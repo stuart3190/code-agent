@@ -28,6 +28,7 @@ export async function runAgent({
 }) {
   const messages = [{ role: "user", content: prompt }];
   const telemetry = createTelemetry();
+  const turnLog = []; // per-turn output attribution, for the cliff re-measurement
   let finalText = "";
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -44,6 +45,13 @@ export async function runAgent({
     if (toolCalls.length === 0) {
       finalText = text;
       break;
+    }
+
+    // Attribute this turn's output to its mutating tool calls (by argument bytes), so the
+    // cliff re-measurement can compare patch output vs full-file output.
+    const mutBytes = toolCalls.reduce((a, tc) => a + mutationBytes(tc.arguments), 0);
+    if (mutBytes > 0) {
+      turnLog.push({ turn, output: usage.output, tools: toolCalls.map((t) => t.name), mutBytes });
     }
 
     // Record the assistant's tool calls, then execute each and feed results back.
@@ -65,7 +73,17 @@ export async function runAgent({
     }
   }
 
-  return { tree, telemetry: telemetry.summary(), finalText };
+  return { tree, telemetry: telemetry.summary(), turnLog, finalText };
+}
+
+// Bytes of file-mutating payload in a tool call's arguments (write_file contents,
+// apply_patch input, or edit_file edits). 0 for read-only calls.
+function mutationBytes(args) {
+  if (!args) return 0;
+  if (typeof args.contents === "string") return Buffer.byteLength(args.contents);
+  if (typeof args.input === "string") return Buffer.byteLength(args.input);
+  if (Array.isArray(args.edits)) return Buffer.byteLength(JSON.stringify(args.edits));
+  return 0;
 }
 
 // Generic one-line summary of a tool call for the live log.
@@ -73,6 +91,12 @@ function summarizeCall(tc, result) {
   const p = tc.arguments?.path;
   if (tc.name === "write_file") {
     return `write_file ${p} (${result.bytes ?? "?"}b${result.created === false ? ", rewrote" : ", new"})`;
+  }
+  if (tc.name === "apply_patch") {
+    return result.ok ? `apply_patch -> ${(result.changed || []).join(", ")}` : `apply_patch FAILED: ${result.error}`;
+  }
+  if (tc.name === "edit_file") {
+    return result.ok ? `edit_file ${p} (${result.bytes ?? "?"}b)` : `edit_file ${p} FAILED: ${result.error}`;
   }
   if (tc.name === "read_file") return `read_file ${p}`;
   if (tc.name === "list_files") return "list_files";
