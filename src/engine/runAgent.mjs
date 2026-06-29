@@ -13,8 +13,10 @@
 
 import { createTelemetry } from "./telemetry.mjs";
 import { fmtGBP, TOKENS_PER_CREDIT } from "../cost.mjs";
+import { directDeps, renderContextBlock, pruneHistory } from "./context.mjs";
 
 const DEFAULT_MAX_TURNS = 25;
+const MAX_EMPTY_RETRY = 1; // a transient 0-token/no-tool turn retries this many times, then fails
 
 export async function runAgent({
   provider,
@@ -25,14 +27,35 @@ export async function runAgent({
   prompt,
   maxTurns = DEFAULT_MAX_TURNS,
   log = console.log,
+  // Phase 2.2 context selection. When on, send a paths-only manifest + the CURRENT contents
+  // of just the relevant files (seeded from `entryFile` + grown as the model touches files),
+  // and prune the accumulating read/patch payloads out of the re-sent history.
+  contextSelection = false,
+  entryFile = "src/App.jsx",
 }) {
   const messages = [{ role: "user", content: prompt }];
   const telemetry = createTelemetry();
   const turnLog = []; // per-turn output attribution, for the cliff re-measurement
   let finalText = "";
 
+  // Conservative inclusion: seed with the likely edit target + its direct local deps, so the
+  // model never edits blind. Grows (never shrinks) as the model reads/mutates more files.
+  const relevant = new Set();
+  if (contextSelection) {
+    if (entryFile in tree) relevant.add(entryFile);
+    for (const d of directDeps(tree, entryFile)) relevant.add(d);
+  }
+
+  let emptyStreak = 0;
   for (let turn = 1; turn <= maxTurns; turn++) {
-    const { text, toolCalls, usage } = await provider.runTurn({ systemPrompt, messages, tools });
+    // With context selection on, carry current state in the (regenerated) system prompt and
+    // prune the redundant copies out of the replayed messages.
+    const turnSystem = contextSelection
+      ? `${systemPrompt}\n\n${renderContextBlock(tree, [...relevant])}`
+      : systemPrompt;
+    const turnMessages = contextSelection ? pruneHistory(messages, { keepLastTurn: true }) : messages;
+
+    const { text, toolCalls, usage } = await provider.runTurn({ systemPrompt: turnSystem, messages: turnMessages, tools });
 
     const c = telemetry.record(usage);
     const s = telemetry.summary();
@@ -43,9 +66,20 @@ export async function runAgent({
     );
 
     if (toolCalls.length === 0) {
-      finalText = text;
+      if (text.trim() !== "") {
+        finalText = text; // normal completion: a summary with no further tool calls
+        break;
+      }
+      // Empty turn: no text AND no tool call — the transient the edit-fallback can't catch.
+      // Retry once (same request) before giving up, so it isn't a silent premature finish.
+      if (++emptyStreak <= MAX_EMPTY_RETRY) {
+        log(`   turn ${turn}: empty response (no text, no tool call) — retrying (${emptyStreak}/${MAX_EMPTY_RETRY})`);
+        continue;
+      }
+      log(`   turn ${turn}: empty response again — giving up.`);
       break;
     }
+    emptyStreak = 0;
 
     // Attribute this turn's output to its mutating tool calls (by argument bytes), so the
     // cliff re-measurement can compare patch output vs full-file output.
@@ -64,6 +98,7 @@ export async function runAgent({
       const impl = toolImpls[tc.name];
       const result = impl ? impl(tc.arguments) : { error: `unknown tool: ${tc.name}` };
       log(`     ↳ ${summarizeCall(tc, result)}`);
+      if (contextSelection) for (const p of touchedPaths(tc, result)) relevant.add(p);
       messages.push({
         role: "tool",
         toolCallId: tc.id,
@@ -74,6 +109,16 @@ export async function runAgent({
   }
 
   return { tree, telemetry: telemetry.summary(), turnLog, finalText };
+}
+
+// Paths a tool call brought into play, so context selection keeps their current contents in
+// the block: a read/write/edit targets `arguments.path`; apply_patch reports `result.changed`.
+function touchedPaths(tc, result) {
+  const out = [];
+  const p = tc.arguments?.path;
+  if (typeof p === "string") out.push(p);
+  if (Array.isArray(result?.changed)) out.push(...result.changed);
+  return out;
 }
 
 // Bytes of file-mutating payload in a tool call's arguments (write_file contents,

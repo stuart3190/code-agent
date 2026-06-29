@@ -34,6 +34,7 @@ const BYTES_PER_TOKEN = 3.6; // measured in the Phase 1 generation spike (6222 b
 const WRITE_BASELINE = process.argv.includes("--baseline");
 const EDIT_FORMAT = (process.argv.find((a) => a.startsWith("--edit=")) || "").split("=")[1] || undefined;
 const EDIT_TOOL_NAME = EDIT_FORMAT === "apply_patch" ? "apply_patch" : EDIT_FORMAT === "search_replace" ? "edit_file" : null;
+const CTX = process.argv.includes("--ctx"); // Phase 2.2 context selection (input-side lever)
 
 function row(r) {
   return {
@@ -56,7 +57,8 @@ function row(r) {
 async function main() {
   console.log(
     `Regression harness — ${CASES.length} archetype(s), model=${MODEL}` +
-      (EDIT_FORMAT ? ` · edit tool: ${EDIT_FORMAT}` : " · engine: write-only (baseline path)")
+      (EDIT_FORMAT ? ` · edit tool: ${EDIT_FORMAT}` : " · engine: write-only (baseline path)") +
+      (CTX ? " · context selection: ON (Phase 2.2)" : "")
   );
   await ensureDeps();
   const provider = createCodexProvider();
@@ -64,7 +66,7 @@ async function main() {
   const results = [];
   for (const c of CASES) {
     console.log(`\n══ Case: ${c.name} — "${c.editPrompt}"`);
-    const r = await runEngineCase(provider, c, { editFormat: EDIT_FORMAT });
+    const r = await runEngineCase(provider, c, { editFormat: EDIT_FORMAT, contextSelection: CTX });
     const pm = r.prior.missing.length ? ` (MISSING ${r.prior.missing.join(",")})` : "";
     const nm = r.fresh.missing.length ? ` (MISSING ${r.fresh.missing.join(",")})` : "";
     console.log(
@@ -115,7 +117,9 @@ async function main() {
     await writeBaseline(summary);
   }
 
-  if (EDIT_FORMAT) {
+  if (EDIT_FORMAT && CTX) {
+    await reportPhase22(summary);
+  } else if (EDIT_FORMAT) {
     await reportPhase21(summary);
   }
 
@@ -252,6 +256,135 @@ cliff the iteration findings projected is flattened.
 `;
   await writeFile(path.join(BASELINE_DIR, "PHASE-2.1.md"), md, "utf8");
   console.log(`\nWrote baseline/PHASE-2.1.md + PHASE-2.1.json`);
+}
+
+// ---- Phase 2.2 report: input tokens/turn vs the recorded 2.1 line (the input-side win) ----
+async function reportPhase22({ results, passed, totalTurns, gbpPerTurn }) {
+  let prev = null;
+  try {
+    prev = JSON.parse(await readFile(path.join(BASELINE_DIR, "PHASE-2.1.json"), "utf8"));
+  } catch {
+    console.warn("  (no PHASE-2.1.json found — skipping vs-2.1 comparison)");
+  }
+
+  const inTok = results.reduce((a, r) => a + r.telemetry.input, 0);
+  const outTok = results.reduce((a, r) => a + r.telemetry.output, 0);
+  const inPerTurn = totalTurns ? inTok / totalTurns : 0;
+  const outPerTurn = totalTurns ? outTok / totalTurns : 0;
+
+  // 2.1 reference (input is the headline this phase; output should hold since the edit path is unchanged).
+  const prevInTok = prev ? prev.cases.reduce((a, c) => a + c.tokens.input, 0) : null;
+  const prevTurns = prev ? prev.cases.reduce((a, c) => a + c.turns, 0) : null;
+  const prevInPerTurn = prev ? prevInTok / prevTurns : null;
+  const prevOutPerTurn = prev ? prev.cases.reduce((a, c) => a + c.tokens.output, 0) / prevTurns : null;
+  const relGreen = prev ? prev.reliability.green : null;
+  const relTotal = prev ? prev.reliability.total : null;
+
+  console.log("\n══ Phase 2.2 — context selection (input-side)");
+  console.log(`  total input tokens: ${inTok}` + (prevInTok ? ` vs 2.1 ${prevInTok} = ${pctLower(prevInTok, inTok)}% lower (over ${totalTurns} turns vs ${prevTurns})` : ""));
+  console.log(`  input tokens/turn: ${inPerTurn.toFixed(0)}` + (prevInPerTurn ? ` vs 2.1 ${prevInPerTurn.toFixed(0)} = ${pctLower(prevInPerTurn, inPerTurn)}% lower` : ""));
+  console.log(`  output tokens/turn: ${outPerTurn.toFixed(0)}` + (prevOutPerTurn ? ` vs 2.1 ${prevOutPerTurn.toFixed(0)} (should hold — edit path unchanged)` : ""));
+  if (prev) {
+    const relOk = passed === results.length && passed >= relGreen;
+    const inTotalDown = inTok < prevInTok;
+    const inPerTurnDown = inPerTurn < prevInPerTurn;
+    // Ship on total input (the real cost), since context selection also cuts turn count,
+    // which can push per-turn up even as the bill falls. Per-turn is reported for context.
+    console.log(
+      `\n══ vs 2.1 (${prevInTok} in-tok over ${prevTurns} turns = ${prevInPerTurn.toFixed(0)}/turn, ${relGreen}/${relTotal} green):` +
+        `\n  reliability ${passed}/${results.length} ${relOk ? "(floor held ✅)" : "(REGRESSED ❌)"}` +
+        ` · total input ${inTotalDown ? "DOWN ✅" : "NOT down ❌"} · input/turn ${inPerTurnDown ? "DOWN ✅" : "up (fewer turns)"}` +
+        `\n  SHIP GATE: ${relOk && inTotalDown ? "PASS — green AND total input down." : "FAIL — needs green AND total input down."}`
+    );
+  }
+
+  await mkdir(BASELINE_DIR, { recursive: true });
+  const date = new Date().toISOString();
+  const perCase = results.map((r) => {
+    const p = prev?.cases.find((c) => c.name === r.name);
+    return {
+      name: r.name,
+      pass: r.pass,
+      turns: r.telemetry.turns,
+      inputPerTurn: r.telemetry.turns ? r.telemetry.input / r.telemetry.turns : 0,
+      prevInputPerTurn: p ? p.tokens.input / p.turns : null,
+      tokens: { input: r.telemetry.input, output: r.telemetry.output, total: r.telemetry.total },
+      gbpIfMetered: r.telemetry.gbp,
+    };
+  });
+
+  const json = {
+    recordedAt: date,
+    model: MODEL,
+    editFormat: EDIT_FORMAT,
+    contextSelection: true,
+    note: "Phase 2.2 context-selection run (manifest + relevant-file contents + history pruning). Input tokens/turn is the headline; output should hold (edit path unchanged). £ uses ASSUMED gpt-5.5 rates (src/cost.mjs); FREE on the sub. Single-pass per case; gpt-5.5 nondeterministic.",
+    reliability: { green: passed, total: results.length, score: passed / results.length },
+    input: {
+      total: inTok,
+      perTurn: inPerTurn,
+      turns: totalTurns,
+      prevTotal: prevInTok,
+      prevPerTurn: prevInPerTurn,
+      prevTurns,
+      totalPctLower: prevInTok ? Number(pctLower(prevInTok, inTok)) : null,
+      perTurnPctLower: prevInPerTurn ? Number(pctLower(prevInPerTurn, inPerTurn)) : null,
+    },
+    output: { perTurn: outPerTurn, prevPerTurn: prevOutPerTurn },
+    cost: { gbpPerTurn },
+    cases: perCase,
+  };
+  await writeFile(path.join(BASELINE_DIR, "PHASE-2.2.json"), JSON.stringify(json, null, 2), "utf8");
+
+  const inLine = prev ? `${prevInTok} in-tok over ${prevTurns} turns, ${relGreen}/${relTotal} green` : "n/a";
+  const totalPct = prevInTok ? pctLower(prevInTok, inTok) : "?";
+  const perTurnPct = prevInPerTurn ? pctLower(prevInPerTurn, inPerTurn) : "?";
+  const md = `# Phase 2.2 — context selection (input-side lever)
+
+_Recorded ${date} · model \`${MODEL}\` · edit format **\`${EDIT_FORMAT}\`** + context selection ON._
+
+The lever: stop re-sending every accumulated file read and patch blob every turn. Carry a
+paths-only **manifest** plus the **current contents of just the relevant files** (seeded from
+\`src/App.jsx\` + its direct deps, grown as the model touches files) in the regenerated system
+prompt, and **prune** the redundant copies out of the replayed history. The block also tells
+the model not to re-read files already shown — so it patches directly instead of spending a
+read turn. Output is untouched (same \`apply_patch\` edit path as 2.1), so the win is input-side.
+
+## Headline vs 2.1 (${inLine})
+
+- **Reliability:** ${passed}/${results.length} cases green ${passed === results.length ? "— floor held ✅" : "— REGRESSED ❌"}.
+- **Total input:** ${inTok} tok over ${totalTurns} turns vs ${prevInTok ? prevInTok : "n/a"} over ${prevTurns ?? "n/a"} (2.1) = **${totalPct}% lower** — the real bill (context selection also cuts turn count).
+- **Input tokens/turn:** ${inPerTurn.toFixed(0)} vs ${prevInPerTurn ? prevInPerTurn.toFixed(0) : "n/a"} (2.1) = ${perTurnPct}% lower _(per-turn is confounded by the turn-count drop)_.
+- **Output tokens/turn:** ${outPerTurn.toFixed(0)} vs ${prevOutPerTurn ? prevOutPerTurn.toFixed(0) : "n/a"} (2.1) — edit path unchanged, so this should roughly hold.
+
+## Per case
+
+| case | result | turns | input tok | in/turn | 2.1 in/turn | out tok |
+|------|--------|-------|-----------|---------|-------------|---------|
+${results
+  .map((r) => {
+    const p = prev?.cases.find((c) => c.name === r.name);
+    const prevIpt = p ? (p.tokens.input / p.turns).toFixed(0) : "—";
+    const ipt = r.telemetry.turns ? (r.telemetry.input / r.telemetry.turns).toFixed(0) : "0";
+    return `| ${r.name} | ${r.pass ? "GREEN" : "RED"} | ${r.telemetry.turns} | ${r.telemetry.input} | ${ipt} | ${prevIpt} | ${r.telemetry.output} |`;
+  })
+  .join("\n")}
+
+## Caveats
+
+- **Single-pass per case.** gpt-5.5 is nondeterministic; reliability is one run per case here.
+- **Total input is the gate, not per-turn.** Context selection also cuts turn count (the model
+  patches directly instead of spending list/read turns), which pushes per-turn input *up* even
+  as the total bill falls. The total is the real cost; per-turn is reported for context.
+- **Cost is hypothetical** — ASSUMED gpt-5.5 rates in \`src/cost.mjs\`; everything was FREE on the
+  ChatGPT sub.
+`;
+  await writeFile(path.join(BASELINE_DIR, "PHASE-2.2.md"), md, "utf8");
+  console.log(`\nWrote baseline/PHASE-2.2.md + PHASE-2.2.json`);
+}
+
+function pctLower(prev, now) {
+  return (((prev - now) / prev) * 100).toFixed(0);
 }
 
 // ---- baseline writer (write-only engine only) ----

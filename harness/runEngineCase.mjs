@@ -1,9 +1,10 @@
 // Run one archetype case through the engine, with an optional targeted edit format.
 // Shared by the A/B trial and by run.mjs so both measure identically.
 //
-//   runEngineCase(provider, case, { editFormat, workName }) -> result
+//   runEngineCase(provider, case, { editFormat, contextSelection, workName }) -> result
 //
 // editFormat: undefined -> write-only (baseline path); "apply_patch" | "search_replace".
+// contextSelection: Phase 2.2 input-side lever (manifest + relevant-file contents + history pruning).
 
 import { runAgent } from "../src/engine/runAgent.mjs";
 import { fromScaffold, clone } from "../src/engine/fileTree.mjs";
@@ -12,7 +13,7 @@ import { systemPromptForEdit } from "../src/prompts/builder.mjs";
 import { markersPresent } from "./assertions.mjs";
 import { buildTree } from "./workspace.mjs";
 
-export async function runEngineCase(provider, c, { editFormat, workName } = {}) {
+export async function runEngineCase(provider, c, { editFormat, contextSelection, workName } = {}) {
   const tree = clone(fromScaffold(c.scaffold, c.startFiles));
   const { schemas, impls, stats } = makeFileTools(tree, { editFormat });
 
@@ -23,6 +24,7 @@ export async function runEngineCase(provider, c, { editFormat, workName } = {}) 
     toolImpls: impls,
     tree,
     prompt: c.editPrompt,
+    contextSelection,
   });
 
   const build = await buildTree(tree, workName || c.name);
