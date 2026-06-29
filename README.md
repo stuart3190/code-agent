@@ -5,8 +5,8 @@ kept intact as the proof artifact). This is the first build-for-keeps structure:
 a real engine behind a provider seam, plus an automated regression harness that proves
 reliability across archetypes and records the cost baseline.
 
-**Status: through Phase 2.3.** The engine has the targeted edit tool (2.1, `apply_patch`),
-context selection (2.2), and a cache-friendly mode (2.3). The router (2.4) is not built yet. Each
+**Status: through Phase 2.4.** The engine has the targeted edit tool (2.1, `apply_patch`),
+context selection (2.2), a cache-friendly mode (2.3), and a model router (2.4). Each
 optimisation is proven against the harness baseline so reliability never silently regresses.
 
 - **2.1 — targeted edit tool:** output scales with *change* size, not *file* size. `write_file`
@@ -28,6 +28,16 @@ optimisation is proven against the harness baseline so reliability never silentl
   cache-write propagation latency), so **2.2 stays the default**; `--cache` is the lever for the
   future BYOK adapter (no latency penalty, `prompt_cache_key` works there) and long sessions. The
   Codex-vs-BYOK cost asymmetry is recorded for the Phase 4 credit model. See `baseline/PHASE-2.3.md`.
+- **2.4 — model router:** a **selection layer ABOVE the seam** — a routing provider
+  (`src/providers/routingProvider.mjs`) that asks the pure policy (`src/router/router.mjs`
+  `chooseModel`) which provider+model to use, then delegates `runTurn` to it. `runAgent`, the tools,
+  the prompts and the cost model are **untouched**. On the single-model Codex lane it is a thin
+  pass-through; on the multi-model Anthropic side it routes **strong→generation**, and for an edit a
+  **cost-aware** choice between strong and cheap that **encodes the 2.1/Anthropic finding**: a cheap
+  model with weaker `apply_patch` adherence falls back to full `write_file` rewrites, and a rewrite
+  emits far more output than a patch — so cheap only pays if it still patches cleanly. The policy is
+  a pure function (unit-tested offline, no spend) and the cheap model's real adherence is *measured*
+  live and fed back. See `baseline/PHASE-2.4.md`.
 
 ## Layout
 
@@ -35,6 +45,9 @@ optimisation is proven against the harness baseline so reliability never silentl
 src/
   providers/codexProvider.mjs   The seam: runTurn({systemPrompt,messages,tools})
   providers/auth.mjs              -> {text,toolCalls,usage}. ALL Codex specifics here.
+  providers/anthropicProvider.mjs BYOK adapter — Anthropic Messages API behind the same seam.
+  providers/routingProvider.mjs  Phase 2.4: seam-compatible wrapper that delegates to the routed model.
+  router/router.mjs              Phase 2.4: pure chooseModel policy + per-model adherence catalogue.
   cost.mjs                       Cost-if-metered (ASSUMED gpt-5.5 rates; FREE on the sub).
   scaffolds/reactVite.mjs        The Vite+React+Tailwind target tree.
   tools/fileTools.mjs            list/read/write_file + apply_patch/edit_file — above the seam.
@@ -45,16 +58,17 @@ src/
   engine/telemetry.mjs           per-turn token/cost accumulation + summary.
   prompts/builder.mjs            proven build/edit system prompts.
 harness/
-  run.mjs                        driver; --baseline / --edit=<fmt> / --ctx / --cache.
+  run.mjs                        driver; --baseline / --edit=<fmt> / --ctx / --cache / --router.
   runEngineCase.mjs              run one case through the engine (shared by run + trial).
   workspace.mjs                  shared-deps install + per-case junction + npm build.
   assertions.mjs                 named-marker presence check.
   _applier-tests.mjs             offline edit-applier tests (no model).
   _context-tests.mjs             offline context-selection helper tests (no model).
   _runagent-tests.mjs            offline empty-turn-retry + cached-token billing tests (fake provider).
+  _router-tests.mjs              offline router-policy tests (chooseModel; no model, no spend).
   _cache-probe.mjs               verify prompt caching is live on the Codex transport (2 calls).
   cases/*.mjs + cases/trees/     three archetypes (todo, dashboard, form-validation).
-baseline/                        BASELINE.md, PHASE-2.1.md, PHASE-2.2.md, PHASE-2.3.md (+ .json).
+baseline/                        BASELINE.md, PHASE-2.1.md … PHASE-2.4.md (+ .json), ANTHROPIC.md.
 ```
 
 ## The seam (do not break)
@@ -79,10 +93,18 @@ node harness/run.mjs --edit=apply_patch     # 2.1 edit tool; writes baseline/PHA
 node harness/run.mjs --edit=apply_patch --ctx    # + 2.2 context selection; writes PHASE-2.2.*
 node harness/run.mjs --edit=apply_patch --cache  # 2.3 cache-friendly shaping; writes PHASE-2.3.*
 
+# 2.4 model router (Anthropic, REAL money — needs ANTHROPIC_API_KEY in env). The A/B:
+node harness/run.mjs --router --edit=apply_patch --ctx --route=strong       # A: all-strong (Sonnet)
+node harness/run.mjs --router --edit=apply_patch --ctx --route=cheap-edits  # B: edits->cheap (Haiku)
+#   writes baseline/PHASE-2.4.<strategy>.json each run; PHASE-2.4.md once both A+B exist.
+#   --route=auto      cost-aware (strong gen; cheap edit only if its adherence makes it cheaper)
+#   --strong=<model> / --cheap=<model>   override the pair (default Sonnet 4.6 / Haiku 4.5)
+
 # offline (no model, no quota):
 node harness/_applier-tests.mjs
 node harness/_context-tests.mjs
 node harness/_runagent-tests.mjs
+node harness/_router-tests.mjs
 
 # tiny quota (2 calls): confirm prompt caching is live on the Codex-OAuth transport:
 node harness/_cache-probe.mjs

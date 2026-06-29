@@ -1,0 +1,94 @@
+{
+  "recordedAt": "2026-06-29T21:43:38.702Z",
+  "provider": "anthropic",
+  "router": {
+    "strong": "claude-sonnet-4-6",
+    "cheap": "claude-haiku-4-5",
+    "strategy": "cheap-edits",
+    "cache": false
+  },
+  "editRoutedTo": "claude-haiku-4-5",
+  "note": "Phase 2.4 router run behind the SAME runTurn seam (a routing provider; runAgent untouched). All harness cases are edits, so the route is uniform per run. £ uses REAL published Anthropic rates (src/cost.mjs); this SPENT real money. Single-pass; the model is nondeterministic.",
+  "reliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "cost": {
+    "gbpPerTurn": 0.004980985909090909,
+    "totalGbpIfMetered": 0.10958169,
+    "totalTurns": 22,
+    "real": true
+  },
+  "tokens": {
+    "input": 94396,
+    "output": 8863
+  },
+  "edits": {
+    "attempts": 15,
+    "applies": 11,
+    "failures": 4,
+    "fallbacks": 1,
+    "writes": 1,
+    "measuredAdherence": 0.7333333333333333
+  },
+  "decomposition": {
+    "patchOut": 5931,
+    "writeOut": 2343,
+    "patchTurns": 15,
+    "writeTurns": 1
+  },
+  "cases": [
+    {
+      "name": "todo",
+      "pass": true,
+      "routedModel": "claude-haiku-4-5",
+      "turns": 9,
+      "input": 50237,
+      "output": 5630,
+      "gbp": 0.06192572999999999,
+      "editStats": {
+        "attempts": 5,
+        "applies": 3,
+        "failures": 2,
+        "fallbacks": 1,
+        "writes": 1,
+        "failsByPath": {}
+      }
+    },
+    {
+      "name": "dashboard",
+      "pass": true,
+      "routedModel": "claude-haiku-4-5",
+      "turns": 8,
+      "input": 28647,
+      "output": 1937,
+      "gbp": 0.030282280000000005,
+      "editStats": {
+        "attempts": 6,
+        "applies": 5,
+        "failures": 1,
+        "fallbacks": 0,
+        "writes": 0,
+        "failsByPath": {}
+      }
+    },
+    {
+      "name": "form-validation",
+      "pass": true,
+      "routedModel": "claude-haiku-4-5",
+      "turns": 5,
+      "input": 15512,
+      "output": 1296,
+      "gbp": 0.01737368,
+      "editStats": {
+        "attempts": 4,
+        "applies": 3,
+        "failures": 1,
+        "fallbacks": 0,
+        "writes": 0,
+        "failsByPath": {}
+      }
+    }
+  ]
+}

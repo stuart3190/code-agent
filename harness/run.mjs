@@ -22,6 +22,8 @@ import { fileURLToPath } from "node:url";
 
 import { createCodexProvider } from "../src/providers/codexProvider.mjs";
 import { createAnthropicProvider } from "../src/providers/anthropicProvider.mjs";
+import { createRoutingProvider } from "../src/providers/routingProvider.mjs";
+import { ratesForModel, chooseModel } from "../src/router/router.mjs";
 import { fmtGBP, setActiveRates, USD_GBP } from "../src/cost.mjs";
 import { ensureDeps } from "./workspace.mjs";
 import { runEngineCase } from "./runEngineCase.mjs";
@@ -43,6 +45,17 @@ const EDIT_TOOL_NAME = EDIT_FORMAT === "apply_patch" ? "apply_patch" : EDIT_FORM
 const CTX = process.argv.includes("--ctx"); // Phase 2.2 context selection (input-side lever)
 const CACHE = process.argv.includes("--cache"); // Phase 2.3 cache-friendly shaping (stable prefix + append-only)
 
+// Phase 2.4 model router. `--router` turns on the selection layer ABOVE the seam (a routing PROVIDER
+// that delegates to the chosen model — runAgent is untouched). `--route=` picks the strategy:
+//   auto         cost-aware: strong for generation, and for edits the cheaper model ONLY if its
+//                apply_patch adherence makes it actually cheaper once fallback rewrites are priced in.
+//   cheap-edits  force edits -> cheap (to MEASURE the cheap model's real adherence live).
+//   strong       everything -> strong (the all-Sonnet A/B comparison baseline).
+const ROUTER = process.argv.includes("--router");
+const ROUTE_STRATEGY = (process.argv.find((a) => a.startsWith("--route=")) || "").split("=")[1] || "auto";
+const STRONG_MODEL = (process.argv.find((a) => a.startsWith("--strong=")) || "").split("=")[1] || "claude-sonnet-4-6";
+const CHEAP_MODEL = (process.argv.find((a) => a.startsWith("--cheap=")) || "").split("=")[1] || "claude-haiku-4-5";
+
 function row(r) {
   return {
     name: r.name,
@@ -58,6 +71,8 @@ function row(r) {
     editStats: r.editStats,
     turnLog: r.turnLog,
     appBytes: r.appBytes,
+    routedModel: r.routedModel,
+    intent: r.intent,
   };
 }
 
@@ -87,18 +102,52 @@ function anthropicPreflight(provider) {
   return true;
 }
 
+// REAL-money preflight for the Phase 2.4 router path (Anthropic, multi-model). Shows the strong/cheap
+// pair + strategy, the per-suite estimate at the edit-routed model's rates, and hard-stops on a
+// missing key. All routing-measurement runs go through here.
+function routerPreflight() {
+  console.log("\n══ Phase 2.4 router preflight (spends REAL money on your key) ════════════════");
+  console.log(`  strong: ${STRONG_MODEL}  ·  cheap: ${CHEAP_MODEL}  ·  strategy: ${ROUTE_STRATEGY}`);
+  console.log(`  key:    read from env ANTHROPIC_API_KEY only — never logged, written to disk, or committed`);
+  // The harness cases are all EDITs, so under strategy=strong they bill at the strong model's rates and
+  // otherwise (auto/cheap-edits) at the cheap model's — estimate at whichever the edit route resolves to.
+  const editModel = ROUTE_STRATEGY === "strong" ? STRONG_MODEL : CHEAP_MODEL;
+  const rates = ratesForModel(editModel);
+  const estIn = 18500, estOut = 5500; // ~recorded 3-case Anthropic suite shape
+  const estUsd = (estIn / 1e6) * rates.usdPerMInput + (estOut / 1e6) * rates.usdPerMOutput;
+  console.log(`  est:    edits route to ${editModel} → ~${estIn} in + ~${estOut} out ≈ $${estUsd.toFixed(3)} (${fmtGBP(estUsd * USD_GBP)}) per suite — pennies, billed on real tokens`);
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("  ABORT: ANTHROPIC_API_KEY is not set. Set it and re-run — nothing was sent.");
+    return false;
+  }
+  console.log("  key present ✓ — proceeding to spend.");
+  console.log("═════════════════════════════════════════════════════════════════════════════");
+  return true;
+}
+
 async function main() {
+  const modelLabel = ROUTER ? `router(strong=${STRONG_MODEL}, cheap=${CHEAP_MODEL}, route=${ROUTE_STRATEGY})` : MODEL;
   console.log(
-    `Regression harness — ${CASES.length} archetype(s), provider=${PROVIDER}, model=${MODEL}` +
+    `Regression harness — ${CASES.length} archetype(s), provider=${ROUTER ? "anthropic+router" : PROVIDER}, model=${modelLabel}` +
       (EDIT_FORMAT ? ` · edit tool: ${EDIT_FORMAT}` : " · engine: write-only (baseline path)") +
       (CTX ? " · context selection: ON (Phase 2.2)" : "") +
       (CACHE ? " · cache-friendly: ON (Phase 2.3)" : "")
   );
 
   // Build the provider behind the SAME seam. Codex is FREE on the sub; Anthropic spends REAL money,
-  // so it gets a cost preflight + a hard key check before anything runs.
-  let provider;
-  if (PROVIDER === "anthropic") {
+  // so it gets a cost preflight + a hard key check before anything runs. With --router, the provider
+  // is the routing layer, built PER CASE inside the loop (intent -> chosen model) so its rates can
+  // drive the live £; it gets its own real-money preflight here.
+  let provider = null;
+  let routerConfig = null;
+  if (ROUTER) {
+    if (!EDIT_FORMAT) {
+      console.error("--router needs an edit tool (e.g. --edit=apply_patch) — the patch/fallback dynamic IS what routing weighs.");
+      process.exit(2);
+    }
+    routerConfig = { provider: "anthropic", strong: STRONG_MODEL, cheap: CHEAP_MODEL, strategy: ROUTE_STRATEGY, cache: CACHE };
+    if (!routerPreflight()) process.exit(2);
+  } else if (PROVIDER === "anthropic") {
     provider = createAnthropicProvider({ model: ANTHROPIC_MODEL, cache: CACHE });
     setActiveRates(provider.rates); // REAL Anthropic rates drive the live £ + summary, not gpt-5.5 assumptions
     if (!anthropicPreflight(provider)) process.exit(2);
@@ -114,7 +163,19 @@ async function main() {
   const results = [];
   for (const c of CASES) {
     console.log(`\n══ Case: ${c.name} — "${c.editPrompt}"`);
-    const r = await runEngineCase(provider, c, { editFormat: EDIT_FORMAT, contextSelection: CTX, cacheFriendly: CACHE });
+    // --router: resolve the route for this (single-intent) case, then run the chosen model behind the
+    // unchanged seam. setActiveRates makes the live £ price at the routed model's REAL rates.
+    let caseProvider = provider;
+    let intent = "edit";
+    if (ROUTER) {
+      intent = Object.keys(c.startFiles || {}).length ? "edit" : "generate";
+      caseProvider = createRoutingProvider({ config: routerConfig, turnMeta: { intent } });
+      setActiveRates(caseProvider.rates);
+      console.log(`  route: intent=${intent} -> ${caseProvider.model}  ::  ${caseProvider.decision.reason}`);
+    }
+    const r = await runEngineCase(caseProvider, c, { editFormat: EDIT_FORMAT, contextSelection: CTX, cacheFriendly: CACHE });
+    r.routedModel = ROUTER ? caseProvider.model : MODEL;
+    r.intent = intent;
     const pm = r.prior.missing.length ? ` (MISSING ${r.prior.missing.join(",")})` : "";
     const nm = r.fresh.missing.length ? ` (MISSING ${r.fresh.missing.join(",")})` : "";
     console.log(
@@ -164,7 +225,11 @@ async function main() {
 
   const summary = { results, passed, totalTurns, totalGbp, totalTok, gbpPerTurn };
 
-  if (PROVIDER === "anthropic") {
+  if (ROUTER) {
+    // Phase 2.4: write a per-strategy report and, once both A (strong) and B (cheap-edits) exist,
+    // the combined A/B with the fallback decomposition. Never touches the committed Codex baselines.
+    await reportPhase24(summary, routerConfig);
+  } else if (PROVIDER === "anthropic") {
     // The Codex baselines (BASELINE/PHASE-2.*) are committed reference lines — an Anthropic run must
     // NOT overwrite them. It writes its own report and compares against them read-only.
     await reportAnthropic(summary);
@@ -703,6 +768,163 @@ the 2.3 finding flagged as a **BYOK-only win**.
 `;
   await writeFile(path.join(BASELINE_DIR, "ANTHROPIC.md"), md, "utf8");
   console.log(`\nWrote baseline/ANTHROPIC.md + ANTHROPIC.json`);
+}
+
+// ---- Phase 2.4 router report -------------------------------------------------------------------
+// Splits each run's output tokens into clean-patch turns vs write_file (fallback rewrite) turns, so
+// the A/B can answer the real question: did routing edits to the cheap model lower cost, or did its
+// weaker apply_patch adherence cause more rewrites that ate the saving? Writes PHASE-2.4.<strategy>.json
+// each run, and the combined PHASE-2.4.md once both A (strong) and B (cheap-edits) exist.
+
+// Decompose one run's turnLog: output tokens spent on patch turns vs write_file (rewrite) turns.
+function decompose(results) {
+  let patchOut = 0, writeOut = 0, patchTurns = 0, writeTurns = 0;
+  for (const r of results) {
+    for (const t of r.turnLog || []) {
+      const wrote = t.tools.includes("write_file");
+      const patched = t.tools.includes("apply_patch") || t.tools.includes("edit_file");
+      if (wrote) { writeOut += t.output; writeTurns += 1; } // a fallback rewrite (attribute the whole turn)
+      else if (patched) { patchOut += t.output; patchTurns += 1; }
+    }
+  }
+  return { patchOut, writeOut, patchTurns, writeTurns };
+}
+
+function sumEditStats(results) {
+  const k = ["attempts", "applies", "failures", "fallbacks", "writes"];
+  const out = Object.fromEntries(k.map((x) => [x, results.reduce((a, r) => a + (r.editStats[x] || 0), 0)]));
+  out.measuredAdherence = out.attempts ? out.applies / out.attempts : null; // clean applies / patch attempts
+  return out;
+}
+
+async function reportPhase24({ results, passed, totalTurns, totalGbp, gbpPerTurn }, routerConfig) {
+  await mkdir(BASELINE_DIR, { recursive: true });
+  const date = new Date().toISOString();
+  const strategy = routerConfig.strategy;
+  const editModel = results.find((r) => r.intent === "edit")?.routedModel || routerConfig.strong;
+  const inTok = results.reduce((a, r) => a + r.telemetry.input, 0);
+  const outTok = results.reduce((a, r) => a + r.telemetry.output, 0);
+  const dec = decompose(results);
+  const edits = sumEditStats(results);
+
+  const json = {
+    recordedAt: date,
+    provider: "anthropic",
+    router: { strong: routerConfig.strong, cheap: routerConfig.cheap, strategy, cache: !!routerConfig.cache },
+    editRoutedTo: editModel,
+    note: "Phase 2.4 router run behind the SAME runTurn seam (a routing provider; runAgent untouched). All harness cases are edits, so the route is uniform per run. £ uses REAL published Anthropic rates (src/cost.mjs); this SPENT real money. Single-pass; the model is nondeterministic.",
+    reliability: { green: passed, total: results.length, score: passed / results.length },
+    cost: { gbpPerTurn, totalGbpIfMetered: totalGbp, totalTurns, real: true },
+    tokens: { input: inTok, output: outTok },
+    edits, // attempts/applies/fallbacks/writes + measuredAdherence (the value to feed back to `auto`)
+    decomposition: dec, // patchOut vs writeOut — where the cheap model's output actually went
+    cases: results.map((r) => ({
+      name: r.name,
+      pass: r.pass,
+      routedModel: r.routedModel,
+      turns: r.telemetry.turns,
+      input: r.telemetry.input,
+      output: r.telemetry.output,
+      gbp: r.telemetry.gbp,
+      editStats: r.editStats,
+    })),
+  };
+  const jsonName = `PHASE-2.4.${strategy}.json`;
+  await writeFile(path.join(BASELINE_DIR, jsonName), JSON.stringify(json, null, 2), "utf8");
+  console.log(`\nWrote baseline/${jsonName}`);
+
+  // Build the combined A/B once both the strong (A) and cheap-edits (B) runs exist.
+  const A = await readJson(path.join(BASELINE_DIR, "PHASE-2.4.strong.json"));
+  const B = await readJson(path.join(BASELINE_DIR, "PHASE-2.4.cheap-edits.json"));
+  if (!(A && B)) {
+    console.log(`  (A/B PHASE-2.4.md pending — have ${A ? "A=strong" : ""}${B ? "B=cheap-edits" : ""}; run the other strategy to complete it.)`);
+    return;
+  }
+
+  const relOk = B.reliability.green === B.reliability.total;
+  const cheaperTotal = B.cost.totalGbpIfMetered < A.cost.totalGbpIfMetered;
+  const cheaperPerTurn = B.cost.gbpPerTurn < A.cost.gbpPerTurn;
+  const totalPct = (((A.cost.totalGbpIfMetered - B.cost.totalGbpIfMetered) / A.cost.totalGbpIfMetered) * 100).toFixed(0);
+  const cheapModel = B.editRoutedTo;
+  const measured = B.edits.measuredAdherence;
+
+  // What would `auto` decide now, given the MEASURED cheap-model adherence (prior -> measure -> calibrate)?
+  const autoNow = chooseModel(
+    { intent: "edit" },
+    { provider: "anthropic", strong: A.editRoutedTo, cheap: cheapModel, strategy: "auto", adherence: measured != null ? { [cheapModel]: measured } : undefined }
+  );
+
+  // Erosion: of B's output, how much went to fallback REWRITES (the saving-eater).
+  const bWriteShare = B.tokens.output ? (B.decomposition.writeOut / B.tokens.output) * 100 : 0;
+
+  const verdict = !relOk
+    ? `**Verdict: DO NOT SHIP — routing edits to ${cheapModel} regressed reliability to ${B.reliability.green}/${B.reliability.total}, below the committed 3/3 floor. The write_file fallback could not save a build the cheap model broke. Routing-to-${cheapModel} stays OFF.**`
+    : cheaperTotal
+      ? `**Verdict: routing edits to ${cheapModel} HELD 3/3 and cut total £ by ${totalPct}% vs all-${A.editRoutedTo} — routing pays on the Anthropic path even with ${cheapModel}'s weaker apply_patch adherence (${B.edits.fallbacks} fallback(s); ${bWriteShare.toFixed(0)}% of its output went to rewrites, which trimmed but did not erase the saving). Eligible to ship as the edit route, with the write_file fallback as the reliability floor.**`
+      : `**Verdict: routing edits to ${cheapModel} HELD 3/3 but did NOT beat all-${A.editRoutedTo} on total £ — ${cheapModel}'s weaker apply_patch adherence caused ${B.edits.fallbacks} write_file fallback(s) (${bWriteShare.toFixed(0)}% of its output was full rewrites), and those rewrites ate the rate saving. This is a valid, honest finding: cheap ≠ cheaper here. Keep edits on ${A.editRoutedTo} (or improve the cheap model's patch adherence first). Nothing force-shipped.**`;
+
+  const md = `# Phase 2.4 — model router (the router, and only the router)
+
+_Recorded ${date} · provider **anthropic** · router strong=\`${A.editRoutedTo}\` cheap=\`${cheapModel}\` · edit tool \`apply_patch\` · input strategy \`--ctx\`._
+
+The router is a **selection layer ABOVE the provider seam**: a routing provider
+(\`src/providers/routingProvider.mjs\`) that asks the pure policy (\`src/router/router.mjs\`
+\`chooseModel\`) which model to use, then delegates \`runTurn\` to it. \`runAgent\`, the tools, the
+prompts and the cost model are **untouched** — the router never reaches into the engine. On the
+single-model Codex lane it is a **thin pass-through** (nothing to route); the abstraction bites on
+the multi-model Anthropic side, measured here.
+
+**The encoded finding (\`baseline/ANTHROPIC.md\`):** a cheaper model with weaker \`apply_patch\`
+adherence falls back to full \`write_file\` rewrites, and a rewrite emits far more output than a
+patch — so routing an edit to a cheap model only pays *if it still patches cleanly*. The policy
+prices this (cost-aware \`auto\`); this run **measures it for real**.
+
+## A/B — all-strong vs routed-cheap-edits (REAL Anthropic spend, paired single-pass)
+
+| run | edit route | reliability | £/turn | total £ | input tok | output tok | patch out | rewrite out | clean applies | fallbacks |
+|-----|-----------|-------------|--------|---------|-----------|------------|-----------|-------------|---------------|-----------|
+| **A — all-strong** | \`${A.editRoutedTo}\` (\`--route=strong\`) | ${A.reliability.green}/${A.reliability.total} | ${fmtGBP(A.cost.gbpPerTurn)} | ${fmtGBP(A.cost.totalGbpIfMetered)} | ${A.tokens.input} | ${A.tokens.output} | ${A.decomposition.patchOut} | ${A.decomposition.writeOut} | ${A.edits.applies}/${A.edits.attempts} | ${A.edits.fallbacks} |
+| **B — routed** | \`${cheapModel}\` (\`--route=cheap-edits\`) | ${B.reliability.green}/${B.reliability.total} | ${fmtGBP(B.cost.gbpPerTurn)} | ${fmtGBP(B.cost.totalGbpIfMetered)} | ${B.tokens.input} | ${B.tokens.output} | ${B.decomposition.patchOut} | ${B.decomposition.writeOut} | ${B.edits.applies}/${B.edits.attempts} | ${B.edits.fallbacks} |
+
+- **Reliability (the floor):** B = ${B.reliability.green}/${B.reliability.total} ${relOk ? "— held ✅" : "— REGRESSED ❌"}. (The Phase-2.1 \`write_file\` fallback is the safety net behind any failed cheap-model patch.)
+- **Total £:** B ${cheaperTotal ? "DOWN ✅" : "NOT down ❌"} vs A (${fmtGBP(B.cost.totalGbpIfMetered)} vs ${fmtGBP(A.cost.totalGbpIfMetered)} = ${totalPct}% ${cheaperTotal ? "lower" : "higher"}). £/turn ${cheaperPerTurn ? "down" : "up"}.
+- **Did fallbacks eat the saving?** ${bWriteShare.toFixed(0)}% of ${cheapModel}'s output went to full \`write_file\` rewrites (${B.edits.fallbacks} fallback(s) on ${B.edits.attempts} patch attempt(s)). ${cheaperTotal ? "They trimmed the saving but did not erase it." : "They erased the rate saving — this is the 'cheap ≠ cheaper' result."}
+
+${verdict}
+
+## Measured adherence → what \`auto\` decides now (prior → measure → calibrate)
+
+The catalogue seeded \`${cheapModel}\` with a **prior** apply_patch adherence. This run **measured**
+${measured != null ? `**${(measured * 100).toFixed(0)}%**` : "n/a"} (clean applies ÷ patch attempts = ${B.edits.applies}/${B.edits.attempts}).
+Feeding that back into the pure \`auto\` policy, it would route an edit to:
+
+> **${autoNow.model}** — ${autoNow.reason}
+
+This closes the loop: the policy's edit decision is no longer a guess, it's grounded in a real
+adherence number. (Update \`MODEL_CAPS["${cheapModel}"].patchAdherence\` to ${measured != null ? measured.toFixed(2) : "the measured value"} to make \`auto\` reflect it by default.)
+
+## Per case (B — routed)
+
+| case | route | result | turns | output tok | clean applies | fallbacks | write_file | £ (REAL) |
+|------|-------|--------|-------|------------|---------------|-----------|-----------|----------|
+${B.cases
+  .map((c) => `| ${c.name} | ${c.routedModel} | ${c.pass ? "GREEN" : "RED"} | ${c.turns} | ${c.output} | ${c.editStats.applies}/${c.editStats.attempts} | ${c.editStats.fallbacks} | ${c.editStats.writes} | ${fmtGBP(c.gbp)} |`)
+  .join("\n")}
+
+## Scope + caveats
+
+- **Router only.** No \`search_replace\`-vs-\`apply_patch\` A/B and no extended thinking this session
+  (both flagged as separate future work; the router needs neither).
+- **Single-intent harness.** Every case is an edit, so the route is uniform per run and telemetry
+  prices it exactly at one model's rates. A future *mixed-intent* task switching models mid-run would
+  need per-turn rate plumbing in telemetry — a seam extension, not built here.
+- **Single-pass per case;** the model is nondeterministic — A and B are one paired run each.
+- **£ is REAL** — published Anthropic rates in \`src/cost.mjs\`; these runs spent money on the key.
+- **Generation route is policy-proven, not live-measured here** — the harness has no from-scratch
+  generation case; \`auto\`/\`cheap-edits\` both keep generation on the strong model by construction.
+`;
+  await writeFile(path.join(BASELINE_DIR, "PHASE-2.4.md"), md, "utf8");
+  console.log(`Wrote baseline/PHASE-2.4.md (A/B complete: A=strong, B=cheap-edits)`);
 }
 
 // ---- baseline writer (write-only engine only) ----
