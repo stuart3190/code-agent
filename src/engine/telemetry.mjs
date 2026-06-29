@@ -13,11 +13,14 @@ export function createTelemetry() {
   let output = 0;
   let reasoning = 0;
   let cached = 0; // Phase 2.3: input tokens served from the prompt cache (a subset of `input`)
+  let cacheWrite = 0; // BYOK adapter: input tokens WRITTEN to the cache (billed at a write premium)
   let total = 0;
   let usd = 0;
 
   return {
     // Record one turn's usage; returns the per-turn cost for logging.
+    // `usd` uses the cost model's ACTIVE rate table (set by the harness per provider) — so the live
+    // £ is REAL on the Anthropic BYOK path and ASSUMED-gpt-5.5 on the FREE Codex path.
     record(usage) {
       const c = costForUsage(usage);
       turns += 1;
@@ -25,6 +28,7 @@ export function createTelemetry() {
       output += usage.output;
       reasoning += usage.reasoning;
       cached += usage.cached ?? 0;
+      cacheWrite += usage.cacheWrite ?? 0;
       total += usage.total;
       usd += c.usd;
       return c;
@@ -37,6 +41,7 @@ export function createTelemetry() {
         output,
         reasoning,
         cached,
+        cacheWrite,
         cacheHitRate: input ? cached / input : 0, // fraction of input billed at the cached rate
         total,
         usd,

@@ -21,15 +21,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createCodexProvider } from "../src/providers/codexProvider.mjs";
-import { fmtGBP } from "../src/cost.mjs";
+import { createAnthropicProvider } from "../src/providers/anthropicProvider.mjs";
+import { fmtGBP, setActiveRates, USD_GBP } from "../src/cost.mjs";
 import { ensureDeps } from "./workspace.mjs";
 import { runEngineCase } from "./runEngineCase.mjs";
 import { CASES } from "./cases/index.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASELINE_DIR = path.join(HERE, "..", "baseline");
-const MODEL = "gpt-5.5";
 const BYTES_PER_TOKEN = 3.6; // measured in the Phase 1 generation spike (6222 b / 1733 out-tok)
+
+// Provider selection (the seam in action). Default = codex (FREE on the sub). `--provider=anthropic`
+// (or APP_BUILDER_PROVIDER=anthropic) runs the SAME harness on the BYOK adapter — REAL money.
+const PROVIDER = ((process.argv.find((a) => a.startsWith("--provider=")) || "").split("=")[1] || process.env.APP_BUILDER_PROVIDER || "codex").toLowerCase();
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+const MODEL = PROVIDER === "anthropic" ? ANTHROPIC_MODEL : "gpt-5.5";
 
 const WRITE_BASELINE = process.argv.includes("--baseline");
 const EDIT_FORMAT = (process.argv.find((a) => a.startsWith("--edit=")) || "").split("=")[1] || undefined;
@@ -55,15 +61,55 @@ function row(r) {
   };
 }
 
+async function readJson(p) {
+  try {
+    return JSON.parse(await readFile(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// REAL-money preflight for the Anthropic BYOK path: show model/rates/key-source + an estimate, and
+// hard-stop if the key is missing (nothing is sent). Estimate uses the recorded Codex suite shape.
+function anthropicPreflight(provider) {
+  console.log("\n══ Anthropic BYOK preflight (spends REAL money on your key) ══════════════════");
+  console.log(`  model: ${provider.model}  ·  rates: ${provider.rates.label}`);
+  console.log(`  key:   read from env ANTHROPIC_API_KEY only — never logged, written to disk, or committed`);
+  const estIn = 18500, estOut = 5500; // ~recorded 3-case Codex suite shape
+  const estUsd = (estIn / 1e6) * provider.rates.usdPerMInput + (estOut / 1e6) * provider.rates.usdPerMOutput;
+  console.log(`  est:   ~${estIn} in + ~${estOut} out ≈ $${estUsd.toFixed(3)} (${fmtGBP(estUsd * USD_GBP)}) per suite run — pennies; billed on real tokens`);
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("  ABORT: ANTHROPIC_API_KEY is not set. Set it and re-run — nothing was sent.");
+    return false;
+  }
+  console.log("  key present ✓ — proceeding to spend.");
+  console.log("═════════════════════════════════════════════════════════════════════════════");
+  return true;
+}
+
 async function main() {
   console.log(
-    `Regression harness — ${CASES.length} archetype(s), model=${MODEL}` +
+    `Regression harness — ${CASES.length} archetype(s), provider=${PROVIDER}, model=${MODEL}` +
       (EDIT_FORMAT ? ` · edit tool: ${EDIT_FORMAT}` : " · engine: write-only (baseline path)") +
       (CTX ? " · context selection: ON (Phase 2.2)" : "") +
       (CACHE ? " · cache-friendly: ON (Phase 2.3)" : "")
   );
+
+  // Build the provider behind the SAME seam. Codex is FREE on the sub; Anthropic spends REAL money,
+  // so it gets a cost preflight + a hard key check before anything runs.
+  let provider;
+  if (PROVIDER === "anthropic") {
+    provider = createAnthropicProvider({ model: ANTHROPIC_MODEL, cache: CACHE });
+    setActiveRates(provider.rates); // REAL Anthropic rates drive the live £ + summary, not gpt-5.5 assumptions
+    if (!anthropicPreflight(provider)) process.exit(2);
+  } else if (PROVIDER === "codex") {
+    provider = createCodexProvider();
+  } else {
+    console.error(`Unknown --provider=${PROVIDER} (expected "codex" or "anthropic").`);
+    process.exit(2);
+  }
+
   await ensureDeps();
-  const provider = createCodexProvider();
 
   const results = [];
   for (const c of CASES) {
@@ -118,20 +164,26 @@ async function main() {
 
   const summary = { results, passed, totalTurns, totalGbp, totalTok, gbpPerTurn };
 
-  if (WRITE_BASELINE) {
-    if (EDIT_FORMAT) {
-      console.error("\nRefusing to overwrite baseline with an edit-tool run. Use --baseline alone (write-only).");
-      process.exit(2);
+  if (PROVIDER === "anthropic") {
+    // The Codex baselines (BASELINE/PHASE-2.*) are committed reference lines — an Anthropic run must
+    // NOT overwrite them. It writes its own report and compares against them read-only.
+    await reportAnthropic(summary);
+  } else {
+    if (WRITE_BASELINE) {
+      if (EDIT_FORMAT) {
+        console.error("\nRefusing to overwrite baseline with an edit-tool run. Use --baseline alone (write-only).");
+        process.exit(2);
+      }
+      await writeBaseline(summary);
     }
-    await writeBaseline(summary);
-  }
 
-  if (EDIT_FORMAT && CACHE) {
-    await reportPhase23(summary);
-  } else if (EDIT_FORMAT && CTX) {
-    await reportPhase22(summary);
-  } else if (EDIT_FORMAT) {
-    await reportPhase21(summary);
+    if (EDIT_FORMAT && CACHE) {
+      await reportPhase23(summary);
+    } else if (EDIT_FORMAT && CTX) {
+      await reportPhase22(summary);
+    } else if (EDIT_FORMAT) {
+      await reportPhase21(summary);
+    }
   }
 
   const allGreen = passed === results.length;
@@ -530,6 +582,127 @@ caching (2.3) is a per-provider cost lever layered on top.
 
 function pctLower(prev, now) {
   return (((prev - now) / prev) * 100).toFixed(0);
+}
+
+// ---- Anthropic BYOK report: REAL £/turn + cache stats, compared READ-ONLY to the recorded Codex
+// reference lines. The proof of the seam is reliability holding 3/3 with the engine untouched. ----
+async function reportAnthropic({ results, passed, totalTurns, totalGbp, gbpPerTurn }) {
+  const inTok = results.reduce((a, r) => a + r.telemetry.input, 0);
+  const outTok = results.reduce((a, r) => a + r.telemetry.output, 0);
+  const cachedTok = results.reduce((a, r) => a + (r.telemetry.cached || 0), 0);
+  const cacheWriteTok = results.reduce((a, r) => a + (r.telemetry.cacheWrite || 0), 0);
+  const hitRate = inTok ? cachedTok / inTok : 0;
+  const relOk = passed === results.length;
+  const mode = CACHE ? "--cache (2.3 cache-friendly)" : CTX ? "--ctx (2.2 context selection)" : EDIT_FORMAT ? `--edit=${EDIT_FORMAT}` : "write-only";
+
+  const codexBase = await readJson(path.join(BASELINE_DIR, "baseline.json"));
+  const codex22 = await readJson(path.join(BASELINE_DIR, "PHASE-2.2.json"));
+  const codex23 = await readJson(path.join(BASELINE_DIR, "PHASE-2.3.json"));
+
+  console.log("\n══ Anthropic BYOK report (REAL Messages-API rates) ══════════════════════════");
+  console.log(`  provider=anthropic · model=${MODEL} · config=${mode}`);
+  console.log(
+    `  RELIABILITY: ${passed}/${results.length} cases green ` +
+      (relOk ? "— SEAM HELD ✅ (same harness, different provider, engine untouched)" : "— REGRESSED ❌ (below the 3/3 floor — DO NOT SHIP)")
+  );
+  console.log(`  £/turn (REAL): ${fmtGBP(gbpPerTurn)} · total ${fmtGBP(totalGbp)} over ${totalTurns} turns`);
+  console.log(`  tokens: ${inTok} in · ${outTok} out · cache-read ${cachedTok} (${(hitRate * 100).toFixed(1)}%) · cache-write ${cacheWriteTok}`);
+  if (codexBase) console.log(`  vs Codex full-rewrite baseline: ${codexBase.reliability.green}/${codexBase.reliability.total} green @ ${fmtGBP(codexBase.cost.gbpPerTurn)}/turn (ASSUMED gpt-5.5; FREE on sub)`);
+  if (CACHE && codex23) console.log(`  vs Codex 2.3 --cache: ${(codex23.cache.hitRate * 100).toFixed(1)}% hit, ${fmtGBP(codex23.cost.gbpPerTurn)}/turn (ASSUMED)`);
+  if (CTX && codex22) console.log(`  vs Codex 2.2 --ctx: ${fmtGBP(codex22.cost.gbpPerTurn)}/turn (ASSUMED)`);
+
+  await mkdir(BASELINE_DIR, { recursive: true });
+  const date = new Date().toISOString();
+  const json = {
+    recordedAt: date,
+    provider: "anthropic",
+    model: MODEL,
+    config: mode,
+    note: "First BYOK adapter run, behind the SAME runTurn seam as Codex with the engine (runAgent/tools) untouched. £ uses REAL published Anthropic Messages-API rates (src/cost.mjs ANTHROPIC_RATES); this SPENT real money. Single-pass per case; the model is nondeterministic.",
+    reliability: { green: passed, total: results.length, score: passed / results.length },
+    cost: { gbpPerTurn, totalGbpIfMetered: totalGbp, totalTurns, real: true },
+    tokens: { input: inTok, output: outTok },
+    cache: { read: cachedTok, write: cacheWriteTok, hitRate },
+    codexReference: {
+      baseline: codexBase ? { green: codexBase.reliability.green, total: codexBase.reliability.total, gbpPerTurn: codexBase.cost.gbpPerTurn } : null,
+      phase22: codex22 ? { gbpPerTurn: codex22.cost.gbpPerTurn } : null,
+      phase23: codex23 ? { gbpPerTurn: codex23.cost.gbpPerTurn, hitRate: codex23.cache.hitRate } : null,
+    },
+    cases: results.map((r) => ({
+      name: r.name,
+      pass: r.pass,
+      turns: r.telemetry.turns,
+      input: r.telemetry.input,
+      output: r.telemetry.output,
+      cacheRead: r.telemetry.cached || 0,
+      cacheWrite: r.telemetry.cacheWrite || 0,
+      gbp: r.telemetry.gbp,
+    })),
+  };
+  await writeFile(path.join(BASELINE_DIR, "ANTHROPIC.json"), JSON.stringify(json, null, 2), "utf8");
+
+  const verdict = !relOk
+    ? "**Verdict: DO NOT SHIP — reliability regressed below the committed 3/3 floor on the Anthropic adapter.**"
+    : "**Verdict: the seam holds — the SAME regression harness passes 3/3 on a second provider (Anthropic Messages API) with `runAgent` and the tools untouched. The adapter alone translated the neutral shapes. £ is REAL (published Anthropic rates).**";
+  const md = `# Anthropic BYOK adapter — first second-provider run
+
+_Recorded ${date} · provider **anthropic** · model \`${MODEL}\` · config **${mode}**._
+
+The first BYOK adapter (\`src/providers/anthropicProvider.mjs\`) runs behind the **same**
+\`runTurn({systemPrompt, messages, tools}) -> {text, toolCalls, usage}\` seam as the Codex provider.
+The engine (\`runAgent\`, the tools, the prompts, context selection) is **unchanged** — the adapter
+alone translates the neutral message/tool/usage shapes to and from Anthropic's Messages API
+(system param, \`tool_use\`/\`tool_result\` content blocks, SSE streaming, cache_control, usage fields).
+Unlike the FREE Codex sub path, this **spent real money** on the user's key; £ figures use the
+**REAL published** Anthropic rates in \`src/cost.mjs\`.
+
+## Headline
+
+- **Reliability:** ${passed}/${results.length} cases green ${relOk ? "— seam held ✅" : "— REGRESSED ❌"}.
+- **£/turn (REAL):** ${fmtGBP(gbpPerTurn)} · total ${fmtGBP(totalGbp)} over ${totalTurns} turns.
+- **Tokens:** ${inTok} in · ${outTok} out · cache-read ${cachedTok} (${(hitRate * 100).toFixed(1)}%) · cache-write ${cacheWriteTok}.
+
+${verdict}
+
+## Per case
+
+| case | result | turns | input tok | output tok | cache-read | cache-write | £ (REAL) |
+|------|--------|-------|-----------|------------|------------|-------------|----------|
+${results
+  .map(
+    (r) =>
+      `| ${r.name} | ${r.pass ? "GREEN" : "RED"} | ${r.telemetry.turns} | ${r.telemetry.input} | ${r.telemetry.output} | ${r.telemetry.cached || 0} | ${r.telemetry.cacheWrite || 0} | ${fmtGBP(r.telemetry.gbp)} |`
+  )
+  .join("\n")}
+
+## vs the recorded Codex reference lines (read-only; ASSUMED gpt-5.5 rates, FREE on the sub)
+
+${codexBase ? `- **Codex full-rewrite baseline:** ${codexBase.reliability.green}/${codexBase.reliability.total} green @ ${fmtGBP(codexBase.cost.gbpPerTurn)}/turn.` : "- (no baseline.json found)"}
+${codex22 ? `- **Codex 2.2 \`--ctx\`:** ${fmtGBP(codex22.cost.gbpPerTurn)}/turn.` : ""}
+${codex23 ? `- **Codex 2.3 \`--cache\`:** ${(codex23.cache.hitRate * 100).toFixed(1)}% cache-hit @ ${fmtGBP(codex23.cost.gbpPerTurn)}/turn.` : ""}
+
+> Codex £ are ASSUMED (no public gpt-5.5 price) and FREE on the sub; Anthropic £ are REAL spend.
+> They are not directly comparable as bills — the comparison that matters is **reliability parity**
+> (same harness, both 3/3) and the **per-provider cost asymmetry** that feeds the Phase 4 credit model.
+
+## Caching note (config \`${mode}\`)
+
+cache-read ${cachedTok} / cache-write ${cacheWriteTok} tok. On \`--cache\`, Anthropic \`cache_control\`
+breakpoints sit on the frozen tools+system prefix and the append-only history. \`${MODEL}\` has a
+**${MODEL.includes("opus") ? "4096" : MODEL.includes("haiku") ? "4096" : "2048"}-token** minimum
+cacheable prefix — a prefix under it silently won't write (treat a 0 here as a floor, not a ceiling).
+Unlike the Codex transport, Anthropic caching has no write-propagation latency, so it is the lever
+the 2.3 finding flagged as a **BYOK-only win**.
+
+## Caveats
+
+- **Single-pass per case;** the model is nondeterministic — reliability is one run per case.
+- **Extended thinking is OFF** in this adapter (replaying \`thinking\` blocks would need the engine to
+  carry them — out of scope for "adapter only, engine unchanged"). Revisit alongside the router.
+- **£ is REAL** — published Anthropic rates in \`src/cost.mjs\`; this run spent money on the key.
+`;
+  await writeFile(path.join(BASELINE_DIR, "ANTHROPIC.md"), md, "utf8");
+  console.log(`\nWrote baseline/ANTHROPIC.md + ANTHROPIC.json`);
 }
 
 // ---- baseline writer (write-only engine only) ----
