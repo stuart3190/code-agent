@@ -13,7 +13,7 @@ import { systemPromptForEdit } from "../src/prompts/builder.mjs";
 import { markersPresent } from "./assertions.mjs";
 import { buildTree } from "./workspace.mjs";
 
-export async function runEngineCase(provider, c, { editFormat, contextSelection, workName } = {}) {
+export async function runEngineCase(provider, c, { editFormat, contextSelection, cacheFriendly, workName } = {}) {
   const tree = clone(fromScaffold(c.scaffold, c.startFiles));
   const { schemas, impls, stats } = makeFileTools(tree, { editFormat });
 
@@ -25,6 +25,7 @@ export async function runEngineCase(provider, c, { editFormat, contextSelection,
     tree,
     prompt: c.editPrompt,
     contextSelection,
+    cacheFriendly,
   });
 
   const build = await buildTree(tree, workName || c.name);

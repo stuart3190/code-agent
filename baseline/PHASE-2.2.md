@@ -1,6 +1,6 @@
 # Phase 2.2 — context selection (input-side lever)
 
-_Recorded 2026-06-29T10:03:04.752Z · model `gpt-5.5` · edit format **`apply_patch`** + context selection ON._
+_Recorded 2026-06-29T12:46:17.720Z · model `gpt-5.5` · edit format **`apply_patch`** + context selection ON._
 
 The lever: stop re-sending every accumulated file read and patch blob every turn. Carry a
 paths-only **manifest** plus the **current contents of just the relevant files** (seeded from
@@ -12,17 +12,17 @@ read turn. Output is untouched (same `apply_patch` edit path as 2.1), so the win
 ## Headline vs 2.1 (26071 in-tok over 14 turns, 3/3 green)
 
 - **Reliability:** 3/3 cases green — floor held ✅.
-- **Total input:** 14206 tok over 6 turns vs 26071 over 14 (2.1) = **46% lower** — the real bill (context selection also cuts turn count).
-- **Input tokens/turn:** 2368 vs 1862 (2.1) = -27% lower _(per-turn is confounded by the turn-count drop)_.
-- **Output tokens/turn:** 463 vs 244 (2.1) — edit path unchanged, so this should roughly hold.
+- **Total input:** 14286 tok over 6 turns vs 26071 over 14 (2.1) = **45% lower** — the real bill (context selection also cuts turn count).
+- **Input tokens/turn:** 2381 vs 1862 (2.1) = -28% lower _(per-turn is confounded by the turn-count drop)_.
+- **Output tokens/turn:** 495 vs 244 (2.1) — edit path unchanged, so this should roughly hold.
 
 ## Per case
 
 | case | result | turns | input tok | in/turn | 2.1 in/turn | out tok |
 |------|--------|-------|-----------|---------|-------------|---------|
-| todo | GREEN | 2 | 6148 | 3074 | 2518 | 1507 |
-| dashboard | GREEN | 2 | 4389 | 2195 | 1517 | 778 |
-| form-validation | GREEN | 2 | 3669 | 1835 | 1224 | 492 |
+| todo | GREEN | 2 | 6166 | 3083 | 2518 | 1645 |
+| dashboard | GREEN | 2 | 4468 | 2234 | 1517 | 858 |
+| form-validation | GREEN | 2 | 3652 | 1826 | 1224 | 466 |
 
 ## Caveats
 

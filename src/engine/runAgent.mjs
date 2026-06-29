@@ -31,6 +31,14 @@ export async function runAgent({
   // of just the relevant files (seeded from `entryFile` + grown as the model touches files),
   // and prune the accumulating read/patch payloads out of the re-sent history.
   contextSelection = false,
+  // Phase 2.3 cache-friendly mode. Opposite trade-off to 2.2: keep the prompt prefix
+  // byte-STABLE and the history APPEND-ONLY so the Codex backend serves most input from its
+  // prompt cache (~10% rate). The up-front context block (manifest + relevant-file contents)
+  // is computed ONCE from the initial tree and frozen — never regenerated — so `instructions`
+  // is identical every turn; history is NOT pruned. (Verified live on this transport; no
+  // prompt_cache_key — it suppressed hits here.) 2.2-style live context + pruning would bust
+  // the cache, so --cache and --ctx are alternatives, not stacked.
+  cacheFriendly = false,
   entryFile = "src/App.jsx",
 }) {
   const messages = [{ role: "user", content: prompt }];
@@ -38,21 +46,31 @@ export async function runAgent({
   const turnLog = []; // per-turn output attribution, for the cliff re-measurement
   let finalText = "";
 
+  // --ctx wins if both are set (they're alternative input strategies).
+  const useCache = cacheFriendly && !contextSelection;
+
   // Conservative inclusion: seed with the likely edit target + its direct local deps, so the
   // model never edits blind. Grows (never shrinks) as the model reads/mutates more files.
   const relevant = new Set();
-  if (contextSelection) {
+  if (contextSelection || useCache) {
     if (entryFile in tree) relevant.add(entryFile);
     for (const d of directDeps(tree, entryFile)) relevant.add(d);
   }
 
+  // Cache-friendly: freeze the context block at the INITIAL tree state, ONCE. Reused verbatim
+  // every turn so the prefix stays byte-identical (cacheable). The model's own append-only
+  // patch history carries any deltas — the standard initial-state-plus-diffs agent pattern.
+  const frozenBlock = useCache ? renderContextBlock(tree, [...relevant]) : "";
+
   let emptyStreak = 0;
   for (let turn = 1; turn <= maxTurns; turn++) {
-    // With context selection on, carry current state in the (regenerated) system prompt and
-    // prune the redundant copies out of the replayed messages.
+    // 2.2: regenerate the system prompt from live state + prune history (input-minimal, cache-hostile).
+    // 2.3: stable frozen block + append-only history (cache-friendly, input grows but bills cheap).
     const turnSystem = contextSelection
       ? `${systemPrompt}\n\n${renderContextBlock(tree, [...relevant])}`
-      : systemPrompt;
+      : useCache
+        ? `${systemPrompt}\n\n${frozenBlock}`
+        : systemPrompt;
     const turnMessages = contextSelection ? pruneHistory(messages, { keepLastTurn: true }) : messages;
 
     const { text, toolCalls, usage } = await provider.runTurn({ systemPrompt: turnSystem, messages: turnMessages, tools });
@@ -60,7 +78,7 @@ export async function runAgent({
     const c = telemetry.record(usage);
     const s = telemetry.summary();
     log(
-      `   turn ${turn}: in/out/reason ${usage.input}/${usage.output}/${usage.reasoning}` +
+      `   turn ${turn}: in/out/reason/cached ${usage.input}/${usage.output}/${usage.reasoning}/${usage.cached}` +
         ` (total ${usage.total}) · cost-if-metered ${fmtGBP(c.gbp)}` +
         ` · running ${s.total} tok = ${(s.total / TOKENS_PER_CREDIT).toFixed(2)} credits`
     );

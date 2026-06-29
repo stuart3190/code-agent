@@ -5,8 +5,8 @@ kept intact as the proof artifact). This is the first build-for-keeps structure:
 a real engine behind a provider seam, plus an automated regression harness that proves
 reliability across archetypes and records the cost baseline.
 
-**Status: through Phase 2.2.** The engine has the targeted edit tool (2.1, `apply_patch`)
-and context selection (2.2). Caching (2.3) and the router (2.4) are not built yet. Each
+**Status: through Phase 2.3.** The engine has the targeted edit tool (2.1, `apply_patch`),
+context selection (2.2), and a cache-friendly mode (2.3). The router (2.4) is not built yet. Each
 optimisation is proven against the harness baseline so reliability never silently regresses.
 
 - **2.1 — targeted edit tool:** output scales with *change* size, not *file* size. `write_file`
@@ -18,6 +18,16 @@ optimisation is proven against the harness baseline so reliability never silentl
   replayed history. It also tells the model not to re-read files already shown, so it patches
   directly. `runAgent` additionally retries a transient empty (0-token/no-tool) turn once
   before failing. See `baseline/PHASE-2.2.md`.
+- **2.3 — prompt caching (verified, situational):** prompt caching IS live on the
+  reverse-engineered Codex-OAuth transport — a probe reused **85%** of a stable >1024-token
+  prefix, automatically, with no `prompt_cache_key` (setting one *suppressed* hits here). The
+  opt-in `--cache` mode keeps the prompt prefix byte-stable (a context block frozen at the
+  initial tree) and history append-only so input bills mostly at the cached rate — the opposite
+  trade-off to 2.2, which mutates the prefix every turn and gets ~0 hits. On the short harness
+  cases caching held 3/3 and cut £/turn but did **not** beat 2.2 on total £ (more turns +
+  cache-write propagation latency), so **2.2 stays the default**; `--cache` is the lever for the
+  future BYOK adapter (no latency penalty, `prompt_cache_key` works there) and long sessions. The
+  Codex-vs-BYOK cost asymmetry is recorded for the Phase 4 credit model. See `baseline/PHASE-2.3.md`.
 
 ## Layout
 
@@ -35,15 +45,16 @@ src/
   engine/telemetry.mjs           per-turn token/cost accumulation + summary.
   prompts/builder.mjs            proven build/edit system prompts.
 harness/
-  run.mjs                        driver; --baseline / --edit=<fmt> / --ctx.
+  run.mjs                        driver; --baseline / --edit=<fmt> / --ctx / --cache.
   runEngineCase.mjs              run one case through the engine (shared by run + trial).
   workspace.mjs                  shared-deps install + per-case junction + npm build.
   assertions.mjs                 named-marker presence check.
   _applier-tests.mjs             offline edit-applier tests (no model).
   _context-tests.mjs             offline context-selection helper tests (no model).
-  _runagent-tests.mjs            offline empty-turn-retry tests (fake provider, no model).
+  _runagent-tests.mjs            offline empty-turn-retry + cached-token billing tests (fake provider).
+  _cache-probe.mjs               verify prompt caching is live on the Codex transport (2 calls).
   cases/*.mjs + cases/trees/     three archetypes (todo, dashboard, form-validation).
-baseline/                        BASELINE.md, PHASE-2.1.md, PHASE-2.2.md (+ .json).
+baseline/                        BASELINE.md, PHASE-2.1.md, PHASE-2.2.md, PHASE-2.3.md (+ .json).
 ```
 
 ## The seam (do not break)
@@ -51,11 +62,13 @@ baseline/                        BASELINE.md, PHASE-2.1.md, PHASE-2.2.md (+ .jso
 Everything provider-specific lives behind one interface:
 
 ```
-provider.runTurn({ systemPrompt, messages, tools }) -> { text, toolCalls, usage }
+provider.runTurn({ systemPrompt, messages, tools, promptCacheKey? }) -> { text, toolCalls, usage }
 ```
 
-The engine (`runAgent`) speaks only neutral message/tool/usage shapes. A future BYOK
-official-API adapter satisfies the same interface without touching the engine.
+The engine (`runAgent`) speaks only neutral message/tool/usage shapes. `usage` carries a
+`cached` count (cache-read input tokens); `promptCacheKey` is an optional input the engine may
+pass (unused on the Codex path — it suppressed hits there — kept for the BYOK adapter). A future
+BYOK official-API adapter satisfies the same interface without touching the engine.
 
 ## Run
 
@@ -63,18 +76,23 @@ official-API adapter satisfies the same interface without touching the engine.
 node harness/run.mjs                        # write-only baseline path; green/red + cost
 node harness/run.mjs --baseline             # also (re)write baseline/BASELINE.md + .json
 node harness/run.mjs --edit=apply_patch     # 2.1 edit tool; writes baseline/PHASE-2.1.*
-node harness/run.mjs --edit=apply_patch --ctx  # + 2.2 context selection; writes PHASE-2.2.*
+node harness/run.mjs --edit=apply_patch --ctx    # + 2.2 context selection; writes PHASE-2.2.*
+node harness/run.mjs --edit=apply_patch --cache  # 2.3 cache-friendly shaping; writes PHASE-2.3.*
 
 # offline (no model, no quota):
 node harness/_applier-tests.mjs
 node harness/_context-tests.mjs
 node harness/_runagent-tests.mjs
+
+# tiny quota (2 calls): confirm prompt caching is live on the Codex-OAuth transport:
+node harness/_cache-probe.mjs
 ```
 
-`--ctx` is opt-in so the 2.1 path stays reproducible for a clean A/B; it becomes the engine
-default in a later commit. First run lazily installs the shared scaffold deps into
-`harness/.deps/` (one-time), then junctions them into each case's working copy under
-`harness/.work/`.
+`--ctx` (2.2, cache-hostile: minimise raw input) and `--cache` (2.3, cache-friendly: stable
+prefix + append-only) are **alternative** input strategies — `--ctx` wins if both are passed.
+Both are opt-in so each phase stays reproducible for a clean A/B. First run lazily installs the
+shared scaffold deps into `harness/.deps/` (one-time), then junctions them into each case's
+working copy under `harness/.work/`.
 
 ## What the harness asserts (per case)
 

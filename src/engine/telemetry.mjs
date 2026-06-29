@@ -12,6 +12,7 @@ export function createTelemetry() {
   let input = 0;
   let output = 0;
   let reasoning = 0;
+  let cached = 0; // Phase 2.3: input tokens served from the prompt cache (a subset of `input`)
   let total = 0;
   let usd = 0;
 
@@ -23,6 +24,7 @@ export function createTelemetry() {
       input += usage.input;
       output += usage.output;
       reasoning += usage.reasoning;
+      cached += usage.cached ?? 0;
       total += usage.total;
       usd += c.usd;
       return c;
@@ -34,9 +36,11 @@ export function createTelemetry() {
         input,
         output,
         reasoning,
+        cached,
+        cacheHitRate: input ? cached / input : 0, // fraction of input billed at the cached rate
         total,
         usd,
-        gbp: usd * 0.79, // ASSUMED USD->GBP, matches cost.mjs
+        gbp: usd * 0.79, // ASSUMED USD->GBP, matches cost.mjs (already cache-discounted via costForUsage)
         credits: total / TOKENS_PER_CREDIT,
         gbpPerTurn: turns ? (usd * 0.79) / turns : 0,
       };

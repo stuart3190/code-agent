@@ -1,0 +1,61 @@
+{
+  "recordedAt": "2026-06-29T12:49:09.050Z",
+  "model": "gpt-5.5",
+  "editFormat": "apply_patch",
+  "cacheFriendly": true,
+  "note": "Phase 2.3 cache-friendly run (stable frozen context block + append-only history; no prompt_cache_key — it suppressed hits on this transport). Caching VERIFIED live on the Codex-OAuth path (probe: 85% on a stable prefix). £ uses ASSUMED gpt-5.5 rates with cached input at 10% (src/cost.mjs); FREE on the sub. Single-pass per case; gpt-5.5 nondeterministic. Cache writes have propagation latency, so short (few-turn) cases may under-show hits vs a long session.",
+  "reliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "cache": {
+    "totalInput": 20215,
+    "totalCached": 2560,
+    "hitRate": 0.1266386346772199
+  },
+  "cost": {
+    "gbpPerTurn": 0.0053699015624999995,
+    "totalGbpIfMetered": 0.042959212499999996,
+    "totalTurns": 8
+  },
+  "vs22": {
+    "gbpPerTurn": 0.006260420833333333,
+    "totalGbp": 0.037562525,
+    "turns": 6,
+    "green": 3,
+    "total": 3
+  },
+  "cases": [
+    {
+      "name": "todo",
+      "pass": true,
+      "turns": 4,
+      "input": 12515,
+      "cached": 2560,
+      "cacheHitRate": 0.20455453455852976,
+      "output": 1832,
+      "gbpIfMetered": 0.0245561625
+    },
+    {
+      "name": "dashboard",
+      "pass": true,
+      "turns": 2,
+      "input": 4195,
+      "cached": 0,
+      "cacheHitRate": 0,
+      "output": 886,
+      "gbpIfMetered": 0.0111419625
+    },
+    {
+      "name": "form-validation",
+      "pass": true,
+      "turns": 2,
+      "input": 3505,
+      "cached": 0,
+      "cacheHitRate": 0,
+      "output": 481,
+      "gbpIfMetered": 0.007261087500000002
+    }
+  ]
+}

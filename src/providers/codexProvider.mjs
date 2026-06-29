@@ -47,7 +47,10 @@ function toWireTools(tools) {
 }
 
 export function createCodexProvider() {
-  async function runTurn({ systemPrompt, messages, tools }) {
+  // Phase 2.3: an optional prompt_cache_key improves prompt-cache ROUTING stickiness
+  // (requests sharing the key + prefix are likelier to reuse the same cached KV state).
+  // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
+  async function runTurn({ systemPrompt, messages, tools, promptCacheKey }) {
     const { accessToken, accountId } = await getAccessToken();
 
     const body = {
@@ -57,6 +60,7 @@ export function createCodexProvider() {
       stream: true,
       store: false, // backend rejects store:true/stream:false; no `metadata` (would 400)
     };
+    if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
     const wireTools = toWireTools(tools);
     if (wireTools) {
       body.tools = wireTools;
