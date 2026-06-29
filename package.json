@@ -1,0 +1,11 @@
+{
+  "name": "app-builder",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI app-builder engine — graduated from the Phase 1 spike. The generation engine sits behind a provider seam (runTurn); a regression harness proves reliability across archetypes and records the cost baseline.",
+  "scripts": {
+    "harness": "node harness/run.mjs",
+    "baseline": "node harness/run.mjs --baseline"
+  }
+}

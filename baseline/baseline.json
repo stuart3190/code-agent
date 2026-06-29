@@ -1,0 +1,67 @@
+{
+  "recordedAt": "2026-06-29T06:40:45.237Z",
+  "model": "gpt-5.5",
+  "engine": "full-file-rewrite (write_file only) — Phase 1 proven path",
+  "note": "Single-pass baseline. gpt-5.5 is nondeterministic; reliability is one run. £ uses ASSUMED gpt-5.5 rates (src/cost.mjs), no public price exists; all FREE on the ChatGPT sub.",
+  "reliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "cost": {
+    "gbpPerTurn": 0.005123808333333333,
+    "totalGbpIfMetered": 0.0614857,
+    "totalTurns": 12,
+    "totalTokens": 23932
+  },
+  "cases": [
+    {
+      "name": "todo",
+      "pass": true,
+      "build": true,
+      "priorKept": "4/4",
+      "newPresent": "2/2",
+      "turns": 4,
+      "tokens": {
+        "input": 7651,
+        "output": 2516,
+        "reasoning": 148,
+        "total": 10167
+      },
+      "gbpIfMetered": 0.027431762499999998,
+      "gbpPerTurn": 0.0068579406249999995
+    },
+    {
+      "name": "dashboard",
+      "pass": true,
+      "build": true,
+      "priorKept": "3/3",
+      "newPresent": "2/2",
+      "turns": 4,
+      "tokens": {
+        "input": 5708,
+        "output": 1622,
+        "reasoning": 48,
+        "total": 7330
+      },
+      "gbpIfMetered": 0.01845045,
+      "gbpPerTurn": 0.0046126125
+    },
+    {
+      "name": "form-validation",
+      "pass": true,
+      "build": true,
+      "priorKept": "3/3",
+      "newPresent": "2/2",
+      "turns": 4,
+      "tokens": {
+        "input": 5097,
+        "output": 1338,
+        "reasoning": 86,
+        "total": 6435
+      },
+      "gbpIfMetered": 0.015603487499999999,
+      "gbpPerTurn": 0.0039008718749999997
+    }
+  ]
+}
