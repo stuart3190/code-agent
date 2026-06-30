@@ -208,6 +208,18 @@ export function breakeven(tier, opts = {}) {
   };
 }
 
+// Per-user HARD CEILING (the runaway-account guardrail from the build plan, §8). DERIVED, not
+// invented: a user's monthly debited credits may not exceed their own tier's BREAKEVEN. Below the
+// breakeven the tier is profitable by construction (§7), so a normal user never trips this; only a
+// runaway loop (or a compromised account burning a bought balance) does. Top-ups raise the spend
+// VALVE, not the ceiling — heavy users past breakeven buy top-ups, which is where margin is made, so
+// the ceiling guards cost runaway, not legitimate paid usage. BYOK has no managed ceiling (inference
+// is on the user's key); callers gate BYOK with the preview-slot cap instead.
+export function userHardCeilCredits(tier, opts = {}) {
+  if (!tier || !tier.managed) return Infinity; // BYOK / unmetered: no managed-credit ceiling
+  return breakeven(tier, opts).breakevenCredits;
+}
+
 // Whole-model snapshot — what the runnable script and the write-up consume.
 export function buildModel(opts = {}) {
   const rt = opts.rt ?? RUNTIME;

@@ -6,6 +6,13 @@
   "description": "AI app-builder engine — graduated from the Phase 1 spike. The generation engine sits behind a provider seam (runTurn); a regression harness proves reliability across archetypes and records the cost baseline.",
   "scripts": {
     "harness": "node harness/run.mjs",
-    "baseline": "node harness/run.mjs --baseline"
+    "baseline": "node harness/run.mjs --baseline",
+    "test:billing": "node harness/_billing-tests.mjs",
+    "test:ledger": "node harness/_ledger-tests.mjs",
+    "prove:billing": "node harness/proveBilling.mjs"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "stripe": "^17.0.0"
   }
 }
