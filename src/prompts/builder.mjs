@@ -15,7 +15,7 @@ All methods are async (await them).
 - db.entity("<type>").create(data) | .list() | .get(id) | .update(id, patch) | .delete(id)
     A record is { id, type, data, owner, created_at }; your fields live inside record.data.
     Pick a "<type>" string per kind of thing (e.g. "note", "task").
-- storage.upload(file, path?) -> { path } · storage.getUrl(path) -> public URL string
+- storage.upload(file, path?) -> { path } · storage.getUrl(path) -> signed URL string (async — await it)
 If the app genuinely needs none of these (a pure client-side widget), it's fine to stay local —
 but anything with accounts, saved data across reloads, or uploads MUST use the SDK.
 

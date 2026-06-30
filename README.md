@@ -5,11 +5,12 @@ kept intact as the proof artifact). This is the first build-for-keeps structure:
 a real engine behind a provider seam, plus an automated regression harness that proves
 reliability across archetypes and records the cost baseline.
 
-**Status: through Phase 3.0.** The engine has the targeted edit tool (2.1, `apply_patch`),
+**Status: through Phase 3.1.** The engine has the targeted edit tool (2.1, `apply_patch`),
 context selection (2.2), a cache-friendly mode (2.3), and a model router (2.4) — each proven
 against the harness baseline so reliability never silently regresses — and now the generated
 apps target a **thin backend SDK** (3.0, auth / entities / storage) implemented on Supabase
-behind a swappable seam, proven end-to-end against a live project.
+behind a swappable seam, proven end-to-end against a live project, with **per-tenant data
+isolation** (3.1, owner/path-scoped RLS) proven to hold.
 
 - **2.1 — targeted edit tool:** output scales with *change* size, not *file* size. `write_file`
   remains the fallback after repeated failed edits. See `baseline/PHASE-2.1.md`.
@@ -48,7 +49,17 @@ behind a swappable seam, proven end-to-end against a live project.
   `entities(id, type, data jsonb, owner, created_at)` table, so `db.entity("note")` needs no schema.
   The 3/3 regression held (the new dep tree-shakes out of the client-only cases), and a generated
   app was proven end-to-end against a **live** project — not just `npm run build`. See
-  `baseline/PHASE-3.md`. **Single-tenant proof only**: per-tenant RLS isolation is a later session.
+  `baseline/PHASE-3.md`. (3.0 was single-tenant; isolation lands in 3.1.)
+- **3.1 — per-tenant data isolation:** the 3.0 proof ran under one permissive policy, so every user
+  could reach every other user's data. 3.1 closes that with **owner-scoped RLS** on `entities`
+  (`owner uuid default auth.uid()` + `owner = auth.uid()` policies — purely DB-side, **zero SDK
+  change**) and **path-scoped RLS** on a now-**private** `uploads` bucket (keys namespaced under
+  `<uid>/`, served via short-lived **signed URLs**). The only app-facing change is `storage`:
+  `upload()` prefixes the uid and `getUrl()` is now async (`createSignedUrl`). `harness/proveTenancy.mjs`
+  proves it with two users — A's own access works while B cannot see, read, update, or delete A's
+  entity or file (the denial is the pass condition). 3/3 regression unaffected. This is per-END-USER
+  isolation within one app; isolating one *builder's* project from another is a separate later layer.
+  See `baseline/PHASE-3.1.md`.
 
 ## Backend SDK (the seam the generated apps call)
 
@@ -85,6 +96,7 @@ src/
 harness/
   run.mjs                        driver; --baseline / --edit=<fmt> / --ctx / --cache / --router.
   proveBackend.mjs               3.0 backend proof: generate ▸ build ▸ markers ▸ LIVE Supabase round-trip.
+  proveTenancy.mjs               3.1 isolation proof: two users; A's access works, B reaches none of A's data.
   runEngineCase.mjs              run one case through the engine (shared by run + trial).
   workspace.mjs                  shared-deps install + per-case junction + npm build.
   assertions.mjs                 named-marker presence check.
@@ -140,6 +152,11 @@ node harness/_cache-probe.mjs
 #   SUPABASE_URL / SUPABASE_ANON_KEY (anon public key only — never the service_role key)
 # Without creds it runs generate+build+markers and reports the live step as SKIPPED.
 SUPABASE_URL=... SUPABASE_ANON_KEY=... node harness/proveBackend.mjs
+
+# 3.1 tenancy proof — two users via normal signUp; assert A's own access works AND user B
+# cannot see/read/update/delete A's entity or file (owner/path-scoped RLS; private bucket +
+# signed URLs). Requires the 3.1 SQL applied (see baseline/PHASE-3.1.md). Anon key only:
+SUPABASE_URL=... SUPABASE_ANON_KEY=... node harness/proveTenancy.mjs
 ```
 
 `--ctx` (2.2, cache-hostile: minimise raw input) and `--cache` (2.3, cache-friendly: stable

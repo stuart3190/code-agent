@@ -9,7 +9,7 @@
 //   await auth.currentUser();                  await auth.signOut();
 //   const note  = await db.entity("note").create({ title, body });
 //   const notes = await db.entity("note").list();
-//   const { path } = await storage.upload(file);   const url = storage.getUrl(path);
+//   const { path } = await storage.upload(file);   const url = await storage.getUrl(path);
 //
 // The app NEVER imports @supabase/supabase-js directly — only this seam. Swapping the
 // backend (self-hosted Supabase, own Postgres, …) means swapping the factory here, with

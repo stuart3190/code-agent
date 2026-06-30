@@ -120,7 +120,7 @@ async function liveSmoke() {
   const payload = Buffer.from(`proof-bytes-${Date.now()}`);
   const { path: objPath } = await be.storage.upload(payload, `proof/${Date.now()}.txt`);
   step(!!objPath, "storage.upload", objPath);
-  const fileUrl = be.storage.getUrl(objPath);
+  const fileUrl = await be.storage.getUrl(objPath);
   step(typeof fileUrl === "string" && fileUrl.startsWith("http"), "storage.getUrl", fileUrl);
   const resp = await fetch(fileUrl);
   const back = Buffer.from(await resp.arrayBuffer());

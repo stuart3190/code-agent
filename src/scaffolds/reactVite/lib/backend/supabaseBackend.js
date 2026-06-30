@@ -82,18 +82,29 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads" } = {})
     },
   };
 
+  // Storage is namespaced per user: every object key lives under `<uid>/...`, and the bucket's
+  // RLS policies scope access to (storage.foldername(name))[1] = auth.uid(). The app stays
+  // UNAWARE of tenancy — it passes its own logical `path` and stores back the RETURNED
+  // (uid-prefixed) key opaquely. The bucket is PRIVATE, so reads go via short-lived signed URLs.
   const storage = {
     // file: a browser File/Blob or a Node Buffer/Uint8Array/ArrayBuffer.
-    // path: optional object key; auto-generated under uploads/ when omitted.
+    // path: optional logical key; auto-generated when omitted. The caller's uid is prefixed.
     async upload(file, path) {
-      const key = path || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const uid = (await client.auth.getSession()).data.session?.user?.id;
+      if (!uid) throw new Error("storage.upload: must be signed in to upload.");
+      const name = path || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const key = `${uid}/${name}`;
       const data = unwrap(
         await client.storage.from(bucket).upload(key, file, { upsert: true })
       );
       return { path: data.path };
     },
-    getUrl(path) {
-      return client.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+    // Private bucket -> mint a short-lived signed URL. ASYNC (await it).
+    async getUrl(path, expiresIn = 3600) {
+      const data = unwrap(
+        await client.storage.from(bucket).createSignedUrl(path, expiresIn)
+      );
+      return data.signedUrl;
     },
   };
 
