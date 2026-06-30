@@ -5,9 +5,11 @@ kept intact as the proof artifact). This is the first build-for-keeps structure:
 a real engine behind a provider seam, plus an automated regression harness that proves
 reliability across archetypes and records the cost baseline.
 
-**Status: through Phase 2.4.** The engine has the targeted edit tool (2.1, `apply_patch`),
-context selection (2.2), a cache-friendly mode (2.3), and a model router (2.4). Each
-optimisation is proven against the harness baseline so reliability never silently regresses.
+**Status: through Phase 3.0.** The engine has the targeted edit tool (2.1, `apply_patch`),
+context selection (2.2), a cache-friendly mode (2.3), and a model router (2.4) — each proven
+against the harness baseline so reliability never silently regresses — and now the generated
+apps target a **thin backend SDK** (3.0, auth / entities / storage) implemented on Supabase
+behind a swappable seam, proven end-to-end against a live project.
 
 - **2.1 — targeted edit tool:** output scales with *change* size, not *file* size. `write_file`
   remains the fallback after repeated failed edits. See `baseline/PHASE-2.1.md`.
@@ -38,6 +40,28 @@ optimisation is proven against the harness baseline so reliability never silentl
   emits far more output than a patch — so cheap only pays if it still patches cleanly. The policy is
   a pure function (unit-tested offline, no spend) and the cheap model's real adherence is *measured*
   live and fed back. See `baseline/PHASE-2.4.md`.
+- **3.0 — thin backend SDK:** generated apps stopped being static. They now call a small, stable
+  SDK — `import { auth, db, storage } from "./lib/backend"` — and never touch Supabase directly. It
+  is a **swappable seam** (same idea as the provider seam): Supabase is one implementation behind
+  `createSupabaseBackend({url, anonKey})`; a self-hosted Supabase or own-Postgres backend satisfies
+  the same shape with no generated-app changes. Data is migration-free — one generic
+  `entities(id, type, data jsonb, owner, created_at)` table, so `db.entity("note")` needs no schema.
+  The 3/3 regression held (the new dep tree-shakes out of the client-only cases), and a generated
+  app was proven end-to-end against a **live** project — not just `npm run build`. See
+  `baseline/PHASE-3.md`. **Single-tenant proof only**: per-tenant RLS isolation is a later session.
+
+## Backend SDK (the seam the generated apps call)
+
+```
+auth.signUp({email,password})  auth.signIn({email,password})  auth.signOut()  auth.currentUser()
+db.entity("<type>").create(data) | .list() | .get(id) | .update(id,patch) | .delete(id)
+storage.upload(file, path?) -> {path}   storage.getUrl(path) -> public URL
+```
+
+Authored as real files under `src/scaffolds/reactVite/lib/backend/` (single source of truth — the
+Node proof imports the same factory the app ships) and read into the scaffold tree. `index.js` wires
+Vite env (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`); `supabaseBackend.js` is the pure,
+config-injected factory. Apps import `./lib/backend` only — never `@supabase/supabase-js`.
 
 ## Layout
 
@@ -49,7 +73,8 @@ src/
   providers/routingProvider.mjs  Phase 2.4: seam-compatible wrapper that delegates to the routed model.
   router/router.mjs              Phase 2.4: pure chooseModel policy + per-model adherence catalogue.
   cost.mjs                       Cost-if-metered (ASSUMED gpt-5.5 rates; FREE on the sub).
-  scaffolds/reactVite.mjs        The Vite+React+Tailwind target tree.
+  scaffolds/reactVite.mjs        The Vite+React+Tailwind target tree (now incl. the backend SDK).
+  scaffolds/reactVite/lib/backend/  3.0 SDK: index.js (Vite env wiring) + supabaseBackend.js (pure factory).
   tools/fileTools.mjs            list/read/write_file + apply_patch/edit_file — above the seam.
   tools/edit/*.mjs               the V4A apply_patch + search/replace appliers.
   engine/runAgent.mjs            THE tool-use loop (one copy; deduped from the spike).
@@ -59,6 +84,7 @@ src/
   prompts/builder.mjs            proven build/edit system prompts.
 harness/
   run.mjs                        driver; --baseline / --edit=<fmt> / --ctx / --cache / --router.
+  proveBackend.mjs               3.0 backend proof: generate ▸ build ▸ markers ▸ LIVE Supabase round-trip.
   runEngineCase.mjs              run one case through the engine (shared by run + trial).
   workspace.mjs                  shared-deps install + per-case junction + npm build.
   assertions.mjs                 named-marker presence check.
@@ -108,6 +134,12 @@ node harness/_router-tests.mjs
 
 # tiny quota (2 calls): confirm prompt caching is live on the Codex-OAuth transport:
 node harness/_cache-probe.mjs
+
+# 3.0 backend proof — generate an app that uses auth + entity CRUD + file upload, then drive it
+# against a LIVE Supabase project (Codex generation free; Supabase free tier). Creds via env:
+#   SUPABASE_URL / SUPABASE_ANON_KEY (anon public key only — never the service_role key)
+# Without creds it runs generate+build+markers and reports the live step as SKIPPED.
+SUPABASE_URL=... SUPABASE_ANON_KEY=... node harness/proveBackend.mjs
 ```
 
 `--ctx` (2.2, cache-hostile: minimise raw input) and `--cache` (2.3, cache-friendly: stable
