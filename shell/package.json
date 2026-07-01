@@ -1,0 +1,10 @@
+{
+  "name": "app-builder-shell-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The product shell's thin Node server — wraps the proven engine / ledger / billing / preview layers into HTTP + SSE. Reuses the repo's node_modules (@supabase/supabase-js, stripe); adds no framework.",
+  "scripts": {
+    "server": "node server/index.mjs"
+  }
+}

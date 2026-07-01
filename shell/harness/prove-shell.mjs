@@ -1,0 +1,226 @@
+// Headless end-to-end proof of the PRODUCT SHELL — the browser's exact API calls, driven server-side
+// with a REAL Supabase session, so every step produces evidence (mirrors proveBilling.mjs discipline:
+// opt-in, creds-required, real round-trips, asserted against costModel, denial = pass).
+//
+//   SIGNUP    a real user via the backend SDK anon flow (no service_role) -> session token
+//   SEED      grant the Starter bundle via the service-role ledger (stands in for the Stripe grant,
+//             whose own path proveBilling.mjs proves live) so there is a balance to spend
+//   GENERATE  POST /api/generate (mode build) -> stream -> app BUILDS -> ledger DEBITS the served
+//             tokens by exactly creditsForTurn({tokens, model}); balance drops by that amount
+//   PREVIEW   the returned preview URL serves HTTP 200 (real local Vite)
+//   ITERATE   POST /api/generate (mode iterate) with the held tree -> edit lands, still builds, debits
+//   PERSIST   save the project via the SDK, then re-open through a FRESH session (= reload) -> tree +
+//             prompts intact
+//   ISOLATE   a second user cannot see user A's project (owner-scoped RLS; denial = pass)
+//
+// Spends Codex quota TWICE (build + iterate) — this is the one gated live spend. Run:
+//   (fill shell/.env + shell/web/.env, or export the vars)  node shell/harness/prove-shell.mjs
+// Missing creds -> SKIPPED.
+
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createClient } from "@supabase/supabase-js";
+import { createSupabaseBackend } from "../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
+import { createLedger } from "../../src/billing/ledger.mjs";
+import { creditsForTurn, TIERS } from "../../src/billing/costModel.mjs";
+import { loadEnv } from "../server/lib/env.mjs";
+
+loadEnv();
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SERVER = path.join(HERE, "..", "server", "index.mjs");
+
+const SUPA_URL = process.env.SUPABASE_URL;
+const ANON = process.env.SUPABASE_ANON_KEY;
+const SVC = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE;
+// Own port, decoupled from shell/.env's SHELL_PORT so the proof never collides with a dev server.
+const PORT = Number(process.env.PROVE_PORT || 8791);
+const BASE = `http://localhost:${PORT}`;
+
+// ── tiny test harness ──────────────────────────────────────────────────────────────────────────
+const G = "\x1b[32m", R = "\x1b[31m", D = "\x1b[2m", B = "\x1b[1m", X = "\x1b[0m";
+let passes = 0, fails = 0;
+const ok = (m) => { passes++; console.log(`  ${G}PASS${X}  ${m}`); };
+const bad = (m) => { fails++; console.log(`  ${R}FAIL${X}  ${m}`); };
+const section = (t) => console.log(`\n${B}--- ${t} ---${X}`);
+const info = (m) => console.log(`  ${D}→ ${m}${X}`);
+const check = (cond, m) => (cond ? ok(m) : bad(m));
+
+if (!SUPA_URL || !ANON || !SVC) {
+  console.log(`${D}SKIPPED — set SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY (shell/.env) to run the live proof.${X}`);
+  process.exit(0);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Trees are { path: contents }. Compare by path-set + per-file contents — robust to Postgres jsonb
+// reordering object keys on the way back out (string values themselves are preserved exactly).
+function treeEqual(a, b) {
+  if (!a || !b) return false;
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+  if (ka.length !== kb.length || ka.some((k, i) => k !== kb[i])) return false;
+  return ka.every((k) => a[k] === b[k]);
+}
+const anonClient = () => createClient(SUPA_URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
+// The PROVEN Phase 3 backend SDK — auth + its RLS-scoped Supabase _client (projects persistence goes
+// through _client.from("projects"), exactly the session the browser uses).
+const userBackend = () => createSupabaseBackend({ url: SUPA_URL, anonKey: ANON });
+const tokenOf = async (be) => (await be._client.auth.getSession()).data.session?.access_token;
+const svcClient = createClient(SUPA_URL, SVC, { auth: { persistSession: false, autoRefreshToken: false } });
+const ledger = createLedger(svcClient);
+
+async function waitHealth(deadlineMs = 30000) {
+  const end = Date.now() + deadlineMs;
+  while (Date.now() < end) {
+    try { const r = await fetch(`${BASE}/api/health`); if (r.ok) return r.json(); } catch {}
+    await sleep(500);
+  }
+  throw new Error("server did not become healthy");
+}
+
+// POST /api/generate and drain the SSE stream (same parser the browser uses).
+async function generate(token, body) {
+  const res = await fetch(`${BASE}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) { let e = {}; try { e = await res.json(); } catch {} throw Object.assign(new Error(e.error || res.status), { payload: e }); }
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  let buf = "", done = null, lastLog = "";
+  for (;;) {
+    const { value, done: d } = await reader.read(); if (d) break;
+    buf += dec.decode(value, { stream: true });
+    const frames = buf.split("\n\n"); buf = frames.pop() || "";
+    for (const f of frames) {
+      const ev = f.split("\n").find((l) => l.startsWith("event:"))?.slice(6).trim();
+      const dl = f.split("\n").find((l) => l.startsWith("data:"))?.slice(5).trim();
+      if (!ev || !dl) continue;
+      const data = JSON.parse(dl);
+      if (ev === "log") lastLog = data.line;
+      if (ev === "done") done = data;
+      if (ev === "error") throw new Error(data.message);
+    }
+  }
+  return { done, lastLog };
+}
+
+async function main() {
+  console.log(`${B}=== Shell E2E proof — describe → generate → preview → iterate → persist ===${X}`);
+  info(`server ${BASE} · supabase ${new URL(SUPA_URL).host}`);
+
+  // Boot the server as a child (inherits env).
+  const child = spawn(process.execPath, [SERVER], {
+    env: { ...process.env, SHELL_PORT: String(PORT) },
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  let owner = null;
+  try {
+    const health = await waitHealth();
+    check(health.ok && health.supabase, `server healthy (supabase env: ${health.supabase}, preview: ${health.previewMode})`);
+
+    // ── SIGNUP ─────────────────────────────────────────────────────────────────────────────────
+    section("SIGNUP — real user via the backend SDK anon flow");
+    const email = `shell.probe.${Date.now()}@gmail.com`;
+    const password = `Pw!${Math.random().toString(36).slice(2)}Aa1`;
+    const backend = userBackend();
+    const user = await backend.auth.signUp({ email, password }); // SDK returns the user (throws on error)
+    check(!!user?.id, `signUp -> user ${user?.id?.slice(0, 8)}…`);
+    owner = user.id;
+    // ensure a session (Phase 3 setup disables email confirmation so signUp establishes it directly)
+    let token = await tokenOf(backend);
+    if (!token) { await backend.auth.signIn({ email, password }); token = await tokenOf(backend); }
+    check(!!token, "have an access token (session established)");
+
+    // ── SEED balance (stands in for the Stripe subscription grant) ───────────────────────────────
+    section("SEED — grant the Starter bundle (service role; the Stripe grant path is proven in proveBilling)");
+    const starter = TIERS.find((t) => t.id === "starter");
+    await ledger.grant({ owner, credits: starter.bundledCredits, bucket: "bundle", kind: "grant", cycle: "seed", ref: `seed:${owner}` });
+    await ledger.setEntitlement({ owner, tier: "starter", currentPeriod: "seed" });
+    const seeded = await ledger.getBalance(owner);
+    check(Math.abs(seeded.total - starter.bundledCredits) < 1e-6, `seeded balance = ${seeded.total} cr (Starter bundle ${starter.bundledCredits})`);
+
+    // ── GENERATE (build) ─────────────────────────────────────────────────────────────────────────
+    section("GENERATE — describe → engine builds a real app → live debit");
+    const balBefore = (await ledger.getBalance(owner)).total;
+    const g1 = await generate(token, { prompt: "a notes app: add a note with a title and body, list notes newest-first, delete a note", mode: "build" });
+    const d1 = g1.done;
+    check(!!d1, "generation returned a done payload");
+    check(d1?.build?.ok === true, `generated app BUILDS (npm run build PASS) — ${Object.keys(d1?.tree || {}).length} files`);
+    const need1 = creditsForTurn({ tokens: d1.telemetry.total, model: d1.decision.model });
+    check(Math.abs(d1.need - need1) < 1e-4, `debit = creditsForTurn (${d1.need.toFixed(4)} cr for ${d1.telemetry.total} tok on ${d1.decision.model})`);
+    const balAfter = (await ledger.getBalance(owner)).total;
+    check(Math.abs((balBefore - balAfter) - d1.need) < 1e-3, `balance dropped by exactly the debit (${balBefore.toFixed(3)} → ${balAfter.toFixed(3)})`);
+
+    // ── PREVIEW ───────────────────────────────────────────────────────────────────────────────────
+    section("PREVIEW — the returned URL serves the running app");
+    if (d1.preview?.url) {
+      const pr = await fetch(d1.preview.url).catch(() => null);
+      const html = pr ? await pr.text() : "";
+      check(pr?.status === 200 && /<div id="root">|<script/.test(html), `preview ${d1.preview.url} -> HTTP ${pr?.status}`);
+    } else { info(`preview mode returned no URL (${d1.preview?.mode || "?"}) — ${d1.preview?.note || ""}`); }
+
+    // ── PERSIST (save to the dedicated projects table via the user's own session) ────────────────
+    section("PERSIST — save the project (dedicated public.projects, RLS-scoped)");
+    const insP = await backend._client.from("projects").insert({
+      name: "Notes app", tree: d1.tree, history: [{ prompt: "notes app", mode: "build", need: d1.need }], preview_ref: d1.preview?.url || null,
+    }).select().single();
+    if (insP.error) throw insP.error;
+    const proj = insP.data;
+    check(!!proj?.id, `project saved -> ${proj.id.slice(0, 8)}…`);
+
+    // ── ITERATE (edit holds) ──────────────────────────────────────────────────────────────────────
+    section("ITERATE — a follow-up edit against the held tree");
+    const g2 = await generate(token, { projectId: proj.id, prompt: "add a search box that filters notes by title", mode: "iterate", tree: d1.tree });
+    const d2 = g2.done;
+    check(d2?.build?.ok === true, "iterated app still BUILDS");
+    const changed = d2 && !treeEqual(d2.tree, d1.tree);
+    check(changed, "the tree actually changed (edit applied)");
+    const need2 = creditsForTurn({ tokens: d2.telemetry.total, model: d2.decision.model });
+    check(Math.abs(d2.need - need2) < 1e-4, `iterate debit = creditsForTurn (${d2.need.toFixed(4)} cr)`);
+    const updP = await backend._client.from("projects").update({
+      name: "Notes app", tree: d2.tree, history: [{ prompt: "notes app" }, { prompt: "search box" }], preview_ref: d2.preview?.url || null, updated_at: new Date().toISOString(),
+    }).eq("id", proj.id);
+    if (updP.error) throw updP.error;
+
+    // ── RELOAD/REOPEN (fresh session = reload) ───────────────────────────────────────────────────
+    section("PERSIST across reload — reopen through a FRESH session");
+    const fresh = userBackend();
+    await fresh.auth.signIn({ email, password });
+    const relP = await fresh._client.from("projects").select("*").eq("id", proj.id).single();
+    if (relP.error) throw relP.error;
+    const reopened = relP.data;
+    check(!!reopened?.tree, "project reopened with its tree intact");
+    check(treeEqual(reopened.tree, d2.tree), "reopened tree == the iterated tree (edits held across reload)");
+    check((reopened.history?.length || 0) === 2, `prompt history intact (${reopened.history?.length} turns)`);
+
+    // ── ISOLATE (RLS) ────────────────────────────────────────────────────────────────────────────
+    section("ISOLATE — a second user cannot see user A's project (RLS)");
+    const bEmail = `shell.probe.b.${Date.now()}@gmail.com`; const bPw = `Pw!${Math.random().toString(36).slice(2)}Bb2`;
+    const b = userBackend(); const bUser = await b.auth.signUp({ email: bEmail, password: bPw });
+    if (!(await tokenOf(b))) await b.auth.signIn({ email: bEmail, password: bPw });
+    const bl = await b._client.from("projects").select("*");
+    const bList = bl.data || [];
+    const leaked = bList.some((r) => r.id === proj.id);
+    check(!leaked, `user B sees none of A's projects (B list: ${bList.length} rows) — denial = pass`);
+
+    // ── cleanup ──────────────────────────────────────────────────────────────────────────────────
+    section("CLEANUP");
+    try { await backend._client.from("projects").delete().eq("id", proj.id); } catch {}
+    try {
+      await svcClient.from("credit_ledger").delete().eq("owner", owner);
+      await svcClient.from("customers").delete().eq("owner", owner);
+      const bOwner = bUser?.id; if (bOwner) await svcClient.from("credit_ledger").delete().eq("owner", bOwner);
+    } catch (e) { info(`cleanup note: ${e.message}`); }
+    info("removed test project + ledger/entitlement rows (test users remain in auth)");
+
+  } catch (e) {
+    bad(`threw: ${e.message}${e.payload ? " · " + JSON.stringify(e.payload) : ""}`);
+  } finally {
+    child.kill();
+  }
+
+  console.log(`\n${B}${fails === 0 ? G : R}${passes} passed, ${fails} failed${X}`);
+  process.exit(fails === 0 ? 0 : 1);
+}
+
+main();

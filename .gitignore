@@ -1,6 +1,8 @@
 node_modules/
 harness/.deps/
 harness/.work/
+shell/.previews/
+shell/web/dist/
 *.log
 
 # Secrets — never commit BYOK keys (defense-in-depth; keys are read from env, never files in-repo)
