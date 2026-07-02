@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
 import { getConfig } from "./lib/api.js";
@@ -15,8 +15,28 @@ export default function App() {
   const [balance, setBalance] = useState(null);
   const [projects, setProjects] = useState([]);
   const [current, setCurrent] = useState(null); // the open project, or null (dashboard)
+  const [leftOpen, setLeftOpen] = useState(true);   // Sidebar (New app / Projects) — open on wide
+  const [rightOpen, setRightOpen] = useState(true); // BillingPanel (Credits / Plans …) — open on wide
 
   useEffect(() => { getConfig().then(setConfig).catch(() => {}); }, []);
+
+  // Responsive auto-collapse so the middle build panel never gets crushed. Acts only when the width
+  // BUCKET changes, so it never fights a manual toggle within the same bucket. In-session state only.
+  const bucketRef = useRef(null);
+  useEffect(() => {
+    const bucketOf = (w) => (w < 900 ? "narrow" : w < 1200 ? "medium" : "wide");
+    const apply = () => {
+      const b = bucketOf(window.innerWidth);
+      if (b === bucketRef.current) return;
+      bucketRef.current = b;
+      if (b === "narrow") { setLeftOpen(false); setRightOpen(false); }
+      else if (b === "medium") { setRightOpen(false); } // keep left as-is
+      // wide: force nothing — respect current state
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
 
   const refreshBalance = useCallback(async () => {
     if (!user) return;
@@ -43,12 +63,17 @@ export default function App() {
     setCurrent(p);
   }
 
+  const RAIL = "2.75rem"; // collapsed rail width (comfortable tap target)
+  const cols = `${leftOpen ? "15rem" : RAIL} minmax(0,1fr) ${rightOpen ? "19rem" : RAIL}`;
+
   return (
-    <div className="h-full grid grid-cols-[15rem_1fr_19rem]">
+    <div className="h-full grid" style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}>
       <Sidebar
         user={user}
         projects={projects}
         currentId={current?.id}
+        collapsed={!leftOpen}
+        onToggle={() => setLeftOpen((v) => !v)}
         onNew={newProject}
         onOpen={openProject}
         onHome={() => setCurrent(null)}
@@ -69,7 +94,8 @@ export default function App() {
         )}
       </main>
 
-      <BillingPanel config={config} balance={balance} onRefresh={refreshBalance} tier={balance?.tier} />
+      <BillingPanel config={config} balance={balance} onRefresh={refreshBalance} tier={balance?.tier}
+        collapsed={!rightOpen} onToggle={() => setRightOpen((v) => !v)} />
     </div>
   );
 }

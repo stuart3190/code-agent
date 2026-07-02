@@ -4,7 +4,7 @@ import { checkout } from "../lib/api.js";
 // Billing UI on the LIVE Phase 4 ledger. Reads balance (client-side, RLS-scoped) and offers the
 // proven Stripe (test-mode) checkout paths. Every price string comes from /api/config -> costModel
 // TIERS; nothing is hardcoded or re-derived here.
-export default function BillingPanel({ config, balance, onRefresh, tier }) {
+export default function BillingPanel({ config, balance, onRefresh, tier, collapsed, onToggle }) {
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
   const [topup, setTopup] = useState(100);
@@ -12,6 +12,19 @@ export default function BillingPanel({ config, balance, onRefresh, tier }) {
   const managed = (config?.tiers || []).filter((t) => t.managed);
   const valuePerCredit = managed.find((t) => t.id === tier)?.effectiveGbpPerCredit ?? config?.topupGbpPerCredit ?? 0;
   const total = balance?.total ?? 0;
+
+  if (collapsed) {
+    return (
+      <aside className="h-full border-l border-line bg-ink-900/60 flex flex-col items-center py-3 gap-2">
+        <button onClick={onToggle} title="Expand billing panel" aria-label="Expand billing panel"
+          className="p-2 rounded-lg border border-line text-slate-400 hover:text-slate-100 hover:bg-ink-850">
+          <ChevronLeft />
+        </button>
+        <div className="font-mono text-lime text-sm tabular-nums mt-1" title={`${total.toFixed(2)} credits`}>{total.toFixed(0)}</div>
+        <div className="text-[9px] font-mono uppercase tracking-wider text-slate-600">cr</div>
+      </aside>
+    );
+  }
 
   async function go(args, key) {
     setBusy(key); setErr(null);
@@ -26,7 +39,11 @@ export default function BillingPanel({ config, balance, onRefresh, tier }) {
       {/* balance meter */}
       <div className="p-4 border-b border-line">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Credits</span>
+          <div className="flex items-center gap-2">
+            <button onClick={onToggle} title="Collapse panel" aria-label="Collapse billing panel"
+              className="text-slate-500 hover:text-slate-200"><ChevronRight /></button>
+            <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Credits</span>
+          </div>
           <button className="text-[11px] text-slate-500 hover:text-amber" onClick={onRefresh}>refresh</button>
         </div>
         <div className="mt-2 flex items-baseline gap-2">
@@ -95,5 +112,20 @@ export default function BillingPanel({ config, balance, onRefresh, tier }) {
 
       {err && <div className="px-4 pb-4 text-xs text-red-400">{err}</div>}
     </aside>
+  );
+}
+
+function ChevronLeft() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  );
+}
+function ChevronRight() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 18l6-6-6-6" />
+    </svg>
   );
 }
