@@ -109,15 +109,41 @@ function buildTodoTree() {
 let tunnel = null;
 const projectId = crypto.randomUUID();
 
+async function openTunnel() {
+  tunnel = spawn("ssh", [...SSH_ARGS, "-o", "ExitOnForwardFailure=yes", "-N",
+    "-L", `${LOCAL_PORT}:127.0.0.1:${REMOTE_PORT}`, SSH_HOST], { stdio: "ignore" });
+  tunnel.on("exit", (code) => { if (code) console.error(`ssh tunnel exited ${code}`); });
+  await waitTunnel();
+}
+
+// Capacity guard proof (opt-in: provisiond must be launched with PREVIEW_CAP=1). Provision A -> ok,
+// provision B -> 503 capacity, then tear A down.
+async function capacityProof() {
+  console.log(`\n${B}=== prove-provisiond (CP-3 capacity: PREVIEW_CAP=1) ===${X}`);
+  section("0. Tunnel");
+  await openTunnel(); ok("tunnel up");
+  const h = await (await fetch(`${BASE}/health`)).json();
+  if (h.capacity === 1) ok(`/health capacity=1 (override active)`); else bad(`expected capacity=1, got ${h.capacity}`);
+  const a = crypto.randomUUID(), b = crypto.randomUUID();
+  section("1. Fill the single slot");
+  const ra = await api("POST", "/provision", { projectId: a, tree: buildTodoTree() });
+  if (ra.status === 200) ok(`provision A -> 200 (${ra.json?.id})`); else bad(`provision A failed: ${ra.text}`);
+  section("2. Next provision is refused at capacity");
+  const rb = await api("POST", "/provision", { projectId: b, tree: buildTodoTree() });
+  if (rb.status === 503 && rb.json?.code === "capacity") ok(`provision B -> 503 capacity (${rb.json.error})`);
+  else bad(`expected 503 capacity, got status=${rb.status} body=${rb.text}`);
+  section("3. Teardown");
+  await api("POST", "/stop", { projectId: a });
+  await api("POST", "/stop", { projectId: b });
+  ok("cap-test projects torn down");
+}
+
 async function main() {
   console.log(`\n${B}=== prove-provisiond (CP-1: remote provision + tree injection, plain HTTP) ===${X}`);
   info(`ssh ${SSH_HOST} · remote :${REMOTE_PORT} -> local :${LOCAL_PORT} · project ${projectId}`);
 
   section("0. Open SSH control-plane tunnel");
-  tunnel = spawn("ssh", [...SSH_ARGS, "-o", "ExitOnForwardFailure=yes", "-N",
-    "-L", `${LOCAL_PORT}:127.0.0.1:${REMOTE_PORT}`, SSH_HOST], { stdio: "ignore" });
-  tunnel.on("exit", (code) => { if (code) console.error(`ssh tunnel exited ${code}`); });
-  await waitTunnel();
+  await openTunnel();
   ok("tunnel up, provisiond /health reachable");
 
   section("1. REMOTE PROVISION");
@@ -162,7 +188,32 @@ async function main() {
   if (/hmr update|page reload/i.test(vlog)) ok("Vite emitted an HMR update after the docker-cp change (container log confirms)");
   else bad(`no HMR update in Vite log after update. tail: ${vlog.split("\n").slice(-4).join(" | ")}`);
 
-  section("3. CLEANUP");
+  section("3. LIFECYCLE (CP-3): reaper -> RAM reclaim -> cold-start");
+  const rid = crypto.randomUUID();
+  const rprov = await api("POST", "/provision", { projectId: rid, tree: buildTodoTree() });
+  const rlabel = rprov.json?.id;
+  if (rprov.status === 200 && rlabel) ok(`provisioned reaper-test container ${rlabel}`);
+  else bad(`reaper-test provision failed: ${rprov.text}`);
+  await sleep(3500); // let it go idle (no traffic)
+  const reap = await api("POST", "/reap", { idleMs: 2000 });
+  if (reap.status === 200 && (reap.json?.reaped || []).includes(rlabel)) ok(`reaper stopped idle container (reaped: ${JSON.stringify(reap.json.reaped)})`);
+  else bad(`reaper did not stop ${rlabel}: ${reap.text}`);
+  const rstate = sshExec(`docker inspect -f '{{.State.Status}}' ${rlabel} 2>&1`).trim();
+  const statsNames = sshExec("docker stats --no-stream --format '{{.Name}}' 2>&1").split("\n").map((s) => s.trim());
+  if (rstate === "exited" && !statsNames.includes(rlabel)) ok(`RAM reclaimed: ${rlabel} state=exited, absent from docker stats`);
+  else bad(`expected exited + no stats; state=${rstate}, in-stats=${statsNames.includes(rlabel)}`);
+  const t0 = Date.now();
+  const rwake = await api("POST", "/provision", { projectId: rid, tree: buildTodoTree() });
+  const coldMs = Date.now() - t0;
+  const rstate2 = sshExec(`docker inspect -f '{{.State.Status}}' ${rlabel} 2>&1`).trim();
+  if (rwake.status === 200 && rstate2 === "running") ok(`cold-start: back to running in ~${coldMs}ms (${rwake.json?.url})`);
+  else bad(`cold-start failed: status=${rwake.status}, state=${rstate2}`);
+  const rserve = await fetch(rwake.json?.url).then((r) => r.status).catch(() => 0);
+  if (rserve === 200) ok("cold-started preview serves 200"); else bad(`cold-started preview did not serve 200 (got ${rserve})`);
+  await api("POST", "/stop", { projectId: rid });
+  ok("reaper-test project torn down");
+
+  section("4. CLEANUP");
   const stop = await api("POST", "/stop", { projectId });
   if (stop.status === 200 && stop.json?.stopped === true) ok("stop -> { stopped: true }");
   else bad(`stop unexpected: status=${stop.status} body=${stop.text}`);
@@ -173,7 +224,8 @@ async function main() {
   else bad(`container ${label} still present after stop`);
 }
 
-main()
+const RUN = process.argv.includes("--capacity") ? capacityProof : main;
+RUN()
   .catch((e) => { console.error(`\n${R}prove-provisiond error:${X} ${e.message}`); failed++; })
   .finally(async () => {
     try { await api("POST", "/stop", { projectId }); } catch {}   // best-effort teardown

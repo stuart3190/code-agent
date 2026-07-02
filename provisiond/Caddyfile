@@ -11,5 +11,9 @@
 }
 
 :80 {
+	log {
+		output stdout
+		format json
+	}
 	reverse_proxy {http.request.host.labels.3}:5173
 }

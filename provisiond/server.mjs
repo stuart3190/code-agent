@@ -20,8 +20,8 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import {
-  ensureCaddy, createContainer, cpInto, connectCaddy, startContainer,
-  destroy, isRunning, containerExists, listPreviewContainers,
+  ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
+  destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs,
 } from "./docker.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -60,8 +60,53 @@ const CADDY_CFG = {
 };
 const AVAILABLE_MB = Number(process.env.AVAILABLE_MB || 6500);
 const PER_CONTAINER_MB = 118; // RUNTIME.md measured idle RSS
+const CAP = Number(process.env.PREVIEW_CAP || Math.floor(AVAILABLE_MB / PER_CONTAINER_MB)); // RAM-bound (~55)
+const REAP_IDLE_MS = Number(process.env.REAP_IDLE_MS || 10 * 60 * 1000);   // billing model: ~10 min idle
+const REAP_INTERVAL_MS = Number(process.env.REAP_INTERVAL_MS || 60 * 1000);
 
 if (!TOKEN) { console.error("[provisiond] refusing to start: PROVISIOND_TOKEN is empty"); process.exit(1); }
+
+// Activity tracking for the reaper: last provisiond-side touch (provision/update/get) per label, merged
+// with the latest Caddy access-log request time per host (so an actively-browsed preview isn't reaped).
+const touched = new Map();
+const touch = (label) => touched.set(label, Date.now());
+const labelFromHost = (h) => String(h || "").split(".")[0];
+
+async function caddyActivity(sinceSec) {
+  const raw = await caddyLogs(sinceSec);
+  const map = new Map();
+  for (const line of (raw ? raw.split("\n") : [])) {
+    if (!line.includes('"request"')) continue;
+    let j; try { j = JSON.parse(line); } catch { continue; }
+    const host = j?.request?.host, ts = j?.ts;
+    if (!host || !ts) continue;
+    const label = labelFromHost(host), ms = ts * 1000;
+    if (!(map.get(label) >= ms)) map.set(label, ms);
+  }
+  return map;
+}
+
+// Stop running previews whose last activity (touch OR access log) exceeds idleMs. docker stop frees the
+// full RSS (RUNTIME.md); the container is kept for a fast cold-start. Returns the reaped labels.
+async function reapOnce(idleMs = REAP_IDLE_MS) {
+  const running = await listPreviewContainers();
+  if (!running.length) return [];
+  const act = await caddyActivity(Math.ceil(idleMs / 1000) + 60);
+  const now = Date.now();
+  const reaped = [];
+  for (const label of running) {
+    const last = Math.max(touched.get(label) || 0, act.get(label) || 0);
+    if (last && now - last > idleMs) { await stopContainer(label); reaped.push(label); }
+  }
+  return reaped;
+}
+
+// Refuse past the RAM-bound cap. A label already running (re-provision/wake) doesn't add a slot.
+async function enforceCapacity(label) {
+  const running = await listPreviewContainers();
+  if (running.includes(label)) return;
+  if (running.length >= CAP) { const e = new Error(`capacity reached (${running.length}/${CAP} previews running)`); e.code = "capacity"; throw e; }
+}
 
 // projectId (often a UUID) -> DNS-safe, docker-safe, lowercase label. NB: strip ALL non-alphanumeric
 // (incl. hyphens) — nip.io mis-parses dash groups in a UUID as a dash-format IP (proven: a hyphenated
@@ -114,38 +159,55 @@ async function injectTree(label, tree) {
   }
 }
 
+const envFor = (label) => ({
+  VITE_HOST: hostFor(label),
+  VITE_CLIENT_PORT: HTTPS ? 443 : 80,
+  VITE_HMR_PROTOCOL: HTTPS ? "wss" : "ws",
+});
+
+// Idempotent: absent -> create+inject; stopped -> cold-start (refresh tree, `docker start`); running ->
+// refresh tree (HMR). No destroy-on-provision (CP-1's behaviour) — the reaper leaves stopped containers
+// for a fast wake. The capacity guard bites only when a NEW slot would be consumed.
 async function provision(projectId, tree) {
   const label = labelFor(projectId);
   await ensureCaddy(CADDY_CFG);
-  if (await containerExists(label)) await destroy(label); // CP-1: recreate fresh (CP-3 = true restart)
-  await createContainer(label, {
-    VITE_HOST: hostFor(label),
-    VITE_CLIENT_PORT: SCHEME === "https" ? 443 : 80,
-    VITE_HMR_PROTOCOL: SCHEME === "https" ? "wss" : "ws",
-  });
-  await injectTree(label, tree);
-  await connectCaddy(label);
-  await startContainer(label);
+  const state = await containerState(label);
+  if (state === "absent") {
+    await enforceCapacity(label);
+    await createContainer(label, envFor(label));
+    await injectTree(label, tree);
+  } else if (state !== "running") { // stopped/exited -> cold start
+    await enforceCapacity(label);
+    await injectTree(label, tree);
+  } else {                          // already running -> refresh (HMR)
+    await injectTree(label, tree);
+  }
+  await connectCaddy(label);        // idempotent; re-links this net after a Caddy recreate
+  if ((await containerState(label)) !== "running") await startContainer(label);
+  touch(label);
   await waitReady(label);
   return { id: label, url: urlFor(label), mode: "vps" };
 }
 
 async function update(projectId, changedFiles) {
   const label = labelFor(projectId);
-  if (!(await isRunning(label))) return provision(projectId, changedFiles); // seam: update falls back to start
+  if ((await containerState(label)) !== "running") return provision(projectId, changedFiles); // wake if reaped
   await injectTree(label, changedFiles || {});
+  touch(label);
   return { id: label, url: urlFor(label), changed: Object.keys(changedFiles || {}), mode: "vps" };
 }
 
 async function stop(projectId) {
   const label = labelFor(projectId);
-  const stopped = await destroy(label);
+  const stopped = await destroy(label); // seam stop = full teardown (vs the reaper's keep-stopped)
+  touched.delete(label);
   return { stopped };
 }
 
 async function get(projectId) {
   const label = labelFor(projectId);
-  return (await isRunning(label)) ? { id: label, url: urlFor(label), mode: "vps" } : null;
+  if ((await containerState(label)) === "running") { touch(label); return { id: label, url: urlFor(label), mode: "vps" }; }
+  return null;
 }
 
 // --- http plumbing ------------------------------------------------------------------------------
@@ -164,9 +226,15 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/health") {
       const running = await listPreviewContainers();
-      return send(res, 200, { ok: true, capacity: Math.floor(AVAILABLE_MB / PER_CONTAINER_MB), running: running.length });
+      return send(res, 200, { ok: true, capacity: CAP, running: running.length, reapIdleMs: REAP_IDLE_MS });
     }
     if (!authed(req)) return send(res, 401, { error: "unauthorized" });
+
+    if (p === "/reap" && req.method === "POST") {
+      const { idleMs } = await readJson(req);
+      const reaped = await reapOnce(typeof idleMs === "number" ? idleMs : REAP_IDLE_MS);
+      return send(res, 200, { reaped });
+    }
 
     if (p === "/provision" && req.method === "POST") {
       const { projectId, tree } = await readJson(req);
@@ -190,10 +258,19 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: `no route ${req.method} ${p}` });
   } catch (e) {
-    return send(res, 500, { error: e.message });
+    return send(res, e.code === "capacity" ? 503 : 500, { error: e.message, code: e.code });
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+server.listen(PORT, "127.0.0.1", async () => {
   console.log(`[provisiond] listening on 127.0.0.1:${PORT} · suffix ${SUFFIX} · scheme ${SCHEME}`);
+  try {
+    const removed = await removeDanglingNets();                 // orphan cleanup
+    const running = await listPreviewContainers();
+    for (const l of running) touch(l);                          // adopt survivors so they aren't reaped at once
+    console.log(`[provisiond] boot: cap ${CAP} · adopted ${running.length} running preview(s) · removed ${removed.length} dangling net(s) · reap idle ${REAP_IDLE_MS}ms`);
+  } catch (e) {
+    console.error("[provisiond] boot cleanup error:", e.message);
+  }
+  setInterval(() => { reapOnce().catch((e) => console.error("[reaper]", e.message)); }, REAP_INTERVAL_MS);
 });
