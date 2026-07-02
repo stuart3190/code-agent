@@ -12,10 +12,13 @@
 //     server on a free port. The iframe points straight at it, so preview + HMR are genuinely live —
 //     minus the container isolation + subdomain the VPS adds. Iterate writes changed files -> Vite's
 //     watcher HMR-updates the same server.
-//   * vpsProvision (STUB): the clearly-marked no-op boundary for the follow-up session that wires the
-//     RUNTIME.md container + nginx-HMR proxy. Returns url:null so the UI shows "VPS preview pending".
+//   * vpsProvision (REAL, PREVIEW_MODE=vps): a thin HTTP client to provisiond over the SSH tunnel
+//     (RUNTIME.md container + Caddy wildcard-TLS/HMR, live on the VPS). Serves previews at
+//     https://<label>.preview.<suffix>/ with real isolation + TLS.
+//   * vpsProvisionStub (PREVIEW_MODE=vps-stub): the original no-op boundary, kept selectable.
+//     Returns url:null so the UI shows "VPS preview pending".
 //
-// Selected by PREVIEW_MODE env (default "local").
+// Selected by PREVIEW_MODE env (default "local"; "vps" = real provisiond, "vps-stub" = no-op).
 
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
@@ -137,10 +140,62 @@ function createVpsProvisionStub() {
   return { start, update, stop, get, mode: "vps-stub" };
 }
 
+// ── vpsProvision (REAL — thin HTTP client to provisiond over the SSH tunnel) ───────────────────
+// Conforms EXACTLY to the seam (start/update/stop/get -> {url,id,mode}). provisiond binds
+// 127.0.0.1 on the VPS; PROVISIOND_URL is the local end of the SSH tunnel. It already returns the
+// seam shape, so this is a near-passthrough. update() forwards the FULL tree as changedFiles:
+// provisiond cp's them all (HMR refresh if running) and, if the container was reaped, rebuilds
+// from them — correct either way, so the shell keeps no per-project diff state.
+function createVpsProvision() {
+  const BASE = process.env.PROVISIOND_URL;
+  const TOKEN = process.env.PROVISIOND_TOKEN || "";
+  if (!BASE) throw new Error("PREVIEW_MODE=vps requires PROVISIOND_URL (the SSH tunnel to provisiond)");
+
+  async function call(method, pathname, body) {
+    const res = await fetch(`${BASE}${pathname}`, {
+      method,
+      headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch {}
+    if (!res.ok) {
+      const err = new Error(data.error || `provisiond ${method} ${pathname} -> ${res.status}`);
+      err.code = data.code; err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  async function start(id, tree) {
+    const r = await call("POST", "/provision", { projectId: id, tree });
+    return { url: r.url, id: r.id, mode: r.mode || "vps" };
+  }
+  async function update(id, tree) {
+    const r = await call("POST", "/update", { projectId: id, changedFiles: tree });
+    return { url: r.url, id: r.id, changed: r.changed, mode: r.mode || "vps" };
+  }
+  async function stop(id) {
+    const r = await call("POST", "/stop", { projectId: id });
+    return { stopped: !!r.stopped };
+  }
+  async function get(id) {
+    const r = await call("GET", `/get?projectId=${encodeURIComponent(id)}`);
+    return r && r.url ? { url: r.url, mode: r.mode || "vps" } : null; // {result:null} -> null
+  }
+  return { start, update, stop, get, mode: "vps" };
+}
+
 let _provider = null;
 export function previewProvider() {
   if (_provider) return _provider;
   const mode = (process.env.PREVIEW_MODE || "local").toLowerCase();
-  _provider = mode === "vps" ? createVpsProvisionStub() : createLocalVite();
+  if (mode === "vps") _provider = createVpsProvision();            // REAL VPS — never the stub
+  else if (mode === "vps-stub") _provider = createVpsProvisionStub(); // stub kept selectable
+  else _provider = createLocalVite();
   return _provider;
 }
