@@ -88,6 +88,7 @@ export function createBilling({ stripe, ledger, env = process.env } = {}) {
   // Checkout for a one-off top-up of `credits` credits (priced per-credit; rolls over freely).
   async function createTopupCheckout({ owner, email, credits, successUrl, cancelUrl }) {
     if (!(credits > 0)) throw new Error("createTopupCheckout: credits must be > 0");
+    if (!topupPriceId) throw new Error("no Stripe price configured for top-ups (set STRIPE_PRICE_TOPUP)");
     const customer = await ensureCustomer({ owner, email });
     return stripe.checkout.sessions.create({
       mode: "payment",
