@@ -8,6 +8,8 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -35,6 +37,38 @@ if (!TOKEN) { console.error("PROVISIOND_TOKEN is required"); process.exit(2); }
 
 const SSH_ARGS = ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
 const sshExec = (cmd) => execFileSync("ssh", [...SSH_ARGS, SSH_HOST, cmd], { encoding: "utf8" }).trim();
+
+// Headless WebSocket-upgrade client (mirrors spike/runtime-spike.mjs testHMR 7b). Proves the Vite HMR
+// ws handshake survives the Caddy proxy hop: expects 101 + the vite-hmr subprotocol echoed back.
+// Scheme-agnostic off the preview URL: http->ws on :80, https->wss on :443 (real LE cert, verified).
+function wsUpgrade(urlStr, { timeoutMs = 10_000 } = {}) {
+  const u = new URL(urlStr);
+  const isTls = u.protocol === "https:";
+  const mod = isTls ? https : http;
+  const port = u.port || (isTls ? 443 : 80);
+  return new Promise((resolve) => {
+    const opts = {
+      host: u.hostname, port, path: "/", method: "GET",
+      headers: {
+        Host: u.hostname, Connection: "Upgrade", Upgrade: "websocket",
+        "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
+        "Sec-WebSocket-Version": "13", "Sec-WebSocket-Protocol": "vite-hmr",
+      },
+    };
+    if (isTls) opts.servername = u.hostname; // real LE cert; verify normally
+    const req = mod.request(opts);
+    const t = setTimeout(() => { req.destroy(); resolve({ ok: false, detail: "timeout" }); }, timeoutMs);
+    req.on("upgrade", (res, socket) => {
+      clearTimeout(t);
+      const proto = res.headers["sec-websocket-protocol"];
+      try { socket.destroy(); } catch {}
+      resolve({ ok: res.statusCode === 101, status: res.statusCode, proto });
+    });
+    req.on("response", (res) => { clearTimeout(t); res.resume(); resolve({ ok: false, status: res.statusCode, detail: "no-upgrade" }); });
+    req.on("error", (e) => { clearTimeout(t); resolve({ ok: false, detail: e.message }); });
+    req.end();
+  });
+}
 
 async function api(method, route, body) {
   const res = await fetch(`${BASE}${route}`, {
@@ -89,7 +123,7 @@ async function main() {
   section("1. REMOTE PROVISION");
   const prov = await api("POST", "/provision", { projectId, tree: buildTodoTree() });
   const p = prov.json || {};
-  if (prov.status === 200 && p.mode === "vps" && /^p[a-z0-9]+$/.test(p.id || "") && /^http:\/\/p[a-z0-9]+\.33c388bd\.nip\.io\/$/.test(p.url || "")) {
+  if (prov.status === 200 && p.mode === "vps" && /^p[a-z0-9]+$/.test(p.id || "") && /^https?:\/\/p[a-z0-9]+\.[a-z0-9.]+\/$/.test(p.url || "")) {
     ok(`provision -> 200 { id:${p.id}, url:${p.url}, mode:vps }`);
   } else {
     bad(`provision unexpected: status=${prov.status} body=${prov.text}`);
@@ -110,6 +144,23 @@ async function main() {
   const app = await fetch(appUrl).then(async (r) => ({ s: r.status, b: await r.text() })).catch((e) => ({ s: 0, b: String(e) }));
   if (app.s === 200 && app.b.includes("Stay on top of your day")) ok(`GET ${appUrl} -> 200, injected todo tree is live (Vite-transformed)`);
   else bad(`GET ${appUrl} -> status=${app.s}, body head: ${app.b.slice(0, 120)}`);
+
+  const scheme = new URL(url).protocol.replace(":", "");
+  section(`2a. HMR WS HANDSHAKE (${scheme === "https" ? "wss/TLS" : "ws"} through Caddy)`);
+  const ws = await wsUpgrade(url);
+  if (ws.ok && ws.proto === "vite-hmr") ok(`WS upgrade via Caddy -> 101, sec-websocket-protocol: ${ws.proto} (survives the ${scheme} proxy hop)`);
+  else bad(`WS upgrade failed: ${JSON.stringify(ws)}`);
+
+  section("2b. HMR UPDATE OVER THE WIRE (docker cp -> Vite HMR)");
+  const marker = `// hmr-wire-${Date.now()}`;
+  const edited = buildTodoTree()["src/App.jsx"] + "\n" + marker;
+  const upd = await api("POST", "/update", { projectId, changedFiles: { "src/App.jsx": edited } });
+  if (upd.status === 200) ok(`update -> 200 (changed ${JSON.stringify(upd.json?.changed || [])})`);
+  else bad(`update failed: status=${upd.status} ${upd.text}`);
+  await sleep(3500);
+  const vlog = sshExec(`docker logs ${label} --since 8s 2>&1 | tail -20`);
+  if (/hmr update|page reload/i.test(vlog)) ok("Vite emitted an HMR update after the docker-cp change (container log confirms)");
+  else bad(`no HMR update in Vite log after update. tail: ${vlog.split("\n").slice(-4).join(" | ")}`);
 
   section("3. CLEANUP");
   const stop = await api("POST", "/stop", { projectId });

@@ -47,19 +47,24 @@ export async function ensureInternalNet(label) {
   return n;
 }
 
-// Idempotently (re)start the shared Caddy front proxy on the proxy net, publishing :80.
-export async function ensureCaddy(caddyfilePath) {
+// Idempotently ensure the shared Caddy front proxy matches the desired scheme. Tagged with a
+// `buildr.scheme` label so a running front is kept as-is UNLESS the scheme changed (http<->https),
+// in which case it is recreated (e.g. the CP-1 :80 plain front -> the CP-2 :443 TLS front).
+//   opts: { caddyfilePath, image, publish: ["80:80"|"443:443",...], env: {CLOUDFLARE_API_TOKEN}, scheme }
+export async function ensureCaddy(opts) {
+  const { caddyfilePath, image = CADDY_IMAGE, publish = ["80:80"], env = {}, scheme = "http" } = opts;
   await ensureProxyNet();
   const running = await docker(["ps", "--filter", `name=^${CADDY_NAME}$`, "--format", "{{.Names}}"]);
-  if (running === CADDY_NAME) return;
+  if (running === CADDY_NAME) {
+    const cur = await docker(["inspect", "-f", '{{ index .Config.Labels "buildr.scheme" }}', CADDY_NAME], { ok: true });
+    if (cur === scheme) return; // right front already up
+  }
   await docker(["rm", "-f", CADDY_NAME], { ok: true });
-  await docker([
-    "run", "-d", "--name", CADDY_NAME,
-    "--network", PROXY_NET,
-    "-p", "80:80",
-    "-v", `${caddyfilePath}:/etc/caddy/Caddyfile:ro`,
-    CADDY_IMAGE,
-  ]);
+  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`, "--network", PROXY_NET];
+  for (const p of publish) args.push("-p", p);
+  for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
+  args.push("-v", `${caddyfilePath}:/etc/caddy/Caddyfile:ro`, image);
+  await docker(args);
 }
 
 export async function containerExists(label) {

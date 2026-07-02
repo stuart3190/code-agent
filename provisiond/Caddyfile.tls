@@ -1,0 +1,19 @@
+# CP-2 (2b): wildcard TLS front. Terminates HTTPS directly for *.preview.buildr101.com using a
+# Let's Encrypt cert obtained via the Cloudflare DNS-01 challenge (token from env), then routes
+# <label>.preview.buildr101.com -> container <label>:5173. Label index 3 is identical to the nip.io
+# path (com=0 buildr101=1 preview=2 <label>=3). reverse_proxy forwards the Vite HMR wss upgrade
+# (incl. Sec-WebSocket-Protocol: vite-hmr) automatically — proven over plain http at 2a.
+#
+# NB: the *.preview.buildr101.com A record must be DNS-only (grey cloud) so Caddy's cert is served
+# directly to the browser; an orange/proxied record would double-terminate TLS and mangle wss.
+{
+	admin off
+}
+
+*.preview.buildr101.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy {http.request.host.labels.3}:5173
+}

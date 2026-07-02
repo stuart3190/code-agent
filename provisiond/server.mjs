@@ -13,6 +13,7 @@
 // stop/get -> {url,id,mode}); provisiond's own HTTP verbs stay internal (plan gap #1).
 
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,7 +48,16 @@ const PORT = Number(process.env.PROVISIOND_PORT || 8790);
 const TOKEN = process.env.PROVISIOND_TOKEN || "";
 const SUFFIX = process.env.PREVIEW_PUBLIC_SUFFIX || "33c388bd.nip.io";
 const SCHEME = process.env.PREVIEW_SCHEME || "http";
-const CADDYFILE = path.join(HERE, "Caddyfile");
+const HTTPS = SCHEME === "https";
+// Caddy front config derives from the scheme: plain :80 (stock caddy) vs :443 TLS (custom caddy with
+// the Cloudflare DNS plugin, DNS-01 token from env). The TLS front also publishes :80 for http->https.
+const CADDY_CFG = {
+  caddyfilePath: path.join(HERE, HTTPS ? "Caddyfile.tls" : "Caddyfile"),
+  image: process.env.CADDY_IMAGE || (HTTPS ? "buildr-caddy:latest" : "caddy:2-alpine"),
+  publish: HTTPS ? ["443:443", "80:80"] : ["80:80"],
+  env: HTTPS && process.env.CLOUDFLARE_API_TOKEN ? { CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN } : {},
+  scheme: SCHEME,
+};
 const AVAILABLE_MB = Number(process.env.AVAILABLE_MB || 6500);
 const PER_CONTAINER_MB = 118; // RUNTIME.md measured idle RSS
 
@@ -63,13 +73,18 @@ function labelFor(projectId) {
 const urlFor = (label) => `${SCHEME}://${label}.${SUFFIX}/`;
 const hostFor = (label) => `${label}.${SUFFIX}`;
 
-// Poll the full path (Caddy :80 with the project's Host header) until Vite answers 200.
-function waitReady(label, timeoutMs = 45_000) {
+// Poll the full path through Caddy (with the project's Host header) until Vite answers 200. In https
+// mode this hits :443 with SNI = the label host (cert won't match 127.0.0.1, so rejectUnauthorized off)
+// — polling :80 would only see Caddy's http->https redirect, not the 200.
+function waitReady(label, timeoutMs = 120_000) {
   const host = hostFor(label);
   const deadline = Date.now() + timeoutMs;
+  const mod = HTTPS ? https : http;
+  const opts = { host: "127.0.0.1", port: HTTPS ? 443 : 80, path: "/", headers: { Host: host }, timeout: 5000 };
+  if (HTTPS) { opts.servername = host; opts.rejectUnauthorized = false; }
   return new Promise((resolve, reject) => {
     const tick = () => {
-      const req = http.get({ host: "127.0.0.1", port: 80, path: "/", headers: { Host: host }, timeout: 4000 }, (res) => {
+      const req = mod.get(opts, (res) => {
         res.resume();
         if (res.statusCode === 200) return resolve(true);
         retry();
@@ -101,7 +116,7 @@ async function injectTree(label, tree) {
 
 async function provision(projectId, tree) {
   const label = labelFor(projectId);
-  await ensureCaddy(CADDYFILE);
+  await ensureCaddy(CADDY_CFG);
   if (await containerExists(label)) await destroy(label); // CP-1: recreate fresh (CP-3 = true restart)
   await createContainer(label, {
     VITE_HOST: hostFor(label),
