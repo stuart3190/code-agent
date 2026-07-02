@@ -35,8 +35,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 if (!TOKEN) { console.error("PROVISIOND_TOKEN is required"); process.exit(2); }
 
-const SSH_ARGS = ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
+const SSH_ARGS = ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+  "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]; // keep the -L tunnel alive through
+  // the isolation section's long burst of synchronous `docker exec` ssh calls (which block the loop).
 const sshExec = (cmd) => execFileSync("ssh", [...SSH_ARGS, SSH_HOST, cmd], { encoding: "utf8" }).trim();
+// Like sshExec but NON-throwing: returns combined stdout+stderr even when the remote command exits
+// non-zero. Used by the isolation assertions, which deliberately run commands EXPECTED to fail
+// (ls a missing path, wget an unreachable host) and inspect the error text. Remote commands append
+// `2>&1` so stderr lands on stdout regardless of exit path.
+const sshOut = (cmd) => {
+  try { return execFileSync("ssh", [...SSH_ARGS, SSH_HOST, cmd], { encoding: "utf8" }); }
+  catch (e) { return `${e.stdout || ""}${e.stderr || ""}`; }
+};
+const oneLine = (s) => String(s).replace(/\s+/g, " ").trim().slice(0, 100);
+const UNREACHABLE = /unreachable|can't connect|connection refused|refused|timed out|timeout|bad address|no route/i;
 
 // Headless WebSocket-upgrade client (mirrors spike/runtime-spike.mjs testHMR 7b). Proves the Vite HMR
 // ws handshake survives the Caddy proxy hop: expects 101 + the vite-hmr subprotocol echoed back.
@@ -70,15 +82,23 @@ function wsUpgrade(urlStr, { timeoutMs = 10_000 } = {}) {
   });
 }
 
-async function api(method, route, body) {
-  const res = await fetch(`${BASE}${route}`, {
-    method,
-    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json = null; try { json = JSON.parse(text); } catch {}
-  return { status: res.status, json, text };
+async function api(method, route, body, _retried = false) {
+  try {
+    const res = await fetch(`${BASE}${route}`, {
+      method,
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let json = null; try { json = JSON.parse(text); } catch {}
+    return { status: res.status, json, text };
+  } catch (e) {
+    // The single long-lived -L tunnel occasionally drops one request right after the isolation
+    // section's synchronous `docker exec` burst (it self-heals immediately). Retry once after a beat.
+    if (_retried) throw e;
+    await sleep(800);
+    return api(method, route, body, true);
+  }
 }
 
 async function waitTunnel(timeoutMs = 20_000) {
@@ -107,6 +127,7 @@ function buildTodoTree() {
 }
 
 let tunnel = null;
+let victimId = null; // second preview used by the isolation proof; cleaned up in finally if it leaks
 const projectId = crypto.randomUUID();
 
 async function openTunnel() {
@@ -188,6 +209,63 @@ async function main() {
   if (/hmr update|page reload/i.test(vlog)) ok("Vite emitted an HMR update after the docker-cp change (container log confirms)");
   else bad(`no HMR update in Vite log after update. tail: ${vlog.split("\n").slice(-4).join(" | ")}`);
 
+  section("2c. ISOLATION (CP-4): five spike assertions + Host-pivot closed");
+  // Stand up a SECOND live preview B (the pivot victim) with a unique marker embedded in its source,
+  // so a successful cross-project reach would be detectable as B's marker leaking into A's fetch.
+  const bId = crypto.randomUUID();
+  victimId = bId;
+  const pivotMarker = `pivot-victim-${crypto.randomBytes(4).toString("hex")}`;
+  const bTree = buildTodoTree();
+  // Embed the marker as an EXPORTED string literal (not a comment — Vite/esbuild strips comments in
+  // the dev transform) so it survives into B's served /src/App.jsx and a cross-project reach would leak it.
+  bTree["src/App.jsx"] = bTree["src/App.jsx"] + `\nexport const PIVOT_MARKER = "${pivotMarker}";\n`;
+  const bProv = await api("POST", "/provision", { projectId: bId, tree: bTree });
+  const bLabel = bProv.json?.id;
+  const bHost = bProv.json?.url ? new URL(bProv.json.url).host : null;
+  if (bProv.status === 200 && bLabel && bHost) ok(`second preview B provisioned (${bLabel} @ ${bHost})`);
+  else { bad(`B provision failed: status=${bProv.status} ${bProv.text}`); throw new Error("cannot run isolation proof without preview B"); }
+
+  // Positive control: B serves its own marker over the PUBLIC path — proves Caddy->container still
+  // works after the listener bind (so a failed pivot below is isolation, not a broken proxy).
+  const bApp = await fetch(`${bProv.json.url}src/App.jsx`).then(async (r) => ({ s: r.status, b: await r.text() })).catch((e) => ({ s: 0, b: String(e) }));
+  if (bApp.s === 200 && bApp.b.includes(pivotMarker)) ok(`control: B's own marker served via its public URL (Caddy->container intact under the bind)`);
+  else bad(`control: B's marker not served publicly (status=${bApp.s}) — proxy may be broken by the bind`);
+
+  const A = label; // A's container label (from section 1)
+  // 1. Host filesystem invisible (no bind-mount of the host).
+  const fs = sshOut(`docker exec ${A} ls /home/ubuntu 2>&1`);
+  if (/no such file/i.test(fs)) ok(`[1/5] host FS invisible: ls /home/ubuntu -> "${oneLine(fs)}"`);
+  else bad(`[1/5] host FS reachable?! ls /home/ubuntu -> ${oneLine(fs)}`);
+  // 2. No internet egress (container is on an --internal net).
+  const egress = sshOut(`docker exec ${A} wget -T 4 -qO- http://1.1.1.1/ 2>&1`);
+  if (UNREACHABLE.test(egress)) ok(`[2/5] no egress: wget 1.1.1.1 -> "${oneLine(egress)}"`);
+  else bad(`[2/5] egress not blocked: wget 1.1.1.1 -> ${oneLine(egress)}`);
+  // 3. Cannot reach a peer container (separate --internal nets). Try B's actual container IP directly.
+  const bip = sshOut(`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${bLabel} 2>&1`).trim();
+  const peer = sshOut(`docker exec ${A} wget -T 4 -qO- http://${bip}:5173/ 2>&1`);
+  if (UNREACHABLE.test(peer) && !peer.includes(pivotMarker)) ok(`[3/5] no peer reach: A -> B(${bip}):5173 -> "${oneLine(peer)}"`);
+  else bad(`[3/5] peer reachable?! A -> B(${bip}):5173 -> ${oneLine(peer)}`);
+  // 4. Non-root.
+  const idout = sshOut(`docker exec ${A} id 2>&1`);
+  if (/uid=1000\(node\)/.test(idout)) ok(`[4/5] non-root: id -> "${oneLine(idout)}"`);
+  else bad(`[4/5] not running as node:1000: id -> ${oneLine(idout)}`);
+  // 5. Zero capability bounding set.
+  const cap = sshOut(`docker exec ${A} grep CapBnd /proc/self/status 2>&1`);
+  if (/CapBnd:\s*0+\b/.test(cap) && /CapBnd:\s*0000000000000000/.test(cap)) ok(`[5/5] CapBnd=0: "${oneLine(cap)}"`);
+  else bad(`[5/5] non-zero capability bound: ${oneLine(cap)}`);
+
+  // 6. Host-pivot CLOSED (the gap this checkpoint targets). Caddy is connected to A's net for the
+  // return path and resolves by name there, but its listener is bound away from the internal-net IP,
+  // so A forging B's Host to Caddy cannot reach B: expect a connection error, and NEVER B's marker.
+  const pivot = sshOut(`docker exec ${A} wget -T 5 -qO- --header 'Host: ${bHost}' http://buildr-caddy/src/App.jsx 2>&1`);
+  if (!pivot.includes(pivotMarker) && UNREACHABLE.test(pivot)) ok(`Host-pivot CLOSED: A forging Host:${bHost} -> Caddy cannot reach B -> "${oneLine(pivot)}"`);
+  else bad(`Host-pivot OPEN or inconclusive (marker leaked=${pivot.includes(pivotMarker)}): ${oneLine(pivot)}`);
+
+  section("2d. ISOLATION teardown (B)");
+  const bstop = await api("POST", "/stop", { projectId: bId });
+  if (bstop.status === 200 && bstop.json?.stopped === true) ok(`preview B torn down`);
+  else bad(`B teardown unexpected: status=${bstop.status} ${bstop.text}`);
+
   section("3. LIFECYCLE (CP-3): reaper -> RAM reclaim -> cold-start");
   const rid = crypto.randomUUID();
   const rprov = await api("POST", "/provision", { projectId: rid, tree: buildTodoTree() });
@@ -229,6 +307,7 @@ RUN()
   .catch((e) => { console.error(`\n${R}prove-provisiond error:${X} ${e.message}`); failed++; })
   .finally(async () => {
     try { await api("POST", "/stop", { projectId }); } catch {}   // best-effort teardown
+    try { if (victimId) await api("POST", "/stop", { projectId: victimId }); } catch {} // isolation victim B
     try { if (tunnel && !tunnel.killed) tunnel.kill("SIGTERM"); } catch {}
     console.log(`\n${B}${failed === 0 ? G + "ALL GREEN" : R + "FAILED"}${X}  ${passed} passed, ${failed} failed\n`);
     setTimeout(() => process.exit(failed === 0 ? 0 : 1), 150); // let the ssh child handle close on Windows

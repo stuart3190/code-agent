@@ -10,7 +10,12 @@
 	auto_https off
 }
 
+# CP-4: bind the listener to Caddy's static proxy-net IP ONLY (docker.mjs CADDY_PROXY_IP). Legit
+# ingress arrives via the host -p 80:80 publish which DNATs to this IP; an app container reaching
+# Caddy over its own per-project net hits a DIFFERENT (internal-net) Caddy IP where nothing listens
+# -> the shared-proxy Host-header pivot is closed. Caddy->Vite is outbound, unaffected by the bind.
 :80 {
+	bind 10.83.7.2
 	log {
 		output stdout
 		format json

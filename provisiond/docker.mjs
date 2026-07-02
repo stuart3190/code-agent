@@ -11,6 +11,15 @@ export const CADDY_NAME = "buildr-caddy";
 export const CADDY_IMAGE = "caddy:2-alpine";
 export const BASE_IMAGE = "buildr-preview-base:latest";
 
+// CP-4 isolation: the proxy net has a FIXED subnet so Caddy can claim a known static IP, and its
+// listener binds to that IP ONLY (see Caddyfile* `bind`). Caddy is also `network connect`'d to every
+// per-project --internal net (for OUTBOUND reverse_proxy to Vite), but it does NOT listen there — so
+// an app container cannot connect to Caddy over its own net and pivot to a sibling via a forged Host
+// header. Chosen values sit outside Docker's default 172.16/12 address pool to avoid collision.
+export const PROXY_SUBNET = "10.83.7.0/24";
+export const PROXY_GATEWAY = "10.83.7.1";
+export const CADDY_PROXY_IP = "10.83.7.2";       // must match the `bind` line in Caddyfile + Caddyfile.tls
+
 // Per-container isolation hardening — copied verbatim from the proven spike.
 const HARDENING = [
   "--cap-drop", "ALL",
@@ -37,7 +46,16 @@ export const netName = (label) => `${label}-net`;
 
 export async function ensureProxyNet() {
   const existing = await docker(["network", "ls", "--filter", `name=^${PROXY_NET}$`, "--format", "{{.Name}}"]);
-  if (existing !== PROXY_NET) await docker(["network", "create", "--driver", "bridge", PROXY_NET]);
+  if (existing === PROXY_NET) {
+    // Verify it carries our fixed subnet. A legacy dynamic-subnet proxy net (pre-CP-4) can't host a
+    // static Caddy --ip, so recreate it. Caddy is the only member we own — remove it first (it is
+    // re-created + reconnected to the project nets on the next provision).
+    const subnet = await docker(["network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}}{{end}}", PROXY_NET], { ok: true });
+    if (subnet === PROXY_SUBNET) return;
+    await docker(["rm", "-f", CADDY_NAME], { ok: true });
+    await docker(["network", "rm", PROXY_NET], { ok: true });
+  }
+  await docker(["network", "create", "--driver", "bridge", "--subnet", PROXY_SUBNET, "--gateway", PROXY_GATEWAY, PROXY_NET]);
 }
 
 export async function ensureInternalNet(label) {
@@ -60,7 +78,8 @@ export async function ensureCaddy(opts) {
     if (cur === scheme) return; // right front already up
   }
   await docker(["rm", "-f", CADDY_NAME], { ok: true });
-  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`, "--network", PROXY_NET];
+  // Static --ip on the proxy net so the Caddyfile can `bind` its listener to this address only.
+  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`, "--network", PROXY_NET, "--ip", CADDY_PROXY_IP];
   for (const p of publish) args.push("-p", p);
   for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   // Persist Caddy's /data (issued certs + ACME account) across recreations so we don't re-issue the
