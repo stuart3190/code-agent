@@ -169,15 +169,19 @@ export function createAccumulator() {
 
 // ---- the provider ----
 
-export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL, cache = false, maxTokens = DEFAULT_MAX_TOKENS } = {}) {
+// `apiKey` (optional) is the per-request BYOK key source: when the caller supplies one at the
+// provider-CONFIG level it is used verbatim; otherwise we fall back to process.env.ANTHROPIC_API_KEY
+// (the platform key). This is the ONLY change for per-user BYOK — the runTurn signature and every
+// wire-translation function above are unchanged. The key is never logged, written, or committed.
+export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL, cache = false, maxTokens = DEFAULT_MAX_TOKENS, apiKey = null } = {}) {
   const rates = anthropicRatesFor(model);
 
   async function runTurn({ systemPrompt, messages, tools }) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    const key = apiKey ?? process.env.ANTHROPIC_API_KEY;
+    if (!key) {
       throw new Error(
-        "ANTHROPIC_API_KEY is not set. The Anthropic BYOK adapter reads your key from that env var " +
-          "only (it is never logged, written to disk, or committed). Set it and re-run."
+        "No Anthropic API key. Provide one via the provider config (BYOK) or process.env.ANTHROPIC_API_KEY " +
+          "(it is never logged, written to disk, or committed). Set it and re-run."
       );
     }
 
@@ -186,7 +190,7 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
     const res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
+        "x-api-key": key,
         "anthropic-version": ANTHROPIC_VERSION,
         "content-type": "application/json",
         accept: "text/event-stream",

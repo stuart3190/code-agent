@@ -22,7 +22,9 @@ import { chooseModel } from "../router/router.mjs";
 // Overridable (`makeProvider`) so offline tests can inject a fake without network calls.
 function defaultMakeProvider(decision, config = {}) {
   if (decision.provider === "anthropic") {
-    return createAnthropicProvider({ model: decision.model, cache: !!config.cache });
+    // config.apiKey (optional) carries a per-user BYOK key straight to the provider config —
+    // the platform-key path (env fallback) is unchanged when it's absent.
+    return createAnthropicProvider({ model: decision.model, cache: !!config.cache, apiKey: config.apiKey ?? null });
   }
   if (decision.provider === "codex") {
     return createCodexProvider();

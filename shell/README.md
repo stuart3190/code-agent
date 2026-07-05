@@ -1,4 +1,4 @@
-# Forge — the product shell
+# Buildr101 — the product shell
 
 The shell wraps the proven app-builder layers into the live loop a user can touch:
 **describe → generate → preview → iterate**, plus auth, project persistence, and the billing UI.

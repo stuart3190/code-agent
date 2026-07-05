@@ -32,6 +32,30 @@ Rules:
 - When the app is fully implemented and working, STOP calling tools and reply with a one-paragraph
   summary of what you built. Do not ask the user questions.`;
 
+// Plan-only pass (shell "Plan mode"): the model answers with a plan as plain text and NO tool
+// calls, so runAgent exits on turn 1 with finalText = the plan. Callers pass tools: [] — nothing
+// to build with, nothing gets built. The plan is later fed back into the BUILD pass's user prompt.
+export const PLAN_SYSTEM_PROMPT = `You are an app-builder planner. The user will describe a web app; produce a CONCISE implementation plan — do NOT build anything.
+
+The app will be built later inside a fixed scaffold: Vite + React 18 + Tailwind CSS, with a thin
+backend SDK (\`import { auth, db, storage } from "./lib/backend"\`) offering auth
+(signUp/signIn/signOut/currentUser), generic entity CRUD via db.entity("<type>"), and file storage.
+Plan within those constraints — no extra packages, no build-config changes, no raw HTTP/Supabase.
+
+Reply with a short markdown outline (aim well under a page):
+1. **Overview** — one sentence on what the app is.
+2. **Structure** — the components/files under src/ (App.jsx plus any split-out components).
+3. **Key features** — the user-visible behaviours, as a bullet list.
+4. **Data & backend** — which db.entity("<type>") types (with their data fields), and whether
+   auth/storage are needed; or "purely client-side" if none.
+5. **Approach** — build order and anything tricky.
+
+Rules:
+- PLAN ONLY: do not write code, do not call any tools, do not include file contents.
+- Do not ask the user questions; make sensible assumptions and state them briefly.
+  (Deferred: a later pass will relax this line to allow structured clarifying questions,
+  with the shell pausing to show them as popups before the plan completes.)`;
+
 export const EDIT_SYSTEM_PROMPT = `You are an app-builder agent editing an EXISTING, working web app.
 
 Stack (already set up — do NOT change build config): Vite + React 18 + Tailwind CSS. Tailwind is wired up.

@@ -21,6 +21,8 @@ import { handleGenerate } from "./routes/generate.mjs";
 import { handleCheckout, handleBalance } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
+import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
+import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
@@ -111,7 +113,7 @@ const server = http.createServer(async (req, res) => {
     // ── unauthenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/health") {
       return sendJson(res, 200, { ok: true, previewMode: publicConfig().previewMode,
-        supabase: haveSupabaseEnv(), stripe: haveStripeEnv() });
+        supabase: haveSupabaseEnv(), stripe: haveStripeEnv(), byok: byokConfigured() });
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
 
@@ -139,6 +141,13 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/billing/balance" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleBalance(req, res, owner);
+    }
+    if (p === "/api/settings/byok") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (method === "GET") return handleByokGet(req, res, owner);
+      if (method === "POST") return handleByokSave(req, res, json(await readBody(req)), owner);
+      if (method === "DELETE") return handleByokClear(req, res, owner);
+      return sendJson(res, 405, { error: "method not allowed" });
     }
 
     if (p.startsWith("/api/")) return sendJson(res, 404, { error: `no route ${method} ${p}` });

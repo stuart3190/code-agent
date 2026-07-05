@@ -28,6 +28,27 @@ export async function checkout({ tierId, credits }) {
   return r.json();
 }
 
+// BYOK settings. The server never returns the raw key — get/save resolve to { set, provider?, hint? }.
+export async function getByok() {
+  const r = await fetch("/api/settings/byok", { headers: await authHeaders() });
+  if (!r.ok) throw new Error((await r.json()).error || `byok ${r.status}`);
+  return r.json();
+}
+
+export async function saveByok(key) {
+  const r = await fetch("/api/settings/byok", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ key }),
+  });
+  if (!r.ok) throw new Error((await r.json()).error || `byok save ${r.status}`);
+  return r.json();
+}
+
+export async function clearByok() {
+  const r = await fetch("/api/settings/byok", { method: "DELETE", headers: await authHeaders() });
+  if (!r.ok) throw new Error((await r.json()).error || `byok clear ${r.status}`);
+  return r.json();
+}
+
 export async function startPreview({ projectId, tree }) {
   const r = await fetch("/api/preview", {
     method: "POST", headers: await authHeaders(),
@@ -39,10 +60,10 @@ export async function startPreview({ projectId, tree }) {
 
 // POST /api/generate and consume the SSE stream via streaming fetch (EventSource can't send the
 // Authorization header). onEvent(name, data) fires per event; resolves with the final "done" payload.
-export async function generate({ projectId, prompt, mode, tree }, onEvent) {
+export async function generate({ projectId, prompt, mode, tree, plan }, onEvent) {
   const res = await fetch("/api/generate", {
     method: "POST", headers: await authHeaders(),
-    body: JSON.stringify({ projectId, prompt, mode, tree }),
+    body: JSON.stringify({ projectId, prompt, mode, tree, plan }),
   });
   if (!res.ok && res.headers.get("content-type")?.includes("application/json")) {
     const err = await res.json();

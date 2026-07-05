@@ -10,6 +10,11 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const [prompts, setPrompts] = useState(project.prompts || []);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [text, setText] = useState("");
+  // Plan mode: toggle ON → the button runs a plan-only pass; the resulting plan is held in
+  // pendingPlan (session state — not persisted until a build saves the prompts history; reopening
+  // an un-built project drops a held plan) and fed into the next build so it steers generation.
+  const [planMode, setPlanMode] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null);
@@ -38,16 +43,37 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   async function run() {
     const prompt = text.trim();
     if (!prompt || busy) return;
+    const effectiveMode = !hasApp && planMode ? "plan" : mode;
     setBusy(true); setErr(null); setResult(null); setLog([]);
     try {
       const done = await generate(
-        { projectId: project.id, prompt, mode, tree: mode === "iterate" ? tree : undefined },
+        { projectId: project.id, prompt, mode: effectiveMode,
+          tree: effectiveMode === "iterate" ? tree : undefined,
+          plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined },
         (name, data) => { if (name === "log") setLog((l) => [...l, data.line]); }
       );
       if (!done) throw new Error("no result");
+
+      if (effectiveMode === "plan") {
+        // Plan-only turn: show the plan, hold it for the next build press, auto-revert the toggle
+        // so the toggle and button text always agree ("Generate app" is the next action).
+        // DEFERRED: clarifying-question popups slot in HERE — between the plan arriving and the
+        // auto-revert — pausing to ask the user before the plan is considered final.
+        setLog((l) => [...l, "", "── PLAN ──", done.finalText || "(empty plan)"]);
+        setPrompts((p) => [...p, {
+          prompt, mode: "plan", finalText: done.finalText, at: new Date().toISOString(),
+          need: done.need, model: done.decision?.model,
+        }]);
+        setPendingPlan(done.finalText || null);
+        setPlanMode(false);
+        setResult(done);
+        return; // no tree/preview/save — the description stays in the box for "Generate app"
+      }
+
       const nextPrompts = [...prompts, {
-        prompt, mode, finalText: done.finalText, at: new Date().toISOString(),
+        prompt, mode: effectiveMode, finalText: done.finalText, at: new Date().toISOString(),
         need: done.need, model: done.decision?.model, buildOk: done.build?.ok,
+        planUsed: effectiveMode === "build" && !!pendingPlan,
       }];
       setTree(done.tree);
       setPrompts(nextPrompts);
@@ -55,6 +81,7 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
       if (done.preview?.url) { setPreviewUrl(done.preview.url); }
       else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
       setText("");
+      setPendingPlan(null); // the build consumed the plan
 
       const name = project.name && project.name !== "Untitled app" ? project.name : deriveName(prompt);
       const saved = await saveProject(project.id, { name, tree: done.tree, prompts: nextPrompts, previewRef: done.preview?.url || null });
@@ -86,11 +113,12 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         </div>
       </div>
 
-      {/* body: builder column | preview */}
-      <div className="grid grid-cols-[23rem_1fr] min-h-0">
-        {/* builder column */}
-        <div className="border-r border-line flex flex-col min-h-0">
-          <div className="p-4 border-b border-line">
+      {/* body: build band on top, wide landscape preview stacked below. minmax floor keeps the
+          preview from being crushed on short/narrow viewports — the body scrolls instead. */}
+      <div className="grid grid-rows-[auto_minmax(24rem,1fr)] min-h-0 overflow-y-auto">
+        {/* build band — describe · turns · engine, laid out across the width so it stays short */}
+        <div className="grid grid-cols-1 lg:grid-cols-[24rem_16rem_minmax(0,1fr)] border-b border-line">
+          <div className="p-4 lg:border-r border-line">
             <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
               {hasApp ? "Describe a change" : "Describe your app"}
             </label>
@@ -100,36 +128,58 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); }} />
             <div className="flex items-center justify-between mt-2">
               <span className="text-[11px] text-slate-500">⌘/Ctrl + Enter</span>
-              <button className="btn-primary" onClick={run} disabled={busy || !text.trim()}>
-                {busy ? "Building…" : hasApp ? "Apply change" : "Generate app"}
-              </button>
+              <div className="flex items-center gap-3">
+                {!hasApp && (
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"
+                    title="Plan first (small metered pass, no build); Generate then builds against the plan">
+                    <input type="checkbox" className="accent-amber-500" checked={planMode} disabled={busy}
+                      onChange={(e) => setPlanMode(e.target.checked)} />
+                    Plan mode
+                  </label>
+                )}
+                <button className="btn-primary" onClick={run} disabled={busy || !text.trim()}>
+                  {busy ? (planMode && !hasApp ? "Planning…" : "Building…")
+                    : hasApp ? "Apply change" : planMode ? "Plan app" : "Generate app"}
+                </button>
+              </div>
             </div>
+            {pendingPlan && !hasApp && !busy && (
+              <div className="mt-2 flex items-center justify-between text-[11px] text-lime">
+                <span>Plan ready — “Generate app” will build against it.</span>
+                <button className="text-slate-500 hover:text-red-400" title="Discard plan"
+                  onClick={() => setPendingPlan(null)}>✕</button>
+              </div>
+            )}
             {err && <div className="mt-2 text-xs text-red-400">{err}</div>}
           </div>
 
           {/* turn history */}
-          <div className="px-4 py-3 space-y-2 overflow-auto border-b border-line" style={{ maxHeight: "12rem" }}>
+          <div className="px-4 py-3 space-y-2 overflow-auto lg:border-r border-t lg:border-t-0 border-line" style={{ maxHeight: "12rem" }}>
             {prompts.length === 0 && <div className="text-xs text-slate-500">No turns yet.</div>}
             {prompts.map((p, i) => (
               <div key={i} className="text-xs">
                 <div className="text-slate-300">▸ {p.prompt}</div>
                 <div className="text-slate-500 font-mono text-[10px] mt-0.5">
-                  {p.model} · {p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · build {p.buildOk ? "PASS" : "FAIL"}
+                  {p.model} · {p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · {p.mode === "plan" ? "plan" : `build ${p.buildOk ? "PASS" : "FAIL"}${p.planUsed ? " (from plan)" : ""}`}
                 </div>
               </div>
             ))}
           </div>
 
           {/* live engine log */}
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex flex-col min-h-0 border-t lg:border-t-0 border-line">
             <div className="px-4 pt-3 text-[11px] font-mono uppercase tracking-wider text-slate-500">Engine</div>
-            <pre ref={logRef} className="flex-1 overflow-auto px-4 py-2 text-[11px] leading-relaxed font-mono text-slate-400 whitespace-pre-wrap">
+            <pre ref={logRef} className="overflow-auto px-4 py-2 text-[11px] leading-relaxed font-mono text-slate-400 whitespace-pre-wrap" style={{ height: "9rem" }}>
 {log.length === 0 ? "idle — click Generate to run the engine (spends 1 build)" : log.join("\n")}
             </pre>
             {result && (
               <div className="px-4 py-2 border-t border-line text-[11px] font-mono text-slate-400">
-                debited <span className="text-amber">{Number(result.need).toFixed(4)} cr</span> ({result.decision?.model}, {result.telemetry?.total} tok) ·
-                balance <span className="text-lime">{result.balance?.total?.toFixed(3)} cr</span> · build {result.build?.ok ? "PASS" : "FAIL"}
+                {result.byok ? (
+                  <><span className="text-lime">BYOK</span> — {result.telemetry?.total} tok on {result.decision?.model}, billed to your key (no credits)</>
+                ) : (
+                  <>debited <span className="text-amber">{Number(result.need).toFixed(4)} cr</span> ({result.decision?.model}, {result.telemetry?.total} tok) ·
+                  balance <span className="text-lime">{result.balance?.total?.toFixed(3)} cr</span></>
+                )} · {result.mode === "plan" ? "plan (no build)" : `build ${result.build?.ok ? "PASS" : "FAIL"}`}
               </div>
             )}
           </div>

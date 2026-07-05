@@ -5,15 +5,17 @@
 //   SIGNUP    a real user via the backend SDK anon flow (no service_role) -> session token
 //   SEED      grant the Starter bundle via the service-role ledger (stands in for the Stripe grant,
 //             whose own path proveBilling.mjs proves live) so there is a balance to spend
-//   GENERATE  POST /api/generate (mode build) -> stream -> app BUILDS -> ledger DEBITS the served
-//             tokens by exactly creditsForTurn({tokens, model}); balance drops by that amount
+//   PLAN      POST /api/generate (mode plan) -> plan text only: NO tree/build/preview in the payload,
+//             small metered debit = creditsForTurn exactly
+//   GENERATE  POST /api/generate (mode build, with the held plan attached) -> stream -> app BUILDS ->
+//             ledger DEBITS the served tokens by exactly creditsForTurn({tokens, model})
 //   PREVIEW   the returned preview URL serves HTTP 200 (real local Vite)
 //   ITERATE   POST /api/generate (mode iterate) with the held tree -> edit lands, still builds, debits
 //   PERSIST   save the project via the SDK, then re-open through a FRESH session (= reload) -> tree +
 //             prompts intact
 //   ISOLATE   a second user cannot see user A's project (owner-scoped RLS; denial = pass)
 //
-// Spends Codex quota TWICE (build + iterate) — this is the one gated live spend. Run:
+// Spends Codex quota THREE times (plan + build + iterate) — this is the one gated live spend. Run:
 //   (fill shell/.env + shell/web/.env, or export the vars)  node shell/harness/prove-shell.mjs
 // Missing creds -> SKIPPED.
 
@@ -139,10 +141,24 @@ async function main() {
     const seeded = await ledger.getBalance(owner);
     check(Math.abs(seeded.total - starter.bundledCredits) < 1e-6, `seeded balance = ${seeded.total} cr (Starter bundle ${starter.bundledCredits})`);
 
-    // ── GENERATE (build) ─────────────────────────────────────────────────────────────────────────
-    section("GENERATE — describe → engine builds a real app → live debit");
+    // ── PLAN (plan-only pass: no tools, no build, no preview) ───────────────────────────────────
+    section("PLAN — plan-only pass produces a plan, builds nothing, debits creditsForTurn");
+    const appPrompt = "a notes app: add a note with a title and body, list notes newest-first, delete a note";
+    const balBeforePlan = (await ledger.getBalance(owner)).total;
+    const gp = await generate(token, { prompt: appPrompt, mode: "plan" });
+    const dp = gp.done;
+    check(!!dp?.finalText?.trim(), `plan produced (${(dp?.finalText || "").trim().length} chars of plan text)`);
+    check(dp?.tree === undefined && dp?.build === undefined && dp?.preview === undefined,
+      "plan payload carries NO tree/build/preview (nothing was built or served)");
+    const needP = creditsForTurn({ tokens: dp.telemetry.total, model: dp.decision.model });
+    check(Math.abs(dp.need - needP) < 1e-4, `plan debit = creditsForTurn (${dp.need.toFixed(4)} cr for ${dp.telemetry.total} tok on ${dp.decision.model})`);
+    const balAfterPlan = (await ledger.getBalance(owner)).total;
+    check(Math.abs((balBeforePlan - balAfterPlan) - dp.need) < 1e-3, `balance dropped by exactly the plan debit (${balBeforePlan.toFixed(3)} → ${balAfterPlan.toFixed(3)})`);
+
+    // ── GENERATE (build, steered by the held plan — the browser's plan→generate sequence) ────────
+    section("GENERATE — describe → engine builds a real app (against the plan) → live debit");
     const balBefore = (await ledger.getBalance(owner)).total;
-    const g1 = await generate(token, { prompt: "a notes app: add a note with a title and body, list notes newest-first, delete a note", mode: "build" });
+    const g1 = await generate(token, { prompt: appPrompt, mode: "build", plan: dp.finalText });
     const d1 = g1.done;
     check(!!d1, "generation returned a done payload");
     check(d1?.build?.ok === true, `generated app BUILDS (npm run build PASS) — ${Object.keys(d1?.tree || {}).length} files`);

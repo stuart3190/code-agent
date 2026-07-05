@@ -27,7 +27,7 @@ export default function AuthGate() {
       <div className="w-full max-w-sm panel p-7">
         <div className="flex items-center gap-2 mb-1">
           <Logo />
-          <span className="text-lg font-semibold tracking-tight text-slate-100">Forge</span>
+          <span className="text-lg font-semibold tracking-tight text-slate-100">Buildr101</span>
         </div>
         <p className="text-sm text-slate-400 mb-6">Describe an app. Watch it build. Keep iterating.</p>
 

@@ -5,9 +5,10 @@ import { getConfig } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
 import { listProjects, createProject, getProject } from "./lib/projects.js";
 import AuthGate, { Logo } from "./auth/AuthGate.jsx";
-import Sidebar from "./components/Sidebar.jsx";
+import TopBar from "./components/TopBar.jsx";
 import Builder from "./builder/Builder.jsx";
 import BillingPanel from "./billing/BillingPanel.jsx";
+import SettingsPanel from "./settings/SettingsPanel.jsx";
 
 export default function App() {
   const { user, loading } = useSession();
@@ -15,22 +16,21 @@ export default function App() {
   const [balance, setBalance] = useState(null);
   const [projects, setProjects] = useState([]);
   const [current, setCurrent] = useState(null); // the open project, or null (dashboard)
-  const [leftOpen, setLeftOpen] = useState(true);   // Sidebar (New app / Projects) — open on wide
+  const [view, setView] = useState("workspace"); // "workspace" (builder/dashboard) | "settings"
   const [rightOpen, setRightOpen] = useState(true); // BillingPanel (Credits / Plans …) — open on wide
 
   useEffect(() => { getConfig().then(setConfig).catch(() => {}); }, []);
 
-  // Responsive auto-collapse so the middle build panel never gets crushed. Acts only when the width
-  // BUCKET changes, so it never fights a manual toggle within the same bucket. In-session state only.
+  // Responsive auto-collapse so the build area never gets crushed by the billing rail. Acts only
+  // when the width BUCKET changes, so it never fights a manual toggle within the same bucket.
   const bucketRef = useRef(null);
   useEffect(() => {
-    const bucketOf = (w) => (w < 900 ? "narrow" : w < 1200 ? "medium" : "wide");
+    const bucketOf = (w) => (w < 1200 ? "narrow" : "wide");
     const apply = () => {
       const b = bucketOf(window.innerWidth);
       if (b === bucketRef.current) return;
       bucketRef.current = b;
-      if (b === "narrow") { setLeftOpen(false); setRightOpen(false); }
-      else if (b === "medium") { setRightOpen(false); } // keep left as-is
+      if (b === "narrow") setRightOpen(false);
       // wide: force nothing — respect current state
     };
     apply();
@@ -56,46 +56,51 @@ export default function App() {
   async function newProject() {
     const p = await createProject("Untitled app");
     await refreshProjects();
-    setCurrent(p);
+    setCurrent(p); setView("workspace");
   }
   async function openProject(id) {
     const p = await getProject(id);
-    setCurrent(p);
+    setCurrent(p); setView("workspace");
   }
+  const goHome = () => { setCurrent(null); setView("workspace"); };
 
   const RAIL = "2.75rem"; // collapsed rail width (comfortable tap target)
-  const cols = `${leftOpen ? "15rem" : RAIL} minmax(0,1fr) ${rightOpen ? "19rem" : RAIL}`;
+  const cols = `minmax(0,1fr) ${rightOpen ? "19rem" : RAIL}`;
 
   return (
-    <div className="h-full grid" style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}>
-      <Sidebar
+    <div className="h-full grid grid-rows-[3rem_minmax(0,1fr)]">
+      <TopBar
         user={user}
         projects={projects}
         currentId={current?.id}
-        collapsed={!leftOpen}
-        onToggle={() => setLeftOpen((v) => !v)}
+        view={view}
         onNew={newProject}
         onOpen={openProject}
-        onHome={() => setCurrent(null)}
-        onSignOut={async () => { await backend().auth.signOut(); setCurrent(null); }}
+        onHome={goHome}
+        onSelectSettings={() => setView("settings")}
+        onSignOut={async () => { await backend().auth.signOut(); goHome(); }}
       />
 
-      <main className="min-w-0 overflow-hidden">
-        {current ? (
-          <Builder
-            key={current.id}
-            project={current}
-            onProjectChange={(p) => { setCurrent(p); refreshProjects(); }}
-            onAfterTurn={refreshBalance}
-            balance={balance}
-          />
-        ) : (
-          <Dashboard projects={projects} onNew={newProject} onOpen={openProject} />
-        )}
-      </main>
+      <div className="min-h-0 grid" style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}>
+        <main className="min-w-0 overflow-hidden">
+          {view === "settings" ? (
+            <SettingsPanel />
+          ) : current ? (
+            <Builder
+              key={current.id}
+              project={current}
+              onProjectChange={(p) => { setCurrent(p); refreshProjects(); }}
+              onAfterTurn={refreshBalance}
+              balance={balance}
+            />
+          ) : (
+            <Dashboard projects={projects} onNew={newProject} onOpen={openProject} />
+          )}
+        </main>
 
-      <BillingPanel config={config} balance={balance} onRefresh={refreshBalance} tier={balance?.tier}
-        collapsed={!rightOpen} onToggle={() => setRightOpen((v) => !v)} />
+        <BillingPanel config={config} balance={balance} onRefresh={refreshBalance} tier={balance?.tier}
+          collapsed={!rightOpen} onToggle={() => setRightOpen((v) => !v)} />
+      </div>
     </div>
   );
 }
