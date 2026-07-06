@@ -28,6 +28,34 @@
 	reverse_proxy {http.request.host.labels.3}:5173
 }
 
+# Production shell: buildr101.com serves the product itself (the shell's node server on the
+# docker proxy-net gateway — serving the built web UI statically and the /api routes, incl. the
+# /api/generate SSE stream). www redirects to the apex. Same DNS-01 cert mechanics; both the apex
+# A record and the www CNAME are DNS-only/grey.
+buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy 10.83.7.1:8787 {
+		flush_interval -1
+	}
+}
+
+www.buildr101.com {
+	bind 10.83.7.2
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	redir https://buildr101.com{uri} permanent
+}
+
 # F7 publish: static published apps. <label>.app.buildr101.com serves the built SPA from the
 # read-only /publish/<label> mount (docker.mjs PUBLISH_ROOT). try_files gives the SPA fallback
 # (client-side routes resolve to index.html). Same DNS-01 wildcard mechanics as previews; the

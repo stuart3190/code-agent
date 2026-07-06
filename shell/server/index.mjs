@@ -31,6 +31,10 @@ import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
 loadEnv();
 const PORT = Number(optionalEnv("SHELL_PORT", "8787"));
+// Bind address. Default (unset) = all interfaces, the local-dev behavior. In production on the
+// VPS this is set to the docker proxy-net gateway (10.83.7.1) so Caddy can reverse-proxy to the
+// shell while the port stays unreachable from the public internet.
+const HOST = optionalEnv("SHELL_HOST", "") || undefined;
 const WEB_DIST = path.join(SHELL_DIR, "web", "dist");
 
 function cors(res, origin) {
@@ -177,8 +181,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`[shell] server on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[shell] server on http://${HOST || "localhost"}:${PORT}`);
   const cfg = publicConfig();
   console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · stripe env: ${haveStripeEnv()}`);
 });

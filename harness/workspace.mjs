@@ -46,7 +46,12 @@ export async function buildTree(tree, caseName, log = console.log) {
 
   const nm = path.join(dir, "node_modules");
   if (!existsSync(nm)) {
-    execFileSync("cmd", ["/c", "mklink", "/J", nm, DEPS_NM], { stdio: "ignore" });
+    if (process.platform === "win32") {
+      execFileSync("cmd", ["/c", "mklink", "/J", nm, DEPS_NM], { stdio: "ignore" });
+    } else {
+      const { symlinkSync } = await import("node:fs");
+      symlinkSync(DEPS_NM, nm, "dir");
+    }
   }
 
   try {
