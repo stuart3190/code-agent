@@ -2,9 +2,10 @@
 
 > Paste-into-a-fresh-session summary of the entire app builder: what it is, every working part,
 > where things run, the rules that keep it clean, and what's still open.
-> Last updated **2026-07-06** (the day of: design pass, 7 Lovable-parity features, production
-> deploy, per-app auth, site names, custom domains, paywalls, plan switching). Repo:
-> `stuart3190/app-builder` (private, linear master, EPYC box `C:\Users\Administrator\app-builder`).
+> Last updated **2026-07-06 end-of-day** (design pass, 7 Lovable-parity features, production
+> deploy, per-app auth, site names + custom domains, full paywall ladder, plan switching, project
+> lifecycle, welcome credits, launch audit). Repo: `stuart3190/app-builder` (private, linear
+> master, EPYC box `C:\Users\Administrator\app-builder`).
 
 ## What it is
 
@@ -57,19 +58,25 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
 
 - **Server** (`shell/server`, pure Node, no framework — reuses root node_modules): routes
   `generate` (SSE; plan/build/iterate; knowledge injection; search_images tool when
-  PEXELS_API_KEY set), `preview`, `publish`/`unpublish` (site-name claims + paywall), `domains`
-  (+ unauthenticated `domain-check` for Caddy), `export` (ZIP, secret-gated), `billing`
-  (checkout/balance/subscription/switch/cancel), `stripeWebhook`, `settings` (BYOK). Env is read
-  ONCE at start — any .env edit or code change ⇒ restart (`sudo systemctl restart buildr-shell`).
+  PEXELS_API_KEY set; welcome grant), `preview`, `publish`/`unpublish` (site-name claims +
+  paywall), `domains` (+ unauthenticated `domain-check` for Caddy), `projects/delete` (FULL infra
+  cleanup: domains, site + released name, preview container, per-app users/data, row — service
+  role with explicit owner check), `export` (ZIP, secret-gated), `billing`
+  (checkout/balance/subscription/switch/cancel + welcome grant on balance reads),
+  `stripeWebhook`, `settings` (BYOK). Env is read ONCE at start — any .env edit or code change
+  ⇒ restart (`sudo systemctl restart buildr-shell`).
 - **Web** (`shell/web`, Vite+React+Tailwind): dark ink + single amber accent, Manrope/Space
   Grotesk, layered-blocks logo. AuthGate = storefront split (proof screenshot + bullets) with
   signup-confirmation handling + forgot-password (+ ResetPassword screen on PASSWORD_RECOVERY).
-  Dashboard with starter-prompt chips. **Builder**: prompt box (⌘Enter), plan-mode toggle,
-  knowledge popover, select-element (visual edits), build TIMELINE (parsed from SSE log lines —
-  `parseTimeline` must track log formats), error banner + **Fix it**, per-turn tree snapshots +
-  **revert** (last 20), preview iframe, **Site ▾ menu** (live URL/Republish/Custom domain/
-  Unpublish), publish dialog (site name), Download. BillingPanel: balance+tier, plans with
-  Current-plan ✓/Upgrade/Downgrade/Cancel/Resume, top-up. Collapses <1440px.
+  Dashboard: starter-prompt chips, live-site links, always-visible delete ✕ (confirm spells out
+  consequences). **Builder**: prompt box (⌘Enter), plan-mode toggle, inline project RENAME
+  (pencil), knowledge popover, select-element (visual edits), build TIMELINE (parsed from SSE log
+  lines — `parseTimeline` must track log formats), error banner + **Fix it**, per-turn tree
+  snapshots + **revert** (last 20), preview iframe, **Site ▾ menu** (live URL/Republish/Custom
+  domain/Unpublish), publish dialog (site name), Download. BillingPanel: balance+tier, plans with
+  Current-plan ✓/Upgrade/Downgrade/Cancel/Resume, top-up (no provider-modes section — internals
+  stay hidden from end users). Collapses <1440px. **Settings**: Account (email + change password
+  in place) + BYOK key.
 
 ## Billing (src/billing/) — costModel is the single source of truth
 
@@ -84,8 +91,14 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   renewal), `setCancelAtPeriodEnd`, `subscriptionStatus`.
 - **Freemium ladder (enforced server-side via getEntitlement)**: free = build+preview · any paid
   tier = publish · Pro/Studio = custom domains. Publish gate fires BEFORE the slug claim.
+  **Welcome credits**: every new account gets `costModel.WELCOME_CREDITS` (30) once — idempotent
+  via ledger ref `welcome:<owner>`, topup bucket (never expires), granted on generate/server
+  balance reads; tierless debits work (ceiling = Infinity without an entitlement).
   BYOK (encrypted key in `byok_keys`, AES-256-GCM via BYOK_ENC_KEY) = user-paid inference,
-  no credit debit.
+  no credit debit. **Scaling plan (Stuart)**: subscription revenue banks platform API-key credit;
+  the managed lane flips from the personal ChatGPT-sub Codex lane to real API keys at scale
+  (router/provider config change only). BYO-ChatGPT-OAuth for users was REJECTED (ToS/custody);
+  BYO-OpenAI-API-key is approved as a future second BYOK provider.
 
 ## Supabase (project `qgemqjcyhuejrsvjxkbh` — shared by platform AND generated apps)
 
@@ -121,17 +134,30 @@ timers under virtual-time).
    `harness/.deps` + rebuild the VPS preview base image (`provisiond/base`, keep its package.json
    in sync). Never `pkill -f node` on the VPS — find the pid via `ss -ltnp`.
 
-## Open items (queued)
+## Open items — LAUNCH AUDIT (Stripe is TEST mode; Stuart is deliberately pre-traffic)
 
-- **Supabase Site URL** → `https://buildr101.com` (dashboard, Auth → URL Configuration) — until
-  then password-reset emails point at localhost. (+ enable Confirm-email when wanted; prove
-  scripts then need a service-role auto-confirm patch.)
-- End-user password reset for generated apps (needs an email provider, e.g. Resend).
-- **Paid lane**: dedicated Supabase project per client via the Management API
-  (`baseline/PLAN-per-app-auth.md` bottom section) — the isolation upsell.
-- Visual edits v2 (source tagging → zero-model instant text edits) · plan-mode clarifying
-  questions · Stripe business name "Zataus"→Buildr101 (dashboard) · engine cost knobs
-  (preview-h/credit instrumentation, search_replace A/B, routing under --cache).
+**🔴 Before real users / launch day:**
+- **Stripe test→live runbook**: live products + 4 price IDs, live sk_ + live webhook whsec,
+  **REMOVE the sk_test safety pin (`shell/server/lib/services.mjs:23` refuses live keys — by
+  design)**, `assertPricesMatchModel` on live, business name "Zataus"→Buildr101, payout details,
+  statement descriptor, public ToS/refund policy (Stripe requires). A **Stripe MCP connector is
+  installed** (surfaces in fresh sessions) — use it for live-mode setup.
+- **Legal**: ToS, Privacy Policy, support contact; **account deletion** (needs project-delete-style
+  full cleanup across all the user's projects).
+- **Transactional email**: Resend/SES (Supabase mailer ≈3/hr — fatal at volume); unlocks app-auth
+  password reset (stage 4). Plus the **Supabase Site URL dashboard step** → `https://buildr101.com`
+  (STILL PENDING — reset links point at localhost until done).
+
+**🟡 Soon after:** Supabase backups (free tier keeps NONE — Pro $25/mo or pg_dump cron) · uptime
+monitoring (e.g. UptimeRobot) · public pricing/landing page (pricing only visible after login) ·
+Codex quota ceiling on the managed lane (covered by the scaling plan) · light abuse guards
+(app-auth signup rate limits, per-account project caps).
+
+**Feature queue:** BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
+`baseline/PLAN-per-app-auth.md`) · visual edits v2 (source tagging) · plan-mode clarifying
+questions · duplicate project · project search · mobile Builder layout · build-done notifications ·
+published-site analytics · engine cost knobs (preview-h/credit instrumentation, search_replace A/B,
+routing under --cache).
 
 ## Canonical docs in-repo
 
