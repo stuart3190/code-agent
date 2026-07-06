@@ -1,7 +1,8 @@
 // Backend SDK entry point for the generated app.
 //
-// Wires the Vite-injected env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY, set in .env)
-// into the pure backend factory, then re-exports the stable surface the app uses:
+// Wires the Vite-injected env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY / VITE_APP_ID,
+// set in .env at materialization time) into the pure backend factory, then re-exports the
+// stable surface the app uses:
 //
 //   import { auth, db, storage } from "./lib/backend";
 //
@@ -14,13 +15,38 @@
 // The app NEVER imports @supabase/supabase-js directly — only this seam. Swapping the
 // backend (self-hosted Supabase, own Postgres, …) means swapping the factory here, with
 // no change to any generated app.
+//
+// FAIL-SOFT: if the env is missing (e.g. a downloaded project without a filled .env), the
+// app still RENDERS — every backend call throws a clear configuration error on use instead
+// of the whole module graph dying at import time (the old white-screen failure mode).
 
 import { createSupabaseBackend } from "./supabaseBackend.js";
 
-const backend = createSupabaseBackend({
-  url: import.meta.env.VITE_SUPABASE_URL,
-  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-});
+function unconfigured() {
+  const fail = () => {
+    throw new Error(
+      "Backend is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env (copy .env.example), then restart the dev server."
+    );
+  };
+  const surface = { signUp: fail, signIn: fail, signOut: fail, currentUser: fail };
+  return {
+    auth: surface,
+    db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }) },
+    storage: { upload: fail, getUrl: fail },
+    _client: null,
+  };
+}
+
+let backend;
+try {
+  backend = createSupabaseBackend({
+    url: import.meta.env.VITE_SUPABASE_URL,
+    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    appId: import.meta.env.VITE_APP_ID || null,
+  });
+} catch {
+  backend = unconfigured();
+}
 
 export const auth = backend.auth;
 export const db = backend.db;

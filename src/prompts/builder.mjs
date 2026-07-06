@@ -18,6 +18,8 @@ All methods are async (await them).
 - storage.upload(file, path?) -> { path } · storage.getUrl(path) -> signed URL string (async — await it)
 If the app genuinely needs none of these (a pure client-side widget), it's fine to stay local —
 but anything with accounts, saved data across reloads, or uploads MUST use the SDK.
+The backend IS live and configured in every preview, and data is automatically namespaced to this
+app — do NOT build "demo mode" / localStorage fallbacks around it; rely on the SDK directly.
 
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
 - The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,

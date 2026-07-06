@@ -19,6 +19,7 @@ import { buildTree } from "../../../harness/workspace.mjs";
 import { ledger } from "../lib/services.mjs";
 import { getDecryptedKey } from "../lib/byokStore.mjs";
 import { previewProvider } from "../preview/index.mjs";
+import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
@@ -145,9 +146,11 @@ export async function handleGenerate(req, res, body, owner) {
       log: (line) => sse(res, "log", { line: String(line) }),
     });
 
-    // Prove it builds (same bar as the 3/3 harness) before we serve/save it.
+    // Prove it builds (same bar as the 3/3 harness) before we serve/save it. The runtime tree
+    // carries the injected backend .env (per-app namespace) — the SAVED tree stays clean.
+    const runtimeTree = withRuntimeEnv(tree, projectId);
     sse(res, "log", { line: "build: npm run build ..." });
-    const build = await buildTree(tree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+    const build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
     sse(res, "log", { line: `build: ${build.ok ? "PASS" : "FAIL"}` });
 
     // Settle: debit the live ledger for the tokens served (managed), or no-op under BYOK.
@@ -157,8 +160,8 @@ export async function handleGenerate(req, res, body, owner) {
     let preview = null;
     try {
       preview = mode === "iterate"
-        ? await previewProvider().update(projectId, tree)
-        : await previewProvider().start(projectId, tree);
+        ? await previewProvider().update(projectId, runtimeTree)
+        : await previewProvider().start(projectId, runtimeTree);
       sse(res, "log", { line: `preview: ${preview.url ? preview.url : "(vps stub — no url)"}` });
     } catch (e) {
       sse(res, "log", { line: `preview: unavailable (${e.message})` });

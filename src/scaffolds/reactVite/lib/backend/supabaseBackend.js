@@ -5,17 +5,20 @@
 // (own Postgres, self-hosted Supabase, etc.) just has to provide the same shape from
 // createXxxBackend(config) — no generated app changes.
 //
-//   createSupabaseBackend({ url, anonKey, bucket? }) -> { auth, db, storage, _client }
+//   createSupabaseBackend({ url, anonKey, bucket?, appId? }) -> { auth, db, storage, _client }
 //
 // The factory is PURE: it takes its config as arguments, so the exact same code path can
 // run in the browser (env wired in ./index.js) or headless in Node (env passed directly).
 // Data model is intentionally thin and migration-free: ONE generic `entities` table
-//   (id uuid, type text, data jsonb, owner uuid, created_at timestamptz)
-// so db.entity("note") / db.entity("task") need no per-app schema.
+//   (id uuid, type text, data jsonb, owner uuid, app_id text, created_at timestamptz)
+// so db.entity("note") / db.entity("task") need no per-app schema. When `appId` is set,
+// every row is stamped and filtered with it, so two apps owned by the SAME user never see
+// each other's rows even when they pick the same type string. Security stays owner-scoped
+// RLS (owner = auth.uid()); app_id is a namespace, not a security boundary.
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads" } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -55,27 +58,30 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads" } = {})
     entity(type) {
       if (!type) throw new Error("db.entity(type): a non-empty entity type is required.");
       const table = () => client.from("entities");
+      // Apply the app namespace to a query when this backend is app-scoped.
+      const scoped = (q) => (appId ? q.eq("app_id", appId) : q);
       return {
         async create(data = {}) {
-          const rows = unwrap(await table().insert({ type, data }).select());
+          const row = appId ? { type, data, app_id: appId } : { type, data };
+          const rows = unwrap(await table().insert(row).select());
           return rows[0];
         },
         async list() {
           return unwrap(
-            await table().select("*").eq("type", type).order("created_at", { ascending: false })
+            await scoped(table().select("*").eq("type", type)).order("created_at", { ascending: false })
           );
         },
         async get(id) {
-          return unwrap(await table().select("*").eq("type", type).eq("id", id).single());
+          return unwrap(await scoped(table().select("*").eq("type", type).eq("id", id)).single());
         },
         async update(id, patch = {}) {
           const rows = unwrap(
-            await table().update({ data: patch }).eq("type", type).eq("id", id).select()
+            await scoped(table().update({ data: patch }).eq("type", type).eq("id", id)).select()
           );
           return rows[0];
         },
         async delete(id) {
-          const { error } = await table().delete().eq("type", type).eq("id", id);
+          const { error } = await scoped(table().delete().eq("type", type).eq("id", id));
           if (error) throw error;
         },
       };
