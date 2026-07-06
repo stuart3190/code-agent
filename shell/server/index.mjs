@@ -25,6 +25,7 @@ import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
 import { handlePublish, handleUnpublish } from "./routes/publish.mjs";
 import { handleDomainCheck, handleDomainList, handleDomainConnect, handleDomainRemove } from "./routes/domains.mjs";
+import { handleProjectDelete } from "./routes/projects.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
@@ -173,6 +174,11 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
       return handleDomainRemove(req, res, body, owner);
+    }
+    if (p === "/api/projects/delete" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleProjectDelete(req, res, body, owner);
     }
     if (p === "/api/billing/checkout" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

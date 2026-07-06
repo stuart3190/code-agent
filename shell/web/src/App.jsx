@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
-import { getConfig } from "./lib/api.js";
+import { getConfig, deleteProjectFull } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
 import { listProjects, createProject, getProject } from "./lib/projects.js";
 import AuthGate, { Logo } from "./auth/AuthGate.jsx";
@@ -73,6 +73,18 @@ export default function App() {
   }
   const goHome = () => { setCurrent(null); setView("workspace"); };
 
+  async function removeProject(p) {
+    const extras = p.publishedUrl ? " Its published site goes offline and its site name is released." : "";
+    if (!window.confirm(`Delete “${p.name}” permanently?${extras} This can't be undone.`)) return;
+    try {
+      await deleteProjectFull(p.id);
+      if (current?.id === p.id) goHome();
+      await refreshProjects();
+    } catch (e) {
+      window.alert(e.message || String(e));
+    }
+  }
+
   const RAIL = "2.75rem"; // collapsed rail width (comfortable tap target)
   const cols = `minmax(0,1fr) ${rightOpen ? "19rem" : RAIL}`;
 
@@ -104,7 +116,7 @@ export default function App() {
               balance={balance}
             />
           ) : (
-            <Dashboard projects={projects} onNew={newProject} onOpen={openProject} onStart={(p) => newProject(p)} />
+            <Dashboard projects={projects} onNew={newProject} onOpen={openProject} onStart={(p) => newProject(p)} onDelete={removeProject} />
           )}
         </main>
 
@@ -121,7 +133,7 @@ const STARTERS = [
   { label: "Team task board", prompt: "a kanban-style task board: columns for todo, in progress and done; add, edit and drag tasks between columns; assignee and due-date on each task" },
 ];
 
-function Dashboard({ projects, onNew, onOpen, onStart }) {
+function Dashboard({ projects, onNew, onOpen, onStart, onDelete }) {
   return (
     <div className="h-full overflow-auto p-8">
       <div className="max-w-2xl">
@@ -144,16 +156,23 @@ function Dashboard({ projects, onNew, onOpen, onStart }) {
             </div>
           )}
           {projects.map((p) => (
-            <button key={p.id} onClick={() => onOpen(p.id)}
-              className="panel p-4 text-left hover:border-amber/40 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-100">{p.name}</span>
-                <span className="text-[11px] font-mono text-slate-500">{p.tree ? "built" : "empty"}</span>
+            <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p.id)}
+              onKeyDown={(e) => { if (e.key === "Enter") onOpen(p.id); }}
+              className="panel p-4 text-left hover:border-amber/40 transition-colors cursor-pointer group">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-100 truncate">{p.name}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {p.publishedUrl && <span className="text-[11px] font-mono text-amber-soft">live</span>}
+                  <span className="text-[11px] font-mono text-slate-500">{p.tree ? "built" : "empty"}</span>
+                  <button className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Delete project (permanent)"
+                    onClick={(e) => { e.stopPropagation(); onDelete(p); }}>✕</button>
+                </div>
               </div>
               <div className="text-xs text-slate-500 mt-1">
                 {(p.prompts?.length || 0)} turn{(p.prompts?.length || 0) === 1 ? "" : "s"} · updated {rel(p.updatedAt)}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>

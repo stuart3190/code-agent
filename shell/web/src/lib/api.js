@@ -104,6 +104,18 @@ export async function publishProject(projectId, tree, name) {
   return out; // { url, files, bytes, slug }
 }
 
+// POST /api/projects/delete — delete a project WITH infra cleanup (published site, name claim,
+// custom domains, preview container, per-app users/data). Permanent.
+export async function deleteProjectFull(projectId) {
+  const r = await fetch("/api/projects/delete", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `delete ${r.status}`);
+  return out;
+}
+
 // Subscription lifecycle — status, in-place plan switch, cancel/resume at period end.
 export async function getSubscription() {
   const r = await fetch("/api/billing/subscription", { headers: await authHeaders() });
