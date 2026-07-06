@@ -9,7 +9,13 @@ import { client } from "./backend.js";
 
 export async function readBalance(ownerId) {
   const led = createLedger(client());
-  return led.getBalance(ownerId);
+  // Balance and entitlement in one read: the tier drives the Plans panel state
+  // (Current plan ✓ / switch guard) and the tier tag on the balance meter.
+  const [balance, ent] = await Promise.all([
+    led.getBalance(ownerId),
+    led.getEntitlement(ownerId).catch(() => null),
+  ]);
+  return { ...balance, tier: ent?.tier ?? null };
 }
 
 export { creditsForTurn };

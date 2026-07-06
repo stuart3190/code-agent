@@ -61,20 +61,34 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
       <div className="p-4 border-b border-line">
         <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-2">Plans</div>
         <div className="space-y-2">
-          {managed.map((t) => (
-            <div key={t.id} className="panel p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-slate-100">{t.name}</div>
-                  <div className="text-[11px] text-slate-500 font-mono">
-                    £{t.gbpPerMonth}/mo · {t.bundledCredits} cr · £{t.effectiveGbpPerCredit?.toFixed(3)}/cr
+          {managed.map((t) => {
+            const isCurrent = tier === t.id;
+            // With ANY active subscription, other tiers are disabled too — a second checkout
+            // would create a concurrent Stripe subscription, not a switch. (Plan switching with
+            // proration is future work; until then: cancel first, then subscribe.)
+            const blocked = !!tier && !isCurrent;
+            return (
+              <div key={t.id} className={`panel p-3 ${isCurrent ? "border-amber/40" : ""}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-100">{t.name}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      £{t.gbpPerMonth}/mo · {t.bundledCredits} cr · £{t.effectiveGbpPerCredit?.toFixed(3)}/cr
+                    </div>
                   </div>
+                  {isCurrent ? (
+                    <span className="tag bg-amber/15 text-amber-soft">Current plan ✓</span>
+                  ) : (
+                    <button className="btn-primary text-xs" disabled={busy === t.id || blocked}
+                      title={blocked ? "You already have a plan — plan switching is coming; cancel first to change." : undefined}
+                      onClick={() => go({ tierId: t.id }, t.id)}>
+                      {busy === t.id ? "Opening checkout…" : "Subscribe"}
+                    </button>
+                  )}
                 </div>
-                <button className="btn-primary text-xs" disabled={busy === t.id}
-                  onClick={() => go({ tierId: t.id }, t.id)}>{busy === t.id ? "Opening checkout…" : "Subscribe"}</button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
