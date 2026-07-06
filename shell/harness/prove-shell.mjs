@@ -130,7 +130,9 @@ async function main() {
 
   // Boot the server as a child (inherits env).
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, SHELL_PORT: String(PORT) },
+    // SHELL_HOST cleared: the proof always talks to its child on localhost, regardless of the
+    // production bind (on the VPS, shell/.env sets SHELL_HOST=10.83.7.1 for the Caddy-only bind).
+    env: { ...process.env, SHELL_PORT: String(PORT), SHELL_HOST: "" },
     stdio: ["ignore", "inherit", "inherit"],
   });
   let owner = null;

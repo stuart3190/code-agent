@@ -1,0 +1,63 @@
+# DEPLOY — Buildr101 production (buildr101.com)
+
+**Deployed 2026-07-06.** The shell runs ON the VPS (OVH, `ubuntu@51.195.136.189`) next to
+provisiond; Caddy fronts everything. Local (the EPYC box) is now the DEV environment only.
+
+## Topology
+
+```
+browser ──https──▶ Caddy (docker, binds 10.83.7.2; certs via Cloudflare DNS-01)
+   buildr101.com           ──reverse_proxy──▶ shell server  10.83.7.1:8787  (systemd buildr-shell)
+   www.buildr101.com       ──301──▶ apex          │  serves web dist + /api (SSE flush -1)
+   *.preview.buildr101.com ──▶ preview containers │  PROVISIOND_URL=127.0.0.1:8790 (no tunnel)
+   *.app.buildr101.com     ──▶ /publish/<label>   ▼
+                                          provisiond 127.0.0.1:8790 (systemd buildr-provisiond)
+```
+
+- Shell binds ONLY `10.83.7.1` (docker proxy-net gateway): Caddy reaches it, the internet cannot
+  (public :8787 verified unreachable). `SHELL_HOST` env controls this; unset locally = old behavior.
+- systemd: `buildr-shell` + `buildr-provisiond`, `Restart=always`, enabled at boot. The
+  setsid/pidfile era is over — manage with `sudo systemctl restart|status buildr-shell`.
+- Engine (Codex lane) runs on the VPS: `~/.codex/auth.json` + `config.toml` copied from the EPYC
+  box 2026-07-06. If Codex auth expires, re-login locally and re-copy those two files.
+- Stripe: PRODUCTION webhook `we_1TqIZvC6PoSrpLpG4HMGQBvD` → https://buildr101.com/api/stripe/webhook
+  (invoice.paid, checkout.session.completed, customer.subscription.deleted); its whsec_ lives in the
+  VPS `~/app-builder/shell/.env`. The local `stripe listen` forwarder is only needed for LOCAL dev.
+- DNS (Cloudflare, all DNS-only/grey): apex A + www CNAME → VPS (parked GoDaddy records deleted
+  2026-07-06); wildcards *.preview / *.app unchanged.
+
+## Updating production (after committing locally)
+
+```sh
+# from the EPYC repo root — ship the tree (excludes caches/secrets), then restart services
+cd /c/Users/Administrator/app-builder
+cd shell/web && npm run build && cd ../..          # fresh web dist rides the tarball
+tar czf /tmp/deploy.tgz --exclude=node_modules --exclude=.git --exclude="harness/.deps" \
+  --exclude="harness/.work" --exclude="shell/.env" --exclude="shell/web/.env" \
+  --exclude=".stripe-listen*" --exclude=".shell-server*" --exclude=".web-dev*" --exclude=supabase .
+scp -i ~/.ssh/id_ed25519 /tmp/deploy.tgz ubuntu@51.195.136.189:/tmp/
+ssh -i ~/.ssh/id_ed25519 ubuntu@51.195.136.189 \
+  'tar xzf /tmp/deploy.tgz -C ~/app-builder && rm /tmp/deploy.tgz && \
+   cd ~/app-builder && npm install --no-audit --no-fund && \
+   sudo systemctl restart buildr-shell buildr-provisiond'
+```
+
+- `~/app-builder/shell/.env` on the VPS is authoritative for prod secrets (tar never touches it).
+  It differs from local: `PROVISIOND_URL=http://127.0.0.1:8790`, `SHELL_HOST=10.83.7.1`, prod
+  `STRIPE_WEBHOOK_SECRET`. Any .env edit → `sudo systemctl restart buildr-shell`.
+- If scaffold `package.json` changed: also delete `~/app-builder/harness/.deps` on the VPS (it
+  reinstalls on next build) and rebuild the preview base image (`~/provisiond/base`, docker build).
+- provisiond code changes: the tarball updates `~/app-builder/provisiond/` but the SERVICE runs
+  from `~/provisiond/` — copy changed files there too, then restart buildr-provisiond.
+
+## Local dev (unchanged, now optional)
+
+`shell && node server/index.mjs` (:8787) + `shell/web && npm run dev` (:5173) + `stripe listen`
+when testing billing. The SSH tunnel is only needed if local dev should use VPS previews.
+Local and prod share the same Supabase project + Stripe test account.
+
+## Manual steps still pending
+
+- Supabase **Site URL** → `https://buildr101.com` (+ add to Redirect URLs) — Auth → URL
+  Configuration. Until then, password-reset links point at localhost.
+- Stripe business name "Zataus" → Buildr101 (dashboard).
