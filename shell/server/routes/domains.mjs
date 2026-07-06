@@ -14,6 +14,11 @@
 
 import { resolve4 } from "node:dns/promises";
 import { serviceClient } from "../lib/supabase.mjs";
+import { ledger } from "../lib/services.mjs";
+
+// Custom domains are a paid feature: Pro and Studio tiers only. Enforced at CONNECT time
+// (already-connected domains keep serving if a subscription lapses — hostages make bad customers).
+const DOMAIN_TIERS = new Set(["pro", "studio"]);
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -71,6 +76,13 @@ export async function handleDomainConnect(req, res, body, owner) {
   if (!projectId) return json(res, 400, { error: "projectId required" });
   if (!domain) return json(res, 400, { error: "Enter a valid domain, e.g. yourbusiness.com" });
   try {
+    const ent = await ledger().getEntitlement(owner.id).catch(() => null);
+    if (!DOMAIN_TIERS.has(ent?.tier)) {
+      return json(res, 402, {
+        error: "Custom domains are a Pro feature — upgrade in the Plans panel to connect your own domain.",
+        code: "upgrade_required",
+      });
+    }
     const svc = serviceClient();
     const { data: site } = await svc.from("published_sites")
       .select("slug, owner").eq("project_id", projectId).maybeSingle();

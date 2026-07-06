@@ -331,7 +331,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         </div>
         {showDomain && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">
-            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Custom domain</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Custom domain</span>
+              <span className="tag bg-amber/15 text-amber-soft">Pro</span>
+            </div>
             <p className="text-xs text-slate-400 mt-1">
               Serve this site on your own domain. Point an A record for it to{" "}
               <span className="font-mono text-slate-300">{domainInfo?.ip || "51.195.136.189"}</span>, then connect it —
