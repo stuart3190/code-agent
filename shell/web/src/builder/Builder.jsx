@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { generate, startPreview } from "../lib/api.js";
+import { downloadProject, generate, startPreview } from "../lib/api.js";
 import { saveProject } from "../lib/projects.js";
 import { publish } from "../publish/publishStub.js";
 
@@ -20,6 +20,7 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
   const [publishMsg, setPublishMsg] = useState(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const logRef = useRef(null);
   const iframeRef = useRef(null);
 
@@ -99,6 +100,20 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
     setPublishMsg(r.message);
   }
 
+  async function doDownload() {
+    if (!hasApp || downloadBusy) return;
+    setDownloadBusy(true);
+    setPublishMsg(null);
+    try {
+      const r = await downloadProject(project.id);
+      setPublishMsg(`Downloaded ${r.filename}`);
+    } catch (e) {
+      setPublishMsg(e.message || String(e));
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
+
   return (
     <div className="h-full grid grid-rows-[3.5rem_1fr]">
       {/* header */}
@@ -109,6 +124,10 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         </div>
         <div className="flex items-center gap-2">
           {publishMsg && <span className="text-[11px] text-slate-500 max-w-[16rem] truncate" title={publishMsg}>{publishMsg}</span>}
+          <button className="btn-ghost text-xs" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
+            title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
+            {downloadBusy ? "Downloading..." : "Download"}
+          </button>
           <button className="btn-ghost text-xs" onClick={doPublish} title="Deferred — no-op stub">Publish ⓘ</button>
         </div>
       </div>

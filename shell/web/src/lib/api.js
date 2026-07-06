@@ -5,6 +5,7 @@ import { accessToken } from "./backend.js";
 
 async function authHeaders(extra = {}) {
   const token = await accessToken();
+  if (!token) throw new Error("Your session expired. Sign out, sign back in, and try again.");
   return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
 }
 
@@ -56,6 +57,39 @@ export async function startPreview({ projectId, tree }) {
   });
   if (!r.ok) throw new Error((await r.json()).error || `preview ${r.status}`);
   return r.json();
+}
+
+function filenameFromDisposition(header) {
+  const quoted = /filename="([^"]+)"/i.exec(header || "");
+  if (quoted?.[1]) return quoted[1];
+  const bare = /filename=([^;]+)/i.exec(header || "");
+  if (bare?.[1]) return bare[1].trim();
+  return "buildr101-app.zip";
+}
+
+export async function downloadProject(projectId) {
+  if (!projectId) throw new Error("Save or generate an app before downloading.");
+  const r = await fetch("/api/export", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId }),
+  });
+  if (!r.ok) {
+    let message = `export ${r.status}`;
+    try { message = (await r.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+
+  const blob = await r.blob();
+  const filename = filenameFromDisposition(r.headers.get("Content-Disposition"));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { filename };
 }
 
 // POST /api/generate and consume the SSE stream via streaming fetch (EventSource can't send the

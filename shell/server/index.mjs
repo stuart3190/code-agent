@@ -6,6 +6,7 @@
 //   GET  /api/config                      public pricing/config, sourced from costModel (no hardcoding)
 //   POST /api/generate      (auth, SSE)   the gated engine call + live ledger debit
 //   POST /api/preview       (auth)        (re)start a live preview for a saved tree (no Codex spend)
+//   POST /api/export        (auth)        download a ready-to-run project ZIP
 //   POST /api/billing/checkout (auth)     Stripe Checkout (subscription tier | top-up)
 //   GET  /api/billing/balance  (auth)     server-side balance read (convenience; UI reads via RLS too)
 //   POST /api/stripe/webhook              Stripe events -> proven handler (raw body, signature-verified)
@@ -21,6 +22,7 @@ import { handleGenerate } from "./routes/generate.mjs";
 import { handleCheckout, handleBalance } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
+import { handleExport } from "./routes/export.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
@@ -132,6 +134,11 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
       return handlePreview(req, res, body, owner);
+    }
+    if (p === "/api/export" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleExport(req, res, body, owner);
     }
     if (p === "/api/billing/checkout" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

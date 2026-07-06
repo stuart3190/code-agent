@@ -25,6 +25,15 @@ export function client() {
 }
 
 export async function accessToken() {
-  const { data } = await client().auth.getSession();
-  return data?.session?.access_token ?? null;
+  const auth = client().auth;
+  let { data } = await auth.getSession();
+  let session = data?.session ?? null;
+  const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0;
+
+  if (!session?.access_token || (expiresAtMs && expiresAtMs - Date.now() < 60_000)) {
+    const refreshed = await auth.refreshSession();
+    session = refreshed.data?.session ?? session;
+  }
+
+  return session?.access_token ?? null;
 }

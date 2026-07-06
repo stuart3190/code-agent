@@ -11,6 +11,7 @@
 //             ledger DEBITS the served tokens by exactly creditsForTurn({tokens, model})
 //   PREVIEW   the returned preview URL serves HTTP 200 (real local Vite)
 //   ITERATE   POST /api/generate (mode iterate) with the held tree -> edit lands, still builds, debits
+//   EXPORT    POST /api/export -> ZIP contains full runnable scaffold + generated files, no secrets
 //   PERSIST   save the project via the SDK, then re-open through a FRESH session (= reload) -> tree +
 //             prompts intact
 //   ISOLATE   a second user cannot see user A's project (owner-scoped RLS; denial = pass)
@@ -27,6 +28,7 @@ import { createSupabaseBackend } from "../../src/scaffolds/reactVite/lib/backend
 import { createLedger } from "../../src/billing/ledger.mjs";
 import { creditsForTurn, TIERS } from "../../src/billing/costModel.mjs";
 import { loadEnv } from "../server/lib/env.mjs";
+import { SAFE_ENV_EXAMPLE, assertNoPlatformSecrets, readStoredZip } from "../server/lib/exportProject.mjs";
 
 loadEnv();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -104,6 +106,22 @@ async function generate(token, body) {
     }
   }
   return { done, lastLog };
+}
+
+async function exportProjectZip(token, projectId) {
+  const res = await fetch(`${BASE}/api/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectId }),
+  });
+  if (!res.ok) {
+    let e = {};
+    try { e = await res.json(); } catch {}
+    throw Object.assign(new Error(e.error || `export ${res.status}`), { payload: e });
+  }
+  const filename = /filename="([^"]+)"/i.exec(res.headers.get("content-disposition") || "")?.[1] || "buildr101-app.zip";
+  const zip = Buffer.from(await res.arrayBuffer());
+  return { filename, zip, entries: readStoredZip(zip) };
 }
 
 async function main() {
@@ -197,6 +215,56 @@ async function main() {
       name: "Notes app", tree: d2.tree, history: [{ prompt: "notes app" }, { prompt: "search box" }], preview_ref: d2.preview?.url || null, updated_at: new Date().toISOString(),
     }).eq("id", proj.id);
     if (updP.error) throw updP.error;
+
+    section("EXPORT - authenticated ZIP download from the saved project");
+    const exported = await exportProjectZip(token, proj.id);
+    check(exported.filename.endsWith(".zip") && exported.zip.length > 1000,
+      `downloaded ${exported.filename} (${exported.zip.length} bytes)`);
+    const requiredExportPaths = [
+      "README.txt",
+      ".gitignore",
+      ".env.example",
+      "package.json",
+      "index.html",
+      "vite.config.js",
+      "tailwind.config.js",
+      "postcss.config.js",
+      "src/main.jsx",
+      "src/index.css",
+      "src/App.jsx",
+      "src/lib/backend/index.js",
+      "src/lib/backend/supabaseBackend.js"
+    ];
+    for (const path of requiredExportPaths) {
+      check(Boolean(exported.entries[path]), `ZIP contains ${path}`);
+    }
+    const pkg = JSON.parse(exported.entries["package.json"]);
+    check(pkg.scripts?.dev === "vite" && pkg.scripts?.build === "vite build",
+      "exported package.json has working Vite dev/build scripts");
+    check(pkg.dependencies?.react && pkg.dependencies?.["react-dom"] && pkg.devDependencies?.vite,
+      "exported package.json includes React and Vite dependencies");
+    check(exported.entries[".env.example"] === SAFE_ENV_EXAMPLE,
+      ".env.example is regenerated with placeholders only");
+    const readme = exported.entries["README.txt"];
+    check(/npm install/.test(readme) &&
+      /npm run dev/.test(readme) &&
+      /npm run build/.test(readme) &&
+      /Before You Start/.test(readme) &&
+      /RUN THE APP ON YOUR COMPUTER/.test(readme) &&
+      /COMMON PROBLEMS/.test(readme) &&
+      /Vercel/.test(readme) &&
+      /Netlify/.test(readme) &&
+      !readme.includes("```") && !/^#/m.test(readme),
+      "README.txt is plain-text and documents beginner setup, install, run, build, troubleshooting, and static deploy");
+    const unsafeExportPaths = [".env", ".env.local", "node_modules/pkg/index.js", "dist/assets/app.js", "server/platform.js"];
+    check(!unsafeExportPaths.some((path) => Object.hasOwn(exported.entries, path)),
+      "ZIP excludes env files, build output, node_modules, and platform paths");
+    try {
+      assertNoPlatformSecrets(exported.entries);
+      ok("secret gate found no service-role, Stripe, BYOK, Cloudflare, or sk_ markers");
+    } catch (e) {
+      bad(e.message);
+    }
 
     // ── RELOAD/REOPEN (fresh session = reload) ───────────────────────────────────────────────────
     section("PERSIST across reload — reopen through a FRESH session");
