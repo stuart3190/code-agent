@@ -244,6 +244,14 @@ async function publishSite(projectId, files) {
   return { id: label, url: `https://${label}.${APP_SUFFIX}/`, mode: "published", files: entries.length, bytes: total };
 }
 
+async function unpublishSite(projectId) {
+  const label = labelFor(projectId);
+  const dir = path.join(PUBLISH_ROOT, label);
+  const existed = existsSync(dir);
+  await rm(dir, { recursive: true, force: true });
+  return { id: label, unpublished: existed };
+}
+
 // --- http plumbing ------------------------------------------------------------------------------
 const send = (res, code, obj) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); };
 const readJson = (req) => new Promise((resolve) => {
@@ -289,6 +297,11 @@ const server = http.createServer(async (req, res) => {
       const { projectId, files } = await readJson(req);
       if (!projectId || !files || typeof files !== "object") return send(res, 400, { error: "projectId and files required" });
       return send(res, 200, await publishSite(projectId, files));
+    }
+    if (p === "/unpublish" && req.method === "POST") {
+      const { projectId } = await readJson(req);
+      if (!projectId) return send(res, 400, { error: "projectId required" });
+      return send(res, 200, await unpublishSite(projectId));
     }
     if (p === "/get" && req.method === "GET") {
       const projectId = url.searchParams.get("projectId");

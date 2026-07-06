@@ -103,6 +103,17 @@ export async function publishProject(projectId, tree) {
   return out; // { url, files, bytes }
 }
 
+// POST /api/unpublish — remove the published static site (its URL then 404s).
+export async function unpublishProject(projectId) {
+  const r = await fetch("/api/unpublish", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `unpublish ${r.status}`);
+  return out; // { unpublished }
+}
+
 // POST /api/generate and consume the SSE stream via streaming fetch (EventSource can't send the
 // Authorization header). onEvent(name, data) fires per event; resolves with the final "done" payload.
 export async function generate({ projectId, prompt, mode, tree, plan, knowledge }, onEvent) {

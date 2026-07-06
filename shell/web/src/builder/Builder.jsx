@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, generate, publishProject, startPreview } from "../lib/api.js";
+import { downloadProject, generate, publishProject, unpublishProject, startPreview } from "../lib/api.js";
 import { saveProject, saveKnowledge, savePublishedUrl } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
@@ -183,6 +183,23 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
     run(p);
   }
 
+  async function doUnpublish() {
+    if (!publishedUrl || publishBusy) return;
+    if (!window.confirm("Take the published site offline? Its URL will stop working (you can republish any time).")) return;
+    setPublishBusy(true);
+    setPublishMsg(null);
+    try {
+      await unpublishProject(project.id);
+      setPublishedUrl(null);
+      setPublishMsg("Unpublished — the site is offline");
+      await savePublishedUrl(project.id, null).catch(() => {});
+    } catch (e) {
+      setPublishMsg(e.message || String(e));
+    } finally {
+      setPublishBusy(false);
+    }
+  }
+
   async function doPublish() {
     if (!hasApp || publishBusy) return;
     setPublishBusy(true);
@@ -241,6 +258,12 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
             title={hasApp ? (publishedUrl ? "Republish the current version" : "Publish this app to a public URL") : "Generate an app before publishing"}>
             {publishBusy ? "Publishing…" : publishedUrl ? "Republish" : "Publish"}
           </button>
+          {publishedUrl && (
+            <button className="btn-ghost text-xs text-red-400/80 hover:text-red-300" onClick={doUnpublish}
+              disabled={publishBusy} title="Take the published site offline (republish any time)">
+              Unpublish
+            </button>
+          )}
         </div>
         {showKnowledge && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">

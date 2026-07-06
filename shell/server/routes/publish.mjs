@@ -27,6 +27,33 @@ async function readDistAsBase64(dir) {
   return files;
 }
 
+// POST /api/unpublish { projectId } — remove the published static site (the URL then 404s).
+export async function handleUnpublish(req, res, body /*, owner */) {
+  const projectId = body?.projectId;
+  if (!projectId) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "projectId is required" }));
+  }
+  if (!PROVISIOND_URL() || !PROVISIOND_TOKEN()) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "publishing is not configured (PROVISIOND_URL/TOKEN)" }));
+  }
+  try {
+    const r = await fetch(`${PROVISIOND_URL()}/unpublish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${PROVISIOND_TOKEN()}` },
+      body: JSON.stringify({ projectId }),
+    });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.error || `provisiond unpublish ${r.status}`);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ unpublished: out.unpublished }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 export async function handlePublish(req, res, body /*, owner */) {
   const projectId = body?.projectId;
   const tree = body?.tree;

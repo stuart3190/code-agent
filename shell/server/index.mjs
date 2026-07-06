@@ -23,7 +23,7 @@ import { handleCheckout, handleBalance } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
-import { handlePublish } from "./routes/publish.mjs";
+import { handlePublish, handleUnpublish } from "./routes/publish.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
@@ -145,6 +145,11 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
       return handlePublish(req, res, body, owner);
+    }
+    if (p === "/api/unpublish" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleUnpublish(req, res, body, owner);
     }
     if (p === "/api/billing/checkout" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
