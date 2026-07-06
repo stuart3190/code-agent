@@ -89,11 +89,15 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         return; // no tree/preview/save — the description stays in the box for "Generate app"
       }
 
-      const nextPrompts = [...prompts, {
+      // Each non-plan turn snapshots the full tree so any version can be reverted to
+      // (capSnapshots keeps the most recent SNAPSHOT_KEEP snapshots; older entries stay
+      // in history but drop their tree).
+      const nextPrompts = capSnapshots([...prompts, {
         prompt, mode: effectiveMode, finalText: done.finalText, at: new Date().toISOString(),
         need: done.need, model: done.decision?.model, buildOk: done.build?.ok,
         planUsed: effectiveMode === "build" && !!pendingPlan,
-      }];
+        tree: done.tree,
+      }]);
       setTree(done.tree);
       setPrompts(nextPrompts);
       setResult(done);
@@ -114,6 +118,30 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         ? "No credits — buy a tier or top-up (right panel) to generate."
         : (e.message || String(e)));
     } finally { setBusy(false); }
+  }
+
+  // Revert the app to an earlier turn's snapshot. NON-destructive (Lovable-style): later turns
+  // stay in history; the revert itself is appended as a new entry carrying the same snapshot.
+  async function revertTo(i) {
+    const snap = prompts[i]?.tree;
+    if (!snap || busy) return;
+    setErr(null); setAppErr(null); setResult(null);
+    const entry = {
+      prompt: `⟲ Reverted to turn ${i + 1} (${new Date(prompts[i].at).toLocaleTimeString()})`,
+      mode: "revert", at: new Date().toISOString(), buildOk: prompts[i].buildOk, tree: snap,
+    };
+    const nextPrompts = capSnapshots([...prompts, entry]);
+    setTree(snap);
+    setPrompts(nextPrompts);
+    try {
+      const r = await startPreview({ projectId: project.id, tree: snap }).catch(() => null);
+      if (r?.url) setPreviewUrl(r.url);
+      else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
+      const saved = await saveProject(project.id, { name: project.name, tree: snap, prompts: nextPrompts, previewRef: previewUrl });
+      onProjectChange?.({ id: project.id, ...saved });
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
   }
 
   // One-click repair: feed the captured error back into an iterate turn (normal metered spend).
@@ -206,10 +234,19 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
           <div className="px-4 py-3 space-y-2 overflow-auto lg:border-r border-t lg:border-t-0 border-line" style={{ maxHeight: "12rem" }}>
             {prompts.length === 0 && <div className="text-xs text-slate-500">No turns yet.</div>}
             {prompts.map((p, i) => (
-              <div key={i} className="text-xs">
-                <div className="text-slate-300">▸ {p.prompt}</div>
+              <div key={i} className="text-xs group">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-slate-300 min-w-0">▸ {p.prompt}</div>
+                  {p.tree && i !== prompts.length - 1 && (
+                    <button className="shrink-0 text-slate-600 hover:text-amber opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Revert the app to this version (later turns stay in history)"
+                      disabled={busy} onClick={() => revertTo(i)}>⟲</button>
+                  )}
+                </div>
                 <div className="text-slate-500 font-mono text-[10px] mt-0.5">
-                  {p.model} · {p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · {p.mode === "plan" ? "plan" : `build ${p.buildOk ? "PASS" : "FAIL"}${p.planUsed ? " (from plan)" : ""}`}
+                  {p.mode === "revert" ? "⟲ revert"
+                    : p.mode === "plan" ? `${p.model} · ${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · plan`
+                    : `${p.model} · ${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · build ${p.buildOk ? "PASS" : "FAIL"}${p.planUsed ? " (from plan)" : ""}`}
                 </div>
               </div>
             ))}
@@ -269,4 +306,14 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
 function deriveName(prompt) {
   const words = prompt.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// Keep full-tree snapshots on only the most recent N history entries (history itself is never
+// trimmed — older entries just drop their tree, so the jsonb column stays bounded).
+const SNAPSHOT_KEEP = 20;
+function capSnapshots(list) {
+  const withTree = list.reduce((acc, p, i) => (p.tree ? [...acc, i] : acc), []);
+  const drop = new Set(withTree.slice(0, Math.max(0, withTree.length - SNAPSHOT_KEEP)));
+  if (drop.size === 0) return list;
+  return list.map((p, i) => (drop.has(i) ? { ...p, tree: undefined } : p));
 }
