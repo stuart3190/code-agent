@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { downloadProject, generate, startPreview } from "../lib/api.js";
-import { saveProject } from "../lib/projects.js";
+import { saveProject, saveKnowledge } from "../lib/projects.js";
 import { publish } from "../publish/publishStub.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
@@ -24,6 +24,10 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const [appErr, setAppErr] = useState(null);
   const [publishMsg, setPublishMsg] = useState(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
+  const [knowledge, setKnowledge] = useState(project.knowledge || "");
+  const [showKnowledge, setShowKnowledge] = useState(false);
+  const [knowledgeMsg, setKnowledgeMsg] = useState(null);
   const logRef = useRef(null);
   const iframeRef = useRef(null);
 
@@ -68,7 +72,8 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
       const done = await generate(
         { projectId: project.id, prompt, mode: effectiveMode,
           tree: effectiveMode === "iterate" ? tree : undefined,
-          plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined },
+          plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined,
+          knowledge: knowledge.trim() || undefined },
         (name, data) => { if (name === "log") setLog((l) => [...l, data.line]); }
       );
       if (!done) throw new Error("no result");
@@ -175,19 +180,44 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   return (
     <div className="h-full grid grid-rows-[3.5rem_1fr]">
       {/* header */}
-      <div className="flex items-center justify-between px-5 border-b border-line">
+      <div className="relative flex items-center justify-between px-5 border-b border-line">
         <div className="min-w-0">
           <div className="font-medium text-slate-100 truncate">{project.name}</div>
           <div className="text-[11px] font-mono text-slate-500">{hasApp ? "iterating" : "new app"} · {prompts.length} turn{prompts.length === 1 ? "" : "s"}</div>
         </div>
         <div className="flex items-center gap-2">
           {publishMsg && <span className="text-[11px] text-slate-500 max-w-[16rem] truncate" title={publishMsg}>{publishMsg}</span>}
+          <button className="btn-ghost text-xs" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); }}
+            title="Standing instructions (brand, tone, constraints) applied to every build and change">
+            Knowledge{knowledge.trim() ? " ●" : ""}
+          </button>
           <button className="btn-ghost text-xs" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
           </button>
           <button className="btn-ghost text-xs" onClick={doPublish} title="Deferred — no-op stub">Publish ⓘ</button>
         </div>
+        {showKnowledge && (
+          <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Project knowledge</div>
+            <p className="text-xs text-slate-400 mt-1">
+              Standing instructions applied to every build and change — brand, tone, constraints.
+              e.g. “Company is Zed Accounting. Brand colour crimson. UK dates. Formal tone.”
+            </p>
+            <textarea className="field mt-2 h-32 resize-none" value={knowledge} maxLength={4000}
+              onChange={(e) => setKnowledge(e.target.value)} placeholder="No knowledge set — builds use only your prompts." />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-[11px] text-slate-500">{knowledgeMsg || `${knowledge.length}/4000`}</span>
+              <div className="flex items-center gap-2">
+                <button className="btn-ghost text-xs" onClick={() => setShowKnowledge(false)}>Close</button>
+                <button className="btn-primary text-xs px-3 py-1" onClick={async () => {
+                  try { await saveKnowledge(project.id, knowledge.trim() || null); setKnowledgeMsg("Saved ✓"); }
+                  catch (e) { setKnowledgeMsg(e.message || String(e)); }
+                }}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* body: build band on top, wide landscape preview stacked below. minmax floor keeps the

@@ -35,6 +35,11 @@ export async function handleGenerate(req, res, body, owner) {
   // "Plan mode": an approved plan from a prior plan pass, fed into the build's user prompt so the
   // build is actually steered by it (not just displayed).
   const plan = typeof body?.plan === "string" ? body.plan.trim() : "";
+  // Per-project knowledge: user-authored standing instructions (brand, tone, constraints),
+  // applied to EVERY turn by riding the user prompt — prompt content only, seam untouched.
+  const knowledge = typeof body?.knowledge === "string" ? body.knowledge.trim().slice(0, 4000) : "";
+  const withKnowledge = (p) =>
+    knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
   const projectId = body?.projectId || `new-${Date.now()}`;
   if (!prompt) {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -105,7 +110,7 @@ export async function handleGenerate(req, res, body, owner) {
         tools: [],
         toolImpls: {},
         tree: {},
-        prompt,
+        prompt: withKnowledge(prompt),
         log: (line) => sse(res, "log", { line: String(line) }),
       });
 
@@ -132,9 +137,9 @@ export async function handleGenerate(req, res, body, owner) {
     sse(res, "log", { line: `engine: ${mode} on model ${provider.model} — ${provider.decision?.reason || ""}${plan ? " · steering by approved plan" : ""}` });
 
     // A held plan steers the build by riding in the user turn (the engine prompt is free-form).
-    const enginePrompt = plan
+    const enginePrompt = withKnowledge(plan
       ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
-      : prompt;
+      : prompt);
 
     const { telemetry, finalText } = await runAgent({
       provider,

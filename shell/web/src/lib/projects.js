@@ -22,9 +22,16 @@ function rowToProject(row) {
     tree: row.tree,
     prompts: row.history || [],
     previewRef: row.preview_ref,
+    knowledge: row.knowledge || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Save just the project knowledge (custom instructions applied to every turn).
+export async function saveKnowledge(id, knowledge) {
+  const rows = unwrap(await table().update({ knowledge, updated_at: new Date().toISOString() }).eq("id", id).select());
+  return rowToProject(rows[0]);
 }
 
 export async function listProjects() {
