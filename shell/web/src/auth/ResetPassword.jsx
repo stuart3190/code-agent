@@ -35,13 +35,13 @@ export default function ResetPassword({ onDone }) {
         <p className="text-sm text-slate-400 mb-6">Choose a new password for your account.</p>
 
         <form onSubmit={submit} className="space-y-3">
-          <input className="field" type="password" placeholder="new password" value={password}
+          <input className="field" type="password" placeholder="New password" value={password}
             onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
-          <input className="field" type="password" placeholder="confirm new password" value={confirm}
+          <input className="field" type="password" placeholder="Confirm new password" value={confirm}
             onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
           {err && <div className="text-xs text-red-400">{err}</div>}
           <button className="btn-primary w-full" disabled={busy}>
-            {busy ? "…" : "Set new password"}
+            {busy ? "Saving…" : "Set new password"}
           </button>
         </form>
       </div>

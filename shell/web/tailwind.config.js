@@ -10,6 +10,8 @@ export default {
         lime: "#c6f24e",
       },
       fontFamily: {
+        sans: ["Manrope Variable", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["Space Grotesk Variable", "Manrope Variable", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       boxShadow: {

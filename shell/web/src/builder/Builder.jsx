@@ -4,11 +4,11 @@ import { saveProject, saveKnowledge, savePublishedUrl } from "../lib/projects.js
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
 // server's /api/generate (the only Codex-spending action; fires only on the button click below).
-export default function Builder({ project, onProjectChange, onAfterTurn }) {
+export default function Builder({ project, initialPrompt, onProjectChange, onAfterTurn }) {
   const [tree, setTree] = useState(project.tree || null);
   const [prompts, setPrompts] = useState(project.prompts || []);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialPrompt || "");
   // Plan mode: toggle ON → the button runs a plan-only pass; the resulting plan is held in
   // pendingPlan (session state — not persisted until a build saves the prompts history; reopening
   // an un-built project drops a held plan) and fed into the next build so it steers generation.
@@ -39,6 +39,13 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const mode = hasApp ? "iterate" : "build";
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
+
+  // Publish/download outcomes surface as a self-dismissing toast (bottom-right).
+  useEffect(() => {
+    if (!publishMsg) return;
+    const t = setTimeout(() => setPublishMsg(null), 6000);
+    return () => clearTimeout(t);
+  }, [publishMsg]);
 
   // Listen for the preview's devReporter. Only trust messages from the current preview's origin.
   useEffect(() => {
@@ -231,7 +238,13 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   }
 
   return (
-    <div className="h-full grid grid-rows-[3.5rem_1fr]">
+    <div className="relative h-full grid grid-rows-[3.5rem_1fr]">
+      {publishMsg && (
+        <div className="fixed bottom-4 right-4 z-40 panel px-4 py-2.5 text-sm text-slate-200 shadow-panel flex items-center gap-3">
+          <span className="max-w-[24rem] truncate" title={publishMsg}>{publishMsg}</span>
+          <button className="text-slate-500 hover:text-slate-300" onClick={() => setPublishMsg(null)} aria-label="Dismiss">✕</button>
+        </div>
+      )}
       {/* header */}
       <div className="relative flex items-center justify-between px-5 border-b border-line">
         <div className="min-w-0">
@@ -239,9 +252,8 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
           <div className="text-[11px] font-mono text-slate-500">{hasApp ? "iterating" : "new app"} · {prompts.length} turn{prompts.length === 1 ? "" : "s"}</div>
         </div>
         <div className="flex items-center gap-2">
-          {publishMsg && <span className="text-[11px] text-slate-500 max-w-[16rem] truncate" title={publishMsg}>{publishMsg}</span>}
           {publishedUrl && (
-            <a className="text-[11px] font-mono text-lime hover:underline max-w-[18rem] truncate"
+            <a className="text-[11px] font-mono text-amber-soft hover:underline max-w-[18rem] truncate"
               href={publishedUrl} target="_blank" rel="noreferrer" title={publishedUrl}>
               {publishedUrl.replace(/^https:\/\//, "").replace(/\/$/, "")} ↗
             </a>
@@ -328,7 +340,7 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
               </div>
             )}
             {pendingPlan && !hasApp && !busy && (
-              <div className="mt-2 flex items-center justify-between text-[11px] text-lime">
+              <div className="mt-2 flex items-center justify-between text-[11px] text-amber-soft">
                 <span>Plan ready — “Generate app” will build against it.</span>
                 <button className="text-slate-500 hover:text-red-400" title="Discard plan"
                   onClick={() => setPendingPlan(null)}>✕</button>
@@ -359,19 +371,19 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
             ))}
           </div>
 
-          {/* live engine log */}
+          {/* live build timeline (raw engine log behind the disclosure) */}
           <div className="flex flex-col min-h-0 border-t lg:border-t-0 border-line">
-            <div className="px-4 pt-3 text-[11px] font-mono uppercase tracking-wider text-slate-500">Engine</div>
-            <pre ref={logRef} className="overflow-auto px-4 py-2 text-[11px] leading-relaxed font-mono text-slate-400 whitespace-pre-wrap" style={{ height: "9rem" }}>
-{log.length === 0 ? "idle — click Generate to run the engine (spends 1 build)" : log.join("\n")}
-            </pre>
+            <div className="px-4 pt-3 text-[11px] font-mono uppercase tracking-wider text-slate-500">Build</div>
+            <div ref={logRef} className="overflow-auto px-4 py-2" style={{ height: "9rem" }}>
+              <Timeline lines={log} busy={busy} />
+            </div>
             {result && (
               <div className="px-4 py-2 border-t border-line text-[11px] font-mono text-slate-400">
                 {result.byok ? (
-                  <><span className="text-lime">BYOK</span> — {result.telemetry?.total} tok on {result.decision?.model}, billed to your key (no credits)</>
+                  <><span className="text-amber-soft">BYOK</span> — {result.telemetry?.total} tok on {result.decision?.model}, billed to your key (no credits)</>
                 ) : (
                   <>debited <span className="text-amber">{Number(result.need).toFixed(4)} cr</span> ({result.decision?.model}, {result.telemetry?.total} tok) ·
-                  balance <span className="text-lime">{result.balance?.total?.toFixed(3)} cr</span></>
+                  balance <span className="text-slate-100">{result.balance?.total?.toFixed(3)} cr</span></>
                 )} · {result.mode === "plan" ? "plan (no build)" : `build ${result.build?.ok ? "PASS" : "FAIL"}`}
               </div>
             )}
@@ -424,6 +436,71 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
 function deriveName(prompt) {
   const words = prompt.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// The engine's SSE log rendered as a build timeline — each tool call becomes a human step;
+// token/billing chatter stays in the raw log behind the disclosure. Plan-mode output (everything
+// after the ── PLAN ── divider) renders as text, since the plan IS the result.
+function parseTimeline(lines) {
+  const steps = [];
+  let planText = null;
+  const push = (label, kind = "step") => steps.push({ label, kind });
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === "── PLAN ──") { planText = lines.slice(i + 1).join("\n").trim(); break; }
+    const t = line.trim();
+    let m;
+    if ((m = t.match(/^engine: (\w+) on model (\S+)/))) push(`${m[1] === "iterate" ? "Applying your change" : m[1] === "plan" ? "Planning" : "Starting the build"} · ${m[2]}`);
+    else if (t.startsWith("↳ list_files")) push("Scanning the project");
+    else if ((m = t.match(/^↳ read_file (\S+)/))) push(`Reading ${m[1]}`);
+    else if ((m = t.match(/^↳ write_file (\S+)/))) push(`Writing ${m[1]}`);
+    else if ((m = t.match(/^↳ apply_patch FAILED/))) push("Retrying an edit", "warn");
+    else if ((m = t.match(/^↳ apply_patch -> (.+)$/))) push(`Editing ${m[1]}`);
+    else if ((m = t.match(/^↳ edit_file (\S+)/))) push(`Editing ${m[1]}`);
+    else if (t.startsWith("↳ search_images")) push("Finding photos");
+    else if (t.startsWith("build: npm run build")) push("Compiling…");
+    else if (t === "build: PASS") push("Build passed", "good");
+    else if (t === "build: FAIL") push("Build failed", "bad");
+    else if (t.startsWith("preview: http")) push("Preview live", "good");
+  }
+  return { steps, planText };
+}
+
+function Timeline({ lines, busy }) {
+  if (lines.length === 0) {
+    return <div className="text-[11px] font-mono text-slate-500">Idle — describe your app and generate (spends 1 build).</div>;
+  }
+  const { steps, planText } = parseTimeline(lines);
+  return (
+    <div className="text-xs">
+      <ol className="space-y-1">
+        {steps.map((s, i) => {
+          const last = i === steps.length - 1;
+          const color = s.kind === "good" ? "text-amber-soft" : s.kind === "bad" ? "text-red-400" : s.kind === "warn" ? "text-slate-400" : "text-slate-300";
+          return (
+            <li key={i} className={`flex items-center gap-2 ${color}`}>
+              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                s.kind === "good" ? "bg-amber" : s.kind === "bad" ? "bg-red-400" :
+                last && busy ? "bg-amber animate-pulse" : "bg-slate-600"}`} />
+              <span className="truncate">{s.label}</span>
+            </li>
+          );
+        })}
+        {busy && steps.length === 0 && (
+          <li className="flex items-center gap-2 text-slate-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber animate-pulse shrink-0" />Thinking…
+          </li>
+        )}
+      </ol>
+      {planText && (
+        <div className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-300 border-t border-line pt-2">{planText}</div>
+      )}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[10px] font-mono uppercase tracking-wider text-slate-600 hover:text-slate-400">Raw log</summary>
+        <pre className="mt-1 whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-500">{lines.join("\n")}</pre>
+      </details>
+    </div>
+  );
 }
 
 // Keep full-tree snapshots on only the most recent N history entries (history itself is never

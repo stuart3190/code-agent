@@ -38,7 +38,7 @@ export default function TopBar({ user, projects, currentId, view, onNew, onOpen,
               <button key={p.id} onClick={() => { close(); onOpen(p.id); }}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors ${
                   p.id === currentId ? "bg-ink-800 text-slate-100" : "text-slate-300 hover:bg-ink-850"}`}>
-                <span className={`mr-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${p.tree ? "bg-lime" : "bg-slate-600"}`} />
+                <span className={`mr-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${p.tree ? "bg-amber" : "bg-slate-600"}`} />
                 {p.name}
               </button>
             ))}

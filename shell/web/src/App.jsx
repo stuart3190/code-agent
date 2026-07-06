@@ -17,6 +17,7 @@ export default function App() {
   const [balance, setBalance] = useState(null);
   const [projects, setProjects] = useState([]);
   const [current, setCurrent] = useState(null); // the open project, or null (dashboard)
+  const [starter, setStarter] = useState(null); // a starter prompt to prefill the new project's builder
   const [view, setView] = useState("workspace"); // "workspace" (builder/dashboard) | "settings"
   const [rightOpen, setRightOpen] = useState(true); // BillingPanel (Credits / Plans …) — open on wide
 
@@ -57,13 +58,15 @@ export default function App() {
   if (recovery && user) return <ResetPassword onDone={clearRecovery} />;
   if (!user) return <AuthGate />;
 
-  async function newProject() {
+  async function newProject(starterPrompt) {
     const p = await createProject("Untitled app");
     await refreshProjects();
+    setStarter(typeof starterPrompt === "string" ? starterPrompt : null);
     setCurrent(p); setView("workspace");
   }
   async function openProject(id) {
     const p = await getProject(id);
+    setStarter(null);
     setCurrent(p); setView("workspace");
   }
   const goHome = () => { setCurrent(null); setView("workspace"); };
@@ -93,12 +96,13 @@ export default function App() {
             <Builder
               key={current.id}
               project={current}
+              initialPrompt={starter}
               onProjectChange={(p) => { setCurrent(p); refreshProjects(); }}
               onAfterTurn={refreshBalance}
               balance={balance}
             />
           ) : (
-            <Dashboard projects={projects} onNew={newProject} onOpen={openProject} />
+            <Dashboard projects={projects} onNew={newProject} onOpen={openProject} onStart={(p) => newProject(p)} />
           )}
         </main>
 
@@ -109,17 +113,33 @@ export default function App() {
   );
 }
 
-function Dashboard({ projects, onNew, onOpen }) {
+const STARTERS = [
+  { label: "Barber shop site with booking", prompt: "a website for a local barber shop: hero, services with prices, opening hours, about the shop, and a booking request form (name, phone, preferred day and time, service)" },
+  { label: "Subscription tracker", prompt: "a subscription and direct debit tracker: add recurring payments with a name, amount, currency and billing frequency; show the total normalized to a monthly cost; highlight payments due soon" },
+  { label: "Team task board", prompt: "a kanban-style task board: columns for todo, in progress and done; add, edit and drag tasks between columns; assignee and due-date on each task" },
+];
+
+function Dashboard({ projects, onNew, onOpen, onStart }) {
   return (
     <div className="h-full overflow-auto p-8">
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Your apps</h1>
         <p className="text-sm text-slate-400 mt-1">Start from a description, then iterate. Everything you build is saved to your account.</p>
-        <button className="btn-primary mt-5" onClick={onNew}>+ New app</button>
+        <button className="btn-primary mt-5" onClick={() => onNew()}>+ New app</button>
 
         <div className="mt-8 grid gap-3">
           {projects.length === 0 && (
-            <div className="panel p-6 text-sm text-slate-400">No apps yet — create one to begin.</div>
+            <div className="panel p-6">
+              <div className="text-sm text-slate-300">No apps yet — describe anything, or start from one of these:</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {STARTERS.map((s) => (
+                  <button key={s.label} onClick={() => onStart(s.prompt)}
+                    className="rounded-full border border-line px-3 py-1.5 text-xs text-slate-300 hover:border-amber/60 hover:text-amber-soft transition-colors">
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {projects.map((p) => (
             <button key={p.id} onClick={() => onOpen(p.id)}

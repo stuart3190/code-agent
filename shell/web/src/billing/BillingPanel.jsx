@@ -20,7 +20,7 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
           className="p-2 rounded-lg border border-line text-slate-400 hover:text-slate-100 hover:bg-ink-850">
           <ChevronLeft />
         </button>
-        <div className="font-mono text-lime text-sm tabular-nums mt-1" title={`${total.toFixed(2)} credits`}>{total.toFixed(0)}</div>
+        <div className="font-mono text-amber-soft text-sm tabular-nums mt-1" title={`${total.toFixed(2)} credits`}>{total.toFixed(0)}</div>
         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-600">cr</div>
       </aside>
     );
@@ -44,10 +44,10 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
               className="text-slate-500 hover:text-slate-200"><ChevronRight /></button>
             <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Credits</span>
           </div>
-          <button className="text-[11px] text-slate-500 hover:text-amber" onClick={onRefresh}>refresh</button>
+          <button className="text-[11px] text-slate-500 hover:text-amber" onClick={onRefresh}>Refresh</button>
         </div>
         <div className="mt-2 flex items-baseline gap-2">
-          <span className="text-3xl font-semibold font-mono text-lime tabular-nums">{total.toFixed(2)}</span>
+          <span className="text-3xl font-semibold font-mono text-slate-100 tabular-nums">{total.toFixed(2)}</span>
           <span className="text-xs text-slate-500">≈ £{(total * valuePerCredit).toFixed(2)} of building</span>
         </div>
         <div className="mt-2 flex gap-3 text-[11px] font-mono text-slate-500">
@@ -71,7 +71,7 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
                   </div>
                 </div>
                 <button className="btn-primary text-xs" disabled={busy === t.id}
-                  onClick={() => go({ tierId: t.id }, t.id)}>{busy === t.id ? "…" : "Subscribe"}</button>
+                  onClick={() => go({ tierId: t.id }, t.id)}>{busy === t.id ? "Opening checkout…" : "Subscribe"}</button>
               </div>
             </div>
           ))}
@@ -86,7 +86,7 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
             onChange={(e) => setTopup(Number(e.target.value))} />
           <button className="btn-ghost text-xs whitespace-nowrap" disabled={busy === "topup" || !(topup > 0)}
             onClick={() => go({ credits: topup }, "topup")}>
-            {busy === "topup" ? "…" : `Buy · £${(topup * (config?.topupGbpPerCredit ?? 0)).toFixed(2)}`}
+            {busy === "topup" ? "Opening checkout…" : `Buy · £${(topup * (config?.topupGbpPerCredit ?? 0)).toFixed(2)}`}
           </button>
         </div>
         <div className="text-[11px] text-slate-500 mt-1 font-mono">£{config?.topupGbpPerCredit}/cr · rolls over freely</div>
@@ -100,7 +100,7 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
             <div key={m.id} className="panel p-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-100">{m.name}</span>
-                <span className={`tag ${i === 2 ? "bg-lime/15 text-lime" : "bg-ink-800 text-slate-400"}`}>
+                <span className={`tag ${i === 2 ? "bg-amber/15 text-amber-soft" : "bg-ink-800 text-slate-400"}`}>
                   {i === 2 ? "active" : "available"}
                 </span>
               </div>

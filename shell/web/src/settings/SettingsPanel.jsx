@@ -44,7 +44,7 @@ export default function SettingsPanel() {
           <div className="flex items-center justify-between">
             <h2 className="text-base font-medium text-slate-100">Bring your own key</h2>
             {!loading && (
-              <span className={`tag ${status?.set ? "bg-lime/15 text-lime" : "bg-ink-800 text-slate-400"}`}>
+              <span className={`tag ${status?.set ? "bg-amber/15 text-amber-soft" : "bg-ink-800 text-slate-400"}`}>
                 {status?.set ? "key set" : "no key"}
               </span>
             )}
@@ -57,7 +57,7 @@ export default function SettingsPanel() {
           {status?.set && (
             <div className="mt-4 flex items-center gap-2 text-[13px] font-mono text-slate-300">
               <span className="text-slate-500">current:</span>
-              <span className="text-lime">{status.hint}</span>
+              <span className="text-amber-soft">{status.hint}</span>
               <span className="text-slate-500">· {status.provider}</span>
             </div>
           )}
