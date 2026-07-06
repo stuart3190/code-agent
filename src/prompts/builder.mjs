@@ -70,8 +70,8 @@ Rules:
 - Always write COMPLETE file contents, never partial snippets or "...".
 - Use only the dependencies already in package.json (react, react-dom, the backend SDK, the
   @/components/ui library and its radix/cva/lucide-react deps). Do not add packages.
-- Do NOT edit files under src/lib/backend/ or src/components/ui/ — fixed SDK and component
-  library; just import from them.
+- Do NOT edit files under src/lib/backend/, src/components/ui/, or src/lib/devReporter.js —
+  fixed SDK, component library, and dev error reporter; just import from them.
 - When the app is fully implemented and working, STOP calling tools and reply with a one-paragraph
   summary of what you built. Do not ask the user questions.`;
 
@@ -107,7 +107,8 @@ CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs ac
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
-lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/.
+lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
+src/lib/devReporter.js.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.
@@ -153,7 +154,8 @@ CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs ac
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
-lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/.
+lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
+src/lib/devReporter.js.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.

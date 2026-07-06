@@ -171,7 +171,10 @@ export async function handleGenerate(req, res, body, owner) {
     sse(res, "done", {
       projectId, mode, finalText, tree, telemetry, byok,
       decision: { model: provider.model, reason: provider.decision?.reason || null },
-      debit, need, balance, build: { ok: build.ok }, preview,
+      debit, need, balance,
+      // stderr tail rides along on failure so the shell's "Fix it" can feed it back.
+      build: { ok: build.ok, stderr: build.ok ? undefined : (build.stderr || "").slice(-2000) },
+      preview,
     });
   } catch (e) {
     sse(res, "error", { message: e.message });

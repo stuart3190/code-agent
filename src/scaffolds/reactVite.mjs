@@ -121,7 +121,8 @@ export default {
 };
 `,
 
-  "src/main.jsx": `import React from "react";
+  "src/main.jsx": `import "./lib/devReporter.js";
+import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "@fontsource-variable/manrope";
@@ -211,6 +212,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   // exact factory the app ships. App code uses `import { auth, db, storage } from "./lib/backend"`.
   "src/lib/backend/index.js": sdk("lib/backend/index.js"),
   "src/lib/backend/supabaseBackend.js": sdk("lib/backend/supabaseBackend.js"),
+
+  // Dev-only preview error reporter (the shell's "Fix it" loop). Fixed file, imported
+  // first by main.jsx; absent from production builds via the import.meta.env.DEV guard.
+  "src/lib/devReporter.js": sdk("lib/devReporter.js"),
 
   // shadcn/ui component set (JSX, tokens-aware) — authored as real files under
   // reactVite/components/ui/ and read into the tree, same pattern as the SDK.

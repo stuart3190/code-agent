@@ -19,6 +19,9 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
+  // The "Fix it" loop: { kind: "runtime" | "build", message, stack } — runtime errors arrive from
+  // the preview iframe's devReporter via postMessage; build errors from the done payload's stderr.
+  const [appErr, setAppErr] = useState(null);
   const [publishMsg, setPublishMsg] = useState(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const logRef = useRef(null);
@@ -28,6 +31,21 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const mode = hasApp ? "iterate" : "build";
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
+
+  // Listen for the preview's devReporter. Only trust messages from the current preview's origin.
+  useEffect(() => {
+    if (!previewUrl) return;
+    let origin;
+    try { origin = new URL(previewUrl).origin; } catch { return; }
+    const onMessage = (e) => {
+      if (e.origin !== origin) return;
+      const d = e.data;
+      if (!d || d.__buildr !== "runtime-error") return;
+      setAppErr((cur) => cur || { kind: "runtime", message: d.message, stack: d.stack });
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewUrl]);
 
   // Reopening a saved (already-built) project: bring its live preview back up (no Codex spend).
   useEffect(() => {
@@ -41,11 +59,11 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 
-  async function run() {
-    const prompt = text.trim();
+  async function run(promptOverride) {
+    const prompt = (typeof promptOverride === "string" ? promptOverride : text).trim();
     if (!prompt || busy) return;
     const effectiveMode = !hasApp && planMode ? "plan" : mode;
-    setBusy(true); setErr(null); setResult(null); setLog([]);
+    setBusy(true); setErr(null); setResult(null); setLog([]); setAppErr(null);
     try {
       const done = await generate(
         { projectId: project.id, prompt, mode: effectiveMode,
@@ -79,9 +97,12 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
       setTree(done.tree);
       setPrompts(nextPrompts);
       setResult(done);
+      if (done.build?.ok === false) {
+        setAppErr({ kind: "build", message: "The app failed to build.", stack: done.build.stderr || "" });
+      }
       if (done.preview?.url) { setPreviewUrl(done.preview.url); }
       else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
-      setText("");
+      if (typeof promptOverride !== "string") setText("");
       setPendingPlan(null); // the build consumed the plan
 
       const name = project.name && project.name !== "Untitled app" ? project.name : deriveName(prompt);
@@ -93,6 +114,15 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         ? "No credits — buy a tier or top-up (right panel) to generate."
         : (e.message || String(e)));
     } finally { setBusy(false); }
+  }
+
+  // One-click repair: feed the captured error back into an iterate turn (normal metered spend).
+  function fixIt() {
+    if (!appErr || busy || !hasApp) return;
+    const p = appErr.kind === "build"
+      ? `The app fails to build. Fix the root cause of this build error:\n\n${appErr.stack || appErr.message}`
+      : `The running app throws this runtime error:\n\n${appErr.message}${appErr.stack ? `\n\nStack:\n${appErr.stack}` : ""}\n\nFind and fix the root cause (do not just swallow the error).`;
+    run(p);
   }
 
   async function doPublish() {
@@ -156,7 +186,7 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
                     Plan mode
                   </label>
                 )}
-                <button className="btn-primary" onClick={run} disabled={busy || !text.trim()}>
+                <button className="btn-primary" onClick={() => run()} disabled={busy || !text.trim()}>
                   {busy ? (planMode && !hasApp ? "Planning…" : "Building…")
                     : hasApp ? "Apply change" : planMode ? "Plan app" : "Generate app"}
                 </button>
@@ -210,6 +240,17 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
             <span className="text-[11px] font-mono text-slate-500">preview{previewUrl ? "" : " · not running"}</span>
             {previewUrl && <a className="text-[11px] text-slate-500 hover:text-amber font-mono" href={previewUrl} target="_blank" rel="noreferrer">{previewUrl} ↗</a>}
           </div>
+          {appErr && (
+            <div className="flex items-center gap-3 px-4 py-2 border-b border-red-900/60 bg-red-950/40">
+              <span className="text-[11px] font-mono text-red-400 shrink-0">{appErr.kind === "build" ? "build error" : "runtime error"}</span>
+              <span className="text-xs text-red-200/90 truncate min-w-0" title={`${appErr.message}\n\n${appErr.stack || ""}`}>{appErr.message}</span>
+              <button className="btn-primary text-xs px-3 py-1 shrink-0" onClick={fixIt} disabled={busy}
+                title="Send this error to the builder and fix it (normal build spend)">
+                {busy ? "Fixing…" : "Fix it"}
+              </button>
+              <button className="text-slate-500 hover:text-slate-300 shrink-0" title="Dismiss" onClick={() => setAppErr(null)}>✕</button>
+            </div>
+          )}
           <div className="flex-1 min-h-0 grid place-items-stretch">
             {previewUrl ? (
               <iframe ref={iframeRef} title="preview" src={previewUrl} className="w-full h-full bg-white" />
