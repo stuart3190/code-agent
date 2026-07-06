@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getByok, saveByok, clearByok } from "../lib/api.js";
+import { client } from "../lib/backend.js";
 
 // Settings tab — BYOK (bring-your-own-key). Lets a user store an Anthropic API key so generation
 // runs on their own inference account (no platform credits debited). The raw key is write-only: it
@@ -39,6 +40,8 @@ export default function SettingsPanel() {
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Settings</h1>
         <p className="text-sm text-slate-400 mt-1">Account and provider settings.</p>
+
+        <AccountPanel />
 
         <div className="panel p-6 mt-6">
           <div className="flex items-center justify-between">
@@ -81,6 +84,60 @@ export default function SettingsPanel() {
             switch back to platform credits.
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Account: who you're signed in as + change password in place (no email round-trip needed
+// while you're already authenticated).
+function AccountPanel() {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    client().auth.getUser().then(({ data }) => setEmail(data?.user?.email || ""));
+  }, []);
+
+  async function changePassword() {
+    setErr(null); setMsg(null);
+    if (pw.length < 8) { setErr("Password must be at least 8 characters."); return; }
+    if (pw !== pw2) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    try {
+      const { error } = await client().auth.updateUser({ password: pw });
+      if (error) throw error;
+      setPw(""); setPw2("");
+      setMsg("Password changed ✓");
+    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="panel p-6 mt-6">
+      <h2 className="text-base font-medium text-slate-100">Account</h2>
+      <div className="mt-3 flex items-center gap-2 text-sm">
+        <span className="text-slate-500">Signed in as</span>
+        <span className="font-mono text-slate-200">{email || "…"}</span>
+      </div>
+      <div className="mt-4">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-2">Change password</div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input className="field" type="password" placeholder="New password" value={pw}
+            autoComplete="new-password" disabled={busy} onChange={(e) => setPw(e.target.value)} />
+          <input className="field" type="password" placeholder="Confirm new password" value={pw2}
+            autoComplete="new-password" disabled={busy} onChange={(e) => setPw2(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") changePassword(); }} />
+          <button className="btn-primary whitespace-nowrap" onClick={changePassword}
+            disabled={busy || !pw || !pw2}>
+            {busy ? "Saving…" : "Change password"}
+          </button>
+        </div>
+        {msg && <div className="mt-2 text-xs text-amber-soft">{msg}</div>}
+        {err && <div className="mt-2 text-xs text-red-400">{err}</div>}
       </div>
     </div>
   );

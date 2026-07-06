@@ -29,6 +29,12 @@ function rowToProject(row) {
   };
 }
 
+// Rename only (the full-state saveProject also carries name, but rename shouldn't rewrite the tree).
+export async function renameProject(id, name) {
+  const rows = unwrap(await table().update({ name, updated_at: new Date().toISOString() }).eq("id", id).select());
+  return rowToProject(rows[0]);
+}
+
 // Save just the project knowledge (custom instructions applied to every turn).
 export async function saveKnowledge(id, knowledge) {
   const rows = unwrap(await table().update({ knowledge, updated_at: new Date().toISOString() }).eq("id", id).select());

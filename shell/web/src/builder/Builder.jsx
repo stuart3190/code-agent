@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { downloadProject, generate, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
-import { saveProject, saveKnowledge, savePublishedUrl } from "../lib/projects.js";
+import { saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
 // server's /api/generate (the only Codex-spending action; fires only on the button click below).
@@ -28,6 +28,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [showPublish, setShowPublish] = useState(false);
   const [siteName, setSiteName] = useState("");
   const [publishErr, setPublishErr] = useState(null);
+  // Inline project rename (pencil next to the title).
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.name || "");
   // Site menu (consolidates the published-site actions so the header never overflows).
   const [showSite, setShowSite] = useState(false);
   // Custom domain popover: connect the user's own domain to the published site.
@@ -229,6 +232,19 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     run(p);
   }
 
+  async function commitRename() {
+    const name = nameDraft.trim();
+    setEditingName(false);
+    if (!name || name === project.name) { setNameDraft(project.name || ""); return; }
+    try {
+      const saved = await renameProject(project.id, name);
+      onProjectChange?.({ ...project, ...saved });
+    } catch (e) {
+      setNameDraft(project.name || "");
+      setPublishMsg(e.message || String(e));
+    }
+  }
+
   async function doUnpublish() {
     if (!publishedUrl || publishBusy) return;
     if (!window.confirm("Take the published site offline? Its URL will stop working (you can republish any time).")) return;
@@ -291,7 +307,24 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       {/* header */}
       <div className="relative flex items-center justify-between px-5 border-b border-line">
         <div className="min-w-0">
-          <div className="font-medium text-slate-100 truncate">{project.name}</div>
+          {editingName ? (
+            <input className="field py-0.5 px-1.5 text-sm font-medium w-64 max-w-full" value={nameDraft} autoFocus
+              maxLength={80}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setNameDraft(project.name || ""); setEditingName(false); } }} />
+          ) : (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-medium text-slate-100 truncate">{project.name}</span>
+              <button className="text-slate-600 hover:text-amber shrink-0" title="Rename project" aria-label="Rename project"
+                onClick={() => { setNameDraft(project.name || ""); setEditingName(true); }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
+              </button>
+            </div>
+          )}
           <div className="text-[11px] font-mono text-slate-500">{hasApp ? "iterating" : "new app"} · {prompts.length} turn{prompts.length === 1 ? "" : "s"}</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

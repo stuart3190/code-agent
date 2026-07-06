@@ -153,24 +153,6 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
         <div className="text-[11px] text-slate-500 mt-1 font-mono">£{config?.topupGbpPerCredit}/cr · rolls over freely</div>
       </div>
 
-      {/* three modes */}
-      <div className="p-4">
-        <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-2">Provider modes</div>
-        <div className="space-y-2">
-          {(config?.modes || []).map((m, i) => (
-            <div key={m.id} className="panel p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-100">{m.name}</span>
-                <span className={`tag ${i === 2 ? "bg-amber/15 text-amber-soft" : "bg-ink-800 text-slate-400"}`}>
-                  {i === 2 ? "active" : "available"}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">{m.blurb}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {err && <div className="px-4 pb-4 text-xs text-red-400">{err}</div>}
     </aside>
   );

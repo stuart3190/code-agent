@@ -162,7 +162,11 @@ function Dashboard({ projects, onNew, onOpen, onStart, onDelete }) {
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-slate-100 truncate">{p.name}</span>
                 <div className="flex items-center gap-2 shrink-0">
-                  {p.publishedUrl && <span className="text-[11px] font-mono text-amber-soft">live</span>}
+                  {p.publishedUrl && (
+                    <a className="text-[11px] font-mono text-amber-soft hover:underline" href={p.publishedUrl}
+                      target="_blank" rel="noreferrer" title={p.publishedUrl}
+                      onClick={(e) => e.stopPropagation()}>live ↗</a>
+                  )}
                   <span className="text-[11px] font-mono text-slate-500">{p.tree ? "built" : "empty"}</span>
                   <button className="px-1.5 py-0.5 rounded text-slate-600 hover:text-red-400 hover:bg-ink-850 transition-colors"
                     title="Delete project (permanent)" aria-label={`Delete ${p.name}`}
