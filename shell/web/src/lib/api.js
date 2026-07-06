@@ -104,6 +104,34 @@ export async function publishProject(projectId, tree, name) {
   return out; // { url, files, bytes, slug }
 }
 
+// Custom domains — connect/list/remove a user-owned domain on a published app.
+export async function listDomains(projectId) {
+  const r = await fetch(`/api/domains?projectId=${encodeURIComponent(projectId)}`, { headers: await authHeaders() });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `domains ${r.status}`);
+  return out; // { domains: [{ domain, verified_at }], ip }
+}
+
+export async function connectDomain(projectId, domain) {
+  const r = await fetch("/api/domains", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId, domain }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `connect ${r.status}`);
+  return out; // { domain, status: "live"|"pending-dns", ip, hint }
+}
+
+export async function removeDomain(projectId, domain) {
+  const r = await fetch("/api/domains/remove", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId, domain }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `remove ${r.status}`);
+  return out;
+}
+
 // POST /api/unpublish — remove the published static site (its URL then 404s).
 export async function unpublishProject(projectId) {
   const r = await fetch("/api/unpublish", {

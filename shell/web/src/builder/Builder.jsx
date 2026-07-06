@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, generate, publishProject, unpublishProject, startPreview } from "../lib/api.js";
+import { downloadProject, generate, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
 import { saveProject, saveKnowledge, savePublishedUrl } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
@@ -28,6 +28,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [showPublish, setShowPublish] = useState(false);
   const [siteName, setSiteName] = useState("");
   const [publishErr, setPublishErr] = useState(null);
+  // Custom domain popover: connect the user's own domain to the published site.
+  const [showDomain, setShowDomain] = useState(false);
+  const [domainInput, setDomainInput] = useState("");
+  const [domainInfo, setDomainInfo] = useState(null); // { domains: [...], ip }
+  const [domainMsg, setDomainMsg] = useState(null);
+  const [domainBusy, setDomainBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
@@ -185,6 +191,33 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     }
   }
 
+  async function openDomains() {
+    setShowDomain((v) => !v);
+    setDomainMsg(null);
+    try { setDomainInfo(await listDomains(project.id)); } catch (e) { setDomainMsg(e.message); }
+  }
+
+  async function doConnectDomain(domain) {
+    if (domainBusy) return;
+    setDomainBusy(true); setDomainMsg(null);
+    try {
+      const r = await connectDomain(project.id, domain);
+      setDomainMsg(r.hint);
+      setDomainInput("");
+      setDomainInfo(await listDomains(project.id));
+    } catch (e) { setDomainMsg(e.message); } finally { setDomainBusy(false); }
+  }
+
+  async function doRemoveDomain(domain) {
+    if (domainBusy) return;
+    setDomainBusy(true); setDomainMsg(null);
+    try {
+      await removeDomain(project.id, domain);
+      setDomainInfo(await listDomains(project.id));
+      setDomainMsg(`${domain} disconnected.`);
+    } catch (e) { setDomainMsg(e.message); } finally { setDomainBusy(false); }
+  }
+
   // One-click repair: feed the captured error back into an iterate turn (normal metered spend).
   function fixIt() {
     if (!appErr || busy || !hasApp) return;
@@ -284,12 +317,57 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             {publishBusy ? "Publishing…" : publishedUrl ? "Republish" : "Publish"}
           </button>
           {publishedUrl && (
+            <button className="btn-ghost text-xs" onClick={openDomains}
+              title="Connect your own domain to this site">
+              Domain
+            </button>
+          )}
+          {publishedUrl && (
             <button className="btn-ghost text-xs text-red-400/80 hover:text-red-300" onClick={doUnpublish}
               disabled={publishBusy} title="Take the published site offline (republish any time)">
               Unpublish
             </button>
           )}
         </div>
+        {showDomain && (
+          <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Custom domain</div>
+            <p className="text-xs text-slate-400 mt-1">
+              Serve this site on your own domain. Point an A record for it to{" "}
+              <span className="font-mono text-slate-300">{domainInfo?.ip || "51.195.136.189"}</span>, then connect it —
+              HTTPS is automatic.
+            </p>
+            {(domainInfo?.domains || []).map((d) => (
+              <div key={d.domain} className="mt-2 flex items-center justify-between gap-2 text-xs">
+                <span className="font-mono text-slate-200 truncate">{d.domain}</span>
+                <span className={`tag ${d.verified_at ? "bg-amber/15 text-amber-soft" : "bg-ink-800 text-slate-400"}`}>
+                  {d.verified_at ? "live" : "waiting for DNS"}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!d.verified_at && (
+                    <button className="text-slate-400 hover:text-amber" disabled={domainBusy}
+                      onClick={() => doConnectDomain(d.domain)}>Check</button>
+                  )}
+                  <button className="text-slate-500 hover:text-red-400" disabled={domainBusy}
+                    onClick={() => doRemoveDomain(d.domain)} title="Disconnect">✕</button>
+                </div>
+              </div>
+            ))}
+            <div className="mt-3 flex items-center gap-2">
+              <input className="field flex-1" placeholder="yourbusiness.com" value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value.trim().toLowerCase())}
+                onKeyDown={(e) => { if (e.key === "Enter" && domainInput) doConnectDomain(domainInput); }} />
+              <button className="btn-primary text-xs px-3 py-1" disabled={domainBusy || !domainInput}
+                onClick={() => doConnectDomain(domainInput)}>
+                {domainBusy ? "Connecting…" : "Connect"}
+              </button>
+            </div>
+            {domainMsg && <div className="mt-2 text-xs text-slate-300">{domainMsg}</div>}
+            <div className="flex justify-end mt-2">
+              <button className="btn-ghost text-xs" onClick={() => setShowDomain(false)}>Close</button>
+            </div>
+          </div>
+        )}
         {showPublish && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[24rem] panel p-4 shadow-xl">
             <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Publish</div>

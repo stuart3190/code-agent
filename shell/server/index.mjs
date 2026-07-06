@@ -24,6 +24,7 @@ import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
 import { handlePublish, handleUnpublish } from "./routes/publish.mjs";
+import { handleDomainCheck, handleDomainList, handleDomainConnect, handleDomainRemove } from "./routes/domains.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
@@ -128,6 +129,10 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req);
       return handleWebhook(req, res, raw);
     }
+    // Caddy's on_demand_tls ask gate (read-only yes/no; see routes/domains.mjs).
+    if (p === "/api/domain-check" && method === "GET") {
+      return handleDomainCheck(req, res, url);
+    }
 
     // ── authenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/generate" && method === "POST") {
@@ -154,6 +159,20 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
       return handleUnpublish(req, res, body, owner);
+    }
+    if (p === "/api/domains" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleDomainList(req, res, url, owner);
+    }
+    if (p === "/api/domains" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleDomainConnect(req, res, body, owner);
+    }
+    if (p === "/api/domains/remove" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleDomainRemove(req, res, body, owner);
     }
     if (p === "/api/billing/checkout" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

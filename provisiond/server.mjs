@@ -258,6 +258,38 @@ async function publishSite(projectId, files, slug) {
   return { id: label, url: `https://${label}.${APP_SUFFIX}/`, mode: "published", files: entries.length, bytes: total };
 }
 
+// ── Custom domains ───────────────────────────────────────────────────────────────────────────
+// A custom domain maps to a published site via a RELATIVE symlink under PUBLISH_ROOT/_domains
+// (resolves inside Caddy's read-only /publish mount): /publish/_domains/<domain> -> ../<label>.
+// Caddy's catch-all https:// site serves root /publish/_domains/{host}; its on-demand TLS asks
+// the shell's /api/domain-check before issuing a cert, so only registered domains get certs.
+const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
+
+function domainPath(domain) {
+  const d = String(domain).toLowerCase();
+  if (!DOMAIN_RE.test(d) || d.endsWith(".buildr101.com") || d === "buildr101.com") {
+    const e = new Error(`invalid domain: ${d}`); e.code = "bad_domain"; throw e;
+  }
+  return { d, link: path.join(PUBLISH_ROOT, "_domains", d) };
+}
+
+async function attachDomain(domain, label) {
+  if (!SLUG_RE.test(String(label)) && !/^p[a-z0-9]+$/.test(String(label))) throw new Error(`invalid label: ${label}`);
+  const { d, link } = domainPath(domain);
+  await mkdir(path.join(PUBLISH_ROOT, "_domains"), { recursive: true });
+  await rm(link, { force: true });
+  const { symlink } = await import("node:fs/promises");
+  await symlink(`../${label}`, link, "dir");
+  return { domain: d, label };
+}
+
+async function detachDomain(domain) {
+  const { d, link } = domainPath(domain);
+  const existed = existsSync(link);
+  await rm(link, { force: true });
+  return { domain: d, detached: existed };
+}
+
 async function unpublishSite(projectId, slug) {
   const label = labelForPublish(projectId, slug);
   const dir = path.join(PUBLISH_ROOT, label);
@@ -316,6 +348,16 @@ const server = http.createServer(async (req, res) => {
       const { projectId, slug } = await readJson(req);
       if (!projectId) return send(res, 400, { error: "projectId required" });
       return send(res, 200, await unpublishSite(projectId, slug));
+    }
+    if (p === "/domain-attach" && req.method === "POST") {
+      const { domain, label } = await readJson(req);
+      if (!domain || !label) return send(res, 400, { error: "domain and label required" });
+      return send(res, 200, await attachDomain(domain, label));
+    }
+    if (p === "/domain-detach" && req.method === "POST") {
+      const { domain } = await readJson(req);
+      if (!domain) return send(res, 400, { error: "domain required" });
+      return send(res, 200, await detachDomain(domain));
     }
     if (p === "/get" && req.method === "GET") {
       const projectId = url.searchParams.get("projectId");
