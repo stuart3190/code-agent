@@ -17,11 +17,11 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import {
   ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
-  destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs,
+  destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs, PUBLISH_ROOT,
 } from "./docker.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -210,6 +210,40 @@ async function get(projectId) {
   return null;
 }
 
+// ── F7 publish: static site hosting ─────────────────────────────────────────────────────────────
+// files = { relPath: base64Contents } of a BUILT dist (binary-safe). Written atomically
+// (tmp dir -> rename) under PUBLISH_ROOT/<label>; Caddy serves it read-only on <label>.<APP_SUFFIX>.
+// Republish overwrites the same label. Static = no container, no reaper, no capacity slot.
+const APP_SUFFIX = process.env.PUBLISH_PUBLIC_SUFFIX || "app.buildr101.com";
+const PUBLISH_MAX_BYTES = Number(process.env.PUBLISH_MAX_BYTES || 25 * 1024 * 1024);
+
+async function publishSite(projectId, files) {
+  const label = labelFor(projectId);
+  await ensureCaddy(CADDY_CFG); // publish mount + *.app cert config live on the Caddy front
+  const entries = Object.entries(files);
+  let total = 0;
+  const dir = path.join(PUBLISH_ROOT, label);
+  const tmp = `${dir}.tmp`;
+  await rm(tmp, { recursive: true, force: true });
+  try {
+    for (const [rel, b64] of entries) {
+      const norm = path.normalize(String(rel));
+      if (norm.startsWith("..") || path.isAbsolute(norm)) continue; // traversal guard
+      const buf = Buffer.from(String(b64), "base64");
+      total += buf.length;
+      if (total > PUBLISH_MAX_BYTES) throw new Error(`publish exceeds ${PUBLISH_MAX_BYTES} bytes`);
+      const full = path.join(tmp, norm);
+      await mkdir(path.dirname(full), { recursive: true });
+      await writeFile(full, buf);
+    }
+    await rm(dir, { recursive: true, force: true });
+    await rename(tmp, dir);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  return { id: label, url: `https://${label}.${APP_SUFFIX}/`, mode: "published", files: entries.length, bytes: total };
+}
+
 // --- http plumbing ------------------------------------------------------------------------------
 const send = (res, code, obj) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); };
 const readJson = (req) => new Promise((resolve) => {
@@ -250,6 +284,11 @@ const server = http.createServer(async (req, res) => {
       const { projectId } = await readJson(req);
       if (!projectId) return send(res, 400, { error: "projectId required" });
       return send(res, 200, await stop(projectId));
+    }
+    if (p === "/publish" && req.method === "POST") {
+      const { projectId, files } = await readJson(req);
+      if (!projectId || !files || typeof files !== "object") return send(res, 400, { error: "projectId and files required" });
+      return send(res, 200, await publishSite(projectId, files));
     }
     if (p === "/get" && req.method === "GET") {
       const projectId = url.searchParams.get("projectId");

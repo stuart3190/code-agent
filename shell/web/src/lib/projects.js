@@ -23,6 +23,7 @@ function rowToProject(row) {
     prompts: row.history || [],
     previewRef: row.preview_ref,
     knowledge: row.knowledge || "",
+    publishedUrl: row.published_url || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -31,6 +32,12 @@ function rowToProject(row) {
 // Save just the project knowledge (custom instructions applied to every turn).
 export async function saveKnowledge(id, knowledge) {
   const rows = unwrap(await table().update({ knowledge, updated_at: new Date().toISOString() }).eq("id", id).select());
+  return rowToProject(rows[0]);
+}
+
+// Record where the project's static site is published.
+export async function savePublishedUrl(id, publishedUrl) {
+  const rows = unwrap(await table().update({ published_url: publishedUrl, updated_at: new Date().toISOString() }).eq("id", id).select());
   return rowToProject(rows[0]);
 }
 

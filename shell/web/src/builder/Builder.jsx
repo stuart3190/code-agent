@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, generate, startPreview } from "../lib/api.js";
-import { saveProject, saveKnowledge } from "../lib/projects.js";
-import { publish } from "../publish/publishStub.js";
+import { downloadProject, generate, publishProject, startPreview } from "../lib/api.js";
+import { saveProject, saveKnowledge, savePublishedUrl } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
 // server's /api/generate (the only Codex-spending action; fires only on the button click below).
@@ -23,6 +22,8 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   // the preview iframe's devReporter via postMessage; build errors from the done payload's stderr.
   const [appErr, setAppErr] = useState(null);
   const [publishMsg, setPublishMsg] = useState(null);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState(project.publishedUrl || null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
@@ -183,8 +184,19 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   }
 
   async function doPublish() {
-    const r = await publish(project);
-    setPublishMsg(r.message);
+    if (!hasApp || publishBusy) return;
+    setPublishBusy(true);
+    setPublishMsg(null);
+    try {
+      const r = await publishProject(project.id, tree);
+      setPublishedUrl(r.url);
+      setPublishMsg(`Published ✓`);
+      await savePublishedUrl(project.id, r.url).catch(() => {});
+    } catch (e) {
+      setPublishMsg(e.message || String(e));
+    } finally {
+      setPublishBusy(false);
+    }
   }
 
   async function doDownload() {
@@ -211,6 +223,12 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         </div>
         <div className="flex items-center gap-2">
           {publishMsg && <span className="text-[11px] text-slate-500 max-w-[16rem] truncate" title={publishMsg}>{publishMsg}</span>}
+          {publishedUrl && (
+            <a className="text-[11px] font-mono text-lime hover:underline max-w-[18rem] truncate"
+              href={publishedUrl} target="_blank" rel="noreferrer" title={publishedUrl}>
+              {publishedUrl.replace(/^https:\/\//, "").replace(/\/$/, "")} ↗
+            </a>
+          )}
           <button className="btn-ghost text-xs" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); }}
             title="Standing instructions (brand, tone, constraints) applied to every build and change">
             Knowledge{knowledge.trim() ? " ●" : ""}
@@ -219,7 +237,10 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
           </button>
-          <button className="btn-ghost text-xs" onClick={doPublish} title="Deferred — no-op stub">Publish ⓘ</button>
+          <button className="btn-ghost text-xs" onClick={doPublish} disabled={!hasApp || busy || publishBusy}
+            title={hasApp ? (publishedUrl ? "Republish the current version" : "Publish this app to a public URL") : "Generate an app before publishing"}>
+            {publishBusy ? "Publishing…" : publishedUrl ? "Republish" : "Publish"}
+          </button>
         </div>
         {showKnowledge && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">

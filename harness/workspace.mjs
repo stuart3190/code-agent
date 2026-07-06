@@ -18,6 +18,10 @@ const DEPS_DIR = path.join(HERE, ".deps");
 const DEPS_NM = path.join(DEPS_DIR, "node_modules");
 const WORK_DIR = path.join(HERE, ".work");
 
+// Where buildTree materialized a given case — callers that consume build ARTIFACTS (e.g. the
+// shell's publish route reading dist/) resolve the workspace through this, not a copied path.
+export const workDirFor = (caseName) => path.join(WORK_DIR, caseName);
+
 // Install scaffold deps once into harness/.deps. Idempotent: skips if present.
 export async function ensureDeps(log = console.log) {
   if (existsSync(DEPS_NM)) return;

@@ -27,3 +27,22 @@
 	}
 	reverse_proxy {http.request.host.labels.3}:5173
 }
+
+# F7 publish: static published apps. <label>.app.buildr101.com serves the built SPA from the
+# read-only /publish/<label> mount (docker.mjs PUBLISH_ROOT). try_files gives the SPA fallback
+# (client-side routes resolve to index.html). Same DNS-01 wildcard mechanics as previews; the
+# *.app.buildr101.com A record must also be DNS-only/grey.
+*.app.buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	root * /publish/{http.request.host.labels.3}
+	try_files {path} /index.html
+	file_server
+}

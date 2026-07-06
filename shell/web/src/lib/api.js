@@ -92,12 +92,23 @@ export async function downloadProject(projectId) {
   return { filename };
 }
 
+// POST /api/publish — build the tree server-side and ship the static dist to the VPS.
+export async function publishProject(projectId, tree) {
+  const r = await fetch("/api/publish", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId, tree }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `publish ${r.status}`);
+  return out; // { url, files, bytes }
+}
+
 // POST /api/generate and consume the SSE stream via streaming fetch (EventSource can't send the
 // Authorization header). onEvent(name, data) fires per event; resolves with the final "done" payload.
-export async function generate({ projectId, prompt, mode, tree, plan }, onEvent) {
+export async function generate({ projectId, prompt, mode, tree, plan, knowledge }, onEvent) {
   const res = await fetch("/api/generate", {
     method: "POST", headers: await authHeaders(),
-    body: JSON.stringify({ projectId, prompt, mode, tree, plan }),
+    body: JSON.stringify({ projectId, prompt, mode, tree, plan, knowledge }),
   });
   if (!res.ok && res.headers.get("content-type")?.includes("application/json")) {
     const err = await res.json();

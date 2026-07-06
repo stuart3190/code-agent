@@ -4,10 +4,15 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import os from "node:os";
+import path from "node:path";
 const execFileP = promisify(execFile);
 
 export const PROXY_NET = "buildr-proxy-net";     // non-internal: lets Caddy's -p 80:80 bind
 export const CADDY_NAME = "buildr-caddy";
+// Published static sites live here on the host; mounted read-only into Caddy at /publish
+// (Caddyfile.tls serves *.app.buildr101.com from /publish/<label>).
+export const PUBLISH_ROOT = process.env.PUBLISH_DIR || path.join(os.homedir(), "publish");
 export const CADDY_IMAGE = "caddy:2-alpine";
 export const BASE_IMAGE = "buildr-preview-base:latest";
 
@@ -84,7 +89,9 @@ export async function ensureCaddy(opts) {
   for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   // Persist Caddy's /data (issued certs + ACME account) across recreations so we don't re-issue the
   // wildcard on every restart (slow + Let's Encrypt rate limits).
-  args.push("-v", "buildr-caddy-data:/data", "-v", `${caddyfilePath}:/etc/caddy/Caddyfile:ro`, image);
+  args.push("-v", "buildr-caddy-data:/data", "-v", `${caddyfilePath}:/etc/caddy/Caddyfile:ro`);
+  // Published static sites (read-only; the dir must exist before mounting).
+  args.push("-v", `${PUBLISH_ROOT}:/publish:ro`, image);
   await docker(args);
 }
 
