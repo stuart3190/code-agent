@@ -38,6 +38,43 @@ export async function handleCheckout(req, res, body, owner) {
   }
 }
 
+// GET /api/billing/subscription -> { active, tier, cancelAtPeriodEnd, periodEnd }
+export async function handleSubscription(req, res, owner) {
+  try {
+    const status = await billing().subscriptionStatus(owner.id);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(status));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+// POST /api/billing/switch { tierId } — in-place plan change (see stripe.mjs semantics).
+export async function handleSwitch(req, res, body, owner) {
+  try {
+    if (!body?.tierId) throw new Error("tierId required");
+    const out = await billing().switchTier({ owner: owner.id, tierId: body.tierId });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+// POST /api/billing/cancel { resume?: true } — cancel at period end, or undo a pending cancel.
+export async function handleCancel(req, res, body, owner) {
+  try {
+    const out = await billing().setCancelAtPeriodEnd({ owner: owner.id, cancel: !body?.resume });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 export async function handleBalance(req, res, owner) {
   try {
     const bal = await ledger().getBalance(owner.id);

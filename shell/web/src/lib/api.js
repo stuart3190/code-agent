@@ -104,6 +104,32 @@ export async function publishProject(projectId, tree, name) {
   return out; // { url, files, bytes, slug }
 }
 
+// Subscription lifecycle — status, in-place plan switch, cancel/resume at period end.
+export async function getSubscription() {
+  const r = await fetch("/api/billing/subscription", { headers: await authHeaders() });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `subscription ${r.status}`);
+  return out; // { active, tier, cancelAtPeriodEnd, periodEnd }
+}
+
+export async function switchPlan(tierId) {
+  const r = await fetch("/api/billing/switch", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ tierId }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `switch ${r.status}`);
+  return out;
+}
+
+export async function cancelPlan(resume = false) {
+  const r = await fetch("/api/billing/cancel", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ resume }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `cancel ${r.status}`);
+  return out;
+}
+
 // Custom domains — connect/list/remove a user-owned domain on a published app.
 export async function listDomains(projectId) {
   const r = await fetch(`/api/domains?projectId=${encodeURIComponent(projectId)}`, { headers: await authHeaders() });

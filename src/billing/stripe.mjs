@@ -132,6 +132,69 @@ export function createBilling({ stripe, ledger, env = process.env } = {}) {
     return tier ? { tier, period: { start: sub.current_period_start } } : null;
   }
 
+  // ── Subscription lifecycle (switch / cancel / resume) — ADDITIVE; the handlers above unchanged ─
+
+  // The user's single active subscription, or null.
+  async function activeSubscription(owner) {
+    const ent = await ledger.getEntitlement(owner);
+    if (!ent?.stripe_customer_id) return null;
+    const subs = await stripe.subscriptions.list({ customer: ent.stripe_customer_id, status: "active", limit: 3 });
+    return subs.data?.[0] || null;
+  }
+
+  // Status for the UI: which tier the live subscription is on, and whether it's winding down.
+  async function subscriptionStatus(owner) {
+    const sub = await activeSubscription(owner);
+    if (!sub) return { active: false };
+    const priceId = sub.items?.data?.[0]?.price?.id;
+    return {
+      active: true,
+      tier: priceId ? (tierForPrice.get(priceId)?.id ?? null) : null,
+      cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+      periodEnd: sub.current_period_end ?? sub.items?.data?.[0]?.current_period_end ?? null,
+    };
+  }
+
+  // Switch tiers in place on the existing subscription.
+  //   UPGRADE:   proration_behavior "create_prorations" — the price difference settles on the NEXT
+  //              invoice (no immediate invoice => no immediate bundle grant), and the entitlement
+  //              flips NOW so the higher tier's features/ceiling unlock immediately. The renewal
+  //              invoice grants the new tier's bundle via the existing invoice.paid handler.
+  //   DOWNGRADE: proration_behavior "none" — nothing charged or credited now; the entitlement keeps
+  //              the richer tier until renewal (the month they paid for stays honored), when the
+  //              renewal invoice syncs entitlement + grants the smaller bundle.
+  // Exploit note: NEITHER path creates an invoice at switch time, so tier-hopping can never farm
+  // bundle grants — grants only ever ride real renewal invoices.
+  async function switchTier({ owner, tierId }) {
+    const t = tierFor(tierId);
+    const sub = await activeSubscription(owner);
+    if (!sub) throw new Error("No active subscription to switch — subscribe first.");
+    if (sub.cancel_at_period_end) throw new Error("Subscription is set to cancel — resume it before switching plans.");
+    const item = sub.items?.data?.[0];
+    const currentTier = item?.price?.id ? tierForPrice.get(item.price.id) : null;
+    if (!currentTier) throw new Error("Current subscription price is not a managed tier.");
+    if (currentTier.id === t.id) return { switched: false, reason: "already on this plan", tier: t.id };
+    const upgrade = t.gbpPerMonth > currentTier.gbpPerMonth;
+    await stripe.subscriptions.update(sub.id, {
+      items: [{ id: item.id, price: priceIdFor[t.id] }],
+      proration_behavior: upgrade ? "create_prorations" : "none",
+    });
+    if (upgrade) await ledger.setEntitlement({ owner, tier: t.id });
+    return { switched: true, from: currentTier.id, to: t.id, upgrade, entitlementNow: upgrade ? t.id : currentTier.id };
+  }
+
+  // Cancel at period end (default) or resume a pending cancellation. The entitlement stays until
+  // Stripe fires customer.subscription.deleted at period end (already handled above).
+  async function setCancelAtPeriodEnd({ owner, cancel = true }) {
+    const sub = await activeSubscription(owner);
+    if (!sub) throw new Error("No active subscription.");
+    const updated = await stripe.subscriptions.update(sub.id, { cancel_at_period_end: !!cancel });
+    return {
+      cancelAtPeriodEnd: !!updated.cancel_at_period_end,
+      periodEnd: updated.current_period_end ?? updated.items?.data?.[0]?.current_period_end ?? null,
+    };
+  }
+
   // ── THE WEBHOOK HANDLER (pure: parsed event in -> ledger writes out) ──────────────────────────
   // Idempotency is the ledger's (owner, ref, kind, bucket) unique index — Stripe redelivers events, so
   // we key grants on a STABLE id (invoice id / session id), and a redelivery no-ops at the DB.
@@ -186,6 +249,10 @@ export function createBilling({ stripe, ledger, env = process.env } = {}) {
     createSubscriptionCheckout,
     createTopupCheckout,
     handleStripeEvent,
+    activeSubscription,
+    subscriptionStatus,
+    switchTier,
+    setCancelAtPeriodEnd,
     _resolveOwner: resolveOwner,
   };
 }

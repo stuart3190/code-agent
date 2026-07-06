@@ -19,7 +19,7 @@ import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv } from "./lib/supabase.mjs";
 import { haveStripeEnv } from "./lib/services.mjs";
 import { handleGenerate } from "./routes/generate.mjs";
-import { handleCheckout, handleBalance } from "./routes/billing.mjs";
+import { handleCheckout, handleBalance, handleSubscription, handleSwitch, handleCancel } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
@@ -182,6 +182,20 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/billing/balance" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleBalance(req, res, owner);
+    }
+    if (p === "/api/billing/subscription" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleSubscription(req, res, owner);
+    }
+    if (p === "/api/billing/switch" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleSwitch(req, res, body, owner);
+    }
+    if (p === "/api/billing/cancel" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleCancel(req, res, body, owner);
     }
     if (p === "/api/settings/byok") {
       const owner = await requireOwner(req, res); if (!owner) return;

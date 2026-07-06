@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { checkout } from "../lib/api.js";
+import { useEffect, useState } from "react";
+import { checkout, getSubscription, switchPlan, cancelPlan } from "../lib/api.js";
 
 // Billing UI on the LIVE Phase 4 ledger. Reads balance (client-side, RLS-scoped) and offers the
 // proven Stripe (test-mode) checkout paths. Every price string comes from /api/config -> costModel
@@ -8,6 +8,28 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
   const [topup, setTopup] = useState(100);
+  // Live subscription state (Stripe-side): drives Switch/Cancel/Resume on the plan cards.
+  const [sub, setSub] = useState(null); // { active, tier, cancelAtPeriodEnd, periodEnd }
+
+  const refreshSub = () => getSubscription().then(setSub).catch(() => setSub(null));
+  useEffect(() => { refreshSub(); }, [tier]);
+
+  async function doSwitch(t, isUpgrade) {
+    const msg = isUpgrade
+      ? `Switch to ${t.name}? The price difference is prorated on your next invoice, and ${t.name} features unlock right away.`
+      : `Switch to ${t.name}? Your current plan stays active until renewal, then ${t.name} takes over.`;
+    if (!window.confirm(msg)) return;
+    setBusy(t.id); setErr(null);
+    try { await switchPlan(t.id); await refreshSub(); onRefresh?.(); }
+    catch (e) { setErr(e.message); } finally { setBusy(null); }
+  }
+
+  async function doCancel(resume) {
+    if (!resume && !window.confirm("Cancel your plan? It stays active until the end of the period you've paid for; your credits are unaffected.")) return;
+    setBusy("cancel"); setErr(null);
+    try { await cancelPlan(resume); await refreshSub(); }
+    catch (e) { setErr(e.message); } finally { setBusy(null); }
+  }
 
   const managed = (config?.tiers || []).filter((t) => t.managed);
   const valuePerCredit = managed.find((t) => t.id === tier)?.effectiveGbpPerCredit ?? config?.topupGbpPerCredit ?? 0;
@@ -63,10 +85,9 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
         <div className="space-y-2">
           {managed.map((t) => {
             const isCurrent = tier === t.id;
-            // With ANY active subscription, other tiers are disabled too — a second checkout
-            // would create a concurrent Stripe subscription, not a switch. (Plan switching with
-            // proration is future work; until then: cancel first, then subscribe.)
-            const blocked = !!tier && !isCurrent;
+            const hasPlan = !!tier;
+            const current = managed.find((x) => x.id === tier);
+            const isUpgrade = current ? t.gbpPerMonth > current.gbpPerMonth : false;
             return (
               <div key={t.id} className={`panel p-3 ${isCurrent ? "border-amber/40" : ""}`}>
                 <div className="flex items-center justify-between">
@@ -78,14 +99,40 @@ export default function BillingPanel({ config, balance, onRefresh, tier, collaps
                   </div>
                   {isCurrent ? (
                     <span className="tag bg-amber/15 text-amber-soft">Current plan ✓</span>
+                  ) : hasPlan ? (
+                    <button className="btn-ghost text-xs" disabled={busy === t.id || sub?.cancelAtPeriodEnd}
+                      title={sub?.cancelAtPeriodEnd ? "Resume your plan before switching." : (isUpgrade ? "Upgrade — features unlock now, difference prorated" : "Downgrade — takes effect at renewal")}
+                      onClick={() => doSwitch(t, isUpgrade)}>
+                      {busy === t.id ? "Switching…" : isUpgrade ? "Upgrade" : "Downgrade"}
+                    </button>
                   ) : (
-                    <button className="btn-primary text-xs" disabled={busy === t.id || blocked}
-                      title={blocked ? "You already have a plan — plan switching is coming; cancel first to change." : undefined}
+                    <button className="btn-primary text-xs" disabled={busy === t.id}
                       onClick={() => go({ tierId: t.id }, t.id)}>
                       {busy === t.id ? "Opening checkout…" : "Subscribe"}
                     </button>
                   )}
                 </div>
+                {isCurrent && sub?.active && (
+                  <div className="mt-2 pt-2 border-t border-line flex items-center justify-between text-[11px]">
+                    {sub.cancelAtPeriodEnd ? (
+                      <>
+                        <span className="text-red-400/90">
+                          Ends {sub.periodEnd ? new Date(sub.periodEnd * 1000).toLocaleDateString() : "at period end"} — credits unaffected
+                        </span>
+                        <button className="text-amber-soft hover:text-amber" disabled={busy === "cancel"}
+                          onClick={() => doCancel(true)}>{busy === "cancel" ? "…" : "Resume plan"}</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-slate-500">
+                          Renews {sub.periodEnd ? new Date(sub.periodEnd * 1000).toLocaleDateString() : "monthly"}
+                        </span>
+                        <button className="text-slate-500 hover:text-red-400" disabled={busy === "cancel"}
+                          onClick={() => doCancel(false)}>{busy === "cancel" ? "…" : "Cancel plan"}</button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
