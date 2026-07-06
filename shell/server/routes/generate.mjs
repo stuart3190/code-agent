@@ -20,6 +20,7 @@ import { ledger } from "../lib/services.mjs";
 import { getDecryptedKey } from "../lib/byokStore.mjs";
 import { previewProvider } from "../preview/index.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
+import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "../lib/images.mjs";
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
@@ -132,7 +133,27 @@ export async function handleGenerate(req, res, body, owner) {
     const tree = mode === "iterate" ? { ...body.tree } : clone(fromScaffold(REACT_VITE));
     const editFormat = mode === "iterate" ? "apply_patch" : undefined;
     const { schemas, impls } = makeFileTools(tree, { editFormat });
-    const systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
+
+    // Stock images (optional): when PEXELS_API_KEY is set, offer the search_images tool and its
+    // prompt addendum. Tools are caller-supplied to runAgent, so this stays above the seam.
+    let tools = schemas;
+    let toolImpls = impls;
+    let systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
+    if (imagesConfigured()) {
+      tools = [...schemas, SEARCH_IMAGES_SCHEMA];
+      toolImpls = {
+        ...impls,
+        search_images: async ({ query, count, orientation }) => {
+          try {
+            const photos = await searchImages(query, { count, orientation });
+            return { photos };
+          } catch (e) {
+            return { error: `image search unavailable (${e.message}) — build without photos`, photos: [] };
+          }
+        },
+      };
+      systemPrompt = `${systemPrompt}\n${IMAGES_PROMPT_BLOCK}`;
+    }
 
     sse(res, "log", { line: `engine: ${mode} on model ${provider.model} — ${provider.decision?.reason || ""}${plan ? " · steering by approved plan" : ""}` });
 
@@ -144,8 +165,8 @@ export async function handleGenerate(req, res, body, owner) {
     const { telemetry, finalText } = await runAgent({
       provider,
       systemPrompt,
-      tools: schemas,
-      toolImpls: impls,
+      tools,
+      toolImpls,
       tree,
       prompt: enginePrompt,
       log: (line) => sse(res, "log", { line: String(line) }),

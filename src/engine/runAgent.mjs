@@ -114,7 +114,8 @@ export async function runAgent({
 
     for (const tc of toolCalls) {
       const impl = toolImpls[tc.name];
-      const result = impl ? impl(tc.arguments) : { error: `unknown tool: ${tc.name}` };
+      // await supports async impls (e.g. the shell's search_images); no-op for the sync file tools.
+      const result = impl ? await impl(tc.arguments) : { error: `unknown tool: ${tc.name}` };
       log(`     ↳ ${summarizeCall(tc, result)}`);
       if (contextSelection) for (const p of touchedPaths(tc, result)) relevant.add(p);
       messages.push({
