@@ -5,13 +5,14 @@ import { getConfig } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
 import { listProjects, createProject, getProject } from "./lib/projects.js";
 import AuthGate, { Logo } from "./auth/AuthGate.jsx";
+import ResetPassword from "./auth/ResetPassword.jsx";
 import TopBar from "./components/TopBar.jsx";
 import Builder from "./builder/Builder.jsx";
 import BillingPanel from "./billing/BillingPanel.jsx";
 import SettingsPanel from "./settings/SettingsPanel.jsx";
 
 export default function App() {
-  const { user, loading } = useSession();
+  const { user, loading, recovery, clearRecovery } = useSession();
   const [config, setConfig] = useState(null);
   const [balance, setBalance] = useState(null);
   const [projects, setProjects] = useState([]);
@@ -51,6 +52,9 @@ export default function App() {
   useEffect(() => { if (user) { refreshBalance(); refreshProjects(); } }, [user, refreshBalance, refreshProjects]);
 
   if (loading) return <Splash label="…" />;
+  // A password-reset email link lands here with a recovery session — force the new-password
+  // screen before the normal app, even though the user is technically signed in.
+  if (recovery && user) return <ResetPassword onDone={clearRecovery} />;
   if (!user) return <AuthGate />;
 
   async function newProject() {
