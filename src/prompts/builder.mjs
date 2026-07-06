@@ -20,10 +20,16 @@ If the app genuinely needs none of these (a pure client-side widget), it's fine 
 but anything with accounts, saved data across reloads, or uploads MUST use the SDK.
 
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
-- Define a small semantic palette as CSS variables in :root in src/index.css — e.g. --background,
-  --foreground, --primary, --muted, --accent, --border — and style through those (Tailwind arbitrary
-  values like bg-[var(--background)], or a few shared classes in index.css). Never scatter one-off
-  hex codes through components.
+- The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,
+  --foreground, --card, --primary, --secondary, --muted, --accent, --destructive, --border, --ring,
+  --radius) wired into Tailwind. Style with those utilities — bg-background, text-foreground,
+  text-muted-foreground, bg-primary text-primary-foreground, bg-card, border-border, rounded-lg —
+  and TUNE the :root HSL values to fit the app's character (keep the variable names; utilities
+  depend on them). Never scatter one-off hex codes through components. For a dark app, add
+  className="dark" on the root element and tune the .dark values.
+- Fonts are baked in and self-hosted: font-sans (Manrope Variable) is the body/UI face and already
+  applied to body; font-display (Space Grotesk Variable) is already applied to h1-h4 for headings.
+  Do not add font imports or CDN links.
 - ONE accent colour, used sparingly: primary buttons, active states, key highlights. Everything else
   stays neutral. Do NOT put gradients on buttons, cards, or badges; at most one subtle hero-level
   gradient when a marketing/landing surface genuinely calls for it.
