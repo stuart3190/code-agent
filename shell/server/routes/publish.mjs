@@ -11,9 +11,24 @@ import { readdir, readFile } from "node:fs/promises";
 import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 import { serviceClient } from "../lib/supabase.mjs";
+import { ledger } from "../lib/services.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
+
+// Publishing is a paid feature: free users build and preview; any paid tier puts the app on a
+// live URL (custom domains are gated separately at Pro+ in routes/domains.mjs). Enforced at
+// PUBLISH time only — unpublish stays open (taking things down is never paywalled), and already-
+// published sites keep serving if a subscription lapses.
+const PUBLISH_TIERS = new Set(["starter", "pro", "studio"]);
+async function requirePublishTier(owner) {
+  const ent = await ledger().getEntitlement(owner.id).catch(() => null);
+  if (!PUBLISH_TIERS.has(ent?.tier)) {
+    const e = new Error("Publishing is included in every paid plan — subscribe in the Plans panel to put your app on a live URL.");
+    e.code = "upgrade_required";
+    throw e;
+  }
+}
 
 // Mirrors provisiond's reserved list (provisiond re-enforces; this gives the friendly 409).
 const RESERVED = new Set(["www", "api", "app", "apps", "preview", "admin", "mail", "buildr", "buildr101", "shell", "static", "assets"]);
@@ -130,6 +145,7 @@ export async function handlePublish(req, res, body, owner) {
     return res.end(JSON.stringify({ error: "publishing is not configured (PROVISIOND_URL/TOKEN)" }));
   }
   try {
+    await requirePublishTier(owner);
     // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
     const { slug, previousSlug } = await claimSlug(owner, projectId, name);
 
@@ -154,7 +170,8 @@ export async function handlePublish(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ url: out.url, files: out.files, bytes: out.bytes, slug: slug || out.id }));
   } catch (e) {
-    const status = e.code === "slug_taken" || e.code === "bad_slug" ? 409 : 500;
+    const status = e.code === "upgrade_required" ? 402
+      : e.code === "slug_taken" || e.code === "bad_slug" ? 409 : 500;
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: e.message, code: e.code }));
   }

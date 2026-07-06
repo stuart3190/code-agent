@@ -373,7 +373,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         )}
         {showPublish && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[24rem] panel p-4 shadow-xl">
-            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Publish</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Publish</span>
+              <span className="tag bg-amber/15 text-amber-soft">Paid plans</span>
+            </div>
             <p className="text-xs text-slate-400 mt-1">Pick your site's address — lowercase letters, numbers and dashes.</p>
             <div className="mt-2 flex items-center gap-1">
               <input className="field flex-1" value={siteName} maxLength={40} autoFocus
