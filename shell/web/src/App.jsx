@@ -27,7 +27,9 @@ export default function App() {
   // when the width BUCKET changes, so it never fights a manual toggle within the same bucket.
   const bucketRef = useRef(null);
   useEffect(() => {
-    const bucketOf = (w) => (w < 1200 ? "narrow" : "wide");
+    // Collapse the billing rail by default below 1440px — the build area always wins;
+    // the collapsed rail still shows the credit count and a one-click expand.
+    const bucketOf = (w) => (w < 1440 ? "narrow" : "wide");
     const apply = () => {
       const b = bucketOf(window.innerWidth);
       if (b === bucketRef.current) return;

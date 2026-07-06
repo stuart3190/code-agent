@@ -28,6 +28,8 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [showPublish, setShowPublish] = useState(false);
   const [siteName, setSiteName] = useState("");
   const [publishErr, setPublishErr] = useState(null);
+  // Site menu (consolidates the published-site actions so the header never overflows).
+  const [showSite, setShowSite] = useState(false);
   // Custom domain popover: connect the user's own domain to the published site.
   const [showDomain, setShowDomain] = useState(false);
   const [domainInput, setDomainInput] = useState("");
@@ -291,14 +293,8 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           <div className="font-medium text-slate-100 truncate">{project.name}</div>
           <div className="text-[11px] font-mono text-slate-500">{hasApp ? "iterating" : "new app"} · {prompts.length} turn{prompts.length === 1 ? "" : "s"}</div>
         </div>
-        <div className="flex items-center gap-2">
-          {publishedUrl && (
-            <a className="text-[11px] font-mono text-amber-soft hover:underline max-w-[18rem] truncate"
-              href={publishedUrl} target="_blank" rel="noreferrer" title={publishedUrl}>
-              {publishedUrl.replace(/^https:\/\//, "").replace(/\/$/, "")} ↗
-            </a>
-          )}
-          <button className="btn-ghost text-xs" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); }}
+        <div className="flex items-center gap-2 shrink-0">
+          <button className="btn-ghost text-xs" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); }}
             title="Standing instructions (brand, tone, constraints) applied to every build and change">
             Knowledge{knowledge.trim() ? " ●" : ""}
           </button>
@@ -306,29 +302,41 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
           </button>
-          <button className="btn-ghost text-xs" disabled={!hasApp || busy || publishBusy}
-            title={hasApp ? (publishedUrl ? "Republish the current version" : "Publish this app to a public URL") : "Generate an app before publishing"}
-            onClick={() => {
-              if (publishedUrl) { doPublish(); return; } // republish keeps the claimed name
-              setSiteName(clientSlugify(project.name));
-              setPublishErr(null);
-              setShowPublish(true);
-            }}>
-            {publishBusy ? "Publishing…" : publishedUrl ? "Republish" : "Publish"}
-          </button>
-          {publishedUrl && (
-            <button className="btn-ghost text-xs" onClick={openDomains}
-              title="Connect your own domain to this site">
-              Domain
+          {!publishedUrl ? (
+            <button className="btn-ghost text-xs" disabled={!hasApp || busy || publishBusy}
+              title={hasApp ? "Publish this app to a public URL" : "Generate an app before publishing"}
+              onClick={() => { setSiteName(clientSlugify(project.name)); setPublishErr(null); setShowPublish(true); }}>
+              {publishBusy ? "Publishing…" : "Publish"}
             </button>
-          )}
-          {publishedUrl && (
-            <button className="btn-ghost text-xs text-red-400/80 hover:text-red-300" onClick={doUnpublish}
-              disabled={publishBusy} title="Take the published site offline (republish any time)">
-              Unpublish
+          ) : (
+            <button className="btn-ghost text-xs" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDomain(false); }}
+              title="Your live site — republish, domain, unpublish">
+              {publishBusy ? "Publishing…" : <>Site <span className="text-amber-soft">●</span> ▾</>}
             </button>
           )}
         </div>
+        {showSite && publishedUrl && (
+          <div className="absolute right-4 top-full mt-1 z-20 w-[20rem] panel p-1.5 shadow-xl">
+            <a className="block px-3 py-2 rounded-lg text-xs font-mono text-amber-soft hover:bg-ink-850 truncate"
+              href={publishedUrl} target="_blank" rel="noreferrer" title={publishedUrl}>
+              {publishedUrl.replace(/^https:\/\//, "").replace(/\/$/, "")} ↗
+            </a>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850"
+              disabled={busy || publishBusy}
+              onClick={() => { setShowSite(false); doPublish(); }}>
+              Republish current version
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850"
+              onClick={() => { setShowSite(false); openDomains(); }}>
+              Custom domain…
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400/90 hover:bg-ink-850"
+              disabled={publishBusy}
+              onClick={() => { setShowSite(false); doUnpublish(); }}>
+              Unpublish site
+            </button>
+          </div>
+        )}
         {showDomain && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">
             <div className="flex items-center gap-2">
