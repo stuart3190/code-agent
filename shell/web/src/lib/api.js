@@ -93,14 +93,15 @@ export async function downloadProject(projectId) {
 }
 
 // POST /api/publish — build the tree server-side and ship the static dist to the VPS.
-export async function publishProject(projectId, tree) {
+// `name` (first publish / rename) becomes the site's subdomain: <name>.app.buildr101.com.
+export async function publishProject(projectId, tree, name) {
   const r = await fetch("/api/publish", {
     method: "POST", headers: await authHeaders(),
-    body: JSON.stringify({ projectId, tree }),
+    body: JSON.stringify({ projectId, tree, name: name || undefined }),
   });
   const out = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(out.error || `publish ${r.status}`);
-  return out; // { url, files, bytes }
+  return out; // { url, files, bytes, slug }
 }
 
 // POST /api/unpublish — remove the published static site (its URL then 404s).

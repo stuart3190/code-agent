@@ -217,8 +217,22 @@ async function get(projectId) {
 const APP_SUFFIX = process.env.PUBLISH_PUBLIC_SUFFIX || "app.buildr101.com";
 const PUBLISH_MAX_BYTES = Number(process.env.PUBLISH_MAX_BYTES || 25 * 1024 * 1024);
 
-async function publishSite(projectId, files) {
-  const label = labelFor(projectId);
+// Site-name slugs: real DNS labels under *.app.buildr101.com — dashes are FINE here (the
+// dash-free rule is a nip.io preview quirk only). Ownership/uniqueness is the SHELL's job
+// (published_sites table); provisiond just validates shape and refuses reserved names.
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+const RESERVED_SLUGS = new Set(["www", "api", "app", "apps", "preview", "admin", "mail", "buildr", "buildr101", "shell", "static", "assets"]);
+function labelForPublish(projectId, slug) {
+  if (slug !== undefined && slug !== null && slug !== "") {
+    const s = String(slug).toLowerCase();
+    if (!SLUG_RE.test(s) || RESERVED_SLUGS.has(s)) { const e = new Error(`invalid site name: ${s}`); e.code = "bad_slug"; throw e; }
+    return s;
+  }
+  return labelFor(projectId);
+}
+
+async function publishSite(projectId, files, slug) {
+  const label = labelForPublish(projectId, slug);
   await ensureCaddy(CADDY_CFG); // publish mount + *.app cert config live on the Caddy front
   const entries = Object.entries(files);
   let total = 0;
@@ -244,8 +258,8 @@ async function publishSite(projectId, files) {
   return { id: label, url: `https://${label}.${APP_SUFFIX}/`, mode: "published", files: entries.length, bytes: total };
 }
 
-async function unpublishSite(projectId) {
-  const label = labelFor(projectId);
+async function unpublishSite(projectId, slug) {
+  const label = labelForPublish(projectId, slug);
   const dir = path.join(PUBLISH_ROOT, label);
   const existed = existsSync(dir);
   await rm(dir, { recursive: true, force: true });
@@ -294,14 +308,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await stop(projectId));
     }
     if (p === "/publish" && req.method === "POST") {
-      const { projectId, files } = await readJson(req);
+      const { projectId, files, slug } = await readJson(req);
       if (!projectId || !files || typeof files !== "object") return send(res, 400, { error: "projectId and files required" });
-      return send(res, 200, await publishSite(projectId, files));
+      return send(res, 200, await publishSite(projectId, files, slug));
     }
     if (p === "/unpublish" && req.method === "POST") {
-      const { projectId } = await readJson(req);
+      const { projectId, slug } = await readJson(req);
       if (!projectId) return send(res, 400, { error: "projectId required" });
-      return send(res, 200, await unpublishSite(projectId));
+      return send(res, 200, await unpublishSite(projectId, slug));
     }
     if (p === "/get" && req.method === "GET") {
       const projectId = url.searchParams.get("projectId");

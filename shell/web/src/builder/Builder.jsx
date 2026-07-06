@@ -24,6 +24,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [publishMsg, setPublishMsg] = useState(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState(project.publishedUrl || null);
+  // First-publish dialog: pick the site name (<name>.app.buildr101.com).
+  const [showPublish, setShowPublish] = useState(false);
+  const [siteName, setSiteName] = useState("");
+  const [publishErr, setPublishErr] = useState(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
@@ -207,17 +211,20 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     }
   }
 
-  async function doPublish() {
+  async function doPublish(name) {
     if (!hasApp || publishBusy) return;
     setPublishBusy(true);
     setPublishMsg(null);
     try {
-      const r = await publishProject(project.id, tree);
+      const r = await publishProject(project.id, tree, name);
       setPublishedUrl(r.url);
-      setPublishMsg(`Published ✓`);
+      setShowPublish(false);
+      setPublishMsg(`Published ✓ ${r.url.replace(/^https:\/\//, "").replace(/\/$/, "")}`);
       await savePublishedUrl(project.id, r.url).catch(() => {});
     } catch (e) {
-      setPublishMsg(e.message || String(e));
+      // Name conflicts keep the dialog open so the user can pick another.
+      if (showPublish) setPublishErr(e.message || String(e));
+      else setPublishMsg(e.message || String(e));
     } finally {
       setPublishBusy(false);
     }
@@ -266,8 +273,14 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
           </button>
-          <button className="btn-ghost text-xs" onClick={doPublish} disabled={!hasApp || busy || publishBusy}
-            title={hasApp ? (publishedUrl ? "Republish the current version" : "Publish this app to a public URL") : "Generate an app before publishing"}>
+          <button className="btn-ghost text-xs" disabled={!hasApp || busy || publishBusy}
+            title={hasApp ? (publishedUrl ? "Republish the current version" : "Publish this app to a public URL") : "Generate an app before publishing"}
+            onClick={() => {
+              if (publishedUrl) { doPublish(); return; } // republish keeps the claimed name
+              setSiteName(clientSlugify(project.name));
+              setPublishErr(null);
+              setShowPublish(true);
+            }}>
             {publishBusy ? "Publishing…" : publishedUrl ? "Republish" : "Publish"}
           </button>
           {publishedUrl && (
@@ -277,6 +290,26 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             </button>
           )}
         </div>
+        {showPublish && (
+          <div className="absolute right-4 top-full mt-1 z-20 w-[24rem] panel p-4 shadow-xl">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Publish</div>
+            <p className="text-xs text-slate-400 mt-1">Pick your site's address — lowercase letters, numbers and dashes.</p>
+            <div className="mt-2 flex items-center gap-1">
+              <input className="field flex-1" value={siteName} maxLength={40} autoFocus
+                onChange={(e) => { setSiteName(clientSlugify(e.target.value, true)); setPublishErr(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && siteName.length >= 3) doPublish(siteName); }} />
+              <span className="text-[11px] font-mono text-slate-500 shrink-0">.app.buildr101.com</span>
+            </div>
+            {publishErr && <div className="mt-2 text-xs text-red-400">{publishErr}</div>}
+            <div className="flex items-center justify-end gap-2 mt-3">
+              <button className="btn-ghost text-xs" onClick={() => setShowPublish(false)}>Cancel</button>
+              <button className="btn-primary text-xs px-3 py-1" disabled={publishBusy || siteName.length < 3}
+                onClick={() => doPublish(siteName)}>
+                {publishBusy ? "Publishing…" : "Publish site"}
+              </button>
+            </div>
+          </div>
+        )}
         {showKnowledge && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[26rem] panel p-4 shadow-xl">
             <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Project knowledge</div>
@@ -501,6 +534,13 @@ function Timeline({ lines, busy }) {
       </details>
     </div>
   );
+}
+
+// Mirror of the server's slugify (the server re-validates; this is just live input shaping).
+// `typing` keeps a trailing dash while the user is mid-word.
+function clientSlugify(name, typing = false) {
+  const s = String(name || "").toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+  return typing ? s.replace(/^-+/, "") : s.replace(/^-+|-+$/g, "");
 }
 
 // Keep full-tree snapshots on only the most recent N history entries (history itself is never
