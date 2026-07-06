@@ -29,6 +29,20 @@ export const REACT_VITE = {
         "@supabase/supabase-js": "^2.45.4",
         "@fontsource-variable/manrope": "^5.2.8",
         "@fontsource-variable/space-grotesk": "^5.2.10",
+        "@radix-ui/react-checkbox": "^1.3.6",
+        "@radix-ui/react-dialog": "^1.1.18",
+        "@radix-ui/react-dropdown-menu": "^2.1.19",
+        "@radix-ui/react-label": "^2.1.11",
+        "@radix-ui/react-select": "^2.3.2",
+        "@radix-ui/react-separator": "^1.1.11",
+        "@radix-ui/react-slot": "^1.3.0",
+        "@radix-ui/react-switch": "^1.3.2",
+        "@radix-ui/react-tabs": "^1.1.16",
+        "class-variance-authority": "^0.7.1",
+        clsx: "^2.1.1",
+        "lucide-react": "^1.23.0",
+        "tailwind-merge": "^2.6.0",
+        "tailwindcss-animate": "^1.0.7",
       },
       devDependencies: {
         "@vitejs/plugin-react": "^4.3.1",
@@ -56,13 +70,19 @@ export const REACT_VITE = {
 </html>
 `,
 
-  "vite.config.js": `import { defineConfig } from "vite";
+  "vite.config.js": `import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({ plugins: [react()] });
+export default defineConfig({
+  plugins: [react()],
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+});
 `,
 
-  "tailwind.config.js": `export default {
+  "tailwind.config.js": `import tailwindcssAnimate from "tailwindcss-animate";
+
+export default {
   darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
@@ -92,7 +112,7 @@ export default defineConfig({ plugins: [react()] });
       },
     },
   },
-  plugins: [],
+  plugins: [tailwindcssAnimate],
 };
 `,
 
@@ -191,6 +211,25 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   // exact factory the app ships. App code uses `import { auth, db, storage } from "./lib/backend"`.
   "src/lib/backend/index.js": sdk("lib/backend/index.js"),
   "src/lib/backend/supabaseBackend.js": sdk("lib/backend/supabaseBackend.js"),
+
+  // shadcn/ui component set (JSX, tokens-aware) — authored as real files under
+  // reactVite/components/ui/ and read into the tree, same pattern as the SDK.
+  // The model composes standard UI from these via `@/components/ui/*` imports.
+  "src/lib/utils.js": sdk("lib/utils.js"),
+  "src/components/ui/badge.jsx": sdk("components/ui/badge.jsx"),
+  "src/components/ui/button.jsx": sdk("components/ui/button.jsx"),
+  "src/components/ui/card.jsx": sdk("components/ui/card.jsx"),
+  "src/components/ui/checkbox.jsx": sdk("components/ui/checkbox.jsx"),
+  "src/components/ui/dialog.jsx": sdk("components/ui/dialog.jsx"),
+  "src/components/ui/dropdown-menu.jsx": sdk("components/ui/dropdown-menu.jsx"),
+  "src/components/ui/input.jsx": sdk("components/ui/input.jsx"),
+  "src/components/ui/label.jsx": sdk("components/ui/label.jsx"),
+  "src/components/ui/select.jsx": sdk("components/ui/select.jsx"),
+  "src/components/ui/separator.jsx": sdk("components/ui/separator.jsx"),
+  "src/components/ui/switch.jsx": sdk("components/ui/switch.jsx"),
+  "src/components/ui/table.jsx": sdk("components/ui/table.jsx"),
+  "src/components/ui/tabs.jsx": sdk("components/ui/tabs.jsx"),
+  "src/components/ui/textarea.jsx": sdk("components/ui/textarea.jsx"),
 
   ".env.example": `# Backend SDK config — copy to .env (gitignored). The anon key is the PUBLIC
 # browser key (safe to ship); never put the service_role key here.

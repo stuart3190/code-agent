@@ -30,6 +30,22 @@ Design (defaults for when the user does not specify a style — a stated style A
 - Fonts are baked in and self-hosted: font-sans (Manrope Variable) is the body/UI face and already
   applied to body; font-display (Space Grotesk Variable) is already applied to h1-h4 for headings.
   Do not add font imports or CDN links.
+- COMPOSE standard UI from the scaffold's component library instead of hand-rolling primitives.
+  Import from "@/components/ui/<name>" (the "@" alias = src/). Do NOT read or edit these files —
+  they are token-aware and ready to use:
+  · button: Button (variant: default|secondary|outline|ghost|destructive|link; size: sm|default|lg|icon; asChild)
+  · card: Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter
+  · input: Input · textarea: Textarea · label: Label (htmlFor)
+  · select: Select (value/onValueChange) + SelectTrigger>SelectValue, SelectContent>SelectItem (value)
+  · dialog: Dialog (open/onOpenChange) + DialogTrigger, DialogContent>DialogHeader>DialogTitle/DialogDescription, DialogFooter, DialogClose
+  · badge: Badge (variant: default|secondary|outline|destructive)
+  · tabs: Tabs (value/onValueChange) + TabsList>TabsTrigger (value), TabsContent (value)
+  · checkbox: Checkbox (checked/onCheckedChange) · switch: Switch (checked/onCheckedChange)
+  · dropdown-menu: DropdownMenu + DropdownMenuTrigger (asChild), DropdownMenuContent>DropdownMenuItem/Label/Separator
+  · table: Table, TableHeader>TableRow>TableHead, TableBody>TableRow>TableCell, TableCaption
+  Icons: import what you need from "lucide-react" (e.g. Plus, Trash2, Pencil, Calendar).
+  Helper: cn() from "@/lib/utils" to merge conditional classes. Hand-roll only what has no
+  counterpart above (charts, canvas, novel widgets) — style those with the same tokens.
 - ONE accent colour, used sparingly: primary buttons, active states, key highlights. Everything else
   stays neutral. Do NOT put gradients on buttons, cards, or badges; at most one subtle hero-level
   gradient when a marketing/landing surface genuinely calls for it.
@@ -50,8 +66,10 @@ You edit files through tools only:
 Rules:
 - Implement the user's app primarily in src/App.jsx (split into more files under src/ if helpful).
 - Always write COMPLETE file contents, never partial snippets or "...".
-- Use only the dependencies already in package.json (react, react-dom, the backend SDK). Do not add packages.
-- Do NOT edit files under src/lib/backend/ — that is the fixed SDK; just import from it.
+- Use only the dependencies already in package.json (react, react-dom, the backend SDK, the
+  @/components/ui library and its radix/cva/lucide-react deps). Do not add packages.
+- Do NOT edit files under src/lib/backend/ or src/components/ui/ — fixed SDK and component
+  library; just import from them.
 - When the app is fully implemented and working, STOP calling tools and reply with a one-paragraph
   summary of what you built. Do not ask the user questions.`;
 
@@ -85,6 +103,9 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
+The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
+label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
+lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.
@@ -128,6 +149,9 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
+The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
+label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
+lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.
