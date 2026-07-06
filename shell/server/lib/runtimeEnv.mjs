@@ -8,12 +8,20 @@
 // The anon key is the PUBLIC browser key (safe to ship to any preview); the security boundary
 // stays the Phase 3.1 owner-scoped RLS. VITE_APP_ID namespaces one user's apps apart.
 
+import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
+
 export function withRuntimeEnv(tree, projectId) {
   const url = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!url || !anonKey) return tree; // unconfigured server -> fail-soft SDK message in the app
   return {
     ...tree,
+    // Keep the fixed dev bridge current in every materialized preview (old projects carry the
+    // devReporter version they were built with; it's do-not-edit, so always refresh it). A dead
+    // file for pre-F2 trees whose main.jsx doesn't import it — harmless.
+    ...(tree["src/lib/devReporter.js"]
+      ? { "src/lib/devReporter.js": REACT_VITE["src/lib/devReporter.js"] }
+      : {}),
     ".env": [
       "# Injected at materialization time by the shell — not part of the saved project.",
       `VITE_SUPABASE_URL=${url}`,

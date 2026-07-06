@@ -28,6 +28,9 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
   const [knowledgeMsg, setKnowledgeMsg] = useState(null);
+  // Visual edits: click an element in the preview -> the next change is scoped to it.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedEl, setSelectedEl] = useState(null); // { tag, text, outerHTML, path }
   const logRef = useRef(null);
   const iframeRef = useRef(null);
 
@@ -44,12 +47,27 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
     const onMessage = (e) => {
       if (e.origin !== origin) return;
       const d = e.data;
-      if (!d || d.__buildr !== "runtime-error") return;
-      setAppErr((cur) => cur || { kind: "runtime", message: d.message, stack: d.stack });
+      if (!d) return;
+      if (d.__buildr === "runtime-error") {
+        setAppErr((cur) => cur || { kind: "runtime", message: d.message, stack: d.stack });
+      } else if (d.__buildr === "element-selected") {
+        setSelectedEl({ tag: d.tag, text: d.text, outerHTML: d.outerHTML, path: d.path });
+        setSelectMode(false);
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [previewUrl]);
+
+  // Toggle select mode inside the preview (the devReporter bridge listens for this).
+  function toggleSelectMode() {
+    if (!previewUrl || !iframeRef.current) return;
+    const next = !selectMode;
+    setSelectMode(next);
+    try {
+      iframeRef.current.contentWindow?.postMessage({ __buildr: "select-mode", on: next }, new URL(previewUrl).origin);
+    } catch { setSelectMode(false); }
+  }
 
   // Reopening a saved (already-built) project: bring its live preview back up (no Codex spend).
   useEffect(() => {
@@ -67,10 +85,15 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
     const prompt = (typeof promptOverride === "string" ? promptOverride : text).trim();
     if (!prompt || busy) return;
     const effectiveMode = !hasApp && planMode ? "plan" : mode;
+    // A selected element scopes a USER-TYPED iterate to that exact spot in the UI (cheaper, more
+    // accurate). Composed prompts (Fix it) skip the scoping — they carry their own context.
+    const scopedPrompt = effectiveMode === "iterate" && selectedEl && typeof promptOverride !== "string"
+      ? `The user selected this element in the running app (path: ${selectedEl.path}):\n\`\`\`html\n${selectedEl.outerHTML}\n\`\`\`\n\nApply this change to that element: ${prompt}`
+      : prompt;
     setBusy(true); setErr(null); setResult(null); setLog([]); setAppErr(null);
     try {
       const done = await generate(
-        { projectId: project.id, prompt, mode: effectiveMode,
+        { projectId: project.id, prompt: scopedPrompt, mode: effectiveMode,
           tree: effectiveMode === "iterate" ? tree : undefined,
           plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined,
           knowledge: knowledge.trim() || undefined },
@@ -113,6 +136,7 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
       else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
       if (typeof promptOverride !== "string") setText("");
       setPendingPlan(null); // the build consumed the plan
+      setSelectedEl(null); // the iterate consumed the selection
 
       const name = project.name && project.name !== "Untitled app" ? project.name : deriveName(prompt);
       const saved = await saveProject(project.id, { name, tree: done.tree, prompts: nextPrompts, previewRef: done.preview?.url || null });
@@ -250,6 +274,15 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
                 </button>
               </div>
             </div>
+            {selectedEl && (
+              <div className="mt-2 flex items-center justify-between text-[11px] text-amber">
+                <span className="truncate" title={selectedEl.outerHTML}>
+                  ◎ Selected: &lt;{selectedEl.tag}&gt;{selectedEl.text ? ` “${selectedEl.text.slice(0, 40)}${selectedEl.text.length > 40 ? "…" : ""}”` : ""} — your next change targets it
+                </span>
+                <button className="text-slate-500 hover:text-red-400 shrink-0 ml-2" title="Clear selection"
+                  onClick={() => setSelectedEl(null)}>✕</button>
+              </div>
+            )}
             {pendingPlan && !hasApp && !busy && (
               <div className="mt-2 flex items-center justify-between text-[11px] text-lime">
                 <span>Plan ready — “Generate app” will build against it.</span>
@@ -304,7 +337,18 @@ export default function Builder({ project, onProjectChange, onAfterTurn }) {
         {/* preview */}
         <div className="min-w-0 bg-ink-950 flex flex-col">
           <div className="flex items-center justify-between px-4 h-9 border-b border-line">
-            <span className="text-[11px] font-mono text-slate-500">preview{previewUrl ? "" : " · not running"}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-mono text-slate-500">preview{previewUrl ? "" : " · not running"}</span>
+              {previewUrl && hasApp && (
+                <button onClick={toggleSelectMode} disabled={busy}
+                  className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors ${selectMode
+                    ? "border-amber text-amber bg-amber/10"
+                    : "border-line text-slate-500 hover:text-amber hover:border-amber/50"}`}
+                  title="Click an element in the preview to target your next change at it">
+                  {selectMode ? "◎ click an element…" : "◎ select element"}
+                </button>
+              )}
+            </div>
             {previewUrl && <a className="text-[11px] text-slate-500 hover:text-amber font-mono" href={previewUrl} target="_blank" rel="noreferrer">{previewUrl} ↗</a>}
           </div>
           {appErr && (
