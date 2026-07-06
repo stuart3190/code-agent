@@ -252,9 +252,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     setPublishMsg(null);
     try {
       const r = await publishProject(project.id, tree, name);
+      const firstPublish = !publishedUrl;
       setPublishedUrl(r.url);
       setShowPublish(false);
-      setPublishMsg(`Published ✓ ${r.url.replace(/^https:\/\//, "").replace(/\/$/, "")}`);
+      setPublishMsg(`Published ✓ ${r.url.replace(/^https:\/\//, "").replace(/\/$/, "")}${firstPublish ? " — connect your own domain via Site ▾" : ""}`);
       await savePublishedUrl(project.id, r.url).catch(() => {});
     } catch (e) {
       // Name conflicts keep the dialog open so the user can pick another.
@@ -386,6 +387,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
               <span className="tag bg-amber/15 text-amber-soft">Paid plans</span>
             </div>
             <p className="text-xs text-slate-400 mt-1">Pick your site's address — lowercase letters, numbers and dashes.</p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Want your own domain (yourbusiness.com)? Publish first, then open <span className="text-slate-300">Site ▾ → Custom domain</span>.
+            </p>
             <div className="mt-2 flex items-center gap-1">
               <input className="field flex-1" value={siteName} maxLength={40} autoFocus
                 onChange={(e) => { setSiteName(clientSlugify(e.target.value, true)); setPublishErr(null); }}
