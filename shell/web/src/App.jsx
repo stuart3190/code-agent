@@ -164,8 +164,8 @@ function Dashboard({ projects, onNew, onOpen, onStart, onDelete }) {
                 <div className="flex items-center gap-2 shrink-0">
                   {p.publishedUrl && <span className="text-[11px] font-mono text-amber-soft">live</span>}
                   <span className="text-[11px] font-mono text-slate-500">{p.tree ? "built" : "empty"}</span>
-                  <button className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Delete project (permanent)"
+                  <button className="px-1.5 py-0.5 rounded text-slate-600 hover:text-red-400 hover:bg-ink-850 transition-colors"
+                    title="Delete project (permanent)" aria-label={`Delete ${p.name}`}
                     onClick={(e) => { e.stopPropagation(); onDelete(p); }}>✕</button>
                 </div>
               </div>
