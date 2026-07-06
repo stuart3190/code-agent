@@ -43,6 +43,7 @@ try {
     url: import.meta.env.VITE_SUPABASE_URL,
     anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
     appId: import.meta.env.VITE_APP_ID || null,
+    authUrl: import.meta.env.VITE_AUTH_URL || null,
   });
 } catch {
   backend = unconfigured();

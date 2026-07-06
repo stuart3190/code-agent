@@ -27,6 +27,8 @@ export function withRuntimeEnv(tree, projectId) {
       `VITE_SUPABASE_URL=${url}`,
       `VITE_SUPABASE_ANON_KEY=${anonKey}`,
       `VITE_APP_ID=${projectId}`,
+      // Per-app end-user auth (app-auth Edge Function): same email can register in many apps.
+      `VITE_AUTH_URL=${url}/functions/v1/app-auth`,
       "",
     ].join("\n"),
   };

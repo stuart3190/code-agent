@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -33,24 +33,58 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     return data;
   };
 
-  const auth = {
-    async signUp({ email, password }) {
-      const data = unwrap(await client.auth.signUp({ email, password }));
-      return data.user;
-    },
-    async signIn({ email, password }) {
-      const data = unwrap(await client.auth.signInWithPassword({ email, password }));
-      return data.user;
-    },
-    async signOut() {
-      const { error } = await client.auth.signOut();
-      if (error) throw error;
-    },
-    async currentUser() {
-      const { data } = await client.auth.getUser();
-      return data?.user ?? null;
-    },
+  // Per-app auth (PLAN-per-app-auth default lane): when authUrl + appId are configured, sign-up/
+  // sign-in go through the platform's app-auth Edge Function, which maps (appId, email) to an
+  // app-scoped auth user and returns a REAL session — same email can register in many apps without
+  // collision. The session is installed on this client, so db/storage/RLS behave identically.
+  const appAuthCall = async (action, { email, password } = {}) => {
+    const res = await fetch(authUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}`, apikey: anonKey },
+      body: JSON.stringify({ action, appId, email, password }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || `auth ${action} failed (${res.status})`);
+    unwrap(await client.auth.setSession({
+      access_token: out.session.access_token,
+      refresh_token: out.session.refresh_token,
+    }));
+    return out.user;
   };
+
+  const auth = authUrl && appId
+    ? {
+        async signUp({ email, password }) { return appAuthCall("signup", { email, password }); },
+        async signIn({ email, password }) { return appAuthCall("signin", { email, password }); },
+        async signOut() {
+          const { error } = await client.auth.signOut();
+          if (error) throw error;
+        },
+        async currentUser() {
+          const { data } = await client.auth.getUser();
+          const u = data?.user ?? null;
+          // Surface the REAL email the person typed, not the app-scoped synthetic address.
+          return u ? { ...u, email: u.user_metadata?.app_email || u.email } : null;
+        },
+      }
+    : {
+        async signUp({ email, password }) {
+          const data = unwrap(await client.auth.signUp({ email, password }));
+          return data.user;
+        },
+        async signIn({ email, password }) {
+          const data = unwrap(await client.auth.signInWithPassword({ email, password }));
+          return data.user;
+        },
+        async signOut() {
+          const { error } = await client.auth.signOut();
+          if (error) throw error;
+        },
+        async currentUser() {
+          const { data } = await client.auth.getUser();
+          return data?.user ?? null;
+        },
+      };
 
   // db.entity(type) — CRUD over the generic `entities` table, scoped to one `type`.
   // Records are returned flat: { id, type, data, owner, created_at }.
