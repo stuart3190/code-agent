@@ -66,6 +66,7 @@ export default function AuthGate() {
           <li className="flex gap-2.5"><Check /> Working accounts and saved data, built in from the first version</li>
           <li className="flex gap-2.5"><Check /> Real design and real photography — nothing that looks generated</li>
           <li className="flex gap-2.5"><Check /> One click to publish on a live URL</li>
+          <li className="flex gap-2.5"><Check /> 30 free build credits when you sign up — no card needed</li>
         </ul>
         {/* framed proof: an app Buildr101 built, as-is */}
         <div className="mt-10 max-w-xl rounded-xl border border-line overflow-hidden shadow-panel bg-ink-900">

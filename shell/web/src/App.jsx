@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
-import { getConfig, deleteProjectFull } from "./lib/api.js";
+import { getConfig, deleteProjectFull, serverBalance } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
 import { listProjects, createProject, getProject } from "./lib/projects.js";
 import AuthGate, { Logo } from "./auth/AuthGate.jsx";
@@ -52,7 +52,13 @@ export default function App() {
     try { setProjects(await listProjects()); } catch { setProjects([]); }
   }, [user]);
 
-  useEffect(() => { if (user) { refreshBalance(); refreshProjects(); } }, [user, refreshBalance, refreshProjects]);
+  useEffect(() => {
+    if (!user) return;
+    // Server balance first: it materializes the one-time welcome grant for brand-new accounts,
+    // so the very first thing a new user sees is their free credits, not a zero.
+    serverBalance().catch(() => {}).finally(() => { refreshBalance(); });
+    refreshProjects();
+  }, [user, refreshBalance, refreshProjects]);
 
   if (loading) return <Splash label="…" />;
   // A password-reset email link lands here with a recovery session — force the new-password

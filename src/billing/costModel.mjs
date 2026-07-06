@@ -136,6 +136,11 @@ export const TIERS = [
 
 export const TOPUP_GBP_PER_CREDIT = 0.12; // on-demand; above every bundle; rolls over freely
 
+// One-time signup gift: enough for a real trial (~7-12 builds at observed 2.3-4.3 cr/build),
+// bounded worst-case cost ≈ WELCOME_CREDITS × trueCostPerCredit (~£1.20 at real API rates; ~£0 on
+// the Codex lane). Granted idempotently per account (ledger ref welcome:<owner>).
+export const WELCOME_CREDITS = 30;
+
 // Worst-case monthly runtime loss for a free BYOK user = every free slot pinned always-on (no
 // reaping). This is the eyes-open ceiling on the loss-leader; reaping makes the real figure far lower.
 export function byokWorstCaseRuntimeLossPerMonth(slots = BYOK_FREE_PREVIEW_SLOTS, rt = RUNTIME) {

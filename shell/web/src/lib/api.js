@@ -116,6 +116,15 @@ export async function deleteProjectFull(projectId) {
   return out;
 }
 
+// Server-side balance read — also materializes the one-time welcome grant for new accounts
+// (the client-side RLS read can't write ledger rows). Fire once after login.
+export async function serverBalance() {
+  const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `balance ${r.status}`);
+  return out;
+}
+
 // Subscription lifecycle — status, in-place plan switch, cancel/resume at period end.
 export async function getSubscription() {
   const r = await fetch("/api/billing/subscription", { headers: await authHeaders() });

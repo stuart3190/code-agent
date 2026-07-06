@@ -6,6 +6,7 @@
 
 import { billing, ledger } from "../lib/services.mjs";
 import { optionalEnv } from "../lib/env.mjs";
+import { ensureWelcomeGrant } from "../lib/welcome.mjs";
 
 function appUrls(body) {
   const base = body?.appUrl || optionalEnv("APP_URL", "http://localhost:5173");
@@ -77,6 +78,7 @@ export async function handleCancel(req, res, body, owner) {
 
 export async function handleBalance(req, res, owner) {
   try {
+    await ensureWelcomeGrant(owner.id); // materializes the signup gift on first balance read
     const bal = await ledger().getBalance(owner.id);
     const ent = await ledger().getEntitlement(owner.id);
     res.writeHead(200, { "Content-Type": "application/json" });

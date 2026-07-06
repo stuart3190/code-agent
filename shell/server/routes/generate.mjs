@@ -21,6 +21,7 @@ import { getDecryptedKey } from "../lib/byokStore.mjs";
 import { previewProvider } from "../preview/index.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "../lib/images.mjs";
+import { ensureWelcomeGrant } from "../lib/welcome.mjs";
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
@@ -63,6 +64,9 @@ export async function handleGenerate(req, res, body, owner) {
     ? { provider: "anthropic", strong: BYOK_MODEL, apiKey: byokKey }
     : { provider: "codex", strong: "gpt-5.5" }; // free ChatGPT-sub lane; single-model pass-through
   const buildProvider = (intent) => createRoutingProvider({ config: providerConfig, turnMeta: { intent } });
+
+  // New accounts get their one-time welcome credits before the gate (idempotent no-op after).
+  await ensureWelcomeGrant(owner.id);
 
   // Coarse pre-spend gate — MANAGED lane only. BYOK users pay their own inference, so a zero
   // platform balance must not block them.
