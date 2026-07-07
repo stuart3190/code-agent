@@ -2,10 +2,12 @@
 
 > Paste-into-a-fresh-session summary of the entire app builder: what it is, every working part,
 > where things run, the rules that keep it clean, and what's still open.
-> Last updated **2026-07-06 end-of-day** (design pass, 7 Lovable-parity features, production
-> deploy, per-app auth, site names + custom domains, full paywall ladder, plan switching, project
-> lifecycle, welcome credits, launch audit). Repo: `stuart3190/app-builder` (private, linear
-> master, EPYC box `C:\Users\Administrator\app-builder`).
+> Last updated **2026-07-07** (launch-audit session: Stripe live catalog created via MCP +
+> STRIPE-LIVE.md runbook, legal pages + account deletion live, public /pricing, nightly Supabase
+> backups — remaining audit items are Stuart-only dashboard steps). Prior 2026-07-06: design pass,
+> 7 Lovable-parity features, production deploy, paywall ladder, welcome credits.
+> Repo: `stuart3190/app-builder` (private, linear master, EPYC box
+> `C:\Users\Administrator\app-builder`).
 
 ## What it is
 
@@ -29,7 +31,11 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
     the shell's `/api/domain-check`).
 - **Local EPYC box = dev only** (shell on :8787, vite dev :5173, optional SSH tunnel + stripe
   listen). Local and prod share the same Supabase project + Stripe test account.
-- **Deploy** = tar/scp/restart (exact commands in DEPLOY.md). Web dist rides the tarball.
+- **Deploy** = tar/scp/restart (exact commands in DEPLOY.md — tar MUST run from the repo root).
+  Web dist rides the tarball.
+- **Backups**: `buildr-backup.timer` (systemd, daily 04:17 UTC) runs `scripts/backup-supabase.mjs`
+  → gzipped-JSON export of all platform tables + auth users into `~/backups/`, 14-day prune
+  (DEPLOY.md §Backups). The Supabase free tier itself keeps NONE.
 - Stripe PRODUCTION webhook `we_1TqIZvC6PoSrpLpG4HMGQBvD` → `buildr101.com/api/stripe/webhook`
   (proven live). DNS on Cloudflare, all records DNS-only/grey.
 
@@ -60,13 +66,18 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   `generate` (SSE; plan/build/iterate; knowledge injection; search_images tool when
   PEXELS_API_KEY set; welcome grant), `preview`, `publish`/`unpublish` (site-name claims +
   paywall), `domains` (+ unauthenticated `domain-check` for Caddy), `projects/delete` (FULL infra
-  cleanup: domains, site + released name, preview container, per-app users/data, row — service
-  role with explicit owner check), `export` (ZIP, secret-gated), `billing`
+  cleanup via the shared `deleteProjectCascade`: domains, site + released name, preview container,
+  per-app users/data, row — service role with explicit owner check), `account/delete` (GDPR-grade:
+  cancels any Stripe sub IMMEDIATELY hard-fail, cascades every project, wipes ledger/customers/
+  BYOK, deletes the auth user; typed-DELETE UI in Settings), `export` (ZIP, secret-gated), `billing`
   (checkout/balance/subscription/switch/cancel + welcome grant on balance reads),
   `stripeWebhook`, `settings` (BYOK). Env is read ONCE at start — any .env edit or code change
   ⇒ restart (`sudo systemctl restart buildr-shell`).
 - **Web** (`shell/web`, Vite+React+Tailwind): dark ink + single amber accent, Manrope/Space
-  Grotesk, layered-blocks logo. AuthGate = storefront split (proof screenshot + bullets) with
+  Grotesk, layered-blocks logo. **Public pages** (routed pre-auth in main.jsx, no account needed):
+  `/pricing` (live numbers from /api/config incl. welcomeCredits) + `/terms` `/privacy` `/refunds`
+  (`src/legal/`); links in AuthGate + Settings footers; support contact support@buildr101.com.
+  AuthGate = storefront split (proof screenshot + bullets) with
   signup-confirmation handling + forgot-password (+ ResetPassword screen on PASSWORD_RECOVERY).
   Dashboard: starter-prompt chips, live-site links, always-visible delete ✕ (confirm spells out
   consequences). **Builder**: prompt box (⌘Enter), plan-mode toggle, inline project RENAME
