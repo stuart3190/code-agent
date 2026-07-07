@@ -137,13 +137,21 @@ timers under virtual-time).
 ## Open items — LAUNCH AUDIT (Stripe is TEST mode; Stuart is deliberately pre-traffic)
 
 **🔴 Before real users / launch day:**
-- **Stripe test→live runbook**: live products + 4 price IDs, live sk_ + live webhook whsec,
-  **REMOVE the sk_test safety pin (`shell/server/lib/services.mjs:23` refuses live keys — by
-  design)**, `assertPricesMatchModel` on live, business name "Zataus"→Buildr101, payout details,
-  statement descriptor, public ToS/refund policy (Stripe requires). A **Stripe MCP connector is
-  installed** (surfaces in fresh sessions) — use it for live-mode setup.
-- **Legal**: ToS, Privacy Policy, support contact; **account deletion** (needs project-delete-style
-  full cleanup across all the user's projects).
+- **Stripe test→live**: runbook = `baseline/STRIPE-LIVE.md`. Step 1 DONE 2026-07-07 (live
+  products + 4 prices created via the Stripe MCP connector, lookup keys `buildr101_*`, IDs in the
+  runbook). Remaining: dashboard housekeeping (name "Zataus"→Buildr101, statement descriptor,
+  payouts, public ToS/refund URLs), live webhook endpoint + whsec (MCP doesn't expose
+  webhook_endpoints — dashboard step), then the flip (**REMOVE the sk_test safety pin
+  `shell/server/lib/services.mjs:23`**, live sk_ + price IDs into VPS .env, restart,
+  `assertPricesMatchModel` on live, one real checkout + refund).
+- **Legal**: BUILT 2026-07-07 (uncommitted, not yet deployed). Public `/terms` `/privacy`
+  `/refunds` (shell/web/src/legal/LegalPage.jsx, routed in main.jsx pre-auth; links in AuthGate
+  footer + Settings) + **account deletion** (POST /api/account/delete: cancels Stripe sub
+  IMMEDIATELY (hard-fail), loops deleteProjectCascade — extracted from projects.mjs — then wipes
+  ledger/customers/byok + auth user; typed-DELETE danger zone in Settings).
+  `shell/harness/prove-account-delete.mjs` 26/26 GREEN live. Support contact =
+  support@buildr101.com — **address doesn't exist yet: set up Cloudflare Email Routing forward
+  (dashboard step)**. Goes live on next deploy (DEPLOY.md tarball).
 - **Transactional email**: Resend/SES (Supabase mailer ≈3/hr — fatal at volume); unlocks app-auth
   password reset (stage 4). Plus the **Supabase Site URL dashboard step** → `https://buildr101.com`
   (STILL PENDING — reset links point at localhost until done).

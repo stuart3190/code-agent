@@ -19,6 +19,46 @@ async function provisiondPost(route, body) {
   return r?.ok ? r.json() : null;
 }
 
+// The full teardown for ONE project (domains, published site + name claim, preview container,
+// per-app end users + data, then the row). Callers verify ownership FIRST — the service role
+// bypasses RLS. Shared by project delete and account delete (which loops every project).
+export async function deleteProjectCascade(svc, projectId) {
+  const cleaned = { domains: 0, site: false, appUsers: 0, entities: false };
+
+  // 1. Custom domains: detach the serving symlinks, drop the rows.
+  const { data: domains } = await svc.from("custom_domains").select("domain").eq("project_id", projectId);
+  for (const d of domains || []) {
+    await provisiondPost("/domain-detach", { domain: d.domain });
+    cleaned.domains++;
+  }
+  if (cleaned.domains) await svc.from("custom_domains").delete().eq("project_id", projectId);
+
+  // 2. Published site: take it offline (named slug AND any legacy UUID label), release the name.
+  const { data: site } = await svc.from("published_sites").select("slug").eq("project_id", projectId).maybeSingle();
+  if (site?.slug) await provisiondPost("/unpublish", { projectId, slug: site.slug });
+  await provisiondPost("/unpublish", { projectId }); // legacy label — no-op when absent
+  if (site) { await svc.from("published_sites").delete().eq("project_id", projectId); cleaned.site = true; }
+
+  // 3. Preview container: full teardown via the seam (reaper would only stop it).
+  await previewProvider().stop(projectId).catch(() => {});
+
+  // 4. Per-app end-user accounts (synthetic auth users) + the app's data rows.
+  const { data: appUsers } = await svc.from("app_users").select("auth_user_id").eq("app_id", projectId);
+  for (const u of appUsers || []) {
+    await svc.auth.admin.deleteUser(u.auth_user_id).catch(() => {});
+    cleaned.appUsers++;
+  }
+  if (cleaned.appUsers) await svc.from("app_users").delete().eq("app_id", projectId);
+  await svc.from("entities").delete().eq("app_id", projectId);
+  cleaned.entities = true;
+
+  // 5. The project row itself.
+  const { error: dErr } = await svc.from("projects").delete().eq("id", projectId);
+  if (dErr) throw new Error(dErr.message);
+
+  return cleaned;
+}
+
 export async function handleProjectDelete(req, res, body, owner) {
   const projectId = body?.projectId;
   if (!projectId) {
@@ -37,38 +77,7 @@ export async function handleProjectDelete(req, res, body, owner) {
       return res.end(JSON.stringify({ error: "Project not found." }));
     }
 
-    const cleaned = { domains: 0, site: false, appUsers: 0, entities: false };
-
-    // 1. Custom domains: detach the serving symlinks, drop the rows.
-    const { data: domains } = await svc.from("custom_domains").select("domain").eq("project_id", projectId);
-    for (const d of domains || []) {
-      await provisiondPost("/domain-detach", { domain: d.domain });
-      cleaned.domains++;
-    }
-    if (cleaned.domains) await svc.from("custom_domains").delete().eq("project_id", projectId);
-
-    // 2. Published site: take it offline (named slug AND any legacy UUID label), release the name.
-    const { data: site } = await svc.from("published_sites").select("slug").eq("project_id", projectId).maybeSingle();
-    if (site?.slug) await provisiondPost("/unpublish", { projectId, slug: site.slug });
-    await provisiondPost("/unpublish", { projectId }); // legacy label — no-op when absent
-    if (site) { await svc.from("published_sites").delete().eq("project_id", projectId); cleaned.site = true; }
-
-    // 3. Preview container: full teardown via the seam (reaper would only stop it).
-    await previewProvider().stop(projectId).catch(() => {});
-
-    // 4. Per-app end-user accounts (synthetic auth users) + the app's data rows.
-    const { data: appUsers } = await svc.from("app_users").select("auth_user_id").eq("app_id", projectId);
-    for (const u of appUsers || []) {
-      await svc.auth.admin.deleteUser(u.auth_user_id).catch(() => {});
-      cleaned.appUsers++;
-    }
-    if (cleaned.appUsers) await svc.from("app_users").delete().eq("app_id", projectId);
-    await svc.from("entities").delete().eq("app_id", projectId);
-    cleaned.entities = true;
-
-    // 5. The project row itself.
-    const { error: dErr } = await svc.from("projects").delete().eq("id", projectId);
-    if (dErr) throw new Error(dErr.message);
+    const cleaned = await deleteProjectCascade(svc, projectId);
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ deleted: projectId, cleaned }));

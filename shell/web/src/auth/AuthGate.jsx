@@ -83,7 +83,8 @@ export default function AuthGate() {
       </div>
 
       {/* auth card */}
-      <div className="grid place-items-center p-6">
+      <div className="grid grid-rows-[1fr_auto] p-6">
+      <div className="grid place-items-center">
       <div className="w-full max-w-sm panel p-7">
         <div className="flex items-center gap-2 mb-1 lg:hidden">
           <Logo />
@@ -139,6 +140,15 @@ export default function AuthGate() {
             </button>
           )}
         </div>
+      </div>
+      </div>
+
+      {/* public legal footer — Stripe + consumer law want these reachable pre-signup */}
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-6 text-[11px] text-slate-600">
+        <a className="hover:text-slate-400" href="/terms">Terms</a>
+        <a className="hover:text-slate-400" href="/privacy">Privacy</a>
+        <a className="hover:text-slate-400" href="/refunds">Refunds</a>
+        <a className="hover:text-slate-400" href="mailto:support@buildr101.com">support@buildr101.com</a>
       </div>
       </div>
     </div>

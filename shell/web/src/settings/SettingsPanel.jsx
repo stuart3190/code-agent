@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { getByok, saveByok, clearByok } from "../lib/api.js";
+import { getByok, saveByok, clearByok, deleteAccount } from "../lib/api.js";
 import { client } from "../lib/backend.js";
+import { SUPPORT_EMAIL } from "../legal/LegalPage.jsx";
 
 // Settings tab — BYOK (bring-your-own-key). Lets a user store an Anthropic API key so generation
 // runs on their own inference account (no platform credits debited). The raw key is write-only: it
@@ -84,7 +85,62 @@ export default function SettingsPanel() {
             switch back to platform credits.
           </div>
         </div>
+
+        <DangerZone />
+
+        <div className="mt-8 pb-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-600">
+          <a className="hover:text-slate-400" href="/terms" target="_blank" rel="noreferrer">Terms of Service</a>
+          <a className="hover:text-slate-400" href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>
+          <a className="hover:text-slate-400" href="/refunds" target="_blank" rel="noreferrer">Refund Policy</a>
+          <a className="hover:text-slate-400" href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+        </div>
       </div>
+    </div>
+  );
+}
+
+// Delete account — the confirm phrase is typed (not a window.confirm) because this one erases
+// EVERYTHING: subscription, published sites, projects, their end-users' data, and the login.
+function DangerZone() {
+  const [phrase, setPhrase] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const armed = phrase === "DELETE";
+
+  async function destroy() {
+    if (!armed || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await deleteAccount();
+      // The auth user is gone server-side; drop the dead local session and start over.
+      await client().auth.signOut().catch(() => {});
+      window.location.replace("/");
+    } catch (e) {
+      setErr(e.message || String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel p-6 mt-6 border-red-900/60">
+      <h2 className="text-base font-medium text-red-400">Delete account</h2>
+      <p className="text-sm text-slate-400 mt-1">
+        Permanently deletes your account: any subscription is cancelled immediately, your published
+        sites go offline (site names released, custom domains disconnected), and all your apps —
+        including their users and data — are erased along with your remaining credits and sign-in.
+        <span className="text-slate-300"> This cannot be undone.</span> Download anything you want to
+        keep first.
+      </p>
+      <div className="mt-4 flex flex-col sm:flex-row gap-2">
+        <input className="field font-mono" placeholder='Type "DELETE" to confirm' value={phrase}
+          disabled={busy} onChange={(e) => setPhrase(e.target.value)} autoComplete="off" spellCheck={false} />
+        <button onClick={destroy} disabled={!armed || busy}
+          className="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium bg-red-600 text-white
+            hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+          {busy ? "Deleting…" : "Delete my account"}
+        </button>
+      </div>
+      {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
     </div>
   );
 }

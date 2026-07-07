@@ -116,6 +116,19 @@ export async function deleteProjectFull(projectId) {
   return out;
 }
 
+// POST /api/account/delete — delete the signed-in account and everything it owns: cancels any
+// active subscription immediately, tears down every project (published sites, domains, previews,
+// per-app users/data), wipes billing rows + BYOK key, then removes the login. Permanent.
+export async function deleteAccount() {
+  const r = await fetch("/api/account/delete", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ confirm: true }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `account delete ${r.status}`);
+  return out;
+}
+
 // Server-side balance read — also materializes the one-time welcome grant for new accounts
 // (the client-side RLS read can't write ledger rows). Fire once after login.
 export async function serverBalance() {
