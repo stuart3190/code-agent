@@ -157,10 +157,11 @@ timers under virtual-time).
   password reset (stage 4). Plus the **Supabase Site URL dashboard step** → `https://buildr101.com`
   (STILL PENDING — reset links point at localhost until done).
 
-**🟡 Soon after:** Supabase backups (free tier keeps NONE — Pro $25/mo or pg_dump cron) · uptime
-monitoring (e.g. UptimeRobot) · public pricing/landing page (pricing only visible after login) ·
-Codex quota ceiling on the managed lane (covered by the scaling plan) · light abuse guards
-(app-auth signup rate limits, per-account project caps).
+**🟡 Soon after:** ~~Supabase backups~~ DONE 2026-07-07 (`buildr-backup.timer` nightly JSON
+export on the VPS — see DEPLOY.md §Backups) · ~~public pricing page~~ DONE 2026-07-07 (public
+`/pricing`, live numbers from /api/config, linked from AuthGate footer) · uptime monitoring
+(e.g. UptimeRobot — needs an account) · Codex quota ceiling on the managed lane (covered by the
+scaling plan) · light abuse guards (app-auth signup rate limits, per-account project caps).
 
 **Feature queue:** BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
 `baseline/PLAN-per-app-auth.md`) · visual edits v2 (source tagging) · plan-mode clarifying

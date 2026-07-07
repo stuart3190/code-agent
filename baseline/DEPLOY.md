@@ -32,6 +32,7 @@ browser ──https──▶ Caddy (docker, binds 10.83.7.2; certs via Cloudflar
 # from the EPYC repo root — ship the tree (excludes caches/secrets), then restart services
 cd /c/Users/Administrator/app-builder
 cd shell/web && npm run build && cd ../..          # fresh web dist rides the tarball
+# ⚠ the tar below MUST run from the repo root — a tarball made from shell/web deploys garbage
 tar czf /tmp/deploy.tgz --exclude=node_modules --exclude=.git --exclude="harness/.deps" \
   --exclude="harness/.work" --exclude="shell/.env" --exclude="shell/web/.env" \
   --exclude=".stripe-listen*" --exclude=".shell-server*" --exclude=".web-dev*" --exclude=supabase .
@@ -49,6 +50,16 @@ ssh -i ~/.ssh/id_ed25519 ubuntu@51.195.136.189 \
   reinstalls on next build) and rebuild the preview base image (`~/provisiond/base`, docker build).
 - provisiond code changes: the tarball updates `~/app-builder/provisiond/` but the SERVICE runs
   from `~/provisiond/` — copy changed files there too, then restart buildr-provisiond.
+
+## Backups (installed 2026-07-07)
+
+`buildr-backup.timer` (systemd, daily 04:17 UTC, `Persistent=true`) runs
+`node scripts/backup-supabase.mjs` from `~/app-builder`: gzipped-JSON export of every platform
+table + auth users via the service role (creds from shell/.env) into `~/backups/supabase-<stamp>/`,
+pruning runs older than 14 days (`BACKUP_DIR`/`BACKUP_KEEP_DAYS` override). Check:
+`systemctl list-timers buildr-backup.timer` · `journalctl -u buildr-backup.service -n 20`.
+Restore = re-insert rows with the service role (see the script header); this is loss protection,
+not point-in-time recovery — that would be Supabase Pro.
 
 ## Local dev (unchanged, now optional)
 
