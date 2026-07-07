@@ -145,6 +145,7 @@ export default function AuthGate() {
 
       {/* public legal footer — Stripe + consumer law want these reachable pre-signup */}
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-6 text-[11px] text-slate-600">
+        <a className="hover:text-slate-400" href="/pricing">Pricing</a>
         <a className="hover:text-slate-400" href="/terms">Terms</a>
         <a className="hover:text-slate-400" href="/privacy">Privacy</a>
         <a className="hover:text-slate-400" href="/refunds">Refunds</a>

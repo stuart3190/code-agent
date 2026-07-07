@@ -29,7 +29,7 @@ import { handleProjectDelete } from "./routes/projects.mjs";
 import { handleAccountDelete } from "./routes/account.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
-import { TIERS, TOPUP_GBP_PER_CREDIT, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
+import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
 loadEnv();
@@ -67,6 +67,7 @@ function publicConfig() {
     tokensPerCredit: TOKENS_PER_CREDIT,
     floorGbpPerCredit: trueCostPerCredit(),
     topupGbpPerCredit: TOPUP_GBP_PER_CREDIT,
+    welcomeCredits: WELCOME_CREDITS,
     tiers: TIERS.map((t) => ({
       id: t.id, name: t.name, gbpPerMonth: t.gbpPerMonth, bundledCredits: t.bundledCredits,
       managed: t.managed, effectiveGbpPerCredit: effectiveGbpPerCredit(t),
