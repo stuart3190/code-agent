@@ -144,7 +144,8 @@ timers under virtual-time).
   webhook_endpoints — dashboard step), then the flip (**REMOVE the sk_test safety pin
   `shell/server/lib/services.mjs:23`**, live sk_ + price IDs into VPS .env, restart,
   `assertPricesMatchModel` on live, one real checkout + refund).
-- **Legal**: BUILT 2026-07-07 (uncommitted, not yet deployed). Public `/terms` `/privacy`
+- **Legal**: DONE 2026-07-07 (9e293be, deployed + verified live on buildr101.com). Public
+  `/terms` `/privacy`
   `/refunds` (shell/web/src/legal/LegalPage.jsx, routed in main.jsx pre-auth; links in AuthGate
   footer + Settings) + **account deletion** (POST /api/account/delete: cancels Stripe sub
   IMMEDIATELY (hard-fail), loops deleteProjectCascade — extracted from projects.mjs — then wipes
