@@ -297,7 +297,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   }
 
   return (
-    <div className="relative h-full grid grid-rows-[3.5rem_1fr]">
+    <div className="relative h-full grid grid-rows-[3.5rem_1fr] grid-cols-[minmax(0,1fr)]">
+      {/* grid-cols must be an explicit minmax(0,1fr): the implicit auto column would grow to fit a
+          long project name and push the header actions past the viewport instead of truncating */}
       {publishMsg && (
         <div className="fixed bottom-4 right-4 z-40 panel px-4 py-2.5 text-sm text-slate-200 shadow-panel flex items-center gap-3">
           <span className="max-w-[24rem] truncate" title={publishMsg}>{publishMsg}</span>
@@ -327,23 +329,25 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           )}
           <div className="text-[11px] font-mono text-slate-500">{hasApp ? "iterating" : "new app"} · {prompts.length} turn{prompts.length === 1 ? "" : "s"}</div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button className="btn-ghost text-xs" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); }}
+        {/* min-w-0 + overflow-x-auto (NOT on the header itself — that would clip the absolute
+            popovers below) so the strip touch-drags left on narrow screens instead of cutting off */}
+        <div className="flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-none pl-2">
+          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); }}
             title="Standing instructions (brand, tone, constraints) applied to every build and change">
             Knowledge{knowledge.trim() ? " ●" : ""}
           </button>
-          <button className="btn-ghost text-xs" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
+          <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
           </button>
           {!publishedUrl ? (
-            <button className="btn-ghost text-xs" disabled={!hasApp || busy || publishBusy}
+            <button className="btn-ghost text-xs shrink-0" disabled={!hasApp || busy || publishBusy}
               title={hasApp ? "Publish this app to a public URL" : "Generate an app before publishing"}
               onClick={() => { setSiteName(clientSlugify(project.name)); setPublishErr(null); setShowPublish(true); }}>
               {publishBusy ? "Publishing…" : "Publish"}
             </button>
           ) : (
-            <button className="btn-ghost text-xs" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDomain(false); }}
+            <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDomain(false); }}
               title="Your live site — republish, domain, unpublish">
               {publishBusy ? "Publishing…" : <>Site <span className="text-amber-soft">●</span> ▾</>}
             </button>
