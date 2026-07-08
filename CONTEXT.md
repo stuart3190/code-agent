@@ -36,6 +36,12 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
 - **Backups**: `buildr-backup.timer` (systemd, daily 04:17 UTC) runs `scripts/backup-supabase.mjs`
   → gzipped-JSON export of all platform tables + auth users into `~/backups/`, 14-day prune
   (DEPLOY.md §Backups). The Supabase free tier itself keeps NONE.
+- **Reboot resilience**: the OVH VPS gets occasional host-level hard resets (2026-07-04 and
+  2026-07-08 observed). provisiond now runs `ensureCaddy` at boot (server.mjs boot block,
+  2026-07-08) because the Caddy container has no docker restart policy and its stale preview-net
+  refs block a plain `docker start` — before this fix a reboot silently killed :443. Gotcha seen
+  2026-07-08: a reboot can leave an orphaned provisiond on 127.0.0.1:8790 that EADDRINUSE-loops
+  the systemd unit — find the pid via `ss -ltnp`, kill it, restart buildr-provisiond.
 - Stripe PRODUCTION webhook `we_1TqIZvC6PoSrpLpG4HMGQBvD` → `buildr101.com/api/stripe/webhook`
   (proven live). DNS on Cloudflare, all records DNS-only/grey.
 
@@ -148,13 +154,14 @@ timers under virtual-time).
 ## Open items — LAUNCH AUDIT (Stripe is TEST mode; Stuart is deliberately pre-traffic)
 
 **🔴 Before real users / launch day:**
-- **Stripe test→live**: runbook = `baseline/STRIPE-LIVE.md`. Step 1 DONE 2026-07-07 (live
-  products + 4 prices created via the Stripe MCP connector, lookup keys `buildr101_*`, IDs in the
-  runbook). Remaining: dashboard housekeeping (name "Zataus"→Buildr101, statement descriptor,
-  payouts, public ToS/refund URLs), live webhook endpoint + whsec (MCP doesn't expose
-  webhook_endpoints — dashboard step), then the flip (**REMOVE the sk_test safety pin
-  `shell/server/lib/services.mjs:23`**, live sk_ + price IDs into VPS .env, restart,
-  `assertPricesMatchModel` on live, one real checkout + refund).
+- **Stripe test→live: ✅ DONE 2026-07-08 — LIVE AND PROVEN** (runbook `baseline/STRIPE-LIVE.md`
+  has the full record). Pin removed from services.mjs, live sk_/whsec/price IDs in the VPS .env
+  (test backup `shell/.env.pre-live-flip`), `assertPricesMatchModel` PASS on live, real £0.60
+  top-up → webhook → 5cr grant → refunded + ledger-reversed. Dashboard rename/descriptor/public
+  profile all Buildr101; support@buildr101.com set as Stripe support email. NOTE: stale test-mode
+  `stripe_customer_id`s were nulled in `customers` (live checkout can't reuse a test cus_).
+  Loose ends: subscription smoke (invoice.paid unproven on live), product description still the
+  old SEO text, payout schedule manual.
 - **Legal**: DONE 2026-07-07 (9e293be, deployed + verified live on buildr101.com). Public
   `/terms` `/privacy`
   `/refunds` (shell/web/src/legal/LegalPage.jsx, routed in main.jsx pre-auth; links in AuthGate
@@ -162,11 +169,12 @@ timers under virtual-time).
   IMMEDIATELY (hard-fail), loops deleteProjectCascade — extracted from projects.mjs — then wipes
   ledger/customers/byok + auth user; typed-DELETE danger zone in Settings).
   `shell/harness/prove-account-delete.mjs` 26/26 GREEN live. Support contact =
-  support@buildr101.com — **address doesn't exist yet: set up Cloudflare Email Routing forward
-  (dashboard step)**. Goes live on next deploy (DEPLOY.md tarball).
+  support@buildr101.com — Cloudflare Email Routing forward set up 2026-07-08 (MX
+  route1/2/3.mx.cloudflare.net + SPF verified live in DNS; spot-check = send it a test email).
 - **Transactional email**: Resend/SES (Supabase mailer ≈3/hr — fatal at volume); unlocks app-auth
-  password reset (stage 4). Plus the **Supabase Site URL dashboard step** → `https://buildr101.com`
-  (STILL PENDING — reset links point at localhost until done).
+  password reset (stage 4). ~~Supabase Site URL dashboard step~~ DONE 2026-07-08 (Stuart set it to
+  `https://buildr101.com` in the dashboard; spot-check = trigger forgot-password and confirm the
+  emailed link points at buildr101.com, not localhost).
 
 **🟡 Soon after:** ~~Supabase backups~~ DONE 2026-07-07 (`buildr-backup.timer` nightly JSON
 export on the VPS — see DEPLOY.md §Backups) · ~~public pricing page~~ DONE 2026-07-07 (public
