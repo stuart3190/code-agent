@@ -374,9 +374,15 @@ server.listen(PORT, "127.0.0.1", async () => {
   console.log(`[provisiond] listening on 127.0.0.1:${PORT} · suffix ${SUFFIX} · scheme ${SCHEME}`);
   try {
     const removed = await removeDanglingNets();                 // orphan cleanup
+    // Re-raise the Caddy front after a VPS reboot: the container doesn't auto-restart and its old
+    // preview-net attachments may have just been removed above, so docker start would fail anyway —
+    // ensureCaddy rm -f's the dead one and runs a fresh front (certs persist in buildr-caddy-data).
+    // Without this, a reboot leaves :443 down until the next provision/publish — which can't arrive,
+    // because those requests come through Caddy.
+    await ensureCaddy(CADDY_CFG);
     const running = await listPreviewContainers();
     for (const l of running) touch(l);                          // adopt survivors so they aren't reaped at once
-    console.log(`[provisiond] boot: cap ${CAP} · adopted ${running.length} running preview(s) · removed ${removed.length} dangling net(s) · reap idle ${REAP_IDLE_MS}ms`);
+    console.log(`[provisiond] boot: cap ${CAP} · adopted ${running.length} running preview(s) · removed ${removed.length} dangling net(s) · caddy up · reap idle ${REAP_IDLE_MS}ms`);
   } catch (e) {
     console.error("[provisiond] boot cleanup error:", e.message);
   }
