@@ -1,7 +1,7 @@
 // Compose the PROVEN billing layers over the server's service-role client, ONCE.
 // This module reuses src/billing/{ledger,stripe}.mjs verbatim — it does not re-derive a
-// price, a weight, or a ceiling. Stripe is pinned to TEST MODE (sk_test_) defensively, the
-// same guard proveBilling.mjs enforces.
+// price, a weight, or a ceiling. Live keys allowed since the 2026-07-08 go-live flip
+// (STRIPE-LIVE.md §4); proveBilling.mjs still enforces sk_test_ for its own runs.
 
 import Stripe from "stripe";
 import { createLedger } from "../../../src/billing/ledger.mjs";
@@ -20,8 +20,8 @@ let _stripe = null;
 export function stripe() {
   if (_stripe) return _stripe;
   const key = requireEnv("STRIPE_SECRET_KEY");
-  if (!key.startsWith("sk_test_")) {
-    throw new Error("Refusing to start: STRIPE_SECRET_KEY is not a test key (must start with sk_test_).");
+  if (!key.startsWith("sk_")) {
+    throw new Error("Refusing to start: STRIPE_SECRET_KEY is not a Stripe secret key (must start with sk_).");
   }
   _stripe = new Stripe(key);
   return _stripe;

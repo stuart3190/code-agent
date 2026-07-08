@@ -1,10 +1,12 @@
 # Stripe test→live runbook (LAUNCH AUDIT item 1)
 
-> Status **2026-07-07**: live products + 4 prices CREATED via the Stripe MCP connector (step 1
-> done, verified in the create responses: gbp / correct pence / monthly recurring / one-time
-> top-up — shaped to pass `assertPricesMatchModel`). Steps 2–6 are manual (dashboard) or
-> deliberate code/env flips. Stripe stays effectively TEST until step 4 — nothing before it
-> changes the running system.
+> Status **2026-07-08: LIVE — the flip is DONE and PROVEN.** Real £0.60 top-up checkout on the
+> live key → live webhook verified → 5-credit ledger grant landed → refunded (re_3Tr3KaC6…) →
+> ledger reversed (kind=refund row). `assertPricesMatchModel` PASSED on live from the VPS.
+> Pin removed at services.mjs (now requires any sk_). Old test env backed up on the VPS as
+> `shell/.env.pre-live-flip` (rollback = §6). Local shell/.env stays sk_test (dev only).
+> Remaining niceties: subscription smoke (§5 last item — invoice.paid path unproven on live),
+> product description still mentions the old SEO business, payout schedule still manual.
 
 ## 1. Live products + prices — DONE (2026-07-07)
 
@@ -23,11 +25,20 @@ changes, create NEW prices; never edit these in the dashboard).
 
 ## 2. Dashboard housekeeping (Stuart, manual — MCP connector doesn't expose these)
 
-- [ ] Business name **"Zataus" → "Buildr101"** (Settings → Business details).
-- [ ] **Statement descriptor** → `BUILDR101` (Settings → Public details). Shows on card statements.
-- [ ] **Payout details** (bank account) confirmed for live mode.
+> Audited live via the MCP account read 2026-07-08 (`GetAccountsAccount`) — statuses below.
+
+- [x] **Dashboard display name** "Zataus" → "Buildr101" — DONE (confirmed 2026-07-08).
+- [ ] **Statement descriptor** still `ZATAUS` (`settings.payments.statement_descriptor`) →
+      `BUILDR101` (Settings → Public details). Shows on card statements.
+- [ ] **Public business profile** still Zataus: `business_profile.name` = "Zataus", url =
+      www.zataus.com, product description = "SEO and expired or expiring domain lists",
+      support email EMPTY. Set name Buildr101, url https://buildr101.com, description to match
+      the product, support email support@buildr101.com (address live as of 2026-07-08).
+- [x] **Payouts** — VERIFIED OK 2026-07-08: payouts_enabled, individual verified, no outstanding
+      requirements, GB bank (Revolut …9102) default for GBP. NOTE payout schedule is **manual** —
+      switch to automatic (e.g. weekly) unless you want to trigger each payout yourself.
 - [ ] Public **support contact + ToS/refund-policy URLs** in Stripe's public details — Stripe
-      requires these to take live payments (chains into launch-audit item 2, legal pages).
+      requires these to take live payments (legal pages are live: buildr101.com/terms /refunds).
 
 ## 3. Live webhook endpoint (dashboard — MCP doesn't expose webhook_endpoints)
 
