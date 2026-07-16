@@ -29,6 +29,9 @@ export function AuthCard({ mode, onMode }) {
         setNotice(`If an account exists for ${email}, a password-reset link is on its way. Open it in this browser to choose a new password.`);
       } else if (mode === "signup") {
         await backend().auth.signUp({ email, password });
+        // Ad conversion signal (Meta pixel, hostname-guarded in index.html) — the account now
+        // exists whether or not email confirmation gates the session.
+        window.fbq?.("track", "CompleteRegistration");
         // With "Confirm email" ON there is no session yet — tell the user to activate the account.
         const { data } = await client().auth.getSession();
         if (!data?.session) {

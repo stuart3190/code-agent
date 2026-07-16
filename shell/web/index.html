@@ -5,8 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3.5' fill='%23f5a623'/%3E%3Crect x='2.5' y='10' width='11' height='2.8' rx='1.4' fill='%230a0c0f'/%3E%3Crect x='2.5' y='6.4' width='8.2' height='2.8' rx='1.4' fill='%230a0c0f' fill-opacity='0.75'/%3E%3Crect x='2.5' y='2.8' width='5.4' height='2.8' rx='1.4' fill='%230a0c0f' fill-opacity='0.5'/%3E%3C/svg%3E" />
     <title>Buildr101 — app builder</title>
+    <!-- Meta Pixel (2026-07-16). Hostname-guarded: dev/preview traffic must not pollute the
+         ad data the campaigns optimize on. CompleteRegistration fires in AuthCard on signup. -->
+    <script>
+      if (location.hostname === "buildr101.com" || location.hostname === "www.buildr101.com") {
+        !function(f,b,e,v,n,t,s)
+        {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+        n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+        n.queue=[];t=b.createElement(e);t.async=!0;
+        t.src=v;s=b.getElementsByTagName(e)[0];
+        s.parentNode.insertBefore(t,s)}(window, document,'script',
+        'https://connect.facebook.net/en_US/fbevents.js');
+        fbq('init', '2460920607724865');
+        fbq('track', 'PageView');
+      }
+    </script>
   </head>
   <body>
+    <noscript><img height="1" width="1" style="display:none" alt=""
+      src="https://www.facebook.com/tr?id=2460920607724865&ev=PageView&noscript=1"
+    /></noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
