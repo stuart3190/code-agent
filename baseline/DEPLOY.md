@@ -61,6 +61,19 @@ pruning runs older than 14 days (`BACKUP_DIR`/`BACKUP_KEEP_DAYS` override). Chec
 Restore = re-insert rows with the service role (see the script header); this is loss protection,
 not point-in-time recovery — that would be Supabase Pro.
 
+## Codex OAuth keep-alive (installed 2026-07-16)
+
+`buildr-codex-keepalive.timer` (systemd, daily 03:47 UTC, `Persistent=true`) runs
+`node scripts/codex-keepalive.mjs` from `~/app-builder`: one forced token refresh, with the
+ROTATED refresh token persisted back to `~/.codex/auth.json` (src/providers/auth.mjs does this on
+every refresh now — the old in-memory-only refresh discarded rotations, so the original login's
+refresh token aged out after an idle week → HTTP 401 → manual `codex login`, 2026-07-15).
+Check: `journalctl -u buildr-codex-keepalive.service -n 5`.
+**The VPS owns the token chain.** If the local box needs fresh creds, PULL them
+(`scp ubuntu@51.195.136.189:.codex/auth.json ~/.codex/auth.json`) — don't run a stale local copy
+hard, and only push local→VPS after a fresh `codex login` (which starts a new chain anyway).
+If the keep-alive ever fails repeatedly: `codex login` locally, copy auth.json to the VPS, done.
+
 ## Local dev (unchanged, now optional)
 
 `shell && node server/index.mjs` (:8787) + `shell/web && npm run dev` (:5173) + `stripe listen`
