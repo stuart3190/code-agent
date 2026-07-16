@@ -91,6 +91,7 @@ export default function PricingPage() {
         </p>
 
         <footer className="mt-12 pt-6 border-t border-line/60 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+          <a className="hover:text-slate-300" href="/support">Support</a>
           <a className="hover:text-slate-300" href="/terms">Terms of Service</a>
           <a className="hover:text-slate-300" href="/privacy">Privacy Policy</a>
           <a className="hover:text-slate-300" href="/refunds">Refund Policy</a>

@@ -63,6 +63,8 @@ export default function TopBar({ user, projects, currentId, view, onNew, onOpen,
         {menu === "user" && (
           <Menu onClose={close} className="right-0 w-48">
             <div className="px-3 py-2 text-xs text-slate-500 truncate border-b border-line" title={user.email}>{user.email}</div>
+            <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850"
+              href="/support" target="_blank" rel="noreferrer" onClick={close}>Help &amp; support</a>
             <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850"
               onClick={() => { close(); onSignOut(); }}>Sign out</button>
           </Menu>

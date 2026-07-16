@@ -154,6 +154,7 @@ export default function Landing() {
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <a className="hover:text-slate-300" href="/pricing">Pricing</a>
+            <a className="hover:text-slate-300" href="/support">Support</a>
             <a className="hover:text-slate-300" href="/terms">Terms</a>
             <a className="hover:text-slate-300" href="/privacy">Privacy</a>
             <a className="hover:text-slate-300" href="/refunds">Refunds</a>
