@@ -4,7 +4,8 @@ import { backend } from "./lib/backend.js";
 import { getConfig, deleteProjectFull, serverBalance } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
 import { listProjects, createProject, getProject } from "./lib/projects.js";
-import AuthGate, { Logo } from "./auth/AuthGate.jsx";
+import { Logo } from "./auth/AuthGate.jsx";
+import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
 import TopBar from "./components/TopBar.jsx";
 import Builder from "./builder/Builder.jsx";
@@ -64,7 +65,7 @@ export default function App() {
   // A password-reset email link lands here with a recovery session — force the new-password
   // screen before the normal app, even though the user is technically signed in.
   if (recovery && user) return <ResetPassword onDone={clearRecovery} />;
-  if (!user) return <AuthGate />;
+  if (!user) return <Landing />;
 
   async function newProject(starterPrompt) {
     const p = await createProject("Untitled app");

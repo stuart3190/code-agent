@@ -34,4 +34,23 @@
      without a visible scrollbar — touch-drag on mobile, wheel/trackpad on desktop. */
   .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
   .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /* Landing hero backdrop: a faint blueprint grid, faded out radially — apps under construction. */
+  .landing-grid {
+    background-image:
+      linear-gradient(rgba(42, 50, 60, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(42, 50, 60, 0.35) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(60rem 36rem at 28% 12%, black, transparent 72%);
+    -webkit-mask-image: radial-gradient(60rem 36rem at 28% 12%, black, transparent 72%);
+  }
+  .landing-caret { animation: landing-caret-blink 1.05s steps(1) infinite; }
+  .landing-rise { animation: landing-rise 0.45s ease-out both; }
+  @media (prefers-reduced-motion: reduce) {
+    .landing-caret { animation: none; }
+    .landing-rise { animation: none; }
+  }
 }
+
+@keyframes landing-caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes landing-rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
