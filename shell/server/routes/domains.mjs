@@ -15,6 +15,7 @@
 import { resolve4 } from "node:dns/promises";
 import { serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
+import { isAdmin } from "../lib/admin.mjs";
 
 // Custom domains are a paid feature: Pro and Studio tiers only. Enforced at CONNECT time
 // (already-connected domains keep serving if a subscription lapses — hostages make bad customers).
@@ -77,7 +78,7 @@ export async function handleDomainConnect(req, res, body, owner) {
   if (!domain) return json(res, 400, { error: "Enter a valid domain, e.g. yourbusiness.com" });
   try {
     const ent = await ledger().getEntitlement(owner.id).catch(() => null);
-    if (!DOMAIN_TIERS.has(ent?.tier)) {
+    if (!isAdmin(owner) && !DOMAIN_TIERS.has(ent?.tier)) {
       return json(res, 402, {
         error: "Custom domains are a Pro feature — upgrade in the Plans panel to connect your own domain.",
         code: "upgrade_required",

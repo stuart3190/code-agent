@@ -12,6 +12,7 @@ import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mj
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 import { serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
+import { isAdmin } from "../lib/admin.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -22,6 +23,7 @@ const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
 // published sites keep serving if a subscription lapses.
 const PUBLISH_TIERS = new Set(["starter", "pro", "studio"]);
 async function requirePublishTier(owner) {
+  if (isAdmin(owner)) return; // platform admins (ADMIN_EMAILS) publish without a subscription
   const ent = await ledger().getEntitlement(owner.id).catch(() => null);
   if (!PUBLISH_TIERS.has(ent?.tier)) {
     const e = new Error("Publishing is included in every paid plan — subscribe in the Plans panel to put your app on a live URL.");

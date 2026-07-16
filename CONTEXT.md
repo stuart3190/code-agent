@@ -89,6 +89,13 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   (checkout/balance/subscription/switch/cancel + welcome grant on balance reads),
   `stripeWebhook`, `settings` (BYOK). Env is read ONCE at start — any .env edit or code change
   ⇒ restart (`sudo systemctl restart buildr-shell`).
+  **Platform admins** (2026-07-16, `lib/admin.mjs`): `ADMIN_EMAILS` in shell/.env (currently
+  stuart3190@gmail.com + support@buildr101.com) pass the publish + custom-domain tier gates with
+  no subscription — matched against the VERIFIED token email, not a DB flag (webhooks own
+  customers.tier and would fight one). Credits still meter normally. Proven live: no-tier
+  non-admin → 402 upgrade_required; no-tier admin email → past the gate. Stuart refunded his
+  £12 Starter smoke sub same day (refund + immediate cancel via live key on the VPS, webhook
+  cleared tier, −120 ledger reversal row) — admin gate is how his account publishes now.
 - **Web** (`shell/web`, Vite+React+Tailwind): dark ink + single amber accent, Manrope/Space
   Grotesk, layered-blocks logo. **Public pages** (routed pre-auth in main.jsx, no account needed):
   `/pricing` (live numbers from /api/config incl. welcomeCredits) + `/terms` `/privacy` `/refunds`
@@ -182,8 +189,9 @@ timers under virtual-time).
   top-up → webhook → 5cr grant → refunded + ledger-reversed. Dashboard rename/descriptor/public
   profile all Buildr101; support@buildr101.com set as Stripe support email. NOTE: stale test-mode
   `stripe_customer_id`s were nulled in `customers` (live checkout can't reuse a test cus_).
-  Loose ends: subscription smoke (invoice.paid unproven on live), product description still the
-  old SEO text, payout schedule manual.
+  Loose ends: ~~subscription smoke~~ PROVEN LIVE 2026-07-16 (Stuart subscribed Starter for real:
+  invoice.paid → +120 bundle grant, tier + cycle set, actively dogfooding on it — kept, not
+  refunded); product description still the old SEO text; payout schedule manual.
 - **Legal**: DONE 2026-07-07 (9e293be, deployed + verified live on buildr101.com). Public
   `/terms` `/privacy`
   `/refunds` (shell/web/src/legal/LegalPage.jsx, routed in main.jsx pre-auth; links in AuthGate
@@ -215,7 +223,9 @@ project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 f
 because creation is a client-side owner-RLS insert, the DB is the only unbypassable gate;
 migration `migrations/password_resets_abuse_guards.sql` applied live via MCP).
 
-**Feature queue:** BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
+**Feature queue:** connector gallery (browse/enable integrations per project — start with
+secretless embeds, then form→owner-email via Resend, Stripe Payment Links; Stuart parked it
+2026-07-16, low priority) · BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
 `baseline/PLAN-per-app-auth.md`) · visual edits v2 (source tagging) · plan-mode clarifying
 questions · duplicate project · project search · mobile Builder layout · build-done notifications ·
 published-site analytics · engine cost knobs (preview-h/credit instrumentation, search_replace A/B,
