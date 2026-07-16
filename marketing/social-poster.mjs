@@ -22,7 +22,8 @@
 // CLAIMS DISCIPLINE (same bar as baseline/PROMO-KIT.md): the prompt forbids invented features,
 // numbers, testimonials or offers. Everything the model may say is in FACTS below.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createCodexProvider } from "../src/providers/codexProvider.mjs";
@@ -39,6 +40,75 @@ const IMAGES = {
   chat: "https://buildr101.com/promo/ad-chat.png",
   vs: "https://buildr101.com/promo/ad-vs.png",
 };
+
+// ── generated card images ──────────────────────────────────────────────────────────────────────
+// Most posts get FRESH art: the model designs a branded text card (eyebrow/headline/sub) and the
+// VPS renders it via headless Chrome in Docker (zenika/alpine-chrome; ~/social-render is mounted
+// at /render, brand fonts copied there once by the installer). The PNG is dropped straight into
+// the served web dist (deploy tars overwrite but never delete, so old cards keep their URLs) —
+// giving it a public URL both the FB photos endpoint and the IG media endpoint can fetch.
+const RENDER_DIR = path.join(os.homedir(), "social-render");
+const GEN_DIR = path.join(os.homedir(), "app-builder", "shell", "web", "dist", "promo", "gen");
+
+function cardHtml({ eyebrow, headline, sub }) {
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  // one **word** in the headline renders amber
+  const head = esc(headline).replace(/\*\*(.+?)\*\*/, '<span class="amber">$1</span>');
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  @font-face { font-family:"Space Grotesk"; src:url("file:///render/fonts/space-grotesk.woff2") format("woff2"); font-weight:300 700; }
+  @font-face { font-family:"Manrope"; src:url("file:///render/fonts/manrope.woff2") format("woff2"); font-weight:200 800; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1080px; height:1080px; background:#0a0c0f; font-family:"Manrope",sans-serif;
+    position:relative; overflow:hidden; display:flex; flex-direction:column; justify-content:center; padding:96px; }
+  .glow { position:absolute; inset:0; background:
+    radial-gradient(52rem 30rem at 85% -12%, rgba(245,166,35,0.15), transparent 62%),
+    radial-gradient(40rem 24rem at 0% 115%, rgba(245,166,35,0.06), transparent 60%); }
+  .grid-bg { position:absolute; inset:0; background-image:
+    linear-gradient(rgba(42,50,60,0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42,50,60,0.4) 1px, transparent 1px);
+    background-size:48px 48px;
+    -webkit-mask-image:radial-gradient(46rem 46rem at 40% 30%, black, transparent 78%); }
+  .eyebrow { position:relative; font-family:ui-monospace,Consolas,monospace; font-size:26px;
+    letter-spacing:0.14em; text-transform:uppercase; color:#f5a623; }
+  h1 { position:relative; margin-top:30px; font-family:"Space Grotesk"; font-weight:640;
+    font-size:88px; letter-spacing:-0.03em; line-height:1.07; color:#f1f5f9; }
+  h1 .amber { color:#f5a623; }
+  .sub { position:relative; margin-top:34px; font-size:34px; line-height:1.45; color:#94a3b8; max-width:820px; }
+  .footer { position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center;
+    justify-content:space-between; padding:26px 96px; border-top:1px solid #232a35; background:rgba(10,12,15,0.9); }
+  .brand { display:flex; align-items:center; gap:13px; }
+  .mark { width:42px; height:42px; border-radius:10px; background:#f5a623; display:grid; place-items:center; }
+  .bword { font-family:"Space Grotesk"; font-weight:650; font-size:28px; color:#f1f5f9; letter-spacing:-0.02em; }
+  .url { font-family:ui-monospace,Consolas,monospace; font-size:22px; color:#f7b955; }
+</style></head><body>
+  <div class="glow"></div><div class="grid-bg"></div>
+  <div class="eyebrow">${esc(eyebrow)}</div>
+  <h1>${head}</h1>
+  <div class="sub">${esc(sub)}</div>
+  <div class="footer">
+    <div class="brand"><span class="mark"><svg width="23" height="23" viewBox="0 0 16 16" fill="none">
+      <rect x="2" y="10.5" width="12" height="3" rx="1.5" fill="#0a0c0f"/>
+      <rect x="2" y="6.5" width="9" height="3" rx="1.5" fill="#0a0c0f" fill-opacity="0.75"/>
+      <rect x="2" y="2.5" width="6" height="3" rx="1.5" fill="#0a0c0f" fill-opacity="0.5"/></svg></span>
+      <span class="bword">Buildr101</span></div>
+    <span class="url">buildr101.com</span>
+  </div>
+</body></html>`;
+}
+
+async function renderCard(card) {
+  await mkdir(RENDER_DIR, { recursive: true });
+  await mkdir(GEN_DIR, { recursive: true });
+  await writeFile(path.join(RENDER_DIR, "card.html"), cardHtml(card), "utf8");
+  execFileSync("docker", [
+    "run", "--rm", "-v", `${RENDER_DIR}:/render`, "zenika/alpine-chrome:latest",
+    "--headless", "--no-sandbox", "--disable-gpu", "--window-size=1080,1080",
+    "--screenshot=/render/card.png", "--virtual-time-budget=4000", "file:///render/card.html",
+  ], { stdio: "pipe" });
+  const name = `card-${Date.now()}.png`;
+  await copyFile(path.join(RENDER_DIR, "card.png"), path.join(GEN_DIR, name));
+  return `https://buildr101.com/promo/gen/${name}`;
+}
 
 const PILLARS = [
   "PROOF — the Iron & Oak barber site built from one sentence (image: barber). Show the actual prompt.",
@@ -80,7 +150,7 @@ corporate filler, zero hype-words ("revolutionary", "game-changing" banned). Sho
 Emoji sparingly (0-2). Vary rhythm between platforms — never identical text everywhere.\n\n${FACTS}`,
     messages: [{
       role: "user",
-      content: `Write ONE post idea, adapted per platform. Pick a pillar we haven't used lately:\n${PILLARS.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\nRecent posts (do NOT repeat these angles):\n${recent}\n\nReply with ONLY JSON:\n{"pillar":"PROOF","idea":"one-line summary","image":"showcase|barber|chat|vs|none",\n "facebook":"2-6 sentences, usually ends with buildr101.com",\n "instagram":"caption, line breaks fine, up to 3 hashtags at the end",\n "x":"under 260 characters including buildr101.com",\n "linkedin":"3-7 sentences, professional but human, ends with buildr101.com"}`,
+      content: `Write ONE post idea, adapted per platform. Pick a pillar we haven't used lately:\n${PILLARS.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\nRecent posts (do NOT repeat these angles):\n${recent}\n\nImage choice: PROOF posts use "barber" (the real screenshot is the proof). Most other posts use\n"card" — a fresh branded graphic you design: give it a punchy eyebrow (2-4 words), a headline\n(max 8 words, wrap exactly ONE word in ** ** to highlight it), and a one-line sub (max 16 words).\nThe stock images showcase|chat|vs are fallbacks — use sparingly. "none" for pure questions.\n\nReply with ONLY JSON:\n{"pillar":"FEATURE","idea":"one-line summary","image":"barber|showcase|chat|vs|card|none",\n "card":{"eyebrow":"NO LOCK-IN","headline":"Your code is **yours**.","sub":"Export the full source of anything you build, any time."},\n "facebook":"2-6 sentences, usually ends with buildr101.com",\n "instagram":"caption, line breaks fine, up to 3 hashtags at the end",\n "x":"under 260 characters including buildr101.com",\n "linkedin":"3-7 sentences, professional but human, ends with buildr101.com"}\n("card" key only when image is "card")`,
     }],
     tools: [],
   });
@@ -90,10 +160,9 @@ Emoji sparingly (0-2). Vary rhythm between platforms — never identical text ev
 }
 
 // ── platform adapters (each returns a result line or null when not configured) ─────────────────
-async function postFacebook(post) {
+async function postFacebook(post, imageUrl) {
   const { FB_PAGE_ID, FB_PAGE_TOKEN } = process.env;
   if (!FB_PAGE_ID || !FB_PAGE_TOKEN) return null;
-  const imageUrl = IMAGES[post.image] || null;
   const endpoint = imageUrl ? `${GRAPH}/${FB_PAGE_ID}/photos` : `${GRAPH}/${FB_PAGE_ID}/feed`;
   const body = new URLSearchParams({ access_token: FB_PAGE_TOKEN, message: post.facebook });
   if (imageUrl) body.set("url", imageUrl);
@@ -103,10 +172,10 @@ async function postFacebook(post) {
   return `facebook ${out.id || out.post_id}`;
 }
 
-async function postInstagram(post) {
+async function postInstagram(post, resolvedUrl) {
   const { IG_USER_ID, FB_PAGE_TOKEN } = process.env;
   if (!IG_USER_ID || !FB_PAGE_TOKEN) return null;
-  const imageUrl = IMAGES[post.image] || IMAGES.showcase; // IG requires an image — default in
+  const imageUrl = resolvedUrl || IMAGES.showcase; // IG requires an image — default in
   const create = await fetch(`${GRAPH}/${IG_USER_ID}/media`, {
     method: "POST",
     body: new URLSearchParams({ access_token: FB_PAGE_TOKEN, image_url: imageUrl, caption: post.instagram }),
@@ -191,14 +260,23 @@ if (!DRY && hourUtc >= 12 && hourUtc < 16 && Math.random() < 0.5) {
 }
 
 const post = await generatePost(state.history || []);
-console.log(`[social] pillar=${post.pillar} image=${post.image}\n  fb: ${post.facebook}\n  ig: ${post.instagram}\n  x:  ${post.x}\n  li: ${post.linkedin}`);
+console.log(`[social] pillar=${post.pillar} image=${post.image}${post.card ? ` card="${post.card.headline}"` : ""}\n  fb: ${post.facebook}\n  ig: ${post.instagram}\n  x:  ${post.x}\n  li: ${post.linkedin}`);
 if (DRY) { console.log("\n[social] dry run — nothing published."); process.exit(0); }
+
+// Resolve the image ONCE: fresh rendered card, stock screenshot, or nothing.
+let imageUrl = null;
+if (post.image === "card" && post.card) {
+  try { imageUrl = await renderCard(post.card); console.log(`[social] card rendered -> ${imageUrl}`); }
+  catch (e) { console.error(`[social] card render failed (${e.message.slice(0, 120)}) — posting without image`); }
+} else {
+  imageUrl = IMAGES[post.image] || null;
+}
 
 const results = [];
 const errors = [];
 for (const [name, fn] of [
-  ["facebook", () => postFacebook(post)],
-  ["instagram", () => postInstagram(post)],
+  ["facebook", () => postFacebook(post, imageUrl)],
+  ["instagram", () => postInstagram(post, imageUrl)],
   ["x", () => postX(post, state)],
   ["linkedin", () => postLinkedIn(post)],
 ]) {
