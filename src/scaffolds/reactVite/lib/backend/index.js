@@ -8,6 +8,7 @@
 //
 //   await auth.signUp({ email, password });   await auth.signIn({ email, password });
 //   await auth.currentUser();                  await auth.signOut();
+//   await auth.resetPassword({ email });       await auth.confirmReset({ email, code, newPassword });
 //   const note  = await db.entity("note").create({ title, body });
 //   const notes = await db.entity("note").list();
 //   const { path } = await storage.upload(file);   const url = await storage.getUrl(path);
@@ -28,7 +29,7 @@ function unconfigured() {
       "Backend is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env (copy .env.example), then restart the dev server."
     );
   };
-  const surface = { signUp: fail, signIn: fail, signOut: fail, currentUser: fail };
+  const surface = { signUp: fail, signIn: fail, signOut: fail, currentUser: fail, resetPassword: fail, confirmReset: fail };
   return {
     auth: surface,
     db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }) },

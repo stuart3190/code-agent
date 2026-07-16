@@ -37,14 +37,19 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   // sign-in go through the platform's app-auth Edge Function, which maps (appId, email) to an
   // app-scoped auth user and returns a REAL session — same email can register in many apps without
   // collision. The session is installed on this client, so db/storage/RLS behave identically.
-  const appAuthCall = async (action, { email, password } = {}) => {
+  const appAuthPost = async (action, payload = {}) => {
     const res = await fetch(authUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}`, apikey: anonKey },
-      body: JSON.stringify({ action, appId, email, password }),
+      body: JSON.stringify({ action, appId, ...payload }),
     });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(out.error || `auth ${action} failed (${res.status})`);
+    return out;
+  };
+  // Session-returning actions install the session on this client so db/storage/RLS just work.
+  const appAuthCall = async (action, payload = {}) => {
+    const out = await appAuthPost(action, payload);
     unwrap(await client.auth.setSession({
       access_token: out.session.access_token,
       refresh_token: out.session.refresh_token,
@@ -56,6 +61,12 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     ? {
         async signUp({ email, password }) { return appAuthCall("signup", { email, password }); },
         async signIn({ email, password }) { return appAuthCall("signin", { email, password }); },
+        // Emails a 6-digit code to the account's address (always resolves — no account enumeration).
+        async resetPassword({ email }) { await appAuthPost("reset", { email }); },
+        // Verifies the emailed code, sets the new password, and signs the user in.
+        async confirmReset({ email, code, newPassword }) {
+          return appAuthCall("reset-confirm", { email, code, newPassword });
+        },
         async signOut() {
           const { error } = await client.auth.signOut();
           if (error) throw error;
@@ -75,6 +86,14 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
         async signIn({ email, password }) {
           const data = unwrap(await client.auth.signInWithPassword({ email, password }));
           return data.user;
+        },
+        // Direct (non-app-scoped) lane: Supabase's own recovery email; no code flow exists here.
+        async resetPassword({ email }) {
+          const { error } = await client.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+        },
+        async confirmReset() {
+          throw new Error("confirmReset is only available for app-scoped auth — use the link in the recovery email instead.");
         },
         async signOut() {
           const { error } = await client.auth.signOut();
