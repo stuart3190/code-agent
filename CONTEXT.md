@@ -2,11 +2,11 @@
 
 > Paste-into-a-fresh-session summary of the entire app builder: what it is, every working part,
 > where things run, the rules that keep it clean, and what's still open.
-> Last updated **2026-07-15** (pre-promotion hardening: app-auth password reset via Resend code
-> flow + abuse guards — signup rate limits, project-cap trigger — all deployed + proven 15/15;
-> Resend account/dashboard steps are the last Stuart-only blockers, runbook `baseline/RESEND.md`).
-> Prior 2026-07-08: Stripe LIVE + proven. 2026-07-07: launch audit (legal, /pricing, backups).
-> 2026-07-06: design pass, 7 Lovable-parity features, production deploy, paywall ladder.
+> Last updated **2026-07-16** (LAUNCH DAY: checklist closed — Resend fully live, abuse guards,
+> platform admins, landing page, photography fix, billing proven both directions, Codex OAuth
+> keep-alive — and PROMOTION STARTED: Meta ad live at £5/day + autonomous multi-platform social
+> poster with generated card art; see §Marketing below). Prior 2026-07-08: Stripe LIVE + proven.
+> 2026-07-07: launch audit. 2026-07-06: design pass, 7 Lovable-parity features, prod deploy.
 > Repo: `stuart3190/app-builder` (private, linear master, EPYC box
 > `C:\Users\Administrator\app-builder`).
 
@@ -233,6 +233,41 @@ secretless embeds, then form→owner-email via Resend, Stripe Payment Links; Stu
 questions · duplicate project · project search · mobile Builder layout · build-done notifications ·
 published-site analytics · engine cost knobs (preview-h/credit instrumentation, search_replace A/B,
 routing under --cache).
+
+## Marketing (LIVE since 2026-07-16 — promotion running)
+
+- **Meta ad**: campaign `52681395849417` "Buildr101 — Launch — Signups" (OUTCOME_LEADS, CBO
+  £5/day) → ad set `52681395863217` (UK broad + Advantage+, OFFSITE_CONVERSIONS on pixel /
+  CompleteRegistration) → ad `52681402780217` "Showcase v2 — app idea angle" ACTIVE ("ever had
+  an app idea", NOT "your business needs a website" — Stuart's call: app builder for normal
+  people, not website-maker). v1 website-angle ad `52681396007017` PAUSED in reserve for A/B.
+  Runs from the AGED Zataus ad account `176865839039062` (payment history = ban-risk shield;
+  the visible identity is the Buildr101 PAGE `1229354346925125`, in the Zataus BM
+  `3452733855009273`). Creative hosted at /promo/ad-showcase-1.png. Judge nothing before
+  48-72h; edits reset learning.
+- **Pixel** `1369829255105802` ("Buildr101" dataset, created INSIDE the Zataus BM — pixel and
+  ad account must share a business; a personal-scope pixel can't connect). Hostname-guarded in
+  shell/web/index.html; CompleteRegistration fires in AuthCard on signup. GOTCHA: /me/accounts
+  is EMPTY for business-owned pages — fetch the page token via GET /{page-id}?fields=access_token
+  with a long-lived user token instead.
+- **Social poster** (`marketing/social-poster.mjs` + `buildr-social.timer`, 3 slots/day +
+  jitter + midday coin-flip = 2-3 posts/day): one Codex-generated post per run with per-platform
+  variants; adapters self-enable on env creds — Facebook LIVE (FB_PAGE_ID/FB_PAGE_TOKEN via Meta
+  app "Buildr101 Tools" 1066640842409652), Instagram piggybacks via the page's "always share to
+  Instagram" (image posts only; direct API adapter ready if native captions wanted — needs a
+  token regen with instagram_basic+instagram_content_publish), X and LinkedIn adapters written,
+  awaiting creds (X refresh token rotates — persisted in state like the Codex lesson). Most
+  posts get FRESH card art (model designs eyebrow/headline/sub; zenika/alpine-chrome docker on
+  the VPS renders 1080² into dist/promo/gen/ — public URL, survives deploys). PROOF posts keep
+  the real Iron & Oak screenshot (honesty bar: "untouched" must stay true). History + X refresh
+  token in ~/.buildr-social-state.json on the VPS. Claims discipline hard-coded in the prompt.
+- **Assets**: FB page profile/cover + 5 ad creatives on the Desktop (buildr101-fb-*,
+  buildr101-ad-*); promo images served under /promo/; OG/twitter-card meta live on the site.
+  Copy kit: `baseline/PROMO-KIT.md`. Night-notifications creative is HELD until a
+  booking→owner-email feature exists (its imagery implies notifications we don't send yet).
+- **Watch under traffic**: ChatGPT-sub Codex quota (the capacity ceiling — plan upgrade +
+  usage credits at scale), Resend 100/day free cap, welcome-credit conversion (Stuart's own
+  builds ran 60-100cr vs 30 welcome — the free-tier calibration number).
 
 ## Canonical docs in-repo
 
