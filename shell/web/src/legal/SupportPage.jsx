@@ -39,6 +39,13 @@ is handled automatically.`,
 builder — if you ever leave, your apps leave with you.`,
   },
   {
+    q: "Can people install my app on their phone?",
+    a: `Yes — every published app is installable. On Android, visitors get an "Install app" prompt
+(it becomes a real app with its own icon); on iPhone it's Share → Add to Home Screen. Either way
+it opens full-screen with your app's own icon, and keeps working on patchy connections. Nothing
+to set up — it's automatic when you publish.`,
+  },
+  {
     q: "Can my app have user accounts and saved data?",
     a: `Yes, and it's built in from the first version: your app's visitors can sign up, log in,
 reset their password, and their data (bookings, records, uploads) is genuinely saved — no

@@ -117,9 +117,9 @@ export default function Landing() {
               Every app gets a real type and color system with real photography — not the look
               people mean when they say “AI-generated”.
             </Feature>
-            <Feature icon={<IconGlobe />} title="Live on the web">
+            <Feature icon={<IconGlobe />} title="Live on the web — and on phones">
               Publish to your own corner of the internet on any paid plan, custom domains on Pro.
-              Your app works on phones from day one.
+              Every published app installs on phones like a real app — icon, full screen, the lot.
             </Feature>
             <Feature icon={<IconDownload />} title="No lock-in">
               Download the complete source code of anything you build, any time. If you leave, your

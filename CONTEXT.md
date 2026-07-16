@@ -72,6 +72,20 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   namespace; per-app auth via authUrl; fail-soft when unconfigured), **devReporter**
   (`lib/devReporter.js`: dev-only bridge → runtime errors out, select-mode/visual-edits in/out,
   refreshed into every materialized preview by `withRuntimeEnv`).
+- **PWA — every published app is installable** (2026-07-16, `shell/server/lib/pwa.mjs`):
+  `withPwaAssets(tree, {appName})` adds `public/manifest.webmanifest` + `public/sw.js` (Vite copies
+  public/* into dist) + injects the manifest link / theme-color / apple-touch-icon / title / SW
+  registration into index.html; `renderIcons({appName,tree,distDir})` writes per-app letter-tile
+  PNGs (192/512/apple-touch) into the built dist via headless Chrome (zenika/alpine-chrome docker
+  on the VPS, Edge headless on win32) — theme/bg/letter colours parsed from the tree's index.css
+  `:root` tokens (--primary/--background HSL→hex). **PUBLISH-ONLY** (called in publish.mjs's
+  materialization only) so previews stay service-worker-free; SW is network-first on navigations
+  (a republish is never stale). GOTCHAS baked in: trees are UTF-8 only → binary icons rendered
+  into dist AFTER the build, NOT injected into the tree; a manifest/sw only reach dist if under
+  `public/`. Proven live 18/18 `shell/harness/prove-pwa.mjs` + offline `harness/_pwa-drycheck.mjs`.
+  **Rename bug fixed same commit**: claimSlug's upsert-on-slug-then-delete inserted a 2nd row for
+  the same project → 500 on every published-site RENAME (unique project_id index); now updates the
+  existing row's slug in place. Existing sites gain PWA on next republish (no migration).
 - **Runtime env injection** (`shell/server/lib/runtimeEnv.mjs`): `.env`
   (VITE_SUPABASE_URL/ANON_KEY/APP_ID/AUTH_URL) added ONLY at materialization (build/preview/
   publish) — saved trees and export ZIPs stay clean. **Backend-as-parameter is a hard rule.**
@@ -226,13 +240,11 @@ project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 f
 because creation is a client-side owner-RLS insert, the DB is the only unbypassable gate;
 migration `migrations/password_resets_abuse_guards.sql` applied live via MCP).
 
-**Feature queue:** **PWA tick-box (QUEUED 2026-07-16, next build session)** — generated apps get
-manifest + icons + service worker at materialization → installable on phones (Android mints a
-real WebAPK; full-screen, offline-capable, push-capable). Step 1 of the Android ladder: Play
-Store later = TWA wrapping the same PWA, customer uploads under their OWN Play account ($25,
-Google's template-app policy). iOS DECIDED NO (Stuart's call — done iOS before, "a nightmare";
-per-publisher $99 accounts + guideline 4.2.6 kills central publishing; revisit only on loud
-paying demand) · AI support chat (needs abuse-guarding + real user questions first) ·
+**Feature queue:** **PWA ✅ DONE 2026-07-16** (always-on, publish-only; see shell/pwa note above)
+— next Android rung = Play Store TWA wrapping the same published PWA, customer uploads under
+their OWN Play account ($25, Google's template-app policy). iOS DECIDED NO (Stuart's call — done
+iOS before, "a nightmare"; per-publisher $99 accounts + guideline 4.2.6 kills central publishing;
+revisit only on loud paying demand) · AI support chat (needs abuse-guarding + real user questions first) ·
 booking→owner-email connector (unlocks the night-notifications ad creative) · Umami self-hosted
 analytics · connector gallery (browse/enable integrations per project — start with
 secretless embeds, then form→owner-email via Resend, Stripe Payment Links; Stuart parked it

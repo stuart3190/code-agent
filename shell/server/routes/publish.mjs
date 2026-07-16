@@ -10,6 +10,7 @@ import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
+import { withPwaAssets, renderIcons } from "../lib/pwa.mjs";
 import { serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
 import { isAdmin } from "../lib/admin.mjs";
@@ -78,11 +79,17 @@ async function claimSlug(owner, projectId, requestedName) {
     e.code = "slug_taken"; throw e;
   }
 
-  const { error: upErr } = await svc.from("published_sites")
-    .upsert({ slug: requested, owner: owner.id, project_id: projectId }, { onConflict: "slug" });
-  if (upErr) throw new Error(`site name claim failed: ${upErr.message}`);
-  if (existing && existing.slug !== requested) {
-    await svc.from("published_sites").delete().eq("slug", existing.slug).eq("project_id", projectId);
+  // A project holds exactly ONE row (unique project_id index), so a rename must MOVE the existing
+  // row's slug in place — inserting a second row for the same project violates that index (the old
+  // upsert-on-slug-then-delete did exactly that and 500'd on every rename).
+  if (existing) {
+    const { error: updErr } = await svc.from("published_sites")
+      .update({ slug: requested }).eq("project_id", projectId);
+    if (updErr) throw new Error(`site name claim failed: ${updErr.message}`);
+  } else {
+    const { error: insErr } = await svc.from("published_sites")
+      .insert({ slug: requested, owner: owner.id, project_id: projectId });
+    if (insErr) throw new Error(`site name claim failed: ${insErr.message}`);
   }
   return { slug: requested, previousSlug: existing?.slug ?? null };
 }
@@ -153,11 +160,21 @@ export async function handlePublish(req, res, body, owner) {
 
     await ensureDeps(() => {});
     const caseName = `pub-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const build = await buildTree(withRuntimeEnv(tree, projectId), caseName, () => {});
+    // PWA assets ride ONLY the publish materialization — previews stay service-worker-free.
+    // Manifest/icon name: the dialog's site name, else the project's display name, else the slug.
+    let appName = name;
+    if (!appName) {
+      const { data: proj } = await serviceClient()
+        .from("projects").select("name").eq("id", projectId).maybeSingle();
+      appName = proj?.name || slug || "My app";
+    }
+    const build = await buildTree(withPwaAssets(withRuntimeEnv(tree, projectId), { appName }), caseName, () => {});
     if (!build.ok) {
       res.writeHead(422, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "build failed", stderr: (build.stderr || "").slice(-2000) }));
     }
+    // Binary icons can't ride the UTF-8 tree — render them straight into the built dist.
+    await renderIcons({ appName, tree, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
     const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
     const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
     // A rename retires the old address so stale URLs stop serving; naming a legacy-published
