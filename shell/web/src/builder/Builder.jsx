@@ -53,6 +53,13 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const hasApp = !!tree;
   const mode = hasApp ? "iterate" : "build";
 
+  // Build-band disclosure: once an app is previewing, the band collapses to a slim one-line
+  // composer so the preview owns the window. It auto-opens while a build runs (live timeline),
+  // auto-collapses on a passing build, and stays open after a FAIL (the log is the evidence).
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => { if (busy) setDetailsOpen(true); }, [busy]);
+  useEffect(() => { if (result?.build?.ok) setDetailsOpen(false); }, [result]);
+
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
 
   // Publish/download outcomes surface as a self-dismissing toast (bottom-right).
@@ -469,7 +476,41 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       {/* body: build band on top, wide landscape preview stacked below. minmax floor keeps the
           preview from being crushed on short/narrow viewports — the body scrolls instead. */}
       <div className="grid grid-rows-[auto_minmax(24rem,1fr)] min-h-0 overflow-y-auto">
-        {/* build band — describe · turns · engine, laid out across the width so it stays short */}
+        {/* build band — describe · turns · engine. Once the app is previewing it collapses to a
+            slim composer (detailsOpen) so the preview owns the window. */}
+        {hasApp && !detailsOpen ? (
+        <div className="border-b border-line">
+          <div className="flex items-center gap-3 px-4 py-2">
+            <input className="field !py-1.5 flex-1 min-w-0" value={text} disabled={busy}
+              placeholder="Describe a change — e.g. make the header sticky"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") run(); }} />
+            <button className="btn-primary shrink-0" onClick={() => run()} disabled={busy || !text.trim()}>
+              Apply change
+            </button>
+            {result && (
+              <span className="hidden xl:block shrink-0 text-[11px] font-mono text-slate-500" title="Last turn">
+                {result.mode === "plan" ? "plan" : `build ${result.build?.ok ? "PASS" : "FAIL"}`}
+                {result.byok ? " · BYOK" : result.need != null ? ` · ${Number(result.need).toFixed(2)} cr` : ""}
+              </span>
+            )}
+            <button className="shrink-0 text-[11px] font-mono text-slate-500 hover:text-slate-300"
+              title="Show turn history and the build log" onClick={() => setDetailsOpen(true)}>
+              details ▾
+            </button>
+          </div>
+          {selectedEl && (
+            <div className="px-4 pb-2 flex items-center justify-between text-[11px] text-amber">
+              <span className="truncate" title={selectedEl.outerHTML}>
+                ◎ Selected: &lt;{selectedEl.tag}&gt;{selectedEl.text ? ` “${selectedEl.text.slice(0, 40)}${selectedEl.text.length > 40 ? "…" : ""}”` : ""} — your next change targets it
+              </span>
+              <button className="text-slate-500 hover:text-red-400 shrink-0 ml-2" title="Clear selection"
+                onClick={() => setSelectedEl(null)}>✕</button>
+            </div>
+          )}
+          {err && <div className="px-4 pb-2 text-xs text-red-400">{err}</div>}
+        </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[24rem_16rem_minmax(0,1fr)] border-b border-line">
           <div className="p-4 lg:border-r border-line">
             <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
@@ -539,7 +580,15 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
 
           {/* live build timeline (raw engine log behind the disclosure) */}
           <div className="flex flex-col min-h-0 border-t lg:border-t-0 border-line">
-            <div className="px-4 pt-3 text-[11px] font-mono uppercase tracking-wider text-slate-500">Build</div>
+            <div className="px-4 pt-3 flex items-center justify-between">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Build</span>
+              {hasApp && !busy && (
+                <button className="text-[11px] font-mono text-slate-500 hover:text-slate-300"
+                  title="Collapse to a slim bar — the preview gets the room" onClick={() => setDetailsOpen(false)}>
+                  hide ▴
+                </button>
+              )}
+            </div>
             <div ref={logRef} className="overflow-auto px-4 py-2" style={{ height: "9rem" }}>
               <Timeline lines={log} busy={busy} />
             </div>
@@ -555,6 +604,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             )}
           </div>
         </div>
+        )}
 
         {/* preview */}
         <div className="min-w-0 bg-ink-950 flex flex-col">
