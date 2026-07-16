@@ -12,6 +12,9 @@ A thin backend is available via \`import { auth, db, storage } from "./lib/backe
 the app needs accounts, persistence, or file uploads — never raw fetch, localStorage, or a new client.
 All methods are async (await them).
 - auth.signUp({ email, password }) · auth.signIn({ email, password }) · auth.signOut() · auth.currentUser() -> user | null
+- Forgot password: auth.resetPassword({ email }) emails the user a 6-digit code (always resolves);
+    auth.confirmReset({ email, code, newPassword }) verifies it, sets the password, and signs them in.
+    When you build a sign-in screen, include a "Forgot password?" link that drives this two-step flow.
 - db.entity("<type>").create(data) | .list() | .get(id) | .update(id, patch) | .delete(id)
     A record is { id, type, data, owner, created_at }; your fields live inside record.data.
     Pick a "<type>" string per kind of thing (e.g. "note", "task").
@@ -59,6 +62,9 @@ Design (defaults for when the user does not specify a style — a stated style A
   genuinely elevated things (dialogs, popovers, dropdowns, one key card). Never heavy shadows everywhere.
 - Match the app's nature: tools and dashboards get quiet, dense, neutral chrome; marketing pages and
   sites get richer, more expressive treatment. Do not force landing-page chrome onto a utility.
+- Photography: when a search_images tool is available, consumer-facing surfaces (business sites,
+  shops, portfolios, landing pages) get REAL photos — a full-bleed hero and section imagery — per
+  the Photography rules below. Colour blocks where a photo belongs make the app look unfinished.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.
@@ -82,7 +88,8 @@ export const PLAN_SYSTEM_PROMPT = `You are an app-builder planner. The user will
 
 The app will be built later inside a fixed scaffold: Vite + React 18 + Tailwind CSS, with a thin
 backend SDK (\`import { auth, db, storage } from "./lib/backend"\`) offering auth
-(signUp/signIn/signOut/currentUser), generic entity CRUD via db.entity("<type>"), and file storage.
+(signUp/signIn/signOut/currentUser + resetPassword/confirmReset code flow), generic entity CRUD via
+db.entity("<type>"), and file storage.
 Plan within those constraints — no extra packages, no build-config changes, no raw HTTP/Supabase.
 
 Reply with a short markdown outline (aim well under a page):

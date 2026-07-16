@@ -34,7 +34,7 @@ export async function searchImages(query, { count = 5, orientation = "landscape"
 export const SEARCH_IMAGES_SCHEMA = {
   name: "search_images",
   description:
-    "Search a stock-photo library for real, working, contextually relevant photos. Returns { photos: [{ url, alt, photographer }] }. Use the returned url values in <img> tags with the alt text. Never invent image URLs.",
+    "Search a stock-photo library for real, working, contextually relevant photos. Returns { photos: [{ url, alt, photographer }] }. Call this FIRST when building anything consumer-facing (business sites, shops, portfolios, landing pages) — real photography is the default for those apps. Use the returned url values in <img> tags with the alt text. Never invent image URLs.",
   parameters: {
     type: "object",
     properties: {
@@ -49,11 +49,19 @@ export const SEARCH_IMAGES_SCHEMA = {
 
 // System-prompt addendum offered only when the key is present.
 export const IMAGES_PROMPT_BLOCK = `
-Images:
-- Real stock photos are available via the search_images tool. For marketing/site-style builds
-  (businesses, landing pages, portfolios), fetch contextually relevant photos — a hero image and
-  section imagery — and use the returned url in <img> (or CSS background) with the alt text.
-- One or two search_images calls with well-chosen queries beat many; pick from the returned set.
+Photography (REQUIRED for consumer-facing apps):
+- Real stock photos are available via the search_images tool, and using them is the DEFAULT, not
+  an option. If the app has ANY public-facing or content surface — a business site, shop,
+  restaurant, salon, gym, portfolio, landing page, event, travel, food, property, blog, product
+  page — your FIRST tool call is search_images. A hero without a real photo, or a business site
+  made only of colour blocks, is a DEFECT: it will read as unfinished and the user will reject it.
+- Fetch a hero image AND section imagery (services, menu items, gallery, about). One or two
+  search_images calls with well-chosen queries (count 5-8) usually cover the whole app — pick the
+  best from the returned set and reuse the batch across sections.
+- Use the returned url values in <img> tags (or CSS backgrounds) with the alt text provided,
+  sized with object-cover. Photos should carry the design: full-bleed heroes, image cards,
+  gallery grids — not thumbnails squeezed into corners.
 - NEVER invent or recall image URLs from memory (no unsplash/picsum/placeholder links) — only use
-  URLs returned by search_images. Give images proper alt text and object-cover sizing.
-- Tools and dashboards usually need NO photography — don't force imagery onto utility apps.`;
+  URLs returned by search_images.
+- The ONLY apps that skip photography are pure utility tools (todo lists, calculators, trackers,
+  dashboards, admin panels). If in doubt, fetch photos.`;
