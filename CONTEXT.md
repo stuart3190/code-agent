@@ -226,7 +226,15 @@ project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 f
 because creation is a client-side owner-RLS insert, the DB is the only unbypassable gate;
 migration `migrations/password_resets_abuse_guards.sql` applied live via MCP).
 
-**Feature queue:** connector gallery (browse/enable integrations per project — start with
+**Feature queue:** **PWA tick-box (QUEUED 2026-07-16, next build session)** — generated apps get
+manifest + icons + service worker at materialization → installable on phones (Android mints a
+real WebAPK; full-screen, offline-capable, push-capable). Step 1 of the Android ladder: Play
+Store later = TWA wrapping the same PWA, customer uploads under their OWN Play account ($25,
+Google's template-app policy). iOS DECIDED NO (Stuart's call — done iOS before, "a nightmare";
+per-publisher $99 accounts + guideline 4.2.6 kills central publishing; revisit only on loud
+paying demand) · AI support chat (needs abuse-guarding + real user questions first) ·
+booking→owner-email connector (unlocks the night-notifications ad creative) · Umami self-hosted
+analytics · connector gallery (browse/enable integrations per project — start with
 secretless embeds, then form→owner-email via Resend, Stripe Payment Links; Stuart parked it
 2026-07-16, low priority) · BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
 `baseline/PLAN-per-app-auth.md`) · visual edits v2 (source tagging) · plan-mode clarifying
