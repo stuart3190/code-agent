@@ -191,7 +191,9 @@ timers under virtual-time).
   `stripe_customer_id`s were nulled in `customers` (live checkout can't reuse a test cus_).
   Loose ends: ~~subscription smoke~~ PROVEN LIVE 2026-07-16 (Stuart subscribed Starter for real:
   invoice.paid → +120 bundle grant, tier + cycle set, actively dogfooding on it — kept, not
-  refunded); product description still the old SEO text; payout schedule manual.
+  refunded); ~~product descriptions~~ DONE 2026-07-16 (all 4 set via the live key — they were
+EMPTY; the "old SEO text" was a stray still-active FinTech product from a prior venture, now
+archived); payout schedule manual.
 - **Legal**: DONE 2026-07-07 (9e293be, deployed + verified live on buildr101.com). Public
   `/terms` `/privacy`
   `/refunds` (shell/web/src/legal/LegalPage.jsx, routed in main.jsx pre-auth; links in AuthGate
@@ -215,8 +217,9 @@ timers under virtual-time).
 
 **🟡 Soon after:** ~~Supabase backups~~ DONE 2026-07-07 (`buildr-backup.timer` nightly JSON
 export on the VPS — see DEPLOY.md §Backups) · ~~public pricing page~~ DONE 2026-07-07 (public
-`/pricing`, live numbers from /api/config, linked from AuthGate footer) · uptime monitoring
-(e.g. UptimeRobot — needs an account) · Codex quota ceiling on the managed lane (covered by the
+`/pricing`, live numbers from /api/config, linked from AuthGate footer) · ~~uptime monitoring~~
+DONE 2026-07-16 (UptimeRobot → /api/health, probes verified in the Caddy logs) ·
+Codex quota ceiling on the managed lane (covered by the
 scaling plan) · ~~light abuse guards~~ DONE 2026-07-15 (app-auth signup limits: 10/h per IP +
 30/h per app, DB-backed via `app_auth_events`; reset limits 5/h per target + 20/h per IP;
 project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 free / 100 paid —
