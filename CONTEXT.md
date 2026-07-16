@@ -2,10 +2,11 @@
 
 > Paste-into-a-fresh-session summary of the entire app builder: what it is, every working part,
 > where things run, the rules that keep it clean, and what's still open.
-> Last updated **2026-07-07** (launch-audit session: Stripe live catalog created via MCP +
-> STRIPE-LIVE.md runbook, legal pages + account deletion live, public /pricing, nightly Supabase
-> backups — remaining audit items are Stuart-only dashboard steps). Prior 2026-07-06: design pass,
-> 7 Lovable-parity features, production deploy, paywall ladder, welcome credits.
+> Last updated **2026-07-15** (pre-promotion hardening: app-auth password reset via Resend code
+> flow + abuse guards — signup rate limits, project-cap trigger — all deployed + proven 15/15;
+> Resend account/dashboard steps are the last Stuart-only blockers, runbook `baseline/RESEND.md`).
+> Prior 2026-07-08: Stripe LIVE + proven. 2026-07-07: launch audit (legal, /pricing, backups).
+> 2026-07-06: design pass, 7 Lovable-parity features, production deploy, paywall ladder.
 > Repo: `stuart3190/app-builder` (private, linear master, EPYC box
 > `C:\Users\Administrator\app-builder`).
 
@@ -54,6 +55,15 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
 - **Prompts** (`src/prompts/builder.mjs`): BUILD / PLAN / EDIT (+apply_patch variant). Contains the
   aesthetic **Design block** (semantic tokens, one accent, type scale, compose from the component
   library via a ~500-token cheat-sheet, search_images rules, per-app-backend note).
+  **Photography regression fixed 2026-07-16**: production builds had stopped using real photos
+  (Pexels quota showed search_images ~never called — the old IMAGES_PROMPT_BLOCK was a soft
+  "consider it" note the design pass drowned out). Fix: IMAGES_PROMPT_BLOCK (shell/server/lib/
+  images.mjs) now makes photography REQUIRED-by-default for consumer-facing apps (first tool
+  call = search_images; photo-less business hero = "a DEFECT"), + a Photography line inside the
+  Design block itself, + a pushier tool description. Guard: `node harness/_images-probe.mjs`
+  (one live Codex build; asserts ≥1 search call, ≥3 pexels URLs, 0 invented hosts, builds) —
+  PASS on first run; the resulting Iron & Oak barber build (full-bleed photo hero) became the
+  landing showcase (assets/showcase-barber2.jpg, replacing the photo-less Fade District png).
 - **Edit tool**: apply_patch (Codex V4A) with write_file fallback after 2 failures.
 - **Scaffold** (`src/scaffolds/reactVite.mjs` + real files under `reactVite/`): Vite+React18+
   Tailwind, **shadcn-style tokens** (`:root`/`.dark` HSL) + **Manrope/Space Grotesk** (@fontsource,
@@ -83,8 +93,18 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   Grotesk, layered-blocks logo. **Public pages** (routed pre-auth in main.jsx, no account needed):
   `/pricing` (live numbers from /api/config incl. welcomeCredits) + `/terms` `/privacy` `/refunds`
   (`src/legal/`); links in AuthGate + Settings footers; support contact support@buildr101.com.
-  AuthGate = storefront split (proof screenshot + bullets) with
-  signup-confirmation handling + forgot-password (+ ResetPassword screen on PASSWORD_RECOVERY).
+  **Landing page** (2026-07-15, `src/landing/Landing.jsx` — the logged-out experience, replaced
+  the bare AuthGate split): sticky nav, hero (headline + trust chips + embedded AuthCard), the
+  signature **build console** (types the barber-shop prompt, streams build-log lines, browser
+  frame resolves into the real fadedistrict screenshot; reduced-motion shows the finished state),
+  how-it-works, feature grid, live pricing strip from /api/config, CTA band, footer.
+  `auth/AuthGate.jsx` now = `AuthCard` (mode lifted; all original signup/signin/forgot logic
+  verbatim) + `Logo` + a standalone default export. Screenshot gotcha discovered: headless Edge
+  on Windows CLAMPS window width to ~492px (innerWidth probe proves it) — "broken mobile"
+  screenshots at 390px were an artifact all along; verify mobile at 492 (still < sm) or via an
+  iframe harness (which stalls on cross-origin session checks — prefer 492). Window height also
+  caps ~2400px. Signup-confirmation handling + forgot-password (+ ResetPassword screen on
+  PASSWORD_RECOVERY) all unchanged.
   Dashboard: starter-prompt chips, live-site links, always-visible delete ✕ (confirm spells out
   consequences). **Builder**: prompt box (⌘Enter), plan-mode toggle, inline project RENAME
   (pencil), knowledge popover, select-element (visual edits), build TIMELINE (parsed from SSE log
@@ -125,15 +145,17 @@ owner-RLS) · `credit_ledger` + `customers` (billing) · `byok_keys` (service-ro
 `app_users` (per-app end-user pools; service-role only) · `published_sites` (slug claims) ·
 `custom_domains`. **Edge Function `app-auth`**: per-app signup/signin — real Supabase auth users
 under synthetic emails (`u.<sha>@apps.buildr101.com`), real sessions/refresh tokens, same email
-usable across apps; reset = 501 stub (needs an email provider). Buildr101 BUILDER accounts use
-normal Supabase auth (shared pool).
+usable across apps; v2 (2026-07-15) adds the full password-reset code flow (Resend) + signup
+rate limits — tables `app_password_resets` + `app_auth_events` (both deny-all RLS). Buildr101
+BUILDER accounts use normal Supabase auth (shared pool).
 
 ## Testing (run on engine/billing changes; ship gate = green)
 
 Offline: `npm run test:billing` (35) · `test:ledger` (19) · `harness/_applier|_context|_runagent|
 _router-tests.mjs` · `test:export`. Live (Codex spend): `node harness/run.mjs` (3 archetypes) ·
 `node shell/harness/prove-shell.mjs` (41 checks, full product loop — runs on the VPS too) ·
-prove:billing / proveBackend / proveTenancy / prove-byok. Headless verify pattern: probe user +
+prove:billing / proveBackend / proveTenancy / prove-byok / prove-reset-guards (15 checks:
+reset code flow + abuse guards against the DEPLOYED function + live DB, no email needed). Headless verify pattern: probe user +
 service-role credit seed + fetch against :8787 or buildr101.com; screenshots via headless Edge
 (`--screenshot`, blank-white 5851b = dev-server needs restart; cross-origin iframes don't tick
 timers under virtual-time).
@@ -171,16 +193,27 @@ timers under virtual-time).
   `shell/harness/prove-account-delete.mjs` 26/26 GREEN live. Support contact =
   support@buildr101.com — Cloudflare Email Routing forward set up 2026-07-08 (MX
   route1/2/3.mx.cloudflare.net + SPF verified live in DNS; spot-check = send it a test email).
-- **Transactional email**: Resend/SES (Supabase mailer ≈3/hr — fatal at volume); unlocks app-auth
-  password reset (stage 4). ~~Supabase Site URL dashboard step~~ DONE 2026-07-08 (Stuart set it to
-  `https://buildr101.com` in the dashboard; spot-check = trigger forgot-password and confirm the
-  emailed link points at buildr101.com, not localhost).
+- **Transactional email**: ✅ FULLY LIVE 2026-07-15 (runbook `baseline/RESEND.md`) — app-auth v2
+  deployed with the full reset flow: `reset` emails a 6-digit code via the Resend API,
+  `reset-confirm` verifies + sets password + signs in; codes hashed in `app_password_resets`
+  (15-min TTL, 5-attempt cap, single-use, no account enumeration); SDK `auth.resetPassword` /
+  `auth.confirmReset` + builder-prompt "Forgot password?" guidance; proven 15/15 by
+  `shell/harness/prove-reset-guards.mjs` AND by a real delivery (Stuart relayed the emailed
+  code → confirm 200). Stuart's dashboard steps all DONE same day: Resend domain verified,
+  `RESEND_API_KEY` edge secret (gotcha: secret NAME must be exactly that — it was first saved
+  as `Resend`), Supabase custom SMTP via smtp.resend.com (kills the ≈3/hr mailer risk).
+  Resend free tier = 100 emails/day — upgrade when signups approach it.
+  ~~Supabase Site URL dashboard step~~ DONE 2026-07-08.
 
 **🟡 Soon after:** ~~Supabase backups~~ DONE 2026-07-07 (`buildr-backup.timer` nightly JSON
 export on the VPS — see DEPLOY.md §Backups) · ~~public pricing page~~ DONE 2026-07-07 (public
 `/pricing`, live numbers from /api/config, linked from AuthGate footer) · uptime monitoring
 (e.g. UptimeRobot — needs an account) · Codex quota ceiling on the managed lane (covered by the
-scaling plan) · light abuse guards (app-auth signup rate limits, per-account project caps).
+scaling plan) · ~~light abuse guards~~ DONE 2026-07-15 (app-auth signup limits: 10/h per IP +
+30/h per app, DB-backed via `app_auth_events`; reset limits 5/h per target + 20/h per IP;
+project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 free / 100 paid —
+because creation is a client-side owner-RLS insert, the DB is the only unbypassable gate;
+migration `migrations/password_resets_abuse_guards.sql` applied live via MCP).
 
 **Feature queue:** BYO-OpenAI-API-key provider · paid lane (dedicated Supabase project per client,
 `baseline/PLAN-per-app-auth.md`) · visual edits v2 (source tagging) · plan-mode clarifying
@@ -190,6 +223,7 @@ routing under --cache).
 
 ## Canonical docs in-repo
 
-`baseline/DEPLOY.md` (production runbook) · `baseline/DECISION-hosting.md` ·
+`baseline/DEPLOY.md` (production runbook) · `baseline/RESEND.md` (email runbook + Stuart's
+remaining dashboard steps) · `baseline/DECISION-hosting.md` ·
 `baseline/PLAN-per-app-auth.md` (paid lane) · `baseline/PHASE-*.md` (history/evidence) ·
 `baseline/PROVISIOND-PLAN.md` · migrations/*.sql (all applied live).
