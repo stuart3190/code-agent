@@ -186,6 +186,15 @@ function Dashboard({ projects, onNew, onOpen, onStart, onDelete }) {
             </div>
           ))}
         </div>
+
+        {/* the logged-in surface needs the public links too — logged-in users never see Landing */}
+        <footer className="mt-12 pt-5 border-t border-line/60 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          <a className="hover:text-slate-400" href="/support" target="_blank" rel="noreferrer">Help &amp; support</a>
+          <a className="hover:text-slate-400" href="/pricing" target="_blank" rel="noreferrer">Pricing</a>
+          <a className="hover:text-slate-400" href="/terms" target="_blank" rel="noreferrer">Terms</a>
+          <a className="hover:text-slate-400" href="/privacy" target="_blank" rel="noreferrer">Privacy</a>
+          <a className="hover:text-slate-400" href="mailto:support@buildr101.com">support@buildr101.com</a>
+        </footer>
       </div>
     </div>
   );
