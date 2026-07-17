@@ -240,9 +240,19 @@ project cap = BEFORE INSERT trigger `enforce_project_cap` on `projects` — 10 f
 because creation is a client-side owner-RLS insert, the DB is the only unbypassable gate;
 migration `migrations/password_resets_abuse_guards.sql` applied live via MCP).
 
-**Feature queue:** **PWA ✅ DONE 2026-07-16** (always-on, publish-only; see shell/pwa note above)
-— next Android rung = Play Store TWA wrapping the same published PWA, customer uploads under
-their OWN Play account ($25, Google's template-app policy). iOS DECIDED NO (Stuart's call — done
+**Feature queue:** **PWA ✅ DONE 2026-07-16** (always-on, publish-only; see shell/pwa note above).
+**ANDROID — NEXT SESSION (plan-mode first), scope = "Download Android app" button by the Publish
+button; Buildr101 emits the signed artifact, the customer does the Play upload with their own $25
+account (Google template-app policy forbids bulk-publishing from one account).** Mechanism = TWA
+(Trusted Web Activity) wrapping the already-published PWA, built with @bubblewrap/cli on the VPS
+Linux toolchain (JDK 17 + Android cmdline-tools/build-tools — a real install, no Mac). THE
+COUPLING to walk in knowing: a TWA only runs full-screen (no browser URL bar) if the app's origin
+serves `/.well-known/assetlinks.json` containing the SHA-256 fingerprint of the APK's signing key
+— so the flow is generate keystore → build+sign → write assetlinks.json with THAT fingerprint into
+the published app's origin (public/.well-known/, same injection seam as the PWA) → the app must be
+(re)published so x.app.buildr101.com serves it. Deliver TWO artifacts: signed .apk (sideload/test
+now) + .aab (Play upload). Key custody decision needed (Buildr101-generated keystore handed to the
+user in the download vs Play App Signing upload-key). iOS DECIDED NO (Stuart's call — done
 iOS before, "a nightmare"; per-publisher $99 accounts + guideline 4.2.6 kills central publishing;
 revisit only on loud paying demand) · AI support chat (needs abuse-guarding + real user questions first) ·
 booking→owner-email connector (unlocks the night-notifications ad creative) · Umami self-hosted
