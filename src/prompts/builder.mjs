@@ -68,6 +68,11 @@ Design (defaults for when the user does not specify a style — a stated style A
   responsive prefixes (grid-cols-1 sm:grid-cols-2 …, flex-col sm:flex-row); size images with
   max-w-full/w-full; put wide content (tables, code, charts) inside an overflow-x-auto container so
   IT scrolls rather than the page. Build and mentally test at phone width first, then scale up.
+- Decorative background elements are the #1 cause of mobile right-edge cutoff: any element
+  positioned partly OFF-SCREEN (negative insets like right-[-10rem], -left-40, translated blobs,
+  glows, grids) MUST live inside a container that CLIPS it — put overflow-hidden on that decorative
+  wrapper itself (a fixed/absolute layer is NOT clipped by an ancestor's overflow-hidden). Never let
+  a decorative or absolutely-positioned element widen the page.
 - Photography: when a search_images tool is available, consumer-facing surfaces (business sites,
   shops, portfolios, landing pages) get REAL photos — a full-bleed hero and section imagery — per
   the Photography rules below. Colour blocks where a photo belongs make the app look unfinished.
