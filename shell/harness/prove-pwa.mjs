@@ -110,6 +110,7 @@ async function main() {
     const html = await (await fetch(`${siteUrl}/`)).text();
     check(html.includes('rel="manifest"'), "index links the manifest");
     check(html.includes("serviceWorker.register"), "index registers the service worker");
+    check(html.includes("overflow-x:clip"), "index carries the horizontal-overflow guard (no right-edge clipping on phones)");
     check(html.includes(`<title>${slugBase}</title>`), "title swapped to the app name");
 
     // ── FRESH — republish must not serve stale PWA metadata ─────────────────────────────────

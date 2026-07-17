@@ -110,6 +110,9 @@ self.addEventListener("fetch", (e) => {
   const headTags = `    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="${themeColor}" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- Safety net: stop any accidental horizontal overflow from shifting the app and clipping the
+         right edge on phones (overflow-x:clip doesn't break sticky, unlike hidden). -->
+    <style>html,body{overflow-x:clip}img,video{max-width:100%}</style>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });

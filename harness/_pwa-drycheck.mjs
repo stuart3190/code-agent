@@ -20,6 +20,7 @@ const checks = [
   ["html: theme-color meta", out["index.html"].includes('name="theme-color"')],
   ["html: apple-touch-icon", out["index.html"].includes("apple-touch-icon")],
   ["html: SW registration", out["index.html"].includes("serviceWorker.register")],
+  ["html: horizontal-overflow guard", out["index.html"].includes("overflow-x:clip")],
   ["html: title swapped + escaped", out["index.html"].includes("<title>Iron &amp; Oak Barber Co</title>")],
   ["input tree untouched (pure)", !tree["public/sw.js"] && !tree["index.html"].includes("manifest")],
 ];

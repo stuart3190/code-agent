@@ -193,9 +193,15 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   * {
     @apply border-border;
   }
+  html, body {
+    /* Never let accidental overflow shift the layout and clip the right edge on phones.
+       overflow-x:clip (not hidden) keeps position:sticky working. */
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+  img, video { max-width: 100%; }
   h1, h2, h3, h4 {
     @apply font-display tracking-tight;
   }

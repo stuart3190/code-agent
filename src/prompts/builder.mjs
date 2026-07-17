@@ -62,6 +62,12 @@ Design (defaults for when the user does not specify a style — a stated style A
   genuinely elevated things (dialogs, popovers, dropdowns, one key card). Never heavy shadows everywhere.
 - Match the app's nature: tools and dashboards get quiet, dense, neutral chrome; marketing pages and
   sites get richer, more expressive treatment. Do not force landing-page chrome onto a utility.
+- MOBILE-FIRST & responsive (REQUIRED — apps are installed and opened on phones): the layout MUST
+  work at 360px wide with NO horizontal overflow and nothing clipped off the right edge. Never use
+  fixed pixel widths wider than the screen; stack or wrap columns on small screens using Tailwind's
+  responsive prefixes (grid-cols-1 sm:grid-cols-2 …, flex-col sm:flex-row); size images with
+  max-w-full/w-full; put wide content (tables, code, charts) inside an overflow-x-auto container so
+  IT scrolls rather than the page. Build and mentally test at phone width first, then scale up.
 - Photography: when a search_images tool is available, consumer-facing surfaces (business sites,
   shops, portfolios, landing pages) get REAL photos — a full-bleed hero and section imagery — per
   the Photography rules below. Colour blocks where a photo belongs make the app look unfinished.
