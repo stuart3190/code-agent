@@ -6,6 +6,7 @@
 
 import { WELCOME_CREDITS } from "../../../src/billing/costModel.mjs";
 import { ledger } from "./services.mjs";
+import { sendOnce, welcomeEmail } from "./email.mjs";
 
 export async function ensureWelcomeGrant(ownerId) {
   if (!ownerId || !(WELCOME_CREDITS > 0)) return;
@@ -21,4 +22,8 @@ export async function ensureWelcomeGrant(ownerId) {
   } catch {
     /* never block the caller on the gift */
   }
+  // Welcome email — idempotent via email_log, fail-soft, only for real builder accounts.
+  try {
+    await sendOnce({ ownerId, kind: "welcome", build: () => welcomeEmail(WELCOME_CREDITS) });
+  } catch { /* never block the caller on the email */ }
 }

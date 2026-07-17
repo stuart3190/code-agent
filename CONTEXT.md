@@ -294,6 +294,21 @@ questions · duplicate project · project search · mobile Builder layout · bui
 published-site analytics · engine cost knobs (preview-h/credit instrumentation, search_replace A/B,
 routing under --cache).
 
+## Lifecycle email (LIVE 2026-07-17)
+
+- **Welcome email** (`shell/server/lib/email.mjs` `sendOnce` + `welcomeEmail`): sent once per new
+  builder account, hooked into `ensureWelcomeGrant` (fires when the 30 free credits land) — reminds
+  them of the credits + gives starter-prompt nudges + the builder link. Idempotent via `email_log`
+  (owner,kind PK, deny-all RLS); fail-soft (no RESEND_API_KEY → no send, never blocks a build).
+- **Credits-remaining nudge** (`scripts/email-nudge.mjs` + `buildr-email-nudge.timer`, daily
+  15:20 UTC): 24-72h after signup, for accounts that got the welcome, haven't been nudged, and
+  still have credits (balance>0) — one nudge with their remaining credit count. `--dry-run` lists
+  targets without sending.
+- Both send via the **Resend API** (RESEND_API_KEY + RESEND_FROM now in the shell/.env, separate
+  from the Supabase edge secret; from = hello@buildr101.com on the verified domain). App end-users
+  (`@apps.buildr101.com`) are excluded — builder accounts only. Proven live: real welcome delivery
+  to stuart3190@gmail.com + idempotency ('already' path) + nudge dry-run (0 eligible yet).
+
 ## Marketing (LIVE since 2026-07-16 — promotion running)
 
 - **Meta ad**: campaign `52681395849417` "Buildr101 — Launch — Signups" (OUTCOME_LEADS, CBO
