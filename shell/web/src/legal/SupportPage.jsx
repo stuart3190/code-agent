@@ -39,6 +39,14 @@ is handled automatically.`,
 builder — if you ever leave, your apps leave with you.`,
   },
   {
+    q: "Can I put my app on the Google Play Store?",
+    a: `Yes. Once your app is published, open the Site menu in the builder and choose "Download
+Android app" — Buildr101 builds you a signed Android app (an APK to install and test right away,
+plus an AAB to upload to Play). You upload the AAB to the Play Store under your own Google Play
+developer account (a one-time $25 from Google), and keep the included keystore file safe for
+future updates. The download includes a README with the exact steps. iOS isn't supported.`,
+  },
+  {
     q: "Can people install my app on their phone?",
     a: `Yes — every published app is installable. On Android, visitors get an "Install app" prompt
 (it becomes a real app with its own icon); on iPhone it's Share → Add to Home Screen. Either way

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, generate, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
+import { downloadProject, downloadAndroid, generate, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
 import { saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
@@ -40,6 +40,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [domainMsg, setDomainMsg] = useState(null);
   const [domainBusy, setDomainBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  const [androidBusy, setAndroidBusy] = useState(false);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -303,6 +304,20 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     }
   }
 
+  async function doDownloadAndroid() {
+    if (androidBusy) return;
+    setAndroidBusy(true);
+    setPublishMsg("Building your Android app — this takes a couple of minutes, keep this tab open…");
+    try {
+      const r = await downloadAndroid(project.id, tree);
+      setPublishMsg(`Downloaded ${r.filename} — see the README inside for Play Store steps.`);
+    } catch (e) {
+      setPublishMsg(e.message || String(e));
+    } finally {
+      setAndroidBusy(false);
+    }
+  }
+
   return (
     <div className="relative h-full grid grid-rows-[3.5rem_1fr] grid-cols-[minmax(0,1fr)]">
       {/* grid-cols must be an explicit minmax(0,1fr): the implicit auto column would grow to fit a
@@ -374,6 +389,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850"
               onClick={() => { setShowSite(false); openDomains(); }}>
               Custom domain…
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-ink-850 disabled:opacity-50"
+              disabled={androidBusy || busy || publishBusy}
+              onClick={() => { setShowSite(false); doDownloadAndroid(); }}
+              title="Build a signed Android app (APK + AAB) from your published site">
+              {androidBusy ? "Building Android app…" : "Download Android app"}
             </button>
             <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400/90 hover:bg-ink-850"
               disabled={publishBusy}

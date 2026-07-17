@@ -61,6 +61,25 @@ pruning runs older than 14 days (`BACKUP_DIR`/`BACKUP_KEEP_DAYS` override). Chec
 Restore = re-insert rows with the service role (see the script header); this is loss protection,
 not point-in-time recovery — that would be Supabase Pro.
 
+## Android builder image (installed 2026-07-17)
+
+The "Download Android app" feature (`POST /api/android`) runs the whole TWA build inside the
+`buildr-android:latest` Docker image (JDK17 + Android SDK 34 + Bubblewrap, gradle primed). Build
+it ONCE on the VPS, and rebuild only when `android/Dockerfile` or `android/build.sh` change:
+
+```sh
+# from the repo root on the VPS (or scp android/ up first)
+docker build -t buildr-android:latest ~/app-builder/android
+```
+
+~2.2GB, ~5-8 min (the prime step compiles a throwaway TWA against
+`https://buildr101.com/android-prime.webmanifest` to warm the gradle cache — that file must be
+live). The shell runs `docker run --rm -v <tmp>:/work buildr-android:latest` per export; the
+`ubuntu` shell user is already in the docker group (same as the alpine-chrome renderer). Health:
+`docker images buildr-android` · a green `node shell/harness/prove-android.mjs` (opt-in, live).
+NOTE: the deploy tar EXCLUDES `android/` (the image is built/owned on the VPS, not shipped in the
+tarball) — re-scp `android/` when its files change.
+
 ## Codex OAuth keep-alive (installed 2026-07-16)
 
 `buildr-codex-keepalive.timer` (systemd, daily 03:47 UTC, `Persistent=true`) runs

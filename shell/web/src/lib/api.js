@@ -92,6 +92,28 @@ export async function downloadProject(projectId) {
   return { filename };
 }
 
+// POST /api/android — wrap the published PWA into a signed Android app (APK+AAB) and download the
+// zip. Slow (a couple of minutes) — the caller shows a spinner. Same blob→anchor as downloadProject.
+export async function downloadAndroid(projectId, tree) {
+  const r = await fetch("/api/android", {
+    method: "POST", headers: await authHeaders(),
+    body: JSON.stringify({ projectId, tree }),
+  });
+  if (!r.ok) {
+    let message = `android ${r.status}`;
+    try { message = (await r.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+  const blob = await r.blob();
+  const filename = filenameFromDisposition(r.headers.get("Content-Disposition"));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { filename };
+}
+
 // POST /api/publish — build the tree server-side and ship the static dist to the VPS.
 // `name` (first publish / rename) becomes the site's subdomain: <name>.app.buildr101.com.
 export async function publishProject(projectId, tree, name) {

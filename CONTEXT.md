@@ -86,6 +86,26 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   **Rename bug fixed same commit**: claimSlug's upsert-on-slug-then-delete inserted a 2nd row for
   the same project → 500 on every published-site RENAME (unique project_id index); now updates the
   existing row's slug in place. Existing sites gain PWA on next republish (no migration).
+- **Android export — "Download Android app"** (2026-07-17): Site ▾ menu action on a PUBLISHED app
+  wraps its PWA into a signed **APK + AAB (TWA via Bubblewrap)** and downloads a zip (apk, aab,
+  keystore, password, README with Play steps — customer uploads under their OWN $25 Play account).
+  Runs entirely in the **`buildr-android` Docker image** (JDK17 + Android SDK 34 + @bubblewrap/cli,
+  gradle primed against `/android-prime.webmanifest`; ~2.2GB, built on the VPS from `android/` —
+  `docker build -t buildr-android:latest android/`). Route `POST /api/android`
+  (`shell/server/routes/android.mjs`) → `shell/server/lib/android.mjs` `buildAndroid`: per-project
+  signing keystore encrypted at rest (`android_keystores`, deny-all RLS, mirrors byokStore but
+  base64s the binary; migration `migrations/android_keystores.sql`), docker run, zip via
+  `createStoredZip`. **assetlinks coupling**: the publish core (`materializeAndPublish`, factored
+  out of publish.mjs) injects `public/.well-known/assetlinks.json` into EVERY publish once a
+  project has a key — so a plain republish never breaks the installed app's full-screen
+  verification (Caddy serves dotfiles; provisiond replaces the whole dir so it MUST ride the tree).
+  Proven 13/13 live `shell/harness/prove-android.mjs` (real ~90s build → signed apk+aab, assetlinks
+  fingerprint match, key reuse, republish survival). GOTCHAS baked in: Bubblewrap 1.24 SDK check
+  wants `${sdk}/tools` (symlink to cmdline-tools/latest); non-interactive path =
+  `bubblewrap update --skipVersionUpgrade && build` (NOT `build` alone → interactive version
+  prompt); container runs as root → `chmod a+rwX /work` on EXIT so the shell can clean up;
+  execFileSync needs `maxBuffer` bumped (gradle is chatty). Shell serveStatic content-type map
+  also gained png/jpg/webmanifest/etc. (was octet-stream — bit the OG/promo images too). iOS still NO.
 - **Runtime env injection** (`shell/server/lib/runtimeEnv.mjs`): `.env`
   (VITE_SUPABASE_URL/ANON_KEY/APP_ID/AUTH_URL) added ONLY at materialization (build/preview/
   publish) — saved trees and export ZIPs stay clean. **Backend-as-parameter is a hard rule.**

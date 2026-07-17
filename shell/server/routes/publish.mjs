@@ -14,6 +14,7 @@ import { withPwaAssets, renderIcons } from "../lib/pwa.mjs";
 import { serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
 import { isAdmin } from "../lib/admin.mjs";
+import { assetlinksJson } from "../lib/androidLinks.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -141,6 +142,57 @@ export async function handleUnpublish(req, res, body, owner) {
   }
 }
 
+// The materialize+publish core, reusable by the publish route AND the Android export (which
+// republishes the tree with assetlinks injected). Enforces tier, claims/renews the slug, builds
+// the PWA-materialized tree, renders icons into dist, ships to provisiond, retires the old label
+// on a rename. Throws coded errors (upgrade_required / slug_taken / bad_slug / build failed).
+// Returns { url, slug, files, bytes }.
+export async function materializeAndPublish({ owner, projectId, tree, name }) {
+  if (!PROVISIOND_URL() || !PROVISIOND_TOKEN()) {
+    const e = new Error("publishing is not configured (PROVISIOND_URL/TOKEN)"); e.code = "not_configured"; throw e;
+  }
+  await requirePublishTier(owner);
+  // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
+  const { slug, previousSlug } = await claimSlug(owner, projectId, name);
+
+  await ensureDeps(() => {});
+  const caseName = `pub-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  // PWA assets ride ONLY the publish materialization — previews stay service-worker-free.
+  // Manifest/icon name: the dialog's site name, else the project's display name, else the slug.
+  let appName = name;
+  if (!appName) {
+    const { data: proj } = await serviceClient()
+      .from("projects").select("name").eq("id", projectId).maybeSingle();
+    appName = proj?.name || slug || "My app";
+  }
+  // Once a project has generated an Android app, EVERY publish must keep serving its assetlinks —
+  // otherwise a plain republish would break the installed app's full-screen verification.
+  let publishTree = tree;
+  const { data: ks } = await serviceClient()
+    .from("android_keystores").select("package_id, fingerprint").eq("project_id", projectId).maybeSingle();
+  if (ks) {
+    publishTree = { ...tree, "public/.well-known/assetlinks.json": assetlinksJson(ks.package_id, ks.fingerprint) };
+  }
+  const build = await buildTree(withPwaAssets(withRuntimeEnv(publishTree, projectId), { appName }), caseName, () => {});
+  if (!build.ok) {
+    const e = new Error("build failed"); e.code = "build_failed"; e.stderr = (build.stderr || "").slice(-2000); throw e;
+  }
+  // Binary icons can't ride the UTF-8 tree — render them straight into the built dist.
+  await renderIcons({ appName, tree, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
+  const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+  const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
+  // A rename retires the old address so stale URLs stop serving; naming a legacy-published
+  // project likewise retires its old UUID label (no-op when that dir never existed).
+  if (slug) {
+    if (previousSlug && previousSlug !== slug) {
+      await provisiondPost("/unpublish", { projectId, slug: previousSlug }).catch(() => {});
+    } else if (!previousSlug) {
+      await provisiondPost("/unpublish", { projectId }).catch(() => {});
+    }
+  }
+  return { url: out.url, files: out.files, bytes: out.bytes, slug: slug || out.id };
+}
+
 export async function handlePublish(req, res, body, owner) {
   const projectId = body?.projectId;
   const tree = body?.tree;
@@ -149,49 +201,30 @@ export async function handlePublish(req, res, body, owner) {
     res.writeHead(400, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: "projectId and tree are required" }));
   }
-  if (!PROVISIOND_URL() || !PROVISIOND_TOKEN()) {
-    res.writeHead(503, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "publishing is not configured (PROVISIOND_URL/TOKEN)" }));
-  }
   try {
-    await requirePublishTier(owner);
-    // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
-    const { slug, previousSlug } = await claimSlug(owner, projectId, name);
-
-    await ensureDeps(() => {});
-    const caseName = `pub-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-    // PWA assets ride ONLY the publish materialization — previews stay service-worker-free.
-    // Manifest/icon name: the dialog's site name, else the project's display name, else the slug.
-    let appName = name;
-    if (!appName) {
-      const { data: proj } = await serviceClient()
-        .from("projects").select("name").eq("id", projectId).maybeSingle();
-      appName = proj?.name || slug || "My app";
-    }
-    const build = await buildTree(withPwaAssets(withRuntimeEnv(tree, projectId), { appName }), caseName, () => {});
-    if (!build.ok) {
-      res.writeHead(422, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: "build failed", stderr: (build.stderr || "").slice(-2000) }));
-    }
-    // Binary icons can't ride the UTF-8 tree — render them straight into the built dist.
-    await renderIcons({ appName, tree, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
-    const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
-    const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
-    // A rename retires the old address so stale URLs stop serving; naming a legacy-published
-    // project likewise retires its old UUID label (no-op when that dir never existed).
-    if (slug) {
-      if (previousSlug && previousSlug !== slug) {
-        await provisiondPost("/unpublish", { projectId, slug: previousSlug }).catch(() => {});
-      } else if (!previousSlug) {
-        await provisiondPost("/unpublish", { projectId }).catch(() => {});
-      }
-    }
+    const out = await materializeAndPublish({ owner, projectId, tree, name });
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ url: out.url, files: out.files, bytes: out.bytes, slug: slug || out.id }));
+    res.end(JSON.stringify(out));
   } catch (e) {
+    if (e.code === "not_configured") {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: e.message }));
+    }
+    if (e.code === "build_failed") {
+      res.writeHead(422, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "build failed", stderr: e.stderr }));
+    }
     const status = e.code === "upgrade_required" ? 402
       : e.code === "slug_taken" || e.code === "bad_slug" ? 409 : 500;
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: e.message, code: e.code }));
   }
+}
+
+// Slug lookup for other routes (Android export precondition): the project's current published
+// slug or null. Read-only — never claims.
+export async function publishedSlug(projectId) {
+  const { data } = await serviceClient()
+    .from("published_sites").select("slug").eq("project_id", projectId).maybeSingle();
+  return data?.slug || null;
 }

@@ -24,6 +24,7 @@ import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
 import { handlePublish, handleUnpublish } from "./routes/publish.mjs";
+import { handleAndroid } from "./routes/android.mjs";
 import { handleDomainCheck, handleDomainList, handleDomainConnect, handleDomainRemove } from "./routes/domains.mjs";
 import { handleProjectDelete } from "./routes/projects.mjs";
 import { handleAccountDelete } from "./routes/account.mjs";
@@ -97,7 +98,10 @@ async function serveStatic(req, res) {
     const data = await readFile(file);
     const ext = path.extname(file);
     const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
-      ".svg": "image/svg+xml", ".json": "application/json" }[ext] || "application/octet-stream";
+      ".svg": "image/svg+xml", ".json": "application/json",
+      ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+      ".gif": "image/gif", ".ico": "image/x-icon", ".woff2": "font/woff2",
+      ".webmanifest": "application/manifest+json", ".txt": "text/plain" }[ext] || "application/octet-stream";
     res.writeHead(200, { "Content-Type": type });
     res.end(data);
   } catch {
@@ -162,6 +166,11 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
       return handleUnpublish(req, res, body, owner);
+    }
+    if (p === "/api/android" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = json(await readBody(req));
+      return handleAndroid(req, res, body, owner);
     }
     if (p === "/api/domains" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
