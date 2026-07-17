@@ -211,7 +211,7 @@ async function xAccessToken(state) {
 }
 
 async function postX(post, state) {
-  const token = await xAccessToken(state).catch((e) => { throw e; });
+  const token = await xAccessToken(state);
   if (!token) return null;
   const res = await fetch("https://api.x.com/2/tweets", {
     method: "POST",
@@ -219,7 +219,10 @@ async function postX(post, state) {
     body: JSON.stringify({ text: post.x }),
   });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`x: ${JSON.stringify(out).slice(0, 200)}`);
+  // X's free tier returns 402 "credits depleted" for writes — best-effort, so skip (don't fail the
+  // whole run over it; FB/IG are what matter). It'll start working if X's tier ever allows writes.
+  if (res.status === 402) { console.log("[social] x: skipped (free-tier write credits unavailable)"); return null; }
+  if (!res.ok) { console.warn(`[social] x: skipped (${JSON.stringify(out).slice(0, 160)})`); return null; }
   return `x ${out.data?.id}`;
 }
 
