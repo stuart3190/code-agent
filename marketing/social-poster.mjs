@@ -252,13 +252,6 @@ async function postLinkedIn(post) {
 // ── main ───────────────────────────────────────────────────────────────────────────────────────
 const state = await loadState();
 
-// Midday run self-skips half the time -> natural 2-3 posts/day cadence.
-const hourUtc = new Date().getUTCHours();
-if (!DRY && hourUtc >= 12 && hourUtc < 16 && Math.random() < 0.5) {
-  console.log("[social] midday coin-flip says skip — cadence stays human.");
-  process.exit(0);
-}
-
 const post = await generatePost(state.history || []);
 console.log(`[social] pillar=${post.pillar} image=${post.image}${post.card ? ` card="${post.card.headline}"` : ""}\n  fb: ${post.facebook}\n  ig: ${post.instagram}\n  x:  ${post.x}\n  li: ${post.linkedin}`);
 if (DRY) { console.log("\n[social] dry run — nothing published."); process.exit(0); }
