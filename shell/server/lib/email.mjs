@@ -9,7 +9,8 @@ import { optionalEnv } from "./env.mjs";
 
 const RESEND_URL = "https://api.resend.com/emails";
 const FROM = () => optionalEnv("RESEND_FROM") || "Buildr101 <hello@buildr101.com>";
-const APP_URL = () => (optionalEnv("APP_URL") || "https://buildr101.com").replace(/\/$/, "");
+// The public builder URL for email links — NOT the internal APP_URL (a dev fallback = localhost).
+const APP_URL = () => (optionalEnv("PUBLIC_URL") || "https://buildr101.com").replace(/\/$/, "");
 
 export function emailConfigured() {
   return !!optionalEnv("RESEND_API_KEY");
