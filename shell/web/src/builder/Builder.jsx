@@ -41,6 +41,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [domainBusy, setDomainBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [androidBusy, setAndroidBusy] = useState(false);
+  const [androidElapsed, setAndroidElapsed] = useState(0);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -307,7 +308,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   async function doDownloadAndroid() {
     if (androidBusy) return;
     setAndroidBusy(true);
-    setPublishMsg("Building your Android app — this takes a couple of minutes, keep this tab open…");
+    setPublishMsg(null);
     try {
       const r = await downloadAndroid(project.id, tree);
       setPublishMsg(`Downloaded ${r.filename} — see the README inside for Play Store steps.`);
@@ -318,6 +319,14 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     }
   }
 
+  // Tick an elapsed counter while the Android build runs — the ticking clock + spinner are the
+  // "it's alive" signal that stops people refreshing a request that legitimately takes minutes.
+  useEffect(() => {
+    if (!androidBusy) { setAndroidElapsed(0); return; }
+    const t = setInterval(() => setAndroidElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [androidBusy]);
+
   return (
     <div className="relative h-full grid grid-rows-[3.5rem_1fr] grid-cols-[minmax(0,1fr)]">
       {/* grid-cols must be an explicit minmax(0,1fr): the implicit auto column would grow to fit a
@@ -326,6 +335,20 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         <div className="fixed bottom-4 right-4 z-40 panel px-4 py-2.5 text-sm text-slate-200 shadow-panel flex items-center gap-3">
           <span className="max-w-[24rem] truncate" title={publishMsg}>{publishMsg}</span>
           <button className="text-slate-500 hover:text-slate-300" onClick={() => setPublishMsg(null)} aria-label="Dismiss">✕</button>
+        </div>
+      )}
+      {androidBusy && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
+            <div className="mx-auto mb-6 h-11 w-11 rounded-full border-2 border-line border-t-amber animate-spin" />
+            <div className="font-display text-lg font-semibold text-slate-100">Building your Android app</div>
+            <div className="mt-2 text-sm text-slate-400 min-h-[2.5em]">{androidStage(androidElapsed)}</div>
+            <div className="mt-1 font-mono text-xs text-slate-500">{fmtElapsed(androidElapsed)} elapsed</div>
+            <div className="mt-6 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2.5 text-xs text-amber-soft leading-relaxed">
+              This usually takes 2–3 minutes. Keep this tab open — don't refresh or close it. Your
+              download starts automatically when it's ready.
+            </div>
+          </div>
         </div>
       )}
       {/* header */}
@@ -673,6 +696,19 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
 function deriveName(prompt) {
   const words = prompt.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// Android build progress — honest, elapsed-driven stages (the request is a plain long POST with no
+// server progress events, so these track the known phases by time rather than real signals).
+function androidStage(s) {
+  if (s < 6) return "Preparing your app's signing key…";
+  if (s < 20) return "Publishing app verification…";
+  if (s < 100) return "Compiling and signing the Android app (APK + AAB)…";
+  return "Almost there — packaging your download…";
+}
+function fmtElapsed(s) {
+  const m = Math.floor(s / 60), r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
 }
 
 // The engine's SSE log rendered as a build timeline — each tool call becomes a human step;
