@@ -72,6 +72,16 @@ Owner: Stuart (stuart3190@gmail.com). Business angle: freemium SaaS + done-for-y
   namespace; per-app auth via authUrl; fail-soft when unconfigured), **devReporter**
   (`lib/devReporter.js`: dev-only bridge → runtime errors out, select-mode/visual-edits in/out,
   refreshed into every materialized preview by `withRuntimeEnv`).
+- **App identity — generated name + icon** (2026-07-17, `shell/server/lib/appIdentity.mjs` +
+  `iconGlyphs.mjs`): on first publish, ONE Codex call (free, cached in `projects.app_name/app_icon`)
+  turns the app's first build prompt into a real display **name** ("Barber Booking") and picks an
+  **icon glyph** from a curated ~36 lucide-SVG allow-list (scissors, coffee, dumbbell…). renderIcons
+  draws the glyph white on the app's brand-colour gradient — a designed app icon, not a letter.
+  Used by BOTH the PWA manifest/install icon AND the Android launcher (android.mjs reads the same
+  cached identity). Fail-soft (any error → fallback name + `sparkles`); publish `name` (explicit
+  site name) still wins for the manifest. SVG paths (not emoji) so alpine-chrome renders reliably
+  with no font dependency. Proven 8/8 `shell/harness/prove-appidentity.mjs`. Existing apps upgrade
+  on next republish (migration `migrations/app_identity.sql`).
 - **PWA — every published app is installable** (2026-07-16, `shell/server/lib/pwa.mjs`):
   `withPwaAssets(tree, {appName})` adds `public/manifest.webmanifest` + `public/sw.js` (Vite copies
   public/* into dist) + injects the manifest link / theme-color / apple-touch-icon / title / SW

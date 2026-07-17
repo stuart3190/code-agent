@@ -15,6 +15,7 @@ import { serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
 import { isAdmin } from "../lib/admin.mjs";
 import { assetlinksJson } from "../lib/androidLinks.mjs";
+import { ensureAppIdentity } from "../lib/appIdentity.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -165,6 +166,11 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
       .from("projects").select("name").eq("id", projectId).maybeSingle();
     appName = proj?.name || slug || "My app";
   }
+  // Generated identity: a real app name + icon glyph (once per project, cached). The manifest
+  // display name uses the generated name UNLESS the user typed an explicit site name at publish.
+  const identity = await ensureAppIdentity({ projectId, fallbackName: appName, log: console.log });
+  if (!name) appName = identity.name;
+  const iconGlyph = identity.icon;
   // Once a project has generated an Android app, EVERY publish must keep serving its assetlinks —
   // otherwise a plain republish would break the installed app's full-screen verification.
   let publishTree = tree;
@@ -178,7 +184,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
     const e = new Error("build failed"); e.code = "build_failed"; e.stderr = (build.stderr || "").slice(-2000); throw e;
   }
   // Binary icons can't ride the UTF-8 tree — render them straight into the built dist.
-  await renderIcons({ appName, tree, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
+  await renderIcons({ appName, tree, iconGlyph, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
   const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
   const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
   // A rename retires the old address so stale URLs stop serving; naming a legacy-published

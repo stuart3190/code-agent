@@ -50,8 +50,8 @@ future updates. The download includes a README with the exact steps. iOS isn't s
     q: "Can people install my app on their phone?",
     a: `Yes — every published app is installable. On Android, visitors get an "Install app" prompt
 (it becomes a real app with its own icon); on iPhone it's Share → Add to Home Screen. Either way
-it opens full-screen with your app's own icon, and keeps working on patchy connections. Nothing
-to set up — it's automatic when you publish.`,
+it opens full-screen with your app's own name and a generated icon, and keeps working on patchy
+connections. Nothing to set up — the name and icon are created automatically when you publish.`,
   },
   {
     q: "Can my app have user accounts and saved data?",

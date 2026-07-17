@@ -16,6 +16,7 @@ import { _internal as byokCrypto } from "./byokStore.mjs";
 import { pwaColors } from "./pwa.mjs";
 import { createStoredZip } from "./exportProject.mjs";
 import { packageIdFor } from "./androidLinks.mjs";
+import { ensureAppIdentity } from "./appIdentity.mjs";
 import { materializeAndPublish } from "../routes/publish.mjs";
 
 const IMAGE = "buildr-android:latest";
@@ -87,7 +88,10 @@ Questions? support@buildr101.com
 export async function buildAndroid({ owner, projectId, slug, tree, appName: rawName, log = () => {} }) {
   const origin = `https://${slug}.${APEX}`;
   const manifestUrl = `${origin}/manifest.webmanifest`;
-  const { name: appName, themeColor, backgroundColor } = pwaColors(tree, rawName || slug);
+  // Use the SAME generated identity name as the PWA (already cached — the app was published first),
+  // so the Android launcher label matches the home-screen name.
+  const identity = await ensureAppIdentity({ projectId, fallbackName: rawName || slug, log });
+  const { name: appName, themeColor, backgroundColor } = pwaColors(tree, identity.name);
 
   const existing = await loadKeystore(projectId);
   const packageId = existing?.packageId || packageIdFor(slug);

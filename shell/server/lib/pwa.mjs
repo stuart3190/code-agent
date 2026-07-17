@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile, copyFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { glyphPath } from "./iconGlyphs.mjs";
 
 // shadcn-style token: "--primary: 222 47% 40%;" (space or comma separated) -> hex.
 function tokenToHex(css, name, fallback) {
@@ -127,15 +128,27 @@ self.addEventListener("fetch", (e) => {
   };
 }
 
-// ── icons: letter tile in the app's own primary colour, written into the BUILT dist ───────────
-function iconHtml({ letter, bg, fg }) {
+// Darken a #rrggbb toward black by `f` (0..1) — for the icon's background gradient.
+function darken(hex, f = 0.4) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex).trim());
+  if (!m) return "#0a0c0f";
+  const c = [1, 2, 3].map((i) => Math.round(parseInt(m[i], 16) * (1 - f)));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// ── icons: a line glyph (or a letter fallback) white on the app's brand-colour gradient,
+//    written into the BUILT dist. Glyph stays in the centre ~54% — safe for maskable crops.
+function iconHtml({ glyph, letter, bg, fg }) {
+  const g2 = darken(bg, 0.45);
+  const mark = glyph
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"
+         stroke-linejoin="round" style="width:54vw;height:54vh">${glyph}</svg>`
+    : `<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-weight:700;font-size:52vh;line-height:1;color:${fg}">${letter}</div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   * { margin:0; padding:0; }
-  body { width:100vw; height:100vh; background:${bg}; display:grid; place-items:center; overflow:hidden; }
-  /* letter stays inside the centre ~60% — safe for maskable (circle/squircle) crops */
-  div { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-weight:700;
-    font-size:52vh; line-height:1; color:${fg}; }
-</style></head><body><div>${letter}</div></body></html>`;
+  body { width:100vw; height:100vh; display:grid; place-items:center; overflow:hidden;
+    background:radial-gradient(120% 120% at 30% 20%, ${bg}, ${g2}); }
+</style></head><body>${mark}</body></html>`;
 }
 
 function chromeRenderer() {
@@ -156,22 +169,23 @@ function chromeRenderer() {
   ], { stdio: "pipe" });
 }
 
-export async function renderIcons({ appName, tree, distDir, log = () => {} }) {
+export async function renderIcons({ appName, tree, distDir, iconGlyph = null, log = () => {} }) {
   const { name, themeColor, letterColor } = pwaColors(tree, appName);
   const letter = (name.match(/[a-zA-Z0-9]/) || ["A"])[0].toUpperCase();
+  const glyph = iconGlyph ? glyphPath(iconGlyph) : null;
   const work = path.join(os.tmpdir(), `buildr-icons-${Date.now()}`);
   try {
     const render = chromeRenderer();
     await mkdir(work, { recursive: true });
     await mkdir(path.join(distDir, "icons"), { recursive: true });
     const htmlPath = path.join(work, "icon.html");
-    await writeFile(htmlPath, iconHtml({ letter, bg: themeColor, fg: letterColor }), "utf8");
+    await writeFile(htmlPath, iconHtml({ glyph, letter, bg: themeColor, fg: letterColor }), "utf8");
     for (const [size, file] of [[512, "icon-512.png"], [192, "icon-192.png"], [180, "apple-touch-icon.png"]]) {
       const tmpOut = path.join(work, file);
       render(htmlPath, tmpOut, size);
       await copyFile(tmpOut, path.join(distDir, "icons", file));
     }
-    log(`pwa: icons rendered ("${letter}" on ${themeColor})`);
+    log(`pwa: icons rendered (${glyph ? iconGlyph : `"${letter}"`} on ${themeColor})`);
   } catch (e) {
     // Never block a publish on icons — the site is fine, the install prompt just degrades.
     log(`pwa: icon render skipped (${String(e.message || e).slice(0, 120)})`);
