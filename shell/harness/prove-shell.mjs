@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseBackend } from "../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
 import { createLedger } from "../../src/billing/ledger.mjs";
-import { creditsForTurn, TIERS, WELCOME_CREDITS } from "../../src/billing/costModel.mjs";
+import { TIERS, WELCOME_CREDITS } from "../../src/billing/costModel.mjs";
 import { loadEnv } from "../server/lib/env.mjs";
 import { SAFE_ENV_EXAMPLE, assertNoPlatformSecrets, readStoredZip } from "../server/lib/exportProject.mjs";
 
@@ -81,7 +81,12 @@ async function waitHealth(deadlineMs = 30000) {
   throw new Error("server did not become healthy");
 }
 
-// POST /api/generate and drain the SSE stream (same parser the browser uses).
+// POST /api/generate (now returns 202 {jobId} — the build is a detached server-side job) then
+// drain the job's coarse event stream to its terminal frame, exactly as the browser does. The
+// terminal `result` is the whitelisted payload {finalText, tree, buildOk, previewUrl, need,
+// balance} — engine internals (model, telemetry, tool calls) intentionally never reach here, so
+// debit-exactness is checked by balance delta below (and independently in prove-jobs / the unit
+// billing suite). Returns { done } where done = { mode, ...result }.
 async function generate(token, body) {
   const res = await fetch(`${BASE}/api/generate`, {
     method: "POST",
@@ -89,23 +94,27 @@ async function generate(token, body) {
     body: JSON.stringify(body),
   });
   if (!res.ok) { let e = {}; try { e = await res.json(); } catch {} throw Object.assign(new Error(e.error || res.status), { payload: e }); }
-  const reader = res.body.getReader(); const dec = new TextDecoder();
-  let buf = "", done = null, lastLog = "";
+  const { jobId } = await res.json();
+  const evRes = await fetch(`${BASE}/api/builds/${encodeURIComponent(jobId)}/events`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!evRes.ok) throw new Error(`events ${evRes.status}`);
+  const reader = evRes.body.getReader(); const dec = new TextDecoder();
+  let buf = "", terminal = null;
   for (;;) {
     const { value, done: d } = await reader.read(); if (d) break;
     buf += dec.decode(value, { stream: true });
     const frames = buf.split("\n\n"); buf = frames.pop() || "";
     for (const f of frames) {
-      const ev = f.split("\n").find((l) => l.startsWith("event:"))?.slice(6).trim();
       const dl = f.split("\n").find((l) => l.startsWith("data:"))?.slice(5).trim();
-      if (!ev || !dl) continue;
+      if (!dl) continue; // skip :ping comments
       const data = JSON.parse(dl);
-      if (ev === "log") lastLog = data.line;
-      if (ev === "done") done = data;
-      if (ev === "error") throw new Error(data.message);
+      if (["complete", "failed", "interrupted"].includes(data.status)) terminal = data;
     }
   }
-  return { done, lastLog };
+  if (!terminal) throw new Error("stream ended with no terminal frame");
+  if (terminal.status !== "complete") throw new Error(terminal.error || `build ${terminal.status}`);
+  return { done: { mode: terminal.mode, ...(terminal.result || {}) } };
 }
 
 async function exportProjectZip(token, projectId) {
@@ -170,18 +179,17 @@ async function main() {
       `seeded balance = ${seeded.total} cr (Starter ${starter.bundledCredits} + welcome ${WELCOME_CREDITS})`);
 
     // ── PLAN (plan-only pass: no tools, no build, no preview) ───────────────────────────────────
-    section("PLAN — plan-only pass produces a plan, builds nothing, debits creditsForTurn");
+    section("PLAN — plan-only pass produces a plan, builds nothing, meters the debit");
     const appPrompt = "a notes app: add a note with a title and body, list notes newest-first, delete a note";
     const balBeforePlan = (await ledger.getBalance(owner)).total;
     const gp = await generate(token, { prompt: appPrompt, mode: "plan" });
     const dp = gp.done;
     check(!!dp?.finalText?.trim(), `plan produced (${(dp?.finalText || "").trim().length} chars of plan text)`);
-    check(dp?.tree === undefined && dp?.build === undefined && dp?.preview === undefined,
+    check(dp?.tree === undefined && dp?.buildOk === undefined && dp?.previewUrl === undefined,
       "plan payload carries NO tree/build/preview (nothing was built or served)");
-    const needP = creditsForTurn({ tokens: dp.telemetry.total, model: dp.decision.model });
-    check(Math.abs(dp.need - needP) < 1e-4, `plan debit = creditsForTurn (${dp.need.toFixed(4)} cr for ${dp.telemetry.total} tok on ${dp.decision.model})`);
+    check(dp.need > 0, `plan metered a positive debit (${dp.need.toFixed(4)} cr)`);
     const balAfterPlan = (await ledger.getBalance(owner)).total;
-    check(Math.abs((balBeforePlan - balAfterPlan) - dp.need) < 1e-3, `balance dropped by exactly the plan debit (${balBeforePlan.toFixed(3)} → ${balAfterPlan.toFixed(3)})`);
+    check(Math.abs((balBeforePlan - balAfterPlan) - dp.need) < 1e-3, `ledger dropped by exactly the reported plan debit (${balBeforePlan.toFixed(3)} → ${balAfterPlan.toFixed(3)})`);
 
     // ── GENERATE (build, steered by the held plan — the browser's plan→generate sequence) ────────
     section("GENERATE — describe → engine builds a real app (against the plan) → live debit");
@@ -189,24 +197,23 @@ async function main() {
     const g1 = await generate(token, { prompt: appPrompt, mode: "build", plan: dp.finalText });
     const d1 = g1.done;
     check(!!d1, "generation returned a done payload");
-    check(d1?.build?.ok === true, `generated app BUILDS (npm run build PASS) — ${Object.keys(d1?.tree || {}).length} files`);
-    const need1 = creditsForTurn({ tokens: d1.telemetry.total, model: d1.decision.model });
-    check(Math.abs(d1.need - need1) < 1e-4, `debit = creditsForTurn (${d1.need.toFixed(4)} cr for ${d1.telemetry.total} tok on ${d1.decision.model})`);
+    check(d1?.buildOk === true, `generated app BUILDS (npm run build PASS) — ${Object.keys(d1?.tree || {}).length} files`);
+    check(d1.need > 0, `build metered a positive debit (${d1.need.toFixed(4)} cr)`);
     const balAfter = (await ledger.getBalance(owner)).total;
-    check(Math.abs((balBefore - balAfter) - d1.need) < 1e-3, `balance dropped by exactly the debit (${balBefore.toFixed(3)} → ${balAfter.toFixed(3)})`);
+    check(Math.abs((balBefore - balAfter) - d1.need) < 1e-3, `ledger dropped by exactly the reported debit (${balBefore.toFixed(3)} → ${balAfter.toFixed(3)})`);
 
     // ── PREVIEW ───────────────────────────────────────────────────────────────────────────────────
     section("PREVIEW — the returned URL serves the running app");
-    if (d1.preview?.url) {
-      const pr = await fetch(d1.preview.url).catch(() => null);
+    if (d1.previewUrl) {
+      const pr = await fetch(d1.previewUrl).catch(() => null);
       const html = pr ? await pr.text() : "";
-      check(pr?.status === 200 && /<div id="root">|<script/.test(html), `preview ${d1.preview.url} -> HTTP ${pr?.status}`);
-    } else { info(`preview mode returned no URL (${d1.preview?.mode || "?"}) — ${d1.preview?.note || ""}`); }
+      check(pr?.status === 200 && /<div id="root">|<script/.test(html), `preview ${d1.previewUrl} -> HTTP ${pr?.status}`);
+    } else { info("preview returned no URL (VPS provisiond unreachable from this box) — skipped"); }
 
     // ── PERSIST (save to the dedicated projects table via the user's own session) ────────────────
     section("PERSIST — save the project (dedicated public.projects, RLS-scoped)");
     const insP = await backend._client.from("projects").insert({
-      name: "Notes app", tree: d1.tree, history: [{ prompt: "notes app", mode: "build", need: d1.need }], preview_ref: d1.preview?.url || null,
+      name: "Notes app", tree: d1.tree, history: [{ prompt: "notes app", mode: "build", need: d1.need }], preview_ref: d1.previewUrl || null,
     }).select().single();
     if (insP.error) throw insP.error;
     const proj = insP.data;
@@ -216,13 +223,12 @@ async function main() {
     section("ITERATE — a follow-up edit against the held tree");
     const g2 = await generate(token, { projectId: proj.id, prompt: "add a search box that filters notes by title", mode: "iterate", tree: d1.tree });
     const d2 = g2.done;
-    check(d2?.build?.ok === true, "iterated app still BUILDS");
+    check(d2?.buildOk === true, "iterated app still BUILDS");
     const changed = d2 && !treeEqual(d2.tree, d1.tree);
     check(changed, "the tree actually changed (edit applied)");
-    const need2 = creditsForTurn({ tokens: d2.telemetry.total, model: d2.decision.model });
-    check(Math.abs(d2.need - need2) < 1e-4, `iterate debit = creditsForTurn (${d2.need.toFixed(4)} cr)`);
+    check(d2.need > 0, `iterate metered a positive debit (${d2.need.toFixed(4)} cr)`);
     const updP = await backend._client.from("projects").update({
-      name: "Notes app", tree: d2.tree, history: [{ prompt: "notes app" }, { prompt: "search box" }], preview_ref: d2.preview?.url || null, updated_at: new Date().toISOString(),
+      name: "Notes app", tree: d2.tree, history: [{ prompt: "notes app" }, { prompt: "search box" }], preview_ref: d2.previewUrl || null, updated_at: new Date().toISOString(),
     }).eq("id", proj.id);
     if (updP.error) throw updP.error;
 
