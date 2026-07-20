@@ -76,7 +76,18 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // Force ONE copy of React. Without this a mid-session dep re-optimize can split React and
+    // ReactDOM across different optimize versions -> two React instances -> a null hooks
+    // dispatcher ("Cannot read properties of null (reading 'useState')") in the dev preview.
+    dedupe: ["react", "react-dom"],
+  },
+  // Pre-bundle the whole React set together on first start so a later re-optimize (triggered by
+  // a newly-added dependency) never re-splits React across versions.
+  optimizeDeps: {
+    include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime"],
+  },
 });
 `,
 
