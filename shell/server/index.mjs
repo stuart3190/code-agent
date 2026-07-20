@@ -251,6 +251,7 @@ const server = http.createServer(async (req, res) => {
     // Static SPA (prod only).
     return serveStatic(req, res);
   } catch (e) {
+    console.error(`[shell] 500 on ${method} ${p}:`, e?.stack || e?.message || e);
     sendJson(res, 500, { error: e.message });
   }
 });
