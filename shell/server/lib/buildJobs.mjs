@@ -1,0 +1,406 @@
+// Background build jobs — the engine loop detached from the HTTP request.
+//
+// POST /api/generate creates a job and returns immediately; the loop runs here, owned by an
+// in-memory registry (mirrors preview/index.mjs's `live` Map), with every status/phase change
+// written through to Supabase `build_jobs` (service role). The client is a passive observer:
+// it subscribes to a coarse phase stream and receives ONLY the vocabulary
+//   queued -> preparing -> planning|building -> finalizing -> complete | failed | interrupted
+// plus a whitelisted terminal result. Engine internals (model names, tool calls, file paths,
+// token counts) go to the server console/journal exactly as before — they never enter any
+// client-visible frame by construction: this module is the single translation point.
+//
+// The engine call chain (welcome grant -> BYOK lookup -> runAgent -> buildTree -> settle ->
+// preview) is handleGenerate's proven body moved verbatim; the runTurn/provider seam and all
+// billing/ledger code are untouched callers. Ordering preserved exactly.
+//
+// Persistence split (deliberate): the `projects` row stays CLIENT-written (RLS-scoped, single
+// writer — see lib/supabase.mjs header). The job's terminal result lands in build_jobs.result
+// so a client that reattaches later can still apply + save it. build_stderr stays server-side
+// only (full of file paths) — Fix-it composes its prompt from it HERE, not in the browser.
+//
+// Cancellation: a flag checked in the runner's `log` callback (called by runAgent between and
+// within turns, caller-side of the seam) — throwing CancelledError aborts cleanly without
+// touching the engine. A cancelled/failed loop skips settle, same as today's error path: the
+// mid-flight provider tokens are forfeited undebited.
+
+import crypto from "node:crypto";
+import os from "node:os";
+import { runAgent } from "../../../src/engine/runAgent.mjs";
+import { fromScaffold, clone } from "../../../src/engine/fileTree.mjs";
+import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
+import { makeFileTools } from "../../../src/tools/fileTools.mjs";
+import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
+import { createRoutingProvider } from "../../../src/providers/routingProvider.mjs";
+import { creditsForTurn } from "../../../src/billing/costModel.mjs";
+import { buildTree } from "../../../harness/workspace.mjs";
+import { ledger } from "./services.mjs";
+import { getDecryptedKey } from "./byokStore.mjs";
+import { previewProvider } from "../preview/index.mjs";
+import { withRuntimeEnv } from "./runtimeEnv.mjs";
+import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "./images.mjs";
+import { ensureWelcomeGrant } from "./welcome.mjs";
+import { serviceClient } from "./supabase.mjs";
+import { optionalEnv } from "./env.mjs";
+
+const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
+
+// Per-user concurrency. A single constant on purpose — the per-tier seam is "read this from the
+// entitlement row instead" later.
+export const MAX_CONCURRENT_BUILDS_PER_USER = 2;
+
+const TERMINAL = new Set(["complete", "failed", "interrupted"]);
+const TERMINAL_KEEP_MS = 30 * 60 * 1000; // finished jobs linger in memory for cheap reattach
+
+// Sweep scoping: local dev and prod share ONE Supabase project, so a dev restart must only
+// sweep its own orphans. Hostname is a stable-enough identity per shell process' machine.
+const SERVER_ID = optionalEnv("SHELL_SERVER_ID", "") || os.hostname();
+
+export class CancelledError extends Error {
+  constructor() { super("Cancelled by user."); this.name = "CancelledError"; }
+}
+
+// ── registry ────────────────────────────────────────────────────────────────────────────────────
+
+const jobs = new Map();   // jobId -> job (live source of truth while this process runs)
+const waiting = [];       // FIFO of queued jobIds (in-process only — no external queue)
+
+function db() { return serviceClient().from("build_jobs"); }
+
+function serverLog(job, line) {
+  console.log(`[job ${job.id.slice(0, 8)}] ${String(line)}`);
+}
+
+// Ordered write-through: chain updates per job so a slow UPDATE can't land after a later one.
+function persist(job, fields) {
+  job._db = job._db
+    .then(() => db().update({ ...fields, updated_at: new Date().toISOString() }).eq("id", job.id))
+    .then(({ error }) => { if (error) serverLog(job, `persist WARN: ${error.message}`); })
+    .catch((e) => serverLog(job, `persist WARN: ${e.message}`));
+  return job._db;
+}
+
+function emit(job, name, data) {
+  for (const fn of job.subscribers) {
+    try { fn(name, data); } catch { job.subscribers.delete(fn); }
+  }
+}
+
+// The ONLY fields any client-visible frame may carry (leak gate contract). `tree`/`finalText`
+// are the user's own deliverable; everything else is scalars.
+function publicResult(job) {
+  if (!job.result) return null;
+  const { finalText, tree, buildOk, previewUrl, need, balance } = job.result;
+  return { finalText, tree, buildOk, previewUrl, need, balance };
+}
+
+export function isTerminal(job) { return TERMINAL.has(job.status); }
+
+export function publicJob(job) {
+  return {
+    jobId: job.id, projectId: job.projectId, mode: job.mode,
+    status: job.status, phase: job.phase, error: job.error || null,
+    result: TERMINAL.has(job.status) ? publicResult(job) : null,
+  };
+}
+
+function setPhase(job, phase) {
+  job.phase = phase;
+  persist(job, { phase });
+  emit(job, "phase", { jobId: job.id, status: job.status, phase });
+}
+
+function finish(job, status, { error = null } = {}) {
+  job.status = status;
+  job.phase = status;
+  job.error = error;
+  job.finishedAt = Date.now();
+  persist(job, {
+    status, phase: status, error,
+    result: job.result ? publicResult(job) : null,
+    build_stderr: job.buildStderr || null,
+  });
+  emit(job, "end", publicJob(job));
+  setTimeout(() => { if (jobs.get(job.id) === job) jobs.delete(job.id); }, TERMINAL_KEEP_MS).unref?.();
+  schedule();
+}
+
+function runningFor(ownerId) {
+  let n = 0;
+  for (const j of jobs.values()) if (j.owner.id === ownerId && j.status === "running") n++;
+  return n;
+}
+
+// FIFO with a per-user cap: skip (don't drop) queued jobs whose owner is at the cap.
+function schedule() {
+  for (let i = 0; i < waiting.length; ) {
+    const job = jobs.get(waiting[i]);
+    if (!job || job.status !== "queued") { waiting.splice(i, 1); continue; }
+    if (runningFor(job.owner.id) >= MAX_CONCURRENT_BUILDS_PER_USER) { i++; continue; }
+    waiting.splice(i, 1);
+    job.status = "running";
+    persist(job, { status: "running" });
+    runJob(job).catch((e) => serverLog(job, `runner WARN (should be unreachable): ${e.message}`));
+  }
+}
+
+// ── creation / lookup / cancel (the API the routes call) ────────────────────────────────────────
+
+// One active job per project: creating while one runs returns the existing job (client just
+// subscribes to it) instead of stacking a second build of the same app.
+export function activeJobFor(ownerId, projectId) {
+  for (const j of jobs.values()) {
+    if (j.owner.id === ownerId && j.projectId === projectId && !TERMINAL.has(j.status)) return j;
+  }
+  return null;
+}
+
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge }) {
+  const existing = activeJobFor(owner.id, projectId);
+  if (existing) return { job: existing, existing: true };
+
+  const job = {
+    id: crypto.randomUUID(),
+    owner, projectId, mode,
+    input: { prompt, tree, plan, knowledge }, // in-memory only — a restart sweeps the job anyway
+    status: "queued", phase: "queued", error: null,
+    result: null, buildStderr: null,
+    cancelled: false,
+    subscribers: new Set(),
+    createdAt: Date.now(), finishedAt: null,
+    _db: Promise.resolve(),
+  };
+  const { error } = await db().insert({
+    id: job.id, owner: owner.id, project_id: projectId, mode,
+    status: "queued", phase: "queued", server_id: SERVER_ID,
+  });
+  if (error) throw new Error(`could not create build job: ${error.message}`);
+  jobs.set(job.id, job);
+  waiting.push(job.id);
+  schedule();
+  return { job, existing: false };
+}
+
+// Registry first, DB fallback (terminal jobs evicted from memory, or from before a restart).
+// Owner-checked HERE so no route can forget it.
+export async function getJob(ownerId, jobId) {
+  const live = jobs.get(jobId);
+  if (live) return live.owner.id === ownerId ? live : null;
+  const { data } = await db().select("*").eq("id", jobId).maybeSingle();
+  if (!data || data.owner !== ownerId) return null;
+  return rowToJob(data);
+}
+
+// The running (or else most recent) job for a project — the reattach-on-open query.
+export async function activeBuildFor(ownerId, projectId) {
+  const live = activeJobFor(ownerId, projectId);
+  if (live) return live;
+  let newest = null;
+  for (const j of jobs.values()) {
+    if (j.owner.id === ownerId && j.projectId === projectId && (!newest || j.createdAt > newest.createdAt)) newest = j;
+  }
+  if (newest) return newest;
+  const { data } = await db().select("*").eq("owner", ownerId).eq("project_id", projectId)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return data ? rowToJob(data) : null;
+}
+
+function rowToJob(row) {
+  return {
+    id: row.id, owner: { id: row.owner }, projectId: row.project_id, mode: row.mode,
+    status: row.status, phase: row.phase, error: row.error,
+    result: row.result, buildStderr: row.build_stderr,
+    subscribers: new Set(), fromDb: true,
+    createdAt: new Date(row.created_at).getTime(), finishedAt: null, _db: Promise.resolve(),
+  };
+}
+
+export async function cancelJob(ownerId, jobId) {
+  const job = jobs.get(jobId);
+  if (!job || job.owner.id !== ownerId) return { ok: false, error: "not found" };
+  if (TERMINAL.has(job.status)) return { ok: false, error: "already finished" };
+  job.cancelled = true;
+  if (job.status === "queued") {
+    const i = waiting.indexOf(job.id);
+    if (i >= 0) waiting.splice(i, 1);
+    finish(job, "failed", { error: "Cancelled by user." });
+  }
+  // Running: the log-callback check throws CancelledError between engine turns.
+  return { ok: true };
+}
+
+// Subscribe to a job's coarse events. Returns unsubscribe. The caller (SSE route) sends the
+// snapshot itself via publicJob() — the snapshot IS the replay: phases are monotonic, so
+// current state supersedes any missed transitions (no ring buffer needed).
+export function subscribe(job, fn) {
+  if (job.fromDb || TERMINAL.has(job.status)) return () => {};
+  job.subscribers.add(fn);
+  return () => job.subscribers.delete(fn);
+}
+
+// Latest failed-build stderr for a project — the server-side half of "Fix it" (stderr never
+// reaches the browser; it is full of file paths).
+export async function latestBuildStderr(ownerId, projectId) {
+  for (const j of [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt)) {
+    if (j.owner.id === ownerId && j.projectId === projectId && j.buildStderr) return j.buildStderr;
+  }
+  const { data } = await db().select("build_stderr").eq("owner", ownerId).eq("project_id", projectId)
+    .not("build_stderr", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return data?.build_stderr || null;
+}
+
+// Startup sweep: rows this server left non-terminal are dead (their in-memory loop is gone).
+// Scoped to OUR server_id — never touch another environment's running jobs.
+export async function sweepInterrupted() {
+  const { data, error } = await db()
+    .update({ status: "interrupted", phase: "interrupted",
+      error: "Build was interrupted by a server restart — please rebuild.",
+      updated_at: new Date().toISOString() })
+    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id");
+  if (error) console.log(`[jobs] sweep WARN: ${error.message}`);
+  else if (data?.length) console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
+}
+
+// ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
+
+async function runJob(job) {
+  const { prompt, tree: inputTree, plan, knowledge } = job.input;
+  const projectId = job.projectId;
+  const mode = job.mode;
+  const owner = job.owner;
+  const led = ledger();
+
+  const withKnowledge = (p) =>
+    knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
+
+  try {
+    setPhase(job, "preparing");
+
+    // BYOK: if the user has saved a provider key, generation runs on THEIR account and debits NO
+    // platform credits. The decrypted key stays server-side (never in any frame, never logged).
+    let byokKey = null;
+    try { byokKey = await getDecryptedKey(owner.id); } catch { byokKey = null; }
+    const byok = !!byokKey;
+    const providerConfig = byok
+      ? { provider: "anthropic", strong: BYOK_MODEL, apiKey: byokKey }
+      : { provider: "codex", strong: "gpt-5.5" };
+    const buildProvider = (intent) => createRoutingProvider({ config: providerConfig, turnMeta: { intent } });
+
+    await ensureWelcomeGrant(owner.id);
+    const preBal = await led.getBalance(owner.id);
+
+    // Settle a turn's cost: debit the ledger (managed) OR no-op (BYOK). Unchanged billing logic.
+    async function settle(telemetry, model, kind) {
+      if (byok) {
+        serverLog(job, `billing: BYOK — ${telemetry.total} tok billed to the user's ${providerConfig.provider} key`);
+        return { need: 0, balance: preBal };
+      }
+      const ref = `${kind}:${projectId}:${crypto.randomUUID()}`;
+      await led.debit({ owner: owner.id, tokens: telemetry.total, model, ref });
+      const need = creditsForTurn({ tokens: telemetry.total, model });
+      const balance = await led.getBalance(owner.id);
+      serverLog(job, `billing: debited ${need.toFixed(4)} cr (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr`);
+      return { need, balance };
+    }
+
+    // Cancellation seam: runAgent calls `log` between/within turns (caller-side of the seam);
+    // throwing here aborts the loop cleanly without touching the engine.
+    const log = (line) => {
+      if (job.cancelled) throw new CancelledError();
+      serverLog(job, line);
+    };
+
+    // ── PLAN-ONLY pass ──────────────────────────────────────────────────────────────────────
+    if (mode === "plan") {
+      const provider = buildProvider("generate");
+      serverLog(job, `engine: plan on model ${provider.model} — plan-only pass, no build${byok ? " · BYOK" : ""}`);
+      setPhase(job, "planning");
+
+      const { telemetry, finalText } = await runAgent({
+        provider, systemPrompt: PLAN_SYSTEM_PROMPT, tools: [], toolImpls: {},
+        tree: {}, prompt: withKnowledge(prompt), log,
+      });
+      if (job.cancelled) throw new CancelledError();
+
+      const { need, balance } = await settle(telemetry, provider.model, "plan");
+      job.result = { finalText, need, balance: balance.total };
+      return finish(job, "complete");
+    }
+
+    // ── BUILD / ITERATE pass ────────────────────────────────────────────────────────────────
+    const intent = mode === "iterate" ? "edit" : "generate";
+    const provider = buildProvider(intent);
+
+    const tree = mode === "iterate" ? { ...inputTree } : clone(fromScaffold(REACT_VITE));
+    const editFormat = mode === "iterate" ? "apply_patch" : undefined;
+    const { schemas, impls } = makeFileTools(tree, { editFormat });
+
+    let tools = schemas;
+    let toolImpls = impls;
+    let systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
+    if (imagesConfigured()) {
+      tools = [...schemas, SEARCH_IMAGES_SCHEMA];
+      toolImpls = {
+        ...impls,
+        search_images: async ({ query, count, orientation }) => {
+          try {
+            const photos = await searchImages(query, { count, orientation });
+            return { photos };
+          } catch (e) {
+            return { error: `image search unavailable (${e.message}) — build without photos`, photos: [] };
+          }
+        },
+      };
+      systemPrompt = `${systemPrompt}\n${IMAGES_PROMPT_BLOCK}`;
+    }
+
+    serverLog(job, `engine: ${mode} on model ${provider.model} — ${provider.decision?.reason || ""}${plan ? " · steering by approved plan" : ""}`);
+    setPhase(job, "building");
+
+    const enginePrompt = withKnowledge(plan
+      ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
+      : prompt);
+
+    const { telemetry, finalText } = await runAgent({
+      provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log,
+    });
+    if (job.cancelled) throw new CancelledError();
+
+    setPhase(job, "finalizing");
+
+    // Prove it builds (same bar as the harness) before we serve/save it. Runtime tree carries
+    // the injected backend .env — the SAVED tree stays clean.
+    const runtimeTree = withRuntimeEnv(tree, projectId);
+    serverLog(job, "build: npm run build ...");
+    const build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+    serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
+    if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
+
+    const { need, balance } = await settle(telemetry, provider.model, "gen");
+
+    let preview = null;
+    try {
+      preview = mode === "iterate"
+        ? await previewProvider().update(projectId, runtimeTree)
+        : await previewProvider().start(projectId, runtimeTree);
+      serverLog(job, `preview: ${preview.url ? preview.url : "(vps stub — no url)"}`);
+    } catch (e) {
+      serverLog(job, `preview: unavailable (${e.message})`);
+      preview = { url: null };
+    }
+
+    job.result = {
+      finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
+      need, balance: balance.total,
+    };
+    finish(job, "complete");
+  } catch (e) {
+    if (e instanceof CancelledError) {
+      serverLog(job, "cancelled between turns — no settle, no result");
+      finish(job, "failed", { error: "Cancelled by user." });
+    } else {
+      serverLog(job, `FAILED: ${e.stack || e.message}`);
+      // Human message only — raw errors can carry internals (models, paths, provider chatter).
+      finish(job, "failed", { error: "The build hit an unexpected error — please try again." });
+    }
+  }
+}
