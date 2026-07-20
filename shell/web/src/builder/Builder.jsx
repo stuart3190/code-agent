@@ -173,6 +173,14 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       : prompt;
     setBusy(true); setErr(null); setResult(null); setAppErr(null);
     setPhase("queued"); setRunningMode(effectiveMode);
+    // Name a new project from its first prompt AT BUILD START — so a build that finishes while the
+    // user has navigated away (a detached background job) still lands with a real name instead of
+    // staying "Untitled app" (the completion handler only has a status label, not the prompt).
+    if (effectiveMode === "build" && prompt && (!project.name || project.name === "Untitled app")) {
+      renameProject(project.id, deriveName(prompt))
+        .then((saved) => onProjectChange?.({ ...project, ...saved }))
+        .catch(() => {});
+    }
     try {
       const { jobId } = await createBuild({
         projectId: project.id, prompt: fixBuild ? undefined : scopedPrompt, mode: effectiveMode,

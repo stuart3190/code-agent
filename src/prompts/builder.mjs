@@ -49,6 +49,17 @@ The backend IS live and configured in every preview (namespaced to this app) —
 ${BACKEND_MODEL}
 
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
+- BASELINE POLISH — applies to EVERY app, tools and utilities included. The result MUST look
+  intentionally designed, never like unstyled default HTML or a bare "wall of text and boxes".
+  Assume the user is a novice who typed one vague line ("a web game builder") and gave NO style
+  direction — you still owe them a polished, modern, confident UI. Every app ships with: a real
+  header / top bar carrying the app's name and a bit of identity; a strong title or hero area that
+  sets the tone; content organised into cards or panels with generous padding and subtle depth
+  (not raw inputs stacked on a white page); the accent colour and lucide icons used to give the
+  interface life and signposting; and considered empty states (icon + a line of copy + a primary
+  action, never a blank box). Give it a point of view — a fitting colour identity (tune the tokens),
+  clear hierarchy, and breathing room. Tools and dashboards stay calm and neutral, but calm is not
+  the same as plain: they are still fully art-directed, just restrained.
 - The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,
   --foreground, --card, --primary, --secondary, --muted, --accent, --destructive, --border, --ring,
   --radius) wired into Tailwind. Style with those utilities — bg-background, text-foreground,
