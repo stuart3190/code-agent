@@ -1,214 +1,58 @@
-// POST /api/generate  — the ONE endpoint that spends Codex quota. Fires only on an explicit
-// user click (the UI never calls it during typing/plan work). Streams the engine's per-turn log
-// over SSE, then debits the LIVE ledger for the tokens actually served.
+// POST /api/generate — the ONE endpoint that spends Codex quota. Fires only on an explicit
+// user click. As of the background-builds change it no longer streams: it validates, gates,
+// creates a detached build JOB (lib/buildJobs.mjs owns the engine loop) and returns 202 with
+// the job id. The client observes the job via GET /api/builds/:id/events — so a build survives
+// the browser navigating away, and two apps can build at once.
 //
-// Wraps proven code, reimplements none of it:
-//   runAgent (src/engine)  ·  routing provider -> Codex (src/providers)  ·  BUILD/EDIT prompts
-//   (src/prompts/builder)  ·  the reactVite scaffold  ·  buildTree (harness/workspace)  ·  the
-//   live ledger.debit (src/billing) which itself enforces the balance + per-tier-ceiling guards.
+// The proven engine chain (runAgent · routing provider · prompts · scaffold · buildTree ·
+// ledger.debit) moved verbatim into buildJobs.runJob — nothing reimplemented.
 
-import crypto from "node:crypto";
-import { runAgent } from "../../../src/engine/runAgent.mjs";
-import { fromScaffold, clone } from "../../../src/engine/fileTree.mjs";
-import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
-import { makeFileTools } from "../../../src/tools/fileTools.mjs";
-import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
-import { createRoutingProvider } from "../../../src/providers/routingProvider.mjs";
-import { creditsForTurn } from "../../../src/billing/costModel.mjs";
-import { buildTree } from "../../../harness/workspace.mjs";
 import { ledger } from "../lib/services.mjs";
 import { getDecryptedKey } from "../lib/byokStore.mjs";
-import { previewProvider } from "../preview/index.mjs";
-import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
-import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "../lib/images.mjs";
 import { ensureWelcomeGrant } from "../lib/welcome.mjs";
+import { createJob, latestBuildStderr } from "../lib/buildJobs.mjs";
 
-const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
-
-// SSE helper — one JSON event.
-function sse(res, event, data) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+function sendJson(res, code, obj) {
+  res.writeHead(code, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(obj));
 }
 
 export async function handleGenerate(req, res, body, owner) {
-  const prompt = (body?.prompt || "").trim();
+  let prompt = (body?.prompt || "").trim();
   const mode = body?.mode === "iterate" ? "iterate" : body?.mode === "plan" ? "plan" : "build";
-  // "Plan mode": an approved plan from a prior plan pass, fed into the build's user prompt so the
-  // build is actually steered by it (not just displayed).
   const plan = typeof body?.plan === "string" ? body.plan.trim() : "";
-  // Per-project knowledge: user-authored standing instructions (brand, tone, constraints),
-  // applied to EVERY turn by riding the user prompt — prompt content only, seam untouched.
   const knowledge = typeof body?.knowledge === "string" ? body.knowledge.trim().slice(0, 4000) : "";
-  const withKnowledge = (p) =>
-    knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
   const projectId = body?.projectId || `new-${Date.now()}`;
-  if (!prompt) {
-    res.writeHead(400, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "prompt is required" }));
+
+  // "Fix it" for a BUILD error: the stderr never went to the browser (it is full of file
+  // paths), so the fix prompt is composed HERE from the job record's server-side copy.
+  if (body?.fixBuild === true) {
+    const stderr = await latestBuildStderr(owner.id, projectId);
+    if (!stderr) return sendJson(res, 400, { error: "no build error on record for this project" });
+    prompt = `The app fails to build. Fix the root cause of this build error:\n\n${stderr}`;
   }
+
+  if (!prompt) return sendJson(res, 400, { error: "prompt is required" });
   if (mode === "iterate" && (!body?.tree || typeof body.tree !== "object")) {
-    res.writeHead(400, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "iterate mode requires the current project `tree`" }));
+    return sendJson(res, 400, { error: "iterate mode requires the current project `tree`" });
   }
 
-  const led = ledger();
-
-  // BYOK: if the user has saved a provider key, generation runs on THEIR account and debits NO
-  // platform credits. Absent -> the managed Codex/ChatGPT-sub lane, unchanged. The decrypted key
-  // stays server-side (never sent to the client, never logged).
-  let byokKey = null;
-  try { byokKey = await getDecryptedKey(owner.id); } catch { byokKey = null; }
-  const byok = !!byokKey;
-  const providerConfig = byok
-    ? { provider: "anthropic", strong: BYOK_MODEL, apiKey: byokKey }
-    : { provider: "codex", strong: "gpt-5.5" }; // free ChatGPT-sub lane; single-model pass-through
-  const buildProvider = (intent) => createRoutingProvider({ config: providerConfig, turnMeta: { intent } });
-
-  // New accounts get their one-time welcome credits before the gate (idempotent no-op after).
+  // Coarse pre-spend gate — MANAGED lane only, synchronous so "no credits" stays an immediate
+  // 402 (no job is created). BYOK users pay their own inference. New accounts get their
+  // one-time welcome credits before the gate (idempotent no-op after).
+  let byok = false;
+  try { byok = !!(await getDecryptedKey(owner.id)); } catch { byok = false; }
   await ensureWelcomeGrant(owner.id);
-
-  // Coarse pre-spend gate — MANAGED lane only. BYOK users pay their own inference, so a zero
-  // platform balance must not block them.
-  const preBal = await led.getBalance(owner.id);
+  const preBal = await ledger().getBalance(owner.id);
   if (!byok && preBal.total <= 0) {
-    res.writeHead(402, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "insufficient_balance", balance: preBal,
-      hint: "Buy a tier or top-up (Stripe test mode) to get credits." }));
+    return sendJson(res, 402, { error: "insufficient_balance", balance: preBal,
+      hint: "Buy a tier or top-up (Stripe test mode) to get credits." });
   }
 
-  // Settle a turn's cost: debit the ledger (managed) OR no-op (BYOK). Returns the fields the `done`
-  // payload reports. This branches AROUND the ledger — it does not change ledger/billing logic.
-  async function settle(telemetry, model, kind) {
-    if (byok) {
-      sse(res, "log", { line: `billing: BYOK — ${telemetry.total} tok billed to your ${providerConfig.provider} key (no platform credits used)` });
-      return { debit: null, need: 0, balance: preBal };
-    }
-    const ref = `${kind}:${projectId}:${crypto.randomUUID()}`;
-    const debit = await led.debit({ owner: owner.id, tokens: telemetry.total, model, ref });
-    const need = creditsForTurn({ tokens: telemetry.total, model });
-    const balance = await led.getBalance(owner.id);
-    sse(res, "log", { line: `billing: debited ${need.toFixed(4)} cr (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr` });
-    return { debit, need, balance };
-  }
-
-  // Begin the SSE stream.
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
+  const { job, existing } = await createJob({
+    owner, projectId, mode, prompt,
+    tree: mode === "iterate" ? { ...body.tree } : undefined,
+    plan, knowledge,
   });
-  sse(res, "start", { projectId, mode, balance: preBal, byok });
-
-  try {
-    // ── PLAN-ONLY pass ────────────────────────────────────────────────────────────────────────
-    // No tools → the model's first text reply ends the runAgent loop (turn 1) and IS the plan.
-    // Skips buildTree and the preview entirely: nothing is built, nothing is served. The client
-    // holds finalText and sends it back as `plan` with the subsequent build press.
-    if (mode === "plan") {
-      const provider = buildProvider("generate");
-      sse(res, "log", { line: `engine: plan on model ${provider.model} — plan-only pass, no build${byok ? " · BYOK" : ""}` });
-
-      const { telemetry, finalText } = await runAgent({
-        provider,
-        systemPrompt: PLAN_SYSTEM_PROMPT,
-        tools: [],
-        toolImpls: {},
-        tree: {},
-        prompt: withKnowledge(prompt),
-        log: (line) => sse(res, "log", { line: String(line) }),
-      });
-
-      // Metered like any engine tokens on the managed lane (a plan is naturally cheap — one no-tool
-      // turn); FREE under BYOK. KNOB: to make managed plan passes free too, skip settle for "plan".
-      const { debit, need, balance } = await settle(telemetry, provider.model, "plan");
-
-      sse(res, "done", {
-        projectId, mode, finalText, telemetry, byok,
-        decision: { model: provider.model, reason: provider.decision?.reason || null },
-        debit, need, balance,
-      });
-      return; // no tree/build/preview in the plan payload — the client must not treat it as a built app
-    }
-
-    const intent = mode === "iterate" ? "edit" : "generate";
-    const provider = buildProvider(intent);
-
-    const tree = mode === "iterate" ? { ...body.tree } : clone(fromScaffold(REACT_VITE));
-    const editFormat = mode === "iterate" ? "apply_patch" : undefined;
-    const { schemas, impls } = makeFileTools(tree, { editFormat });
-
-    // Stock images (optional): when PEXELS_API_KEY is set, offer the search_images tool and its
-    // prompt addendum. Tools are caller-supplied to runAgent, so this stays above the seam.
-    let tools = schemas;
-    let toolImpls = impls;
-    let systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
-    if (imagesConfigured()) {
-      tools = [...schemas, SEARCH_IMAGES_SCHEMA];
-      toolImpls = {
-        ...impls,
-        search_images: async ({ query, count, orientation }) => {
-          try {
-            const photos = await searchImages(query, { count, orientation });
-            return { photos };
-          } catch (e) {
-            return { error: `image search unavailable (${e.message}) — build without photos`, photos: [] };
-          }
-        },
-      };
-      systemPrompt = `${systemPrompt}\n${IMAGES_PROMPT_BLOCK}`;
-    }
-
-    sse(res, "log", { line: `engine: ${mode} on model ${provider.model} — ${provider.decision?.reason || ""}${plan ? " · steering by approved plan" : ""}` });
-
-    // A held plan steers the build by riding in the user turn (the engine prompt is free-form).
-    const enginePrompt = withKnowledge(plan
-      ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
-      : prompt);
-
-    const { telemetry, finalText } = await runAgent({
-      provider,
-      systemPrompt,
-      tools,
-      toolImpls,
-      tree,
-      prompt: enginePrompt,
-      log: (line) => sse(res, "log", { line: String(line) }),
-    });
-
-    // Prove it builds (same bar as the 3/3 harness) before we serve/save it. The runtime tree
-    // carries the injected backend .env (per-app namespace) — the SAVED tree stays clean.
-    const runtimeTree = withRuntimeEnv(tree, projectId);
-    sse(res, "log", { line: "build: npm run build ..." });
-    const build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
-    sse(res, "log", { line: `build: ${build.ok ? "PASS" : "FAIL"}` });
-
-    // Settle: debit the live ledger for the tokens served (managed), or no-op under BYOK.
-    const { debit, need, balance } = await settle(telemetry, provider.model, "gen");
-
-    // Preview (real local Vite, or the VPS stub).
-    let preview = null;
-    try {
-      preview = mode === "iterate"
-        ? await previewProvider().update(projectId, runtimeTree)
-        : await previewProvider().start(projectId, runtimeTree);
-      sse(res, "log", { line: `preview: ${preview.url ? preview.url : "(vps stub — no url)"}` });
-    } catch (e) {
-      sse(res, "log", { line: `preview: unavailable (${e.message})` });
-      preview = { url: null, error: e.message };
-    }
-
-    sse(res, "done", {
-      projectId, mode, finalText, tree, telemetry, byok,
-      decision: { model: provider.model, reason: provider.decision?.reason || null },
-      debit, need, balance,
-      // stderr tail rides along on failure so the shell's "Fix it" can feed it back.
-      build: { ok: build.ok, stderr: build.ok ? undefined : (build.stderr || "").slice(-2000) },
-      preview,
-    });
-  } catch (e) {
-    sse(res, "error", { message: e.message });
-  } finally {
-    res.end();
-  }
+  return sendJson(res, 202, { jobId: job.id, existing, status: job.status, phase: job.phase });
 }

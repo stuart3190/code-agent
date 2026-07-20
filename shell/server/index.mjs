@@ -19,6 +19,8 @@ import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv } from "./lib/supabase.mjs";
 import { haveStripeEnv } from "./lib/services.mjs";
 import { handleGenerate } from "./routes/generate.mjs";
+import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
+import { sweepInterrupted } from "./lib/buildJobs.mjs";
 import { handleCheckout, handleBalance, handleSubscription, handleSwitch, handleCancel } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
@@ -147,6 +149,23 @@ const server = http.createServer(async (req, res) => {
       const body = json(await readBody(req));
       return handleGenerate(req, res, body, owner);
     }
+    // Background build jobs: /api/builds/:jobId/events · /api/builds/:jobId/cancel ·
+    // /api/projects/:id/active-build. Ids come from the path; ownership is checked in buildJobs.
+    {
+      let m;
+      if ((m = p.match(/^\/api\/builds\/([^/]+)\/events$/)) && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return handleBuildEvents(req, res, decodeURIComponent(m[1]), owner);
+      }
+      if ((m = p.match(/^\/api\/builds\/([^/]+)\/cancel$/)) && method === "POST") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return handleBuildCancel(req, res, decodeURIComponent(m[1]), owner);
+      }
+      if ((m = p.match(/^\/api\/projects\/([^/]+)\/active-build$/)) && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return handleActiveBuild(req, res, decodeURIComponent(m[1]), owner);
+      }
+    }
     if (p === "/api/preview" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = json(await readBody(req));
@@ -240,4 +259,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[shell] server on http://${HOST || "localhost"}:${PORT}`);
   const cfg = publicConfig();
   console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · stripe env: ${haveStripeEnv()}`);
+  // Any job rows THIS server left non-terminal are dead (their loop died with the process) —
+  // mark them interrupted so no build ever shows "building" forever. Scoped by server_id.
+  sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
 });
