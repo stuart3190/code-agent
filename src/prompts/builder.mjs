@@ -16,10 +16,16 @@ const BACKEND_MODEL = `HOW THE BACKEND WORKS — build for this or the app break
   per-user owner. Define it as PLAIN CONSTANTS in the code (e.g. a SERVICES array, a HOURS object) and
   render it directly. NEVER store or read site content through db.entity — a signed-out visitor would
   get an empty read and a broken page. This is the #1 cause of first-load failures.
-- Use db.entity / storage ONLY for genuinely user-owned dynamic records the visitor creates or manages
-  (their bookings, orders, notes, profile). Gate that UI behind sign-in: when \`await auth.currentUser()\`
-  is null, show a sign-in / sign-up prompt (or let them keep browsing public content) instead of
-  calling the backend.
+- NEVER put a sign-in / sign-up screen in FRONT of the whole app as a gate. A first-time, signed-out
+  visitor MUST land directly in the app's core experience and be able to USE it immediately — build
+  the thing, play with it, configure it, browse it — driven by ordinary in-memory React state. (That
+  is NOT "demo mode" or localStorage; it is just an app that works. A "web game builder" lets you
+  build and play a game right away; a shop shows products and a working cart; a tool does its job.)
+- Sign-in is OPTIONAL and ADDITIVE — it exists only to PERSIST or reload a user's own records across
+  devices/sessions. Offer it as a small action (a "Sign in" button in the header, or an inline
+  "Sign in to save" prompt shown ONLY when the user actually tries to save/sync). Use db.entity /
+  storage ONLY at that save/load moment, and only after \`await auth.currentUser()\` is non-null —
+  never on first mount, never to unlock the UI.
 - NEVER let a backend read failure or empty result render an error screen or a "something went wrong"
   card. Wrap every read in try/catch and treat failure OR empty as a normal EMPTY STATE (a friendly
   "no bookings yet", seed content, a call to action). A first render for a signed-out visitor with
@@ -159,10 +165,12 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
-If this change adds or touches data: public site content (name, services, hours, menu, gallery) stays
-as in-code constants — NEVER db.entity; db.entity/storage are per-signed-in-user (a read returns
-nothing when signed out), so gate them behind \`await auth.currentUser()\` and render an empty/seed
-state on any empty or failed read — never a fatal "something went wrong" card.
+If this change adds or touches data: the app's core experience and public/site content must keep
+working for a signed-out visitor (in-code constants + in-memory React state) — NEVER wall the app
+behind a sign-in screen. db.entity/storage are per-signed-in-user and used ONLY to SAVE or reload a
+user's own records (behind \`await auth.currentUser()\`, at the save/load moment, offered as an
+optional "Sign in to save" — never on mount, never to unlock the UI); render an empty/seed state on
+any empty or failed read, never a fatal "something went wrong" card.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
@@ -210,10 +218,12 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
-If this change adds or touches data: public site content (name, services, hours, menu, gallery) stays
-as in-code constants — NEVER db.entity; db.entity/storage are per-signed-in-user (a read returns
-nothing when signed out), so gate them behind \`await auth.currentUser()\` and render an empty/seed
-state on any empty or failed read — never a fatal "something went wrong" card.
+If this change adds or touches data: the app's core experience and public/site content must keep
+working for a signed-out visitor (in-code constants + in-memory React state) — NEVER wall the app
+behind a sign-in screen. db.entity/storage are per-signed-in-user and used ONLY to SAVE or reload a
+user's own records (behind \`await auth.currentUser()\`, at the save/load moment, offered as an
+optional "Sign in to save" — never on mount, never to unlock the UI); render an empty/seed state on
+any empty or failed read, never a fatal "something went wrong" card.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
