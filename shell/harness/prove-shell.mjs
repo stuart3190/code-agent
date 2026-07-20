@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseBackend } from "../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
 import { createLedger } from "../../src/billing/ledger.mjs";
-import { creditsForTurn, TIERS } from "../../src/billing/costModel.mjs";
+import { creditsForTurn, TIERS, WELCOME_CREDITS } from "../../src/billing/costModel.mjs";
 import { loadEnv } from "../server/lib/env.mjs";
 import { SAFE_ENV_EXAMPLE, assertNoPlatformSecrets, readStoredZip } from "../server/lib/exportProject.mjs";
 
@@ -153,13 +153,21 @@ async function main() {
     if (!token) { await backend.auth.signIn({ email, password }); token = await tokenOf(backend); }
     check(!!token, "have an access token (session established)");
 
+    // ── WELCOME credits land once, up front (a server balance read triggers the idempotent grant)
+    // — flushed BEFORE the seed so every later balance delta measures ONLY its own debit.
+    section("WELCOME — new account gets its one-time welcome credits on first server contact");
+    const wr = await fetch(`${BASE}/api/billing/balance`, { headers: { Authorization: `Bearer ${token}` } });
+    const welcomed = (await wr.json())?.balance?.total ?? (await ledger.getBalance(owner)).total;
+    check(Math.abs(welcomed - WELCOME_CREDITS) < 1e-6, `welcome grant landed = ${welcomed} cr (WELCOME_CREDITS ${WELCOME_CREDITS})`);
+
     // ── SEED balance (stands in for the Stripe subscription grant) ───────────────────────────────
     section("SEED — grant the Starter bundle (service role; the Stripe grant path is proven in proveBilling)");
     const starter = TIERS.find((t) => t.id === "starter");
     await ledger.grant({ owner, credits: starter.bundledCredits, bucket: "bundle", kind: "grant", cycle: "seed", ref: `seed:${owner}` });
     await ledger.setEntitlement({ owner, tier: "starter", currentPeriod: "seed" });
     const seeded = await ledger.getBalance(owner);
-    check(Math.abs(seeded.total - starter.bundledCredits) < 1e-6, `seeded balance = ${seeded.total} cr (Starter bundle ${starter.bundledCredits})`);
+    check(Math.abs(seeded.total - (starter.bundledCredits + WELCOME_CREDITS)) < 1e-6,
+      `seeded balance = ${seeded.total} cr (Starter ${starter.bundledCredits} + welcome ${WELCOME_CREDITS})`);
 
     // ── PLAN (plan-only pass: no tools, no build, no preview) ───────────────────────────────────
     section("PLAN — plan-only pass produces a plan, builds nothing, debits creditsForTurn");
