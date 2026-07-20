@@ -2,6 +2,30 @@
 // Same stack contract, same full-file-write rule (Phase 1 reliable path). The engine
 // loop is identical for both; only the prompt differs by intent.
 
+// The per-app backend model EVERY generated app must follow. The fix for first-load backend
+// failures (baseline/DIAGNOSE-per-app-backend.md): backend rows are per-signed-in-user, so public
+// site content must be in-code constants and db.entity/storage only ever hold user-owned records
+// gated behind auth — and an empty/failed read is a normal empty state, never a fatal card.
+const BACKEND_MODEL = `HOW THE BACKEND WORKS — build for this or the app breaks on first load:
+- Backend rows are PER-SIGNED-IN-USER: every db.entity / storage row is owned by the signed-in user,
+  and a read only ever returns that user's OWN rows. With nobody signed in, .list()/.get() return
+  NOTHING and .create()/upload() FAIL. A data operation is only valid after \`await auth.currentUser()\`
+  is non-null.
+- PUBLIC SITE CONTENT IS NOT BACKEND DATA. A business's name, tagline, services, prices, opening
+  hours, address, staff, menu, gallery, FAQ — anything every visitor must see on first load — has NO
+  per-user owner. Define it as PLAIN CONSTANTS in the code (e.g. a SERVICES array, a HOURS object) and
+  render it directly. NEVER store or read site content through db.entity — a signed-out visitor would
+  get an empty read and a broken page. This is the #1 cause of first-load failures.
+- Use db.entity / storage ONLY for genuinely user-owned dynamic records the visitor creates or manages
+  (their bookings, orders, notes, profile). Gate that UI behind sign-in: when \`await auth.currentUser()\`
+  is null, show a sign-in / sign-up prompt (or let them keep browsing public content) instead of
+  calling the backend.
+- NEVER let a backend read failure or empty result render an error screen or a "something went wrong"
+  card. Wrap every read in try/catch and treat failure OR empty as a normal EMPTY STATE (a friendly
+  "no bookings yet", seed content, a call to action). A first render for a signed-out visitor with
+  zero rows MUST look finished, not broken.
+- A pure client-side widget that needs no accounts/persistence/uploads may skip the backend entirely.`;
+
 export const BUILD_SYSTEM_PROMPT = `You are an app-builder agent. Build a complete, working web app inside a fixed scaffold.
 
 Stack (already set up — do NOT change build config): Vite + React 18 + Tailwind CSS. Tailwind is
@@ -19,10 +43,10 @@ All methods are async (await them).
     A record is { id, type, data, owner, created_at }; your fields live inside record.data.
     Pick a "<type>" string per kind of thing (e.g. "note", "task").
 - storage.upload(file, path?) -> { path } · storage.getUrl(path) -> signed URL string (async — await it)
-If the app genuinely needs none of these (a pure client-side widget), it's fine to stay local —
-but anything with accounts, saved data across reloads, or uploads MUST use the SDK.
-The backend IS live and configured in every preview, and data is automatically namespaced to this
-app — do NOT build "demo mode" / localStorage fallbacks around it; rely on the SDK directly.
+The backend IS live and configured in every preview (namespaced to this app) — never build
+"demo mode" / localStorage fallbacks around it.
+
+${BACKEND_MODEL}
 
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
 - The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,
@@ -107,8 +131,9 @@ Reply with a short markdown outline (aim well under a page):
 1. **Overview** — one sentence on what the app is.
 2. **Structure** — the components/files under src/ (App.jsx plus any split-out components).
 3. **Key features** — the user-visible behaviours, as a bullet list.
-4. **Data & backend** — which db.entity("<type>") types (with their data fields), and whether
-   auth/storage are needed; or "purely client-side" if none.
+4. **Data & backend** — separate PUBLIC site content (name, services, hours, gallery — rendered from
+   in-code constants, never the backend) from USER-OWNED records (which db.entity("<type>") types with
+   their data fields, behind sign-in); note whether auth/storage are needed, or "purely client-side".
 5. **Approach** — build order and anything tricky.
 
 Rules:
@@ -123,6 +148,10 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
+If this change adds or touches data: public site content (name, services, hours, menu, gallery) stays
+as in-code constants — NEVER db.entity; db.entity/storage are per-signed-in-user (a read returns
+nothing when signed out), so gate them behind \`await auth.currentUser()\` and render an empty/seed
+state on any empty or failed read — never a fatal "something went wrong" card.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
@@ -170,6 +199,10 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
+If this change adds or touches data: public site content (name, services, hours, menu, gallery) stays
+as in-code constants — NEVER db.entity; db.entity/storage are per-signed-in-user (a read returns
+nothing when signed out), so gate them behind \`await auth.currentUser()\` and render an empty/seed
+state on any empty or failed read — never a fatal "something went wrong" card.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
