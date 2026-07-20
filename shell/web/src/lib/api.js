@@ -231,10 +231,10 @@ export async function unpublishProject(projectId) {
 
 const TERMINAL_STATUSES = ["complete", "failed", "interrupted"];
 
-export async function createBuild({ projectId, prompt, mode, tree, plan, knowledge, fixBuild }) {
+export async function createBuild({ projectId, prompt, mode, tree, plan, knowledge, fixBuild, style, designProfile, redesign }) {
   const res = await fetch("/api/generate", {
     method: "POST", headers: await authHeaders(),
-    body: JSON.stringify({ projectId, prompt, mode, tree, plan, knowledge, fixBuild }),
+    body: JSON.stringify({ projectId, prompt, mode, tree, plan, knowledge, fixBuild, style, designProfile, redesign }),
   });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(out.error || `generate ${res.status}`), { payload: out, status: res.status });

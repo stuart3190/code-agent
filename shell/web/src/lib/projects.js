@@ -24,6 +24,7 @@ function rowToProject(row) {
     previewRef: row.preview_ref,
     knowledge: row.knowledge || "",
     publishedUrl: row.published_url || null,
+    designProfile: row.design_profile || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -64,8 +65,9 @@ export async function createProject(name) {
 }
 
 // Persist the full build state after a generate/iterate turn.
-export async function saveProject(id, { name, tree, prompts, previewRef }) {
+export async function saveProject(id, { name, tree, prompts, previewRef, designProfile }) {
   const patch = { name, tree, history: prompts, preview_ref: previewRef, updated_at: new Date().toISOString() };
+  if (designProfile !== undefined) patch.design_profile = designProfile;
   const rows = unwrap(await table().update(patch).eq("id", id).select());
   return rowToProject(rows[0]);
 }

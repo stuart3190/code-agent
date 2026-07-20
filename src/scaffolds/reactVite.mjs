@@ -29,6 +29,10 @@ export const REACT_VITE = {
         "@supabase/supabase-js": "^2.45.4",
         "@fontsource-variable/manrope": "^5.2.8",
         "@fontsource-variable/space-grotesk": "^5.2.10",
+        "@fontsource-variable/dm-sans": "^5.2.8",
+        "@fontsource-variable/newsreader": "^5.2.8",
+        "@fontsource-variable/sora": "^5.2.8",
+        "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
         "@radix-ui/react-checkbox": "^1.3.6",
         "@radix-ui/react-dialog": "^1.1.18",
         "@radix-ui/react-dropdown-menu": "^2.1.19",
@@ -118,8 +122,8 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["Manrope Variable", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
-        display: ["Space Grotesk Variable", "Manrope Variable", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
     },
   },
@@ -157,6 +161,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
    Dark mode is class-based: add class="dark" on <html> or the root div and tune .dark. */
 @layer base {
   :root {
+    --font-sans: "Manrope Variable";
+    --font-display: "Space Grotesk Variable";
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;

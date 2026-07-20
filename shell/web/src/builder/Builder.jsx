@@ -51,6 +51,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
   const [knowledgeMsg, setKnowledgeMsg] = useState(null);
+  // Automatic premium art direction by default; existing apps are only redesigned explicitly.
+  const [showDesign, setShowDesign] = useState(false);
+  const [stylePreset, setStylePreset] = useState(project.designProfile?.preset || "auto");
+  const [styleNotes, setStyleNotes] = useState(project.designProfile?.notes || "");
   // Visual edits: click an element in the preview -> the next change is scoped to it.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedEl, setSelectedEl] = useState(null); // { tag, text, outerHTML, path }
@@ -144,6 +148,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     setTree(r.tree);
     setPrompts(nextPrompts);
     setResult({ mode: job.mode, ...r });
+    if (r.qualityWarnings?.length) setPublishMsg(r.qualityWarnings.join(" "));
     if (r.buildOk === false) {
       setAppErr({ kind: "build", message: "The app failed to build — “Fix it” sends the error back to the builder." });
     }
@@ -156,13 +161,17 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     // Background completions keep the current name — the label is a status line, not a prompt.
     const name = project.name && project.name !== "Untitled app" ? project.name
       : background ? (project.name || "Untitled app") : deriveName(promptLabel);
-    const saved = await saveProject(project.id, { name, tree: r.tree, prompts: nextPrompts, previewRef: r.previewUrl || null });
+    const saved = await saveProject(project.id, {
+      name, tree: r.tree, prompts: nextPrompts, previewRef: r.previewUrl || null,
+      designProfile: r.designProfile ?? project.designProfile ?? undefined,
+    });
     onProjectChange?.({ id: project.id, ...saved });
     onAfterTurn?.();
   }
 
   async function run(promptOverride, opts = {}) {
     const fixBuild = opts.fixBuild === true;
+    const redesign = opts.redesign === true;
     const prompt = fixBuild ? "" : (typeof promptOverride === "string" ? promptOverride : text).trim();
     if ((!prompt && !fixBuild) || busy) return;
     const effectiveMode = fixBuild ? "iterate" : !hasApp && planMode ? "plan" : mode;
@@ -172,7 +181,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       ? `The user selected this element in the running app (path: ${selectedEl.path}):\n\`\`\`html\n${selectedEl.outerHTML}\n\`\`\`\n\nApply this change to that element: ${prompt}`
       : prompt;
     setBusy(true); setErr(null); setResult(null); setAppErr(null);
-    setPhase("queued"); setRunningMode(effectiveMode);
+    setPhase("queued"); setRunningMode(redesign ? "redesign" : effectiveMode);
     // Name a new project from its first prompt AT BUILD START — so a build that finishes while the
     // user has navigated away (a detached background job) still lands with a real name instead of
     // staying "Untitled app" (the completion handler only has a status label, not the prompt).
@@ -188,6 +197,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined,
         knowledge: knowledge.trim() || undefined,
         fixBuild: fixBuild || undefined,
+        style: { preset: stylePreset, notes: styleNotes.trim() },
+        designProfile: !redesign ? project.designProfile || undefined : undefined,
+        redesign: redesign || undefined,
       });
       setActiveJobId(jobId);
       const job = await watchBuild(jobId, (ph) => setPhase(ph));
@@ -445,9 +457,13 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         {/* min-w-0 + overflow-x-auto (NOT on the header itself — that would clip the absolute
             popovers below) so the strip touch-drags left on narrow screens instead of cutting off */}
         <div className="flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-none pl-2">
-          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); }}
+          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); setShowDesign(false); }}
             title="Standing instructions (brand, tone, constraints) applied to every build and change">
             Knowledge{knowledge.trim() ? " ●" : ""}
+          </button>
+          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowDesign((v) => !v); setShowKnowledge(false); setShowSite(false); }}
+            title="Choose automatic or guided premium art direction">
+            Design{project.designProfile ? " active" : ""}
           </button>
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
@@ -460,7 +476,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
               {publishBusy ? "Publishing…" : "Publish"}
             </button>
           ) : (
-            <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDomain(false); }}
+            <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDesign(false); setShowDomain(false); }}
               title="Your live site — republish, domain, unpublish">
               {publishBusy ? "Publishing…" : <>Site <span className="text-amber-soft">●</span> ▾</>}
             </button>
@@ -559,6 +575,48 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                 onClick={() => doPublish(siteName)}>
                 {publishBusy ? "Publishing…" : "Publish site"}
               </button>
+            </div>
+          </div>
+        )}
+        {showDesign && (
+          <div className="absolute right-4 top-full mt-1 z-20 w-[27rem] max-w-[calc(100vw-2rem)] panel p-4 shadow-xl">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Premium design direction</div>
+            <p className="text-xs text-slate-400 mt-1">
+              Automatic chooses a product-specific layout, palette and font pair. A preset guides the art direction without forcing every app into one template.
+            </p>
+            {project.designProfile && (
+              <div className="mt-3 rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-xs text-slate-300">
+                Current direction: <span className="text-amber-soft">{project.designProfile.family}</span>
+                <span className="text-slate-500"> / {project.designProfile.category}</span>
+              </div>
+            )}
+            <label className="block mt-3 text-[11px] text-slate-500">Style preset</label>
+            <select className="field mt-1" value={stylePreset} onChange={(e) => setStylePreset(e.target.value)} disabled={busy}>
+              <option value="auto">Automatic</option>
+              <option value="editorial-luxury">Editorial luxury</option>
+              <option value="bold-expressive">Bold expressive</option>
+              <option value="warm-organic">Warm organic</option>
+              <option value="clean-saas">Clean SaaS</option>
+              <option value="technical-dark">Technical dark</option>
+              <option value="playful">Playful</option>
+            </select>
+            <label className="block mt-3 text-[11px] text-slate-500">Optional custom direction</label>
+            <textarea className="field mt-1 h-20 resize-none" value={styleNotes} maxLength={500} disabled={busy}
+              onChange={(e) => setStyleNotes(e.target.value)}
+              placeholder="e.g. refined Japanese editorial feel, warm paper tones, avoid gradients" />
+            <div className="flex items-center justify-between gap-3 mt-3">
+              <span className="text-[11px] text-slate-500">
+                {hasApp ? "Normal edits preserve the current look." : "Used when this app is generated."}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button className="btn-ghost text-xs" onClick={() => setShowDesign(false)}>Close</button>
+                {hasApp && (
+                  <button className="btn-primary text-xs px-3 py-1" disabled={busy}
+                    onClick={() => { setShowDesign(false); run("Give this app a complete premium visual redesign using the selected design direction.", { redesign: true }); }}>
+                    Redesign app
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -794,7 +852,10 @@ const PHASE_LABELS = {
   queued: "Waiting for a build slot",
   preparing: "Getting things ready",
   planning: "Drafting the plan",
+  designing: "Directing a unique visual concept",
   building: "Building your app",
+  "quality-checking": "Checking premium design quality",
+  polishing: "Polishing the visual details",
   finalizing: "Finishing up — compiling and starting the preview",
 };
 
@@ -810,7 +871,11 @@ function PhaseTimeline({ phase, busy, mode, lastResult }) {
     }
     return <div className="text-[11px] font-mono text-slate-500">Idle — describe your app and generate (spends 1 build).</div>;
   }
-  const order = mode === "plan" ? ["queued", "preparing", "planning"] : ["queued", "preparing", "building", "finalizing"];
+  const order = mode === "plan"
+    ? ["queued", "preparing", "planning"]
+    : mode === "iterate"
+      ? ["queued", "preparing", "building", "finalizing"]
+      : ["queued", "preparing", "designing", "building", "quality-checking", ...(phase === "polishing" ? ["polishing"] : []), "finalizing"];
   const idx = Math.max(0, order.indexOf(phase));
   const steps = order.slice(0, idx + 1);
   return (

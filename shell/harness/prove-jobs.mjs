@@ -136,7 +136,9 @@ async function debitCount(owner, kind, projectId) {
 
 // ── leak gate ─────────────────────────────────────────────────────────────────────────────────
 const WHITELIST_TOP = new Set(["jobId", "projectId", "mode", "status", "phase", "error", "result"]);
-const WHITELIST_RESULT = new Set(["finalText", "tree", "buildOk", "previewUrl", "need", "balance"]);
+const WHITELIST_RESULT = new Set([
+  "finalText", "tree", "buildOk", "previewUrl", "need", "balance", "designProfile", "qualityWarnings",
+]);
 const FORBIDDEN = [
   [/gpt-?5|claude-|sonnet|haiku|\bopus\b|codex/i, "model identifier"],
   [/read_file|write_file|apply_patch|edit_file|list_files|search_images/i, "tool name"],
@@ -152,7 +154,8 @@ function scanFrame({ data }) {
   const scrub = { ...data };
   if (scrub.result && typeof scrub.result === "object") {
     for (const k of Object.keys(scrub.result)) if (!WHITELIST_RESULT.has(k)) problems.push(`stray result key "${k}"`);
-    const { tree, finalText, ...rest } = scrub.result; // deliverable excluded from the content scan
+    const { tree, finalText, designProfile, qualityWarnings, ...rest } = scrub.result;
+    // User deliverable plus explicitly whitelisted design metadata are excluded from content scan.
     scrub.result = rest;
   }
   const text = JSON.stringify(scrub);

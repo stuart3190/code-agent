@@ -59,10 +59,10 @@ Design (defaults for when the user does not specify a style — a stated style A
   intentionally designed, never like unstyled default HTML or a bare "wall of text and boxes".
   Assume the user is a novice who typed one vague line ("a web game builder") and gave NO style
   direction — you still owe them a polished, modern, confident UI. Every app ships with: a real
-  header / top bar carrying the app's name and a bit of identity; a strong title or hero area that
-  sets the tone; content organised into cards or panels with generous padding and subtle depth
-  (not raw inputs stacked on a white page); the accent colour and lucide icons used to give the
-  interface life and signposting; and considered empty states (icon + a line of copy + a primary
+  product-appropriate composition with clear hierarchy and a recognisable visual idea. A header,
+  centered hero, two CTA buttons and equal card grid is NOT a required recipe. Utilities may be
+  canvas-first, dashboards may be dense workspaces, and consumer sites may be editorial or image-led.
+  Include considered empty states (icon + a line of copy + a primary
   action, never a blank box). Give it a point of view — a fitting colour identity (tune the tokens),
   clear hierarchy, and breathing room. Tools and dashboards stay calm and neutral, but calm is not
   the same as plain: they are still fully art-directed, just restrained.
@@ -73,10 +73,12 @@ Design (defaults for when the user does not specify a style — a stated style A
   and TUNE the :root HSL values to fit the app's character (keep the variable names; utilities
   depend on them). Never scatter one-off hex codes through components. For a dark app, add
   className="dark" on the root element and tune the .dark values.
-- Fonts are baked in and self-hosted: font-sans (Manrope Variable) is the body/UI face and already
-  applied to body; font-display (Space Grotesk Variable) is already applied to h1-h4 for headings.
-  Do not add font imports or CDN links.
+- Fonts are self-hosted through the font packages already in package.json. The scaffold starts with
+  Manrope/Space Grotesk; when a project-specific brief selects another pair, replace the imports in
+  src/main.jsx and set --font-sans/--font-display in src/index.css to the selected family names.
+  Never use remote font CDN links.
 - COMPOSE standard UI from the scaffold's component library instead of hand-rolling primitives.
+  Use primitives for controls and semantics, but do not wrap every section in the same Card surface.
   Import from "@/components/ui/<name>" (the "@" alias = src/). Do NOT read or edit these files —
   they are token-aware and ready to use:
   · button: Button (variant: default|secondary|outline|ghost|destructive|link; size: sm|default|lg|icon; asChild)

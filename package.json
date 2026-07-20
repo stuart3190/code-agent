@@ -10,6 +10,7 @@
     "test:billing": "node harness/_billing-tests.mjs",
     "test:ledger": "node harness/_ledger-tests.mjs",
     "test:export": "node shell/harness/_export-tests.mjs",
+    "test:design": "node harness/_design-profile-tests.mjs",
     "prove:billing": "node harness/proveBilling.mjs",
     "prove:jobs": "node shell/harness/prove-jobs.mjs"
   },

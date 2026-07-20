@@ -6,7 +6,7 @@
 // iterate.mjs:80-83 (Windows `mklink /J`).
 
 import { execFileSync } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,18 +22,28 @@ const WORK_DIR = path.join(HERE, ".work");
 // shell's publish route reading dist/) resolve the workspace through this, not a copied path.
 export const workDirFor = (caseName) => path.join(WORK_DIR, caseName);
 
-// Install scaffold deps once into harness/.deps. Idempotent: skips if present.
+// Install scaffold deps into harness/.deps. Refresh when the scaffold manifest changes so newly
+// approved packages (for example a font family) cannot pass prompts but fail the actual build.
+let depsRefresh = null;
 export async function ensureDeps(log = console.log) {
-  if (existsSync(DEPS_NM)) return;
-  log("[deps] installing shared scaffold deps into harness/.deps (first run only)...");
-  await mkdir(DEPS_DIR, { recursive: true });
-  await writeFile(path.join(DEPS_DIR, "package.json"), REACT_VITE["package.json"], "utf8");
-  execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
-    cwd: DEPS_DIR,
-    stdio: "inherit",
-    shell: true,
-  });
-  log("[deps] done.");
+  if (depsRefresh) return depsRefresh;
+  depsRefresh = (async () => {
+    const manifest = REACT_VITE["package.json"];
+    const manifestPath = path.join(DEPS_DIR, "package.json");
+    const current = existsSync(manifestPath) ? await readFile(manifestPath, "utf8").catch(() => "") : "";
+    if (existsSync(DEPS_NM) && current === manifest) return;
+    log(`[deps] ${existsSync(DEPS_NM) ? "refreshing" : "installing"} shared scaffold dependencies...`);
+    await mkdir(DEPS_DIR, { recursive: true });
+    await writeFile(manifestPath, manifest, "utf8");
+    execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
+      cwd: DEPS_DIR,
+      stdio: "inherit",
+      shell: true,
+    });
+    log("[deps] done.");
+  })();
+  try { return await depsRefresh; }
+  finally { depsRefresh = null; }
 }
 
 // Flush a tree to a fresh working copy, junction in the shared node_modules, and run

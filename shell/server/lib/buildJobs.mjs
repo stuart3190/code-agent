@@ -32,7 +32,7 @@ import { makeFileTools } from "../../../src/tools/fileTools.mjs";
 import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
 import { createRoutingProvider } from "../../../src/providers/routingProvider.mjs";
 import { creditsForTurn } from "../../../src/billing/costModel.mjs";
-import { buildTree } from "../../../harness/workspace.mjs";
+import { buildTree, ensureDeps } from "../../../harness/workspace.mjs";
 import { ledger } from "./services.mjs";
 import { getDecryptedKey } from "./byokStore.mjs";
 import { previewProvider } from "../preview/index.mjs";
@@ -41,6 +41,10 @@ import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLO
 import { ensureWelcomeGrant } from "./welcome.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
+import {
+  DESIGN_DIRECTOR_SYSTEM_PROMPT, auditDesign, fallbackDesignProfile,
+  normalizeDesignProfile, normalizeStyle, parseDesignProfile, renderDesignBrief,
+} from "../../../src/design/designProfile.mjs";
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
@@ -89,8 +93,8 @@ function emit(job, name, data) {
 // are the user's own deliverable; everything else is scalars.
 function publicResult(job) {
   if (!job.result) return null;
-  const { finalText, tree, buildOk, previewUrl, need, balance } = job.result;
-  return { finalText, tree, buildOk, previewUrl, need, balance };
+  const { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings } = job.result;
+  return { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings };
 }
 
 export function isTerminal(job) { return TERMINAL.has(job.status); }
@@ -154,14 +158,14 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign }) {
   const existing = activeJobFor(owner.id, projectId);
   if (existing) return { job: existing, existing: true };
 
   const job = {
     id: crypto.randomUUID(),
     owner, projectId, mode,
-    input: { prompt, tree, plan, knowledge }, // in-memory only — a restart sweeps the job anyway
+    input: { prompt, tree, plan, knowledge, style, designProfile, redesign }, // in-memory only; restart sweeps the job
     status: "queued", phase: "queued", error: null,
     result: null, buildStderr: null,
     cancelled: false,
@@ -262,8 +266,66 @@ export async function sweepInterrupted() {
 
 // ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
 
+function usageBucket() {
+  let total = 0;
+  return {
+    add(telemetry) { total += Number(telemetry?.total || 0); },
+    summary() { return { total }; },
+  };
+}
+
+async function directDesign({ provider, prompt, projectId, style, knowledge, plan, log }) {
+  const context = { prompt, projectId, style: normalizeStyle(style) };
+  const fallback = fallbackDesignProfile(context);
+  const request = JSON.stringify({
+    productRequest: prompt,
+    requestedStyle: context.style,
+    projectKnowledge: knowledge || undefined,
+    approvedPlan: plan || undefined,
+    variationSeed: projectId,
+    fallbackFamilyToBeat: fallback.family,
+  });
+  try {
+    const out = await runAgent({
+      provider, systemPrompt: DESIGN_DIRECTOR_SYSTEM_PROMPT,
+      tools: [], toolImpls: {}, tree: {}, prompt: request, log,
+    });
+    return { profile: parseDesignProfile(out.finalText, context), telemetry: out.telemetry };
+  } catch (e) {
+    log(`design: director unavailable (${e.message}) — using deterministic premium brief`);
+    return { profile: fallback, telemetry: null };
+  }
+}
+
+async function preparePhotography(profile, log) {
+  if (!profile?.imagery?.required) return { assets: [], unavailable: false };
+  if (!imagesConfigured()) {
+    log("design: photography unavailable (PEXELS_API_KEY is not configured)");
+    return { assets: [], unavailable: true };
+  }
+  const queries = [...(profile.imagery.queries || []), `${profile.category} authentic premium photography`];
+  const assets = [];
+  const seen = new Set();
+  for (const query of queries.slice(0, 3)) {
+    if (assets.length >= 6) break;
+    try {
+      const photos = await searchImages(query, { count: 8, orientation: "landscape" });
+      for (const photo of photos || []) {
+        if (!photo?.url || seen.has(photo.url)) continue;
+        seen.add(photo.url);
+        assets.push(photo);
+      }
+    } catch (e) {
+      log(`design: image search retry needed (${e.message})`);
+    }
+  }
+  if (!assets.length) log("design: photo search returned no usable results after retry");
+  else log(`design: prepared ${assets.length} approved photo options`);
+  return { assets: assets.slice(0, 8), unavailable: assets.length === 0 };
+}
+
 async function runJob(job) {
-  const { prompt, tree: inputTree, plan, knowledge } = job.input;
+  const { prompt, tree: inputTree, plan, knowledge, style, designProfile: inputDesignProfile, redesign } = job.input;
   const projectId = job.projectId;
   const mode = job.mode;
   const owner = job.owner;
@@ -330,9 +392,27 @@ async function runJob(job) {
     const intent = mode === "iterate" ? "edit" : "generate";
     const provider = buildProvider(intent);
 
+    const combinedUsage = usageBucket();
+    const needsDesignPass = mode === "build" || redesign === true;
+    let designProfile = inputDesignProfile
+      ? normalizeDesignProfile(inputDesignProfile, { prompt, projectId, style })
+      : null;
+    let photography = { assets: [], unavailable: false };
+    if (needsDesignPass) {
+      setPhase(job, "designing");
+      const directed = await directDesign({
+        provider: buildProvider("generate"), prompt, projectId, style, knowledge, plan, log,
+      });
+      designProfile = directed.profile;
+      combinedUsage.add(directed.telemetry);
+      photography = await preparePhotography(designProfile, log);
+    }
+
     const tree = mode === "iterate" ? { ...inputTree } : clone(fromScaffold(REACT_VITE));
     const editFormat = mode === "iterate" ? "apply_patch" : undefined;
     const { schemas, impls } = makeFileTools(tree, { editFormat });
+    const approvedPhotos = [...photography.assets];
+    const approvedPhotoUrls = new Set(approvedPhotos.map((photo) => photo.url));
 
     let tools = schemas;
     let toolImpls = impls;
@@ -344,6 +424,11 @@ async function runJob(job) {
         search_images: async ({ query, count, orientation }) => {
           try {
             const photos = await searchImages(query, { count, orientation });
+            for (const photo of photos || []) {
+              if (!photo?.url || approvedPhotoUrls.has(photo.url)) continue;
+              approvedPhotoUrls.add(photo.url);
+              approvedPhotos.push(photo);
+            }
             return { photos };
           } catch (e) {
             return { error: `image search unavailable (${e.message}) — build without photos`, photos: [] };
@@ -353,29 +438,89 @@ async function runJob(job) {
       systemPrompt = `${systemPrompt}\n${IMAGES_PROMPT_BLOCK}`;
     }
 
+    if (needsDesignPass && designProfile) {
+      systemPrompt = `${systemPrompt}\n\n${renderDesignBrief(designProfile, approvedPhotos)}`;
+    } else if (designProfile) {
+      systemPrompt = `${systemPrompt}\n\nPERSISTED DESIGN DIRECTION: Preserve the existing ${designProfile.family} visual family, ${designProfile.typography.display}/${designProfile.typography.body} typography, and established palette unless the user's edit explicitly asks to change the visual direction.`;
+    }
+
     serverLog(job, `engine: ${mode} on model ${provider.model} — ${provider.decision?.reason || ""}${plan ? " · steering by approved plan" : ""}`);
     setPhase(job, "building");
 
-    const enginePrompt = withKnowledge(plan
+    let enginePrompt = withKnowledge(plan
       ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
       : prompt);
+    if (redesign === true) {
+      enginePrompt = `This is an explicit full visual redesign. Preserve every working feature, route, data flow, form, and important piece of content while comprehensively replacing the visual system and composition.\n\n${enginePrompt}`;
+    }
 
-    const { telemetry, finalText } = await runAgent({
+    const initial = await runAgent({
       provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log,
     });
+    combinedUsage.add(initial.telemetry);
+    let finalText = initial.finalText;
     if (job.cancelled) throw new CancelledError();
-
-    setPhase(job, "finalizing");
 
     // Prove it builds (same bar as the harness) before we serve/save it. Runtime tree carries
     // the injected backend .env — the SAVED tree stays clean.
-    const runtimeTree = withRuntimeEnv(tree, projectId);
+    await ensureDeps(() => {});
+    await ensureDeps(() => {});
+    let runtimeTree = withRuntimeEnv(tree, projectId);
     serverLog(job, "build: npm run build ...");
-    const build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+    let build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
     serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
     if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
 
-    const { need, balance } = await settle(telemetry, provider.model, "gen");
+    let qualityWarnings = [];
+    if (needsDesignPass && build.ok && designProfile) {
+      setPhase(job, "quality-checking");
+      let audit = auditDesign(tree, {
+        profile: designProfile, assets: approvedPhotos, imageUnavailable: photography.unavailable,
+      });
+      qualityWarnings = audit.warnings;
+
+      if (audit.issues.length) {
+        setPhase(job, "polishing");
+        serverLog(job, `quality: ${audit.issues.length} issue(s) found; running one focused polish pass`);
+        const polishFiles = makeFileTools(tree, { editFormat: "apply_patch" });
+        let polishTools = polishFiles.schemas;
+        let polishImpls = polishFiles.impls;
+        let polishSystem = `${systemPromptForEdit("apply_patch")}\n\n${renderDesignBrief(designProfile, approvedPhotos)}`;
+        if (imagesConfigured()) {
+          polishTools = [...polishTools, SEARCH_IMAGES_SCHEMA];
+          polishImpls = { ...polishImpls, search_images: toolImpls.search_images };
+          polishSystem = `${polishSystem}\n${IMAGES_PROMPT_BLOCK}`;
+        }
+        const polished = await runAgent({
+          provider: buildProvider("edit"),
+          systemPrompt: polishSystem,
+          tools: polishTools,
+          toolImpls: polishImpls,
+          tree,
+          prompt: `The premium design audit found the issues below. Correct only these issues while preserving all behavior, routes, data, content, and working interactions. Re-read the relevant files and use apply_patch.\n\n${audit.issues.map((issue) => `- ${issue}`).join("\n")}`,
+          log,
+        });
+        combinedUsage.add(polished.telemetry);
+        if (polished.finalText) finalText = polished.finalText;
+        if (job.cancelled) throw new CancelledError();
+
+        runtimeTree = withRuntimeEnv(tree, projectId);
+        serverLog(job, "build: verifying polished result ...");
+        build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+        serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
+        if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
+        audit = auditDesign(tree, {
+          profile: designProfile, assets: approvedPhotos, imageUnavailable: photography.unavailable,
+        });
+        qualityWarnings = [...audit.warnings];
+        if (audit.issues.length) {
+          qualityWarnings.push("The automated polish could not fully satisfy every premium design check.");
+        }
+      }
+    }
+
+    setPhase(job, "finalizing");
+    const { need, balance } = await settle(combinedUsage.summary(), provider.model, "gen");
 
     let preview = null;
     try {
@@ -390,7 +535,7 @@ async function runJob(job) {
 
     job.result = {
       finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
-      need, balance: balance.total,
+      need, balance: balance.total, designProfile, qualityWarnings,
     };
     finish(job, "complete");
   } catch (e) {

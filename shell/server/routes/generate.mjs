@@ -22,6 +22,13 @@ export async function handleGenerate(req, res, body, owner) {
   const mode = body?.mode === "iterate" ? "iterate" : body?.mode === "plan" ? "plan" : "build";
   const plan = typeof body?.plan === "string" ? body.plan.trim() : "";
   const knowledge = typeof body?.knowledge === "string" ? body.knowledge.trim().slice(0, 4000) : "";
+  const style = {
+    preset: typeof body?.style?.preset === "string" ? body.style.preset.slice(0, 40) : "auto",
+    notes: typeof body?.style?.notes === "string" ? body.style.notes.trim().slice(0, 500) : "",
+  };
+  const designProfile = body?.designProfile && typeof body.designProfile === "object" && !Array.isArray(body.designProfile)
+    ? body.designProfile : null;
+  const redesign = body?.redesign === true;
   const projectId = body?.projectId || `new-${Date.now()}`;
 
   // "Fix it" for a BUILD error: the stderr never went to the browser (it is full of file
@@ -52,7 +59,7 @@ export async function handleGenerate(req, res, body, owner) {
   const { job, existing } = await createJob({
     owner, projectId, mode, prompt,
     tree: mode === "iterate" ? { ...body.tree } : undefined,
-    plan, knowledge,
+    plan, knowledge, style, designProfile, redesign,
   });
   return sendJson(res, 202, { jobId: job.id, existing, status: job.status, phase: job.phase });
 }
