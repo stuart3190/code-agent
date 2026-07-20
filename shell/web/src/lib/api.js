@@ -225,38 +225,81 @@ export async function unpublishProject(projectId) {
   return out; // { unpublished }
 }
 
-// POST /api/generate and consume the SSE stream via streaming fetch (EventSource can't send the
-// Authorization header). onEvent(name, data) fires per event; resolves with the final "done" payload.
-export async function generate({ projectId, prompt, mode, tree, plan, knowledge }, onEvent) {
+// ── background build jobs ───────────────────────────────────────────────────────────────────────
+// POST /api/generate creates a detached server-side job and returns immediately — the build no
+// longer lives or dies with this tab. The client is a passive observer via watchBuild.
+
+const TERMINAL_STATUSES = ["complete", "failed", "interrupted"];
+
+export async function createBuild({ projectId, prompt, mode, tree, plan, knowledge, fixBuild }) {
   const res = await fetch("/api/generate", {
     method: "POST", headers: await authHeaders(),
-    body: JSON.stringify({ projectId, prompt, mode, tree, plan, knowledge }),
+    body: JSON.stringify({ projectId, prompt, mode, tree, plan, knowledge, fixBuild }),
   });
-  if (!res.ok && res.headers.get("content-type")?.includes("application/json")) {
-    const err = await res.json();
-    throw Object.assign(new Error(err.error || `generate ${res.status}`), { payload: err, status: res.status });
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let done = null;
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(out.error || `generate ${res.status}`), { payload: out, status: res.status });
+  return out; // { jobId, existing, status, phase }
+}
+
+// Observe a job's coarse phase stream (streaming fetch — EventSource can't send the Authorization
+// header) until it ends. onPhase(phase) fires per transition; resolves with the terminal job
+// { status, phase, error, result }. Reconnects on dropped sockets: the server's snapshot frame
+// replays current state, and the build itself never depends on this connection existing.
+export async function watchBuild(jobId, onPhase) {
+  let failedAttempts = 0;
   for (;;) {
-    const { value, done: streamDone } = await reader.read();
-    if (streamDone) break;
-    buf += decoder.decode(value, { stream: true });
-    const frames = buf.split("\n\n");
-    buf = frames.pop() || "";
-    for (const frame of frames) {
-      const evLine = frame.split("\n").find((l) => l.startsWith("event:"));
-      const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
-      if (!evLine || !dataLine) continue;
-      const name = evLine.slice(6).trim();
-      let data = {};
-      try { data = JSON.parse(dataLine.slice(5).trim()); } catch {}
-      onEvent?.(name, data);
-      if (name === "done") done = data;
-      if (name === "error") throw new Error(data.message || "generation error");
+    let sawFrame = false;
+    try {
+      const res = await fetch(`/api/builds/${encodeURIComponent(jobId)}/events`, { headers: await authHeaders() });
+      if (!res.ok) {
+        const out = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(out.error || `events ${res.status}`), { status: res.status, hard: true });
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const evLine = frame.split("\n").find((l) => l.startsWith("event:"));
+          const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!evLine || !dataLine) continue;
+          sawFrame = true;
+          let data = {};
+          try { data = JSON.parse(dataLine.slice(5).trim()); } catch {}
+          if (TERMINAL_STATUSES.includes(data.status)) return data;
+          if (data.phase) onPhase?.(data.phase, data);
+        }
+      }
+    } catch (e) {
+      if (e.hard) throw e; // 404/401 — retrying won't help
     }
+    // Stream ended without a terminal frame (network blip / proxy timeout) — reattach. Frames
+    // flowing resets the failure count; only repeated dead connections give up.
+    failedAttempts = sawFrame ? 0 : failedAttempts + 1;
+    if (failedAttempts >= 6) {
+      throw new Error("Lost contact with the build — it keeps running; reopen the project to check on it.");
+    }
+    await new Promise((r) => setTimeout(r, 1500));
   }
-  return done;
+}
+
+// The running (or most recent) build for a project — reattach-on-open.
+export async function activeBuild(projectId) {
+  const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/active-build`, { headers: await authHeaders() });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `active-build ${r.status}`);
+  return (await r.json()).job; // whitelisted job or null
+}
+
+export async function cancelBuild(jobId) {
+  const r = await fetch(`/api/builds/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST", headers: await authHeaders(),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `cancel ${r.status}`);
+  return out;
 }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, generate, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
 import { saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
-// The core loop: describe -> generate -> preview -> iterate. Wired to the REAL engine via the
-// server's /api/generate (the only Codex-spending action; fires only on the button click below).
+// The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
+// job (/api/generate returns a jobId immediately): the build survives navigating away, and this
+// component just observes its coarse phase stream — reattaching on open if one is already running.
 export default function Builder({ project, initialPrompt, onProjectChange, onAfterTurn }) {
   const [tree, setTree] = useState(project.tree || null);
   const [prompts, setPrompts] = useState(project.prompts || []);
@@ -15,11 +16,15 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [planMode, setPlanMode] = useState(false);
   const [pendingPlan, setPendingPlan] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState([]);
+  // The observed background job: coarse phase + id (for cancel) + the running job's mode.
+  const [phase, setPhase] = useState(null);
+  const [activeJobId, setActiveJobId] = useState(null);
+  const [runningMode, setRunningMode] = useState(null);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
-  // The "Fix it" loop: { kind: "runtime" | "build", message, stack } — runtime errors arrive from
-  // the preview iframe's devReporter via postMessage; build errors from the done payload's stderr.
+  // The "Fix it" loop: { kind: "runtime" | "build", message } — runtime errors arrive from the
+  // preview iframe's devReporter via postMessage; build failures set a generic message and the
+  // SERVER composes the fix prompt from its stored stderr (it never reaches the browser).
   const [appErr, setAppErr] = useState(null);
   const [publishMsg, setPublishMsg] = useState(null);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -49,7 +54,6 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   // Visual edits: click an element in the preview -> the next change is scoped to it.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedEl, setSelectedEl] = useState(null); // { tag, text, outerHTML, path }
-  const logRef = useRef(null);
   const iframeRef = useRef(null);
 
   const hasApp = !!tree;
@@ -60,9 +64,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   // auto-collapses on a passing build, and stays open after a FAIL (the log is the evidence).
   const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => { if (busy) setDetailsOpen(true); }, [busy]);
-  useEffect(() => { if (result?.build?.ok) setDetailsOpen(false); }, [result]);
-
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
+  useEffect(() => { if (result?.buildOk) setDetailsOpen(false); }, [result]);
 
   // Publish/download outcomes surface as a self-dismissing toast (bottom-right).
   useEffect(() => {
@@ -113,73 +115,131 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 
-  async function run(promptOverride) {
-    const prompt = (typeof promptOverride === "string" ? promptOverride : text).trim();
-    if (!prompt || busy) return;
-    const effectiveMode = !hasApp && planMode ? "plan" : mode;
+  // Adopt a finished job's result: plan → hold the plan; build → new tree + history + SAVE (the
+  // projects row stays client-written under RLS — the server only stores the job result). History
+  // entries carry jobId so reattach can tell "already applied" from "finished while I was away".
+  async function applyFinishedJob(job, promptLabel, { planUsed = false, clearComposer = false, background = false } = {}) {
+    const r = job.result || {};
+    if (job.mode === "plan") {
+      // Plan-only turn: show the plan, hold it for the next build press, auto-revert the toggle
+      // so the toggle and button text always agree ("Generate app" is the next action).
+      // DEFERRED: clarifying-question popups slot in HERE — between the plan arriving and the
+      // auto-revert — pausing to ask the user before the plan is considered final.
+      setPrompts((p) => [...p, {
+        prompt: promptLabel, mode: "plan", finalText: r.finalText, at: new Date().toISOString(),
+        need: r.need, jobId: job.jobId,
+      }]);
+      setPendingPlan(r.finalText || null);
+      setPlanMode(false);
+      setResult({ mode: "plan", ...r });
+      return; // no tree/preview/save — the description stays in the box for "Generate app"
+    }
+
+    // Each non-plan turn snapshots the full tree so any version can be reverted to (capSnapshots
+    // keeps the most recent SNAPSHOT_KEEP snapshots; older entries just drop their tree).
+    const nextPrompts = capSnapshots([...prompts, {
+      prompt: promptLabel, mode: job.mode, finalText: r.finalText, at: new Date().toISOString(),
+      need: r.need, buildOk: r.buildOk, planUsed, jobId: job.jobId, tree: r.tree,
+    }]);
+    setTree(r.tree);
+    setPrompts(nextPrompts);
+    setResult({ mode: job.mode, ...r });
+    if (r.buildOk === false) {
+      setAppErr({ kind: "build", message: "The app failed to build — “Fix it” sends the error back to the builder." });
+    }
+    if (r.previewUrl) { setPreviewUrl(r.previewUrl); }
+    else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
+    if (clearComposer) setText("");
+    setPendingPlan(null); // the build consumed the plan
+    setSelectedEl(null); // the iterate consumed the selection
+
+    // Background completions keep the current name — the label is a status line, not a prompt.
+    const name = project.name && project.name !== "Untitled app" ? project.name
+      : background ? (project.name || "Untitled app") : deriveName(promptLabel);
+    const saved = await saveProject(project.id, { name, tree: r.tree, prompts: nextPrompts, previewRef: r.previewUrl || null });
+    onProjectChange?.({ id: project.id, ...saved });
+    onAfterTurn?.();
+  }
+
+  async function run(promptOverride, opts = {}) {
+    const fixBuild = opts.fixBuild === true;
+    const prompt = fixBuild ? "" : (typeof promptOverride === "string" ? promptOverride : text).trim();
+    if ((!prompt && !fixBuild) || busy) return;
+    const effectiveMode = fixBuild ? "iterate" : !hasApp && planMode ? "plan" : mode;
     // A selected element scopes a USER-TYPED iterate to that exact spot in the UI (cheaper, more
     // accurate). Composed prompts (Fix it) skip the scoping — they carry their own context.
-    const scopedPrompt = effectiveMode === "iterate" && selectedEl && typeof promptOverride !== "string"
+    const scopedPrompt = effectiveMode === "iterate" && selectedEl && typeof promptOverride !== "string" && !fixBuild
       ? `The user selected this element in the running app (path: ${selectedEl.path}):\n\`\`\`html\n${selectedEl.outerHTML}\n\`\`\`\n\nApply this change to that element: ${prompt}`
       : prompt;
-    setBusy(true); setErr(null); setResult(null); setLog([]); setAppErr(null);
+    setBusy(true); setErr(null); setResult(null); setAppErr(null);
+    setPhase("queued"); setRunningMode(effectiveMode);
     try {
-      const done = await generate(
-        { projectId: project.id, prompt: scopedPrompt, mode: effectiveMode,
-          tree: effectiveMode === "iterate" ? tree : undefined,
-          plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined,
-          knowledge: knowledge.trim() || undefined },
-        (name, data) => { if (name === "log") setLog((l) => [...l, data.line]); }
-      );
-      if (!done) throw new Error("no result");
-
-      if (effectiveMode === "plan") {
-        // Plan-only turn: show the plan, hold it for the next build press, auto-revert the toggle
-        // so the toggle and button text always agree ("Generate app" is the next action).
-        // DEFERRED: clarifying-question popups slot in HERE — between the plan arriving and the
-        // auto-revert — pausing to ask the user before the plan is considered final.
-        setLog((l) => [...l, "", "── PLAN ──", done.finalText || "(empty plan)"]);
-        setPrompts((p) => [...p, {
-          prompt, mode: "plan", finalText: done.finalText, at: new Date().toISOString(),
-          need: done.need, model: done.decision?.model,
-        }]);
-        setPendingPlan(done.finalText || null);
-        setPlanMode(false);
-        setResult(done);
-        return; // no tree/preview/save — the description stays in the box for "Generate app"
+      const { jobId } = await createBuild({
+        projectId: project.id, prompt: fixBuild ? undefined : scopedPrompt, mode: effectiveMode,
+        tree: effectiveMode === "iterate" ? tree : undefined,
+        plan: effectiveMode === "build" && pendingPlan ? pendingPlan : undefined,
+        knowledge: knowledge.trim() || undefined,
+        fixBuild: fixBuild || undefined,
+      });
+      setActiveJobId(jobId);
+      const job = await watchBuild(jobId, (ph) => setPhase(ph));
+      if (job.status !== "complete") {
+        throw new Error(job.error || "The build hit an unexpected error — please try again.");
       }
-
-      // Each non-plan turn snapshots the full tree so any version can be reverted to
-      // (capSnapshots keeps the most recent SNAPSHOT_KEEP snapshots; older entries stay
-      // in history but drop their tree).
-      const nextPrompts = capSnapshots([...prompts, {
-        prompt, mode: effectiveMode, finalText: done.finalText, at: new Date().toISOString(),
-        need: done.need, model: done.decision?.model, buildOk: done.build?.ok,
+      await applyFinishedJob(job, fixBuild ? "⚙ Fix the build error" : prompt, {
         planUsed: effectiveMode === "build" && !!pendingPlan,
-        tree: done.tree,
-      }]);
-      setTree(done.tree);
-      setPrompts(nextPrompts);
-      setResult(done);
-      if (done.build?.ok === false) {
-        setAppErr({ kind: "build", message: "The app failed to build.", stack: done.build.stderr || "" });
-      }
-      if (done.preview?.url) { setPreviewUrl(done.preview.url); }
-      else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
-      if (typeof promptOverride !== "string") setText("");
-      setPendingPlan(null); // the build consumed the plan
-      setSelectedEl(null); // the iterate consumed the selection
-
-      const name = project.name && project.name !== "Untitled app" ? project.name : deriveName(prompt);
-      const saved = await saveProject(project.id, { name, tree: done.tree, prompts: nextPrompts, previewRef: done.preview?.url || null });
-      onProjectChange?.({ id: project.id, ...saved });
-      onAfterTurn?.();
+        clearComposer: typeof promptOverride !== "string" && !fixBuild,
+      });
     } catch (e) {
       setErr(e.payload?.error === "insufficient_balance"
-        ? "No credits — buy a tier or top-up (right panel) to generate."
+        ? "You're out of credits — pick a plan or top up in the right-hand panel, then try again."
         : (e.message || String(e)));
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setPhase(null); setActiveJobId(null); setRunningMode(null); }
   }
+
+  // Stop the observed build: the server flags the job and the runner halts at the next safe
+  // point. The watch resolves with the job's "Cancelled by user." ending — no state to unwind here.
+  async function doCancelBuild() {
+    if (!activeJobId) return;
+    try { await cancelBuild(activeJobId); } catch { /* already finished is fine */ }
+  }
+
+  // Reattach on open: a build may be running for this project (started here or in another tab),
+  // or may have finished while we were away. Observe the former; adopt-and-save the latter.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const job = await activeBuild(project.id);
+        if (!active || !job) return;
+        const applied = (project.prompts || []).some((p) => p.jobId === job.jobId);
+        if (job.status === "queued" || job.status === "running") {
+          setBusy(true); setActiveJobId(job.jobId); setRunningMode(job.mode);
+          setPhase(job.phase || "queued"); setDetailsOpen(true);
+          const end = await watchBuild(job.jobId, (ph) => { if (active) setPhase(ph); });
+          if (!active) return;
+          if (end.status === "complete") {
+            await applyFinishedJob(end, "⟳ Build finished in the background", { background: true });
+          } else {
+            setErr(end.error || "The build hit an unexpected error — please try again.");
+          }
+          setBusy(false); setPhase(null); setActiveJobId(null); setRunningMode(null);
+        } else if (job.status === "complete" && job.mode !== "plan" && job.result?.tree && !applied) {
+          await applyFinishedJob(job, "⟳ Build finished while you were away", { background: true });
+        } else if (job.status === "complete" && job.mode === "plan" && job.result?.finalText && !hasApp && !pendingPlan) {
+          // A plan that finished while we were away: restore it as the held plan (no history
+          // entry — plan turns only persist once a build saves them, same as before).
+          setPendingPlan(job.result.finalText);
+          setResult({ mode: "plan", ...job.result });
+        } else if (job.status === "interrupted" && !applied) {
+          // Surface the invisible death (a failed/cancelled build was seen live by whoever ran it).
+          setErr(job.error || "The build was interrupted — please rebuild.");
+        }
+      } catch { /* reattach is best-effort; the composer still works without it */ }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
 
   // Revert the app to an earlier turn's snapshot. NON-destructive (Lovable-style): later turns
   // stay in history; the revert itself is appended as a new entry carrying the same snapshot.
@@ -232,13 +292,13 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     } catch (e) { setDomainMsg(e.message); } finally { setDomainBusy(false); }
   }
 
-  // One-click repair: feed the captured error back into an iterate turn (normal metered spend).
+  // One-click repair (normal metered spend). Build failures: the stderr lives server-side on the
+  // job record, so the server composes the prompt (fixBuild flag). Runtime errors come from the
+  // preview iframe itself and are composed here as before.
   function fixIt() {
     if (!appErr || busy || !hasApp) return;
-    const p = appErr.kind === "build"
-      ? `The app fails to build. Fix the root cause of this build error:\n\n${appErr.stack || appErr.message}`
-      : `The running app throws this runtime error:\n\n${appErr.message}${appErr.stack ? `\n\nStack:\n${appErr.stack}` : ""}\n\nFind and fix the root cause (do not just swallow the error).`;
-    run(p);
+    if (appErr.kind === "build") return run(null, { fixBuild: true });
+    run(`The running app throws this runtime error:\n\n${appErr.message}${appErr.stack ? `\n\nStack:\n${appErr.stack}` : ""}\n\nFind and fix the root cause (do not just swallow the error).`);
   }
 
   async function commitRename() {
@@ -534,8 +594,8 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             </button>
             {result && (
               <span className="hidden xl:block shrink-0 text-[11px] font-mono text-slate-500" title="Last turn">
-                {result.mode === "plan" ? "plan" : `build ${result.build?.ok ? "PASS" : "FAIL"}`}
-                {result.byok ? " · BYOK" : result.need != null ? ` · ${Number(result.need).toFixed(2)} cr` : ""}
+                {result.mode === "plan" ? "plan" : `build ${result.buildOk ? "PASS" : "FAIL"}`}
+                {result.need > 0 ? ` · ${Number(result.need).toFixed(2)} cr` : ""}
               </span>
             )}
             <button className="shrink-0 text-[11px] font-mono text-slate-500 hover:text-slate-300"
@@ -615,17 +675,23 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                 </div>
                 <div className="text-slate-500 font-mono text-[10px] mt-0.5">
                   {p.mode === "revert" ? "⟲ revert"
-                    : p.mode === "plan" ? `${p.model} · ${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · plan`
-                    : `${p.model} · ${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · build ${p.buildOk ? "PASS" : "FAIL"}${p.planUsed ? " (from plan)" : ""}`}
+                    : p.mode === "plan" ? `${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · plan`
+                    : `${p.need != null ? `${Number(p.need).toFixed(3)} cr` : "—"} · build ${p.buildOk ? "PASS" : "FAIL"}${p.planUsed ? " (from plan)" : ""}`}
                 </div>
               </div>
             ))}
           </div>
 
-          {/* live build timeline (raw engine log behind the disclosure) */}
+          {/* live build status — the coarse phase timeline (engine internals stay server-side) */}
           <div className="flex flex-col min-h-0 border-t lg:border-t-0 border-line">
             <div className="px-4 pt-3 flex items-center justify-between">
               <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Build</span>
+              {busy && activeJobId && (
+                <button className="text-[11px] font-mono text-red-400/80 hover:text-red-300"
+                  title="Stop this build — it halts at the next safe point" onClick={doCancelBuild}>
+                  cancel ■
+                </button>
+              )}
               {hasApp && !busy && (
                 <button className="text-[11px] font-mono text-slate-500 hover:text-slate-300"
                   title="Collapse to a slim bar — the preview gets the room" onClick={() => setDetailsOpen(false)}>
@@ -633,17 +699,20 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                 </button>
               )}
             </div>
-            <div ref={logRef} className="overflow-auto px-4 py-2" style={{ height: "9rem" }}>
-              <Timeline lines={log} busy={busy} />
+            <div className="overflow-auto px-4 py-2" style={{ height: "9rem" }}>
+              <PhaseTimeline phase={phase} busy={busy} mode={runningMode} lastResult={result} />
+              {result?.mode === "plan" && result.finalText && (
+                <div className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-300 border-t border-line pt-2">{result.finalText}</div>
+              )}
             </div>
             {result && (
               <div className="px-4 py-2 border-t border-line text-[11px] font-mono text-slate-400">
-                {result.byok ? (
-                  <><span className="text-amber-soft">BYOK</span> — {result.telemetry?.total} tok on {result.decision?.model}, billed to your key (no credits)</>
+                {result.need > 0 ? (
+                  <>used <span className="text-amber">{Number(result.need).toFixed(4)} cr</span>
+                  {result.balance != null && <> · balance <span className="text-slate-100">{Number(result.balance).toFixed(3)} cr</span></>}</>
                 ) : (
-                  <>debited <span className="text-amber">{Number(result.need).toFixed(4)} cr</span> ({result.decision?.model}, {result.telemetry?.total} tok) ·
-                  balance <span className="text-slate-100">{result.balance?.total?.toFixed(3)} cr</span></>
-                )} · {result.mode === "plan" ? "plan (no build)" : `build ${result.build?.ok ? "PASS" : "FAIL"}`}
+                  <>no credits used</>
+                )} · {result.mode === "plan" ? "plan (no build)" : `build ${result.buildOk ? "PASS" : "FAIL"}`}
               </div>
             )}
           </div>
@@ -711,68 +780,44 @@ function fmtElapsed(s) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-// The engine's SSE log rendered as a build timeline — each tool call becomes a human step;
-// token/billing chatter stays in the raw log behind the disclosure. Plan-mode output (everything
-// after the ── PLAN ── divider) renders as text, since the plan IS the result.
-function parseTimeline(lines) {
-  const steps = [];
-  let planText = null;
-  const push = (label, kind = "step") => steps.push({ label, kind });
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line === "── PLAN ──") { planText = lines.slice(i + 1).join("\n").trim(); break; }
-    const t = line.trim();
-    let m;
-    if ((m = t.match(/^engine: (\w+) on model (\S+)/))) push(`${m[1] === "iterate" ? "Applying your change" : m[1] === "plan" ? "Planning" : "Starting the build"} · ${m[2]}`);
-    else if (t.startsWith("↳ list_files")) push("Scanning the project");
-    else if ((m = t.match(/^↳ read_file (\S+)/))) push(`Reading ${m[1]}`);
-    else if ((m = t.match(/^↳ write_file (\S+)/))) push(`Writing ${m[1]}`);
-    else if ((m = t.match(/^↳ apply_patch FAILED/))) push("Retrying an edit", "warn");
-    else if ((m = t.match(/^↳ apply_patch -> (.+)$/))) push(`Editing ${m[1]}`);
-    else if ((m = t.match(/^↳ edit_file (\S+)/))) push(`Editing ${m[1]}`);
-    else if (t.startsWith("↳ search_images")) push("Finding photos");
-    else if (t.startsWith("build: npm run build")) push("Compiling…");
-    else if (t === "build: PASS") push("Build passed", "good");
-    else if (t === "build: FAIL") push("Build failed", "bad");
-    else if (t.startsWith("preview: http")) push("Preview live", "good");
-  }
-  return { steps, planText };
-}
+// The job's coarse phase stream rendered as a timeline. This is ALL the server sends — engine
+// internals (models, tools, file paths, token counts) never reach the browser.
+const PHASE_LABELS = {
+  queued: "Waiting for a build slot",
+  preparing: "Getting things ready",
+  planning: "Drafting the plan",
+  building: "Building your app",
+  finalizing: "Finishing up — compiling and starting the preview",
+};
 
-function Timeline({ lines, busy }) {
-  if (lines.length === 0) {
+function PhaseTimeline({ phase, busy, mode, lastResult }) {
+  if (!phase) {
+    if (lastResult) {
+      return (
+        <div className={`text-xs flex items-center gap-2 ${lastResult.mode !== "plan" && lastResult.buildOk === false ? "text-red-400" : "text-amber-soft"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${lastResult.mode !== "plan" && lastResult.buildOk === false ? "bg-red-400" : "bg-amber"}`} />
+          {lastResult.mode === "plan" ? "Plan ready" : lastResult.buildOk ? "Done — your app is live in the preview" : "Build failed — use “Fix it” above the preview"}
+        </div>
+      );
+    }
     return <div className="text-[11px] font-mono text-slate-500">Idle — describe your app and generate (spends 1 build).</div>;
   }
-  const { steps, planText } = parseTimeline(lines);
+  const order = mode === "plan" ? ["queued", "preparing", "planning"] : ["queued", "preparing", "building", "finalizing"];
+  const idx = Math.max(0, order.indexOf(phase));
+  const steps = order.slice(0, idx + 1);
   return (
-    <div className="text-xs">
-      <ol className="space-y-1">
-        {steps.map((s, i) => {
-          const last = i === steps.length - 1;
-          const color = s.kind === "good" ? "text-amber-soft" : s.kind === "bad" ? "text-red-400" : s.kind === "warn" ? "text-slate-400" : "text-slate-300";
-          return (
-            <li key={i} className={`flex items-center gap-2 ${color}`}>
-              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                s.kind === "good" ? "bg-amber" : s.kind === "bad" ? "bg-red-400" :
-                last && busy ? "bg-amber animate-pulse" : "bg-slate-600"}`} />
-              <span className="truncate">{s.label}</span>
-            </li>
-          );
-        })}
-        {busy && steps.length === 0 && (
-          <li className="flex items-center gap-2 text-slate-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber animate-pulse shrink-0" />Thinking…
+    <ol className="space-y-1 text-xs">
+      {steps.map((p, i) => {
+        const last = i === steps.length - 1;
+        const label = p === "building" && mode === "iterate" ? "Applying your change" : PHASE_LABELS[p];
+        return (
+          <li key={p} className={`flex items-center gap-2 ${last ? "text-slate-200" : "text-slate-400"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${last && busy ? "bg-amber animate-pulse" : "bg-amber"}`} />
+            <span className="truncate">{label}{last && busy ? "…" : ""}</span>
           </li>
-        )}
-      </ol>
-      {planText && (
-        <div className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-300 border-t border-line pt-2">{planText}</div>
-      )}
-      <details className="mt-2">
-        <summary className="cursor-pointer text-[10px] font-mono uppercase tracking-wider text-slate-600 hover:text-slate-400">Raw log</summary>
-        <pre className="mt-1 whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-500">{lines.join("\n")}</pre>
-      </details>
-    </div>
+        );
+      })}
+    </ol>
   );
 }
 
