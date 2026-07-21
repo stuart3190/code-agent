@@ -243,6 +243,76 @@ export async function saveIntegrationSettings(projectId, settings) {
   return out;
 }
 
+export async function getConnectorOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/connectors?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `connectors ${r.status}`);
+  return out;
+}
+
+export async function saveConnector(projectId, settings) {
+  const r = await fetch("/api/projects/connectors", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...settings }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `connector ${r.status}`);
+  return out;
+}
+
+export async function testConnector(projectId, provider) {
+  const r = await fetch("/api/projects/connectors/test", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, provider }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `connector test ${r.status}`);
+  return out;
+}
+
+export async function disconnectConnector(projectId, provider) {
+  const r = await fetch("/api/projects/connectors/disconnect", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, provider }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `connector disconnect ${r.status}`);
+  return out;
+}
+
+export async function startConnectorOAuth(projectId, provider) {
+  const r = await fetch("/api/projects/connectors/oauth/start", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, provider }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `connector authorization ${r.status}`);
+  return out;
+}
+
+export async function getConnectorWorkflows(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/connector-workflows?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `workflows ${r.status}`);
+  return out.workflows || [];
+}
+
+export async function saveConnectorWorkflow(projectId, workflow) {
+  const r = await fetch("/api/projects/connector-workflows", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...workflow }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `workflow ${r.status}`);
+  return out.workflow;
+}
+
+export async function deleteConnectorWorkflow(projectId, workflowId) {
+  const r = await fetch("/api/projects/connector-workflows", {
+    method: "DELETE", headers: await authHeaders(), body: JSON.stringify({ projectId, workflowId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `workflow delete ${r.status}`);
+  return out;
+}
+
 export async function getProjectAnalytics(projectId, days = 14) {
   const params = new URLSearchParams({ projectId, days: String(days) });
   const r = await fetch(`/api/projects/analytics?${params}`, { headers: await authHeaders() });

@@ -77,7 +77,7 @@ export async function saveIntegration(owner, projectId, input, client = serviceC
   return { config, signingSecret, providers: { email: emailConfigured(), sms: smsConfigured() } };
 }
 
-async function sendWebhook(url, secret, envelope) {
+export async function sendWebhook(url, secret, envelope) {
   if (!url || !secret || !(await safeBrowserUrl(url, "https://invalid.local"))) return "skipped";
   const body = JSON.stringify(envelope);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -113,6 +113,8 @@ async function processTask(task, client) {
     if (!sent) throw new Error("event SMS delivery failed");
     result.sms = "sent";
   }
+  const { runConnectorWorkflows } = await import("./connectorWorkflows.mjs");
+  result.workflows = await runConnectorWorkflows(task, envelope, client);
   return result;
 }
 

@@ -42,6 +42,7 @@ import { ensureWelcomeGrant } from "./welcome.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { managedAffordableCreditLimit } from "./billingLimits.mjs";
+import { connectorToolsForProject } from "./connectors.mjs";
 import {
   DESIGN_DIRECTOR_SYSTEM_PROMPT, auditDesign, fallbackDesignProfile,
   normalizeDesignProfile, normalizeStyle, parseDesignProfile, renderDesignBrief,
@@ -483,10 +484,20 @@ async function runJob(job) {
     let tools = schemas;
     let toolImpls = impls;
     let systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
+    try {
+      const connectors = await connectorToolsForProject(owner.id, projectId);
+      if (connectors.schemas.length) {
+        tools = [...tools, ...connectors.schemas];
+        toolImpls = { ...toolImpls, ...connectors.impls };
+        systemPrompt = `${systemPrompt}\n\n${connectors.promptBlock}`;
+      }
+    } catch (error) {
+      serverLog(job, `connectors: unavailable (${error.message})`);
+    }
     if (imagesConfigured()) {
-      tools = [...schemas, SEARCH_IMAGES_SCHEMA];
+      tools = [...tools, SEARCH_IMAGES_SCHEMA];
       toolImpls = {
-        ...impls,
+        ...toolImpls,
         search_images: async ({ query, count, orientation }) => {
           try {
             const photos = await searchImages(query, { count, orientation });

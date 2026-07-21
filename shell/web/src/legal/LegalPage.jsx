@@ -166,6 +166,10 @@ function Privacy() {
           customer reference. Card details go directly to Stripe; we never see or store them.</li>
         <li><span className="text-slate-300">BYOK keys</span> — if you save an API key it is stored
           encrypted (AES-256-GCM), is never shown again in full, and is used only to run your builds.</li>
+        <li><span className="text-slate-300">Connector credentials and data</span> — connector tokens and
+          webhook URLs are encrypted and never shown again. When you allow a read-only connector in the
+          builder, the small amount of data it requests is sent to the active AI model provider to complete
+          that build. You can disconnect a connector at any time.</li>
         <li><span className="text-slate-300">Technical</span> — server logs (IP address, requests,
           errors) kept for security and debugging.</li>
       </UL>
@@ -190,6 +194,9 @@ function Privacy() {
           generate it. Don&rsquo;t put secrets in prompts.</li>
         <li><span className="text-slate-300">Pexels</span> — image search queries when a build looks
           for photography.</li>
+        <li><span className="text-slate-300">Services you connect</span> — such as Google Workspace,
+          Slack, Discord, GitHub, Stripe, or a custom API. We contact them only for connections and actions
+          you configure, using the permissions you grant.</li>
       </UL>
 
       <H2>4. Apps you build</H2>

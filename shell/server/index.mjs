@@ -45,6 +45,10 @@ import { handleBrandApply, handleBrandDelete, handleBrandOverview } from "./rout
 import { handleConsoleRecordDelete, handleConsoleUser, handleOwnerConsole } from "./routes/ownerConsole.mjs";
 import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handleGithubOverview } from "./routes/github.mjs";
 import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integrations.mjs";
+import {
+  handleConnectorDisconnect, handleConnectorOAuthCallback, handleConnectorOAuthStart,
+  handleConnectorOverview, handleConnectorSave, handleConnectorTest, handleConnectorWorkflows,
+} from "./routes/connectors.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { handleAnalytics } from "./routes/analytics.mjs";
 import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
@@ -210,6 +214,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
 
+    if (p === "/api/connectors/oauth/google/callback" && method === "GET") {
+      return handleConnectorOAuthCallback(req, res, url);
+    }
+
     if (p === "/api/runtime/checkout" && method === "POST") {
       return handleRuntimeCheckout(req, res, await readJson(req), bearer(req), origin);
     }
@@ -304,6 +312,31 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/integrations" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleIntegrationSave(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/connectors" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConnectorOverview(req, res, url, owner);
+    }
+    if (p === "/api/projects/connectors" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConnectorSave(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/connectors/test" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConnectorTest(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/connectors/disconnect" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConnectorDisconnect(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/connectors/oauth/start" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConnectorOAuthStart(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/connector-workflows" && ["GET", "POST", "DELETE"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = method === "GET" ? null : await readJson(req);
+      return handleConnectorWorkflows(req, res, { method, url, body, owner });
     }
     if (p === "/api/projects/analytics" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics, getEnvironmentControl, deployTestEnvironment, runReleaseAction, listTemplates, createTemplate, remixTemplate, deleteTemplate } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
+import ConnectorHub from "./ConnectorHub.jsx";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
 // job (/api/generate returns a jobId immediately): the build survives navigating away, and this
@@ -76,6 +77,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [githubRepo, setGithubRepo] = useState("");
   const [githubPrivate, setGithubPrivate] = useState(true);
   const [showIntegrations, setShowIntegrations] = useState(false);
+  const [showConnectorHub, setShowConnectorHub] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationData, setIntegrationData] = useState(null);
   const [integrationError, setIntegrationError] = useState("");
@@ -1069,6 +1071,16 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showConnectorHub && (
+        <ConnectorHub
+          projectId={project.id}
+          githubAllowed={!!featureAccess?.github_export?.allowed}
+          onClose={() => setShowConnectorHub(false)}
+          onOpenPayments={() => { setShowConnectorHub(false); openPayments(); }}
+          onOpenGithub={() => { setShowConnectorHub(false); openGithubPanel(); }}
+          onOpenDelivery={() => { setShowConnectorHub(false); openIntegrationPanel(); }}
+        />
+      )}
       {showIntegrations && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[44rem] max-w-[96vw] max-h-[88vh] overflow-auto p-6">
@@ -1314,9 +1326,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             </button>
           )}
           {featureAccess?.integrations?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openIntegrationPanel} disabled={!hasApp || busy}
-              title={hasApp ? "Configure webhooks, email and SMS" : "Generate an app before adding integrations"}>
-              Integrations
+            <button className="btn-ghost text-xs shrink-0" onClick={() => setShowConnectorHub(true)} disabled={!hasApp || busy}
+              title={hasApp ? "Connect data, services and no-credit workflows" : "Generate an app before adding connectors"}>
+              Connectors
             </button>
           )}
           {featureAccess?.analytics?.allowed && (

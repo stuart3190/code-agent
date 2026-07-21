@@ -25,6 +25,7 @@
     "test:owner-console": "node harness/_owner-console-tests.mjs",
     "test:github-sync": "node harness/_github-sync-tests.mjs",
     "test:app-integrations": "node harness/_app-integrations-tests.mjs",
+    "test:connectors": "node harness/_connector-hub-tests.mjs",
     "test:analytics": "node harness/_analytics-tests.mjs",
     "test:environments": "node harness/_environment-tests.mjs",
     "test:templates": "node harness/_template-tests.mjs",
