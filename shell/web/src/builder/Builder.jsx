@@ -39,6 +39,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [nameDraft, setNameDraft] = useState(project.name || "");
   // Site menu (consolidates the published-site actions so the header never overflows).
   const [showSite, setShowSite] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   // Custom domain popover: connect the user's own domain to the published site.
   const [showDomain, setShowDomain] = useState(false);
   const [domainInput, setDomainInput] = useState("");
@@ -1287,11 +1288,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         {/* min-w-0 + overflow-x-auto (NOT on the header itself — that would clip the absolute
             popovers below) so the strip touch-drags left on narrow screens instead of cutting off */}
         <div className="flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-none pl-2">
-          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); setShowDesign(false); }}
+          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowKnowledge((v) => !v); setKnowledgeMsg(null); setShowSite(false); setShowTools(false); setShowDesign(false); }}
             title="Standing instructions (brand, tone, constraints) applied to every build and change">
             Knowledge{knowledge.trim() ? " ●" : ""}
           </button>
-          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowDesign((v) => !v); setShowKnowledge(false); setShowSite(false); }}
+          <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowDesign((v) => !v); setShowKnowledge(false); setShowSite(false); setShowTools(false); }}
             title="Choose automatic or guided premium art direction">
             Design{project.designProfile ? " active" : ""}
           </button>
@@ -1301,54 +1302,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
               {qaBusy ? "Testing…" : "Test app"}
             </button>
           )}
-          {featureAccess?.saas_runtime?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openPayments} disabled={!hasApp || busy}
-              title={hasApp ? "Connect Stripe and manage app products" : "Generate an app before adding payments"}>
-              Payments
-            </button>
-          )}
-          {featureAccess?.visual_editor?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openBrandEditor} disabled={!hasApp || busy}
-              title={hasApp ? "Change colours and type without spending credits" : "Generate an app before styling it"}>
-              Visual style
-            </button>
-          )}
-          {featureAccess?.owner_console?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={() => refreshOwnerConsole(true)} disabled={!hasApp || busy}
-              title={hasApp ? "Manage this app's users and data" : "Generate an app before opening its console"}>
-              Console
-            </button>
-          )}
-          {featureAccess?.github_export?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openGithubPanel} disabled={!hasApp || busy}
-              title={hasApp ? "Export or sync this project to GitHub" : "Generate an app before exporting"}>
-              GitHub
-            </button>
-          )}
-          {featureAccess?.integrations?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={() => setShowConnectorHub(true)} disabled={!hasApp || busy}
-              title={hasApp ? "Connect data, services and no-credit workflows" : "Generate an app before adding connectors"}>
-              Connectors
-            </button>
-          )}
-          {featureAccess?.analytics?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openAnalytics} disabled={!hasApp || busy}
-              title={hasApp ? "View traffic, events and client errors" : "Generate an app before viewing analytics"}>
-              Analytics
-            </button>
-          )}
-          {featureAccess?.environments?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={() => refreshEnvironments(true)} disabled={!hasApp || busy}
-              title={hasApp ? "Manage test deployments and live rollbacks" : "Generate an app before deploying"}>
-              Environments
-            </button>
-          )}
-          {featureAccess?.templates?.allowed && (
-            <button className="btn-ghost text-xs shrink-0" onClick={openTemplates} disabled={!hasApp || busy}
-              title={hasApp ? "Save or remix reusable app templates" : "Generate an app before saving a template"}>
-              Templates
-            </button>
-          )}
+          <button className={`btn-ghost text-xs shrink-0 ${showTools ? "border-amber/50 bg-ink-800 text-slate-100" : ""}`}
+            onClick={() => { setShowTools((value) => !value); setShowKnowledge(false); setShowDesign(false); setShowSite(false); }}
+            disabled={!hasApp || busy || !featureAccess} title="Style, extend and operate this app">
+            Tools <span className="text-[9px] text-slate-500">▾</span>
+          </button>
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}
@@ -1360,12 +1318,42 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
               {publishBusy ? "Publishing…" : "Publish"}
             </button>
           ) : (
-            <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDesign(false); setShowDomain(false); }}
+            <button className="btn-ghost text-xs shrink-0" onClick={() => { setShowSite((v) => !v); setShowKnowledge(false); setShowDesign(false); setShowTools(false); setShowDomain(false); }}
               title="Your live site — republish, domain, unpublish">
               {publishBusy ? "Publishing…" : <>Site <span className="text-amber-soft">●</span> ▾</>}
             </button>
           )}
         </div>
+        {showTools && (
+          <>
+            <button className="fixed inset-0 z-10 cursor-default" onClick={() => setShowTools(false)} aria-label="Close tools menu" />
+            <div className="absolute right-4 top-full z-30 mt-1 w-[43rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-line bg-ink-850/70 px-4 py-3">
+                <div><div className="text-sm font-medium text-slate-100">App tools</div><div className="mt-0.5 text-[10px] text-slate-500">Style, extend and operate without crowding your workspace.</div></div>
+                <span className="tag bg-amber/10 text-amber-soft">project</span>
+              </div>
+              <div className="grid gap-px bg-line sm:grid-cols-3">
+                <section className="bg-ink-900 p-2">
+                  <div className="px-2 pb-1.5 pt-1 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-600">Create</div>
+                  {featureAccess?.visual_editor?.allowed && <ToolAction mark="VS" title="Visual style" detail="Colours, type and radius · 0 credits" onClick={() => { setShowTools(false); openBrandEditor(); }} />}
+                  {featureAccess?.templates?.allowed && <ToolAction mark="TM" title="Templates" detail="Save and remix starting points" onClick={() => { setShowTools(false); openTemplates(); }} />}
+                </section>
+                <section className="bg-ink-900 p-2">
+                  <div className="px-2 pb-1.5 pt-1 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-600">Extend</div>
+                  {featureAccess?.integrations?.allowed && <ToolAction mark="CN" title="Connectors" detail="Data sources and free workflows" onClick={() => { setShowTools(false); setShowConnectorHub(true); }} accent />}
+                  {featureAccess?.saas_runtime?.allowed && <ToolAction mark="£" title="Payments" detail="Stripe products and checkout" onClick={() => { setShowTools(false); openPayments(); }} />}
+                  {featureAccess?.github_export?.allowed && <ToolAction mark="GH" title="GitHub" detail="Export and sync source" onClick={() => { setShowTools(false); openGithubPanel(); }} />}
+                </section>
+                <section className="bg-ink-900 p-2">
+                  <div className="px-2 pb-1.5 pt-1 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-600">Operate</div>
+                  {featureAccess?.owner_console?.allowed && <ToolAction mark="CO" title="Console" detail="Users, records and orders" onClick={() => { setShowTools(false); refreshOwnerConsole(true); }} />}
+                  {featureAccess?.analytics?.allowed && <ToolAction mark="AN" title="Analytics" detail="Traffic, events and errors" onClick={() => { setShowTools(false); openAnalytics(); }} />}
+                  {featureAccess?.environments?.allowed && <ToolAction mark="EN" title="Environments" detail="Test, promote and roll back" onClick={() => { setShowTools(false); refreshEnvironments(true); }} />}
+                </section>
+              </div>
+            </div>
+          </>
+        )}
         {showSite && publishedUrl && (
           <div className="absolute right-4 top-full mt-1 z-20 w-[20rem] panel p-1.5 shadow-xl">
             <a className="block px-3 py-2 rounded-lg text-xs font-mono text-amber-soft hover:bg-ink-850 truncate"
@@ -1719,6 +1707,16 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
 function deriveName(prompt) {
   const words = prompt.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function ToolAction({ mark, title, detail, onClick, accent = false }) {
+  return (
+    <button className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-ink-800" onClick={onClick}>
+      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border font-mono text-[9px] font-semibold ${accent
+        ? "border-amber/30 bg-amber/10 text-amber-soft" : "border-line bg-ink-850 text-slate-500 group-hover:text-slate-300"}`}>{mark}</span>
+      <span className="min-w-0"><span className="block text-xs font-medium text-slate-200">{title}</span><span className="mt-0.5 block truncate text-[9px] text-slate-600">{detail}</span></span>
+    </button>
+  );
 }
 
 // Android build progress — honest, elapsed-driven stages (the request is a plain long POST with no
