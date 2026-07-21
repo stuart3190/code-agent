@@ -78,6 +78,17 @@ check("audit reports honest image-free fallback and invented hosts", () => {
   assert.equal(audit.warnings.length, 1);
 });
 
+check("audit rejects a SaaS product hidden behind an auth screen", () => {
+  const profile = fallbackDesignProfile({ prompt: "creator SaaS dashboard", projectId: "creator" });
+  const tree = {
+    "src/main.jsx": `import "${profile.typography.bodyPackage}";\nimport "${profile.typography.displayPackage}";`,
+    "src/index.css": `:root { --font-sans: "${profile.typography.bodyFamily}"; --font-display: "${profile.typography.displayFamily}"; }`,
+    "src/App.jsx": `export default function App(){ const user = null; if (!user) return <AuthScreen />; return <Dashboard className="md:grid" />; }`,
+  };
+  const audit = auditDesign(tree, { profile });
+  assert.ok(audit.issues.some((issue) => issue.includes("authentication gate")));
+});
+
 await ensureDeps(() => {});
 const fontTree = clone(fromScaffold(REACT_VITE));
 fontTree["src/main.jsx"] = fontTree["src/main.jsx"].replace(

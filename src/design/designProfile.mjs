@@ -167,7 +167,8 @@ JSON shape:
 
 Use the requested preset and custom notes as hard direction. Marketing/content sites need authentic
 photography queries. SaaS, utilities and interactive apps should prioritise the product surface and
-need not use stock photography.`;
+need not use stock photography. Their first signed-out viewport must visibly showcase the real product
+surface with realistic seeded content; a login form, headline and feature grid are not a substitute.`;
 
 export function parseDesignProfile(text, context = {}) {
   const raw = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -179,6 +180,9 @@ export function renderDesignBrief(profile, assets = []) {
   const photos = assets.length
     ? `\nAPPROVED PHOTOGRAPHY — use at least ${Math.min(3, assets.length)} DISTINCT URLs below in meaningful placements:\n${assets.map((p, i) => `${i + 1}. ${p.url} — ${p.alt || "contextual photo"}`).join("\n")}`
     : profile.imagery.required ? "\nPhotography was unavailable. Use the intentional type/vector-led fallback described by the caller; never invent URLs." : "";
+  const productProof = ["saas", "utility", "interactive"].includes(profile.category)
+    ? `\n- First-view product proof: open directly on a substantial, usable product surface with realistic in-memory seed content. Treat that workspace/dashboard/editor as the hero. Keep sign-in secondary for saving or syncing; never gate the product behind auth or substitute a headline + feature grid + form for the actual interface.`
+    : "";
   return `PROJECT-SPECIFIC DESIGN BRIEF (treat as a build requirement):
 - Category: ${profile.category}
 - Layout family: ${profile.family}
@@ -190,7 +194,7 @@ export function renderDesignBrief(profile, assets = []) {
 - Density: ${profile.density}
 - Signature details: ${profile.signature.join("; ")}
 - Avoid: ${profile.avoid.join("; ")}
-This brief OVERRIDES the generic design defaults. Do not merely recolour the usual header/hero/card template.${photos}`;
+This brief OVERRIDES the generic design defaults. Do not merely recolour the usual header/hero/card template.${productProof}${photos}`;
 }
 
 export function auditDesign(tree, { profile, assets = [], imageUnavailable = false } = {}) {
@@ -213,6 +217,12 @@ export function auditDesign(tree, { profile, assets = [], imageUnavailable = fal
     issues.push("Replace the scaffold default palette/radius with the design brief's specific visual system.");
   }
   if (!/(sm:|md:|lg:|xl:)/.test(app)) issues.push("Add explicit responsive layout behaviour for phone and desktop widths.");
+  const productCategory = ["saas", "utility", "interactive"].includes(profile.category);
+  const authGate = /if\s*\(\s*(?:!\s*user|user\s*===?\s*null)\s*\)\s*return\s*\(?\s*<\s*(?:Auth|Login|SignIn)\w*/i.test(app)
+    || /(?:!\s*user|user\s*===?\s*null)\s*\?\s*<\s*(?:Auth|Login|SignIn)\w*/i.test(app);
+  if (productCategory && authGate) {
+    issues.push("Remove the full-app authentication gate. The first signed-out screen must expose the real product workspace with realistic in-memory seed content; offer sign-in only as a secondary save/sync action.");
+  }
   if (/images\.unsplash\.com|picsum\.photos|placehold\.co|placeholder\.com/i.test(source)) {
     issues.push("Remove invented or placeholder image hosts; use only approved returned image URLs.");
   }

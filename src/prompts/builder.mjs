@@ -54,6 +54,16 @@ The backend IS live and configured in every preview (namespaced to this app) —
 
 ${BACKEND_MODEL}
 
+FIRST-SCREEN PRODUCT PROOF — REQUIRED FOR SAAS, UTILITIES AND INTERACTIVE APPS:
+- The first signed-out screen must SHOW THE PRODUCT doing its job: a usable workspace, dashboard,
+  editor, board, canvas or other primary interface filled with realistic in-memory seed content.
+  This is the app's hero. A large headline, feature-card grid and login form are not product proof.
+- If a short marketing introduction is useful, compose it around a substantial product preview or
+  live interactive surface. Do not spend the opening viewport on copy while hiding the useful UI.
+- Authentication is a secondary "Sign in to save/sync" action, modal or drawer. It must never replace
+  the product surface. Signed-out interactions can update ordinary React state; signed-in users may
+  additionally persist those records through the backend.
+
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
 - BASELINE POLISH — applies to EVERY app, tools and utilities included. The result MUST look
   intentionally designed, never like unstyled default HTML or a bare "wall of text and boxes".
@@ -152,11 +162,14 @@ Reply with a short markdown outline (aim well under a page):
 3. **Key features** — the user-visible behaviours, as a bullet list.
 4. **Data & backend** — separate PUBLIC site content (name, services, hours, gallery — rendered from
    in-code constants, never the backend) from USER-OWNED records (which db.entity("<type>") types with
-   their data fields, behind sign-in); note whether auth/storage are needed, or "purely client-side".
+   their data fields, persisted after sign-in); note whether auth/storage are needed, or "purely client-side".
 5. **Approach** — build order and anything tricky.
 
 Rules:
 - PLAN ONLY: do not write code, do not call any tools, do not include file contents.
+- For SaaS, utility and interactive products, plan the real core interface as the FIRST signed-out
+  experience with realistic in-memory seed content. Never plan auth gating. Sign-in is an optional
+  save/sync action and must not hide the dashboard, workspace, editor, board, canvas or main tool.
 - Do not ask the user questions; make sensible assumptions and state them briefly.
   (Deferred: a later pass will relax this line to allow structured clarifying questions,
   with the shell pausing to show them as popups before the plan completes.)`;
