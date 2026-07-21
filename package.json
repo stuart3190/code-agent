@@ -16,6 +16,7 @@
     "test:draft-project": "node harness/_draft-project-tests.mjs",
     "test:ownership": "node shell/harness/_ownership-tests.mjs",
     "test:billing-limits": "node harness/_billing-limit-tests.mjs",
+    "test:instagram-publishing": "node harness/_instagram-publishing-tests.mjs",
     "test:e2e": "npm --prefix shell/web run build && playwright test",
     "backup:validate": "node scripts/validate-backup.mjs",
     "test:design": "node harness/_design-profile-tests.mjs",

@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createCodexProvider } from "../src/providers/codexProvider.mjs";
+import { waitForInstagramContainer } from "./instagramPublishing.mjs";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 
 loadEnv();
@@ -182,6 +183,7 @@ async function postInstagram(post, resolvedUrl) {
   });
   const c = await create.json().catch(() => ({}));
   if (!create.ok) throw new Error(`instagram create: ${JSON.stringify(c.error || c).slice(0, 200)}`);
+  await waitForInstagramContainer({ containerId: c.id, token: FB_PAGE_TOKEN, graph: GRAPH });
   const pub = await fetch(`${GRAPH}/${IG_USER_ID}/media_publish`, {
     method: "POST",
     body: new URLSearchParams({ access_token: FB_PAGE_TOKEN, creation_id: c.id }),
