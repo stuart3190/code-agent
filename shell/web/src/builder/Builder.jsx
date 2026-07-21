@@ -472,7 +472,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       setBrandKitName("");
       onProjectChange?.({ ...project, tree: result.tree });
       const preview = await startPreview({ projectId: project.id, tree: result.tree }).catch(() => null);
-      if (preview?.url) setPreviewUrl(preview.url);
+      if (preview?.url) {
+        const refreshedUrl = new URL(preview.url);
+        refreshedUrl.searchParams.set("buildrStyle", Date.now().toString());
+        setPreviewUrl(refreshedUrl.toString());
+      }
       else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
       setBrandData(await getBrandOverview(project.id));
       setPublishMsg("Visual style applied with no credits used.");

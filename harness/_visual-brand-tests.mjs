@@ -22,4 +22,21 @@ assert.match(second.tree["src/index.css"], /--buildr-primary: #123456/);
 assert.doesNotMatch(second.tree["src/index.css"], /--buildr-primary: #abcdef/);
 assert.equal(second.tree["src/App.jsx"], original["src/App.jsx"]);
 
+const semanticTree = {
+  "src/index.css": ":root { --primary: 210 50% 40%; }",
+  "tailwind.config.js": 'export default { colors: { primary: "hsl(var(--primary))" } };',
+};
+const semantic = applyBrandToTree(semanticTree, {
+  primary: "#ff0000", accent: "#00ff00", background: "#ffffff", surface: "#eeeeee", text: "#111111", font: "technical", radius: 6,
+});
+assert.match(semantic.tree["src/index.css"], /:root, \.dark, \[class\*="theme-"\]/);
+assert.match(semantic.tree["src/index.css"], /--primary: 0 100% 50%/);
+assert.match(semantic.tree["src/index.css"], /--accent: 120 100% 50%/);
+assert.match(semantic.tree["src/index.css"], /--background: 0 0% 100%/);
+assert.match(semantic.tree["src/index.css"], /--font-display: "IBM Plex Mono"/);
+assert.doesNotMatch(semantic.tree["src/index.css"], /--primary: #ff0000/);
+
+const builderSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../shell/web/src/builder/Builder.jsx", import.meta.url), "utf8"));
+assert.match(builderSource, /searchParams\.set\("buildrStyle", Date\.now\(\)\.toString\(\)\)/);
+
 console.log("Visual brand tests passed");

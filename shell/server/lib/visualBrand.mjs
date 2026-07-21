@@ -11,6 +11,76 @@ const FONTS = Object.freeze({
   technical: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace',
 });
 
+function hexToRgb(value) {
+  const hex = String(value).replace("#", "");
+  return [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
+}
+
+function rgbToHsl(value) {
+  const [red, green, blue] = hexToRgb(value).map((channel) => channel / 255);
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = (max + min) / 2;
+  if (max === min) return `0 0% ${trimNumber(lightness * 100)}%`;
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  let hue = max === red ? (green - blue) / delta + (green < blue ? 6 : 0)
+    : max === green ? (blue - red) / delta + 2 : (red - green) / delta + 4;
+  hue *= 60;
+  return `${trimNumber(hue)} ${trimNumber(saturation * 100)}% ${trimNumber(lightness * 100)}%`;
+}
+
+function rgbTriplet(value) {
+  return hexToRgb(value).join(" ");
+}
+
+function rgbToOklch(value) {
+  const [red, green, blue] = hexToRgb(value).map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  const l = Math.cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue);
+  const m = Math.cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
+  const s = Math.cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
+  const lightness = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const b = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  const chroma = Math.sqrt(a * a + b * b);
+  const hue = (Math.atan2(b, a) * 180 / Math.PI + 360) % 360;
+  return `${trimNumber(lightness * 100)}% ${trimNumber(chroma, 4)} ${trimNumber(hue)}`;
+}
+
+function trimNumber(value, precision = 1) {
+  return Number(value.toFixed(precision)).toString();
+}
+
+function relativeLuminance(value) {
+  const channels = hexToRgb(value).map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastColor(value) {
+  return relativeLuminance(value) > 0.42 ? "#0b1020" : "#ffffff";
+}
+
+function tokenMode(tree, cssPath) {
+  const source = `${tree[cssPath] || ""}\n${tree["tailwind.config.js"] || ""}`;
+  if (/hsl\(\s*var\(\s*--(?:primary|background|foreground)/i.test(source)) return "hsl";
+  if (/rgb(?:a)?\(\s*var\(\s*--(?:primary|background|foreground)/i.test(source)) return "rgb";
+  if (/oklch\(\s*var\(\s*--(?:primary|background|foreground)/i.test(source)) return "oklch";
+  return "hex";
+}
+
+function tokenValue(value, mode) {
+  if (mode === "hsl") return rgbToHsl(value);
+  if (mode === "rgb") return rgbTriplet(value);
+  if (mode === "oklch") return rgbToOklch(value);
+  return value;
+}
+
 function color(value, fallback) {
   const candidate = String(value || "").trim();
   return /^#[0-9a-f]{6}$/i.test(candidate) ? candidate.toLowerCase() : fallback;
@@ -36,26 +106,51 @@ export function applyBrandToTree(tree, rawConfig) {
   const cssPath = Object.hasOwn(tree, "src/index.css") ? "src/index.css"
     : Object.hasOwn(tree, "src/App.css") ? "src/App.css" : "src/index.css";
   const previous = String(tree[cssPath] || "");
+  const mode = tokenMode(tree, cssPath);
   const start = previous.indexOf(START);
   const end = previous.indexOf(END);
   const base = start >= 0 && end > start ? `${previous.slice(0, start).trimEnd()}\n` : `${previous.trimEnd()}\n`;
+  const semantic = Object.fromEntries(Object.entries({
+    primary: config.primary,
+    primaryForeground: contrastColor(config.primary),
+    accent: config.accent,
+    accentForeground: contrastColor(config.accent),
+    background: config.background,
+    surface: config.surface,
+    text: config.text,
+  }).map(([key, value]) => [key, tokenValue(value, mode)]));
   const block = `${START}
-:root {
+:root, .dark, [class*="theme-"] {
   --buildr-primary: ${config.primary};
   --buildr-accent: ${config.accent};
   --buildr-background: ${config.background};
   --buildr-surface: ${config.surface};
   --buildr-text: ${config.text};
   --buildr-radius: ${config.radius}px;
-  --primary: ${config.primary};
-  --accent: ${config.accent};
-  --background: ${config.background};
-  --foreground: ${config.text};
-  --card: ${config.surface};
+  --primary: ${semantic.primary};
+  --primary-foreground: ${semantic.primaryForeground};
+  --accent: ${semantic.accent};
+  --accent-foreground: ${semantic.accentForeground};
+  --background: ${semantic.background};
+  --foreground: ${semantic.text};
+  --card: ${semantic.surface};
+  --card-foreground: ${semantic.text};
+  --popover: ${semantic.surface};
+  --popover-foreground: ${semantic.text};
+  --secondary: ${semantic.surface};
+  --secondary-foreground: ${semantic.text};
+  --muted: ${semantic.surface};
+  --muted-foreground: ${semantic.text};
+  --border: ${semantic.surface};
+  --input: ${semantic.surface};
+  --ring: ${semantic.primary};
   --radius: ${config.radius}px;
+  --font-sans: ${FONTS[config.font]};
+  --font-display: ${FONTS[config.font]};
 }
 html, body, #root { min-height: 100%; }
 body { font-family: ${FONTS[config.font]}; background-color: var(--buildr-background); color: var(--buildr-text); }
+button, input, select, textarea, h1, h2, h3, h4, h5, h6 { font-family: ${FONTS[config.font]}; }
 button, input, select, textarea, [class*="rounded"] { border-radius: var(--buildr-radius); }
 ${END}
 `;
