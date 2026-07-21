@@ -243,6 +243,14 @@ export async function saveIntegrationSettings(projectId, settings) {
   return out;
 }
 
+export async function getProjectAnalytics(projectId, days = 14) {
+  const params = new URLSearchParams({ projectId, days: String(days) });
+  const r = await fetch(`/api/projects/analytics?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `analytics ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

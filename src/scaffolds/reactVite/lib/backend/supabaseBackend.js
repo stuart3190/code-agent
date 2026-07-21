@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, analyticsUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -214,5 +214,41 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     async emit(event, payload = {}) { return actionPost("emit", { event, payload }); },
   };
 
-  return { auth, db, storage, payments, notifications, _client: client };
+  const sessionId = (() => {
+    if (typeof window === "undefined") return `server-${Date.now()}`;
+    try {
+      const key = `buildr-session:${appId || "app"}`;
+      let value = window.sessionStorage.getItem(key);
+      if (!value) { value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; window.sessionStorage.setItem(key, value); }
+      return value;
+    } catch { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+  })();
+  const analytics = {
+    async track(name, properties = {}) {
+      if (!analyticsUrl || !appId || typeof window === "undefined") return { skipped: true };
+      const token = (await client.auth.getSession()).data.session?.access_token || anonKey;
+      const response = await fetch(analyticsUrl, {
+        method: "POST", keepalive: true,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: anonKey },
+        body: JSON.stringify({ appId, sessionId, name, path: `${window.location.pathname}${window.location.search}`.slice(0, 500), properties }),
+      });
+      if (!response.ok) throw new Error(`Analytics event failed (${response.status}).`);
+      return response.json();
+    },
+    async page(properties = {}) { return analytics.track("page_view", { title: document.title, ...properties }); },
+  };
+
+  if (typeof window !== "undefined" && analyticsUrl && appId) {
+    queueMicrotask(() => analytics.page().catch(() => {}));
+    window.addEventListener("error", (event) => analytics.track("client_error", {
+      message: String(event.message || "Runtime error").slice(0, 500), file: String(event.filename || "").slice(0, 300),
+      line: event.lineno || null, column: event.colno || null,
+    }).catch(() => {}));
+    window.addEventListener("unhandledrejection", (event) => analytics.track("client_error", {
+      message: String(event.reason?.message || event.reason || "Unhandled rejection").slice(0, 500),
+      stack: String(event.reason?.stack || "").slice(0, 1200),
+    }).catch(() => {}));
+  }
+
+  return { auth, db, storage, payments, notifications, analytics, _client: client };
 }

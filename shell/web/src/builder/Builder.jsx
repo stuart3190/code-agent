@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -81,6 +81,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [integrationError, setIntegrationError] = useState("");
   const [integrationSecret, setIntegrationSecret] = useState("");
   const [integrationDraft, setIntegrationDraft] = useState({ webhookUrl: "", email: "", phone: "" });
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analyticsBusy, setAnalyticsBusy] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState("");
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -551,6 +555,15 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       setPublishMsg("App integrations updated.");
     } catch (error) { setIntegrationError(error.message || String(error)); }
     finally { setIntegrationBusy(false); }
+  }
+
+  async function openAnalytics() {
+    setShowAnalytics(true);
+    setAnalyticsBusy(true);
+    setAnalyticsError("");
+    try { setAnalyticsData(await getProjectAnalytics(project.id)); }
+    catch (error) { setAnalyticsError(error.message || String(error)); }
+    finally { setAnalyticsBusy(false); }
   }
 
   async function commitRename() {
@@ -1028,6 +1041,55 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showAnalytics && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[58rem] max-w-[96vw] max-h-[90vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">Analytics and errors</div>
+                <div className="mt-1 text-xs text-slate-400">First-party activity from the last 14 days. No IP addresses or user-agent strings are stored.</div>
+              </div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowAnalytics(false)} aria-label="Close analytics">✕</button>
+            </div>
+            {analyticsError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{analyticsError}</div>}
+            {analyticsBusy && !analyticsData ? <div className="mt-6 text-sm text-slate-400">Loading analytics…</div> : analyticsData && (
+              <>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[["Sessions", analyticsData.totals.sessions], ["Page views", analyticsData.totals.pageViews], ["Events", analyticsData.totals.events], ["Errors", analyticsData.totals.errors]].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-line bg-ink-900 p-3"><div className={`text-2xl font-semibold ${label === "Errors" && value ? "text-red-300" : "text-slate-100"}`}>{value}</div><div className="text-[11px] uppercase tracking-wider text-slate-500">{label}</div></div>
+                  ))}
+                </div>
+                <div className="mt-6 rounded-xl border border-line bg-ink-900/70 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-slate-500">Daily sessions</div>
+                  <div className="mt-4 flex h-32 items-end gap-1">
+                    {analyticsData.daily.map((day) => {
+                      const max = Math.max(1, ...analyticsData.daily.map((item) => item.sessions));
+                      return <div key={day.date} className="group relative flex-1 rounded-t bg-amber/70 hover:bg-amber" style={{ height: `${Math.max(3, day.sessions / max * 100)}%` }} title={`${day.date}: ${day.sessions} sessions, ${day.pageViews} views`} />;
+                    })}
+                  </div>
+                  <div className="mt-2 flex justify-between text-[9px] text-slate-600"><span>{analyticsData.daily[0]?.date}</span><span>{analyticsData.daily.at(-1)?.date}</span></div>
+                </div>
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                  <section>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Top pages</div>
+                    <div className="mt-2 space-y-2">
+                      {!analyticsData.pages.length && <div className="text-sm text-slate-500">No live page views yet.</div>}
+                      {analyticsData.pages.slice(0, 10).map((page) => <div key={page.path} className="flex gap-3 text-sm"><span className="truncate text-slate-300">{page.path}</span><span className="ml-auto font-mono text-slate-500">{page.count}</span></div>)}
+                    </div>
+                  </section>
+                  <section>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Recent client errors</div>
+                    <div className="mt-2 max-h-52 space-y-2 overflow-auto">
+                      {!analyticsData.errors.length && <div className="text-sm text-emerald-400">No client errors recorded.</div>}
+                      {analyticsData.errors.map((error) => <div key={error.id} className="rounded-lg border border-red-500/20 bg-red-500/5 p-2"><div className="text-xs text-red-300 break-words">{error.properties?.message || "Client error"}</div><div className="mt-1 text-[10px] text-slate-500">{error.path} · {new Date(error.created_at).toLocaleString()}</div></div>)}
+                    </div>
+                  </section>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -1110,6 +1172,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={openIntegrationPanel} disabled={!hasApp || busy}
               title={hasApp ? "Configure webhooks, email and SMS" : "Generate an app before adding integrations"}>
               Integrations
+            </button>
+          )}
+          {featureAccess?.analytics?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openAnalytics} disabled={!hasApp || busy}
+              title={hasApp ? "View traffic, events and client errors" : "Generate an app before viewing analytics"}>
+              Analytics
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

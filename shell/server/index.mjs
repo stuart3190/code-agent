@@ -46,6 +46,7 @@ import { handleConsoleRecordDelete, handleConsoleUser, handleOwnerConsole } from
 import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handleGithubOverview } from "./routes/github.mjs";
 import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integrations.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
+import { handleAnalytics } from "./routes/analytics.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -283,6 +284,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/integrations" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleIntegrationSave(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/analytics" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAnalytics(req, res, url, owner);
     }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

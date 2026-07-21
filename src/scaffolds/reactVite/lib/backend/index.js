@@ -36,6 +36,7 @@ function unconfigured() {
     storage: { upload: fail, getUrl: fail },
     payments: { checkout: fail },
     notifications: { list: fail, markRead: fail, notifySelf: fail, emailSelf: fail, emit: fail },
+    analytics: { track: fail, page: fail },
     _client: null,
   };
 }
@@ -49,6 +50,7 @@ try {
     authUrl: import.meta.env.VITE_AUTH_URL || null,
     paymentsUrl: import.meta.env.VITE_PAYMENTS_URL || null,
     actionsUrl: import.meta.env.VITE_ACTIONS_URL || null,
+    analyticsUrl: import.meta.env.VITE_ANALYTICS_URL || null,
   });
 } catch {
   backend = unconfigured();
@@ -59,4 +61,5 @@ export const db = backend.db;
 export const storage = backend.storage;
 export const payments = backend.payments;
 export const notifications = backend.notifications;
+export const analytics = backend.analytics;
 export default backend;

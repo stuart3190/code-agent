@@ -31,6 +31,7 @@ export function withRuntimeEnv(tree, projectId) {
       `VITE_AUTH_URL=${url}/functions/v1/app-auth`,
       `VITE_PAYMENTS_URL=${url}/functions/v1/app-payments`,
       `VITE_ACTIONS_URL=${url}/functions/v1/app-actions`,
+      `VITE_ANALYTICS_URL=${url}/functions/v1/app-analytics`,
       "",
     ].join("\n"),
   };
