@@ -31,7 +31,7 @@ import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
 import { makeFileTools } from "../../../src/tools/fileTools.mjs";
 import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
 import { createRoutingProvider } from "../../../src/providers/routingProvider.mjs";
-import { creditsForTurn } from "../../../src/billing/costModel.mjs";
+import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { buildTree, ensureDeps } from "../../../harness/workspace.mjs";
 import { ledger } from "./services.mjs";
 import { getDecryptedKey } from "./byokStore.mjs";
@@ -50,7 +50,7 @@ const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthrop
 
 // Independent per-job runaway limits. These are NOT prices or minimum balances: any positive
 // managed balance may start, and settlement charges actual usage (capped at the balance remaining).
-export const MANAGED_JOB_CREDIT_LIMITS = Object.freeze({ plan: 2, iterate: 25, build: 30, redesign: 30 });
+export const MANAGED_JOB_CREDIT_LIMITS = Object.freeze({ plan: 2, iterate: 40, build: 60, redesign: 60 });
 export function managedJobCreditLimit({ mode, redesign = false } = {}) {
   if (redesign) return MANAGED_JOB_CREDIT_LIMITS.redesign;
   return MANAGED_JOB_CREDIT_LIMITS[mode] ?? MANAGED_JOB_CREDIT_LIMITS.build;
@@ -286,18 +286,21 @@ export async function sweepInterrupted() {
 // ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
 
 function usageBucket() {
-  let total = 0;
+  const total = { turns: 0, input: 0, output: 0, reasoning: 0, cached: 0, cacheWrite: 0, total: 0 };
   return {
-    add(telemetry) { total += Number(telemetry?.total || 0); },
-    summary() { return { total }; },
+    add(telemetry) {
+      if (!telemetry) return;
+      for (const key of Object.keys(total)) total[key] += Number(telemetry[key] || 0);
+    },
+    summary() { return { ...total }; },
   };
 }
 
 function managedUsageGuard(limit, model) {
-  let totalTokens = 0;
-  return async (usage) => {
-    totalTokens += Number(usage?.total || 0);
-    if (creditsForTurn({ tokens: totalTokens, model }) > limit + 1e-9) {
+  const tracked = usageBucket();
+  return async (turnUsage) => {
+    tracked.add(turnUsage);
+    if (creditsForUsage({ usage: tracked.summary(), model }) > limit + 1e-9) {
       throw new ManagedCreditBudgetError(limit);
     }
   };
@@ -391,7 +394,7 @@ async function runJob(job) {
         return { need: 0, balance: preBal };
       }
       const ref = `${kind}:${projectId}:${crypto.randomUUID()}`;
-      const charged = await led.debit({ owner: owner.id, tokens: telemetry.total, model, ref, allowPartial: true });
+      const charged = await led.debit({ owner: owner.id, usage: telemetry, model, ref, allowPartial: true });
       if (!charged.ok) {
         if (charged.reason === "hard_ceiling") {
           throw new ManagedBillingError("Your monthly managed-usage safety limit has been reached. No credits were charged.", charged.reason);
@@ -401,7 +404,7 @@ async function runJob(job) {
       const need = charged.debited;
       const balance = await led.getBalance(owner.id);
       const capped = charged.partial ? ` (actual ${charged.need.toFixed(4)} cr; used remaining balance)` : "";
-      serverLog(job, `billing: debited ${need.toFixed(4)} cr${capped} (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr`);
+      serverLog(job, `billing: debited ${need.toFixed(4)} cr${capped} (model ${model}, ${telemetry.total} raw tok, cache-adjusted) -> balance ${balance.total.toFixed(4)} cr`);
       return { need, balance };
     }
 

@@ -245,6 +245,8 @@ Rules:
   rhythm — unless the change explicitly asks to restyle.
 - Prefer targeted edits over rewriting whole files — it is much cheaper. Only use write_file for
   new files, or when an edit repeatedly fails to apply.
+- When several files need changes, batch them into as few tool turns as practical. A single
+  apply_patch input may contain updates for multiple files; use that instead of one turn per file.
 - When you do use write_file, write COMPLETE file contents, never partial snippets or "...".
 - Use only the dependencies already in package.json. Do not add packages.
 - When the change is done and the app still works, STOP calling tools and reply with a one-paragraph

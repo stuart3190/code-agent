@@ -7,6 +7,7 @@ import {
   costPerCreditFromRates,
   modelWeight,
   creditsForTurn,
+  creditsForUsage,
   trueCostPerCredit,
   effectiveGbpPerCredit,
   tierEconomics,
@@ -122,6 +123,13 @@ console.log("credit debit math:");
 {
   check("10k Sonnet tokens debit exactly 1.000 credit", near(creditsForTurn({ tokens: 10000, model: "claude-sonnet-4-6" }), 1.0));
   check("10k Haiku tokens debit ~0.333 credit", near(creditsForTurn({ tokens: 10000, model: "claude-haiku-4-5" }), 0.333, 0.005));
+  check("cached managed input is charged at the cache-read multiplier", near(creditsForUsage({
+    usage: { input: 9000, output: 1000, cached: 8000, cacheWrite: 0, total: 10000 },
+    model: "gpt-5.5",
+  }), 0.28));
+  check("usage without a token breakdown retains legacy raw-token pricing", near(creditsForUsage({
+    usage: { total: 10000 }, model: "gpt-5.5",
+  }), 1.0));
   check("buildModel() snapshot is well-formed", (() => {
     const m = buildModel();
     return m.floorGbpPerCredit > 0 && m.tiers.length === TIERS.length && m.runtime.costPerSlotMonth > 0;

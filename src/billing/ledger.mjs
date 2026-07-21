@@ -15,6 +15,7 @@
 
 import {
   creditsForTurn,
+  creditsForUsage,
   modelWeight,
   bundleRolloverCapCredits,
   userHardCeilCredits,
@@ -122,9 +123,12 @@ export function createLedger(client) {
   //      breakeven (userHardCeilCredits). Tier resolved from the entitlement row unless passed in.
   // Then BUNDLE-FIRST split: spend resetting bundle credits before rolling top-up credits, writing one
   // row per bucket so every row stays single-bucket. Idempotent on the turn `ref`.
-  async function debit({ owner, tokens, model, ref, tier = undefined, allowPartial = false }) {
+  async function debit({ owner, tokens, usage = null, model, ref, tier = undefined, allowPartial = false }) {
     if (!owner || !ref) throw new Error("debit: owner and ref are required.");
-    const need = r4(creditsForTurn({ tokens, model }));
+    const rawTokens = Number(usage?.total ?? tokens ?? 0);
+    const need = r4(usage
+      ? creditsForUsage({ usage, model })
+      : creditsForTurn({ tokens: rawTokens, model }));
     const weight = modelWeight(model);
 
     // Idempotency: if this turn already debited, return the prior result unchanged.
@@ -171,9 +175,9 @@ export function createLedger(client) {
 
     const rows = [];
     if (fromBundle > 0)
-      rows.push({ owner, delta: r4(-fromBundle), bucket: "bundle", kind: "debit", model, tokens, weight: r4(weight), ref });
+      rows.push({ owner, delta: r4(-fromBundle), bucket: "bundle", kind: "debit", model, tokens: rawTokens, weight: r4(weight), ref });
     if (fromTopup > 0)
-      rows.push({ owner, delta: r4(-fromTopup), bucket: "topup", kind: "debit", model, tokens, weight: r4(weight), ref });
+      rows.push({ owner, delta: r4(-fromTopup), bucket: "topup", kind: "debit", model, tokens: rawTokens, weight: r4(weight), ref });
     if (!rows.length) return { ok: true, need: 0, debited: 0, fromBundle: 0, fromTopup: 0, model, weight };
 
     const { error } = await table().insert(rows);

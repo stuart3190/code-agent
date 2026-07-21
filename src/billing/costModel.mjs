@@ -68,6 +68,34 @@ export function creditsForTurn({ tokens, model }) {
   return (tokens / TOKENS_PER_CREDIT) * modelWeight(model);
 }
 
+// Convert provider telemetry into the token quantity credits should meter. Prompt-cache reads are
+// repeated context that the provider serves at a fraction of the normal input cost, so charging
+// them as brand-new full-price tokens makes long, multi-file redesigns look several times larger
+// than they really are. Output stays one blended token per token, matching the existing credit
+// definition; cache writes stay at their provider multiplier.
+export function billableTokensForUsage({ usage, model }) {
+  const u = usage || {};
+  const hasBreakdown = ["input", "output", "cached", "cacheWrite"]
+    .some((key) => Number.isFinite(Number(u[key])));
+  if (!hasBreakdown) return Math.max(0, Number(u.total || 0));
+
+  const input = Math.max(0, Number(u.input || 0));
+  const output = Math.max(0, Number(u.output || 0));
+  const cached = Math.min(input, Math.max(0, Number(u.cached || 0)));
+  const cacheWrite = Math.min(input - cached, Math.max(0, Number(u.cacheWrite || 0)));
+  const rates = ANTHROPIC_RATES[model] || GPT55_ASSUMED_RATES;
+  const cacheReadMultiplier = Number(rates.cachedInputMultiplier ?? 1);
+  const cacheWriteMultiplier = Number(rates.cacheWriteMultiplier ?? 1);
+  return (input - cached - cacheWrite) +
+    (cached * cacheReadMultiplier) +
+    (cacheWrite * cacheWriteMultiplier) +
+    output;
+}
+
+export function creditsForUsage({ usage, model }) {
+  return (billableTokensForUsage({ usage, model }) / TOKENS_PER_CREDIT) * modelWeight(model);
+}
+
 // ----------------------------------------------------------------------------------------------
 // 3. Runtime cost (baseline/RUNTIME.md — measured capacity, ASSUMED box price)
 // ----------------------------------------------------------------------------------------------
