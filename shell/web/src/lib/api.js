@@ -14,6 +14,55 @@ export async function getConfig() {
   return r.json();
 }
 
+export async function getFeatures() {
+  const r = await fetch("/api/features", { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `features ${r.status}`);
+  return out;
+}
+
+export async function listProjectSecrets(projectId, environment = "test") {
+  const params = new URLSearchParams({ projectId, environment });
+  const r = await fetch(`/api/projects/secrets?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `secrets ${r.status}`);
+  return out.secrets;
+}
+
+export async function saveProjectSecret(projectId, environment, name, value) {
+  const r = await fetch("/api/projects/secrets", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, environment, name, value }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `secret save ${r.status}`);
+  return out;
+}
+
+export async function removeProjectSecret(projectId, environment, name) {
+  const r = await fetch("/api/projects/secrets", {
+    method: "DELETE", headers: await authHeaders(), body: JSON.stringify({ projectId, environment, name }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `secret delete ${r.status}`);
+  return out;
+}
+
+export async function listProjectReleases(projectId, limit = 25) {
+  const params = new URLSearchParams({ projectId, limit: String(limit) });
+  const r = await fetch(`/api/projects/releases?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `releases ${r.status}`);
+  return out.releases;
+}
+
+export async function listProjectEnvironments(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/environments?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `environments ${r.status}`);
+  return out.environments;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

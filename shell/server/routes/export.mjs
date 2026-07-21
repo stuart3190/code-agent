@@ -1,5 +1,6 @@
 import { serviceClient } from "../lib/supabase.mjs";
 import { assertNoPlatformSecrets, buildProjectZip } from "../lib/exportProject.mjs";
+import { auditEvent } from "../lib/projectState.mjs";
 
 function safeContentDisposition(filename) {
   const fallback = "buildr101-app.zip";
@@ -48,5 +49,7 @@ export async function handleExport(req, res, body, owner) {
     "Content-Disposition": safeContentDisposition(filename),
     "Cache-Control": "no-store"
   });
+  await auditEvent({ owner: owner.id, projectId, action: "project.source_zip_exported", target: filename })
+    .catch((error) => console.error(`[export] audit failed: ${error.message}`));
   res.end(zip);
 }

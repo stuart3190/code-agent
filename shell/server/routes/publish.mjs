@@ -12,10 +12,10 @@ import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mj
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 import { withPwaAssets, renderIcons } from "../lib/pwa.mjs";
 import { ownedProject, serviceClient } from "../lib/supabase.mjs";
-import { ledger } from "../lib/services.mjs";
-import { isAdmin } from "../lib/admin.mjs";
 import { assetlinksJson } from "../lib/androidLinks.mjs";
 import { ensureAppIdentity } from "../lib/appIdentity.mjs";
+import { auditEvent, recordRelease } from "../lib/projectState.mjs";
+import { requireFeature } from "../lib/features.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -24,17 +24,6 @@ const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
 // live URL (custom domains are gated separately at Pro+ in routes/domains.mjs). Enforced at
 // PUBLISH time only — unpublish stays open (taking things down is never paywalled), and already-
 // published sites keep serving if a subscription lapses.
-const PUBLISH_TIERS = new Set(["starter", "pro", "studio"]);
-async function requirePublishTier(owner) {
-  if (isAdmin(owner)) return; // platform admins (ADMIN_EMAILS) publish without a subscription
-  const ent = await ledger().getEntitlement(owner.id).catch(() => null);
-  if (!PUBLISH_TIERS.has(ent?.tier)) {
-    const e = new Error("Publishing is included in every paid plan — subscribe in the Plans panel to put your app on a live URL.");
-    e.code = "upgrade_required";
-    throw e;
-  }
-}
-
 // Mirrors provisiond's reserved list (provisiond re-enforces; this gives the friendly 409).
 const RESERVED = new Set(["www", "api", "app", "apps", "preview", "admin", "mail", "buildr", "buildr101", "shell", "static", "assets"]);
 
@@ -160,7 +149,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   if (!(await ownedProject(owner.id, projectId))) {
     const e = new Error("project not found"); e.code = "project_not_found"; throw e;
   }
-  await requirePublishTier(owner);
+  await requireFeature(owner, "publish");
   // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
   const { slug, previousSlug } = await claimSlug(owner, projectId, name);
 
@@ -195,6 +184,14 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   await renderIcons({ appName, tree, iconGlyph, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
   const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
   const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
+  const release = await recordRelease({
+    owner: owner.id, projectId, environment: "live", tree,
+    config: { slug: slug || out.id, url: out.url, files: out.files, bytes: out.bytes },
+  }).catch((error) => { console.error(`[publish] release record failed: ${error.message}`); return null; });
+  await auditEvent({
+    owner: owner.id, projectId, action: "project.published", target: slug || out.id,
+    metadata: { url: out.url, releaseId: release?.id || null },
+  }).catch((error) => console.error(`[publish] audit failed: ${error.message}`));
   // A rename retires the old address so stale URLs stop serving; naming a legacy-published
   // project likewise retires its old UUID label (no-op when that dir never existed).
   if (slug) {
@@ -204,7 +201,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
       await provisiondPost("/unpublish", { projectId }).catch(() => {});
     }
   }
-  return { url: out.url, files: out.files, bytes: out.bytes, slug: slug || out.id };
+  return { url: out.url, files: out.files, bytes: out.bytes, slug: slug || out.id, releaseId: release?.id || null };
 }
 
 export async function handlePublish(req, res, body, owner) {

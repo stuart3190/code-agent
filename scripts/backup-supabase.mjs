@@ -31,6 +31,8 @@ const TABLES = [
   "projects", "entities", "credit_ledger", "customers", "byok_keys", "app_users",
   "published_sites", "custom_domains", "app_password_resets", "app_auth_events",
   "android_keystores", "email_log", "build_jobs",
+  "feature_flags", "project_secrets", "project_integrations", "project_environments",
+  "project_releases", "background_tasks", "audit_events",
 ];
 const PAGE = 1000;
 

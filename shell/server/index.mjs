@@ -35,6 +35,8 @@ import { handleDomainCheck, handleDomainList, handleDomainConnect, handleDomainR
 import { handleProjectDelete } from "./routes/projects.mjs";
 import { handleAccountDelete } from "./routes/account.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
+import { handleFeatures } from "./routes/features.mjs";
+import { handleProjectEnvironments, handleProjectReleases, handleProjectSecrets } from "./routes/foundation.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -192,6 +194,23 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── authenticated ───────────────────────────────────────────────────────────────────────
+    if (p === "/api/features" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleFeatures(req, res, owner);
+    }
+    if (p === "/api/projects/secrets" && ["GET", "POST", "DELETE"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = method === "GET" ? null : await readJson(req);
+      return handleProjectSecrets(req, res, { method, url, body, owner });
+    }
+    if (p === "/api/projects/releases" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleProjectReleases(req, res, url, owner);
+    }
+    if (p === "/api/projects/environments" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleProjectEnvironments(req, res, url, owner);
+    }
     if (p === "/api/generate" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = await readJson(req, BODY_LIMITS.tree);
@@ -300,6 +319,9 @@ const server = http.createServer(async (req, res) => {
     return serveStatic(req, res);
   } catch (e) {
     if (e instanceof HttpInputError) return sendJson(res, e.status, { error: e.message, code: e.code });
+    if (e?.code === "bad_secret") return sendJson(res, 400, { error: e.message, code: e.code });
+    if (e?.code === "upgrade_required") return sendJson(res, 402, { error: e.message, code: e.code });
+    if (e?.code === "feature_unavailable") return sendJson(res, 404, { error: e.message, code: e.code });
     console.error(`[shell] 500 on ${method} ${p}:`, e?.stack || e?.message || e);
     sendJson(res, 500, { error: "Something went wrong. Please try again." });
   }

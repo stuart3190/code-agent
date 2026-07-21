@@ -14,13 +14,10 @@
 
 import { resolve4 } from "node:dns/promises";
 import { serviceClient } from "../lib/supabase.mjs";
-import { ledger } from "../lib/services.mjs";
-import { isAdmin } from "../lib/admin.mjs";
+import { requireFeature } from "../lib/features.mjs";
 
 // Custom domains are a paid feature: Pro and Studio tiers only. Enforced at CONNECT time
 // (already-connected domains keep serving if a subscription lapses — hostages make bad customers).
-const DOMAIN_TIERS = new Set(["pro", "studio"]);
-
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
 const PUBLISH_IP = process.env.PUBLISH_IP || "51.195.136.189";
@@ -80,13 +77,7 @@ export async function handleDomainConnect(req, res, body, owner) {
   if (!projectId) return json(res, 400, { error: "projectId required" });
   if (!domain) return json(res, 400, { error: "Enter a valid domain, e.g. yourbusiness.com" });
   try {
-    const ent = await ledger().getEntitlement(owner.id).catch(() => null);
-    if (!isAdmin(owner) && !DOMAIN_TIERS.has(ent?.tier)) {
-      return json(res, 402, {
-        error: "Custom domains are a Pro feature — upgrade in the Plans panel to connect your own domain.",
-        code: "upgrade_required",
-      });
-    }
+    await requireFeature(owner, "custom_domains");
     const svc = serviceClient();
     const { data: site } = await svc.from("published_sites")
       .select("slug, owner").eq("project_id", projectId).maybeSingle();
@@ -110,6 +101,7 @@ export async function handleDomainConnect(req, res, body, owner) {
                  : `Point an A record for ${domain} to ${PUBLISH_IP}, then check again.`,
     });
   } catch (e) {
+    if (e.code === "upgrade_required") return json(res, 402, { error: e.message, code: e.code });
     console.error(`[domains:connect] ${e?.stack || e}`);
     return json(res, 500, { error: "The domain could not be connected. Please try again." });
   }
