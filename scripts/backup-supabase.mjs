@@ -33,6 +33,7 @@ const TABLES = [
   "android_keystores", "email_log", "build_jobs",
   "feature_flags", "project_secrets", "project_integrations", "project_environments",
   "project_releases", "background_tasks", "audit_events",
+  "qa_runs",
 ];
 const PAGE = 1000;
 

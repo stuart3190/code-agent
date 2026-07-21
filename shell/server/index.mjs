@@ -37,6 +37,8 @@ import { handleAccountDelete } from "./routes/account.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
 import { handleFeatures } from "./routes/features.mjs";
 import { handleProjectEnvironments, handleProjectReleases, handleProjectSecrets } from "./routes/foundation.mjs";
+import { handleQaArtifact, handleQaGet, handleQaList, handleQaStart } from "./routes/qa.mjs";
+import { sweepQaRuns } from "./lib/qaRuns.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -211,6 +213,26 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleProjectEnvironments(req, res, url, owner);
     }
+    if (p === "/api/projects/test-runs" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleQaStart(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/test-runs" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleQaList(req, res, url, owner);
+    }
+    {
+      const artifact = p.match(/^\/api\/test-runs\/([^/]+)\/artifacts\/([^/]+)$/);
+      if (artifact && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return handleQaArtifact(req, res, decodeURIComponent(artifact[1]), decodeURIComponent(artifact[2]), owner);
+      }
+      const match = p.match(/^\/api\/test-runs\/([^/]+)$/);
+      if (match && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return handleQaGet(req, res, decodeURIComponent(match[1]), owner);
+      }
+    }
     if (p === "/api/generate" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       const body = await readJson(req, BODY_LIMITS.tree);
@@ -335,6 +357,7 @@ server.listen(PORT, HOST, () => {
   // mark them interrupted so no build ever shows "building" forever. Scoped by server_id.
   sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
   sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
+  sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
 });
 
 let shuttingDown = false;

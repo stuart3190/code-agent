@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -47,6 +47,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [androidBusy, setAndroidBusy] = useState(false);
   const [androidElapsed, setAndroidElapsed] = useState(0);
+  const [featureAccess, setFeatureAccess] = useState(null);
+  const [qaBusy, setQaBusy] = useState(false);
+  const [qaRun, setQaRun] = useState(null);
+  const [showQa, setShowQa] = useState(false);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -71,6 +75,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
 
   const hasApp = !!tree;
   const mode = hasApp ? "iterate" : "build";
+
+  useEffect(() => {
+    let active = true;
+    getFeatures().then((result) => { if (active) setFeatureAccess(result.features); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // Build-band disclosure: once an app is previewing, the band collapses to a slim one-line
   // composer so the preview owns the window. It auto-opens while a build runs (live timeline),
@@ -334,6 +344,22 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     run(`The running app throws this runtime error:\n\n${appErr.message}${appErr.stack ? `\n\nStack:\n${appErr.stack}` : ""}\n\nFind and fix the root cause (do not just swallow the error).`);
   }
 
+  async function testApp() {
+    if (!hasApp || busy || qaBusy) return;
+    setQaBusy(true);
+    setShowQa(true);
+    setQaRun({ status: "queued", passed_count: 0, issue_count: 0 });
+    try {
+      const started = await startQaRun(project.id);
+      const finished = await waitForQaRun(started.id, setQaRun);
+      setQaRun(finished);
+    } catch (error) {
+      setQaRun({ status: "failed", error: error.message || String(error) });
+    } finally {
+      setQaBusy(false);
+    }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -434,6 +460,77 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           <button className="text-slate-500 hover:text-slate-300" onClick={() => setPublishMsg(null)} aria-label="Dismiss">✕</button>
         </div>
       )}
+      {showQa && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[42rem] max-w-[96vw] max-h-[86vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">Test and Fix</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {qaBusy ? "Checking routes, browser errors, images and responsive layout…"
+                    : qaRun?.status === "passed" ? "Everything tested cleanly."
+                      : qaRun?.status === "issues_found" ? `${qaRun.issue_count} issue${qaRun.issue_count === 1 ? "" : "s"} found.`
+                        : qaRun?.error || "Testing stopped."}
+                </div>
+              </div>
+              {!qaBusy && <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowQa(false)} aria-label="Close test report">✕</button>}
+            </div>
+            {qaBusy && (
+              <div className="mt-6 flex items-center gap-3 text-sm text-slate-300">
+                <div className="h-4 w-4 rounded-full border-2 border-amber border-t-transparent animate-spin" />
+                <span className="font-mono text-xs uppercase tracking-wider">{qaRun?.status || "queued"}</span>
+              </div>
+            )}
+            {!qaBusy && qaRun?.report && (
+              <>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-line bg-ink-900 p-3">
+                    <div className="text-2xl font-semibold text-slate-100">{qaRun.passed_count}</div>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">pages checked</div>
+                  </div>
+                  <div className="rounded-lg border border-line bg-ink-900 p-3">
+                    <div className={`text-2xl font-semibold ${qaRun.issue_count ? "text-amber-soft" : "text-emerald-400"}`}>{qaRun.issue_count}</div>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">issues</div>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {(qaRun.report.issues || []).map((issue, index) => (
+                    <div key={`${issue.type}-${index}`} className="rounded-lg border border-line bg-ink-900/70 px-3 py-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="tag bg-ink-800 text-slate-300">{issue.viewport}</span>
+                        <span className="font-mono text-amber-soft">{issue.type.replaceAll("_", " ")}</span>
+                        <span className="ml-auto text-slate-500 truncate">{issue.url}</span>
+                      </div>
+                      <div className="mt-1 text-sm text-slate-300 break-words">{issue.message}</div>
+                    </div>
+                  ))}
+                </div>
+                {!!qaRun.report.screenshots?.length && (
+                  <div className="mt-4">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Screenshots</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {qaRun.report.screenshots.map((shot) => (
+                        <button key={shot.file} className="btn-ghost text-xs" onClick={() => openQaArtifact(qaRun.id, shot.file)}>
+                          {shot.viewport} {shot.url}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-5 flex justify-end gap-2">
+                  <button className="btn-ghost text-xs" onClick={() => setShowQa(false)}>Close</button>
+                  {qaRun.report.fixPrompt && (
+                    <button className="btn-primary text-xs px-3 py-1" disabled={busy}
+                      onClick={() => { const prompt = qaRun.report.fixPrompt; setShowQa(false); run(prompt); }}>
+                      Fix everything
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -482,6 +579,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             title="Choose automatic or guided premium art direction">
             Design{project.designProfile ? " active" : ""}
           </button>
+          {featureAccess?.test_fix?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={testApp} disabled={!hasApp || busy || qaBusy}
+              title={hasApp ? "Test routes, errors and responsive layout" : "Generate an app before testing"}>
+              {qaBusy ? "Testing…" : "Test app"}
+            </button>
+          )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
             title={hasApp ? "Download project ZIP" : "Generate an app before downloading"}>
             {downloadBusy ? "Downloading..." : "Download"}

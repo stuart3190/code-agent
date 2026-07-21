@@ -63,6 +63,46 @@ export async function listProjectEnvironments(projectId) {
   return out.environments;
 }
 
+export async function startQaRun(projectId) {
+  const r = await fetch("/api/projects/test-runs", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `test run ${r.status}`);
+  return out;
+}
+
+export async function getQaRun(runId) {
+  const r = await fetch(`/api/test-runs/${encodeURIComponent(runId)}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `test run ${r.status}`);
+  return out;
+}
+
+export async function waitForQaRun(runId, onUpdate, { timeoutMs = 8 * 60_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const run = await getQaRun(runId);
+    onUpdate?.(run);
+    if (["passed", "issues_found", "failed", "cancelled"].includes(run.status)) return run;
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+  }
+  throw new Error("Testing is still running. You can close this message and check again shortly.");
+}
+
+export async function openQaArtifact(runId, filename) {
+  const artifactWindow = window.open("", "_blank");
+  const r = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`, { headers: await authHeaders() });
+  if (!r.ok) {
+    artifactWindow?.close();
+    throw new Error((await r.json().catch(() => ({}))).error || `artifact ${r.status}`);
+  }
+  const objectUrl = URL.createObjectURL(await r.blob());
+  if (artifactWindow) artifactWindow.location.replace(objectUrl);
+  else window.location.assign(objectUrl);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);
