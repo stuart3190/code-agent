@@ -21,6 +21,7 @@
     "test:qa-runner": "node harness/_qa-runner-tests.mjs",
     "test:saas-payments": "node harness/_saas-payments-tests.mjs",
     "test:visual-brand": "node harness/_visual-brand-tests.mjs",
+    "repair:visual-brands": "node scripts/reapply-visual-brands.mjs",
     "test:owner-console": "node harness/_owner-console-tests.mjs",
     "test:github-sync": "node harness/_github-sync-tests.mjs",
     "test:app-integrations": "node harness/_app-integrations-tests.mjs",
