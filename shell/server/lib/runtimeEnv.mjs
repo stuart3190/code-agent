@@ -17,6 +17,10 @@ export function withRuntimeEnv(tree, projectId) {
   if (!url || !anonKey) return tree; // unconfigured server -> fail-soft SDK message in the app
   return {
     ...tree,
+    // Protected generated SDK files are platform-owned. Refresh them at materialization so an
+    // older saved project can use newly added backend surfaces without a manual migration.
+    "src/lib/backend/index.js": REACT_VITE["src/lib/backend/index.js"],
+    "src/lib/backend/supabaseBackend.js": REACT_VITE["src/lib/backend/supabaseBackend.js"],
     // Keep the fixed dev bridge current in every materialized preview (old projects carry the
     // devReporter version they were built with; it's do-not-edit, so always refresh it). A dead
     // file for pre-F2 trees whose main.jsx doesn't import it — harmless.

@@ -33,5 +33,7 @@ assert.equal(Number(openAiCostGbp({ input_tokens: 1_000_000, input_tokens_detail
 
 const sdk = await readFile(new URL("../src/scaffolds/reactVite/lib/backend/supabaseBackend.js", import.meta.url), "utf8");
 for (const surface of ["actions", "usage", "knowledge", "subscribe", "uploadMany", "createSignedUrl"]) assert.match(sdk, new RegExp(surface));
+const runtimeEnv = await readFile(new URL("../shell/server/lib/runtimeEnv.mjs", import.meta.url), "utf8");
+assert.match(runtimeEnv, /src\/lib\/backend\/supabaseBackend\.js/);
 
 console.log("capability runtime tests: PASS");

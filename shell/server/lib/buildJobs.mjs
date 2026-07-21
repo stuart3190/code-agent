@@ -487,6 +487,12 @@ async function runJob(job) {
     }
 
     const tree = mode === "iterate" ? { ...inputTree } : clone(fromScaffold(REACT_VITE));
+    if (mode === "iterate") {
+      // The backend SDK is a protected platform seam, not user-authored app code. Persist the
+      // latest version into edited legacy projects so future exports and builds keep new APIs.
+      tree["src/lib/backend/index.js"] = REACT_VITE["src/lib/backend/index.js"];
+      tree["src/lib/backend/supabaseBackend.js"] = REACT_VITE["src/lib/backend/supabaseBackend.js"];
+    }
     const editFormat = mode === "iterate" ? "apply_patch" : undefined;
     const { schemas, impls } = makeFileTools(tree, { editFormat });
     const approvedPhotos = [...photography.assets];
