@@ -44,6 +44,8 @@ import { handleConnectWebhook } from "./routes/connectWebhook.mjs";
 import { handleBrandApply, handleBrandDelete, handleBrandOverview } from "./routes/visualBrand.mjs";
 import { handleConsoleRecordDelete, handleConsoleUser, handleOwnerConsole } from "./routes/ownerConsole.mjs";
 import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handleGithubOverview } from "./routes/github.mjs";
+import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integrations.mjs";
+import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -274,6 +276,14 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleGithubDisconnect(req, res, await readJson(req), owner);
     }
+    if (p === "/api/projects/integrations" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleIntegrationOverview(req, res, url, owner);
+    }
+    if (p === "/api/projects/integrations" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleIntegrationSave(req, res, await readJson(req), owner);
+    }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleQaStart(req, res, await readJson(req), owner);
@@ -419,6 +429,7 @@ server.listen(PORT, HOST, () => {
   sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
   sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
   sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
+  startActionWorker();
 });
 
 let shuttingDown = false;
@@ -427,6 +438,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[shell] ${signal} - marking active builds interrupted`);
   server.close();
+  stopActionWorker();
   await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
   process.exit(0);
 }

@@ -35,6 +35,7 @@ function unconfigured() {
     db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }) },
     storage: { upload: fail, getUrl: fail },
     payments: { checkout: fail },
+    notifications: { list: fail, markRead: fail, notifySelf: fail, emailSelf: fail, emit: fail },
     _client: null,
   };
 }
@@ -47,6 +48,7 @@ try {
     appId: import.meta.env.VITE_APP_ID || null,
     authUrl: import.meta.env.VITE_AUTH_URL || null,
     paymentsUrl: import.meta.env.VITE_PAYMENTS_URL || null,
+    actionsUrl: import.meta.env.VITE_ACTIONS_URL || null,
   });
 } catch {
   backend = unconfigured();
@@ -56,4 +58,5 @@ export const auth = backend.auth;
 export const db = backend.db;
 export const storage = backend.storage;
 export const payments = backend.payments;
+export const notifications = backend.notifications;
 export default backend;

@@ -226,6 +226,23 @@ export async function disconnectGithub(projectId) {
   return out;
 }
 
+export async function getIntegrationOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/integrations?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `integrations ${r.status}`);
+  return out;
+}
+
+export async function saveIntegrationSettings(projectId, settings) {
+  const r = await fetch("/api/projects/integrations", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...settings }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `integrations ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

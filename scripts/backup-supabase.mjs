@@ -36,6 +36,7 @@ const TABLES = [
   "qa_runs",
   "payment_products", "payment_orders",
   "brand_kits", "project_brand_settings",
+  "app_notifications",
 ];
 const PAGE = 1000;
 

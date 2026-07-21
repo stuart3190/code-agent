@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -185,5 +185,34 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     },
   };
 
-  return { auth, db, storage, payments, _client: client };
+  const actionPost = async (action, payload = {}) => {
+    if (!actionsUrl || !appId) throw new Error("App actions are not configured.");
+    const session = (await client.auth.getSession()).data.session;
+    if (!session?.access_token) throw new Error("Sign in before using notifications.");
+    const response = await fetch(actionsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+      body: JSON.stringify({ action, appId, ...payload }),
+    });
+    const out = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(out.error || `App action failed (${response.status}).`);
+    return out;
+  };
+
+  const notifications = {
+    async list({ unreadOnly = false, limit = 50 } = {}) {
+      let query = client.from("app_notifications").select("id,title,body,data,read_at,created_at")
+        .eq("app_id", appId).order("created_at", { ascending: false }).limit(Math.max(1, Math.min(100, limit)));
+      if (unreadOnly) query = query.is("read_at", null);
+      return unwrap(await query);
+    },
+    async markRead(id) {
+      return unwrap(await client.from("app_notifications").update({ read_at: new Date().toISOString() }).eq("id", id).eq("app_id", appId).select().single());
+    },
+    async notifySelf({ title, body = "", data = {} }) { return actionPost("notify_self", { title, body, data }); },
+    async emailSelf({ subject, text }) { return actionPost("email_self", { subject, text }); },
+    async emit(event, payload = {}) { return actionPost("emit", { event, payload }); },
+  };
+
+  return { auth, db, storage, payments, notifications, _client: client };
 }

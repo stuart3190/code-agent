@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -75,6 +75,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [githubToken, setGithubToken] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
   const [githubPrivate, setGithubPrivate] = useState(true);
+  const [showIntegrations, setShowIntegrations] = useState(false);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
+  const [integrationData, setIntegrationData] = useState(null);
+  const [integrationError, setIntegrationError] = useState("");
+  const [integrationSecret, setIntegrationSecret] = useState("");
+  const [integrationDraft, setIntegrationDraft] = useState({ webhookUrl: "", email: "", phone: "" });
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -522,6 +528,31 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     finally { setGithubBusy(false); }
   }
 
+  async function openIntegrationPanel() {
+    setShowIntegrations(true);
+    setIntegrationBusy(true);
+    setIntegrationError("");
+    setIntegrationSecret("");
+    try {
+      const overview = await getIntegrationOverview(project.id);
+      setIntegrationData(overview);
+      setIntegrationDraft({ webhookUrl: overview.config.webhook_url || "", email: overview.config.email || "", phone: overview.config.phone || "" });
+    } catch (error) { setIntegrationError(error.message || String(error)); }
+    finally { setIntegrationBusy(false); }
+  }
+
+  async function saveIntegrations() {
+    setIntegrationBusy(true);
+    setIntegrationError("");
+    try {
+      const result = await saveIntegrationSettings(project.id, integrationDraft);
+      setIntegrationSecret(result.signingSecret || "");
+      setIntegrationData(await getIntegrationOverview(project.id));
+      setPublishMsg("App integrations updated.");
+    } catch (error) { setIntegrationError(error.message || String(error)); }
+    finally { setIntegrationBusy(false); }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -950,6 +981,53 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showIntegrations && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[44rem] max-w-[96vw] max-h-[88vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">App integrations</div>
+                <div className="mt-1 text-xs text-slate-400">Deliver app events by signed webhook, email, or SMS.</div>
+              </div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowIntegrations(false)} aria-label="Close integrations">✕</button>
+            </div>
+            {integrationError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{integrationError}</div>}
+            {integrationBusy && !integrationData ? <div className="mt-6 text-sm text-slate-400">Loading integrations…</div> : integrationData && (
+              <>
+                <div className="mt-5 space-y-4">
+                  <label className="block text-xs text-slate-400">Webhook URL
+                    <input className="input mt-1 w-full text-sm" placeholder="https://your-api.com/webhooks/buildr" value={integrationDraft.webhookUrl}
+                      onChange={(event) => setIntegrationDraft((value) => ({ ...value, webhookUrl: event.target.value }))} />
+                    <span className="mt-1 block text-[10px] text-slate-500">Public HTTPS only. Requests are signed with HMAC-SHA256 and retried up to three times.</span>
+                  </label>
+                  <label className="block text-xs text-slate-400">Owner alert email
+                    <input className="input mt-1 w-full text-sm" type="email" placeholder="alerts@example.com" value={integrationDraft.email}
+                      onChange={(event) => setIntegrationDraft((value) => ({ ...value, email: event.target.value }))} />
+                    {!integrationData.providers.email && <span className="mt-1 block text-[10px] text-amber-soft">Email provider is not configured on the platform yet.</span>}
+                  </label>
+                  <label className="block text-xs text-slate-400">Owner SMS number
+                    <input className="input mt-1 w-full text-sm" type="tel" placeholder="+447700900000" value={integrationDraft.phone}
+                      onChange={(event) => setIntegrationDraft((value) => ({ ...value, phone: event.target.value }))} />
+                    {!integrationData.providers.sms && <span className="mt-1 block text-[10px] text-amber-soft">SMS is ready in code but needs Twilio credentials before delivery is enabled.</span>}
+                  </label>
+                </div>
+                {integrationSecret && (
+                  <div className="mt-4 rounded-lg border border-amber/30 bg-amber/10 p-3">
+                    <div className="text-xs font-medium text-amber-soft">Copy this signing secret now. It will not be shown again.</div>
+                    <div className="mt-2 select-all break-all font-mono text-xs text-slate-200">{integrationSecret}</div>
+                  </div>
+                )}
+                <div className="mt-5 rounded-lg bg-ink-900 px-3 py-3 font-mono text-[11px] text-slate-400 space-y-1">
+                  <div>{`await notifications.emit("booking.created", { id: booking.id })`}</div>
+                  <div>{`await notifications.emailSelf({ subject: "Receipt", text: "Thanks" })`}</div>
+                  <div>{`await notifications.notifySelf({ title: "Done", body: "Saved" })`}</div>
+                </div>
+                <div className="mt-4 flex justify-end"><button className="btn-primary px-4 py-2 text-xs" disabled={integrationBusy} onClick={saveIntegrations}>{integrationBusy ? "Saving…" : "Save integrations"}</button></div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -1026,6 +1104,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={openGithubPanel} disabled={!hasApp || busy}
               title={hasApp ? "Export or sync this project to GitHub" : "Generate an app before exporting"}>
               GitHub
+            </button>
+          )}
+          {featureAccess?.integrations?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openIntegrationPanel} disabled={!hasApp || busy}
+              title={hasApp ? "Configure webhooks, email and SMS" : "Generate an app before adding integrations"}>
+              Integrations
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
