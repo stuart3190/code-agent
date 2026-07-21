@@ -117,6 +117,24 @@ console.log("pre-turn BALANCE check refuses when short:");
   check("refused turn wrote NOTHING (balance unchanged)", b.total === 0.5);
 }
 
+console.log("final-job grace debit consumes the remaining balance without going negative:");
+{
+  const L = newLedger();
+  await L.grant({ owner: OWNER, credits: 1.29, bucket: "topup", ref: "partial-g" });
+  const res = await L.debit({
+    owner: OWNER, tokens: 164358, model: "gpt-5.5", ref: "partial-turn",
+    tier: null, allowPartial: true,
+  });
+  check("16.4358-credit usage debits the available 1.29 credits", res.ok && res.partial && res.debited === 1.29 && res.need === 16.4358);
+  check("partial debit reports the unpaid usage difference", near(res.shortfall, 15.1458));
+  check("partial debit leaves exactly zero, never a negative balance", (await L.getBalance(OWNER)).total === 0);
+  const replay = await L.debit({
+    owner: OWNER, tokens: 164358, model: "gpt-5.5", ref: "partial-turn",
+    tier: null, allowPartial: true,
+  });
+  check("replaying a partial debit is idempotent", replay.ok && replay.idempotent && replay.debited === 1.29);
+}
+
 console.log("per-tier HARD CEILING (== tier breakeven from costModel):");
 {
   const L = newLedger();
@@ -161,41 +179,6 @@ console.log("idempotency — redelivered grant + replayed turn don't double-writ
   check("replayed turn is idempotent (no second debit)", d1.idempotent === false && d2.idempotent === true);
   const b = await L.getBalance(OWNER);
   check("balance reflects ONE grant and ONE debit only", near(b.bundle, 120 - 10));
-}
-
-console.log("managed reservation holds funds, commits exact usage, and refunds the remainder:");
-{
-  const L = newLedger();
-  await L.grant({ owner: OWNER, credits: 20, bucket: "bundle", ref: "reserve-gb" });
-  await L.grant({ owner: OWNER, credits: 10, bucket: "topup", ref: "reserve-gt" });
-  const held = await L.reserve({ owner: OWNER, credits: 25, ref: "reserve:job-1", tier: null });
-  check("25-credit reservation succeeds and holds bundle first", held.ok && held.fromBundle === 20 && held.fromTopup === 5);
-  check("held credits are unavailable while the job runs", (await L.getBalance(OWNER)).total === 5);
-  check("a reservation is not counted as monthly consumed usage", (await L.monthlyDebitedCredits(OWNER)) === 0);
-
-  const charged = await L.commitReservation({
-    owner: OWNER, reservationRef: "reserve:job-1", tokens: 164358,
-    model: "gpt-5.5", ref: "gen:job-1", tier: null,
-  });
-  check("commit records the exact 16.4358-credit usage", charged.ok && near(charged.debited, 16.4358));
-  check("unused reservation is restored and final balance is exact", near((await L.getBalance(OWNER)).total, 13.5642));
-  check("only the committed usage counts toward monthly spend", near(await L.monthlyDebitedCredits(OWNER), 16.4358));
-}
-
-console.log("managed reservation refuses a short balance and releases failed jobs in full:");
-{
-  const L = newLedger();
-  await L.grant({ owner: OWNER, credits: 1.29, bucket: "topup", ref: "short-g" });
-  const refused = await L.reserve({ owner: OWNER, credits: 25, ref: "reserve:short", tier: null });
-  check("1.29 credits cannot authorize a 25-credit build", !refused.ok && refused.reason === "insufficient_balance");
-  check("a refused reservation writes nothing", (await L.getBalance(OWNER)).total === 1.29);
-
-  await L.grant({ owner: OWNER, credits: 28.71, bucket: "topup", ref: "failure-g" });
-  await L.reserve({ owner: OWNER, credits: 25, ref: "reserve:failed", tier: null });
-  const released = await L.releaseReservation({ owner: OWNER, reservationRef: "reserve:failed" });
-  const releasedAgain = await L.releaseReservation({ owner: OWNER, reservationRef: "reserve:failed" });
-  check("failed job releases its full reservation", released.ok && released.released === 25 && (await L.getBalance(OWNER)).total === 30);
-  check("reservation release is idempotent", releasedAgain.idempotent && releasedAgain.released === 25);
 }
 
 console.log(`\n${fail === 0 ? "ALL GREEN" : "RED"} — ${pass} passed, ${fail} failed`);

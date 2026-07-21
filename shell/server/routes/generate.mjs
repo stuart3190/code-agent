@@ -10,7 +10,7 @@
 import { ledger } from "../lib/services.mjs";
 import { getDecryptedKey } from "../lib/byokStore.mjs";
 import { ensureWelcomeGrant } from "../lib/welcome.mjs";
-import { createJob, latestBuildStderr, requiredManagedCredits } from "../lib/buildJobs.mjs";
+import { createJob, latestBuildStderr } from "../lib/buildJobs.mjs";
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -51,11 +51,9 @@ export async function handleGenerate(req, res, body, owner) {
   try { byok = !!(await getDecryptedKey(owner.id)); } catch { byok = false; }
   await ensureWelcomeGrant(owner.id);
   const preBal = await ledger().getBalance(owner.id);
-  const required = requiredManagedCredits({ mode, redesign });
-  if (!byok && preBal.total + 1e-9 < required) {
+  if (!byok && preBal.total <= 0) {
     return sendJson(res, 402, { error: "insufficient_balance", balance: preBal,
-      required,
-      hint: `This ${redesign ? "redesign" : mode} needs at least ${required} credits available. Top up and try again.` });
+      hint: "You're out of credits. Top up and try again." });
   }
 
   const { job, existing } = await createJob({

@@ -48,13 +48,12 @@ import {
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
-// Managed generation is post-metered, so hold enough prepaid credit to cover the largest allowed
-// run before contacting the provider. Successful jobs release the hold and debit exact usage;
-// failed/cancelled/interrupted jobs release it in full. These limits also bound runaway agent loops.
-export const MANAGED_CREDIT_RESERVATIONS = Object.freeze({ plan: 1, iterate: 10, build: 25, redesign: 25 });
-export function requiredManagedCredits({ mode, redesign = false } = {}) {
-  if (redesign) return MANAGED_CREDIT_RESERVATIONS.redesign;
-  return MANAGED_CREDIT_RESERVATIONS[mode] ?? MANAGED_CREDIT_RESERVATIONS.build;
+// Independent per-job runaway limits. These are NOT prices or minimum balances: any positive
+// managed balance may start, and settlement charges actual usage (capped at the balance remaining).
+export const MANAGED_JOB_CREDIT_LIMITS = Object.freeze({ plan: 2, iterate: 25, build: 30, redesign: 30 });
+export function managedJobCreditLimit({ mode, redesign = false } = {}) {
+  if (redesign) return MANAGED_JOB_CREDIT_LIMITS.redesign;
+  return MANAGED_JOB_CREDIT_LIMITS[mode] ?? MANAGED_JOB_CREDIT_LIMITS.build;
 }
 
 class ManagedBillingError extends Error {
@@ -63,7 +62,7 @@ class ManagedBillingError extends Error {
 
 class ManagedCreditBudgetError extends ManagedBillingError {
   constructor(limit) {
-    super(`This build exceeded its ${limit}-credit safety limit. No credits were charged; try a smaller request.`, "reservation_exceeded");
+    super(`This build exceeded its ${limit}-credit safety limit. No credits were charged; try a smaller request.`, "job_credit_limit");
     this.name = "ManagedCreditBudgetError";
   }
 }
@@ -279,18 +278,9 @@ export async function sweepInterrupted() {
     .update({ status: "interrupted", phase: "interrupted",
       error: "Build was interrupted by a server restart — please rebuild.",
       updated_at: new Date().toISOString() })
-    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id,owner");
+    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id");
   if (error) console.log(`[jobs] sweep WARN: ${error.message}`);
-  else if (data?.length) {
-    for (const row of data) {
-      try {
-        await ledger().releaseReservation({ owner: row.owner, reservationRef: `reserve:${row.id}` });
-      } catch (e) {
-        console.log(`[jobs] sweep reservation WARN (${String(row.id).slice(0, 8)}): ${e.message}`);
-      }
-    }
-    console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
-  }
+  else if (data?.length) console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
 }
 
 // ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
@@ -370,8 +360,6 @@ async function runJob(job) {
   const mode = job.mode;
   const owner = job.owner;
   const led = ledger();
-  let reservationRef = null;
-  let reservationLimit = 0;
 
   const withKnowledge = (p) =>
     knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
@@ -391,46 +379,29 @@ async function runJob(job) {
 
     await ensureWelcomeGrant(owner.id);
     const preBal = await led.getBalance(owner.id);
+    const jobCreditLimit = managedJobCreditLimit({ mode, redesign });
+    const onUsage = byok ? null : managedUsageGuard(jobCreditLimit, providerConfig.strong);
 
-    if (!byok) {
-      reservationLimit = requiredManagedCredits({ mode, redesign });
-      reservationRef = `reserve:${job.id}`;
-      const held = await led.reserve({ owner: owner.id, credits: reservationLimit, ref: reservationRef });
-      if (!held.ok) {
-        reservationRef = null;
-        if (held.reason === "hard_ceiling") {
-          throw new ManagedBillingError("Your monthly managed-usage safety limit has been reached.", held.reason);
-        }
-        throw new ManagedBillingError(
-          `This ${redesign ? "redesign" : mode} needs at least ${reservationLimit} credits available. Top up and try again.`,
-          held.reason,
-        );
-      }
-      serverLog(job, `billing: reserved ${reservationLimit.toFixed(4)} cr before managed ${redesign ? "redesign" : mode}`);
-    }
-    const onUsage = byok ? null : managedUsageGuard(reservationLimit, providerConfig.strong);
-
-    // Settle exact usage against the prepaid hold (managed) OR no-op (BYOK).
+    // Managed jobs are post-metered. Charge exact usage when the balance covers it; otherwise
+    // consume the remaining prepaid balance down to zero. That lets a customer use every last
+    // credit on a final change without creating debt or an unlimited free-build loophole.
     async function settle(telemetry, model, kind) {
       if (byok) {
         serverLog(job, `billing: BYOK — ${telemetry.total} tok billed to the user's ${providerConfig.provider} key`);
         return { need: 0, balance: preBal };
       }
       const ref = `${kind}:${projectId}:${crypto.randomUUID()}`;
-      const charged = await led.commitReservation({
-        owner: owner.id, reservationRef, tokens: telemetry.total, model, ref,
-      });
+      const charged = await led.debit({ owner: owner.id, tokens: telemetry.total, model, ref, allowPartial: true });
       if (!charged.ok) {
-        if (charged.reason === "reservation_exceeded") throw new ManagedCreditBudgetError(reservationLimit);
         if (charged.reason === "hard_ceiling") {
           throw new ManagedBillingError("Your monthly managed-usage safety limit has been reached. No credits were charged.", charged.reason);
         }
         throw new ManagedBillingError("We could not confirm the credit charge. No credits were charged; please try again.", charged.reason);
       }
-      reservationRef = null;
       const need = charged.debited;
       const balance = await led.getBalance(owner.id);
-      serverLog(job, `billing: debited ${need.toFixed(4)} cr (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr`);
+      const capped = charged.partial ? ` (actual ${charged.need.toFixed(4)} cr; used remaining balance)` : "";
+      serverLog(job, `billing: debited ${need.toFixed(4)} cr${capped} (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr`);
       return { need, balance };
     }
 
@@ -609,17 +580,8 @@ async function runJob(job) {
     };
     finish(job, "complete");
   } catch (e) {
-    if (reservationRef) {
-      try {
-        const released = await led.releaseReservation({ owner: owner.id, reservationRef });
-        serverLog(job, `billing: released ${released.released.toFixed(4)} reserved cr after unsuccessful job`);
-      } catch (releaseError) {
-        serverLog(job, `billing: reservation release WARN: ${releaseError.message}`);
-      }
-      reservationRef = null;
-    }
     if (e instanceof CancelledError) {
-      serverLog(job, "cancelled between turns — reservation released, no result");
+      serverLog(job, "cancelled between turns — no settle, no result");
       finish(job, "failed", { error: "Cancelled by user." });
     } else if (e instanceof ManagedBillingError) {
       serverLog(job, `billing: stopped (${e.reason})`);

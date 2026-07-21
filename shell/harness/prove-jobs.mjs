@@ -241,7 +241,7 @@ async function main() {
       "re-subscribing a finished job returns the terminal snapshot + result and closes (no hang)");
 
     // ── CONCURRENCY — 2nd job at the cap queues; distinct apps don't cross-talk ─────────────────
-    section("CONCURRENCY — per-user cap of 1: a 2nd job queues (denial of reservation races)");
+    section("CONCURRENCY — per-user cap of 1: a 2nd job queues (denial of billing races)");
     const cids = [0, 1].map((i) => `prove-conc-${Date.now()}-${i}`);
     const created = await Promise.all(cids.map((pid) => createBuild(token, { projectId: pid, prompt: "a todo list", mode: "plan" })));
     const statuses = created.map((c) => c.out.status);
