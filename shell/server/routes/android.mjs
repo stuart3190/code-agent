@@ -48,8 +48,10 @@ export async function handleAndroid(req, res, body, owner) {
     res.end(zip);
   } catch (e) {
     const status = e.code === "upgrade_required" ? 402 : e.code === "build_failed" ? 422 : 500;
-    console.error(`[android] ${e.message}`); // never the keystore password
+    console.error(`[android] ${e?.stack || e}`); // never the keystore password
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.code === "build_failed" ? "Android build failed — try again." : e.message }));
+    const message = e.code === "build_failed" ? "Android build failed — try again."
+      : status === 402 ? e.message : "Android export failed. Please try again.";
+    res.end(JSON.stringify({ error: message }));
   }
 }

@@ -5,8 +5,9 @@
 
 import { previewProvider } from "../preview/index.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
+import { ownedProject } from "../lib/supabase.mjs";
 
-export async function handlePreview(req, res, body /*, owner */) {
+export async function handlePreview(req, res, body, owner) {
   const projectId = body?.projectId;
   const tree = body?.tree;
   if (!projectId || !tree || typeof tree !== "object") {
@@ -14,12 +15,17 @@ export async function handlePreview(req, res, body /*, owner */) {
     return res.end(JSON.stringify({ error: "projectId and tree are required" }));
   }
   try {
+    if (!(await ownedProject(owner.id, projectId))) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "project not found" }));
+    }
     // Inject the runtime backend .env at materialization (saved tree stays clean).
     const result = await previewProvider().start(projectId, withRuntimeEnv(tree, projectId));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
   } catch (e) {
+    console.error(`[preview] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "Preview could not be started. Please try again." }));
   }
 }

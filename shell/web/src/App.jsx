@@ -3,7 +3,8 @@ import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
 import { getConfig, deleteProjectFull, serverBalance } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
-import { listProjects, createProject, getProject, deleteProject } from "./lib/projects.js";
+import { listProjects, getProject, deleteProject } from "./lib/projects.js";
+import { createLocalDraft } from "./lib/draftProject.js";
 import { Logo } from "./auth/AuthGate.jsx";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -73,6 +74,7 @@ export default function App() {
     if (!isEmptyDraft(p)) return false;
     // Remove it from the visible list immediately; the owner-scoped Supabase delete follows.
     setProjects((items) => items.filter((item) => item.id !== p.id));
+    if (p.transient) return true;
     try {
       await deleteProject(p.id);
       return true;
@@ -85,7 +87,7 @@ export default function App() {
   async function newProject(starterPrompt) {
     // Repeatedly pressing New app must replace an untouched draft, not stack empty rows.
     await discardEmptyDraft(current);
-    const p = await createProject("Untitled app");
+    const p = createLocalDraft("Untitled app");
     setStarter(typeof starterPrompt === "string" ? starterPrompt : null);
     setCurrent(p); setView("workspace");
   }

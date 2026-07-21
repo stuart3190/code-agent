@@ -41,6 +41,7 @@ import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLO
 import { ensureWelcomeGrant } from "./welcome.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
+import { managedAffordableCreditLimit } from "./billingLimits.mjs";
 import {
   DESIGN_DIRECTOR_SYSTEM_PROMPT, auditDesign, fallbackDesignProfile,
   normalizeDesignProfile, normalizeStyle, parseDesignProfile, renderDesignBrief,
@@ -50,11 +51,6 @@ const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthrop
 
 // Independent per-job runaway limits. These are NOT prices or minimum balances: any positive
 // managed balance may start, and settlement charges actual usage (capped at the balance remaining).
-export const MANAGED_JOB_CREDIT_LIMITS = Object.freeze({ plan: 2, iterate: 40, build: 60, redesign: 60 });
-export function managedJobCreditLimit({ mode, redesign = false } = {}) {
-  if (redesign) return MANAGED_JOB_CREDIT_LIMITS.redesign;
-  return MANAGED_JOB_CREDIT_LIMITS[mode] ?? MANAGED_JOB_CREDIT_LIMITS.build;
-}
 
 class ManagedBillingError extends Error {
   constructor(message, reason = "billing_error") { super(message); this.name = "ManagedBillingError"; this.reason = reason; }
@@ -62,7 +58,7 @@ class ManagedBillingError extends Error {
 
 class ManagedCreditBudgetError extends ManagedBillingError {
   constructor(limit) {
-    super(`This build exceeded its ${limit}-credit safety limit. No credits were charged; try a smaller request.`, "job_credit_limit");
+    super(`This build exceeded its ${limit.toFixed(2)}-credit affordability limit and was stopped. Try a smaller change or top up.`, "job_credit_limit");
     this.name = "ManagedCreditBudgetError";
   }
 }
@@ -283,6 +279,30 @@ export async function sweepInterrupted() {
   else if (data?.length) console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
 }
 
+// Catch rows abandoned by one-off test servers, killed hosts, or renamed server identities. The
+// normal per-server sweep above is immediate; this cross-server sweep only touches jobs old enough
+// that no legitimate build should still be running.
+export async function sweepStaleJobs(maxAgeMs = 90 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const { data, error } = await db()
+    .update({ status: "interrupted", phase: "interrupted",
+      error: "Build was interrupted before it could finish â€” please rebuild.",
+      updated_at: new Date().toISOString() })
+    .in("status", ["queued", "running"]).lt("created_at", cutoff).select("id");
+  if (error) console.log(`[jobs] stale sweep WARN: ${error.message}`);
+  else if (data?.length) console.log(`[jobs] swept ${data.length} stale job(s)`);
+}
+
+export async function interruptLiveJobs(reason = "Build was interrupted by a server restart â€” please rebuild.") {
+  const active = [...jobs.values()].filter((job) => !TERMINAL.has(job.status));
+  await Promise.all(active.map(async (job) => {
+    job.cancelled = true;
+    finish(job, "interrupted", { error: reason });
+    await job._db;
+  }));
+  return active.length;
+}
+
 // ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
 
 function usageBucket() {
@@ -296,8 +316,7 @@ function usageBucket() {
   };
 }
 
-function managedUsageGuard(limit, model) {
-  const tracked = usageBucket();
+function managedUsageGuard(limit, model, tracked = usageBucket()) {
   return async (turnUsage) => {
     tracked.add(turnUsage);
     if (creditsForUsage({ usage: tracked.summary(), model }) > limit + 1e-9) {
@@ -363,6 +382,7 @@ async function runJob(job) {
   const mode = job.mode;
   const owner = job.owner;
   const led = ledger();
+  let failureMeter = null;
 
   const withKnowledge = (p) =>
     knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
@@ -382,8 +402,10 @@ async function runJob(job) {
 
     await ensureWelcomeGrant(owner.id);
     const preBal = await led.getBalance(owner.id);
-    const jobCreditLimit = managedJobCreditLimit({ mode, redesign });
-    const onUsage = byok ? null : managedUsageGuard(jobCreditLimit, providerConfig.strong);
+    const jobCreditLimit = managedAffordableCreditLimit({ balance: preBal.total, mode, redesign });
+    const trackedUsage = usageBucket();
+    failureMeter = byok ? null : { trackedUsage, model: providerConfig.strong };
+    const onUsage = byok ? null : managedUsageGuard(jobCreditLimit, providerConfig.strong, trackedUsage);
 
     // Managed jobs are post-metered. Charge exact usage when the balance covers it; otherwise
     // consume the remaining prepaid balance down to zero. That lets a customer use every last
@@ -587,6 +609,15 @@ async function runJob(job) {
       serverLog(job, "cancelled between turns — no settle, no result");
       finish(job, "failed", { error: "Cancelled by user." });
     } else if (e instanceof ManagedBillingError) {
+      if (e.reason === "job_credit_limit" && failureMeter?.trackedUsage) {
+        const usage = failureMeter.trackedUsage.summary();
+        if (usage.total > 0) {
+          const ref = `limit:${projectId}:${crypto.randomUUID()}`;
+          const charged = await led.debit({ owner: owner.id, usage, model: failureMeter.model, ref, allowPartial: true })
+            .catch(() => null);
+          if (charged?.ok) serverLog(job, `billing: affordability stop debited ${charged.debited.toFixed(4)} cr`);
+        }
+      }
       serverLog(job, `billing: stopped (${e.reason})`);
       finish(job, "failed", { error: e.message });
     } else {

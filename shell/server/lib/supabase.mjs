@@ -38,6 +38,20 @@ export async function ownerFromToken(accessToken) {
   return { id: data.user.id, email: data.user.email ?? null };
 }
 
+// Service-role routes bypass RLS, so every project-scoped operation must prove ownership here.
+// Return null for both a missing project and somebody else's project to avoid an ID oracle.
+export async function ownedProject(ownerId, projectId, columns = "id", client = serviceClient()) {
+  if (!ownerId || !projectId) return null;
+  const { data, error } = await client
+    .from("projects")
+    .select(columns)
+    .eq("id", projectId)
+    .eq("owner", ownerId)
+    .maybeSingle();
+  if (error) throw new Error(`project lookup failed: ${error.message}`);
+  return data || null;
+}
+
 // Pull the bearer token out of an incoming request's Authorization header.
 export function bearer(req) {
   const h = req.headers["authorization"] || req.headers["Authorization"];

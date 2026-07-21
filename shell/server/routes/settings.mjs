@@ -17,7 +17,8 @@ export async function handleByokGet(req, res, owner) {
   try {
     send(res, 200, await getKeyRecord(owner.id));
   } catch (e) {
-    send(res, 500, { error: e.message });
+    console.error(`[byok:get] ${e?.stack || e}`);
+    send(res, 500, { error: "BYOK settings are temporarily unavailable." });
   }
 }
 
@@ -36,7 +37,8 @@ export async function handleByokSave(req, res, body, owner) {
     const rec = await setKey(owner.id, key, provider); // returns masked hint only
     send(res, 200, { set: true, provider: rec.provider, hint: rec.hint });
   } catch (e) {
-    send(res, 500, { error: e.message });
+    console.error(`[byok:save] ${e?.stack || e}`);
+    send(res, 500, { error: "The API key could not be saved. Please try again." });
   }
 }
 
@@ -44,6 +46,7 @@ export async function handleByokClear(req, res, owner) {
   try {
     send(res, 200, await clearKey(owner.id));
   } catch (e) {
-    send(res, 500, { error: e.message });
+    console.error(`[byok:clear] ${e?.stack || e}`);
+    send(res, 500, { error: "The API key could not be removed. Please try again." });
   }
 }

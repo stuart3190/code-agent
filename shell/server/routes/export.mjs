@@ -37,8 +37,9 @@ export async function handleExport(req, res, body, owner) {
     zip = built.zip;
     filename = built.filename;
   } catch (e) {
+    console.error(`[export] ${e?.stack || e}`);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message || "project export failed" }));
+    res.end(JSON.stringify({ error: "Project export failed. Please try again." }));
     return;
   }
 

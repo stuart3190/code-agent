@@ -58,9 +58,11 @@ export async function getProject(id) {
   return rowToProject(row);
 }
 
-export async function createProject(name) {
+export async function createProject(name, id = undefined) {
   // owner is stamped by the DB default (auth.uid()); the app never sets it — same as Phase 3.1 entities.
-  const rows = unwrap(await table().insert({ name: name || "Untitled app", tree: null, history: [], preview_ref: null }).select());
+  const row = { name: name || "Untitled app", tree: null, history: [], preview_ref: null };
+  if (id) row.id = id;
+  const rows = unwrap(await table().insert(row).select());
   return rowToProject(rows[0]);
 }
 

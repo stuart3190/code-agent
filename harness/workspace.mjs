@@ -17,6 +17,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEPS_DIR = path.join(HERE, ".deps");
 const DEPS_NM = path.join(DEPS_DIR, "node_modules");
 const WORK_DIR = path.join(HERE, ".work");
+const NPM = process.platform === "win32" ? process.execPath : "npm";
+const NPM_PREFIX = process.platform === "win32"
+  ? [path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+  : [];
 
 // Where buildTree materialized a given case — callers that consume build ARTIFACTS (e.g. the
 // shell's publish route reading dist/) resolve the workspace through this, not a copied path.
@@ -35,10 +39,9 @@ export async function ensureDeps(log = console.log) {
     log(`[deps] ${existsSync(DEPS_NM) ? "refreshing" : "installing"} shared scaffold dependencies...`);
     await mkdir(DEPS_DIR, { recursive: true });
     await writeFile(manifestPath, manifest, "utf8");
-    execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
+    execFileSync(NPM, [...NPM_PREFIX, "install", "--no-audit", "--no-fund"], {
       cwd: DEPS_DIR,
       stdio: "inherit",
-      shell: true,
     });
     log("[deps] done.");
   })();
@@ -65,7 +68,7 @@ export async function buildTree(tree, caseName, log = console.log) {
   }
 
   try {
-    execFileSync("npm", ["run", "build"], { cwd: dir, stdio: "pipe", shell: true });
+    execFileSync(NPM, [...NPM_PREFIX, "run", "build"], { cwd: dir, stdio: "pipe" });
     return { ok: true, stderr: "" };
   } catch (e) {
     const stderr = (e.stderr || e.stdout || e.message).toString();

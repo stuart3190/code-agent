@@ -11,6 +11,7 @@ import { ledger } from "../lib/services.mjs";
 import { getDecryptedKey } from "../lib/byokStore.mjs";
 import { ensureWelcomeGrant } from "../lib/welcome.mjs";
 import { createJob, latestBuildStderr } from "../lib/buildJobs.mjs";
+import { ownedProject } from "../lib/supabase.mjs";
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -30,6 +31,10 @@ export async function handleGenerate(req, res, body, owner) {
     ? body.designProfile : null;
   const redesign = body?.redesign === true;
   const projectId = body?.projectId || `new-${Date.now()}`;
+
+  if (!(await ownedProject(owner.id, projectId))) {
+    return sendJson(res, 404, { error: "project not found" });
+  }
 
   // "Fix it" for a BUILD error: the stderr never went to the browser (it is full of file
   // paths), so the fix prompt is composed HERE from the job record's server-side copy.

@@ -11,7 +11,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
 import { withPwaAssets, renderIcons } from "../lib/pwa.mjs";
-import { serviceClient } from "../lib/supabase.mjs";
+import { ownedProject, serviceClient } from "../lib/supabase.mjs";
 import { ledger } from "../lib/services.mjs";
 import { isAdmin } from "../lib/admin.mjs";
 import { assetlinksJson } from "../lib/androidLinks.mjs";
@@ -133,13 +133,18 @@ export async function handleUnpublish(req, res, body, owner) {
     return res.end(JSON.stringify({ error: "publishing is not configured (PROVISIOND_URL/TOKEN)" }));
   }
   try {
+    if (!(await ownedProject(owner.id, projectId))) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "project not found" }));
+    }
     const { slug } = await claimSlug(owner, projectId, null); // lookup only — no name requested
     const out = await provisiondPost("/unpublish", { projectId, slug: slug || undefined });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ unpublished: out.unpublished }));
   } catch (e) {
+    console.error(`[unpublish] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "The app could not be unpublished. Please try again." }));
   }
 }
 
@@ -151,6 +156,9 @@ export async function handleUnpublish(req, res, body, owner) {
 export async function materializeAndPublish({ owner, projectId, tree, name }) {
   if (!PROVISIOND_URL() || !PROVISIOND_TOKEN()) {
     const e = new Error("publishing is not configured (PROVISIOND_URL/TOKEN)"); e.code = "not_configured"; throw e;
+  }
+  if (!(await ownedProject(owner.id, projectId))) {
+    const e = new Error("project not found"); e.code = "project_not_found"; throw e;
   }
   await requirePublishTier(owner);
   // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
@@ -218,12 +226,14 @@ export async function handlePublish(req, res, body, owner) {
     }
     if (e.code === "build_failed") {
       res.writeHead(422, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: "build failed", stderr: e.stderr }));
+      return res.end(JSON.stringify({ error: "The app did not compile. Return to the builder and use Fix it." }));
     }
     const status = e.code === "upgrade_required" ? 402
-      : e.code === "slug_taken" || e.code === "bad_slug" ? 409 : 500;
+      : e.code === "slug_taken" || e.code === "bad_slug" ? 409
+      : e.code === "project_not_found" ? 404 : 500;
+    if (status === 500) console.error(`[publish] ${e?.stack || e}`);
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message, code: e.code }));
+    res.end(JSON.stringify({ error: status === 500 ? "Publishing failed. Please try again." : e.message, code: e.code }));
   }
 }
 

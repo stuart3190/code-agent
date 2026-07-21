@@ -67,7 +67,10 @@ export async function handleDomainList(req, res, url, owner) {
   const { data, error } = await serviceClient()
     .from("custom_domains").select("domain, verified_at, created_at")
     .eq("project_id", projectId).eq("owner", owner.id).order("created_at");
-  if (error) return json(res, 500, { error: error.message });
+  if (error) {
+    console.error(`[domains:list] ${error.message}`);
+    return json(res, 500, { error: "Domains are temporarily unavailable." });
+  }
   return json(res, 200, { domains: data || [], ip: PUBLISH_IP });
 }
 
@@ -107,7 +110,8 @@ export async function handleDomainConnect(req, res, body, owner) {
                  : `Point an A record for ${domain} to ${PUBLISH_IP}, then check again.`,
     });
   } catch (e) {
-    return json(res, 500, { error: e.message });
+    console.error(`[domains:connect] ${e?.stack || e}`);
+    return json(res, 500, { error: "The domain could not be connected. Please try again." });
   }
 }
 
@@ -125,6 +129,7 @@ export async function handleDomainRemove(req, res, body, owner) {
     await provisiondPost("/domain-detach", { domain }).catch(() => {});
     return json(res, 200, { removed: domain });
   } catch (e) {
-    return json(res, 500, { error: e.message });
+    console.error(`[domains:remove] ${e?.stack || e}`);
+    return json(res, 500, { error: "The domain could not be removed. Please try again." });
   }
 }

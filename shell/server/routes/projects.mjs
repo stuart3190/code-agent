@@ -82,7 +82,8 @@ export async function handleProjectDelete(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ deleted: projectId, cleaned }));
   } catch (e) {
+    console.error(`[project-delete] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "The project could not be deleted. Please try again." }));
   }
 }

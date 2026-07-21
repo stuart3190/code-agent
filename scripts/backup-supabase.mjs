@@ -13,10 +13,12 @@
 
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
+import { validateBackupDirectory } from "./lib/backupValidation.mjs";
 
 loadEnv();
 const URL = process.env.SUPABASE_URL;
@@ -25,7 +27,11 @@ if (!URL || !SVC) { console.error("backup: SUPABASE_URL / SUPABASE_SERVICE_ROLE_
 
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(os.homedir(), "backups");
 const KEEP_DAYS = Number(process.env.BACKUP_KEEP_DAYS || 14);
-const TABLES = ["projects", "entities", "credit_ledger", "customers", "byok_keys", "app_users", "published_sites", "custom_domains"];
+const TABLES = [
+  "projects", "entities", "credit_ledger", "customers", "byok_keys", "app_users",
+  "published_sites", "custom_domains", "app_password_resets", "app_auth_events",
+  "android_keystores", "email_log", "build_jobs",
+];
 const PAGE = 1000;
 
 const svc = createClient(URL, SVC, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -74,12 +80,13 @@ async function main() {
   const dir = path.join(BACKUP_DIR, `supabase-${stamp}`);
   await mkdir(dir, { recursive: true });
 
-  const manifest = { url: new globalThis.URL(URL).host, startedAt: new Date().toISOString(), tables: {}, bytes: 0 };
+  const manifest = { url: new globalThis.URL(URL).host, startedAt: new Date().toISOString(), tables: {}, files: {}, bytes: 0 };
   for (const t of TABLES) {
     const rows = await dumpTable(t);
     const gz = gzipSync(JSON.stringify(rows));
     await writeFile(path.join(dir, `${t}.json.gz`), gz);
     manifest.tables[t] = rows.length;
+    manifest.files[`${t}.json.gz`] = { bytes: gz.length, sha256: createHash("sha256").update(gz).digest("hex") };
     manifest.bytes += gz.length;
     console.log(`  ${t}: ${rows.length} rows (${gz.length} bytes gz)`);
   }
@@ -87,11 +94,15 @@ async function main() {
   const ugz = gzipSync(JSON.stringify(users));
   await writeFile(path.join(dir, "auth_users.json.gz"), ugz);
   manifest.tables.auth_users = users.length;
+  manifest.files["auth_users.json.gz"] = { bytes: ugz.length, sha256: createHash("sha256").update(ugz).digest("hex") };
   manifest.bytes += ugz.length;
   console.log(`  auth_users: ${users.length} rows (${ugz.length} bytes gz)`);
 
   manifest.finishedAt = new Date().toISOString();
   await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
+
+  const validation = await validateBackupDirectory(dir);
+  console.log(`  validation: ${validation.files} files decoded, counted and checksummed`);
 
   const removed = await prune();
   console.log(`backup OK -> ${dir} (${manifest.bytes} bytes gz total, pruned ${removed} old run${removed === 1 ? "" : "s"})`);

@@ -14,14 +14,17 @@
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { resolveStaticPath } from "./lib/staticPath.mjs";
-import { ownerFromToken, bearer, haveSupabaseEnv } from "./lib/supabase.mjs";
+import {
+  BODY_LIMITS, HttpInputError, allowedOrigins, applyCors, applySecurityHeaders,
+  createRateLimiter, parseJson, readBody, staticCacheControl,
+} from "./lib/httpSecurity.mjs";
+import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
 import { haveStripeEnv } from "./lib/services.mjs";
 import { handleGenerate } from "./routes/generate.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
-import { sweepInterrupted } from "./lib/buildJobs.mjs";
+import { interruptLiveJobs, sweepInterrupted, sweepStaleJobs } from "./lib/buildJobs.mjs";
 import { handleCheckout, handleBalance, handleSubscription, handleSwitch, handleCancel } from "./routes/billing.mjs";
 import { handleWebhook } from "./routes/stripeWebhook.mjs";
 import { handlePreview } from "./routes/preview.mjs";
@@ -43,23 +46,28 @@ const PORT = Number(optionalEnv("SHELL_PORT", "8787"));
 // shell while the port stays unreachable from the public internet.
 const HOST = optionalEnv("SHELL_HOST", "") || undefined;
 const WEB_DIST = path.join(SHELL_DIR, "web", "dist");
+const CORS_ORIGINS = allowedOrigins(optionalEnv("APP_URL", "https://buildr101.com"));
+CORS_ORIGINS.add(`http://127.0.0.1:${PORT}`);
+CORS_ORIGINS.add(`http://localhost:${PORT}`);
+const consumeRate = createRateLimiter();
 
-function cors(res, origin) {
-  res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
-  res.setHeader("Access-Control-Max-Age", "86400");
+const readJson = async (req, limit = BODY_LIMITS.standard) => parseJson(await readBody(req, limit));
+
+function clientIp(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || req.socket?.remoteAddress || "unknown";
 }
 
-function readBody(req) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", () => resolve(Buffer.concat(chunks)));
-  });
+function ratePolicy(pathname, method) {
+  if (pathname === "/api/domain-check") return { limit: 120, windowMs: 60_000 };
+  if (pathname === "/api/generate") return { limit: 40, windowMs: 10 * 60_000 };
+  if (pathname === "/api/preview") return { limit: 60, windowMs: 5 * 60_000 };
+  if (["/api/publish", "/api/unpublish", "/api/android"].includes(pathname)) {
+    return { limit: 15, windowMs: 10 * 60_000 };
+  }
+  if (method === "POST" || method === "DELETE") return { limit: 120, windowMs: 60_000 };
+  return null;
 }
-const json = (buf) => { try { return JSON.parse(buf.toString("utf8") || "{}"); } catch { return {}; } };
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -86,6 +94,20 @@ function publicConfig() {
   };
 }
 
+async function deepHealth() {
+  const timeoutMs = 2500;
+  const bounded = (promise) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+  ]);
+  const supabase = await bounded(serviceClient().from("projects").select("id").limit(1))
+    .then(({ error }) => !error).catch(() => false);
+  const mode = publicConfig().previewMode;
+  const provisiond = mode !== "vps" || await bounded(fetch(`${optionalEnv("PROVISIOND_URL", "")}/health`))
+    .then((r) => r.ok).catch(() => false);
+  return { ok: supabase && provisiond, supabase, provisiond };
+}
+
 async function serveStatic(req, res) {
   // Only used in prod (after `vite build`). In dev the UI is served by Vite on :5173.
   let rel = new URL(req.url, "http://x").pathname;
@@ -95,11 +117,13 @@ async function serveStatic(req, res) {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     return res.end("Not found");
   }
+  let fallback = false;
   try {
     const s = await stat(file);
     if (s.isDirectory()) file = path.join(file, "index.html");
   } catch {
     file = path.join(WEB_DIST, "index.html"); // SPA fallback
+    fallback = true;
   }
   try {
     const data = await readFile(file);
@@ -109,7 +133,10 @@ async function serveStatic(req, res) {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
       ".gif": "image/gif", ".ico": "image/x-icon", ".woff2": "font/woff2",
       ".webmanifest": "application/manifest+json", ".txt": "text/plain" }[ext] || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": type });
+    res.writeHead(200, {
+      "Content-Type": type,
+      "Cache-Control": fallback ? "no-cache" : staticCacheControl(rel),
+    });
     res.end(data);
   } catch {
     sendJson(res, 404, { error: "not found" });
@@ -124,23 +151,39 @@ async function requireOwner(req, res) {
 
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
-  cors(res, origin);
+  applySecurityHeaders(res);
+  const corsOk = applyCors(res, origin, CORS_ORIGINS);
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
   const method = req.method || "GET";
 
-  if (method === "OPTIONS") { res.writeHead(204); return res.end(); }
+  if (method === "OPTIONS") {
+    res.writeHead(corsOk ? 204 : 403);
+    return res.end();
+  }
+  if (!corsOk) return sendJson(res, 403, { error: "origin not allowed" });
+
+  const policy = ratePolicy(p, method);
+  if (policy) {
+    const rate = consumeRate(`${clientIp(req)}:${method}:${p}`, policy.limit, policy.windowMs);
+    res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfter));
+      return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+    }
+  }
 
   try {
     // ── unauthenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/health") {
-      return sendJson(res, 200, { ok: true, previewMode: publicConfig().previewMode,
-        supabase: haveSupabaseEnv(), stripe: haveStripeEnv(), byok: byokConfigured() });
+      const deps = await deepHealth();
+      return sendJson(res, deps.ok ? 200 : 503, { ...deps, previewMode: publicConfig().previewMode,
+        stripe: haveStripeEnv(), byok: byokConfigured() });
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
 
     if (p === "/api/stripe/webhook" && method === "POST") {
-      const raw = await readBody(req);
+      const raw = await readBody(req, BODY_LIMITS.webhook);
       return handleWebhook(req, res, raw);
     }
     // Caddy's on_demand_tls ask gate (read-only yes/no; see routes/domains.mjs).
@@ -151,7 +194,7 @@ const server = http.createServer(async (req, res) => {
     // ── authenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/generate" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req, BODY_LIMITS.tree);
       return handleGenerate(req, res, body, owner);
     }
     // Background build jobs: /api/builds/:jobId/events · /api/builds/:jobId/cancel ·
@@ -173,27 +216,27 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/preview" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req, BODY_LIMITS.tree);
       return handlePreview(req, res, body, owner);
     }
     if (p === "/api/export" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleExport(req, res, body, owner);
     }
     if (p === "/api/publish" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req, BODY_LIMITS.tree);
       return handlePublish(req, res, body, owner);
     }
     if (p === "/api/unpublish" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleUnpublish(req, res, body, owner);
     }
     if (p === "/api/android" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req, BODY_LIMITS.tree);
       return handleAndroid(req, res, body, owner);
     }
     if (p === "/api/domains" && method === "GET") {
@@ -202,27 +245,27 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/domains" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleDomainConnect(req, res, body, owner);
     }
     if (p === "/api/domains/remove" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleDomainRemove(req, res, body, owner);
     }
     if (p === "/api/projects/delete" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleProjectDelete(req, res, body, owner);
     }
     if (p === "/api/account/delete" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleAccountDelete(req, res, body, owner);
     }
     if (p === "/api/billing/checkout" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleCheckout(req, res, body, owner);
     }
     if (p === "/api/billing/balance" && method === "GET") {
@@ -235,18 +278,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/billing/switch" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleSwitch(req, res, body, owner);
     }
     if (p === "/api/billing/cancel" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const body = json(await readBody(req));
+      const body = await readJson(req);
       return handleCancel(req, res, body, owner);
     }
     if (p === "/api/settings/byok") {
       const owner = await requireOwner(req, res); if (!owner) return;
       if (method === "GET") return handleByokGet(req, res, owner);
-      if (method === "POST") return handleByokSave(req, res, json(await readBody(req)), owner);
+      if (method === "POST") return handleByokSave(req, res, await readJson(req), owner);
       if (method === "DELETE") return handleByokClear(req, res, owner);
       return sendJson(res, 405, { error: "method not allowed" });
     }
@@ -257,7 +300,8 @@ const server = http.createServer(async (req, res) => {
     return serveStatic(req, res);
   } catch (e) {
     console.error(`[shell] 500 on ${method} ${p}:`, e?.stack || e?.message || e);
-    sendJson(res, 500, { error: e.message });
+    if (e instanceof HttpInputError) return sendJson(res, e.status, { error: e.message, code: e.code });
+    sendJson(res, 500, { error: "Something went wrong. Please try again." });
   }
 });
 
@@ -268,4 +312,17 @@ server.listen(PORT, HOST, () => {
   // Any job rows THIS server left non-terminal are dead (their loop died with the process) —
   // mark them interrupted so no build ever shows "building" forever. Scoped by server_id.
   sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
+  sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shell] ${signal} - marking active builds interrupted`);
+  server.close();
+  await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
+  process.exit(0);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

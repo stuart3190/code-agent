@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain } from "../lib/api.js";
-import { saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
+import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
 // job (/api/generate returns a jobId immediately): the build survives navigating away, and this
@@ -59,6 +59,15 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [selectMode, setSelectMode] = useState(false);
   const [selectedEl, setSelectedEl] = useState(null); // { tag, text, outerHTML, path }
   const iframeRef = useRef(null);
+  const persistedRef = useRef(!project.transient);
+
+  async function ensurePersisted(name = project.name || "Untitled app") {
+    if (persistedRef.current) return project;
+    const saved = await createProject(name, project.id);
+    persistedRef.current = true;
+    onProjectChange?.({ ...saved, transient: false });
+    return saved;
+  }
 
   const hasApp = !!tree;
   const mode = hasApp ? "iterate" : "build";
@@ -185,12 +194,16 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     // Name a new project from its first prompt AT BUILD START — so a build that finishes while the
     // user has navigated away (a detached background job) still lands with a real name instead of
     // staying "Untitled app" (the completion handler only has a status label, not the prompt).
-    if (effectiveMode === "build" && prompt && (!project.name || project.name === "Untitled app")) {
-      renameProject(project.id, deriveName(prompt))
-        .then((saved) => onProjectChange?.({ ...project, ...saved }))
-        .catch(() => {});
-    }
     try {
+      // A New app is local-only until the first meaningful action. Planning also persists because
+      // the detached server job must be tied to an owner-scoped project row.
+      const firstName = effectiveMode === "build" && prompt ? deriveName(prompt) : (project.name || "Untitled app");
+      await ensurePersisted(firstName);
+      if (!project.transient && effectiveMode === "build" && prompt && (!project.name || project.name === "Untitled app")) {
+        renameProject(project.id, firstName)
+          .then((saved) => onProjectChange?.({ ...project, ...saved }))
+          .catch(() => {});
+      }
       const { jobId } = await createBuild({
         projectId: project.id, prompt: fixBuild ? undefined : scopedPrompt, mode: effectiveMode,
         tree: effectiveMode === "iterate" ? tree : undefined,
@@ -326,6 +339,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     setEditingName(false);
     if (!name || name === project.name) { setNameDraft(project.name || ""); return; }
     try {
+      if (project.transient) {
+        await ensurePersisted(name);
+        return;
+      }
       const saved = await renameProject(project.id, name);
       onProjectChange?.({ ...project, ...saved });
     } catch (e) {
@@ -634,7 +651,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
               <div className="flex items-center gap-2">
                 <button className="btn-ghost text-xs" onClick={() => setShowKnowledge(false)}>Close</button>
                 <button className="btn-primary text-xs px-3 py-1" onClick={async () => {
-                  try { await saveKnowledge(project.id, knowledge.trim() || null); setKnowledgeMsg("Saved ✓"); }
+                  try {
+                    await ensurePersisted();
+                    await saveKnowledge(project.id, knowledge.trim() || null);
+                    setKnowledgeMsg("Saved ✓");
+                  }
                   catch (e) { setKnowledgeMsg(e.message || String(e)); }
                 }}>Save</button>
               </div>

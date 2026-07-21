@@ -8,8 +8,9 @@ import { billing, ledger } from "../lib/services.mjs";
 import { optionalEnv } from "../lib/env.mjs";
 import { ensureWelcomeGrant } from "../lib/welcome.mjs";
 
-function appUrls(body) {
-  const base = body?.appUrl || optionalEnv("APP_URL", "http://localhost:5173");
+function appUrls() {
+  // Never trust a checkout return URL from the browser; that would turn this into an open redirect.
+  const base = optionalEnv("APP_URL", "http://localhost:5173").replace(/\/$/, "");
   return {
     successUrl: `${base}/?billing=success`,
     cancelUrl: `${base}/?billing=cancel`,
@@ -17,7 +18,7 @@ function appUrls(body) {
 }
 
 export async function handleCheckout(req, res, body, owner) {
-  const { successUrl, cancelUrl } = appUrls(body);
+  const { successUrl, cancelUrl } = appUrls();
   try {
     const b = billing();
     let session;
@@ -34,8 +35,9 @@ export async function handleCheckout(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ url: session.url, id: session.id }));
   } catch (e) {
+    console.error(`[billing:checkout] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "Checkout could not be started. Please try again." }));
   }
 }
 
@@ -46,8 +48,9 @@ export async function handleSubscription(req, res, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(status));
   } catch (e) {
+    console.error(`[billing:subscription] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "Subscription details are temporarily unavailable." }));
   }
 }
 
@@ -59,8 +62,9 @@ export async function handleSwitch(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
   } catch (e) {
+    console.error(`[billing:switch] ${e?.stack || e}`);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "The plan could not be changed. Please check the plan and try again." }));
   }
 }
 
@@ -71,8 +75,9 @@ export async function handleCancel(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
   } catch (e) {
+    console.error(`[billing:cancel] ${e?.stack || e}`);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "The subscription could not be updated. Please try again." }));
   }
 }
 
@@ -84,7 +89,8 @@ export async function handleBalance(req, res, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ balance: bal, tier: ent?.tier ?? null }));
   } catch (e) {
+    console.error(`[billing:balance] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "Your balance is temporarily unavailable." }));
   }
 }

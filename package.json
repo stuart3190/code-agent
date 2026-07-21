@@ -11,11 +11,19 @@
     "test:ledger": "node harness/_ledger-tests.mjs",
     "test:export": "node shell/harness/_export-tests.mjs",
     "test:static-security": "node shell/harness/_static-path-tests.mjs",
+    "test:http-security": "node shell/harness/_http-security-tests.mjs",
+    "test:backup-validation": "node harness/_backup-validation-tests.mjs",
+    "test:draft-project": "node harness/_draft-project-tests.mjs",
+    "test:ownership": "node shell/harness/_ownership-tests.mjs",
+    "test:billing-limits": "node harness/_billing-limit-tests.mjs",
+    "test:e2e": "npm --prefix shell/web run build && playwright test",
+    "backup:validate": "node scripts/validate-backup.mjs",
     "test:design": "node harness/_design-profile-tests.mjs",
     "prove:billing": "node harness/proveBilling.mjs",
     "prove:jobs": "node shell/harness/prove-jobs.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@supabase/supabase-js": "^2.45.4",
     "stripe": "^17.0.0"
   }

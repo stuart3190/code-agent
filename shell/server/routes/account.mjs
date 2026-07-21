@@ -62,6 +62,7 @@ export async function handleAccountDelete(req, res, body, owner) {
 
     send(res, 200, { deleted: true, ...summary });
   } catch (e) {
-    send(res, 500, { error: e.message });
+    console.error(`[account-delete] ${e?.stack || e}`);
+    send(res, 500, { error: "The account could not be deleted. Please contact support." });
   }
 }

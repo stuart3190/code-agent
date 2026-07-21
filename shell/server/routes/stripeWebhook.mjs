@@ -14,15 +14,17 @@ export async function handleWebhook(req, res, rawBody) {
   try {
     event = stripe().webhooks.constructEvent(rawBody, sig, requireEnv("STRIPE_WEBHOOK_SECRET"));
   } catch (e) {
+    console.error(`[stripe-webhook:signature] ${e?.message || e}`);
     res.writeHead(400, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: `signature verification failed: ${e.message}` }));
+    return res.end(JSON.stringify({ error: "signature verification failed" }));
   }
   try {
     const result = await billing().handleStripeEvent(event);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
   } catch (e) {
+    console.error(`[stripe-webhook:handler] ${e?.stack || e}`);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: "webhook processing failed" }));
   }
 }
