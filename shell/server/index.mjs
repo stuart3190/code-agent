@@ -16,6 +16,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
+import { resolveStaticPath } from "./lib/staticPath.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv } from "./lib/supabase.mjs";
 import { haveStripeEnv } from "./lib/services.mjs";
 import { handleGenerate } from "./routes/generate.mjs";
@@ -87,9 +88,13 @@ function publicConfig() {
 
 async function serveStatic(req, res) {
   // Only used in prod (after `vite build`). In dev the UI is served by Vite on :5173.
-  let rel = decodeURIComponent(new URL(req.url, "http://x").pathname);
+  let rel = new URL(req.url, "http://x").pathname;
   if (rel === "/" || rel === "") rel = "/index.html";
-  let file = path.join(WEB_DIST, rel);
+  let file = resolveStaticPath(WEB_DIST, rel);
+  if (!file) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Not found");
+  }
   try {
     const s = await stat(file);
     if (s.isDirectory()) file = path.join(file, "index.html");
