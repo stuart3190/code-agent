@@ -139,6 +139,32 @@ export async function deletePaymentProduct(projectId, productId) {
   return savePaymentProduct(projectId, { productId, delete: true });
 }
 
+export async function getBrandOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/brand?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `brand settings ${r.status}`);
+  return out;
+}
+
+export async function applyProjectBrand(projectId, config, options = {}) {
+  const r = await fetch("/api/projects/brand", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, config, ...options }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `brand apply ${r.status}`);
+  return out;
+}
+
+export async function deleteBrandKit(kitId) {
+  const r = await fetch("/api/brand-kits/delete", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ kitId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `brand delete ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

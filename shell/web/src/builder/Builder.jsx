@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -56,6 +56,14 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [paymentData, setPaymentData] = useState(null);
   const [paymentError, setPaymentError] = useState("");
   const [productDraft, setProductDraft] = useState({ name: "", description: "", currency: "gbp", price: "" });
+  const [showBrand, setShowBrand] = useState(false);
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandData, setBrandData] = useState(null);
+  const [brandError, setBrandError] = useState("");
+  const [brandKitName, setBrandKitName] = useState("");
+  const [brandDraft, setBrandDraft] = useState({
+    primary: "#7c3aed", accent: "#f59e0b", background: "#0f172a", surface: "#1e293b", text: "#f8fafc", font: "modern", radius: 12,
+  });
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -409,6 +417,39 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     finally { setPaymentBusy(false); }
   }
 
+  async function openBrandEditor() {
+    setShowBrand(true);
+    setBrandBusy(true);
+    setBrandError("");
+    try {
+      const overview = await getBrandOverview(project.id);
+      setBrandData(overview);
+      setBrandDraft((value) => ({ ...value, ...(overview.current?.config || {}) }));
+    } catch (error) { setBrandError(error.message || String(error)); }
+    finally { setBrandBusy(false); }
+  }
+
+  async function saveBrand(config = brandDraft, options = {}) {
+    setBrandBusy(true);
+    setBrandError("");
+    try {
+      const result = await applyProjectBrand(project.id, config, {
+        ...options,
+        kitName: options.brandKitId ? undefined : brandKitName.trim() || undefined,
+      });
+      setTree(result.tree);
+      setBrandDraft(result.config);
+      setBrandKitName("");
+      onProjectChange?.({ ...project, tree: result.tree });
+      const preview = await startPreview({ projectId: project.id, tree: result.tree }).catch(() => null);
+      if (preview?.url) setPreviewUrl(preview.url);
+      else if (iframeRef.current) { try { iframeRef.current.contentWindow?.location.reload(); } catch {} }
+      setBrandData(await getBrandOverview(project.id));
+      setPublishMsg("Visual style applied with no credits used.");
+    } catch (error) { setBrandError(error.message || String(error)); }
+    finally { setBrandBusy(false); }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -654,6 +695,69 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showBrand && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[46rem] max-w-[96vw] max-h-[88vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">Visual style</div>
+                <div className="mt-1 text-xs text-slate-400">Change the app's brand tokens instantly. This does not use credits.</div>
+              </div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowBrand(false)} aria-label="Close visual style">✕</button>
+            </div>
+            {brandError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{brandError}</div>}
+            {brandBusy && !brandData ? <div className="mt-6 text-sm text-slate-400">Loading visual settings…</div> : (
+              <>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  {[["primary", "Primary"], ["accent", "Accent"], ["background", "Background"], ["surface", "Surface"], ["text", "Text"]].map(([key, label]) => (
+                    <label key={key} className="rounded-lg border border-line bg-ink-900 p-3 text-[11px] text-slate-400">
+                      <span>{label}</span>
+                      <input type="color" className="mt-2 block h-9 w-full cursor-pointer rounded border-0 bg-transparent" value={brandDraft[key]}
+                        onChange={(event) => setBrandDraft((value) => ({ ...value, [key]: event.target.value }))} />
+                      <span className="mt-1 block font-mono text-[10px]">{brandDraft[key]}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs text-slate-400">Typography
+                    <select className="input mt-1 w-full text-sm" value={brandDraft.font}
+                      onChange={(event) => setBrandDraft((value) => ({ ...value, font: event.target.value }))}>
+                      <option value="modern">Modern sans</option><option value="editorial">Editorial serif</option>
+                      <option value="friendly">Friendly rounded</option><option value="technical">Technical mono</option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-slate-400">Corner radius: {brandDraft.radius}px
+                    <input type="range" min="0" max="32" className="mt-3 w-full accent-amber" value={brandDraft.radius}
+                      onChange={(event) => setBrandDraft((value) => ({ ...value, radius: Number(event.target.value) }))} />
+                  </label>
+                </div>
+                <div className="mt-4 flex flex-wrap items-end gap-2">
+                  <label className="min-w-52 flex-1 text-xs text-slate-400">Save as reusable kit (optional)
+                    <input className="input mt-1 w-full text-sm" placeholder="e.g. Acme dark" value={brandKitName}
+                      onChange={(event) => setBrandKitName(event.target.value)} />
+                  </label>
+                  <button className="btn-primary px-4 py-2 text-xs" disabled={brandBusy} onClick={() => saveBrand()}>
+                    {brandBusy ? "Applying…" : "Apply style"}
+                  </button>
+                </div>
+                {!!brandData?.kits?.length && (
+                  <div className="mt-6">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Your brand kits</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {brandData.kits.map((kit) => (
+                        <button key={kit.id} className="btn-ghost text-xs flex items-center gap-2" disabled={brandBusy}
+                          onClick={() => saveBrand(kit.config, { brandKitId: kit.id })}>
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: kit.config.primary }} />{kit.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -712,6 +816,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={openPayments} disabled={!hasApp || busy}
               title={hasApp ? "Connect Stripe and manage app products" : "Generate an app before adding payments"}>
               Payments
+            </button>
+          )}
+          {featureAccess?.visual_editor?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openBrandEditor} disabled={!hasApp || busy}
+              title={hasApp ? "Change colours and type without spending credits" : "Generate an app before styling it"}>
+              Visual style
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

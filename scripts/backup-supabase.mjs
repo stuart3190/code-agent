@@ -35,6 +35,7 @@ const TABLES = [
   "project_releases", "background_tasks", "audit_events",
   "qa_runs",
   "payment_products", "payment_orders",
+  "brand_kits", "project_brand_settings",
 ];
 const PAGE = 1000;
 
