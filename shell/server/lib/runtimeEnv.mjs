@@ -13,6 +13,7 @@ import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
 export function withRuntimeEnv(tree, projectId) {
   const url = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
+  const platformUrl = (process.env.PUBLIC_URL || process.env.APP_URL || "https://buildr101.com").replace(/\/$/, "");
   if (!url || !anonKey) return tree; // unconfigured server -> fail-soft SDK message in the app
   return {
     ...tree,
@@ -29,7 +30,7 @@ export function withRuntimeEnv(tree, projectId) {
       `VITE_APP_ID=${projectId}`,
       // Per-app end-user auth (app-auth Edge Function): same email can register in many apps.
       `VITE_AUTH_URL=${url}/functions/v1/app-auth`,
-      `VITE_PAYMENTS_URL=${url}/functions/v1/app-payments`,
+      `VITE_PAYMENTS_URL=${platformUrl}/api/runtime/checkout`,
       `VITE_ACTIONS_URL=${url}/functions/v1/app-actions`,
       `VITE_ANALYTICS_URL=${url}/functions/v1/app-analytics`,
       "",

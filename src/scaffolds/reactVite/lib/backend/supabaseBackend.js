@@ -175,7 +175,7 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
       if (!session?.access_token) throw new Error("Sign in before starting checkout.");
       const response = await fetch(paymentsUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ appId, productId, successPath, cancelPath }),
       });
       const out = await response.json().catch(() => ({}));

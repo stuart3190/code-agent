@@ -49,6 +49,7 @@ import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { handleAnalytics } from "./routes/analytics.mjs";
 import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
 import { handleTemplateCreate, handleTemplateDelete, handleTemplateList, handleTemplateRemix } from "./routes/templates.mjs";
+import { handleRuntimeCheckout } from "./routes/runtimeCheckout.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -64,6 +65,18 @@ const CORS_ORIGINS = allowedOrigins(optionalEnv("APP_URL", "https://buildr101.co
 CORS_ORIGINS.add(`http://127.0.0.1:${PORT}`);
 CORS_ORIGINS.add(`http://localhost:${PORT}`);
 const consumeRate = createRateLimiter();
+
+function applyRuntimeCors(res, origin) {
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) return false;
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    return true;
+  } catch { return false; }
+}
 
 const readJson = async (req, limit = BODY_LIMITS.standard) => parseJson(await readBody(req, limit));
 
@@ -166,10 +179,11 @@ async function requireOwner(req, res) {
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   applySecurityHeaders(res);
-  const corsOk = applyCors(res, origin, CORS_ORIGINS);
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
   const method = req.method || "GET";
+  const runtimeCors = p === "/api/runtime/checkout";
+  const corsOk = runtimeCors ? applyRuntimeCors(res, origin) : applyCors(res, origin, CORS_ORIGINS);
 
   if (method === "OPTIONS") {
     res.writeHead(corsOk ? 204 : 403);
@@ -195,6 +209,10 @@ const server = http.createServer(async (req, res) => {
         stripe: haveStripeEnv(), byok: byokConfigured() });
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
+
+    if (p === "/api/runtime/checkout" && method === "POST") {
+      return handleRuntimeCheckout(req, res, await readJson(req), bearer(req), origin);
+    }
 
     if (p === "/api/stripe/webhook" && method === "POST") {
       const raw = await readBody(req, BODY_LIMITS.webhook);
