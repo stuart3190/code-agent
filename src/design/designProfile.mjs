@@ -171,7 +171,10 @@ JSON shape:
 Use the requested preset and custom notes as hard direction. Marketing/content sites and SaaS launch
 pages need authentic, product-relevant photography queries. SaaS must pair that imagery with a large,
 convincing interface mockup and a complete public launch page; its private dashboard comes after the
-marketing experience. Pure utilities and interactive tools can prioritise the product surface.`;
+marketing experience. Direct one coherent visual system across every route, workspace screen, form,
+modal and mobile navigation state. A premium landing page with generic inner screens is a failed
+design. Every SaaS workspace must retain a visible route back to its public site. Pure utilities and
+interactive tools can prioritise the product surface.`;
 
 export function parseDesignProfile(text, context = {}) {
   const raw = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -184,7 +187,10 @@ export function renderDesignBrief(profile, assets = []) {
     ? `\nAPPROVED PHOTOGRAPHY — use at least ${Math.min(3, assets.length)} DISTINCT URLs below in meaningful placements:\n${assets.map((p, i) => `${i + 1}. ${p.url} — ${p.alt || "contextual photo"}`).join("\n")}`
     : profile.imagery.required ? "\nPhotography was unavailable. Use the intentional type/vector-led fallback described by the caller; never invent URLs." : "";
   const productProof = profile.category === "saas"
-    ? `\n- First-page standard: create a premium public launch page with a visually dominant product UI mockup, meaningful photography, social proof, varied screenshot-led feature stories, conversion CTA and finished footer. Do not open on a raw dashboard or login form. Avoid flat solid-colour boxes, repeated identical cards and heavy outlines.`
+    ? `\n- First-page standard: create a premium public launch page with a visually dominant product UI mockup, meaningful photography, social proof, varied screenshot-led feature stories, conversion CTA and finished footer. Do not open on a raw dashboard or login form. Avoid flat solid-colour boxes, repeated identical cards and heavy outlines.
+- Whole-product standard: inventory every destination in the application navigation and art-direct every screen, form, table, calendar, modal and empty state using one shared shell, token system and component language. The inner app must be as considered as the public page.
+- Navigation continuity: the working app and auth surfaces must always include a clear visible route back to the public launch page; make the app-shell logo return home as well.
+- Responsive composition: large floating mockups and overlapping panels must be in normal document flow at 360px and only become absolute at a suitable responsive breakpoint.`
     : ["utility", "interactive"].includes(profile.category)
       ? `\n- First-view product proof: open on a substantial, usable core surface with realistic in-memory seed content and a clear visual idea. Keep sign-in secondary.`
       : "";
@@ -225,7 +231,7 @@ export function auditDesign(tree, { profile, assets = [], imageUnavailable = fal
   if (scaffoldDefaults.filter((v) => css.includes(v)).length >= 2) {
     issues.push("Replace the scaffold default palette/radius with the design brief's specific visual system.");
   }
-  if (!/(sm:|md:|lg:|xl:)/.test(app)) issues.push("Add explicit responsive layout behaviour for phone and desktop widths.");
+  if (!/(sm:|md:|lg:|xl:)/.test(authoredSource)) issues.push("Add explicit responsive layout behaviour for phone and desktop widths across every authored screen.");
   if (/images\.unsplash\.com|picsum\.photos|placehold\.co|placeholder\.com/i.test(source)) {
     issues.push("Remove invented or placeholder image hosts; use only approved returned image URLs.");
   }
@@ -246,6 +252,35 @@ export function auditDesign(tree, { profile, assets = [], imageUnavailable = fal
     const softDepth = (authoredSource.match(/\bshadow-(?:md|lg|xl|2xl|\[)/g) || []).length;
     if (thickBoxes >= 10 && softDepth < 3) {
       issues.push("Replace the repeated thick-outlined boxes with a premium mix of borderless sections, tonal layers, image-led moments and selective soft depth.");
+    }
+  }
+  if (profile.category === "saas") {
+    const landing = String(tree?.["src/components/LandingPage.jsx"] || tree?.["src/pages/LandingPage.jsx"] || "");
+    const shell = String(tree?.["src/components/Layout.jsx"] || tree?.["src/components/AppShell.jsx"] || tree?.["src/layouts/AppLayout.jsx"] || "");
+    if (landing && shell && !/(onHome|onLanding|onBackToSite|onReturnToSite|back to (?:site|home|launch)|return to (?:site|home|launch))/i.test(shell)) {
+      issues.push("Keep a persistent, visible route from the application shell back to the public launch page, including a home action on the brand/logo.");
+    }
+
+    const riskyMobileOverlay = [...authoredSource.matchAll(/className=(?:\{|)?["'`]([^"'`]{0,700})["'`]/g)]
+      .map((match) => match[1])
+      .some((classes) => /(?:^|\s)absolute(?:\s|$)/.test(classes)
+        && /(?:^|\s)(?:w-\[(?:6[5-9]|[7-9]\d|100)%\]|inset-x-\d|left-\d|right-\d)/.test(classes)
+        && !/(?:^|\s)(?:sm|md|lg):absolute(?:\s|$)/.test(classes)
+        && !/(?:^|\s)(?:max-sm:static|sm:static|sm:relative|md:static|md:relative|lg:static|lg:relative)(?:\s|$)/.test(classes));
+    if (riskyMobileOverlay) {
+      issues.push("Move large floating or overlapping panels into normal document flow at phone width, then introduce absolute positioning only at a responsive breakpoint.");
+    }
+
+    const screenEntries = Object.entries(tree || {}).filter(([path, value]) =>
+      /^src\/(?:components|pages)\/.+\.(?:jsx|tsx)$/.test(path)
+      && !/(?:LandingPage|Layout|AppShell|AuthScreen)\.(?:jsx|tsx)$/.test(path)
+      && typeof value === "string"
+      && /(Dashboard|Board|Calendar|Invoice|Earning|Setting|Workspace|Page|Screen)/i.test(path));
+    if (screenEntries.length >= 2) {
+      const responsiveScreens = screenEntries.filter(([, value]) => /(?:sm:|md:|lg:|xl:|overflow-x-auto)/.test(value)).length;
+      if (responsiveScreens < Math.ceil(screenEntries.length * 0.7)) {
+        issues.push(`Apply deliberate phone and desktop compositions across the inner application screens (${responsiveScreens}/${screenEntries.length} currently contain responsive layout treatment).`);
+      }
     }
   }
   return { ok: issues.length === 0, issues, warnings };

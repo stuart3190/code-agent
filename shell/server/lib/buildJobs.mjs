@@ -528,7 +528,7 @@ async function runJob(job) {
       ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
       : prompt);
     if (redesign === true) {
-      enginePrompt = `This is an explicit full visual redesign. Preserve every working feature, route, data flow, form, and important piece of content while comprehensively replacing the visual system and composition.\n\n${enginePrompt}`;
+      enginePrompt = `This is an explicit full-product frontend redesign. Preserve every working feature, route, data flow, form, and important piece of content while comprehensively replacing the visual system and composition. Read the shared shell and EVERY reachable screen component before editing. Apply one premium design language to the public page, dashboard, navigation destinations, forms, tables, calendars, modals, empty states and mobile menu. Keep an obvious route back to the public site from the app. At 360px, large mockups and floating panels must return to normal document flow and nothing may collide, clip or overlap unintentionally. Do not stop after making the landing page attractive.\n\n${enginePrompt}`;
     }
 
     const initial = await runAgent({

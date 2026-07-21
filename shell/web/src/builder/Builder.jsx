@@ -1738,10 +1738,10 @@ const PHASE_LABELS = {
   queued: "Waiting for a build slot",
   preparing: "Getting things ready",
   planning: "Drafting the plan",
-  designing: "Directing a unique visual concept",
+  designing: "Frontend designer mapping every screen",
   building: "Building your app",
-  "quality-checking": "Checking premium design quality",
-  polishing: "Polishing the visual details",
+  "quality-checking": "Checking every screen and mobile layout",
+  polishing: "Polishing the complete frontend system",
   finalizing: "Finishing up — compiling and starting the preview",
 };
 

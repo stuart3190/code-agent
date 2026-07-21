@@ -92,6 +92,16 @@ export async function runQaBrowser({ previewUrl, runId, artifactRoot = process.e
             title: document.title,
             horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 2,
             brokenImages: [...document.images].filter((img) => img.complete && img.naturalWidth === 0).map((img) => img.currentSrc || img.src).slice(0, 10),
+            largeAbsolutePanels: [...document.querySelectorAll("body *")].filter((el) => {
+              const style = getComputedStyle(el);
+              if (style.position !== "absolute" || style.display === "none" || style.visibility === "hidden") return false;
+              const rect = el.getBoundingClientRect();
+              const meaningfulContent = String(el.textContent || "").trim().length >= 12 || !!el.querySelector("button,input,select,textarea,a[href]");
+              return meaningfulContent && rect.width > window.innerWidth * 0.65 && rect.height > window.innerHeight * 0.25;
+            }).map((el) => ({
+              tag: el.tagName.toLowerCase(),
+              text: String(el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+            })).slice(0, 5),
             unlabeledControls: [...document.querySelectorAll("button,input,select,textarea,a[href]")]
               .filter((el) => {
                 if (el.matches('input[type="hidden"]')) return false;
@@ -103,6 +113,12 @@ export async function runQaBrowser({ previewUrl, runId, artifactRoot = process.e
           const pathname = new URL(routeUrl).pathname;
           checks.push({ viewport: viewport.name, url: pathname, ok: true, status: response?.status() || null, title: audit.title });
           if (audit.horizontalOverflow) uniqueIssue(issues, { viewport: viewport.name, url: pathname, type: "horizontal_overflow", severity: "warning", message: "Page is wider than the viewport." });
+          if (viewport.name === "mobile" && audit.largeAbsolutePanels.length) {
+            uniqueIssue(issues, {
+              viewport: viewport.name, url: pathname, type: "mobile_content_overlap", severity: "warning",
+              message: `${audit.largeAbsolutePanels.length} large panel(s) remain absolutely positioned at phone width and can collide with nearby content. Return them to normal document flow below the responsive breakpoint.`,
+            });
+          }
           for (const image of audit.brokenImages) uniqueIssue(issues, { viewport: viewport.name, url: pathname, type: "broken_image", severity: "warning", message: image.slice(0, 500) });
           if (audit.unlabeledControls) uniqueIssue(issues, { viewport: viewport.name, url: pathname, type: "accessibility", severity: "warning", message: `${audit.unlabeledControls} interactive control(s) have no accessible name.` });
 

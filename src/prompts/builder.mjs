@@ -80,6 +80,17 @@ Design (defaults for when the user does not specify a style — a stated style A
   appropriate. Every major section needs its own composition; never repeat the same bordered card
   three or four times and call it a design. Avoid the "school project" look of thick outlines around
   every rectangle, raw icon-and-text grids, empty colour panels and huge unused areas.
+- WHOLE-PRODUCT FRONTEND DESIGN — the art direction applies to EVERY user-visible screen, route,
+  modal, empty state and responsive navigation state, not only the public landing page. Before you
+  finish, inventory every destination reachable from the primary navigation and give each one a
+  deliberate composition, hierarchy, responsive behaviour and the same design-token system. Do not
+  leave inner dashboards, tables, calendars, forms or settings looking like scaffold defaults after
+  making the first page premium. Prefer a shared application shell and reusable screen patterns so
+  the public site and working product feel authored by one frontend designer.
+- PUBLIC/PRODUCT CONTINUITY — when a SaaS app moves from its public launch page into a demo,
+  workspace or auth screen, keep a clear, persistent way back to the public site. The brand/logo in
+  the app shell should return home and the navigation should expose an explicit "Website", "Home"
+  or "Back to site" action. Entering the product must never be a one-way transition.
 - The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,
   --foreground, --card, --primary, --secondary, --muted, --accent, --destructive, --border, --ring,
   --radius) wired into Tailwind. Style with those utilities — bg-background, text-foreground,
@@ -127,6 +138,10 @@ Design (defaults for when the user does not specify a style — a stated style A
   responsive prefixes (grid-cols-1 sm:grid-cols-2 …, flex-col sm:flex-row); size images with
   max-w-full/w-full; put wide content (tables, code, charts) inside an overflow-x-auto container so
   IT scrolls rather than the page. Build and mentally test at phone width first, then scale up.
+- Large product mockups, floating cards and overlapping editorial panels MUST return to normal
+  document flow on phones. Never keep a large panel absolutely positioned at 360px; use a base
+  relative/static layout and introduce absolute positioning only at an appropriate sm/md/lg
+  breakpoint. Intentional desktop overlap is not permission for mobile content collision.
 - Decorative background elements are the #1 cause of mobile right-edge cutoff: any element
   positioned partly OFF-SCREEN (negative insets like right-[-10rem], -left-40, translated blobs,
   glows, grids) MUST live inside a container that CLIPS it — put overflow-hidden on that decorative
@@ -207,6 +222,9 @@ Rules:
   existing features and behaviour.
 - Preserve the app's existing visual system — its CSS-variable palette, type scale, and spacing
   rhythm — unless the change explicitly asks to restyle.
+- A visual redesign applies to every reachable screen and state, not just the landing page. Inspect
+  and restyle the shared shell plus every page component, preserve a visible route back to the public
+  site, and make large overlapping panels return to document flow below their responsive breakpoint.
 - Always write COMPLETE file contents, never partial snippets or "...".
 - Use only the dependencies already in package.json. Do not add packages.
 - When the change is done and the app still works, STOP calling tools and reply with a one-paragraph

@@ -92,6 +92,24 @@ check("audit rejects a flat school-project SaaS made from thick boxes", () => {
   assert.ok(audit.issues.some((issue) => issue.includes("thick-outlined boxes")));
 });
 
+check("audit rejects one-way SaaS shells and desktop overlays left active on phones", () => {
+  const profile = fallbackDesignProfile({ prompt: "creator SaaS dashboard", projectId: "whole-product" });
+  const assets = [1, 2, 3].map((n) => ({ url: `https://cdn.example/creator-${n}.jpg` }));
+  const tree = {
+    "src/main.jsx": `import "${profile.typography.bodyPackage}";\nimport "${profile.typography.displayPackage}";`,
+    "src/index.css": `:root { --font-sans: "${profile.typography.bodyFamily}"; --font-display: "${profile.typography.displayFamily}"; }`,
+    "src/App.jsx": `<main className="relative overflow-hidden shadow-xl md:grid">${assets.map((a) => `<img className="object-cover transition-transform" src="${a.url}" />`).join("")}<LandingPage /><Layout /></main>`,
+    "src/components/LandingPage.jsx": `<section className="relative md:grid"><div className="absolute w-[84%] shadow-2xl">product</div></section>`,
+    "src/components/Layout.jsx": `<aside className="md:block">Workspace navigation</aside>`,
+    "src/components/Dashboard.jsx": `<main className="p-4">Dashboard</main>`,
+    "src/components/Invoices.jsx": `<main className="p-4">Invoices</main>`,
+  };
+  const audit = auditDesign(tree, { profile, assets });
+  assert.ok(audit.issues.some((issue) => issue.includes("back to the public launch page")));
+  assert.ok(audit.issues.some((issue) => issue.includes("normal document flow")));
+  assert.ok(audit.issues.some((issue) => issue.includes("inner application screens")));
+});
+
 await ensureDeps(() => {});
 const fontTree = clone(fromScaffold(REACT_VITE));
 fontTree["src/main.jsx"] = fontTree["src/main.jsx"].replace(

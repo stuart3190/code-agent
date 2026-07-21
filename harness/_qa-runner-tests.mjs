@@ -36,11 +36,12 @@ const server = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html" });
   res.end(`<!doctype html>
     <title>QA fixture</title>
-    <style>.too-wide { width: 1600px; }</style>
+    <style>.too-wide { width: 1600px; } .mobile-overlay { position:absolute; width:80vw; height:40vh; }</style>
     <a href="/second">Second</a>
     <button></button>
     <img src="/missing.png" alt="missing fixture">
     <div class="too-wide">wide</div>
+    <div class="mobile-overlay">large floating product panel</div>
     <script>setTimeout(() => { throw new Error("fixture runtime failure") }, 20)</script>`);
 });
 
@@ -61,6 +62,7 @@ try {
   assert.ok(report.issues.some((issue) => issue.type === "broken_image"), "broken images should be reported");
   assert.ok(report.issues.some((issue) => issue.type === "accessibility"), "unlabelled controls should be reported");
   assert.ok(report.issues.some((issue) => issue.type === "horizontal_overflow"), "overflow should be reported");
+  assert.ok(report.issues.some((issue) => issue.type === "mobile_content_overlap"), "large mobile overlays should be reported");
   assert.ok(report.screenshots.length >= 2, "screenshots should be captured");
   assert.match(report.fixPrompt, /fixture runtime failure/);
   const screenshot = await readFile(path.join(artifactRoot, "fixture-run", report.screenshots[0].file));
