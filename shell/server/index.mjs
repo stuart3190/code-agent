@@ -42,6 +42,7 @@ import { sweepQaRuns } from "./lib/qaRuns.mjs";
 import { handlePaymentOverview, handlePaymentProducts, handleStripeOnboarding } from "./routes/saasPayments.mjs";
 import { handleConnectWebhook } from "./routes/connectWebhook.mjs";
 import { handleBrandApply, handleBrandDelete, handleBrandOverview } from "./routes/visualBrand.mjs";
+import { handleConsoleRecordDelete, handleConsoleUser, handleOwnerConsole } from "./routes/ownerConsole.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -243,6 +244,18 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/brand-kits/delete" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleBrandDelete(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/owner-console" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleOwnerConsole(req, res, url, owner);
+    }
+    if (p === "/api/projects/owner-console/user" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConsoleUser(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/owner-console/record" && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConsoleRecordDelete(req, res, await readJson(req), owner);
     }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

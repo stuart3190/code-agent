@@ -21,6 +21,7 @@
     "test:qa-runner": "node harness/_qa-runner-tests.mjs",
     "test:saas-payments": "node harness/_saas-payments-tests.mjs",
     "test:visual-brand": "node harness/_visual-brand-tests.mjs",
+    "test:owner-console": "node harness/_owner-console-tests.mjs",
     "test:e2e": "npm --prefix shell/web run build && playwright test",
     "backup:validate": "node scripts/validate-backup.mjs",
     "test:design": "node harness/_design-profile-tests.mjs",

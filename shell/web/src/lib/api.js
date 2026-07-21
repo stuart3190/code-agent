@@ -165,6 +165,32 @@ export async function deleteBrandKit(kitId) {
   return out;
 }
 
+export async function getOwnerConsole(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/owner-console?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `owner console ${r.status}`);
+  return out;
+}
+
+export async function setConsoleUserStatus(projectId, userId, status) {
+  const r = await fetch("/api/projects/owner-console/user", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, userId, status }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `app user ${r.status}`);
+  return out.user;
+}
+
+export async function deleteConsoleRecord(projectId, recordId) {
+  const r = await fetch("/api/projects/owner-console/record", {
+    method: "DELETE", headers: await authHeaders(), body: JSON.stringify({ projectId, recordId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `app record ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

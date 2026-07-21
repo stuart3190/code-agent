@@ -140,7 +140,7 @@ Deno.serve(async (req: Request) => {
     await logEvent("reset", ip, appId);
 
     const { data: target } = await svc
-      .from("app_users").select("auth_user_id").eq("app_id", appId).eq("email", email).maybeSingle();
+      .from("app_users").select("auth_user_id").eq("app_id", appId).eq("email", email).eq("status", "active").maybeSingle();
     if (target) {
       const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
       // A new request invalidates any outstanding unused codes for this account.
@@ -175,7 +175,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const { data: target } = await svc
-      .from("app_users").select("auth_user_id").eq("app_id", appId).eq("email", email).maybeSingle();
+      .from("app_users").select("auth_user_id").eq("app_id", appId).eq("email", email).eq("status", "active").maybeSingle();
     if (!target) return json(400, { error: "Invalid or expired code." });
 
     const { error: updErr } = await svc.auth.admin.updateUserById(target.auth_user_id, { password: newPassword });
@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
 
   const synth = await syntheticEmail(appId, email);
   const { data: existing, error: lookupErr } = await svc
-    .from("app_users").select("id, auth_user_id").eq("app_id", appId).eq("email", email).maybeSingle();
+    .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
   if (lookupErr) return json(500, { error: `lookup failed: ${lookupErr.message}` });
 
   if (action === "signup") {
@@ -232,6 +232,8 @@ Deno.serve(async (req: Request) => {
     await logEvent("signup", ip, appId);
   } else if (!existing) {
     return json(401, { error: "Invalid email or password." });
+  } else if (existing.status !== "active") {
+    return json(403, { error: "This account has been disabled by the app owner." });
   }
 
   // Both paths end in a REAL password sign-in against the synthetic address -> native session.

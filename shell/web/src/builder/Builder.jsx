@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -64,6 +64,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [brandDraft, setBrandDraft] = useState({
     primary: "#7c3aed", accent: "#f59e0b", background: "#0f172a", surface: "#1e293b", text: "#f8fafc", font: "modern", radius: 12,
   });
+  const [showConsole, setShowConsole] = useState(false);
+  const [consoleBusy, setConsoleBusy] = useState(false);
+  const [consoleData, setConsoleData] = useState(null);
+  const [consoleError, setConsoleError] = useState("");
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -450,6 +454,36 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     finally { setBrandBusy(false); }
   }
 
+  async function refreshOwnerConsole(open = false) {
+    if (open) setShowConsole(true);
+    setConsoleBusy(true);
+    setConsoleError("");
+    try { setConsoleData(await getOwnerConsole(project.id)); }
+    catch (error) { setConsoleError(error.message || String(error)); }
+    finally { setConsoleBusy(false); }
+  }
+
+  async function toggleAppUser(user) {
+    setConsoleBusy(true);
+    setConsoleError("");
+    try {
+      await setConsoleUserStatus(project.id, user.id, user.status === "active" ? "disabled" : "active");
+      setConsoleData(await getOwnerConsole(project.id));
+    } catch (error) { setConsoleError(error.message || String(error)); }
+    finally { setConsoleBusy(false); }
+  }
+
+  async function removeAppRecord(record) {
+    if (!window.confirm(`Delete this ${record.type} record? This cannot be undone.`)) return;
+    setConsoleBusy(true);
+    setConsoleError("");
+    try {
+      await deleteConsoleRecord(project.id, record.id);
+      setConsoleData(await getOwnerConsole(project.id));
+    } catch (error) { setConsoleError(error.message || String(error)); }
+    finally { setConsoleBusy(false); }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -758,6 +792,76 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showConsole && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[58rem] max-w-[96vw] max-h-[90vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">App owner console</div>
+                <div className="mt-1 text-xs text-slate-400">Users, data and payments for this app.</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="btn-ghost text-xs" onClick={() => refreshOwnerConsole()} disabled={consoleBusy}>Refresh</button>
+                <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowConsole(false)} aria-label="Close owner console">✕</button>
+              </div>
+            </div>
+            {consoleError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{consoleError}</div>}
+            {consoleBusy && !consoleData ? <div className="mt-6 text-sm text-slate-400">Loading app data…</div> : consoleData && (
+              <>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[["Users", consoleData.stats.users], ["Active", consoleData.stats.activeUsers], ["Records", consoleData.stats.records], ["Paid orders", consoleData.stats.paidOrders]].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-line bg-ink-900 p-3">
+                      <div className="text-2xl font-semibold text-slate-100">{value}</div>
+                      <div className="text-[11px] uppercase tracking-wider text-slate-500">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                {!!Object.keys(consoleData.stats.revenueByCurrency).length && (
+                  <div className="mt-3 text-sm text-emerald-400">
+                    Paid revenue: {Object.entries(consoleData.stats.revenueByCurrency).map(([currency, amount]) => `${currency.toUpperCase()} ${(amount / 100).toFixed(2)}`).join(" · ")}
+                  </div>
+                )}
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                  <section>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">App users</div>
+                    <div className="mt-2 max-h-72 space-y-2 overflow-auto">
+                      {!consoleData.users.length && <div className="text-sm text-slate-500">No users have signed up yet.</div>}
+                      {consoleData.users.map((user) => (
+                        <div key={user.id} className="flex items-center gap-3 rounded-lg border border-line bg-ink-900/70 px-3 py-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-slate-200">{user.email}</div>
+                            <div className="text-[10px] text-slate-500">Joined {new Date(user.created_at).toLocaleDateString()}</div>
+                          </div>
+                          <span className={`tag ${user.status === "active" ? "text-emerald-400" : "text-red-300"}`}>{user.status}</span>
+                          <button className="btn-ghost text-xs" disabled={consoleBusy} onClick={() => toggleAppUser(user)}>
+                            {user.status === "active" ? "Disable" : "Enable"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                  <section>
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Recent data</div>
+                    <div className="mt-2 max-h-72 space-y-2 overflow-auto">
+                      {!consoleData.records.length && <div className="text-sm text-slate-500">No app records yet.</div>}
+                      {consoleData.records.slice(0, 50).map((record) => (
+                        <div key={record.id} className="rounded-lg border border-line bg-ink-900/70 px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="tag text-amber-soft">{record.type}</span>
+                            <span className="ml-auto text-[10px] text-slate-500">{new Date(record.created_at).toLocaleString()}</span>
+                            <button className="text-xs text-red-300 hover:text-red-200" disabled={consoleBusy} onClick={() => removeAppRecord(record)}>Delete</button>
+                          </div>
+                          <pre className="mt-2 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-slate-400">{JSON.stringify(record.data)}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -822,6 +926,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={openBrandEditor} disabled={!hasApp || busy}
               title={hasApp ? "Change colours and type without spending credits" : "Generate an app before styling it"}>
               Visual style
+            </button>
+          )}
+          {featureAccess?.owner_console?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={() => refreshOwnerConsole(true)} disabled={!hasApp || busy}
+              title={hasApp ? "Manage this app's users and data" : "Generate an app before opening its console"}>
+              Console
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}
