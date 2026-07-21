@@ -445,8 +445,18 @@ async function runJob(job) {
       serverLog(job, `engine: plan on model ${provider.model} — plan-only pass, no build${byok ? " · BYOK" : ""}`);
       setPhase(job, "planning");
 
+      let planSystemPrompt = PLAN_SYSTEM_PROMPT;
+      try {
+        const capabilityContext = await connectorToolsForProject(owner.id, projectId);
+        if (capabilityContext.manifest?.length) {
+          planSystemPrompt = `${planSystemPrompt}\n\nAVAILABLE SERVER ACTIONS FOR THIS APP:\n${JSON.stringify(capabilityContext.manifest, null, 2)}\nPlan only with these exact action keys and input/output schemas. Do not invent provider calls, credentials, or unavailable backend features.`;
+        }
+      } catch (error) {
+        serverLog(job, `capabilities: plan context unavailable (${error.message})`);
+      }
+
       const { telemetry, finalText } = await runAgent({
-        provider, systemPrompt: PLAN_SYSTEM_PROMPT, tools: [], toolImpls: {},
+        provider, systemPrompt: planSystemPrompt, tools: [], toolImpls: {},
         tree: {}, prompt: withKnowledge(prompt), log, onUsage,
       });
       if (job.cancelled) throw new CancelledError();
