@@ -8,6 +8,8 @@ test("landing page is usable without horizontal overflow", async ({ page }) => {
   await expect(page).toHaveTitle(/Buildr101/i);
   await expect(page.getByRole("heading", { name: /Describe an app/i }), browserErrors.join("\n")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByText(/Supabase not configured/i)).toHaveCount(0);
+  await expect(page.locator("form").getByRole("button", { name: "Start building free" })).toBeEnabled();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
