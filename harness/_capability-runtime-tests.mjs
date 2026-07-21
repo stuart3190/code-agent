@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { auditCapabilityTree } from "../shell/server/lib/capabilityAudit.mjs";
-import { safeRuntimeFetch } from "../shell/server/lib/capabilityRuntime.mjs";
+import { openAiCostGbp, safeRuntimeFetch } from "../shell/server/lib/capabilityRuntime.mjs";
 import { CAPABILITY_PRESETS } from "../shell/server/lib/capabilities.mjs";
 
 const migration = await readFile(new URL("../supabase/migrations/20260721224922_capability_runtime.sql", import.meta.url), "utf8");
@@ -28,6 +28,8 @@ assert.equal(auditCapabilityTree({ "src/App.jsx": "fetch('https://api.openai.com
 assert.equal(auditCapabilityTree({ "src/config.js": "export const key = 'sk-proj-1234567890abcdef'" }).ok, false);
 await assert.rejects(() => safeRuntimeFetch("https://localhost/internal"), /public HTTPS/);
 await assert.rejects(() => safeRuntimeFetch("http://example.com"), /public HTTPS/);
+assert.equal(Number(openAiCostGbp({ input_tokens: 1_000_000, output_tokens: 0 }).toFixed(2)), 0.6);
+assert.equal(Number(openAiCostGbp({ input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 1_000_000 }, output_tokens: 0 }).toFixed(2)), 0.06);
 
 const sdk = await readFile(new URL("../src/scaffolds/reactVite/lib/backend/supabaseBackend.js", import.meta.url), "utf8");
 for (const surface of ["actions", "usage", "knowledge", "subscribe", "uploadMany", "createSignedUrl"]) assert.match(sdk, new RegExp(surface));

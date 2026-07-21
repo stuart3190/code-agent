@@ -33,6 +33,18 @@ function outputText(response) {
     .filter((item) => item?.type === "output_text").map((item) => item.text).join("\n");
 }
 
+export function openAiCostGbp(usage, config = {}) {
+  if (!usage) return 0;
+  const input = Math.max(0, Number(usage.input_tokens || usage.prompt_tokens || 0));
+  const cached = Math.min(input, Math.max(0, Number(usage.input_tokens_details?.cached_tokens || usage.prompt_tokens_details?.cached_tokens || 0)));
+  const output = Math.max(0, Number(usage.output_tokens || usage.completion_tokens || 0));
+  const inputUsd = Number(config.usd_per_million_input ?? 0.75);
+  const cachedUsd = Number(config.usd_per_million_cached_input ?? 0.075);
+  const outputUsd = Number(config.usd_per_million_output ?? 4.5);
+  const usdToGbp = Number(config.usd_to_gbp ?? 0.8);
+  return (((input - cached) * inputUsd + cached * cachedUsd + output * outputUsd) / 1_000_000) * usdToGbp;
+}
+
 function mapped(object, mapping) {
   if (!mapping || typeof mapping !== "object") return object;
   const result = {};
@@ -118,7 +130,9 @@ async function runOpenAI(action, job, client) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error?.message || `OpenAI embeddings failed (${response.status}).`);
-    return { output: { embedding: data.data?.[0]?.embedding || [], usage: data.usage || null }, usage: data.usage || null };
+    const providerCostGbp = openAiCostGbp(data.usage, { usd_per_million_input: 0.02, usd_per_million_cached_input: 0.02,
+      usd_per_million_output: 0, usd_to_gbp: config.usd_to_gbp ?? 0.8 });
+    return { output: { embedding: data.data?.[0]?.embedding || [], usage: data.usage || null }, usage: data.usage || null, providerCostGbp };
   }
   const content = [];
   const prompt = job.input.prompt || job.input.text || config.prompt || "";
@@ -154,7 +168,8 @@ async function runOpenAI(action, job, client) {
   if (action.operation === "structured") {
     try { result = JSON.parse(value); } catch { throw new Error("OpenAI returned an invalid structured result."); }
   }
-  return { output: { result, usage: data.usage || null }, usage: data.usage || null };
+  const providerCostGbp = openAiCostGbp(data.usage, config);
+  return { output: action.operation === "structured" ? result : { result, usage: data.usage || null }, usage: data.usage || null, providerCostGbp };
 }
 
 async function runReplicate(action, job, client) {
