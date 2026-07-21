@@ -40,4 +40,10 @@ assert.match(migration, /revoke all on table public\.project_secrets from anon, 
 assert.doesNotMatch(migration, /grant .*project_secrets.*authenticated/i);
 assert.match(migration, /grant select on table public\.project_releases to authenticated/i);
 
+const viteConfig = await readFile(new URL("../shell/web/vite.config.js", import.meta.url), "utf8");
+assert.match(viteConfig, /loadEnv\(mode, path\.resolve\(HERE, "\.\."\), ""\)/);
+assert.match(viteConfig, /shellEnv\.SUPABASE_URL/);
+assert.match(viteConfig, /shellEnv\.SUPABASE_ANON_KEY/);
+assert.doesNotMatch(viteConfig, /SUPABASE_SERVICE_ROLE_KEY/);
+
 console.log("platform foundations: pass");
