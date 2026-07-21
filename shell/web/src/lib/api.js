@@ -103,6 +103,42 @@ export async function openQaArtifact(runId, filename) {
   setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
+export async function getPaymentOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/payments?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `payments ${r.status}`);
+  return out;
+}
+
+export async function beginStripeOnboarding(projectId) {
+  const onboardingWindow = window.open("", "_blank");
+  const r = await fetch("/api/projects/payments/onboard", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json();
+  if (!r.ok) {
+    onboardingWindow?.close();
+    throw new Error(out.error || `Stripe onboarding ${r.status}`);
+  }
+  if (onboardingWindow) onboardingWindow.location.replace(out.url);
+  else window.location.assign(out.url);
+  return out;
+}
+
+export async function savePaymentProduct(projectId, product) {
+  const r = await fetch("/api/projects/payments/products", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...product }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `payment product ${r.status}`);
+  return out.product;
+}
+
+export async function deletePaymentProduct(projectId, productId) {
+  return savePaymentProduct(projectId, { productId, delete: true });
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

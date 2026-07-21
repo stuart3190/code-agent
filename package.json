@@ -19,6 +19,7 @@
     "test:instagram-publishing": "node harness/_instagram-publishing-tests.mjs",
     "test:foundations": "node harness/_foundation-tests.mjs",
     "test:qa-runner": "node harness/_qa-runner-tests.mjs",
+    "test:saas-payments": "node harness/_saas-payments-tests.mjs",
     "test:e2e": "npm --prefix shell/web run build && playwright test",
     "backup:validate": "node scripts/validate-backup.mjs",
     "test:design": "node harness/_design-profile-tests.mjs",

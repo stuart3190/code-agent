@@ -4,7 +4,7 @@
 // set in .env at materialization time) into the pure backend factory, then re-exports the
 // stable surface the app uses:
 //
-//   import { auth, db, storage } from "./lib/backend";
+//   import { auth, db, storage, payments } from "./lib/backend";
 //
 //   await auth.signUp({ email, password });   await auth.signIn({ email, password });
 //   await auth.currentUser();                  await auth.signOut();
@@ -34,6 +34,7 @@ function unconfigured() {
     auth: surface,
     db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }) },
     storage: { upload: fail, getUrl: fail },
+    payments: { checkout: fail },
     _client: null,
   };
 }
@@ -45,6 +46,7 @@ try {
     anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
     appId: import.meta.env.VITE_APP_ID || null,
     authUrl: import.meta.env.VITE_AUTH_URL || null,
+    paymentsUrl: import.meta.env.VITE_PAYMENTS_URL || null,
   });
 } catch {
   backend = unconfigured();
@@ -53,4 +55,5 @@ try {
 export const auth = backend.auth;
 export const db = backend.db;
 export const storage = backend.storage;
+export const payments = backend.payments;
 export default backend;

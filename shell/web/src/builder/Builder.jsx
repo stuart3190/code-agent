@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -51,6 +51,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [qaBusy, setQaBusy] = useState(false);
   const [qaRun, setQaRun] = useState(null);
   const [showQa, setShowQa] = useState(false);
+  const [showPayments, setShowPayments] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+  const [paymentError, setPaymentError] = useState("");
+  const [productDraft, setProductDraft] = useState({ name: "", description: "", currency: "gbp", price: "" });
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -360,6 +365,50 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     }
   }
 
+  async function openPayments() {
+    setShowPayments(true);
+    setPaymentBusy(true);
+    setPaymentError("");
+    try { setPaymentData(await getPaymentOverview(project.id)); }
+    catch (error) { setPaymentError(error.message || String(error)); }
+    finally { setPaymentBusy(false); }
+  }
+
+  async function connectStripe() {
+    setPaymentError("");
+    try { await beginStripeOnboarding(project.id); }
+    catch (error) { setPaymentError(error.message || String(error)); }
+  }
+
+  async function addPaymentProduct() {
+    const value = Number(productDraft.price);
+    if (!Number.isFinite(value) || value <= 0) return setPaymentError("Enter a valid price.");
+    setPaymentBusy(true);
+    setPaymentError("");
+    try {
+      await savePaymentProduct(project.id, {
+        name: productDraft.name,
+        description: productDraft.description,
+        currency: productDraft.currency,
+        unitAmount: Math.round(value * 100),
+      });
+      setProductDraft({ name: "", description: "", currency: "gbp", price: "" });
+      setPaymentData(await getPaymentOverview(project.id));
+    } catch (error) { setPaymentError(error.message || String(error)); }
+    finally { setPaymentBusy(false); }
+  }
+
+  async function removePaymentProduct(productId) {
+    if (!window.confirm("Delete this payment product? Existing order history will be kept.")) return;
+    setPaymentBusy(true);
+    setPaymentError("");
+    try {
+      await deletePaymentProduct(project.id, productId);
+      setPaymentData(await getPaymentOverview(project.id));
+    } catch (error) { setPaymentError(error.message || String(error)); }
+    finally { setPaymentBusy(false); }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -531,6 +580,80 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showPayments && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[48rem] max-w-[96vw] max-h-[88vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">App payments</div>
+                <div className="mt-1 text-xs text-slate-400">Connect Stripe, create fixed-price products, and use their IDs in your app.</div>
+              </div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowPayments(false)} aria-label="Close payments">✕</button>
+            </div>
+            {paymentBusy && !paymentData && <div className="mt-6 text-sm text-slate-400">Loading payment setup…</div>}
+            {paymentError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{paymentError}</div>}
+            {paymentData && (
+              <>
+                <div className="mt-5 rounded-xl border border-line bg-ink-900/70 p-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-slate-200">Stripe account</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {paymentData.account?.chargesEnabled ? "Connected and ready to take payments"
+                        : paymentData.account ? "Onboarding needs to be completed" : "Not connected"}
+                    </div>
+                  </div>
+                  <button className="btn-primary text-xs px-3 py-1" onClick={connectStripe}>
+                    {paymentData.account ? "Continue setup" : "Connect Stripe"}
+                  </button>
+                </div>
+                <div className="mt-5 grid gap-2 sm:grid-cols-[1.2fr_.7fr_.55fr_auto]">
+                  <input className="input text-sm" placeholder="Product name" value={productDraft.name}
+                    onChange={(event) => setProductDraft((value) => ({ ...value, name: event.target.value }))} />
+                  <input className="input text-sm" inputMode="decimal" placeholder="Price" value={productDraft.price}
+                    onChange={(event) => setProductDraft((value) => ({ ...value, price: event.target.value }))} />
+                  <select className="input text-sm" value={productDraft.currency}
+                    onChange={(event) => setProductDraft((value) => ({ ...value, currency: event.target.value }))}>
+                    <option value="gbp">GBP</option><option value="usd">USD</option><option value="eur">EUR</option>
+                  </select>
+                  <button className="btn-primary text-xs px-3" disabled={paymentBusy || !productDraft.name.trim()} onClick={addPaymentProduct}>Add</button>
+                </div>
+                <input className="input mt-2 w-full text-sm" placeholder="Short description (optional)" value={productDraft.description}
+                  onChange={(event) => setProductDraft((value) => ({ ...value, description: event.target.value }))} />
+                <div className="mt-5 space-y-2">
+                  {paymentData.products.length === 0 && <div className="text-sm text-slate-500">No products yet.</div>}
+                  {paymentData.products.map((product) => (
+                    <div key={product.id} className="rounded-lg border border-line bg-ink-900/70 px-3 py-3 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-slate-200 truncate">{product.name}</div>
+                        <div className="mt-1 font-mono text-[11px] text-slate-500 select-all">{product.id}</div>
+                      </div>
+                      <div className="text-sm font-medium uppercase text-slate-300">{product.currency} {(product.unit_amount / 100).toFixed(2)}</div>
+                      <button className="btn-ghost text-xs" disabled={paymentBusy} onClick={() => removePaymentProduct(product.id)}>Delete</button>
+                    </div>
+                  ))}
+                </div>
+                {!!paymentData.orders.length && (
+                  <div className="mt-6">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Recent orders</div>
+                    <div className="mt-2 space-y-1">
+                      {paymentData.orders.slice(0, 8).map((order) => (
+                        <div key={order.id} className="flex items-center gap-3 text-xs text-slate-400 py-1">
+                          <span className="tag bg-ink-800 text-slate-300">{order.status}</span>
+                          <span className="truncate">{order.customer_email || "Customer"}</span>
+                          <span className="ml-auto uppercase">{order.currency} {(order.amount_total / 100).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-5 rounded-lg bg-ink-900 px-3 py-2 font-mono text-[11px] text-slate-400">
+                  {`await payments.checkout({ productId: "${paymentData.products[0]?.id || "PRODUCT_ID"}" })`}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -583,6 +706,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={testApp} disabled={!hasApp || busy || qaBusy}
               title={hasApp ? "Test routes, errors and responsive layout" : "Generate an app before testing"}>
               {qaBusy ? "Testing…" : "Test app"}
+            </button>
+          )}
+          {featureAccess?.saas_runtime?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openPayments} disabled={!hasApp || busy}
+              title={hasApp ? "Connect Stripe and manage app products" : "Generate an app before adding payments"}>
+              Payments
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

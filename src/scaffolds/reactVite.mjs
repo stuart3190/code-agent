@@ -263,5 +263,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 # browser key (safe to ship); never put the service_role key here.
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
+VITE_APP_ID=
+VITE_AUTH_URL=
+VITE_PAYMENTS_URL=
 `,
 };

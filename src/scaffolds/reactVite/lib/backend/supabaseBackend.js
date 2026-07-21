@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -167,5 +167,23 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     },
   };
 
-  return { auth, db, storage, _client: client };
+  const payments = {
+    async checkout({ productId, successPath = "/?checkout=success", cancelPath = "/?checkout=cancel", redirect = true } = {}) {
+      if (!paymentsUrl || !appId) throw new Error("Payments are not configured for this app.");
+      if (!productId) throw new Error("payments.checkout: productId is required.");
+      const session = (await client.auth.getSession()).data.session;
+      if (!session?.access_token) throw new Error("Sign in before starting checkout.");
+      const response = await fetch(paymentsUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        body: JSON.stringify({ appId, productId, successPath, cancelPath }),
+      });
+      const out = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(out.error || `Checkout could not start (${response.status}).`);
+      if (redirect) window.location.assign(out.url);
+      return out;
+    },
+  };
+
+  return { auth, db, storage, payments, _client: client };
 }

@@ -4,6 +4,9 @@ export const SAFE_ENV_EXAMPLE = `# Supabase project settings for exported Buildr
 # Fill these in only if your app uses auth, persistence, or uploads.
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
+VITE_APP_ID=
+VITE_AUTH_URL=
+VITE_PAYMENTS_URL=
 `;
 
 export const SAFE_GITIGNORE = `node_modules/
