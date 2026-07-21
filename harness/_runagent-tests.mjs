@@ -121,5 +121,24 @@ console.log("\nPhase 2.3 cached-token billing:");
   check("runAgent telemetry carries cached tokens end-to-end", telemetry.cached === 1500);
 }
 
+// 9. A caller-side usage ceiling is checked before provider-returned mutations are applied.
+{
+  const provider = fakeProvider([
+    { text: "", toolCalls: [{ id: "t1", name: "write_file", arguments: { path: "x", contents: "y" }, rawArguments: "{}" }] },
+  ]);
+  let mutated = false;
+  let stopped = false;
+  try {
+    await runAgent({
+      provider, systemPrompt: "s", tools: [], tree: {}, prompt: "p", log: noop,
+      toolImpls: { write_file: () => { mutated = true; return { ok: true }; } },
+      onUsage: () => { throw new Error("budget reached"); },
+    });
+  } catch (e) {
+    stopped = e.message === "budget reached";
+  }
+  check("usage guard stops the run before over-budget tool mutations", stopped && !mutated && provider.calls === 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

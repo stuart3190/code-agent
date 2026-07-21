@@ -48,9 +48,29 @@ import {
 
 const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
 
+// Managed generation is post-metered, so hold enough prepaid credit to cover the largest allowed
+// run before contacting the provider. Successful jobs release the hold and debit exact usage;
+// failed/cancelled/interrupted jobs release it in full. These limits also bound runaway agent loops.
+export const MANAGED_CREDIT_RESERVATIONS = Object.freeze({ plan: 1, iterate: 10, build: 25, redesign: 25 });
+export function requiredManagedCredits({ mode, redesign = false } = {}) {
+  if (redesign) return MANAGED_CREDIT_RESERVATIONS.redesign;
+  return MANAGED_CREDIT_RESERVATIONS[mode] ?? MANAGED_CREDIT_RESERVATIONS.build;
+}
+
+class ManagedBillingError extends Error {
+  constructor(message, reason = "billing_error") { super(message); this.name = "ManagedBillingError"; this.reason = reason; }
+}
+
+class ManagedCreditBudgetError extends ManagedBillingError {
+  constructor(limit) {
+    super(`This build exceeded its ${limit}-credit safety limit. No credits were charged; try a smaller request.`, "reservation_exceeded");
+    this.name = "ManagedCreditBudgetError";
+  }
+}
+
 // Per-user concurrency. A single constant on purpose — the per-tier seam is "read this from the
 // entitlement row instead" later.
-export const MAX_CONCURRENT_BUILDS_PER_USER = 2;
+export const MAX_CONCURRENT_BUILDS_PER_USER = 1;
 
 const TERMINAL = new Set(["complete", "failed", "interrupted"]);
 const TERMINAL_KEEP_MS = 30 * 60 * 1000; // finished jobs linger in memory for cheap reattach
@@ -259,9 +279,18 @@ export async function sweepInterrupted() {
     .update({ status: "interrupted", phase: "interrupted",
       error: "Build was interrupted by a server restart — please rebuild.",
       updated_at: new Date().toISOString() })
-    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id");
+    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id,owner");
   if (error) console.log(`[jobs] sweep WARN: ${error.message}`);
-  else if (data?.length) console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
+  else if (data?.length) {
+    for (const row of data) {
+      try {
+        await ledger().releaseReservation({ owner: row.owner, reservationRef: `reserve:${row.id}` });
+      } catch (e) {
+        console.log(`[jobs] sweep reservation WARN (${String(row.id).slice(0, 8)}): ${e.message}`);
+      }
+    }
+    console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
+  }
 }
 
 // ── the runner — handleGenerate's proven engine body, verbatim, minus the res coupling ─────────
@@ -274,7 +303,17 @@ function usageBucket() {
   };
 }
 
-async function directDesign({ provider, prompt, projectId, style, knowledge, plan, log }) {
+function managedUsageGuard(limit, model) {
+  let totalTokens = 0;
+  return async (usage) => {
+    totalTokens += Number(usage?.total || 0);
+    if (creditsForTurn({ tokens: totalTokens, model }) > limit + 1e-9) {
+      throw new ManagedCreditBudgetError(limit);
+    }
+  };
+}
+
+async function directDesign({ provider, prompt, projectId, style, knowledge, plan, log, onUsage }) {
   const context = { prompt, projectId, style: normalizeStyle(style) };
   const fallback = fallbackDesignProfile(context);
   const request = JSON.stringify({
@@ -288,10 +327,11 @@ async function directDesign({ provider, prompt, projectId, style, knowledge, pla
   try {
     const out = await runAgent({
       provider, systemPrompt: DESIGN_DIRECTOR_SYSTEM_PROMPT,
-      tools: [], toolImpls: {}, tree: {}, prompt: request, log,
+      tools: [], toolImpls: {}, tree: {}, prompt: request, log, onUsage,
     });
     return { profile: parseDesignProfile(out.finalText, context), telemetry: out.telemetry };
   } catch (e) {
+    if (e instanceof ManagedCreditBudgetError) throw e;
     log(`design: director unavailable (${e.message}) — using deterministic premium brief`);
     return { profile: fallback, telemetry: null };
   }
@@ -330,6 +370,8 @@ async function runJob(job) {
   const mode = job.mode;
   const owner = job.owner;
   const led = ledger();
+  let reservationRef = null;
+  let reservationLimit = 0;
 
   const withKnowledge = (p) =>
     knowledge ? `${p}\n\nProject knowledge (standing instructions — always apply):\n${knowledge}` : p;
@@ -350,15 +392,43 @@ async function runJob(job) {
     await ensureWelcomeGrant(owner.id);
     const preBal = await led.getBalance(owner.id);
 
-    // Settle a turn's cost: debit the ledger (managed) OR no-op (BYOK). Unchanged billing logic.
+    if (!byok) {
+      reservationLimit = requiredManagedCredits({ mode, redesign });
+      reservationRef = `reserve:${job.id}`;
+      const held = await led.reserve({ owner: owner.id, credits: reservationLimit, ref: reservationRef });
+      if (!held.ok) {
+        reservationRef = null;
+        if (held.reason === "hard_ceiling") {
+          throw new ManagedBillingError("Your monthly managed-usage safety limit has been reached.", held.reason);
+        }
+        throw new ManagedBillingError(
+          `This ${redesign ? "redesign" : mode} needs at least ${reservationLimit} credits available. Top up and try again.`,
+          held.reason,
+        );
+      }
+      serverLog(job, `billing: reserved ${reservationLimit.toFixed(4)} cr before managed ${redesign ? "redesign" : mode}`);
+    }
+    const onUsage = byok ? null : managedUsageGuard(reservationLimit, providerConfig.strong);
+
+    // Settle exact usage against the prepaid hold (managed) OR no-op (BYOK).
     async function settle(telemetry, model, kind) {
       if (byok) {
         serverLog(job, `billing: BYOK — ${telemetry.total} tok billed to the user's ${providerConfig.provider} key`);
         return { need: 0, balance: preBal };
       }
       const ref = `${kind}:${projectId}:${crypto.randomUUID()}`;
-      await led.debit({ owner: owner.id, tokens: telemetry.total, model, ref });
-      const need = creditsForTurn({ tokens: telemetry.total, model });
+      const charged = await led.commitReservation({
+        owner: owner.id, reservationRef, tokens: telemetry.total, model, ref,
+      });
+      if (!charged.ok) {
+        if (charged.reason === "reservation_exceeded") throw new ManagedCreditBudgetError(reservationLimit);
+        if (charged.reason === "hard_ceiling") {
+          throw new ManagedBillingError("Your monthly managed-usage safety limit has been reached. No credits were charged.", charged.reason);
+        }
+        throw new ManagedBillingError("We could not confirm the credit charge. No credits were charged; please try again.", charged.reason);
+      }
+      reservationRef = null;
+      const need = charged.debited;
       const balance = await led.getBalance(owner.id);
       serverLog(job, `billing: debited ${need.toFixed(4)} cr (model ${model}, ${telemetry.total} tok) -> balance ${balance.total.toFixed(4)} cr`);
       return { need, balance };
@@ -379,7 +449,7 @@ async function runJob(job) {
 
       const { telemetry, finalText } = await runAgent({
         provider, systemPrompt: PLAN_SYSTEM_PROMPT, tools: [], toolImpls: {},
-        tree: {}, prompt: withKnowledge(prompt), log,
+        tree: {}, prompt: withKnowledge(prompt), log, onUsage,
       });
       if (job.cancelled) throw new CancelledError();
 
@@ -401,7 +471,7 @@ async function runJob(job) {
     if (needsDesignPass) {
       setPhase(job, "designing");
       const directed = await directDesign({
-        provider: buildProvider("generate"), prompt, projectId, style, knowledge, plan, log,
+        provider: buildProvider("generate"), prompt, projectId, style, knowledge, plan, log, onUsage,
       });
       designProfile = directed.profile;
       combinedUsage.add(directed.telemetry);
@@ -455,7 +525,7 @@ async function runJob(job) {
     }
 
     const initial = await runAgent({
-      provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log,
+      provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
     });
     combinedUsage.add(initial.telemetry);
     let finalText = initial.finalText;
@@ -498,7 +568,7 @@ async function runJob(job) {
           toolImpls: polishImpls,
           tree,
           prompt: `The premium design audit found the issues below. Correct only these issues while preserving all behavior, routes, data, content, and working interactions. Re-read the relevant files and use apply_patch.\n\n${audit.issues.map((issue) => `- ${issue}`).join("\n")}`,
-          log,
+          log, onUsage,
         });
         combinedUsage.add(polished.telemetry);
         if (polished.finalText) finalText = polished.finalText;
@@ -539,9 +609,21 @@ async function runJob(job) {
     };
     finish(job, "complete");
   } catch (e) {
+    if (reservationRef) {
+      try {
+        const released = await led.releaseReservation({ owner: owner.id, reservationRef });
+        serverLog(job, `billing: released ${released.released.toFixed(4)} reserved cr after unsuccessful job`);
+      } catch (releaseError) {
+        serverLog(job, `billing: reservation release WARN: ${releaseError.message}`);
+      }
+      reservationRef = null;
+    }
     if (e instanceof CancelledError) {
-      serverLog(job, "cancelled between turns — no settle, no result");
+      serverLog(job, "cancelled between turns — reservation released, no result");
       finish(job, "failed", { error: "Cancelled by user." });
+    } else if (e instanceof ManagedBillingError) {
+      serverLog(job, `billing: stopped (${e.reason})`);
+      finish(job, "failed", { error: e.message });
     } else {
       serverLog(job, `FAILED: ${e.stack || e.message}`);
       // Human message only — raw errors can carry internals (models, paths, provider chatter).

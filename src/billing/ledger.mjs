@@ -179,6 +179,124 @@ export function createLedger(client) {
     return { ok: true, idempotent: false, need, debited: need, fromBundle, fromTopup, model, weight, ref };
   }
 
+  // ── managed-build reservations ──────────────────────────────────────────────────────────────
+  // Generation is post-metered: the exact token total is only known after the provider finishes.
+  // Reserve a bounded amount before the first provider call so an expensive build cannot complete
+  // against a tiny balance. Reservations are temporary `adjust` rows (so they do not count as
+  // monthly usage); commit atomically releases the hold and inserts the real model-weighted debit.
+  async function reserve({ owner, credits, ref, tier = undefined }) {
+    if (!owner || !ref) throw new Error("reserve: owner and ref are required.");
+    const held = r4(credits);
+    if (!(held > 0)) throw new Error(`reserve: credits must be > 0 (got ${credits}).`);
+
+    const existing = unwrap(await table().select("delta,bucket").eq("owner", owner).eq("ref", ref).eq("kind", "adjust"));
+    if (existing.length) {
+      const fromBundle = r4(existing.filter((r) => r.bucket === "bundle").reduce((s, r) => s + -Number(r.delta), 0));
+      const fromTopup = r4(existing.filter((r) => r.bucket === "topup").reduce((s, r) => s + -Number(r.delta), 0));
+      return { ok: true, idempotent: true, reserved: r4(fromBundle + fromTopup), fromBundle, fromTopup, ref };
+    }
+
+    const bal = await getBalance(owner);
+    if (bal.total + 1e-9 < held) {
+      return { ok: false, reason: "insufficient_balance", need: held, balance: bal };
+    }
+
+    let tierObj = tier;
+    if (tierObj === undefined) {
+      const ent = await getEntitlement(owner);
+      tierObj = ent?.tier ? tierById(ent.tier) : null;
+    }
+    const ceil = userHardCeilCredits(tierObj || undefined);
+    if (Number.isFinite(ceil)) {
+      const spent = await monthlyDebitedCredits(owner);
+      if (spent + held > ceil + 1e-9) {
+        return { ok: false, reason: "hard_ceiling", need: held, spentThisMonth: spent, ceiling: ceil, tier: tierObj?.id ?? null };
+      }
+    }
+
+    const fromBundle = r4(Math.min(held, Math.max(0, bal.bundle)));
+    const fromTopup = r4(held - fromBundle);
+    const rows = [];
+    if (fromBundle > 0) rows.push({ owner, delta: -fromBundle, bucket: "bundle", kind: "adjust", ref });
+    if (fromTopup > 0) rows.push({ owner, delta: -fromTopup, bucket: "topup", kind: "adjust", ref });
+    const { error } = await table().insert(rows);
+    if (error) {
+      if (isDup(error)) return reserve({ owner, credits: held, ref, tier });
+      throw error;
+    }
+    return { ok: true, idempotent: false, reserved: held, fromBundle, fromTopup, ref };
+  }
+
+  async function releaseReservation({ owner, reservationRef }) {
+    if (!owner || !reservationRef) throw new Error("releaseReservation: owner and reservationRef are required.");
+    const releaseRef = `release:${reservationRef}`;
+    const existing = unwrap(await table().select("delta,bucket").eq("owner", owner).eq("ref", releaseRef).eq("kind", "adjust"));
+    if (existing.length) {
+      return { ok: true, idempotent: true, released: r4(existing.reduce((s, r) => s + Number(r.delta), 0)), ref: releaseRef };
+    }
+
+    const heldRows = unwrap(await table().select("delta,bucket").eq("owner", owner).eq("ref", reservationRef).eq("kind", "adjust"));
+    const held = heldRows.filter((r) => Number(r.delta) < 0);
+    if (!held.length) return { ok: true, idempotent: true, released: 0, ref: releaseRef };
+    const rows = held.map((r) => ({ owner, delta: r4(-Number(r.delta)), bucket: r.bucket, kind: "adjust", ref: releaseRef }));
+    const { error } = await table().insert(rows);
+    if (error) {
+      if (isDup(error)) return releaseReservation({ owner, reservationRef });
+      throw error;
+    }
+    return { ok: true, idempotent: false, released: r4(rows.reduce((s, r) => s + r.delta, 0)), ref: releaseRef };
+  }
+
+  async function commitReservation({ owner, reservationRef, tokens, model, ref, tier = undefined }) {
+    if (!owner || !reservationRef || !ref) throw new Error("commitReservation: owner, reservationRef and ref are required.");
+    const need = r4(creditsForTurn({ tokens, model }));
+    const weight = modelWeight(model);
+
+    const existing = unwrap(await table().select("delta,bucket").eq("owner", owner).eq("ref", ref).eq("kind", "debit"));
+    if (existing.length) {
+      const debited = r4(existing.reduce((s, r) => s + -Number(r.delta), 0));
+      return { ok: true, idempotent: true, need, debited, model, weight, ref };
+    }
+
+    const heldRows = unwrap(await table().select("delta,bucket").eq("owner", owner).eq("ref", reservationRef).eq("kind", "adjust"));
+    const held = heldRows.filter((r) => Number(r.delta) < 0);
+    const reservedBundle = r4(held.filter((r) => r.bucket === "bundle").reduce((s, r) => s + -Number(r.delta), 0));
+    const reservedTopup = r4(held.filter((r) => r.bucket === "topup").reduce((s, r) => s + -Number(r.delta), 0));
+    const reserved = r4(reservedBundle + reservedTopup);
+    if (!(reserved > 0)) return { ok: false, reason: "missing_reservation", need, reserved };
+    if (need > reserved + 1e-9) return { ok: false, reason: "reservation_exceeded", need, reserved };
+
+    let tierObj = tier;
+    if (tierObj === undefined) {
+      const ent = await getEntitlement(owner);
+      tierObj = ent?.tier ? tierById(ent.tier) : null;
+    }
+    const ceil = userHardCeilCredits(tierObj || undefined);
+    if (Number.isFinite(ceil)) {
+      const spent = await monthlyDebitedCredits(owner);
+      if (spent + need > ceil + 1e-9) {
+        return { ok: false, reason: "hard_ceiling", need, spentThisMonth: spent, ceiling: ceil, tier: tierObj?.id ?? null };
+      }
+    }
+
+    const releaseRef = `release:${reservationRef}`;
+    const rows = held.map((r) => ({ owner, delta: r4(-Number(r.delta)), bucket: r.bucket, kind: "adjust", ref: releaseRef }));
+    const fromBundle = r4(Math.min(need, reservedBundle));
+    const fromTopup = r4(need - fromBundle);
+    if (fromBundle > 0) rows.push({ owner, delta: -fromBundle, bucket: "bundle", kind: "debit", model, tokens, weight: r4(weight), ref });
+    if (fromTopup > 0) rows.push({ owner, delta: -fromTopup, bucket: "topup", kind: "debit", model, tokens, weight: r4(weight), ref });
+
+    const { error } = await table().insert(rows);
+    if (error) {
+      if (isDup(error)) {
+        const after = unwrap(await table().select("delta").eq("owner", owner).eq("ref", ref).eq("kind", "debit"));
+        if (after.length) return { ok: true, idempotent: true, need, debited: r4(after.reduce((s, r) => s + -Number(r.delta), 0)), model, weight, ref };
+      }
+      throw error;
+    }
+    return { ok: true, idempotent: false, need, debited: need, fromBundle, fromTopup, reserved, model, weight, ref };
+  }
+
   // ── monthly rollover / expiry job ────────────────────────────────────────────────────────────
   // Bundle resets each cycle. Carry up to bundleRolloverCapCredits(tier) (= breakeven − bundle, from
   // costModel) into the next cycle; EXPIRE the remainder; then GRANT the next cycle's bundle. The cap
@@ -218,6 +336,9 @@ export function createLedger(client) {
     ownerForStripeCustomer,
     grant,
     debit,
+    reserve,
+    releaseReservation,
+    commitReservation,
     rolloverJob,
     _client: client,
   };

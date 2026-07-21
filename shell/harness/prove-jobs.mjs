@@ -9,7 +9,7 @@
 //   LEAK GATE  every client-visible frame of a full build carries ONLY the coarse vocabulary +
 //              the whitelisted result — zero model names, tool names, file paths, token counts
 //              (the user's own tree/finalText are the deliverable and excluded from the scan)
-//   CONCURRENCY a 3rd job for a user at the cap QUEUES (not dropped, not run) then runs; two jobs
+//   CONCURRENCY a 2nd job for a user at the cap QUEUES (not dropped, not run) then runs; two jobs
 //              on different apps stream without cross-talk (events routed by job id)
 //   AUTHZ      user B cannot read / cancel / subscribe to user A's job (server check + RLS)
 //   SWEEP      a non-terminal row this server left behind reads `interrupted`; a foreign
@@ -240,16 +240,16 @@ async function main() {
     check(post.closed && post.terminal?.status === "complete" && !!post.terminal?.result?.tree,
       "re-subscribing a finished job returns the terminal snapshot + result and closes (no hang)");
 
-    // ── CONCURRENCY — 3rd job at the cap queues; distinct apps don't cross-talk ─────────────────
-    section("CONCURRENCY — per-user cap of 2: a 3rd job queues (denial of over-run)");
-    const cids = [0, 1, 2].map((i) => `prove-conc-${Date.now()}-${i}`);
+    // ── CONCURRENCY — 2nd job at the cap queues; distinct apps don't cross-talk ─────────────────
+    section("CONCURRENCY — per-user cap of 1: a 2nd job queues (denial of reservation races)");
+    const cids = [0, 1].map((i) => `prove-conc-${Date.now()}-${i}`);
     const created = await Promise.all(cids.map((pid) => createBuild(token, { projectId: pid, prompt: "a todo list", mode: "plan" })));
     const statuses = created.map((c) => c.out.status);
     const running = statuses.filter((s) => s === "running").length;
     const queued = statuses.filter((s) => s === "queued").length;
-    check(running === 2 && queued === 1, `at creation: 2 running + 1 queued (got running=${running} queued=${queued}) — cap held, excess queued not rejected`);
+    check(running === 1 && queued === 1, `at creation: 1 running + 1 queued (got running=${running} queued=${queued}) — cap held, excess queued not rejected`);
     // the queued one still runs once a slot frees
-    const lastPid = cids[statuses.lastIndexOf("queued")] || cids[2];
+    const lastPid = cids[statuses.lastIndexOf("queued")] || cids[1];
     const drained = await waitTerminal(token, lastPid, 120000);
     check(drained.status === "complete", "the queued job ran to completion once a slot freed (FIFO drain)");
 

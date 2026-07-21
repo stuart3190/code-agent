@@ -212,7 +212,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       });
     } catch (e) {
       setErr(e.payload?.error === "insufficient_balance"
-        ? "You're out of credits — pick a plan or top up in the right-hand panel, then try again."
+        ? (e.payload?.hint || "You're out of credits — pick a plan or top up in the right-hand panel, then try again.")
         : (e.message || String(e)));
     } finally { setBusy(false); setPhase(null); setActiveJobId(null); setRunningMode(null); }
   }

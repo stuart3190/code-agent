@@ -27,6 +27,10 @@ export async function runAgent({
   prompt,
   maxTurns = DEFAULT_MAX_TURNS,
   log = console.log,
+  // Optional caller-side metering guard. Called after every provider response and before any
+  // returned tool calls are applied, so a product shell can enforce a prepaid usage ceiling
+  // without coupling the provider seam or this engine to a billing implementation.
+  onUsage = null,
   // Phase 2.2 context selection. When on, send a paths-only manifest + the CURRENT contents
   // of just the relevant files (seeded from `entryFile` + grown as the model touches files),
   // and prune the accumulating read/patch payloads out of the re-sent history.
@@ -82,6 +86,7 @@ export async function runAgent({
         ` (total ${usage.total}) · cost-if-metered ${fmtGBP(c.gbp)}` +
         ` · running ${s.total} tok = ${(s.total / TOKENS_PER_CREDIT).toFixed(2)} credits`
     );
+    if (onUsage) await onUsage(usage);
 
     if (toolCalls.length === 0) {
       if (text.trim() !== "") {

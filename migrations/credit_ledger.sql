@@ -6,11 +6,10 @@
 -- DESIGN INVARIANTS (do not relax):
 --   * credit_ledger is APPEND-ONLY. No update/delete policy is granted -> rows are immutable by
 --     construction. Balance is NEVER stored; it is Σ delta. Corrections are new refund/adjust rows.
---   * RLS is owner-scoped exactly like Phase 3.1 `entities`: a user reads/writes only their own rows.
+--   * RLS is owner-scoped: a user reads only their own rows; all writes are server-side.
 --   * Platform writes (Stripe-webhook grants, the trusted engine's debits, the monthly expiry job)
---     run server-side with the SERVICE_ROLE key, which bypasses RLS. The insert_own policy exists so
---     the RLS surface matches Phase 3.1 and a user *could* be the writer, but the real writer is the
---     server. The decisive policy is select_own: a user can read only their own balance.
+--     run server-side with the SERVICE_ROLE key, which bypasses RLS. There is deliberately no
+--     end-user insert policy or INSERT grant on this money-like table.
 
 -- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- 1. credit_ledger  (append-only; balance = Σ delta)
@@ -42,8 +41,8 @@ drop policy if exists ledger_select_own on public.credit_ledger;
 drop policy if exists ledger_insert_own on public.credit_ledger;
 create policy ledger_select_own on public.credit_ledger
   for select to authenticated using (owner = auth.uid());
-create policy ledger_insert_own on public.credit_ledger
-  for insert to authenticated with check (owner = auth.uid());
+revoke insert, update, delete, truncate, references, trigger on public.credit_ledger from anon, authenticated;
+grant select on public.credit_ledger to authenticated;
 -- (no update/delete policies — corrections are new 'refund'/'adjust' rows)
 
 -- ──────────────────────────────────────────────────────────────────────────────────────────────
