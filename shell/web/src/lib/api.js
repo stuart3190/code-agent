@@ -191,6 +191,41 @@ export async function deleteConsoleRecord(projectId, recordId) {
   return out;
 }
 
+export async function getGithubOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/github?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `GitHub ${r.status}`);
+  return out;
+}
+
+export async function connectGithub(projectId, token) {
+  const r = await fetch("/api/projects/github/connect", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, token }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `GitHub connection ${r.status}`);
+  return out;
+}
+
+export async function exportGithub(projectId, options = {}) {
+  const r = await fetch("/api/projects/github/export", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...options }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `GitHub export ${r.status}`);
+  return out;
+}
+
+export async function disconnectGithub(projectId) {
+  const r = await fetch("/api/projects/github/disconnect", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `GitHub disconnect ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

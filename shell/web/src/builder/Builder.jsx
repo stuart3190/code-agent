@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -68,6 +68,13 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [consoleBusy, setConsoleBusy] = useState(false);
   const [consoleData, setConsoleData] = useState(null);
   const [consoleError, setConsoleError] = useState("");
+  const [showGithub, setShowGithub] = useState(false);
+  const [githubBusy, setGithubBusy] = useState(false);
+  const [githubData, setGithubData] = useState(null);
+  const [githubError, setGithubError] = useState("");
+  const [githubToken, setGithubToken] = useState("");
+  const [githubRepo, setGithubRepo] = useState("");
+  const [githubPrivate, setGithubPrivate] = useState(true);
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -484,6 +491,37 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     finally { setConsoleBusy(false); }
   }
 
+  async function openGithubPanel() {
+    setShowGithub(true);
+    setGithubBusy(true);
+    setGithubError("");
+    try { setGithubData(await getGithubOverview(project.id)); }
+    catch (error) { setGithubError(error.message || String(error)); }
+    finally { setGithubBusy(false); }
+  }
+
+  async function saveGithubConnection() {
+    setGithubBusy(true);
+    setGithubError("");
+    try {
+      await connectGithub(project.id, githubToken.trim());
+      setGithubToken("");
+      setGithubData(await getGithubOverview(project.id));
+    } catch (error) { setGithubError(error.message || String(error)); }
+    finally { setGithubBusy(false); }
+  }
+
+  async function pushGithub() {
+    setGithubBusy(true);
+    setGithubError("");
+    try {
+      const result = await exportGithub(project.id, { repoName: githubRepo.trim() || project.name, private: githubPrivate });
+      setGithubData(await getGithubOverview(project.id));
+      setPublishMsg(result.initial ? "GitHub repository created." : "Latest app synced to GitHub.");
+    } catch (error) { setGithubError(error.message || String(error)); }
+    finally { setGithubBusy(false); }
+  }
+
   async function commitRename() {
     const name = nameDraft.trim();
     setEditingName(false);
@@ -862,6 +900,56 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showGithub && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[38rem] max-w-[96vw] max-h-[88vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-display text-lg font-semibold text-slate-100">GitHub export and sync</div>
+                <div className="mt-1 text-xs text-slate-400">Paid plans only. Tokens are encrypted at rest and never returned to the browser.</div>
+              </div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowGithub(false)} aria-label="Close GitHub">✕</button>
+            </div>
+            {githubError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{githubError}</div>}
+            {githubBusy && !githubData ? <div className="mt-6 text-sm text-slate-400">Loading GitHub setup…</div> : githubData && !githubData.connected ? (
+              <div className="mt-5">
+                <div className="text-sm text-slate-300">Create a fine-grained token with repository Contents read/write permission, then paste it here.</div>
+                <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-amber-soft hover:underline">Create token on GitHub ↗</a>
+                <input className="input mt-4 w-full font-mono text-sm" type="password" autoComplete="off" placeholder="github_pat_…"
+                  value={githubToken} onChange={(event) => setGithubToken(event.target.value)} />
+                <button className="btn-primary mt-3 px-4 py-2 text-xs" disabled={githubBusy || !githubToken.trim()} onClick={saveGithubConnection}>Connect GitHub</button>
+              </div>
+            ) : githubData && (
+              <div className="mt-5">
+                <div className="rounded-lg border border-line bg-ink-900/70 p-4">
+                  <div className="text-sm text-slate-200">Connected as <span className="font-mono text-amber-soft">{githubData.login}</span></div>
+                  {githubData.repository && <a href={githubData.repositoryUrl} target="_blank" rel="noreferrer" className="mt-1 block text-xs text-slate-400 hover:text-slate-200">{githubData.repository} ↗</a>}
+                  {githubData.lastCommitAt && <div className="mt-1 text-[10px] text-slate-500">Last synced {new Date(githubData.lastCommitAt).toLocaleString()}</div>}
+                </div>
+                {!githubData.repository && (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <input className="input text-sm" placeholder={project.name || "Repository name"} value={githubRepo}
+                      onChange={(event) => setGithubRepo(event.target.value)} />
+                    <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={githubPrivate} onChange={(event) => setGithubPrivate(event.target.checked)} /> Private</label>
+                  </div>
+                )}
+                <div className="mt-4 flex items-center gap-2">
+                  <button className="btn-primary px-4 py-2 text-xs" disabled={githubBusy} onClick={pushGithub}>
+                    {githubBusy ? "Pushing…" : githubData.repository ? "Sync latest" : "Create repository"}
+                  </button>
+                  <button className="btn-ghost text-xs text-red-300" disabled={githubBusy} onClick={async () => {
+                    if (!window.confirm("Disconnect GitHub from this project? The repository will not be deleted.")) return;
+                    setGithubBusy(true); setGithubError("");
+                    try { await disconnectGithub(project.id); setGithubData(await getGithubOverview(project.id)); }
+                    catch (error) { setGithubError(error.message || String(error)); }
+                    finally { setGithubBusy(false); }
+                  }}>Disconnect</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -932,6 +1020,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={() => refreshOwnerConsole(true)} disabled={!hasApp || busy}
               title={hasApp ? "Manage this app's users and data" : "Generate an app before opening its console"}>
               Console
+            </button>
+          )}
+          {featureAccess?.github_export?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openGithubPanel} disabled={!hasApp || busy}
+              title={hasApp ? "Export or sync this project to GitHub" : "Generate an app before exporting"}>
+              GitHub
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

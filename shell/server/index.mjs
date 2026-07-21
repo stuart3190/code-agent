@@ -43,6 +43,7 @@ import { handlePaymentOverview, handlePaymentProducts, handleStripeOnboarding } 
 import { handleConnectWebhook } from "./routes/connectWebhook.mjs";
 import { handleBrandApply, handleBrandDelete, handleBrandOverview } from "./routes/visualBrand.mjs";
 import { handleConsoleRecordDelete, handleConsoleUser, handleOwnerConsole } from "./routes/ownerConsole.mjs";
+import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handleGithubOverview } from "./routes/github.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -256,6 +257,22 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/owner-console/record" && method === "DELETE") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleConsoleRecordDelete(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/github" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleGithubOverview(req, res, url, owner);
+    }
+    if (p === "/api/projects/github/connect" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleGithubConnect(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/github/export" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleGithubExport(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/github/disconnect" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleGithubDisconnect(req, res, await readJson(req), owner);
     }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
