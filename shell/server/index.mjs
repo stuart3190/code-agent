@@ -299,8 +299,8 @@ const server = http.createServer(async (req, res) => {
     // Static SPA (prod only).
     return serveStatic(req, res);
   } catch (e) {
-    console.error(`[shell] 500 on ${method} ${p}:`, e?.stack || e?.message || e);
     if (e instanceof HttpInputError) return sendJson(res, e.status, { error: e.message, code: e.code });
+    console.error(`[shell] 500 on ${method} ${p}:`, e?.stack || e?.message || e);
     sendJson(res, 500, { error: "Something went wrong. Please try again." });
   }
 });
