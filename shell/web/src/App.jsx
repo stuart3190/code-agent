@@ -3,7 +3,7 @@ import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
 import { getConfig, deleteProjectFull, serverBalance } from "./lib/api.js";
 import { readBalance } from "./lib/ledger.js";
-import { listProjects, createProject, getProject } from "./lib/projects.js";
+import { listProjects, createProject, getProject, deleteProject } from "./lib/projects.js";
 import { Logo } from "./auth/AuthGate.jsx";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -67,25 +67,53 @@ export default function App() {
   if (recovery && user) return <ResetPassword onDone={clearRecovery} />;
   if (!user) return <Landing />;
 
+  const isEmptyDraft = (p) => !!p && !p.tree && !(p.prompts?.length) && !p.publishedUrl;
+
+  async function discardEmptyDraft(p) {
+    if (!isEmptyDraft(p)) return false;
+    // Remove it from the visible list immediately; the owner-scoped Supabase delete follows.
+    setProjects((items) => items.filter((item) => item.id !== p.id));
+    try {
+      await deleteProject(p.id);
+      return true;
+    } catch {
+      await refreshProjects();
+      return false;
+    }
+  }
+
   async function newProject(starterPrompt) {
+    // Repeatedly pressing New app must replace an untouched draft, not stack empty rows.
+    await discardEmptyDraft(current);
     const p = await createProject("Untitled app");
-    await refreshProjects();
     setStarter(typeof starterPrompt === "string" ? starterPrompt : null);
     setCurrent(p); setView("workspace");
   }
   async function openProject(id) {
+    if (current?.id !== id) await discardEmptyDraft(current);
     const p = await getProject(id);
     setStarter(null);
     setCurrent(p); setView("workspace");
   }
-  const goHome = () => { setCurrent(null); setView("workspace"); };
+  const goHome = async () => {
+    const leaving = current;
+    setCurrent(null); setView("workspace");
+    await discardEmptyDraft(leaving);
+  };
+
+  const selectSettings = async () => {
+    const leaving = current;
+    if (isEmptyDraft(leaving)) setCurrent(null);
+    setView("settings");
+    await discardEmptyDraft(leaving);
+  };
 
   async function removeProject(p) {
     const extras = p.publishedUrl ? " Its published site goes offline and its site name is released." : "";
     if (!window.confirm(`Delete “${p.name}” permanently?${extras} This can't be undone.`)) return;
     try {
       await deleteProjectFull(p.id);
-      if (current?.id === p.id) goHome();
+      if (current?.id === p.id) { setCurrent(null); setView("workspace"); }
       await refreshProjects();
     } catch (e) {
       window.alert(e.message || String(e));
@@ -105,8 +133,12 @@ export default function App() {
         onNew={newProject}
         onOpen={openProject}
         onHome={goHome}
-        onSelectSettings={() => setView("settings")}
-        onSignOut={async () => { await backend().auth.signOut(); goHome(); }}
+        onSelectSettings={selectSettings}
+        onSignOut={async () => {
+          await discardEmptyDraft(current);
+          await backend().auth.signOut();
+          setCurrent(null); setView("workspace");
+        }}
       />
 
       <div className="min-h-0 grid" style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}>
