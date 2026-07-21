@@ -277,6 +277,40 @@ export async function runReleaseAction(projectId, releaseId, action) {
   return out;
 }
 
+export async function listTemplates() {
+  const r = await fetch("/api/templates", { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `templates ${r.status}`);
+  return out.templates;
+}
+
+export async function createTemplate(projectId, template) {
+  const r = await fetch("/api/templates", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...template }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `template ${r.status}`);
+  return out.template;
+}
+
+export async function remixTemplate(templateId, name) {
+  const r = await fetch("/api/templates/remix", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ templateId, name }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `template remix ${r.status}`);
+  return out.project;
+}
+
+export async function deleteTemplate(templateId) {
+  const r = await fetch("/api/templates/delete", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ templateId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `template delete ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);

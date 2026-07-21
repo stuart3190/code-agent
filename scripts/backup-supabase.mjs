@@ -38,6 +38,7 @@ const TABLES = [
   "brand_kits", "project_brand_settings",
   "app_notifications",
   "app_analytics_events",
+  "project_templates",
 ];
 const PAGE = 1000;
 

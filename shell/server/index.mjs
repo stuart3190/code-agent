@@ -48,6 +48,7 @@ import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integ
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { handleAnalytics } from "./routes/analytics.mjs";
 import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
+import { handleTemplateCreate, handleTemplateDelete, handleTemplateList, handleTemplateRemix } from "./routes/templates.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -301,6 +302,22 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/environment-control/release" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleReleaseAction(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/templates" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleTemplateList(req, res, owner);
+    }
+    if (p === "/api/templates" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleTemplateCreate(req, res, await readJson(req, BODY_LIMITS.tree), owner);
+    }
+    if (p === "/api/templates/remix" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleTemplateRemix(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/templates/delete" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleTemplateDelete(req, res, await readJson(req), owner);
     }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

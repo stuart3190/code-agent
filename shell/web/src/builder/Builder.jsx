@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics, getEnvironmentControl, deployTestEnvironment, runReleaseAction } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics, getEnvironmentControl, deployTestEnvironment, runReleaseAction, listTemplates, createTemplate, remixTemplate, deleteTemplate } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -89,6 +89,11 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [environmentBusy, setEnvironmentBusy] = useState(false);
   const [environmentData, setEnvironmentData] = useState(null);
   const [environmentError, setEnvironmentError] = useState("");
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templateError, setTemplateError] = useState("");
+  const [templateDraft, setTemplateDraft] = useState({ name: "", description: "", category: "saas" });
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -601,6 +606,35 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
       setPublishMsg(action === "rollback" ? "Live site rolled back." : "Test release promoted to live.");
     } catch (error) { setEnvironmentError(error.message || String(error)); }
     finally { setEnvironmentBusy(false); }
+  }
+
+  async function openTemplates() {
+    setShowTemplates(true); setTemplateBusy(true); setTemplateError("");
+    setTemplateDraft((value) => ({ ...value, name: value.name || `${project.name || "App"} template` }));
+    try { setTemplates(await listTemplates()); }
+    catch (error) { setTemplateError(error.message || String(error)); }
+    finally { setTemplateBusy(false); }
+  }
+
+  async function saveCurrentTemplate() {
+    setTemplateBusy(true); setTemplateError("");
+    try {
+      await createTemplate(project.id, templateDraft);
+      setTemplates(await listTemplates());
+      setTemplateDraft((value) => ({ ...value, name: "", description: "" }));
+      setPublishMsg("Reusable template saved.");
+    } catch (error) { setTemplateError(error.message || String(error)); }
+    finally { setTemplateBusy(false); }
+  }
+
+  async function remixSavedTemplate(template) {
+    setTemplateBusy(true); setTemplateError("");
+    try {
+      const remixed = await remixTemplate(template.id, `${template.name} remix`);
+      setShowTemplates(false);
+      onProjectChange?.(remixed);
+    } catch (error) { setTemplateError(error.message || String(error)); }
+    finally { setTemplateBusy(false); }
   }
 
   async function commitRename() {
@@ -1165,6 +1199,38 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showTemplates && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[52rem] max-w-[96vw] max-h-[90vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div><div className="font-display text-lg font-semibold text-slate-100">Templates and remixing</div><div className="mt-1 text-xs text-slate-400">Save strong starting points and clone them into independent new projects.</div></div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowTemplates(false)} aria-label="Close templates">✕</button>
+            </div>
+            {templateError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{templateError}</div>}
+            <div className="mt-5 rounded-xl border border-line bg-ink-900/70 p-4">
+              <div className="text-sm font-medium text-slate-200">Save this app as a private template</div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_.55fr]">
+                <input className="input text-sm" placeholder="Template name" value={templateDraft.name} onChange={(event) => setTemplateDraft((value) => ({ ...value, name: event.target.value }))} />
+                <select className="input text-sm" value={templateDraft.category} onChange={(event) => setTemplateDraft((value) => ({ ...value, category: event.target.value }))}>
+                  <option value="saas">SaaS</option><option value="business">Business</option><option value="commerce">Commerce</option><option value="dashboard">Dashboard</option><option value="other">Other</option>
+                </select>
+              </div>
+              <input className="input mt-2 w-full text-sm" placeholder="What makes this template useful?" value={templateDraft.description} onChange={(event) => setTemplateDraft((value) => ({ ...value, description: event.target.value }))} />
+              <button className="btn-primary mt-3 px-4 py-2 text-xs" disabled={templateBusy || !templateDraft.name.trim()} onClick={saveCurrentTemplate}>Save template</button>
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {!templateBusy && !templates.length && <div className="text-sm text-slate-500">No templates yet. Save this app to create your first one.</div>}
+              {templates.map((template) => <div key={template.id} className="rounded-xl border border-line bg-ink-900/70 p-4">
+                <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-slate-200">{template.name}</div><div className="mt-1 text-xs text-slate-500">{template.description || "Reusable app starting point"}</div></div><span className="tag text-amber-soft">{template.category}</span></div>
+                <div className="mt-4 flex items-center gap-2"><button className="btn-primary px-3 py-1 text-xs" disabled={templateBusy} onClick={() => remixSavedTemplate(template)}>Remix</button>{template.owner && <button className="btn-ghost text-xs text-red-300" disabled={templateBusy} onClick={async () => {
+                  if (!window.confirm(`Delete the template “${template.name}”?`)) return;
+                  setTemplateBusy(true); try { await deleteTemplate(template.id); setTemplates(await listTemplates()); } catch (error) { setTemplateError(error.message || String(error)); } finally { setTemplateBusy(false); }
+                }}>Delete</button>}<span className="ml-auto text-[10px] text-slate-600">{template.times_remixed} remixes</span></div>
+              </div>)}
+            </div>
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -1259,6 +1325,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={() => refreshEnvironments(true)} disabled={!hasApp || busy}
               title={hasApp ? "Manage test deployments and live rollbacks" : "Generate an app before deploying"}>
               Environments
+            </button>
+          )}
+          {featureAccess?.templates?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={openTemplates} disabled={!hasApp || busy}
+              title={hasApp ? "Save or remix reusable app templates" : "Generate an app before saving a template"}>
+              Templates
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

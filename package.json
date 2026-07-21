@@ -26,6 +26,7 @@
     "test:app-integrations": "node harness/_app-integrations-tests.mjs",
     "test:analytics": "node harness/_analytics-tests.mjs",
     "test:environments": "node harness/_environment-tests.mjs",
+    "test:templates": "node harness/_template-tests.mjs",
     "test:e2e": "npm --prefix shell/web run build && playwright test",
     "backup:validate": "node scripts/validate-backup.mjs",
     "test:design": "node harness/_design-profile-tests.mjs",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
 import { getConfig, deleteProjectFull, serverBalance } from "./lib/api.js";
@@ -9,7 +9,7 @@ import { Logo } from "./auth/AuthGate.jsx";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
 import TopBar from "./components/TopBar.jsx";
-import Builder from "./builder/Builder.jsx";
+const Builder = lazy(() => import("./builder/Builder.jsx"));
 import BillingPanel from "./billing/BillingPanel.jsx";
 import SettingsPanel from "./settings/SettingsPanel.jsx";
 
@@ -148,14 +148,16 @@ export default function App() {
           {view === "settings" ? (
             <SettingsPanel />
           ) : current ? (
-            <Builder
-              key={current.id}
-              project={current}
-              initialPrompt={starter}
-              onProjectChange={(p) => { setCurrent(p); refreshProjects(); }}
-              onAfterTurn={refreshBalance}
-              balance={balance}
-            />
+            <Suspense fallback={<Splash label="Loading builder…" />}>
+              <Builder
+                key={current.id}
+                project={current}
+                initialPrompt={starter}
+                onProjectChange={(p) => { setCurrent(p); refreshProjects(); }}
+                onAfterTurn={refreshBalance}
+                balance={balance}
+              />
+            </Suspense>
           ) : (
             <Dashboard projects={projects} onNew={newProject} onOpen={openProject} onStart={(p) => newProject(p)} onDelete={removeProject} />
           )}
