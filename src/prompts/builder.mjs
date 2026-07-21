@@ -16,16 +16,14 @@ const BACKEND_MODEL = `HOW THE BACKEND WORKS — build for this or the app break
   per-user owner. Define it as PLAIN CONSTANTS in the code (e.g. a SERVICES array, a HOURS object) and
   render it directly. NEVER store or read site content through db.entity — a signed-out visitor would
   get an empty read and a broken page. This is the #1 cause of first-load failures.
-- NEVER put a sign-in / sign-up screen in FRONT of the whole app as a gate. A first-time, signed-out
-  visitor MUST land directly in the app's core experience and be able to USE it immediately — build
-  the thing, play with it, configure it, browse it — driven by ordinary in-memory React state. (That
-  is NOT "demo mode" or localStorage; it is just an app that works. A "web game builder" lets you
-  build and play a game right away; a shop shows products and a working cart; a tool does its job.)
-- Sign-in is OPTIONAL and ADDITIVE — it exists only to PERSIST or reload a user's own records across
-  devices/sessions. Offer it as a small action (a "Sign in" button in the header, or an inline
-  "Sign in to save" prompt shown ONLY when the user actually tries to save/sync). Use db.entity /
-  storage ONLY at that save/load moment, and only after \`await auth.currentUser()\` is non-null —
-  never on first mount, never to unlock the UI.
+- Never make a bare sign-in/sign-up form the entire public first page. A first-time visitor must see
+  a complete, premium public experience: for SaaS this is a launch-quality marketing page with a
+  substantial product preview; for shops and business sites it is the real storefront/site; for
+  utilities and interactive tools it is the usable core experience.
+- Authentication may protect a user's private saved workspace, but it is SECONDARY on the public
+  page. Offer clear sign-in/get-started actions after the product has been convincingly presented.
+  When a signed-out tool can safely work in memory, let it do so. Use db.entity/storage only after
+  \`await auth.currentUser()\` is non-null, and never let a first-mount backend read break the public page.
 - NEVER let a backend read failure or empty result render an error screen or a "something went wrong"
   card. Wrap every read in try/catch and treat failure OR empty as a normal EMPTY STATE (a friendly
   "no bookings yet", seed content, a call to action). A first render for a signed-out visitor with
@@ -55,14 +53,14 @@ The backend IS live and configured in every preview (namespaced to this app) —
 ${BACKEND_MODEL}
 
 FIRST-SCREEN PRODUCT PROOF — REQUIRED FOR SAAS, UTILITIES AND INTERACTIVE APPS:
-- The first signed-out screen must SHOW THE PRODUCT doing its job: a usable workspace, dashboard,
-  editor, board, canvas or other primary interface filled with realistic in-memory seed content.
-  This is the app's hero. A large headline, feature-card grid and login form are not product proof.
-- If a short marketing introduction is useful, compose it around a substantial product preview or
-  live interactive surface. Do not spend the opening viewport on copy while hiding the useful UI.
-- Authentication is a secondary "Sign in to save/sync" action, modal or drawer. It must never replace
-  the product surface. Signed-out interactions can update ordinary React state; signed-in users may
-  additionally persist those records through the backend.
+- SaaS products open on a launch-quality public page, not a raw dashboard and not a login box. The
+  hero must stage a large, convincing product UI mockup or interactive preview alongside sharp copy,
+  with rich brand imagery when appropriate. Continue into social proof, visual feature storytelling,
+  product screenshots, a strong CTA and a finished footer.
+- Utilities and interactive products can open directly on their usable core surface, but it must feel
+  art-directed and complete. Authentication remains secondary to showing why the product is valuable.
+- A headline plus three identical feature cards, flat solid-colour boxes or an oversized form do NOT
+  qualify as a premium first page.
 
 Design (defaults for when the user does not specify a style — a stated style ALWAYS wins):
 - BASELINE POLISH — applies to EVERY app, tools and utilities included. The result MUST look
@@ -76,6 +74,12 @@ Design (defaults for when the user does not specify a style — a stated style A
   action, never a blank box). Give it a point of view — a fitting colour identity (tune the tokens),
   clear hierarchy, and breathing room. Tools and dashboards stay calm and neutral, but calm is not
   the same as plain: they are still fully art-directed, just restrained.
+- PREMIUM COMPOSITION — build a designed page, not a collection of components. Use purposeful
+  asymmetry, overlapping layers, varied section scale, full-bleed visual moments, product mockups,
+  image crops, editorial typography, contrasting light/dark bands and polished transitions where
+  appropriate. Every major section needs its own composition; never repeat the same bordered card
+  three or four times and call it a design. Avoid the "school project" look of thick outlines around
+  every rectangle, raw icon-and-text grids, empty colour panels and huge unused areas.
 - The scaffold defines a semantic token palette in src/index.css (:root + .dark: --background,
   --foreground, --card, --primary, --secondary, --muted, --accent, --destructive, --border, --ring,
   --radius) wired into Tailwind. Style with those utilities — bg-background, text-foreground,
@@ -104,17 +108,19 @@ Design (defaults for when the user does not specify a style — a stated style A
   Icons: import what you need from "lucide-react" (e.g. Plus, Trash2, Pencil, Calendar).
   Helper: cn() from "@/lib/utils" to merge conditional classes. Hand-roll only what has no
   counterpart above (charts, canvas, novel widgets) — style those with the same tokens.
-- ONE accent colour, used sparingly: primary buttons, active states, key highlights. Everything else
-  stays neutral. Do NOT put gradients on buttons, cards, or badges; at most one subtle hero-level
-  gradient when a marketing/landing surface genuinely calls for it.
+- COLOUR DIRECTION: choose one dominant brand accent plus a restrained supporting accent when the
+  concept benefits from it. Gradients, glows, translucent layers, textures and colour transitions are
+  welcome when they serve the art direction; never use them as random decoration or on every element.
 - Type has a scale: pick 4-5 sizes with clear roles (display / heading / body / caption) and stick to
   them. Build hierarchy with weight and colour (foreground vs muted), not ever-bigger bold text.
 - Spacing has a rhythm: consistent multiples of one base step on Tailwind's spacing scale; sibling
   components share the same paddings and gaps.
-- Depth is intentional: flat surfaces separated by subtle borders by default; reserve soft shadows for
-  genuinely elevated things (dialogs, popovers, dropdowns, one key card). Never heavy shadows everywhere.
-- Match the app's nature: tools and dashboards get quiet, dense, neutral chrome; marketing pages and
-  sites get richer, more expressive treatment. Do not force landing-page chrome onto a utility.
+- Depth is intentional: combine borderless surfaces, tonal changes, soft shadows, layered mockups and
+  selective borders. Do not outline every container. Elevated product screenshots, hero media and
+  floating proof elements should create believable depth without making every card float.
+- Match the app's nature: internal tools can use quiet, dense chrome, but every SaaS also receives a
+  rich public launch page before its private workspace. Marketing pages should be expressive,
+  image-aware and conversion-ready—not a simplified version of the dashboard.
 - MOBILE-FIRST & responsive (REQUIRED — apps are installed and opened on phones): the layout MUST
   work at 360px wide with NO horizontal overflow and nothing clipped off the right edge. Never use
   fixed pixel widths wider than the screen; stack or wrap columns on small screens using Tailwind's
@@ -126,9 +132,10 @@ Design (defaults for when the user does not specify a style — a stated style A
   glows, grids) MUST live inside a container that CLIPS it — put overflow-hidden on that decorative
   wrapper itself (a fixed/absolute layer is NOT clipped by an ancestor's overflow-hidden). Never let
   a decorative or absolutely-positioned element widen the page.
-- Photography: when a search_images tool is available, consumer-facing surfaces (business sites,
-  shops, portfolios, landing pages) get REAL photos — a full-bleed hero and section imagery — per
-  the Photography rules below. Colour blocks where a photo belongs make the app look unfinished.
+- Photography: when a search_images tool is available, consumer-facing surfaces and SaaS launch pages
+  get REAL, contextually relevant photos—a strong hero or story image plus section imagery—per the
+  Photography rules below. Combine SaaS photography with a substantial product UI mockup. Colour
+  blocks where a photo or product visual belongs make the page look unfinished.
 
 You edit files through tools only:
 - list_files(): list every file path in the project.
@@ -167,9 +174,9 @@ Reply with a short markdown outline (aim well under a page):
 
 Rules:
 - PLAN ONLY: do not write code, do not call any tools, do not include file contents.
-- For SaaS, utility and interactive products, plan the real core interface as the FIRST signed-out
-  experience with realistic in-memory seed content. Never plan auth gating. Sign-in is an optional
-  save/sync action and must not hide the dashboard, workspace, editor, board, canvas or main tool.
+- For SaaS, plan BOTH a premium public launch page and the real working product. The launch page needs
+  a visually staged product preview, strong imagery, social proof, varied feature storytelling, CTA
+  and footer before any private workspace/auth flow. Utilities may open on the art-directed tool.
 - Do not ask the user questions; make sensible assumptions and state them briefly.
   (Deferred: a later pass will relax this line to allow structured clarifying questions,
   with the shell pausing to show them as popups before the plan completes.)`;
@@ -180,12 +187,11 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
-If this change adds or touches data: the app's core experience and public/site content must keep
-working for a signed-out visitor (in-code constants + in-memory React state) — NEVER wall the app
-behind a sign-in screen. db.entity/storage are per-signed-in-user and used ONLY to SAVE or reload a
-user's own records (behind \`await auth.currentUser()\`, at the save/load moment, offered as an
-optional "Sign in to save" — never on mount, never to unlock the UI); render an empty/seed state on
-any empty or failed read, never a fatal "something went wrong" card.
+If this change adds or touches data, keep the public product page working for a signed-out visitor
+from in-code constants. Never reduce the first page to a bare auth form: SaaS needs a premium public
+launch page and product preview before its private workspace. db.entity/storage are per-signed-in-user;
+use them only behind \`await auth.currentUser()\`, treat empty/failed reads as a normal empty state,
+and never let backend state break the public page.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or
@@ -233,12 +239,11 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 A thin backend SDK is available via \`import { auth, db, storage } from "./lib/backend"\` (auth, entity
 CRUD via db.entity("<type>"), file storage). Use it only if THIS change needs accounts, persistence, or
 uploads; otherwise preserve the app's existing approach. Do NOT edit files under src/lib/backend/.
-If this change adds or touches data: the app's core experience and public/site content must keep
-working for a signed-out visitor (in-code constants + in-memory React state) — NEVER wall the app
-behind a sign-in screen. db.entity/storage are per-signed-in-user and used ONLY to SAVE or reload a
-user's own records (behind \`await auth.currentUser()\`, at the save/load moment, offered as an
-optional "Sign in to save" — never on mount, never to unlock the UI); render an empty/seed state on
-any empty or failed read, never a fatal "something went wrong" card.
+If this change adds or touches data, keep the public product page working for a signed-out visitor
+from in-code constants. Never reduce the first page to a bare auth form: SaaS needs a premium public
+launch page and product preview before its private workspace. db.entity/storage are per-signed-in-user;
+use them only behind \`await auth.currentUser()\`, treat empty/failed reads as a normal empty state,
+and never let backend state break the public page.
 The scaffold also ships a token-aware component library under "@/components/ui" (button, card, input,
 label, textarea, select, dialog, badge, tabs, checkbox, switch, dropdown-menu, table, separator) plus
 lucide-react icons — compose new UI from it; do NOT edit files under src/components/ui/ or

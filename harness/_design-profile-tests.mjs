@@ -24,11 +24,13 @@ check("deterministic selection still varies across projects", () => {
   assert.ok(families.size >= 3, `expected at least 3 families, got ${[...families].join(", ")}`);
 });
 
-check("consumer and product categories use different imagery policy", () => {
+check("public websites and SaaS get imagery while pure utilities may stay product-led", () => {
   const site = fallbackDesignProfile({ prompt: "a boutique hotel website", projectId: "hotel" });
   const app = fallbackDesignProfile({ prompt: "a SaaS analytics dashboard", projectId: "analytics" });
+  const utility = fallbackDesignProfile({ prompt: "a mortgage calculator utility", projectId: "calculator" });
   assert.equal(site.imagery.required, true);
-  assert.equal(app.imagery.required, false);
+  assert.equal(app.imagery.required, true);
+  assert.equal(utility.imagery.required, false);
 });
 
 check("invalid model output normalises to an allowed profile", () => {
@@ -61,7 +63,7 @@ check("audit passes a responsive, rethemed build using selected fonts and photos
   const tree = {
     "src/main.jsx": `import "${profile.typography.bodyPackage}";\nimport "${profile.typography.displayPackage}";`,
     "src/index.css": `:root { --font-sans: "${profile.typography.bodyFamily}"; --font-display: "${profile.typography.displayFamily}"; --background: 38 30% 94%; --radius: 0.125rem; }`,
-    "src/App.jsx": `<main className="grid grid-cols-1 md:grid-cols-2">${assets.map((a) => `<img src="${a.url}" />`).join("")}</main>`,
+    "src/App.jsx": `<main className="relative grid grid-cols-1 overflow-hidden shadow-xl md:grid-cols-2">${assets.map((a) => `<img className="object-cover transition-transform" src="${a.url}" />`).join("")}</main>`,
   };
   assert.deepEqual(auditDesign(tree, { profile, assets }), { ok: true, issues: [], warnings: [] });
 });
@@ -78,15 +80,16 @@ check("audit reports honest image-free fallback and invented hosts", () => {
   assert.equal(audit.warnings.length, 1);
 });
 
-check("audit rejects a SaaS product hidden behind an auth screen", () => {
+check("audit rejects a flat school-project SaaS made from thick boxes", () => {
   const profile = fallbackDesignProfile({ prompt: "creator SaaS dashboard", projectId: "creator" });
   const tree = {
     "src/main.jsx": `import "${profile.typography.bodyPackage}";\nimport "${profile.typography.displayPackage}";`,
     "src/index.css": `:root { --font-sans: "${profile.typography.bodyFamily}"; --font-display: "${profile.typography.displayFamily}"; }`,
-    "src/App.jsx": `export default function App(){ const user = null; if (!user) return <AuthScreen />; return <Dashboard className="md:grid" />; }`,
+    "src/App.jsx": `<main className="md:grid">${"<section className=\"border-2\">box</section>".repeat(12)}</main>`,
   };
   const audit = auditDesign(tree, { profile });
-  assert.ok(audit.issues.some((issue) => issue.includes("authentication gate")));
+  assert.ok(audit.issues.some((issue) => issue.includes("visual-production quality")));
+  assert.ok(audit.issues.some((issue) => issue.includes("thick-outlined boxes")));
 });
 
 await ensureDeps(() => {});

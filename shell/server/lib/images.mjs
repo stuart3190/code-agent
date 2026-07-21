@@ -49,10 +49,10 @@ export const SEARCH_IMAGES_SCHEMA = {
 
 // System-prompt addendum offered only when the key is present.
 export const IMAGES_PROMPT_BLOCK = `
-Photography (REQUIRED for consumer-facing apps):
+Photography (REQUIRED for consumer-facing apps and SaaS launch pages):
 - Real stock photos are available via the search_images tool, and using them is the DEFAULT, not
   an option. If the app has ANY public-facing or content surface — a business site, shop,
-  restaurant, salon, gym, portfolio, landing page, event, travel, food, property, blog, product
+  restaurant, salon, gym, portfolio, SaaS launch page, event, travel, food, property, blog, product
   page — your FIRST tool call is search_images. A hero without a real photo, or a business site
   made only of colour blocks, is a DEFECT: it will read as unfinished and the user will reject it.
 - Fetch a hero image AND section imagery (services, menu items, gallery, about). One or two
@@ -63,5 +63,8 @@ Photography (REQUIRED for consumer-facing apps):
   gallery grids — not thumbnails squeezed into corners.
 - NEVER invent or recall image URLs from memory (no unsplash/picsum/placeholder links) — only use
   URLs returned by search_images.
-- The ONLY apps that skip photography are pure utility tools (todo lists, calculators, trackers,
-  dashboards, admin panels). If in doubt, fetch photos.`;
+- SaaS must combine contextually relevant photography with a substantial, realistic product UI
+  mockup in the hero and screenshot-led feature sections. A plain dashboard screenshot by itself is
+  not a launch page, and three icon cards are not visual storytelling.
+- The ONLY apps that skip photography are pure utilities or private-only admin tools with no public
+  marketing surface. If in doubt, fetch photos.`;
