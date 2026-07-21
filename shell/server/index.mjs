@@ -54,6 +54,8 @@ import { handleAnalytics } from "./routes/analytics.mjs";
 import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
 import { handleTemplateCreate, handleTemplateDelete, handleTemplateList, handleTemplateRemix } from "./routes/templates.mjs";
 import { handleRuntimeCheckout } from "./routes/runtimeCheckout.mjs";
+import { handleRuntimeWebhook } from "./routes/runtimeWebhook.mjs";
+import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRuntimeCredentialDelete } from "./routes/capabilities.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -230,6 +232,10 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req, BODY_LIMITS.webhook);
       return handleConnectWebhook(req, res, raw);
     }
+    if (p === "/api/runtime/webhooks/replicate" && method === "POST") {
+      const raw = await readBody(req, BODY_LIMITS.webhook);
+      return handleRuntimeWebhook(req, res, raw, url);
+    }
     // Caddy's on_demand_tls ask gate (read-only yes/no; see routes/domains.mjs).
     if (p === "/api/domain-check" && method === "GET") {
       return handleDomainCheck(req, res, url);
@@ -320,6 +326,23 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/connectors" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleConnectorSave(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/capabilities" && ["GET", "POST", "DELETE"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = method === "GET" ? null : await readJson(req);
+      return handleCapabilities(req, res, { method, url, body, owner });
+    }
+    if (p === "/api/projects/knowledge-bases" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleKnowledgeBase(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/action-schedules" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleActionSchedule(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/runtime-credentials" && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRuntimeCredentialDelete(req, res, await readJson(req), owner);
     }
     if (p === "/api/projects/connectors/test" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

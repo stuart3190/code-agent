@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, analyticsUrl = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, analyticsUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -119,10 +119,27 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           const rows = unwrap(await table().insert(row).select());
           return rows[0];
         },
-        async list() {
-          return unwrap(
-            await scoped(table().select("*").eq("type", type)).order("created_at", { ascending: false })
-          );
+        async list({ filters = {}, order = "created_at", ascending = false, limit = 100, cursor = null } = {}) {
+          let query = scoped(table().select("*").eq("type", type));
+          for (const [field, value] of Object.entries(filters || {})) {
+            const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
+            if (value && typeof value === "object" && !Array.isArray(value)) {
+              if (value.eq !== undefined) query = query.eq(column, value.eq);
+              if (value.neq !== undefined) query = query.neq(column, value.neq);
+              if (value.gte !== undefined) query = query.gte(column, value.gte);
+              if (value.lte !== undefined) query = query.lte(column, value.lte);
+              if (value.ilike !== undefined) query = query.ilike(column, value.ilike);
+              if (Array.isArray(value.in)) query = query.in(column, value.in);
+            } else query = query.eq(column, value);
+          }
+          if (cursor) query = ascending ? query.gt("created_at", cursor) : query.lt("created_at", cursor);
+          const safeOrder = ["created_at", "id", "type"].includes(order) ? order : "created_at";
+          return unwrap(await query.order(safeOrder, { ascending }).limit(Math.max(1, Math.min(500, limit))));
+        },
+        async count(filters = {}) {
+          let query = scoped(table().select("id", { count: "exact", head: true }).eq("type", type));
+          for (const [field, value] of Object.entries(filters || {})) query = query.eq(field === "id" ? field : `data->>${field}`, value);
+          const { count, error } = await query; if (error) throw error; return count || 0;
         },
         async get(id) {
           return unwrap(await scoped(table().select("*").eq("type", type).eq("id", id)).single());
@@ -137,6 +154,14 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           const { error } = await scoped(table().delete().eq("type", type).eq("id", id));
           if (error) throw error;
         },
+        subscribe(callback) {
+          if (typeof callback !== "function") throw new Error("db.entity(type).subscribe(callback): callback is required.");
+          const channel = client.channel(`entities:${appId || "global"}:${type}:${Math.random().toString(36).slice(2)}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "entities", filter: appId ? `app_id=eq.${appId}` : undefined },
+              (event) => { const record = event.new?.type === type ? event.new : event.old?.type === type ? event.old : null; if (record) callback({ ...event, record }); })
+            .subscribe();
+          return () => client.removeChannel(channel);
+        },
       };
     },
   };
@@ -145,25 +170,49 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   // RLS policies scope access to (storage.foldername(name))[1] = auth.uid(). The app stays
   // UNAWARE of tenancy — it passes its own logical `path` and stores back the RETURNED
   // (uid-prefixed) key opaquely. The bucket is PRIVATE, so reads go via short-lived signed URLs.
+  const assetBucket = appId ? "runtime-assets" : bucket;
   const storage = {
     // file: a browser File/Blob or a Node Buffer/Uint8Array/ArrayBuffer.
     // path: optional logical key; auto-generated when omitted. The caller's uid is prefixed.
-    async upload(file, path) {
+    async upload(file, pathOrOptions) {
       const uid = (await client.auth.getSession()).data.session?.user?.id;
       if (!uid) throw new Error("storage.upload: must be signed in to upload.");
+      const options = pathOrOptions && typeof pathOrOptions === "object" ? pathOrOptions : { path: pathOrOptions };
+      const path = options.path;
       const name = path || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const key = `${uid}/${name}`;
+      const key = appId ? `${appId}/${uid}/${name}` : `${uid}/${name}`;
       const data = unwrap(
-        await client.storage.from(bucket).upload(key, file, { upsert: true })
+        await client.storage.from(assetBucket).upload(key, file, { upsert: options.upsert !== false, contentType: options.contentType })
       );
+      options.onProgress?.({ loaded: file?.size || 0, total: file?.size || 0, percent: 100 });
       return { path: data.path };
+    },
+    async uploadMany(files, options = {}) {
+      const values = Array.from(files || []); const result = [];
+      for (let index = 0; index < values.length; index += 1) {
+        const file = values[index]; const prefix = options.prefix ? `${String(options.prefix).replace(/\/$/, "")}/` : "";
+        result.push(await storage.upload(file, { ...options, path: `${prefix}${file.name || `${Date.now()}-${index}`}` }));
+        options.onProgress?.({ completed: index + 1, total: values.length, percent: Math.round((index + 1) / values.length * 100) });
+      }
+      return result;
     },
     // Private bucket -> mint a short-lived signed URL. ASYNC (await it).
     async getUrl(path, expiresIn = 3600) {
       const data = unwrap(
-        await client.storage.from(bucket).createSignedUrl(path, expiresIn)
+        await client.storage.from(path.startsWith(`${appId}/`) ? assetBucket : bucket).createSignedUrl(path, expiresIn)
       );
       return data.signedUrl;
+    },
+    async createSignedUrl(path, expiresIn = 3600) { return storage.getUrl(path, expiresIn); },
+    async list(prefix = "") {
+      const uid = (await client.auth.getSession()).data.session?.user?.id;
+      if (!uid) throw new Error("storage.list: must be signed in.");
+      const root = appId ? `${appId}/${uid}/${prefix}` : `${uid}/${prefix}`;
+      return unwrap(await client.storage.from(assetBucket).list(root.replace(/\/$/, ""), { limit: 500, sortBy: { column: "created_at", order: "desc" } }));
+    },
+    async remove(pathOrPaths) {
+      const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+      return unwrap(await client.storage.from(assetBucket).remove(paths));
     },
   };
 
@@ -214,6 +263,42 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     async emit(event, payload = {}) { return actionPost("emit", { event, payload }); },
   };
 
+  const runtimePost = async (command, payload = {}) => {
+    if (!runtimeUrl || !appId) throw new Error("Capability Runtime is not configured for this app.");
+    const session = (await client.auth.getSession()).data.session;
+    if (!session?.access_token) throw new Error("Sign in before running app actions.");
+    const response = await fetch(runtimeUrl, { method: "POST", headers: { "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`, apikey: anonKey }, body: JSON.stringify({ command, appId, ...payload }) });
+    const out = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(out.error || `Runtime request failed (${response.status}).`); error.code = out.code; throw error; }
+    return out;
+  };
+  const actions = {
+    async invoke(actionKey, input = {}, { idempotencyKey } = {}) { return (await runtimePost("invoke", { actionKey, input, idempotencyKey })).job; },
+    async getJob(jobId) { return (await runtimePost("get", { jobId })).job; },
+    async listJobs(options = {}) { return (await runtimePost("list", options)).jobs; },
+    async cancel(jobId) { return (await runtimePost("cancel", { jobId })).job; },
+    subscribe(jobId, callback) {
+      if (!jobId || typeof callback !== "function") throw new Error("actions.subscribe(jobId, callback) requires both values.");
+      const channel = client.channel(`app-job:${jobId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "app_jobs", filter: `id=eq.${jobId}` },
+        (event) => callback(event.new)).subscribe();
+      return () => client.removeChannel(channel);
+    },
+    async wait(jobId, { interval = 1500, timeout = 15 * 60_000 } = {}) {
+      const started = Date.now();
+      while (Date.now() - started < timeout) {
+        const job = await actions.getJob(jobId);
+        if (["succeeded", "failed", "cancelled"].includes(job.status)) return job;
+        await new Promise((resolve) => setTimeout(resolve, interval));
+      }
+      throw new Error("The action is still running; check its job again later.");
+    },
+  };
+  const usage = { async getBalance() { return (await runtimePost("usage")).balance; } };
+  const knowledge = { async search(actionKey, query, options = {}) {
+    const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);
+  } };
+
   const sessionId = (() => {
     if (typeof window === "undefined") return `server-${Date.now()}`;
     try {
@@ -250,5 +335,5 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     }).catch(() => {}));
   }
 
-  return { auth, db, storage, payments, notifications, analytics, _client: client };
+  return { auth, db, storage, payments, notifications, actions, usage, knowledge, analytics, _client: client };
 }

@@ -43,6 +43,7 @@ import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { managedAffordableCreditLimit } from "./billingLimits.mjs";
 import { connectorToolsForProject } from "./connectors.mjs";
+import { auditCapabilityTree } from "./capabilityAudit.mjs";
 import {
   DESIGN_DIRECTOR_SYSTEM_PROMPT, auditDesign, fallbackDesignProfile,
   normalizeDesignProfile, normalizeStyle, parseDesignProfile, renderDesignBrief,
@@ -484,11 +485,13 @@ async function runJob(job) {
     let tools = schemas;
     let toolImpls = impls;
     let systemPrompt = mode === "iterate" ? systemPromptForEdit(editFormat) : BUILD_SYSTEM_PROMPT;
+    let capabilityManifest = [];
     try {
       const connectors = await connectorToolsForProject(owner.id, projectId);
-      if (connectors.schemas.length) {
-        tools = [...tools, ...connectors.schemas];
-        toolImpls = { ...toolImpls, ...connectors.impls };
+      capabilityManifest = connectors.manifest || [];
+      if (connectors.promptBlock) {
+        if (connectors.schemas.length) tools = [...tools, ...connectors.schemas];
+        if (connectors.schemas.length) toolImpls = { ...toolImpls, ...connectors.impls };
         systemPrompt = `${systemPrompt}\n\n${connectors.promptBlock}`;
       }
     } catch (error) {
@@ -594,6 +597,16 @@ async function runJob(job) {
           qualityWarnings.push("The automated polish could not fully satisfy every premium design check.");
         }
       }
+    }
+
+    const capabilityAudit = auditCapabilityTree(tree, capabilityManifest);
+    qualityWarnings.push(...capabilityAudit.warnings);
+    if (capabilityAudit.hardIssues.length) {
+      qualityWarnings.push(...capabilityAudit.hardIssues);
+      build = { ...build, ok: false };
+      serverLog(job, `capabilities: FAIL (${capabilityAudit.hardIssues.length} unsafe direct integration issue(s))`);
+    } else if (capabilityManifest.length) {
+      serverLog(job, `capabilities: PASS (${capabilityManifest.length} configured action(s))`);
     }
 
     setPhase(job, "finalizing");

@@ -3,8 +3,9 @@ import { cleanProduct } from "../shell/server/lib/saasPayments.mjs";
 import { REACT_VITE } from "../src/scaffolds/reactVite.mjs";
 
 assert.deepEqual(cleanProduct({ name: " Pro plan ", description: " Access ", currency: "GBP", unitAmount: 1299 }), {
-  name: "Pro plan", description: "Access", currency: "gbp", unit_amount: 1299,
+  name: "Pro plan", description: "Access", currency: "gbp", unit_amount: 1299, usage_units: 0, action_scope: [],
 });
+assert.deepEqual(cleanProduct({ name: "100 runs", currency: "gbp", unitAmount: 499, usageUnits: 100, actionScope: ["ai_text", "ai_image"] }).usage_units, 100);
 assert.throws(() => cleanProduct({ name: "", currency: "gbp", unitAmount: 100 }), /Product name/);
 assert.throws(() => cleanProduct({ name: "Plan", currency: "pounds", unitAmount: 100 }), /Currency/);
 assert.throws(() => cleanProduct({ name: "Plan", currency: "gbp", unitAmount: 1.5 }), /Price/);

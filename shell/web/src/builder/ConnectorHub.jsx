@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  deleteConnectorWorkflow, disconnectConnector, getConnectorOverview, getConnectorWorkflows,
-  saveConnector, saveConnectorWorkflow, startConnectorOAuth, testConnector,
+  deleteCapability, deleteConnectorWorkflow, disconnectConnector, getCapabilityOverview, getConnectorOverview, getConnectorWorkflows,
+  saveActionSchedule, saveCapability, saveConnector, saveConnectorWorkflow, saveKnowledgeBase, startConnectorOAuth, testConnector,
 } from "../lib/api.js";
 
 const CONFIGURABLE = new Set(["custom_api", "slack_webhook", "discord_webhook"]);
@@ -29,19 +29,32 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
   const [oauthUrl, setOauthUrl] = useState("");
   const [draft, setDraft] = useState({ label: "", baseUrl: "", contextPath: "/", headerName: "Authorization", token: "", webhookUrl: "", useInBuilder: true });
   const [workflowDraft, setWorkflowDraft] = useState({ name: "", triggerEvent: "lead.created", actionProvider: "app_email" });
+  const [capabilities, setCapabilities] = useState(null);
+  const [capabilityDraft, setCapabilityDraft] = useState({ presetId: "ai_text", key: "ai_text", name: "AI text & vision", executionMode: "managed", credential: "", baseUrl: "", apiPath: "/", method: "POST", model: "", endUserUnitCost: 0, freeAllowance: 0, rateLimitPerHour: 20, timeoutSeconds: 300 });
+  const [knowledgeDraft, setKnowledgeDraft] = useState({ key: "support", name: "Support knowledge" });
+  const [scheduleDraft, setScheduleDraft] = useState({ actionId: "", name: "Daily automation", intervalMinutes: 1440, input: "{}" });
 
   async function refresh({ quiet = false } = {}) {
     if (!quiet) setBusy(true);
     setError("");
     try {
-      const [nextOverview, nextWorkflows] = await Promise.all([getConnectorOverview(projectId), getConnectorWorkflows(projectId)]);
+      const [nextOverview, nextWorkflows, nextCapabilities] = await Promise.all([getConnectorOverview(projectId), getConnectorWorkflows(projectId), getCapabilityOverview(projectId)]);
       setOverview(nextOverview);
       setWorkflows(nextWorkflows);
+      setCapabilities(nextCapabilities);
     } catch (err) { setError(err.message || String(err)); }
     finally { if (!quiet) setBusy(false); }
   }
 
   useEffect(() => { refresh(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!capabilities || capabilityDraft.executionMode !== "managed") return;
+    const preset = capabilities.presets?.find((item) => item.id === capabilityDraft.presetId);
+    const managedReady = preset?.provider === "openai" ? capabilities.credentials?.managedOpenAI
+      : preset?.provider === "replicate" ? capabilities.credentials?.managedReplicate : true;
+    if (!managedReady && preset?.modes?.includes("byok")) setCapabilityDraft((value) => ({ ...value, executionMode: "byok" }));
+  }, [capabilities, capabilityDraft.executionMode, capabilityDraft.presetId]);
 
   useEffect(() => {
     const receive = (event) => {
@@ -142,26 +155,142 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
     finally { setBusy(false); }
   }
 
+  function choosePreset(presetId) {
+    const preset = (capabilities?.presets || []).find((item) => item.id === presetId);
+    if (!preset) return;
+    const managedReady = preset.provider === "openai" ? capabilities?.credentials?.managedOpenAI
+      : preset.provider === "replicate" ? capabilities?.credentials?.managedReplicate : true;
+    const mode = preset.modes[0] === "managed" && !managedReady && preset.modes.includes("byok") ? "byok" : preset.modes[0];
+    setCapabilityDraft((value) => ({ ...value, presetId, key: preset.id, name: preset.name,
+      executionMode: mode, model: preset.config?.model || "" }));
+  }
+
+  async function addCapability() {
+    const preset = (capabilities?.presets || []).find((item) => item.id === capabilityDraft.presetId);
+    if (!preset) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const config = { ...(preset.config || {}) };
+      if (capabilityDraft.model) config.model = capabilityDraft.model;
+      if (preset.provider === "http") { config.base_url = capabilityDraft.baseUrl; config.path = capabilityDraft.apiPath; config.method = capabilityDraft.method; }
+      await saveCapability(projectId, { ...capabilityDraft, config });
+      setCapabilityDraft((value) => ({ ...value, credential: "" }));
+      setNotice(`${capabilityDraft.name} is ready for generated apps.`);
+      await refresh({ quiet: true });
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); }
+  }
+
+  async function removeCapability(action) {
+    if (!window.confirm(`Remove the runtime action “${action.name}”?`)) return;
+    setBusy(true); setError("");
+    try { await deleteCapability(projectId, action.id); await refresh({ quiet: true }); }
+    catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); }
+  }
+
+  async function addKnowledgeBase() {
+    setBusy(true); setError("");
+    try { await saveKnowledgeBase(projectId, knowledgeDraft); setNotice("Knowledge base is ready."); await refresh({ quiet: true }); }
+    catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); }
+  }
+
+  async function addSchedule() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const actionId = scheduleDraft.actionId || capabilities?.actions?.[0]?.id;
+      if (!actionId) throw new Error("Add a runtime action before scheduling it.");
+      let input;
+      try { input = JSON.parse(scheduleDraft.input || "{}"); } catch { throw new Error("Scheduled input must be valid JSON."); }
+      await saveActionSchedule(projectId, { ...scheduleDraft, actionId, input });
+      setNotice("Scheduled action is active."); await refresh({ quiet: true });
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 p-4 backdrop-blur-sm sm:p-6">
       <div className="panel max-h-[92vh] w-[66rem] max-w-[98vw] overflow-auto p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="font-display text-xl font-semibold text-slate-100">Connector Hub</div>
-            <div className="mt-1 max-w-2xl text-xs text-slate-400">Connect data and automate app events. Connections and direct actions cost 0 credits; AI building keeps the normal credit meter.</div>
+            <div className="font-display text-xl font-semibold text-slate-100">Capability Hub</div>
+            <div className="mt-1 max-w-2xl text-xs text-slate-400">Give generated apps real AI, media, knowledge, API, payment and automation backends—not placeholder buttons.</div>
           </div>
           <button className="text-slate-500 hover:text-slate-300" onClick={onClose} aria-label="Close connector hub">✕</button>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2 text-[10px] uppercase tracking-wider">
-          <span className="tag bg-emerald-500/10 text-emerald-400">0-credit setup</span>
+          <span className="tag bg-emerald-500/10 text-emerald-400">real server actions</span>
           <span className="tag bg-ink-800 text-slate-300">encrypted secrets</span>
-          <span className="tag bg-ink-800 text-slate-300">read-only AI access</span>
-          <span className="tag bg-ink-800 text-slate-300">write actions need your workflow</span>
+          <span className="tag bg-ink-800 text-slate-300">live job progress</span>
+          <span className="tag bg-ink-800 text-slate-300">managed or BYOK</span>
         </div>
         {error && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         {notice && <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{notice}</div>}
         {oauthUrl && <a className="mt-3 inline-block text-sm text-amber-soft hover:underline" href={oauthUrl} target="_blank" rel="noreferrer">Continue Google authorization ↗</a>}
+
+        <section className="mt-6 rounded-xl border border-amber/25 bg-gradient-to-br from-amber/10 to-ink-900/80 p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><div className="font-display text-base font-semibold text-slate-100">Runtime actions</div>
+              <div className="mt-1 text-xs text-slate-400">Secure capabilities the builder wires through <span className="font-mono text-amber-soft">actions.invoke()</span>.</div></div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">{capabilities?.actions?.length || 0} configured</div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-4">
+            <label className="text-xs text-slate-400">Capability<select className="input mt-1 w-full text-sm" value={capabilityDraft.presetId} onChange={(e) => choosePreset(e.target.value)}>
+              {(capabilities?.presets || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label className="text-xs text-slate-400">Action key<input className="input mt-1 w-full font-mono text-sm" value={capabilityDraft.key} onChange={(e) => setCapabilityDraft((v) => ({ ...v, key: e.target.value }))} /></label>
+            <label className="text-xs text-slate-400">Mode<select className="input mt-1 w-full text-sm" value={capabilityDraft.executionMode} onChange={(e) => setCapabilityDraft((v) => ({ ...v, executionMode: e.target.value }))}>
+              {((capabilities?.presets || []).find((item) => item.id === capabilityDraft.presetId)?.modes || []).map((mode) => <option key={mode}>{mode}</option>)}</select></label>
+            <label className="text-xs text-slate-400">End-user units<input className="input mt-1 w-full text-sm" type="number" min="0" value={capabilityDraft.endUserUnitCost} onChange={(e) => setCapabilityDraft((v) => ({ ...v, endUserUnitCost: Number(e.target.value) }))} /></label>
+            <label className="text-xs text-slate-400">Free uses per user<input className="input mt-1 w-full text-sm" type="number" min="0" value={capabilityDraft.freeAllowance} onChange={(e) => setCapabilityDraft((v) => ({ ...v, freeAllowance: Number(e.target.value) }))} /></label>
+            <label className="text-xs text-slate-400">Hourly user limit<input className="input mt-1 w-full text-sm" type="number" min="1" max="1000" value={capabilityDraft.rateLimitPerHour} onChange={(e) => setCapabilityDraft((v) => ({ ...v, rateLimitPerHour: Number(e.target.value) }))} /></label>
+            <label className="text-xs text-slate-400">Timeout seconds<input className="input mt-1 w-full text-sm" type="number" min="5" max="3600" value={capabilityDraft.timeoutSeconds} onChange={(e) => setCapabilityDraft((v) => ({ ...v, timeoutSeconds: Number(e.target.value) }))} /></label>
+            {capabilityDraft.presetId === "safe_http" && <><label className="text-xs text-slate-400 lg:col-span-2">Public HTTPS base URL<input className="input mt-1 w-full font-mono text-sm" value={capabilityDraft.baseUrl} placeholder="https://api.example.com" onChange={(e) => setCapabilityDraft((v) => ({ ...v, baseUrl: e.target.value }))} /></label>
+              <label className="text-xs text-slate-400">Method<select className="input mt-1 w-full text-sm" value={capabilityDraft.method} onChange={(e) => setCapabilityDraft((v) => ({ ...v, method: e.target.value }))}>{["GET","POST","PUT","PATCH","DELETE"].map((method) => <option key={method}>{method}</option>)}</select></label>
+              <label className="text-xs text-slate-400">Path<input className="input mt-1 w-full font-mono text-sm" value={capabilityDraft.apiPath} placeholder="/v1/items" onChange={(e) => setCapabilityDraft((v) => ({ ...v, apiPath: e.target.value }))} /></label></>}
+            {!["media_finish","image_convert"].includes(capabilityDraft.presetId) && capabilityDraft.executionMode === "byok" && <label className="text-xs text-slate-400 lg:col-span-2">Provider credential<input className="input mt-1 w-full font-mono text-sm" type="password" autoComplete="off" value={capabilityDraft.credential} placeholder="Encrypted; blank keeps the saved key" onChange={(e) => setCapabilityDraft((v) => ({ ...v, credential: e.target.value }))} /></label>}
+          </div>
+          <div className="mt-4 flex justify-end"><button className="btn-primary px-4 py-2 text-xs" disabled={busy} onClick={addCapability}>Add real capability</button></div>
+          <div className="mt-5 grid gap-2 md:grid-cols-2">
+            {(capabilities?.actions || []).map((action) => <div key={action.id} className="rounded-lg border border-line bg-ink-950/55 p-3">
+              <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-slate-100">{action.name}</div><div className="mt-1 font-mono text-[10px] text-amber-soft">{action.key}</div></div>
+                <span className={`text-[9px] uppercase tracking-wider ${action.enabled ? "text-emerald-400" : "text-slate-600"}`}>{action.execution_mode}</span></div>
+              <div className="mt-2 text-[11px] text-slate-500">{action.provider} / {action.operation} · max {Number(action.config?.max_credits || 0).toFixed(2)} credits · {action.end_user_unit_cost} app units</div>
+              <button className="mt-3 text-xs text-red-300 hover:text-red-200" disabled={busy} onClick={() => removeCapability(action)}>Remove</button>
+            </div>)}
+            {!capabilities?.actions?.length && <div className="rounded-lg border border-dashed border-line p-5 text-sm text-slate-500 md:col-span-2">No runtime actions yet. Add one and the builder can create a working app around it.</div>}
+          </div>
+        </section>
+
+        <section className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-line bg-ink-900/70 p-4"><div className="text-sm font-medium text-slate-100">Knowledge bases</div>
+            <div className="mt-1 text-xs text-slate-500">Private vector search for support, learning and document apps.</div>
+            <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2"><input className="input font-mono text-xs" value={knowledgeDraft.key} onChange={(e) => setKnowledgeDraft((v) => ({ ...v, key: e.target.value }))} />
+              <input className="input text-xs" value={knowledgeDraft.name} onChange={(e) => setKnowledgeDraft((v) => ({ ...v, name: e.target.value }))} /><button className="btn-ghost text-xs" disabled={busy} onClick={addKnowledgeBase}>Add</button></div>
+            <div className="mt-3 flex flex-wrap gap-2">{(capabilities?.knowledgeBases || []).map((base) => <span key={base.id} className="tag bg-ink-800 text-slate-300">{base.key}</span>)}</div>
+          </div>
+          <div className="rounded-xl border border-line bg-ink-900/70 p-4"><div className="text-sm font-medium text-slate-100">Recent runtime jobs</div>
+            <div className="mt-3 space-y-2">{(capabilities?.jobs || []).slice(0,5).map((job) => <div key={job.id} className="flex items-center gap-3 text-xs"><span className={`h-2 w-2 rounded-full ${job.status === "succeeded" ? "bg-emerald-400" : job.status === "failed" ? "bg-red-400" : "bg-amber-soft"}`} />
+              <span className="min-w-0 flex-1 truncate font-mono text-slate-300">{job.action_key}</span><span className="text-slate-500">{job.status} · {job.progress}%</span></div>)}
+              {!capabilities?.jobs?.length && <div className="text-xs text-slate-500">Jobs will appear here with live progress and charges.</div>}</div>
+          </div>
+        </section>
+
+        <section className="mt-5 rounded-xl border border-line bg-ink-900/70 p-4">
+          <div className="text-sm font-medium text-slate-100">Scheduled automations</div>
+          <div className="mt-1 text-xs text-slate-500">Run a configured action every few minutes, hourly or daily without keeping a browser open.</div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-4">
+            <select className="input text-xs" value={scheduleDraft.actionId || capabilities?.actions?.[0]?.id || ""} onChange={(e) => setScheduleDraft((v) => ({ ...v, actionId: e.target.value }))}><option value="" disabled>Choose action</option>{(capabilities?.actions || []).map((action) => <option key={action.id} value={action.id}>{action.key}</option>)}</select>
+            <input className="input text-xs" value={scheduleDraft.name} onChange={(e) => setScheduleDraft((v) => ({ ...v, name: e.target.value }))} placeholder="Automation name" />
+            <input className="input text-xs" type="number" min="5" value={scheduleDraft.intervalMinutes} onChange={(e) => setScheduleDraft((v) => ({ ...v, intervalMinutes: Number(e.target.value) }))} aria-label="Interval in minutes" />
+            <button className="btn-ghost text-xs" disabled={busy || !capabilities?.actions?.length} onClick={addSchedule}>Add schedule</button>
+            <textarea className="input min-h-20 font-mono text-xs lg:col-span-4" value={scheduleDraft.input} onChange={(e) => setScheduleDraft((v) => ({ ...v, input: e.target.value }))} aria-label="Scheduled JSON input" />
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">{(capabilities?.schedules || []).map((schedule) => <div key={schedule.id} className="rounded-lg border border-line bg-ink-950/50 px-3 py-2 text-xs text-slate-300"><span className="font-medium">{schedule.name}</span><span className="ml-2 text-slate-500">every {schedule.schedule} min · next {schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : "pending"}</span></div>)}</div>
+        </section>
+
+        <div className="mt-8 border-t border-line pt-6"><div className="font-display text-base font-semibold text-slate-100">Connections and event workflows</div><div className="mt-1 text-xs text-slate-500">OAuth data sources, notifications, Stripe and GitHub stay available alongside runtime actions.</div></div>
 
         {busy && !overview ? <div className="mt-8 text-sm text-slate-400">Loading connectors…</div> : (
           <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -262,4 +391,3 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
     </div>
   );
 }
-

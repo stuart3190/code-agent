@@ -39,7 +39,7 @@ export async function handleRuntimeCheckout(req, res, body, accessToken, origin)
   const { data: feature } = await client.from("feature_flags").select("enabled").eq("key", "saas_runtime").maybeSingle();
   if (!feature?.enabled) return json(res, 503, { error: "Payments are not available yet." });
   const { data: product } = await client.from("payment_products")
-    .select("id,project_id,owner,name,description,currency,unit_amount,active")
+    .select("id,project_id,owner,name,description,currency,unit_amount,usage_units,active")
     .eq("id", productId).eq("project_id", appId).eq("active", true).maybeSingle();
   if (!product) return json(res, 404, { error: "Product is unavailable." });
   const { data: linked } = await client.from("project_integrations").select("status,config")

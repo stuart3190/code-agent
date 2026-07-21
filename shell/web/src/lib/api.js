@@ -251,6 +251,42 @@ export async function getConnectorOverview(projectId) {
   return out;
 }
 
+export async function getCapabilityOverview(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/capabilities?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `capabilities ${r.status}`);
+  return out;
+}
+
+export async function saveCapability(projectId, settings) {
+  const r = await fetch("/api/projects/capabilities", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...settings }) });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `capability ${r.status}`);
+  return out.action;
+}
+
+export async function deleteCapability(projectId, actionId) {
+  const r = await fetch("/api/projects/capabilities", { method: "DELETE", headers: await authHeaders(), body: JSON.stringify({ projectId, actionId }) });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `capability delete ${r.status}`);
+  return out;
+}
+
+export async function saveKnowledgeBase(projectId, input) {
+  const r = await fetch("/api/projects/knowledge-bases", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...input }) });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `knowledge base ${r.status}`);
+  return out.knowledgeBase;
+}
+
+export async function saveActionSchedule(projectId, input) {
+  const r = await fetch("/api/projects/action-schedules", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...input }) });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `action schedule ${r.status}`);
+  return out.schedule;
+}
+
 export async function saveConnector(projectId, settings) {
   const r = await fetch("/api/projects/connectors", {
     method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, ...settings }),

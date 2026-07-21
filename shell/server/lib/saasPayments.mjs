@@ -11,13 +11,15 @@ export function cleanProduct(input = {}) {
   const description = String(input.description || "").trim();
   const currency = String(input.currency || "gbp").trim().toLowerCase();
   const unitAmount = Number(input.unitAmount);
+  const usageUnits = Math.max(0, Math.min(1_000_000_000, Number(input.usageUnits || 0)));
+  const actionScope = Array.isArray(input.actionScope) ? input.actionScope.map((value) => String(value).trim()).filter((value) => /^[a-z][a-z0-9_.-]{1,79}$/.test(value)).slice(0, 100) : [];
   if (!name || name.length > 120) throw Object.assign(new Error("Product name must be 1 to 120 characters."), { code: "bad_product" });
   if (description.length > 500) throw Object.assign(new Error("Product description must be 500 characters or less."), { code: "bad_product" });
   if (!/^[a-z]{3}$/.test(currency)) throw Object.assign(new Error("Currency must be a three-letter code."), { code: "bad_product" });
   if (!Number.isSafeInteger(unitAmount) || unitAmount <= 0 || unitAmount > 100_000_000) {
     throw Object.assign(new Error("Price must be a positive amount in the currency's smallest unit."), { code: "bad_product" });
   }
-  return { name, description, currency, unit_amount: unitAmount };
+  return { name, description, currency, unit_amount: unitAmount, usage_units: Math.floor(usageUnits), action_scope: actionScope };
 }
 
 async function integration(owner, projectId, client) {
@@ -52,7 +54,7 @@ export async function paymentOverview(owner, projectId, client = serviceClient()
     }
   }
   const [{ data: products, error: productError }, { data: orders, error: orderError }] = await Promise.all([
-    client.from("payment_products").select("id,name,description,currency,unit_amount,active,created_at,updated_at")
+    client.from("payment_products").select("id,name,description,currency,unit_amount,usage_units,action_scope,active,created_at,updated_at")
       .eq("owner", owner.id).eq("project_id", projectId).order("created_at", { ascending: false }),
     client.from("payment_orders").select("id,product_id,amount_total,currency,customer_email,status,created_at")
       .eq("owner", owner.id).eq("project_id", projectId).order("created_at", { ascending: false }).limit(20),
@@ -99,7 +101,7 @@ export async function createPaymentProduct(owner, projectId, input, client = ser
   const row = cleanProduct(input);
   const { data, error } = await client.from("payment_products").insert({
     owner: owner.id, project_id: projectId, ...row,
-  }).select("id,name,description,currency,unit_amount,active,created_at,updated_at").single();
+  }).select("id,name,description,currency,unit_amount,usage_units,action_scope,active,created_at,updated_at").single();
   if (error) throw new Error(`payment product create: ${error.message}`);
   await auditEvent({ owner: owner.id, projectId, action: "payment.product.created", target: data.id }, client).catch(() => {});
   return data;
@@ -112,7 +114,7 @@ export async function updatePaymentProduct(owner, projectId, productId, input, c
   const query = client.from("payment_products");
   const { data, error } = patch
     ? await query.update(patch).eq("id", productId).eq("project_id", projectId).eq("owner", owner.id)
-      .select("id,name,description,currency,unit_amount,active,created_at,updated_at").maybeSingle()
+      .select("id,name,description,currency,unit_amount,usage_units,action_scope,active,created_at,updated_at").maybeSingle()
     : await query.delete().eq("id", productId).eq("project_id", projectId).eq("owner", owner.id).select("id").maybeSingle();
   if (error) throw new Error(`payment product update: ${error.message}`);
   if (data) await auditEvent({ owner: owner.id, projectId, action: patch ? "payment.product.updated" : "payment.product.deleted", target: productId }, client).catch(() => {});

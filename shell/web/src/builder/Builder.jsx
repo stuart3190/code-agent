@@ -57,7 +57,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentData, setPaymentData] = useState(null);
   const [paymentError, setPaymentError] = useState("");
-  const [productDraft, setProductDraft] = useState({ name: "", description: "", currency: "gbp", price: "" });
+  const [productDraft, setProductDraft] = useState({ name: "", description: "", currency: "gbp", price: "", usageUnits: "" });
   const [showBrand, setShowBrand] = useState(false);
   const [brandBusy, setBrandBusy] = useState(false);
   const [brandData, setBrandData] = useState(null);
@@ -432,8 +432,9 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
         description: productDraft.description,
         currency: productDraft.currency,
         unitAmount: Math.round(value * 100),
+        usageUnits: Math.max(0, Math.floor(Number(productDraft.usageUnits || 0))),
       });
-      setProductDraft({ name: "", description: "", currency: "gbp", price: "" });
+      setProductDraft({ name: "", description: "", currency: "gbp", price: "", usageUnits: "" });
       setPaymentData(await getPaymentOverview(project.id));
     } catch (error) { setPaymentError(error.message || String(error)); }
     finally { setPaymentBusy(false); }
@@ -841,11 +842,13 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                     {paymentData.account ? "Continue setup" : "Connect Stripe"}
                   </button>
                 </div>
-                <div className="mt-5 grid gap-2 sm:grid-cols-[1.2fr_.7fr_.55fr_auto]">
+                <div className="mt-5 grid gap-2 sm:grid-cols-[1.2fr_.7fr_.7fr_.55fr_auto]">
                   <input className="input text-sm" placeholder="Product name" value={productDraft.name}
                     onChange={(event) => setProductDraft((value) => ({ ...value, name: event.target.value }))} />
                   <input className="input text-sm" inputMode="decimal" placeholder="Price" value={productDraft.price}
                     onChange={(event) => setProductDraft((value) => ({ ...value, price: event.target.value }))} />
+                  <input className="input text-sm" inputMode="numeric" placeholder="Usage units" value={productDraft.usageUnits}
+                    onChange={(event) => setProductDraft((value) => ({ ...value, usageUnits: event.target.value }))} />
                   <select className="input text-sm" value={productDraft.currency}
                     onChange={(event) => setProductDraft((value) => ({ ...value, currency: event.target.value }))}>
                     <option value="gbp">GBP</option><option value="usd">USD</option><option value="eur">EUR</option>
@@ -861,6 +864,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                       <div className="min-w-0 flex-1">
                         <div className="text-sm text-slate-200 truncate">{product.name}</div>
                         <div className="mt-1 font-mono text-[11px] text-slate-500 select-all">{product.id}</div>
+                        {product.usage_units > 0 && <div className="mt-1 text-[10px] text-emerald-400">Grants {product.usage_units.toLocaleString()} app units</div>}
                       </div>
                       <div className="text-sm font-medium uppercase text-slate-300">{product.currency} {(product.unit_amount / 100).toFixed(2)}</div>
                       <button className="btn-ghost text-xs" disabled={paymentBusy} onClick={() => removePaymentProduct(product.id)}>Delete</button>
@@ -1340,7 +1344,7 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
                 </section>
                 <section className="bg-ink-900 p-2">
                   <div className="px-2 pb-1.5 pt-1 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-600">Extend</div>
-                  {featureAccess?.integrations?.allowed && <ToolAction mark="CN" title="Connectors" detail="Data sources and free workflows" onClick={() => { setShowTools(false); setShowConnectorHub(true); }} accent />}
+                  {featureAccess?.integrations?.allowed && <ToolAction mark="CP" title="Capabilities" detail="AI, media, APIs, data and workflows" onClick={() => { setShowTools(false); setShowConnectorHub(true); }} accent />}
                   {featureAccess?.saas_runtime?.allowed && <ToolAction mark="£" title="Payments" detail="Stripe products and checkout" onClick={() => { setShowTools(false); openPayments(); }} />}
                   {featureAccess?.github_export?.allowed && <ToolAction mark="GH" title="GitHub" detail="Export and sync source" onClick={() => { setShowTools(false); openGithubPanel(); }} />}
                 </section>

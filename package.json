@@ -26,6 +26,7 @@
     "test:github-sync": "node harness/_github-sync-tests.mjs",
     "test:app-integrations": "node harness/_app-integrations-tests.mjs",
     "test:connectors": "node harness/_connector-hub-tests.mjs",
+    "test:capability-runtime": "node harness/_capability-runtime-tests.mjs",
     "test:analytics": "node harness/_analytics-tests.mjs",
     "test:environments": "node harness/_environment-tests.mjs",
     "test:templates": "node harness/_template-tests.mjs",
@@ -35,9 +36,11 @@
     "prove:billing": "node harness/proveBilling.mjs",
     "prove:jobs": "node shell/harness/prove-jobs.mjs"
   },
+  "dependencies": {
+    "@supabase/supabase-js": "2.45.4",
+    "stripe": "17.0.0"
+  },
   "devDependencies": {
-    "@playwright/test": "1.61.1",
-    "@supabase/supabase-js": "^2.45.4",
-    "stripe": "^17.0.0"
+    "@playwright/test": "1.61.1"
   }
 }

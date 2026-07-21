@@ -16,6 +16,7 @@ import { assetlinksJson } from "../lib/androidLinks.mjs";
 import { ensureAppIdentity } from "../lib/appIdentity.mjs";
 import { auditEvent, recordRelease } from "../lib/projectState.mjs";
 import { requireFeature } from "../lib/features.mjs";
+import { auditCapabilityTree } from "../lib/capabilityAudit.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -150,6 +151,16 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
     const e = new Error("project not found"); e.code = "project_not_found"; throw e;
   }
   await requireFeature(owner, "publish");
+  const runtimeClient = serviceClient();
+  const { data: actions, error: actionError } = await runtimeClient.from("project_actions").select("key")
+    .eq("owner", owner.id).eq("project_id", projectId).eq("environment", "live").eq("enabled", true);
+  if (actionError && actionError.code !== "PGRST205" && actionError.code !== "42P01") throw actionError;
+  const capabilityAudit = auditCapabilityTree(tree, actions || []);
+  if (!capabilityAudit.ok) {
+    const e = new Error(`Publishing stopped: ${capabilityAudit.hardIssues[0]}`);
+    e.code = "capability_incomplete";
+    throw e;
+  }
   // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
   const { slug, previousSlug } = await claimSlug(owner, projectId, name);
 
@@ -233,6 +244,10 @@ export async function handlePublish(req, res, body, owner) {
     if (e.code === "build_failed") {
       res.writeHead(422, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "The app did not compile. Return to the builder and use Fix it." }));
+    }
+    if (e.code === "capability_incomplete") {
+      res.writeHead(422, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: e.message, code: e.code }));
     }
     const status = e.code === "upgrade_required" ? 402
       : e.code === "slug_taken" || e.code === "bad_slug" ? 409

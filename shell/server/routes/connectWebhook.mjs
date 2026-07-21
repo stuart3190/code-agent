@@ -15,7 +15,7 @@ async function recordSession(event) {
   if (!projectId || !productId || !event.account) return { ignored: true };
   const client = serviceClient();
   const { data: product } = await client.from("payment_products")
-    .select("id,owner,project_id,currency,unit_amount").eq("id", productId).eq("project_id", projectId).maybeSingle();
+    .select("id,owner,project_id,currency,unit_amount,usage_units").eq("id", productId).eq("project_id", projectId).maybeSingle();
   if (!product) return { ignored: true };
   const { data: linked } = await client.from("project_integrations")
     .select("config").eq("project_id", projectId).eq("owner", product.owner)
@@ -38,6 +38,11 @@ async function recordSession(event) {
     updated_at: new Date().toISOString(),
   }, { onConflict: "stripe_session_id" });
   if (error) throw new Error(`connect order record: ${error.message}`);
+  if (paid === "paid" && appUserId && Number(product.usage_units || 0) > 0) {
+    const { error: grantError } = await client.from("app_usage_ledger").insert({ project_id: product.project_id,
+      app_user_id: appUserId, delta: product.usage_units, kind: "grant", ref: `stripe:${session.id}`, product_id: product.id });
+    if (grantError && grantError.code !== "23505") throw new Error(`usage grant: ${grantError.message}`);
+  }
   return { recorded: true };
 }
 

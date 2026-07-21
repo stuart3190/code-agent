@@ -6,7 +6,7 @@ process.env.PLATFORM_ENC_KEY = "11".repeat(32);
 const { FEATURE_REGISTRY, disabledFeatureMatrix, evaluateFeature, rolloutBucket } = await import("../src/features/entitlements.mjs");
 const { decryptSecret, encryptSecret, encryptedStorageConfigured, secretHint } = await import("../shell/server/lib/secretCrypto.mjs");
 
-assert.equal(Object.keys(FEATURE_REGISTRY).length, 13);
+assert.equal(Object.keys(FEATURE_REGISTRY).length, 18);
 assert.equal(rolloutBucket("owner-1", "test_fix"), rolloutBucket("owner-1", "test_fix"));
 assert.ok(rolloutBucket("owner-1", "test_fix") >= 0 && rolloutBucket("owner-1", "test_fix") < 100);
 

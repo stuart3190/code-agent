@@ -12,6 +12,11 @@ export const FEATURE_REGISTRY = Object.freeze({
   analytics: { name: "Analytics" },
   environments: { name: "Test and live environments" },
   templates: { name: "Templates and remixing" },
+  capability_runtime: { name: "Capability runtime" },
+  managed_ai_runtime: { name: "Managed AI runtime" },
+  media_runtime: { name: "Media runtime" },
+  knowledge_runtime: { name: "Knowledge runtime" },
+  app_usage_packs: { name: "App usage packs" },
 });
 
 export function rolloutBucket(ownerId, feature) {

@@ -28,6 +28,10 @@ const BACKEND_MODEL = `HOW THE BACKEND WORKS — build for this or the app break
   card. Wrap every read in try/catch and treat failure OR empty as a normal EMPTY STATE (a friendly
   "no bookings yet", seed content, a call to action). A first render for a signed-out visitor with
   zero rows MUST look finished, not broken.
+- Runtime actions are per-app and REQUIRE a signed-in app user. When a CAPABILITY MANIFEST is
+  supplied later in this prompt, use only those exact action keys through actions.invoke(); show
+  progress, failure, retry and empty states. Never draw a fake working API button or put a provider
+  key, provider URL, raw fetch call, or placeholder response in generated source.
 - A pure client-side widget that needs no accounts/persistence/uploads may skip the backend entirely.`;
 
 export const BUILD_SYSTEM_PROMPT = `You are an app-builder agent. Build a complete, working web app inside a fixed scaffold.
@@ -36,19 +40,23 @@ Stack (already set up — do NOT change build config): Vite + React 18 + Tailwin
 wired up, so use Tailwind utility classes for styling.
 
 Backend SDK (already wired — do NOT call Supabase or any HTTP API directly):
-A thin backend is available via \`import { auth, db, storage } from "./lib/backend"\`. Use it whenever
+A thin backend is available via \`import { auth, db, storage, actions, usage, knowledge } from "./lib/backend"\`. Use it whenever
 the app needs accounts, persistence, or file uploads — never raw fetch, localStorage, or a new client.
 All methods are async (await them).
 - auth.signUp({ email, password }) · auth.signIn({ email, password }) · auth.signOut() · auth.currentUser() -> user | null
 - Forgot password: auth.resetPassword({ email }) emails the user a 6-digit code (always resolves);
     auth.confirmReset({ email, code, newPassword }) verifies it, sets the password, and signs them in.
     When you build a sign-in screen, include a "Forgot password?" link that drives this two-step flow.
-- db.entity("<type>").create(data) | .list() | .get(id) | .update(id, patch) | .delete(id)
+- db.entity("<type>").create(data) | .list(options) | .count(filters) | .get(id) | .update(id, patch) | .delete(id) | .subscribe(callback)
     A record is { id, type, data, owner, created_at }; your fields live inside record.data.
     Pick a "<type>" string per kind of thing (e.g. "note", "task").
 - storage.upload(file, path?) -> { path } · storage.getUrl(path) -> signed URL string (async — await it)
 The backend IS live and configured in every preview (namespaced to this app) — never build
 "demo mode" / localStorage fallbacks around it.
+
+- actions.invoke(actionKey, input, { idempotencyKey? }) -> job; actions.getJob/listJobs/cancel/
+  subscribe/wait expose live progress and terminal output. usage.getBalance() returns app units.
+  storage also supports uploadMany/list/remove/createSignedUrl and upload progress callbacks.
 
 ${BACKEND_MODEL}
 
