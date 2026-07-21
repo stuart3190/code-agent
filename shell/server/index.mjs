@@ -47,6 +47,7 @@ import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handle
 import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integrations.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { handleAnalytics } from "./routes/analytics.mjs";
+import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -288,6 +289,18 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/projects/analytics" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleAnalytics(req, res, url, owner);
+    }
+    if (p === "/api/projects/environment-control" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleEnvironmentOverview(req, res, url, owner);
+    }
+    if (p === "/api/projects/environment-control/test" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleTestDeploy(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/projects/environment-control/release" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleReleaseAction(req, res, await readJson(req), owner);
     }
     if (p === "/api/projects/test-runs" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

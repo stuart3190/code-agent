@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics } from "../lib/api.js";
+import { downloadProject, downloadAndroid, createBuild, watchBuild, activeBuild, cancelBuild, publishProject, unpublishProject, startPreview, listDomains, connectDomain, removeDomain, getFeatures, startQaRun, waitForQaRun, openQaArtifact, getPaymentOverview, beginStripeOnboarding, savePaymentProduct, deletePaymentProduct, getBrandOverview, applyProjectBrand, getOwnerConsole, setConsoleUserStatus, deleteConsoleRecord, getGithubOverview, connectGithub, exportGithub, disconnectGithub, getIntegrationOverview, saveIntegrationSettings, getProjectAnalytics, getEnvironmentControl, deployTestEnvironment, runReleaseAction } from "../lib/api.js";
 import { createProject, saveProject, saveKnowledge, savePublishedUrl, renameProject } from "../lib/projects.js";
 
 // The core loop: describe -> generate -> preview -> iterate. Generation is a detached SERVER-side
@@ -85,6 +85,10 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
   const [analyticsBusy, setAnalyticsBusy] = useState(false);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");
+  const [showEnvironments, setShowEnvironments] = useState(false);
+  const [environmentBusy, setEnvironmentBusy] = useState(false);
+  const [environmentData, setEnvironmentData] = useState(null);
+  const [environmentError, setEnvironmentError] = useState("");
   // Project knowledge: standing instructions (brand, tone, constraints) sent with every turn.
   const [knowledge, setKnowledge] = useState(project.knowledge || "");
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -564,6 +568,39 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
     try { setAnalyticsData(await getProjectAnalytics(project.id)); }
     catch (error) { setAnalyticsError(error.message || String(error)); }
     finally { setAnalyticsBusy(false); }
+  }
+
+  async function refreshEnvironments(open = false) {
+    if (open) setShowEnvironments(true);
+    setEnvironmentBusy(true);
+    setEnvironmentError("");
+    try { setEnvironmentData(await getEnvironmentControl(project.id)); }
+    catch (error) { setEnvironmentError(error.message || String(error)); }
+    finally { setEnvironmentBusy(false); }
+  }
+
+  async function deployTest() {
+    setEnvironmentBusy(true); setEnvironmentError("");
+    try {
+      const result = await deployTestEnvironment(project.id);
+      if (result.url) setPreviewUrl(result.url);
+      setEnvironmentData(await getEnvironmentControl(project.id));
+      setPublishMsg("Current build deployed to the test environment.");
+    } catch (error) { setEnvironmentError(error.message || String(error)); }
+    finally { setEnvironmentBusy(false); }
+  }
+
+  async function releaseAction(release, action) {
+    const prompt = action === "rollback" ? "Roll the live site back to this release? Your editor will keep its current version." : "Promote this test release to the live site?";
+    if (!window.confirm(prompt)) return;
+    setEnvironmentBusy(true); setEnvironmentError("");
+    try {
+      const result = await runReleaseAction(project.id, release.id, action);
+      if (result.url) { setPublishedUrl(result.url); await savePublishedUrl(project.id, result.url).catch(() => {}); }
+      setEnvironmentData(await getEnvironmentControl(project.id));
+      setPublishMsg(action === "rollback" ? "Live site rolled back." : "Test release promoted to live.");
+    } catch (error) { setEnvironmentError(error.message || String(error)); }
+    finally { setEnvironmentBusy(false); }
   }
 
   async function commitRename() {
@@ -1090,6 +1127,44 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
           </div>
         </div>
       )}
+      {showEnvironments && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
+          <div className="panel w-[52rem] max-w-[96vw] max-h-[90vh] overflow-auto p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div><div className="font-display text-lg font-semibold text-slate-100">Test and live environments</div><div className="mt-1 text-xs text-slate-400">Deploy safely to test, promote when ready, or restore an earlier live release.</div></div>
+              <button className="text-slate-500 hover:text-slate-300" onClick={() => setShowEnvironments(false)} aria-label="Close environments">✕</button>
+            </div>
+            {environmentError && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{environmentError}</div>}
+            {environmentBusy && !environmentData ? <div className="mt-6 text-sm text-slate-400">Loading releases…</div> : environmentData && (
+              <>
+                <div className="mt-5 flex items-center justify-between rounded-xl border border-line bg-ink-900/70 p-4">
+                  <div><div className="text-sm text-slate-200">Test environment</div><div className="mt-1 text-xs text-slate-500">Deploying here does not change the public live site.</div></div>
+                  <button className="btn-primary px-4 py-2 text-xs" onClick={deployTest} disabled={environmentBusy}>{environmentBusy ? "Deploying…" : "Deploy current to test"}</button>
+                </div>
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                  {["test", "live"].map((environment) => {
+                    const current = environmentData.environments.find((item) => item.environment === environment)?.config?.current_release_id;
+                    const releases = environmentData.releases.filter((release) => release.environment === environment);
+                    return <section key={environment}>
+                      <div className="text-[11px] uppercase tracking-wider text-slate-500">{environment} releases</div>
+                      <div className="mt-2 max-h-80 space-y-2 overflow-auto">
+                        {!releases.length && <div className="text-sm text-slate-500">No {environment} releases yet.</div>}
+                        {releases.map((release) => <div key={release.id} className="rounded-lg border border-line bg-ink-900/70 p-3">
+                          <div className="flex items-center gap-2"><span className={`tag ${release.id === current ? "text-emerald-400" : "text-slate-400"}`}>{release.id === current ? "current" : release.status}</span><span className="ml-auto text-[10px] text-slate-500">{new Date(release.created_at).toLocaleString()}</span></div>
+                          <div className="mt-2 flex gap-2">
+                            {environment === "test" && release.status === "ready" && <button className="btn-ghost text-xs" disabled={environmentBusy} onClick={() => releaseAction(release, "promote")}>Promote live</button>}
+                            {environment === "live" && release.status === "ready" && release.id !== current && <button className="btn-ghost text-xs" disabled={environmentBusy} onClick={() => releaseAction(release, "rollback")}>Rollback here</button>}
+                          </div>
+                        </div>)}
+                      </div>
+                    </section>;
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {androidBusy && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/85 backdrop-blur-sm p-6">
           <div className="panel w-[27rem] max-w-[92vw] p-8 text-center">
@@ -1178,6 +1253,12 @@ export default function Builder({ project, initialPrompt, onProjectChange, onAft
             <button className="btn-ghost text-xs shrink-0" onClick={openAnalytics} disabled={!hasApp || busy}
               title={hasApp ? "View traffic, events and client errors" : "Generate an app before viewing analytics"}>
               Analytics
+            </button>
+          )}
+          {featureAccess?.environments?.allowed && (
+            <button className="btn-ghost text-xs shrink-0" onClick={() => refreshEnvironments(true)} disabled={!hasApp || busy}
+              title={hasApp ? "Manage test deployments and live rollbacks" : "Generate an app before deploying"}>
+              Environments
             </button>
           )}
           <button className="btn-ghost text-xs shrink-0" onClick={doDownload} disabled={!hasApp || busy || downloadBusy}

@@ -188,6 +188,15 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
     owner: owner.id, projectId, environment: "live", tree,
     config: { slug: slug || out.id, url: out.url, files: out.files, bytes: out.bytes },
   }).catch((error) => { console.error(`[publish] release record failed: ${error.message}`); return null; });
+  if (release?.id) {
+    const client = serviceClient();
+    const { data: environment } = await client.from("project_environments").select("config")
+      .eq("project_id", projectId).eq("environment", "live").maybeSingle();
+    const { error: environmentError } = await client.from("project_environments").update({
+      config: { ...(environment?.config || {}), current_release_id: release.id, url: out.url }, updated_at: new Date().toISOString(),
+    }).eq("project_id", projectId).eq("environment", "live");
+    if (environmentError) console.error(`[publish] environment pointer failed: ${environmentError.message}`);
+  }
   await auditEvent({
     owner: owner.id, projectId, action: "project.published", target: slug || out.id,
     metadata: { url: out.url, releaseId: release?.id || null },

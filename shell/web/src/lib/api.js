@@ -251,6 +251,32 @@ export async function getProjectAnalytics(projectId, days = 14) {
   return out;
 }
 
+export async function getEnvironmentControl(projectId) {
+  const params = new URLSearchParams({ projectId });
+  const r = await fetch(`/api/projects/environment-control?${params}`, { headers: await authHeaders() });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `environments ${r.status}`);
+  return out;
+}
+
+export async function deployTestEnvironment(projectId) {
+  const r = await fetch("/api/projects/environment-control/test", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `test deploy ${r.status}`);
+  return out;
+}
+
+export async function runReleaseAction(projectId, releaseId, action) {
+  const r = await fetch("/api/projects/environment-control/release", {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ projectId, releaseId, action }),
+  });
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || `release ${action} ${r.status}`);
+  return out;
+}
+
 export async function getBalance() {
   const r = await fetch("/api/billing/balance", { headers: await authHeaders() });
   if (!r.ok) throw new Error((await r.json()).error || `balance ${r.status}`);
