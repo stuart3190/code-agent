@@ -6,11 +6,13 @@ import { auditEvent } from "./projectState.mjs";
 import { deleteProjectSecret, getProjectSecret, setProjectSecret } from "./projectSecrets.mjs";
 import { safeBrowserUrl } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
+import { beginMetaOwnerOAuth, finishMetaOwnerOAuth, metaConfigured, testMetaOwner } from "./metaConnector.mjs";
 
 const ENVIRONMENT = "live";
 const MAX_CONNECTOR_OUTPUT = 12_000;
 const CONFIGURABLE = new Set(["custom_api", "slack_webhook", "discord_webhook"]);
 const GOOGLE = new Set(["google_drive", "google_sheets", "gmail", "google_calendar"]);
+const OAUTH = new Set([...GOOGLE, "meta"]);
 const AI_READABLE = new Set(["custom_api", ...GOOGLE]);
 
 const GOOGLE_SCOPES = Object.freeze({
@@ -34,6 +36,8 @@ export const CONNECTOR_CATALOG = Object.freeze([
     description: "Search message metadata and snippets with read-only access." },
   { id: "google_calendar", name: "Google Calendar", category: "Google", auth: "oauth", readable: true,
     description: "Read upcoming events and schedules as app context." },
+  { id: "meta", name: "Meta publishing", category: "Social", auth: "oauth", readable: false,
+    description: "Publish Facebook Page posts and create scheduled paid ads without exposing Meta tokens." },
   { id: "slack_webhook", name: "Slack", category: "Automation", auth: "webhook", readable: false,
     description: "Send event workflow notifications to a Slack channel." },
   { id: "discord_webhook", name: "Discord", category: "Automation", auth: "webhook", readable: false,
@@ -121,7 +125,7 @@ export async function connectorOverview(owner, projectId, client = serviceClient
       const row = byProvider.get(definition.id);
       return {
         ...definition,
-        available: definition.auth !== "oauth" || googleConfigured(),
+        available: definition.auth !== "oauth" || (definition.id === "meta" ? metaConfigured() : googleConfigured()),
         status: row?.status || "disconnected",
         connected: row?.status === "connected",
         config: row?.config || {},
@@ -156,7 +160,7 @@ export async function saveConnector(owner, projectId, input, client = serviceCli
 
 export async function disconnectConnector(owner, projectId, provider, client = serviceClient()) {
   await requireFeature(owner, "integrations");
-  if (![...CONFIGURABLE, ...GOOGLE].includes(provider)) throw bad("That connector cannot be disconnected here.");
+  if (![...CONFIGURABLE, ...OAUTH].includes(provider)) throw bad("That connector cannot be disconnected here.");
   if (!(await ownedProject(owner.id, projectId, "id", client))) return null;
   for (const kind of ["TOKEN", "URL", "ACCESS_TOKEN", "REFRESH_TOKEN"]) {
     await deleteProjectSecret(owner.id, projectId, ENVIRONMENT, connectorSecret(provider, kind), client).catch(() => {});
@@ -174,9 +178,10 @@ function oauthRedirectUri() {
 
 export async function beginConnectorOAuth(owner, projectId, provider, client = serviceClient()) {
   await requireFeature(owner, "integrations");
-  if (!GOOGLE.has(provider)) throw bad("Unknown OAuth connector.");
-  if (!googleConfigured()) throw bad("Google OAuth is not configured on the platform yet.");
+  if (!OAUTH.has(provider)) throw bad("Unknown OAuth connector.");
   if (!(await ownedProject(owner.id, projectId, "id", client))) return null;
+  if (provider === "meta") return beginMetaOwnerOAuth(owner.id, projectId, client);
+  if (!googleConfigured()) throw bad("Google OAuth is not configured on the platform yet.");
   const state = crypto.randomBytes(32).toString("base64url");
   const verifier = crypto.randomBytes(48).toString("base64url");
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
@@ -281,6 +286,10 @@ export async function finishConnectorOAuth(url, client = serviceClient()) {
   await auditEvent({ owner, projectId, action: "connector.connected", target: provider,
     metadata: { oauth: "google", readonly: true } }, client).catch(() => {});
   return { provider, projectId, accountEmail: profile.email || null };
+}
+
+export async function finishMetaConnectorOAuth(url, client = serviceClient()) {
+  return finishMetaOwnerOAuth(url, client);
 }
 
 function authHeadersForCustom(config, token) {
@@ -405,7 +414,10 @@ export async function testConnector(owner, projectId, provider, client = service
   if (!row || row.status === "disconnected") throw bad("Connect this provider before testing it.");
   try {
     let detail;
-    if (AI_READABLE.has(provider)) {
+    if (provider === "meta") {
+      const result = await testMetaOwner(owner.id, projectId, row.config || {}, client);
+      detail = result.detail;
+    } else if (AI_READABLE.has(provider)) {
       const result = await readConnectorData(owner.id, projectId, provider, { maxResults: 1 }, client);
       detail = Array.isArray(result.data) ? `${result.data.length} item available` : "API responded successfully";
     } else if (["slack_webhook", "discord_webhook"].includes(provider)) {
@@ -437,8 +449,10 @@ export async function connectorToolsForProject(owner, projectId, client = servic
     provider: action.provider, operation: action.operation, mode: action.execution_mode, input: action.input_schema,
     output: action.output_schema, appUnits: action.end_user_unit_cost, timeoutSeconds: action.timeout_seconds }));
   if (!providers.length && !manifest.length) return { schemas: [], impls: {}, promptBlock: "", manifest: [] };
+  const metaBlock = manifest.some((action) => action.provider === "meta") ? `
+For Meta features, use integrations.meta.overview(), connect(), select(), and disconnect() from the protected backend SDK. Let each signed-in app user connect their own account and choose a Page/ad account. Page posts may contain text, a link, an uploaded image, or a combination; upload images with storage.upload() before invoking. Paid ads require an uploaded image and must show budget, audience, status and a final confirmation; pass confirmed:true only after that confirmation.` : "";
   const capabilityBlock = manifest.length ? `\n\nCAPABILITY MANIFEST (real server actions configured for this app):\n${JSON.stringify(manifest, null, 2)}
-Use only these exact keys with actions.invoke(key,input), then actions.subscribe()/wait() for progress. Require sign-in before invoking. Files must first use storage.upload(). Build complete success, empty, failed, retry and cancelled UI. Never call a provider directly, expose credentials, invent an unlisted action, simulate provider output, or leave a feature button pretending an unavailable capability works.` : "";
+Use only these exact keys with actions.invoke(key,input), then actions.subscribe()/wait() for progress. Require sign-in before invoking. Files must first use storage.upload(). Build complete success, empty, failed, retry and cancelled UI. Never call a provider directly, expose credentials, invent an unlisted action, simulate provider output, or leave a feature button pretending an unavailable capability works.${metaBlock}` : "";
   return {
     schemas: providers.length ? [{
       name: "read_connector",

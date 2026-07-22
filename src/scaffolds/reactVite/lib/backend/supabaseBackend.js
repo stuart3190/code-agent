@@ -18,7 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, analyticsUrl = null } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -299,6 +299,42 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);
   } };
 
+  const connectorPost = async (action, payload = {}) => {
+    if (!connectorsUrl || !appId) throw new Error("App connectors are not configured.");
+    const session = (await client.auth.getSession()).data.session;
+    if (!session?.access_token) throw new Error("Sign in before connecting an account.");
+    const response = await fetch(connectorsUrl, { method: "POST", headers: { "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action, appId, ...payload }) });
+    const out = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(out.error || `Connector request failed (${response.status}).`);
+    return out;
+  };
+  const integrations = { meta: {
+    async overview() { return connectorPost("overview"); },
+    async start() { return connectorPost("start"); },
+    async connect({ timeout = 5 * 60_000 } = {}) {
+      const popup = typeof window !== "undefined" ? window.open("", "buildr-meta-connect", "popup,width=640,height=760") : null;
+      let started;
+      try { started = await connectorPost("start"); }
+      catch (error) { if (popup && !popup.closed) popup.close(); throw error; }
+      if (!popup) return { ...started, popupBlocked: true };
+      popup.location.href = started.authorizationUrl;
+      return new Promise((resolve, reject) => {
+        const expected = new URL(connectorsUrl).origin;
+        const timer = setTimeout(() => { cleanup(); reject(new Error("Meta connection timed out.")); }, timeout);
+        const closed = setInterval(() => { if (popup.closed) { cleanup(); reject(new Error("Meta connection window was closed.")); } }, 750);
+        const receive = (event) => {
+          if (event.origin !== expected || !event.data?.__buildrRuntimeConnector || event.data.provider !== "meta") return;
+          cleanup(); event.data.ok ? integrations.meta.overview().then(resolve, reject) : reject(new Error(event.data.error || "Meta connection failed."));
+        };
+        function cleanup() { clearTimeout(timer); clearInterval(closed); window.removeEventListener("message", receive); }
+        window.addEventListener("message", receive);
+      });
+    },
+    async select({ pageId, adAccountId } = {}) { return connectorPost("select", { pageId, adAccountId }); },
+    async disconnect() { return connectorPost("disconnect"); },
+  } };
+
   const sessionId = (() => {
     if (typeof window === "undefined") return `server-${Date.now()}`;
     try {
@@ -335,5 +371,5 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     }).catch(() => {}));
   }
 
-  return { auth, db, storage, payments, notifications, actions, usage, knowledge, analytics, _client: client };
+  return { auth, db, storage, payments, notifications, actions, usage, knowledge, integrations, analytics, _client: client };
 }

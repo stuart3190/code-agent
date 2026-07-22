@@ -1,7 +1,7 @@
 import { optionalEnv } from "../lib/env.mjs";
 import {
   beginConnectorOAuth, connectorOverview, disconnectConnector, finishConnectorOAuth,
-  saveConnector, testConnector,
+  finishMetaConnectorOAuth, saveConnector, testConnector,
 } from "../lib/connectors.mjs";
 import {
   deleteConnectorWorkflow, listConnectorWorkflows, saveConnectorWorkflow,
@@ -88,6 +88,17 @@ export async function handleConnectorOAuthCallback(req, res, url) {
   }
 }
 
+export async function handleMetaConnectorOAuthCallback(req, res, url) {
+  try {
+    const result = await finishMetaConnectorOAuth(url);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(callbackPage({ ok: true, ...result }));
+  } catch (error) {
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(callbackPage({ ok: false, error: String(error.message || error).slice(0, 300) }));
+  }
+}
+
 export async function handleConnectorWorkflows(req, res, { method, url, body, owner }) {
   const projectId = method === "GET" ? url.searchParams.get("projectId") : body?.projectId;
   if (!projectId) return json(res, 400, { error: "projectId is required" });
@@ -107,4 +118,3 @@ export async function handleConnectorWorkflows(req, res, { method, url, body, ow
     throw error;
   }
 }
-

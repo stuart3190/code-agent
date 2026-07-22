@@ -3,6 +3,7 @@ const PROVIDER_ENDPOINTS = [
   /api\.replicate\.com/i,
   /generativelanguage\.googleapis\.com/i,
   /api\.anthropic\.com/i,
+  /graph\.facebook\.com/i,
 ];
 
 const EXPOSED_CREDENTIALS = [
@@ -26,7 +27,7 @@ export function auditCapabilityTree(tree, manifest = []) {
   const entries = sourceEntries(tree);
   for (const [name, source] of entries) {
     if (PROVIDER_ENDPOINTS.some((pattern) => pattern.test(source))) {
-      hardIssues.push(`${name} calls an AI provider directly. Route it through actions.invoke() so credentials and billing stay server-side.`);
+      hardIssues.push(`${name} calls an external provider directly. Route it through the protected backend SDK so credentials and billing stay server-side.`);
     }
     if (EXPOSED_CREDENTIALS.some((pattern) => pattern.test(source))) {
       hardIssues.push(`${name} appears to expose a provider credential or a client-visible secret variable.`);

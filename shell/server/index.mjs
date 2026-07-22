@@ -47,13 +47,14 @@ import { handleGithubConnect, handleGithubDisconnect, handleGithubExport, handle
 import { handleIntegrationOverview, handleIntegrationSave } from "./routes/integrations.mjs";
 import {
   handleConnectorDisconnect, handleConnectorOAuthCallback, handleConnectorOAuthStart,
-  handleConnectorOverview, handleConnectorSave, handleConnectorTest, handleConnectorWorkflows,
+  handleConnectorOverview, handleConnectorSave, handleConnectorTest, handleConnectorWorkflows, handleMetaConnectorOAuthCallback,
 } from "./routes/connectors.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import { handleAnalytics } from "./routes/analytics.mjs";
 import { handleEnvironmentOverview, handleReleaseAction, handleTestDeploy } from "./routes/environments.mjs";
 import { handleTemplateCreate, handleTemplateDelete, handleTemplateList, handleTemplateRemix } from "./routes/templates.mjs";
 import { handleRuntimeCheckout } from "./routes/runtimeCheckout.mjs";
+import { handleRuntimeConnectors, handleRuntimeMetaCallback } from "./routes/runtimeConnectors.mjs";
 import { handleRuntimeWebhook } from "./routes/runtimeWebhook.mjs";
 import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRuntimeCredentialDelete } from "./routes/capabilities.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
@@ -188,7 +189,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
   const method = req.method || "GET";
-  const runtimeCors = p === "/api/runtime/checkout";
+  const runtimeCors = ["/api/runtime/checkout", "/api/runtime/connectors"].includes(p);
   const corsOk = runtimeCors ? applyRuntimeCors(res, origin) : applyCors(res, origin, CORS_ORIGINS);
 
   if (method === "OPTIONS") {
@@ -219,9 +220,18 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/connectors/oauth/google/callback" && method === "GET") {
       return handleConnectorOAuthCallback(req, res, url);
     }
+    if (p === "/api/connectors/oauth/meta/callback" && method === "GET") {
+      return handleMetaConnectorOAuthCallback(req, res, url);
+    }
+    if (p === "/api/runtime/connectors/meta/callback" && method === "GET") {
+      return handleRuntimeMetaCallback(req, res, url);
+    }
 
     if (p === "/api/runtime/checkout" && method === "POST") {
       return handleRuntimeCheckout(req, res, await readJson(req), bearer(req), origin);
+    }
+    if (p === "/api/runtime/connectors" && method === "POST") {
+      return handleRuntimeConnectors(req, res, await readJson(req), bearer(req), origin);
     }
 
     if (p === "/api/stripe/webhook" && method === "POST") {

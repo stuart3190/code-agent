@@ -6,12 +6,15 @@ import {
 
 const CONFIGURABLE = new Set(["custom_api", "slack_webhook", "discord_webhook"]);
 const GOOGLE = new Set(["google_drive", "google_sheets", "gmail", "google_calendar"]);
+const OAUTH = new Set([...GOOGLE, "meta"]);
 
 const FEATURE_PACKS = [
   { id: "ai_app", mark: "AI", title: "Smart AI app", description: "Add working chat, text analysis, structured results and image generation.",
     presetIds: ["ai_text", "ai_structured", "ai_image"], credentialProvider: "openai", credentialLabel: "OpenAI API key", credentialUrl: "https://platform.openai.com/api-keys" },
   { id: "ugc_video", mark: "UGC", title: "UGC video maker", description: "Turn uploaded pictures into AI clips, finish them for social media and optimise the images.",
     presetIds: ["replicate_video", "media_finish", "image_convert"], credentialProvider: "replicate", credentialLabel: "Replicate API token", credentialUrl: "https://replicate.com/account/api-tokens" },
+  { id: "meta_publishing", mark: "META", title: "Meta publishing", description: "Connect Facebook Pages and ad accounts for scheduled organic posts and paid static ads.",
+    presetIds: ["meta_accounts", "meta_page_post", "meta_create_ad"], platformProvider: "meta" },
   { id: "documents", mark: "DOC", title: "Document tools", description: "Extract and merge PDFs, optimise images and create downloadable ZIP files.",
     presetIds: ["pdf_extract", "pdf_merge", "archive", "image_convert"] },
   { id: "knowledge", mark: "KB", title: "Knowledge assistant", description: "Upload private information, search it and build a support bot or learning app around it.",
@@ -25,7 +28,7 @@ function statusClass(connector) {
 }
 
 function ConnectorMark({ id }) {
-  const marks = { custom_api: "API", google_drive: "DR", google_sheets: "SH", gmail: "GM", google_calendar: "CA",
+  const marks = { custom_api: "API", google_drive: "DR", google_sheets: "SH", gmail: "GM", google_calendar: "CA", meta: "META",
     slack_webhook: "SL", discord_webhook: "DI", app_actions: "EV", stripe_connect: "ST", github: "GH" };
   return <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-ink-800 font-mono text-[10px] font-semibold text-amber-soft">{marks[id] || "CN"}</span>;
 }
@@ -292,7 +295,7 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
         </div>
         {error && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         {notice && <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{notice}</div>}
-        {oauthUrl && <a className="mt-3 inline-block text-sm text-amber-soft hover:underline" href={oauthUrl} target="_blank" rel="noreferrer">Continue Google authorization ↗</a>}
+        {oauthUrl && <a className="mt-3 inline-block text-sm text-amber-soft hover:underline" href={oauthUrl} target="_blank" rel="noreferrer">Continue authorization ↗</a>}
 
         <section className="mt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -304,10 +307,15 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
             {FEATURE_PACKS.map((pack) => {
               const installed = pack.presetIds.every((id) => actionKeys.has(id));
               const needsCredential = !!pack.credentialProvider && !providerReady(pack.credentialProvider);
-              return <div key={pack.id} className={`rounded-xl border p-4 ${installed ? "border-emerald-500/30 bg-emerald-500/5" : "border-line bg-ink-900/70"}`}>
+              const connector = pack.connectorProvider ? (overview?.connectors || []).find((item) => item.id === pack.connectorProvider) : null;
+              const platformConnector = pack.platformProvider ? (overview?.connectors || []).find((item) => item.id === pack.platformProvider) : null;
+              const needsConnector = !!connector && !connector.connected;
+              const connectorUnavailable = (needsConnector && !connector.available) || (!!platformConnector && !platformConnector.available);
+              const ready = installed && !needsConnector;
+              return <div key={pack.id} className={`rounded-xl border p-4 ${ready ? "border-emerald-500/30 bg-emerald-500/5" : "border-line bg-ink-900/70"}`}>
                 <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-800 font-mono text-[10px] font-semibold text-amber-soft">{pack.mark}</span>
                   <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium text-slate-100">{pack.title}</span>
-                    {installed && <span className="text-[9px] uppercase tracking-wider text-emerald-400">ready</span>}</div>
+                    {ready && <span className="text-[9px] uppercase tracking-wider text-emerald-400">ready</span>}</div>
                     <div className="mt-1 text-[11px] leading-relaxed text-slate-500">{pack.description}</div></div></div>
                 {needsCredential && !installed && packSetup === pack.id && <label className="mt-4 block text-[11px] text-slate-400">One thing needed: {pack.credentialLabel}
                   <input className="input mt-1 w-full font-mono text-xs" type="password" autoComplete="off" value={packCredentials[pack.id] || ""}
@@ -315,10 +323,11 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
                   <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-600"><span>Encrypted and never placed in the generated website.</span>
                     <a className="shrink-0 text-amber-soft hover:underline" href={pack.credentialUrl} target="_blank" rel="noreferrer">Get key ↗</a></span>
                 </label>}
-                <button className={installed ? "btn-ghost mt-4 w-full text-xs" : "btn-primary mt-4 w-full px-4 py-2 text-xs"}
-                  disabled={busy || installed || (needsCredential && packSetup === pack.id && !String(packCredentials[pack.id] || "").trim())}
-                  onClick={() => needsCredential && packSetup !== pack.id ? setPackSetup(pack.id) : addFeaturePack(pack)}>
-                  {installed ? "Added" : packBusy === pack.id ? "Adding features…" : needsCredential && packSetup !== pack.id ? `Set up ${pack.title}` : `Add ${pack.title}`}
+                {connectorUnavailable && <div className="mt-4 rounded-lg border border-amber/20 bg-amber/5 px-3 py-2 text-[10px] text-amber-soft">One-time Buildr Meta app setup is needed before accounts can connect.</div>}
+                <button className={ready ? "btn-ghost mt-4 w-full text-xs" : "btn-primary mt-4 w-full px-4 py-2 text-xs"}
+                  disabled={busy || ready || connectorUnavailable || (needsCredential && packSetup === pack.id && !String(packCredentials[pack.id] || "").trim())}
+                  onClick={() => needsConnector ? connectOAuth(connector) : needsCredential && packSetup !== pack.id ? setPackSetup(pack.id) : addFeaturePack(pack)}>
+                  {ready ? "Added" : connectorUnavailable ? "Meta setup required" : needsConnector ? "Connect Meta" : packBusy === pack.id ? "Adding features…" : needsCredential && packSetup !== pack.id ? `Set up ${pack.title}` : `Add ${pack.title}`}
                 </button>
               </div>;
             })}
@@ -416,14 +425,14 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
                       <button className="btn-ghost text-xs" disabled={lockedGithub} onClick={() => openBuiltIn(connector.id)}>
                         {lockedGithub ? "Paid plan" : connector.connected ? "Manage" : "Open setup"}
                       </button>
-                    ) : GOOGLE.has(connector.id) ? (
+                    ) : OAUTH.has(connector.id) ? (
                       <button className="btn-ghost text-xs" disabled={busy || (!connector.available && !connector.connected)} onClick={() => connector.connected ? runTest(connector.id) : connectOAuth(connector)}>
                         {!connector.available && !connector.connected ? "Platform setup needed" : connector.connected ? "Test" : "Connect"}
                       </button>
                     ) : (
                       <button className="btn-ghost text-xs" disabled={busy} onClick={() => configure(connector)}>{connector.connected ? "Settings" : "Connect"}</button>
                     )}
-                    {connector.connected && (CONFIGURABLE.has(connector.id) || GOOGLE.has(connector.id)) && (
+                    {connector.connected && (CONFIGURABLE.has(connector.id) || OAUTH.has(connector.id)) && (
                       <button className="text-xs text-red-300 hover:text-red-200" disabled={busy} onClick={() => removeConnector(connector.id)}>Disconnect</button>
                     )}
                   </div>

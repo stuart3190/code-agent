@@ -34,6 +34,7 @@ const TABLES = [
   "feature_flags", "project_secrets", "project_integrations", "project_environments",
   "project_releases", "background_tasks", "audit_events",
   "connector_oauth_states", "connector_workflows",
+  "app_user_integrations", "app_connector_oauth_states",
   "qa_runs",
   "payment_products", "payment_orders",
   "brand_kits", "project_brand_settings",

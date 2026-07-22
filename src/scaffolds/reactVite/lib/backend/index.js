@@ -39,6 +39,7 @@ function unconfigured() {
     actions: { invoke: fail, getJob: fail, listJobs: fail, cancel: fail, subscribe: fail, wait: fail },
     usage: { getBalance: fail },
     knowledge: { search: fail },
+    integrations: { meta: { overview: fail, start: fail, connect: fail, select: fail, disconnect: fail } },
     analytics: { track: fail, page: fail },
     _client: null,
   };
@@ -54,6 +55,7 @@ try {
     paymentsUrl: import.meta.env.VITE_PAYMENTS_URL || null,
     actionsUrl: import.meta.env.VITE_ACTIONS_URL || null,
     runtimeUrl: import.meta.env.VITE_RUNTIME_URL || null,
+    connectorsUrl: import.meta.env.VITE_CONNECTORS_URL || null,
     analyticsUrl: import.meta.env.VITE_ANALYTICS_URL || null,
   });
 } catch {
@@ -68,5 +70,6 @@ export const notifications = backend.notifications;
 export const actions = backend.actions;
 export const usage = backend.usage;
 export const knowledge = backend.knowledge;
+export const integrations = backend.integrations;
 export const analytics = backend.analytics;
 export default backend;

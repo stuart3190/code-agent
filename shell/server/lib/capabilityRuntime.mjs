@@ -7,6 +7,7 @@ import path from "node:path";
 import { optionalEnv } from "./env.mjs";
 import { getProjectSecret } from "./projectSecrets.mjs";
 import { serviceClient } from "./supabase.mjs";
+import { metaJson, metaPageToken, metaRuntimeConnection } from "./metaConnector.mjs";
 import { trueCostPerCredit } from "../../../src/billing/costModel.mjs";
 
 const MAX_HTTP_BYTES = 1_000_000;
@@ -372,6 +373,133 @@ async function runKnowledge(action, job, client) {
   return { output: { documentId: document.id, chunks: rows.length } };
 }
 
+function connectedChoice(values, requested, fallback, label) {
+  const raw = String(requested || fallback || "");
+  const id = label === "ad account" ? raw.replace(/^act_/, "") : raw;
+  if (!id || !(values || []).some((item) => String(item.id) === id)) throw new Error(`Choose a connected Meta ${label}.`);
+  return id;
+}
+
+function publicDestination(value) {
+  let url;
+  try { url = new URL(String(value || "")); } catch { url = null; }
+  if (!url || url.protocol !== "https:" || url.username || url.password) throw new Error("The ad destination must be a public HTTPS URL.");
+  return url.href.slice(0, 2000);
+}
+
+export function normalizeMetaPublishAt(value, { minimumMinutes = 20, maximumDays = 29 } = {}) {
+  if (!value) return null;
+  const time = Date.parse(String(value));
+  if (!Number.isFinite(time)) throw new Error("Choose a valid publishing date and time.");
+  if (time < Date.now() + minimumMinutes * 60_000) throw new Error(`Scheduled publishing must be at least ${minimumMinutes} minutes ahead.`);
+  if (time > Date.now() + maximumDays * 86_400_000) throw new Error(`Scheduled publishing cannot be more than ${maximumDays} days ahead.`);
+  return new Date(time).toISOString();
+}
+
+export function buildMetaTargeting(input) {
+  const countries = [...new Set((Array.isArray(input?.countries) ? input.countries : []).map((item) => String(item).trim().toUpperCase()))]
+    .filter((item) => /^[A-Z]{2}$/.test(item)).slice(0, 25);
+  if (!countries.length) throw new Error("Choose at least one two-letter country code for the Meta audience.");
+  const requestedMin = Number(input?.ageMin ?? 18);
+  const requestedMax = Number(input?.ageMax ?? 65);
+  if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax)) throw new Error("Choose a valid Meta audience age range.");
+  const ageMin = Math.round(Math.max(18, Math.min(65, requestedMin)));
+  const ageMax = Math.round(Math.max(ageMin, Math.min(65, requestedMax)));
+  return { geo_locations: { countries }, age_min: ageMin, age_max: ageMax };
+}
+
+async function runtimeImage(client, job, storagePath) {
+  const value = String(storagePath || "");
+  const expected = `${job.project_id}/${job.app_user_id || job.owner}/`;
+  if (!value.startsWith(expected)) throw new Error("Choose an image uploaded by this signed-in app account.");
+  const { data, error } = await client.storage.from("runtime-assets").download(value);
+  if (error || !data) throw new Error(`The Meta image could not be loaded: ${error?.message || "missing file"}`);
+  if (data.size > 30 * 1024 * 1024) throw new Error("Meta static images must be smaller than 30 MB.");
+  return data;
+}
+
+function formBody(values) {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== "") {
+    body.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  return body;
+}
+
+async function runMeta(action, job, client) {
+  const connection = await metaRuntimeConnection(job, client);
+  const config = connection.config || {};
+  if (action.operation === "accounts") return { output: { pages: config.pages || [], adAccounts: config.ad_accounts || [],
+    selectedPageId: config.selected_page_id || null, selectedAdAccountId: config.selected_ad_account_id || null } };
+  const pageId = connectedChoice(config.pages, job.input.pageId, config.selected_page_id, "Page");
+  if (action.operation === "page_post") {
+    const page = await metaPageToken(connection.token, pageId);
+    const publishAt = normalizeMetaPublishAt(job.input.publishAt);
+    let message = String(job.input.message || "").trim().slice(0, 5000);
+    if (job.input.destinationUrl) message = `${message}${message ? "\n\n" : ""}${publicDestination(job.input.destinationUrl)}`;
+    if (!job.input.path && !message) throw new Error("Add post text, a destination link or an image before publishing.");
+    let body;
+    let endpoint;
+    if (job.input.path) {
+      const image = await runtimeImage(client, job, job.input.path);
+      body = new FormData();
+      body.set("source", image, "facebook-post");
+      body.set("message", message);
+      endpoint = `${pageId}/photos`;
+    } else {
+      body = formBody({ message });
+      endpoint = `${pageId}/feed`;
+    }
+    if (publishAt) { body.set("published", "false"); body.set("scheduled_publish_time", String(Math.floor(Date.parse(publishAt) / 1000))); }
+    const result = await metaJson(endpoint, { token: page.token, method: "POST", body, timeout: 60_000 });
+    return { output: { postId: String(result.post_id || result.id || ""), photoId: job.input.path ? String(result.id || "") : "",
+      status: publishAt ? "scheduled" : "published", scheduledFor: publishAt } };
+  }
+  if (action.operation !== "create_ad") throw new Error(`Unsupported Meta operation '${action.operation}'.`);
+  const adAccountId = connectedChoice(config.ad_accounts, job.input.adAccountId, config.selected_ad_account_id, "ad account");
+  const destinationUrl = publicDestination(job.input.destinationUrl);
+  const dailyBudget = Math.floor(Number(job.input.dailyBudgetMinor || 0));
+  if (!Number.isInteger(dailyBudget) || dailyBudget < 100) throw new Error("Enter a daily ad budget of at least 100 in the ad account's smallest currency unit.");
+  const targeting = buildMetaTargeting(job.input);
+  const confirmed = job.input.confirmed === true;
+  const startAt = job.input.startAt ? normalizeMetaPublishAt(job.input.startAt, { minimumMinutes: 10, maximumDays: 365 }) : null;
+  const endAt = job.input.endAt ? new Date(job.input.endAt) : null;
+  if (endAt && (!Number.isFinite(endAt.getTime()) || endAt.getTime() <= Date.parse(startAt || new Date().toISOString()))) throw new Error("The Meta ad end time must be after its start time.");
+  // Stage the entire campaign paused. Only activate after every object exists, so a
+  // rejected creative or ad can never leave a partially-created campaign spending.
+  const status = "PAUSED";
+  const special = (job.input.specialAdCategories || []).map((item) => String(item).trim().toUpperCase()).filter((item) => /^[A-Z_]{2,50}$/.test(item)).slice(0, 4);
+  const image = await runtimeImage(client, job, job.input.path);
+  const upload = new FormData(); upload.set("filename", image, "static-ad");
+  const uploaded = await metaJson(`act_${adAccountId}/adimages`, { token: connection.token, method: "POST", body: upload, timeout: 60_000 });
+  const imageHash = Object.values(uploaded.images || {})[0]?.hash;
+  if (!imageHash) throw new Error("Meta accepted the image but did not return an image hash.");
+  const name = String(job.input.name || "Static ad").trim().slice(0, 120);
+  const campaign = await metaJson(`act_${adAccountId}/campaigns`, { token: connection.token, method: "POST", body: formBody({
+    name, objective: "OUTCOME_TRAFFIC", special_ad_categories: special, status,
+  }) });
+  const adSet = await metaJson(`act_${adAccountId}/adsets`, { token: connection.token, method: "POST", body: formBody({
+    name: `${name} audience`, campaign_id: campaign.id, daily_budget: dailyBudget, billing_event: "IMPRESSIONS",
+    optimization_goal: "LINK_CLICKS", bid_strategy: "LOWEST_COST_WITHOUT_CAP", destination_type: "WEBSITE",
+    targeting, status, start_time: startAt, end_time: endAt?.toISOString(),
+  }) });
+  const creative = await metaJson(`act_${adAccountId}/adcreatives`, { token: connection.token, method: "POST", body: formBody({
+    name: `${name} creative`, object_story_spec: { page_id: pageId, link_data: { image_hash: imageHash, link: destinationUrl,
+      message: String(job.input.message || "").slice(0, 5000), name: String(job.input.headline || "").slice(0, 255),
+      call_to_action: { type: job.input.callToAction || "LEARN_MORE", value: { link: destinationUrl } } } },
+  }) });
+  const ad = await metaJson(`act_${adAccountId}/ads`, { token: connection.token, method: "POST", body: formBody({
+    name, adset_id: adSet.id, creative: { creative_id: creative.id }, status,
+  }) });
+  if (confirmed) {
+    await metaJson(campaign.id, { token: connection.token, method: "POST", body: formBody({ status: "ACTIVE" }) });
+    await metaJson(adSet.id, { token: connection.token, method: "POST", body: formBody({ status: "ACTIVE" }) });
+    await metaJson(ad.id, { token: connection.token, method: "POST", body: formBody({ status: "ACTIVE" }) });
+  }
+  return { output: { campaignId: String(campaign.id), adSetId: String(adSet.id), creativeId: String(creative.id),
+    adId: String(ad.id), status: confirmed ? "ACTIVE" : "PAUSED", scheduledFor: startAt } };
+}
+
 async function execute(action, job, client) {
   if (action.provider === "openai") return runOpenAI(action, job, client);
   if (action.provider === "replicate") return runReplicate(action, job, client);
@@ -379,6 +507,7 @@ async function execute(action, job, client) {
   if (action.provider === "media") return runMedia(action, job, client);
   if (action.provider === "document") return runDocument(action, job, client);
   if (action.provider === "knowledge") return runKnowledge(action, job, client);
+  if (action.provider === "meta") return runMeta(action, job, client);
   throw new Error(`Unsupported runtime provider '${action.provider}'.`);
 }
 

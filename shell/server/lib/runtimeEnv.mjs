@@ -37,6 +37,7 @@ export function withRuntimeEnv(tree, projectId) {
       `VITE_PAYMENTS_URL=${platformUrl}/api/runtime/checkout`,
       `VITE_ACTIONS_URL=${url}/functions/v1/app-actions`,
       `VITE_RUNTIME_URL=${url}/functions/v1/app-runtime`,
+      `VITE_CONNECTORS_URL=${platformUrl}/api/runtime/connectors`,
       `VITE_ANALYTICS_URL=${url}/functions/v1/app-analytics`,
       "",
     ].join("\n"),
