@@ -7,6 +7,17 @@ import {
 const CONFIGURABLE = new Set(["custom_api", "slack_webhook", "discord_webhook"]);
 const GOOGLE = new Set(["google_drive", "google_sheets", "gmail", "google_calendar"]);
 
+const FEATURE_PACKS = [
+  { id: "ai_app", mark: "AI", title: "Smart AI app", description: "Add working chat, text analysis, structured results and image generation.",
+    presetIds: ["ai_text", "ai_structured", "ai_image"], credentialProvider: "openai", credentialLabel: "OpenAI API key", credentialUrl: "https://platform.openai.com/api-keys" },
+  { id: "ugc_video", mark: "UGC", title: "UGC video maker", description: "Turn uploaded pictures into AI clips, finish them for social media and optimise the images.",
+    presetIds: ["replicate_video", "media_finish", "image_convert"], credentialProvider: "replicate", credentialLabel: "Replicate API token", credentialUrl: "https://replicate.com/account/api-tokens" },
+  { id: "documents", mark: "DOC", title: "Document tools", description: "Extract and merge PDFs, optimise images and create downloadable ZIP files.",
+    presetIds: ["pdf_extract", "pdf_merge", "archive", "image_convert"] },
+  { id: "knowledge", mark: "KB", title: "Knowledge assistant", description: "Upload private information, search it and build a support bot or learning app around it.",
+    presetIds: ["knowledge_ingest", "knowledge_search", "ai_text"], credentialProvider: "openai", credentialLabel: "OpenAI API key", credentialUrl: "https://platform.openai.com/api-keys", knowledgeBase: true },
+];
+
 function statusClass(connector) {
   if (connector.connected) return "border-emerald-500/30 bg-emerald-500/5";
   if (connector.status === "error") return "border-red-500/30 bg-red-500/5";
@@ -30,6 +41,10 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
   const [draft, setDraft] = useState({ label: "", baseUrl: "", contextPath: "/", headerName: "Authorization", token: "", webhookUrl: "", useInBuilder: true });
   const [workflowDraft, setWorkflowDraft] = useState({ name: "", triggerEvent: "lead.created", actionProvider: "app_email" });
   const [capabilities, setCapabilities] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [packBusy, setPackBusy] = useState("");
+  const [packSetup, setPackSetup] = useState("");
+  const [packCredentials, setPackCredentials] = useState({});
   const [capabilityDraft, setCapabilityDraft] = useState({ presetId: "ai_text", key: "ai_text", name: "AI text & vision", executionMode: "managed", credential: "", baseUrl: "", apiPath: "/", method: "POST", model: "", endUserUnitCost: 0, freeAllowance: 0, rateLimitPerHour: 20, timeoutSeconds: 300 });
   const [knowledgeDraft, setKnowledgeDraft] = useState({ key: "support", name: "Support knowledge" });
   const [scheduleDraft, setScheduleDraft] = useState({ actionId: "", name: "Daily automation", intervalMinutes: 1440, input: "{}" });
@@ -67,6 +82,56 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connected = useMemo(() => new Set((overview?.connectors || []).filter((item) => item.connected).map((item) => item.id)), [overview]);
+  const actionKeys = useMemo(() => new Set((capabilities?.actions || []).map((item) => item.key)), [capabilities]);
+  const visibleConnectors = useMemo(() => (overview?.connectors || []).filter((item) => item.connected || item.available || !GOOGLE.has(item.id)), [overview]);
+  const hiddenGoogleCount = (overview?.connectors || []).filter((item) => GOOGLE.has(item.id) && !item.connected && !item.available).length;
+
+  function providerReady(provider) {
+    if (provider === "openai") return !!(capabilities?.credentials?.managedOpenAI || capabilities?.credentials?.openai);
+    if (provider === "replicate") return !!(capabilities?.credentials?.managedReplicate || capabilities?.credentials?.replicate);
+    return true;
+  }
+
+  function presetProvider(preset) {
+    return preset?.provider === "knowledge" ? "openai" : preset?.provider;
+  }
+
+  function executionMode(preset) {
+    if (preset?.modes?.includes("internal")) return "internal";
+    const ready = presetProvider(preset) === "openai" ? capabilities?.credentials?.managedOpenAI
+      : presetProvider(preset) === "replicate" ? capabilities?.credentials?.managedReplicate : false;
+    if (ready && preset?.modes?.includes("managed")) return "managed";
+    return preset?.modes?.includes("byok") ? "byok" : preset?.modes?.[0];
+  }
+
+  async function addFeaturePack(pack) {
+    const credential = String(packCredentials[pack.id] || "").trim();
+    if (pack.credentialProvider && !providerReady(pack.credentialProvider) && !credential) {
+      setError(`Paste your ${pack.credentialLabel} first. It is encrypted when saved.`);
+      return;
+    }
+    setBusy(true); setPackBusy(pack.id); setError(""); setNotice("");
+    try {
+      const definitions = pack.presetIds.map((id) => (capabilities?.presets || []).find((item) => item.id === id));
+      if (definitions.some((item) => !item)) throw new Error("This feature pack is not available yet.");
+      let credentialSaved = false;
+      for (const preset of definitions) {
+        const usesPackCredential = presetProvider(preset) === pack.credentialProvider;
+        await saveCapability(projectId, {
+          presetId: preset.id, key: preset.id, name: preset.name, executionMode: executionMode(preset),
+          credential: usesPackCredential && !credentialSaved ? credential : "", config: preset.config || {},
+          endUserUnitCost: 0, freeAllowance: 0, rateLimitPerHour: 20, timeoutSeconds: 300,
+        });
+        if (usesPackCredential && credential) credentialSaved = true;
+      }
+      if (pack.knowledgeBase) await saveKnowledgeBase(projectId, { key: "app_knowledge", name: "App knowledge" });
+      setPackCredentials((value) => ({ ...value, [pack.id]: "" }));
+      setPackSetup("");
+      setNotice(`${pack.title} is ready. The builder can now wire these features into this app.`);
+      await refresh({ quiet: true });
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); setPackBusy(""); }
+  }
 
   function configure(connector) {
     setActive(connector.id); setError(""); setNotice(""); setOauthUrl("");
@@ -214,21 +279,59 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
       <div className="panel max-h-[92vh] w-[66rem] max-w-[98vw] overflow-auto p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="font-display text-xl font-semibold text-slate-100">Capability Hub</div>
-            <div className="mt-1 max-w-2xl text-xs text-slate-400">Give generated apps real AI, media, knowledge, API, payment and automation backends—not placeholder buttons.</div>
+            <div className="font-display text-xl font-semibold text-slate-100">Add working features</div>
+            <div className="mt-1 max-w-2xl text-xs text-slate-400">Choose what this app should do. Buildr handles the server setup and tells the builder to make the feature work.</div>
           </div>
           <button className="text-slate-500 hover:text-slate-300" onClick={onClose} aria-label="Close connector hub">✕</button>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2 text-[10px] uppercase tracking-wider">
-          <span className="tag bg-emerald-500/10 text-emerald-400">real server actions</span>
-          <span className="tag bg-ink-800 text-slate-300">encrypted secrets</span>
-          <span className="tag bg-ink-800 text-slate-300">live job progress</span>
-          <span className="tag bg-ink-800 text-slate-300">managed or BYOK</span>
+          <span className="tag bg-emerald-500/10 text-emerald-400">working features</span>
+          <span className="tag bg-ink-800 text-slate-300">secure keys</span>
+          <span className="tag bg-ink-800 text-slate-300">no coding</span>
         </div>
         {error && <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         {notice && <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{notice}</div>}
         {oauthUrl && <a className="mt-3 inline-block text-sm text-amber-soft hover:underline" href={oauthUrl} target="_blank" rel="noreferrer">Continue Google authorization ↗</a>}
+
+        <section className="mt-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div><div className="font-display text-base font-semibold text-slate-100">What are you building?</div>
+              <div className="mt-1 text-xs text-slate-500">You can add more than one pack. Website, login, database and payment features keep working as normal.</div></div>
+            <span className="text-[10px] uppercase tracking-wider text-slate-600">one-click setup</span>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {FEATURE_PACKS.map((pack) => {
+              const installed = pack.presetIds.every((id) => actionKeys.has(id));
+              const needsCredential = !!pack.credentialProvider && !providerReady(pack.credentialProvider);
+              return <div key={pack.id} className={`rounded-xl border p-4 ${installed ? "border-emerald-500/30 bg-emerald-500/5" : "border-line bg-ink-900/70"}`}>
+                <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-800 font-mono text-[10px] font-semibold text-amber-soft">{pack.mark}</span>
+                  <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium text-slate-100">{pack.title}</span>
+                    {installed && <span className="text-[9px] uppercase tracking-wider text-emerald-400">ready</span>}</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-500">{pack.description}</div></div></div>
+                {needsCredential && !installed && packSetup === pack.id && <label className="mt-4 block text-[11px] text-slate-400">One thing needed: {pack.credentialLabel}
+                  <input className="input mt-1 w-full font-mono text-xs" type="password" autoComplete="off" value={packCredentials[pack.id] || ""}
+                    placeholder={`Paste ${pack.credentialLabel}`} onChange={(e) => setPackCredentials((value) => ({ ...value, [pack.id]: e.target.value }))} />
+                  <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-600"><span>Encrypted and never placed in the generated website.</span>
+                    <a className="shrink-0 text-amber-soft hover:underline" href={pack.credentialUrl} target="_blank" rel="noreferrer">Get key ↗</a></span>
+                </label>}
+                <button className={installed ? "btn-ghost mt-4 w-full text-xs" : "btn-primary mt-4 w-full px-4 py-2 text-xs"}
+                  disabled={busy || installed || (needsCredential && packSetup === pack.id && !String(packCredentials[pack.id] || "").trim())}
+                  onClick={() => needsCredential && packSetup !== pack.id ? setPackSetup(pack.id) : addFeaturePack(pack)}>
+                  {installed ? "Added" : packBusy === pack.id ? "Adding features…" : needsCredential && packSetup !== pack.id ? `Set up ${pack.title}` : `Add ${pack.title}`}
+                </button>
+              </div>;
+            })}
+          </div>
+        </section>
+
+        <div className="mt-6 rounded-xl border border-line bg-ink-900/45 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-medium text-slate-200">Need a custom connection or automation?</div>
+            <div className="mt-1 text-[11px] text-slate-500">Only open this if you need your own API, webhook or fine control over a feature.</div></div>
+            <button className="btn-ghost text-xs" onClick={() => setShowAdvanced((value) => !value)}>{showAdvanced ? "Hide advanced settings" : "Show advanced settings"}</button></div>
+        </div>
+
+        {showAdvanced && <>
 
         <section className="mt-6 rounded-xl border border-amber/25 bg-gradient-to-br from-amber/10 to-ink-900/80 p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -294,7 +397,7 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
 
         {busy && !overview ? <div className="mt-8 text-sm text-slate-400">Loading connectors…</div> : (
           <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {(overview?.connectors || []).map((connector) => {
+            {visibleConnectors.map((connector) => {
               const lockedGithub = connector.id === "github" && !githubAllowed;
               return (
                 <div key={connector.id} className={`rounded-xl border p-4 ${statusClass(connector)}`}>
@@ -329,6 +432,7 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
             })}
           </div>
         )}
+        {!!hiddenGoogleCount && <div className="mt-3 rounded-lg border border-line bg-ink-900/45 px-3 py-2 text-[11px] text-slate-500">Google Drive, Sheets, Gmail and Calendar are hidden because Google connection setup is not enabled on Buildr yet. They will only appear when they can actually connect.</div>}
 
         {active && (
           <section className="mt-7 rounded-xl border border-amber/25 bg-ink-900/70 p-4">
@@ -387,6 +491,7 @@ export default function ConnectorHub({ projectId, githubAllowed, onClose, onOpen
             ))}
           </div>
         </section>
+        </>}
       </div>
     </div>
   );
