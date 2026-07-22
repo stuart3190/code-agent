@@ -18,6 +18,8 @@ browser ──https──▶ Caddy (docker, binds 10.83.7.2; certs via Cloudflar
   (public :8787 verified unreachable). `SHELL_HOST` env controls this; unset locally = old behavior.
 - systemd: `buildr-shell` + `buildr-provisiond`, `Restart=always`, enabled at boot. The
   setsid/pidfile era is over — manage with `sudo systemctl restart|status buildr-shell`.
+- `buildr-runtime-worker` (systemd) runs the immutable `buildr-runtime-worker:latest` Docker image
+  for generated-app capability jobs. Its private env is `/etc/buildr/runtime-worker.env`.
 - Engine (Codex lane) runs on the VPS: `~/.codex/auth.json` + `config.toml` copied from the EPYC
   box 2026-07-06. If Codex auth expires, re-login locally and re-copy those two files.
 - Stripe: PRODUCTION webhook `we_1TqIZvC6PoSrpLpG4HMGQBvD` → https://buildr101.com/api/stripe/webhook
@@ -40,12 +42,22 @@ scp -i ~/.ssh/id_ed25519 /tmp/deploy.tgz ubuntu@51.195.136.189:/tmp/
 ssh -i ~/.ssh/id_ed25519 ubuntu@51.195.136.189 \
   'tar xzf /tmp/deploy.tgz -C ~/app-builder && rm /tmp/deploy.tgz && \
    cd ~/app-builder && npm install --no-audit --no-fund && \
-   sudo systemctl restart buildr-shell buildr-provisiond'
+   docker build -t buildr-runtime-worker:latest -f runtime-worker/Dockerfile . && \
+   sudo systemctl restart buildr-shell buildr-runtime-worker'
 ```
 
 - `~/app-builder/shell/.env` on the VPS is authoritative for prod secrets (tar never touches it).
   It differs from local: `PROVISIOND_URL=http://127.0.0.1:8790`, `SHELL_HOST=10.83.7.1`, prod
   `STRIPE_WEBHOOK_SECRET`. Any .env edit → `sudo systemctl restart buildr-shell`.
+- The runtime worker is built from the deployed tree, not bind-mounted. Rebuild its image whenever
+  `runtime-worker/`, `src/`, or worker-imported `shell/server/` code changes; a service restart by
+  itself keeps the old code. Normal app-builder deploys restart `buildr-shell` and
+  `buildr-runtime-worker`, NOT `buildr-provisiond`.
+- Meta publishing uses `META_APP_ID` and `META_APP_SECRET` in BOTH `~/app-builder/shell/.env`
+  (OAuth) and `/etc/buildr/runtime-worker.env` (Graph calls/app-secret proof). Keep both files mode
+  600. After rotating the Meta secret, update both and restart shell + runtime worker. OAuth redirect
+  URIs are `https://buildr101.com/api/connectors/oauth/meta/callback` and
+  `https://buildr101.com/api/runtime/connectors/meta/callback`.
 - If scaffold `package.json` changed: also delete `~/app-builder/harness/.deps` on the VPS (it
   reinstalls on next build) and rebuild the preview base image (`~/provisiond/base`, docker build).
 - provisiond code changes: the tarball updates `~/app-builder/provisiond/` but the SERVICE runs

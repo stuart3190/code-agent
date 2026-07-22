@@ -24,4 +24,12 @@ Generated apps call `backend.actions.invoke(key, input)` and observe the returne
 
 `buildr-runtime-worker.service` runs `buildr-runtime-worker:latest` with a 3 GB memory limit. `/etc/buildr/runtime-worker.env` contains only the Supabase service variables, the project-secret encryption key, public app URL, optional managed-provider keys, and concurrency settings. It must not reuse the full shell environment.
 
-Required variables are `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (or the legacy role name), and `PLATFORM_ENC_KEY`/`BYOK_ENC_KEY`. Optional managed lanes use `RUNTIME_OPENAI_API_KEY` and `RUNTIME_REPLICATE_API_TOKEN`.
+Required variables are `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (or the legacy role name), and `PLATFORM_ENC_KEY`/`BYOK_ENC_KEY`. Optional managed lanes use `RUNTIME_OPENAI_API_KEY` and `RUNTIME_REPLICATE_API_TOKEN`. Meta publishing uses `META_APP_ID` and `META_APP_SECRET`; keep the same values in the shell's private environment for OAuth callbacks.
+
+The worker code is copied into the image. After deploying any change under `runtime-worker/`, `src/`, or worker-imported `shell/server/` modules, rebuild before restarting:
+
+```sh
+cd ~/app-builder
+docker build -t buildr-runtime-worker:latest -f runtime-worker/Dockerfile .
+sudo systemctl restart buildr-runtime-worker
+```

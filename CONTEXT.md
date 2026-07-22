@@ -2,13 +2,61 @@
 
 > Paste-into-a-fresh-session summary of the entire app builder: what it is, every working part,
 > where things run, the rules that keep it clean, and what's still open.
-> Last updated **2026-07-16** (LAUNCH DAY: checklist closed — Resend fully live, abuse guards,
-> platform admins, landing page, photography fix, billing proven both directions, Codex OAuth
-> keep-alive — and PROMOTION STARTED: Meta ad live at £5/day + autonomous multi-platform social
-> poster with generated card art; see §Marketing below). Prior 2026-07-08: Stripe LIVE + proven.
+> Last updated **2026-07-22** (secure Meta publishing connector deployed; managed capability
+> runtime, feature packs, premium generation pipeline and the 2026-07-21 platform expansion live).
+> Prior 2026-07-16: launch checklist closed, Resend live, billing proven and promotion started.
 > 2026-07-07: launch audit. 2026-07-06: design pass, 7 Lovable-parity features, prod deploy.
 > Repo: `stuart3190/app-builder` (private, linear master, EPYC box
 > `C:\Users\Administrator\app-builder`).
+
+## Current handoff — 2026-07-22 (START HERE AFTER RESTART)
+
+- Branch `agent/premium-unique-generation` is clean at commit `651e71c` (`Add secure Meta
+  publishing capabilities`). The change is committed and deployed to `https://buildr101.com`.
+- The one-click **Meta publishing** feature pack installs three protected actions:
+  `meta_accounts`, `meta_page_post`, and `meta_create_ad`. Generated SaaS users connect their own
+  Meta account through `integrations.meta`, select a Page/ad account, and never receive the token.
+  Organic Page publishing supports text, links and/or an uploaded image, now or scheduled. Paid
+  static ads create the campaign, ad set, creative and ad PAUSED first; `confirmed:true` activates
+  them only after every object exists. Budget, audience and destination are mandatory.
+- Meta OAuth is implemented for both the project owner and each generated-app end user. Relevant
+  code: `shell/server/lib/metaConnector.mjs`, `shell/server/routes/runtimeConnectors.mjs`,
+  `shell/server/lib/capabilityRuntime.mjs`, `shell/server/lib/connectors.mjs`, and the generated SDK
+  in `src/scaffolds/reactVite/lib/backend/`. Direct generated-code calls to
+  `graph.facebook.com` are blocked by the capability audit.
+- Supabase migration `20260722091357_meta_publishing_connectors.sql` is APPLIED to project
+  `qgemqjcyhuejrsvjxkbh`. `app_user_integrations` and `app_connector_oauth_states` have RLS on,
+  no anon/authenticated privileges, and service-role-only CRUD. Encrypted integration rows are
+  included in the nightly backup list.
+- The supplied Meta App ID/secret are installed only in the VPS private environments (values are
+  deliberately NOT recorded here): `~/app-builder/shell/.env` and
+  `/etc/buildr/runtime-worker.env`, both mode 600. Meta's app-token endpoint validated the pair.
+  `buildr-shell` and `buildr-runtime-worker` were restarted; `buildr-provisiond` was NOT restarted
+  or modified and remains active.
+- IMPORTANT security follow-up: the App Secret was pasted into chat. After the first successful
+  connection test, rotate it in Meta, update BOTH VPS env files, then restart only
+  `buildr-shell buildr-runtime-worker`. Never commit or paste the replacement into generated code.
+- Immediate user test: hard-refresh Buildr, open Tools, and click **Connect Meta** (the card should
+  no longer be grey). If Meta rejects the redirect, configure the Meta app's Facebook Login OAuth
+  product with BOTH Valid OAuth Redirect URIs:
+  `https://buildr101.com/api/connectors/oauth/meta/callback` and
+  `https://buildr101.com/api/runtime/connectors/meta/callback`. The requested permissions are
+  `public_profile`, `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `ads_read`,
+  and `ads_management`. Public customers beyond app roles will ultimately require Meta App Review/
+  the appropriate advanced access. No real Page post or paid ad has been fired by this new
+  connector yet because OAuth authorization is the next test.
+- Verification already green: connector hub tests, capability-runtime tests, HTTP/static security,
+  backup validation, Vite production build, production `/api/health`, live CORS/origin rejection,
+  encrypted-table privilege checks, Meta credential validation, and worker-container file
+  verification. The live worker image was rebuilt after deploy and reports concurrency 4.
+- Deployment correction now captured in `baseline/DEPLOY.md`: the runtime worker is an immutable
+  Docker image. After shipping code, rebuild `buildr-runtime-worker:latest` before restarting the
+  worker. Normal app-builder deploys must not restart provisiond unless provisiond itself changed.
+- Other major 2026-07-20/21 work now live (see git history for detail): premium unique/design-first
+  generation across all screens; visual brand kits/repair; browser QA; Stripe Connect generated-app
+  payments; owner console; paid-plan GitHub sync; notifications/integrations; first-party analytics;
+  test/live promotion and rollback; reusable templates; connector hub/workflows; and the managed
+  capability runtime/feature-pack UI.
 
 ## What it is
 
