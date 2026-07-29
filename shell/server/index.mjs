@@ -64,6 +64,7 @@ import {
 } from "./routes/codeAgent.mjs";
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
 import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentService.mjs";
+import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
   handleGithubInstallations, handleGithubRepositoryConnect,
@@ -652,6 +653,7 @@ server.listen(PORT, HOST, () => {
     if (haveSupabaseEnv()) startActionWorker();
   }
   startCodeAgentWorker();
+  startGithubWebhookWorker();
 });
 
 let shuttingDown = false;
@@ -662,6 +664,7 @@ async function shutdown(signal) {
   server.close();
   stopActionWorker();
   stopCodeAgentWorker();
+  stopGithubWebhookWorker();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
   }

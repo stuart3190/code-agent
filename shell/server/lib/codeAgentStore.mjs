@@ -12,6 +12,7 @@ export class MemoryCodeAgentStore {
     this.runs = new Map();
     this.events = new Map();
     this.installations = new Map();
+    this.webhookDeliveries = new Map();
     this.artifacts = new Map();
     this.usageRecords = new Map();
     this.checkpoints = new Map();
@@ -39,7 +40,9 @@ export class MemoryCodeAgentStore {
   }
 
   async listGithubInstallations(owner) {
-    return [...this.installations.values()].filter((x) => x.owner === owner).sort(byNewest);
+    return [...this.installations.values()]
+      .filter((x) => x.owner === owner && (x.status || "active") === "active")
+      .sort(byNewest);
   }
 
   async upsertGithubInstallation(owner, input) {
@@ -54,7 +57,90 @@ export class MemoryCodeAgentStore {
 
   async getGithubInstallation(owner, installationId) {
     return [...this.installations.values()]
-      .find((x) => x.owner === owner && x.installation_id === Number(installationId)) || null;
+      .find((x) => x.owner === owner
+        && x.installation_id === Number(installationId)
+        && (x.status || "active") === "active") || null;
+  }
+
+  async findGithubInstallation(installationId) {
+    return [...this.installations.values()]
+      .find((x) => x.installation_id === Number(installationId)) || null;
+  }
+
+  async updateGithubInstallationLifecycle(installationId, patch) {
+    const row = await this.findGithubInstallation(installationId);
+    if (!row) return null;
+    Object.assign(row, patch, { updated_at: now() });
+    return row;
+  }
+
+  async syncGithubRepositoryAccess(installationId, accessibleRepositoryIds, reason) {
+    const accessible = accessibleRepositoryIds === null
+      ? null
+      : new Set(accessibleRepositoryIds.map(Number));
+    const rows = [...this.repositories.values()]
+      .filter((x) => x.installation_id === Number(installationId));
+    let ready = 0;
+    let disconnected = 0;
+    for (const row of rows) {
+      const allowed = accessible?.has(Number(row.external_id)) || false;
+      Object.assign(row, {
+        status: allowed ? "ready" : "disconnected",
+        last_error: allowed ? null : reason,
+        updated_at: now(),
+      });
+      if (allowed) ready += 1;
+      else disconnected += 1;
+    }
+    return { ready, disconnected, total: rows.length };
+  }
+
+  async recordGithubWebhookDelivery(input) {
+    const existing = this.webhookDeliveries.get(input.delivery_id);
+    if (existing) return { delivery: existing, isNew: false };
+    const row = {
+      status: "received",
+      attempts: 0,
+      next_attempt_at: null,
+      error: null,
+      result: {},
+      received_at: now(),
+      processed_at: null,
+      updated_at: now(),
+      ...input,
+    };
+    this.webhookDeliveries.set(row.delivery_id, row);
+    return { delivery: row, isNew: true };
+  }
+
+  async claimGithubWebhookDeliveries(limit = 10) {
+    const timestamp = now();
+    const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
+    const rows = [...this.webhookDeliveries.values()]
+      .filter((x) => x.status === "received"
+        || (x.status === "failed" && x.attempts < 10
+          && (!x.next_attempt_at || x.next_attempt_at <= timestamp))
+        || (x.status === "processing" && x.attempts < 10 && x.updated_at <= staleBefore))
+      .sort((a, b) => a.received_at.localeCompare(b.received_at))
+      .slice(0, Math.min(Math.max(Number(limit) || 10, 1), 100));
+    for (const row of rows) {
+      Object.assign(row, {
+        status: "processing",
+        attempts: row.attempts + 1,
+        next_attempt_at: null,
+        error: null,
+        processed_at: null,
+        updated_at: now(),
+      });
+    }
+    return rows;
+  }
+
+  async completeGithubWebhookDelivery(deliveryId, patch) {
+    const row = this.webhookDeliveries.get(deliveryId);
+    if (!row) throw new Error("GitHub webhook delivery disappeared");
+    Object.assign(row, patch, { updated_at: now() });
+    return row;
   }
 
   async listAgents(owner) {
@@ -231,7 +317,8 @@ export class SupabaseCodeAgentStore {
   }
 
   async listGithubInstallations(owner) {
-    return unwrap(await this.query("ca_github_installations", owner).order("updated_at", { ascending: false }));
+    return unwrap(await this.query("ca_github_installations", owner).eq("status", "active")
+      .order("updated_at", { ascending: false }));
   }
 
   async upsertGithubInstallation(owner, input) {
@@ -246,7 +333,67 @@ export class SupabaseCodeAgentStore {
 
   async getGithubInstallation(owner, installationId) {
     return unwrapMaybe(await this.query("ca_github_installations", owner)
+      .eq("installation_id", Number(installationId)).eq("status", "active").maybeSingle());
+  }
+
+  async findGithubInstallation(installationId) {
+    return unwrapMaybe(await this.client.from("ca_github_installations").select("*")
       .eq("installation_id", Number(installationId)).maybeSingle());
+  }
+
+  async updateGithubInstallationLifecycle(installationId, patch) {
+    const { data, error } = await this.client.from("ca_github_installations")
+      .update({ ...patch, updated_at: now() })
+      .eq("installation_id", Number(installationId)).select("*").maybeSingle();
+    return unwrapMaybe({ data, error });
+  }
+
+  async syncGithubRepositoryAccess(installationId, accessibleRepositoryIds, reason) {
+    const rows = unwrap(await this.client.from("ca_repositories").select("id,external_id")
+      .eq("installation_id", Number(installationId)));
+    const accessible = accessibleRepositoryIds === null
+      ? null
+      : new Set(accessibleRepositoryIds.map(Number));
+    const readyIds = [];
+    const disconnectedIds = [];
+    for (const row of rows) {
+      if (accessible?.has(Number(row.external_id))) readyIds.push(row.id);
+      else disconnectedIds.push(row.id);
+    }
+    if (readyIds.length) {
+      const { error } = await this.client.from("ca_repositories")
+        .update({ status: "ready", last_error: null, updated_at: now() }).in("id", readyIds);
+      if (error) throw new Error(error.message);
+    }
+    if (disconnectedIds.length) {
+      const { error } = await this.client.from("ca_repositories")
+        .update({ status: "disconnected", last_error: reason, updated_at: now() }).in("id", disconnectedIds);
+      if (error) throw new Error(error.message);
+    }
+    return { ready: readyIds.length, disconnected: disconnectedIds.length, total: rows.length };
+  }
+
+  async recordGithubWebhookDelivery(input) {
+    const { data, error } = await this.client.from("ca_github_webhook_deliveries")
+      .insert(input).select("*").single();
+    if (!error) return { delivery: data, isNew: true };
+    if (error.code !== "23505") throw new Error(error.message);
+    const delivery = unwrapMaybe(await this.client.from("ca_github_webhook_deliveries")
+      .select("*").eq("delivery_id", input.delivery_id).maybeSingle());
+    return { delivery, isNew: false };
+  }
+
+  async claimGithubWebhookDeliveries(limit = 10) {
+    const { data, error } = await this.client.rpc("claim_github_webhook_deliveries", {
+      p_limit: limit,
+    });
+    return unwrapOne(data || [], error);
+  }
+
+  async completeGithubWebhookDelivery(deliveryId, patch) {
+    const { data, error } = await this.client.from("ca_github_webhook_deliveries")
+      .update(patch).eq("delivery_id", deliveryId).select("*").single();
+    return unwrapOne(data, error);
   }
 
   async listAgents(owner) {
