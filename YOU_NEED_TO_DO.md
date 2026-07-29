@@ -38,7 +38,9 @@ values. Codex will keep everything else moving locally.
 
 - [x] Choose the product name and domain: Thrallo at `thrallo.com`.
 - [x] Choose production hosting: isolated services on the existing Buildr101 VPS.
-- [ ] Point the GoDaddy DNS records for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
+- [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
+- [ ] In Supabase Authentication → URL Configuration, set both the Site URL and an allowed redirect
+  URL to `https://app.thrallo.com`.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.

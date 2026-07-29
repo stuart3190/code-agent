@@ -3,7 +3,7 @@
 Thrallo shares the Buildr101 VPS but not its application directory, service, port, environment,
 database, or credentials.
 
-Initial production installation completed on 2026-07-29. DNS activation remains account-owned.
+Initial production installation, DNS activation, and TLS issuance completed on 2026-07-29.
 
 ## Topology
 

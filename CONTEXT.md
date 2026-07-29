@@ -23,8 +23,10 @@ is `https://github.com/stuart3190/code-agent`.
 - Production target: the existing Buildr101 VPS, isolated as `/home/ubuntu/code-agent`, systemd
   service `thrallo-shell`, private port `8788`, and public origin `https://app.thrallo.com`.
 - Production service and Caddy routes were installed on 2026-07-29. Internal `/api/health` and
-  `/api/v1/capabilities` are green, and Buildr101 remained healthy after the proxy reload. Public
-  access is waiting only for GoDaddy DNS and automatic TLS issuance.
+  `/api/v1/capabilities` are green, and Buildr101 remained healthy after the proxy reload.
+- Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
+  redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
+  all pass externally.
 - Never reuse Buildr101 production Supabase, Stripe, or provider secrets for this product.
 
 ## Next implementation slice
