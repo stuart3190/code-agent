@@ -1,0 +1,100 @@
+# CP-2 (2b): wildcard TLS front. Terminates HTTPS directly for *.preview.buildr101.com using a
+# Let's Encrypt cert obtained via the Cloudflare DNS-01 challenge (token from env), then routes
+# <label>.preview.buildr101.com -> container <label>:5173. Label index 3 is identical to the nip.io
+# path (com=0 buildr101=1 preview=2 <label>=3). reverse_proxy forwards the Vite HMR wss upgrade
+# (incl. Sec-WebSocket-Protocol: vite-hmr) automatically — proven over plain http at 2a.
+#
+# NB: the *.preview.buildr101.com A record must be DNS-only (grey cloud) so Caddy's cert is served
+# directly to the browser; an orange/proxied record would double-terminate TLS and mangle wss.
+{
+	admin off
+	# Custom domains: certs are issued ON DEMAND at the first TLS handshake for any hostname —
+	# but only after the shell confirms the domain is registered (custom_domains table). The ask
+	# endpoint is the shell on the proxy-net gateway; unauthenticated by design (read-only yes/no).
+	on_demand_tls {
+		ask http://10.83.7.1:8787/api/domain-check
+	}
+}
+
+# CP-4: bind the listener to Caddy's static proxy-net IP ONLY (docker.mjs CADDY_PROXY_IP). Legit
+# ingress arrives via the host -p 443:443 publish which DNATs to this IP; an app container reaching
+# Caddy over its own per-project net hits a DIFFERENT (internal-net) Caddy IP where nothing listens
+# -> the shared-proxy Host-header pivot is closed. Caddy->Vite is outbound, DNS-01 issuance is
+# outbound to Cloudflare — both unaffected by the bind.
+*.preview.buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy {http.request.host.labels.3}:5173
+}
+
+# Production shell: buildr101.com serves the product itself (the shell's node server on the
+# docker proxy-net gateway — serving the built web UI statically and the /api routes, incl. the
+# /api/generate SSE stream). www redirects to the apex. Same DNS-01 cert mechanics; both the apex
+# A record and the www CNAME are DNS-only/grey.
+buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy 10.83.7.1:8787 {
+		flush_interval -1
+	}
+}
+
+www.buildr101.com {
+	bind 10.83.7.2
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	redir https://buildr101.com{uri} permanent
+}
+
+# F7 publish: static published apps. <label>.app.buildr101.com serves the built SPA from the
+# read-only /publish/<label> mount (docker.mjs PUBLISH_ROOT). try_files gives the SPA fallback
+# (client-side routes resolve to index.html). Same DNS-01 wildcard mechanics as previews; the
+# *.app.buildr101.com A record must also be DNS-only/grey.
+*.app.buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	root * /publish/{http.request.host.labels.3}
+	try_files {path} /index.html
+	file_server
+}
+
+# Custom domains (catch-all: any hostname not matched by the named sites above). The user points
+# their domain's A record at this VPS; on-demand TLS issues the cert (gated by the ask endpoint),
+# and the site serves via the /publish/_domains/<host> symlink provisiond maintains. HTTP-01/
+# TLS-ALPN challenges need no DNS access — works for domains we don't control.
+https:// {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		on_demand
+	}
+	root * /publish/_domains/{host}
+	try_files {path} /index.html
+	file_server
+}

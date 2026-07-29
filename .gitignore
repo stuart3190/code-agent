@@ -1,0 +1,16 @@
+node_modules/
+harness/.deps/
+harness/.work/
+shell/.previews/
+shell/web/dist/
+test-results/
+playwright-report/
+*.log
+
+# Secrets — never commit BYOK keys (defense-in-depth; keys are read from env, never files in-repo)
+key.txt
+*.key
+.env
+.env.*
+!.env.example
+!**/.env.example

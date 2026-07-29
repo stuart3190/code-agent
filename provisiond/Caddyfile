@@ -1,0 +1,24 @@
+# CP-1: plain HTTP front. Routes <label>.<suffix> -> container named <label> on :5173.
+# Both suffixes put the project label at index 3 (right-indexed):
+#   <label>.33c388bd.nip.io      -> labels: io=0 nip=1 33c388bd=2 <label>=3   (CP-1, nip.io hex)
+#   <label>.preview.buildr101.com-> labels: com=0 buildr101=1 preview=2 <label>=3 (CP-2, real domain)
+# Docker's embedded DNS (127.0.0.11, via the container's resolv.conf) resolves <label> to the
+# app container on the shared per-project network. reverse_proxy forwards WebSocket upgrades
+# (incl. Sec-WebSocket-Protocol: vite-hmr) automatically — the HMR path is exercised at CP-2.
+{
+	admin off
+	auto_https off
+}
+
+# CP-4: bind the listener to Caddy's static proxy-net IP ONLY (docker.mjs CADDY_PROXY_IP). Legit
+# ingress arrives via the host -p 80:80 publish which DNATs to this IP; an app container reaching
+# Caddy over its own per-project net hits a DIFFERENT (internal-net) Caddy IP where nothing listens
+# -> the shared-proxy Host-header pivot is closed. Caddy->Vite is outbound, unaffected by the bind.
+:80 {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	reverse_proxy {http.request.host.labels.3}:5173
+}

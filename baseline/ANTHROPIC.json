@@ -1,0 +1,40 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "note": "First BYOK adapter runs, behind the SAME runTurn seam as Codex with the engine (runAgent/tools/prompts/context.mjs) byte-identical. £ uses REAL published Anthropic Messages-API rates (src/cost.mjs ANTHROPIC_RATES); this SPENT real money. Curated record of BOTH harness configs (single live run each; the model is nondeterministic). Re-run with `node harness/run.mjs --provider=anthropic --edit=apply_patch --ctx|--cache` to regenerate per-config numbers.",
+  "tokensPerCredit": 10000,
+  "configs": {
+    "ctx": {
+      "config": "--ctx (2.2 context selection — cache-hostile default)",
+      "recordedAt": "2026-06-29T18:18:00.000Z",
+      "reliability": { "green": 3, "total": 3, "score": 1 },
+      "cost": { "gbpPerTurn": 0.0199688, "totalGbp": 0.1797197, "totalTurns": 9, "totalTokens": 45140, "gbpPerCredit": 0.0398, "real": true },
+      "tokens": { "input": 37469, "output": 7671 },
+      "cache": { "read": 0, "write": 0, "hitRate": 0.0 },
+      "cases": [
+        { "name": "todo", "pass": true, "turns": 2, "input": 10643, "output": 3323, "cacheRead": 0, "cacheWrite": 0, "gbp": 0.0646 },
+        { "name": "dashboard", "pass": true, "turns": 3, "input": 11884, "output": 2253, "cacheRead": 0, "cacheWrite": 0, "gbp": 0.0549 },
+        { "name": "form-validation", "pass": true, "turns": 4, "input": 14942, "output": 2095, "cacheRead": 0, "cacheWrite": 0, "gbp": 0.0602 }
+      ]
+    },
+    "cache": {
+      "config": "--cache (2.3 cache-friendly — stable prefix + append-only)",
+      "recordedAt": "2026-06-29T18:27:08.824Z",
+      "reliability": { "green": 3, "total": 3, "score": 1 },
+      "cost": { "gbpPerTurn": 0.0173820, "totalGbp": 0.1564384, "totalTurns": 9, "totalTokens": 50111, "gbpPerCredit": 0.0312, "real": true },
+      "tokens": { "input": 42238, "output": 7873 },
+      "cache": { "read": 22740, "write": 19483, "hitRate": 0.5383778 },
+      "cases": [
+        { "name": "todo", "pass": true, "turns": 2, "input": 9879, "output": 3583, "cacheRead": 3306, "cacheWrite": 6569, "gbp": 0.0627122 },
+        { "name": "dashboard", "pass": true, "turns": 3, "input": 13311, "output": 2233, "cacheRead": 7175, "cacheWrite": 6131, "gbp": 0.0463365 },
+        { "name": "form-validation", "pass": true, "turns": 4, "input": 19048, "output": 2057, "cacheRead": 12259, "cacheWrite": 6783, "gbp": 0.0473897 }
+      ]
+    }
+  },
+  "codexReference": {
+    "note": "ASSUMED gpt-5.5 rates, FREE on the ChatGPT sub — NOT comparable as bills. The comparisons that matter are reliability parity (all 3/3) and the per-provider cost-per-credit asymmetry for the Phase 4 credit model.",
+    "baseline": { "green": 3, "total": 3, "gbpPerTurn": 0.0051238, "gbpPerCredit": 0.0257 },
+    "phase22": { "gbpPerTurn": 0.0062604 },
+    "phase23": { "gbpPerTurn": 0.0053699, "hitRate": 0.1266386 }
+  }
+}

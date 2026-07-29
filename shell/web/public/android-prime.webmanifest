@@ -1,0 +1,12 @@
+{
+  "name": "Buildr101 Prime",
+  "short_name": "Prime",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0c0f",
+  "theme_color": "#0a0c0f",
+  "icons": [
+    { "src": "/promo/ad-showcase-1.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "recordedAt": "2026-06-29T08:30:18.865Z",
+  "model": "gpt-5.5",
+  "editFormat": "apply_patch",
+  "note": "Phase 2.1 targeted-edit-tool run. £ uses ASSUMED gpt-5.5 rates (src/cost.mjs); FREE on the sub. Single-pass per case; gpt-5.5 nondeterministic.",
+  "reliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "baselineReliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "cost": {
+    "gbpPerTurn": 0.0037631508928571426,
+    "totalGbpIfMetered": 0.0526841125,
+    "totalTurns": 14
+  },
+  "baselineGbpPerTurn": 0.005123808333333333,
+  "edits": {
+    "attempts": 5,
+    "cleanApplies": 5,
+    "fallbacks": 0,
+    "writeFiles": 0
+  },
+  "cliff": {
+    "bytesPerToken": 3.6,
+    "perCase": [
+      {
+        "name": "todo",
+        "appBytes": 7995,
+        "editOut": 1769,
+        "rewriteOut1x": 2221
+      },
+      {
+        "name": "dashboard",
+        "appBytes": 4784,
+        "editOut": 844,
+        "rewriteOut1x": 1329
+      },
+      {
+        "name": "form-validation",
+        "appBytes": 4078,
+        "editOut": 450,
+        "rewriteOut1x": 1133
+      }
+    ],
+    "sumEditOut": 3063,
+    "sumRewrite1x": 4683,
+    "factorAt20x": 30.577864838393733
+  },
+  "cases": [
+    {
+      "name": "todo",
+      "pass": true,
+      "build": true,
+      "priorKept": "4/4",
+      "newPresent": "2/2",
+      "turns": 6,
+      "tokens": {
+        "input": 15108,
+        "output": 1916,
+        "total": 17024
+      },
+      "gbpIfMetered": 0.030055549999999997,
+      "editStats": {
+        "attempts": 3,
+        "applies": 3,
+        "failures": 0,
+        "fallbacks": 0,
+        "writes": 0,
+        "failsByPath": {}
+      }
+    },
+    {
+      "name": "dashboard",
+      "pass": true,
+      "build": true,
+      "priorKept": "3/3",
+      "newPresent": "2/2",
+      "turns": 4,
+      "tokens": {
+        "input": 6069,
+        "output": 961,
+        "total": 7030
+      },
+      "gbpIfMetered": 0.013585037500000001,
+      "editStats": {
+        "attempts": 1,
+        "applies": 1,
+        "failures": 0,
+        "fallbacks": 0,
+        "writes": 0,
+        "failsByPath": {}
+      }
+    },
+    {
+      "name": "form-validation",
+      "pass": true,
+      "build": true,
+      "priorKept": "3/3",
+      "newPresent": "2/2",
+      "turns": 4,
+      "tokens": {
+        "input": 4894,
+        "output": 533,
+        "total": 5427
+      },
+      "gbpIfMetered": 0.009043525000000002,
+      "editStats": {
+        "attempts": 1,
+        "applies": 1,
+        "failures": 0,
+        "fallbacks": 0,
+        "writes": 0,
+        "failsByPath": {}
+      }
+    }
+  ]
+}

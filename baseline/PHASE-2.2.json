@@ -1,0 +1,70 @@
+{
+  "recordedAt": "2026-06-29T12:46:17.720Z",
+  "model": "gpt-5.5",
+  "editFormat": "apply_patch",
+  "contextSelection": true,
+  "note": "Phase 2.2 context-selection run (manifest + relevant-file contents + history pruning). Input tokens/turn is the headline; output should hold (edit path unchanged). £ uses ASSUMED gpt-5.5 rates (src/cost.mjs); FREE on the sub. Single-pass per case; gpt-5.5 nondeterministic.",
+  "reliability": {
+    "green": 3,
+    "total": 3,
+    "score": 1
+  },
+  "input": {
+    "total": 14286,
+    "perTurn": 2381,
+    "turns": 6,
+    "prevTotal": 26071,
+    "prevPerTurn": 1862.2142857142858,
+    "prevTurns": 14,
+    "totalPctLower": 45,
+    "perTurnPctLower": -28
+  },
+  "output": {
+    "perTurn": 494.8333333333333,
+    "prevPerTurn": 243.57142857142858
+  },
+  "cost": {
+    "gbpPerTurn": 0.006260420833333333
+  },
+  "cases": [
+    {
+      "name": "todo",
+      "pass": true,
+      "turns": 2,
+      "inputPerTurn": 3083,
+      "prevInputPerTurn": 2518,
+      "tokens": {
+        "input": 6166,
+        "output": 1645,
+        "total": 7811
+      },
+      "gbpIfMetered": 0.019084425
+    },
+    {
+      "name": "dashboard",
+      "pass": true,
+      "turns": 2,
+      "inputPerTurn": 2234,
+      "prevInputPerTurn": 1517.25,
+      "tokens": {
+        "input": 4468,
+        "output": 858,
+        "total": 5326
+      },
+      "gbpIfMetered": 0.011190350000000002
+    },
+    {
+      "name": "form-validation",
+      "pass": true,
+      "turns": 2,
+      "inputPerTurn": 1826,
+      "prevInputPerTurn": 1223.5,
+      "tokens": {
+        "input": 3652,
+        "output": 466,
+        "total": 4118
+      },
+      "gbpIfMetered": 0.007287750000000001
+    }
+  ]
+}

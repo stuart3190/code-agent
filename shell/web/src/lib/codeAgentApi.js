@@ -1,0 +1,81 @@
+import { accessToken } from "./backend.js";
+
+async function request(path, options = {}) {
+  const token = await accessToken();
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `Request failed (${response.status})`);
+    error.code = payload.code;
+    throw error;
+  }
+  return payload;
+}
+
+export async function capabilities() {
+  const response = await fetch("/api/v1/capabilities");
+  if (!response.ok) throw new Error("Control plane is unavailable");
+  return response.json();
+}
+
+export const listRepositories = () => request("/api/v1/repositories");
+export const addRepository = (body) => request("/api/v1/repositories", { method: "POST", body: JSON.stringify(body) });
+export const listAgents = () => request("/api/v1/agents");
+export const addAgent = (body) => request("/api/v1/agents", { method: "POST", body: JSON.stringify(body) });
+export const createRun = (agentId, body) => request(`/api/v1/agents/${agentId}/runs`, {
+  method: "POST", body: JSON.stringify(body),
+});
+export const getRun = (runId) => request(`/api/v1/runs/${runId}`);
+export const cancelRun = (runId) => request(`/api/v1/runs/${runId}/cancel`, { method: "POST" });
+export const publishRun = (runId, body = {}) => request(`/api/v1/runs/${runId}/publish`, {
+  method: "POST", body: JSON.stringify(body),
+});
+export const runArtifacts = (runId) => request(`/api/v1/runs/${runId}/artifacts`);
+export const retryRun = (runId) => request(`/api/v1/runs/${runId}/retry`, { method: "POST" });
+export const usageSummary = () => request("/api/v1/usage");
+export const githubInstallations = () => request("/api/v1/github/installations");
+export const startGithubInstallation = () => request("/api/v1/github/installations/start", { method: "POST" });
+export const githubInstallationRepositories = (installationId) =>
+  request(`/api/v1/github/installations/${installationId}/repositories`);
+export const connectGithubRepository = (installationId, repositoryId) =>
+  request("/api/v1/github/repositories/connect", {
+    method: "POST", body: JSON.stringify({ installationId, repositoryId }),
+  });
+
+export async function streamRunEvents(runId, onEvent, { signal, after = 0 } = {}) {
+  const token = await accessToken();
+  const response = await fetch(`/api/v1/runs/${runId}/events?after=${after}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+    signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Event stream failed (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = block.split("\n").find((line) => line.startsWith("data: "));
+      if (!data) continue;
+      const event = JSON.parse(data.slice(6));
+      after = Math.max(after, Number(event.sequence || 0));
+      onEvent(event);
+    }
+  }
+  return after;
+}

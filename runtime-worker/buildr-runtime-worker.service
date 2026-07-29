@@ -1,0 +1,18 @@
+[Unit]
+Description=Buildr Capability Runtime Worker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+EnvironmentFile=/etc/buildr/runtime-worker.env
+ExecStart=/usr/bin/docker run --rm --name buildr-runtime-worker --memory=3g --cpus=2.5 \
+  --env-file /etc/buildr/runtime-worker.env buildr-runtime-worker:latest
+ExecStop=/usr/bin/docker stop -t 30 buildr-runtime-worker
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,51 @@
+{
+  "name": "code-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Code Agent control plane and cloud coding-agent runtime.",
+  "scripts": {
+    "harness": "node harness/run.mjs",
+    "baseline": "node harness/run.mjs --baseline",
+    "test:billing": "node harness/_billing-tests.mjs",
+    "test:ledger": "node harness/_ledger-tests.mjs",
+    "test:export": "node shell/harness/_export-tests.mjs",
+    "test:static-security": "node shell/harness/_static-path-tests.mjs",
+    "test:http-security": "node shell/harness/_http-security-tests.mjs",
+    "test:backup-validation": "node harness/_backup-validation-tests.mjs",
+    "test:draft-project": "node harness/_draft-project-tests.mjs",
+    "test:ownership": "node shell/harness/_ownership-tests.mjs",
+    "test:billing-limits": "node harness/_billing-limit-tests.mjs",
+    "test:instagram-publishing": "node harness/_instagram-publishing-tests.mjs",
+    "test:foundations": "node harness/_foundation-tests.mjs",
+    "test:qa-runner": "node harness/_qa-runner-tests.mjs",
+    "test:saas-payments": "node harness/_saas-payments-tests.mjs",
+    "test:visual-brand": "node harness/_visual-brand-tests.mjs",
+    "repair:visual-brands": "node scripts/reapply-visual-brands.mjs",
+    "test:owner-console": "node harness/_owner-console-tests.mjs",
+    "test:github-sync": "node harness/_github-sync-tests.mjs",
+    "test:app-integrations": "node harness/_app-integrations-tests.mjs",
+    "test:connectors": "node harness/_connector-hub-tests.mjs",
+    "test:capability-runtime": "node harness/_capability-runtime-tests.mjs",
+    "test:analytics": "node harness/_analytics-tests.mjs",
+    "test:environments": "node harness/_environment-tests.mjs",
+    "test:templates": "node harness/_template-tests.mjs",
+    "test:e2e": "npm --prefix shell/web run build && playwright test",
+    "backup:validate": "node scripts/validate-backup.mjs",
+    "test:design": "node harness/_design-profile-tests.mjs",
+    "prove:billing": "node harness/proveBilling.mjs",
+    "prove:jobs": "node shell/harness/prove-jobs.mjs",
+    "test:code-agent": "node --test test/code-agent/*.test.mjs",
+    "test:ui": "playwright test e2e/public-shell.spec.mjs",
+    "build:web": "npm --prefix shell/web run build",
+    "verify": "npm run test:code-agent && npm run build:web && npm run test:ui"
+  },
+  "dependencies": {
+    "@daytona/sdk": "0.201.0",
+    "@supabase/supabase-js": "2.111.0",
+    "stripe": "17.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

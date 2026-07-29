@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased font-sans;
+    background-image:
+      radial-gradient(60rem 40rem at 85% -10%, rgba(79,70,229,0.06), transparent),
+      radial-gradient(50rem 40rem at -10% 110%, rgba(37,99,235,0.03), transparent);
+  }
+  h1, h2, h3 { @apply font-display tracking-tight; }
+}
+
+@layer components {
+  .panel { @apply bg-ink-900/80 border border-line rounded-xl shadow-panel; }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
+           transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60;
+  }
+  .btn-primary { @apply btn bg-gradient-to-r from-blue-500 to-violet-500 text-white hover:from-blue-400 hover:to-violet-400; }
+  .btn-ghost   { @apply btn border border-line text-slate-300 hover:bg-ink-800; }
+  .field {
+    @apply w-full rounded-lg bg-ink-850 border border-line px-3 py-2 text-sm text-slate-100
+           placeholder:text-slate-500 focus:outline-none focus:border-blue-400/60 focus:ring-1 focus:ring-blue-400/30;
+  }
+  .tag { @apply inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-mono uppercase tracking-wide; }
+}
+
+@layer utilities {
+  /* Horizontal-scroll strips (e.g. the Builder header actions on narrow screens): scrollable
+     without a visible scrollbar — touch-drag on mobile, wheel/trackpad on desktop. */
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /* Landing hero backdrop: a faint blueprint grid, faded out radially — apps under construction. */
+  .landing-grid {
+    background-image:
+      linear-gradient(rgba(42, 50, 60, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(42, 50, 60, 0.35) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(60rem 36rem at 28% 12%, black, transparent 72%);
+    -webkit-mask-image: radial-gradient(60rem 36rem at 28% 12%, black, transparent 72%);
+  }
+  .landing-caret { animation: landing-caret-blink 1.05s steps(1) infinite; }
+  .landing-rise { animation: landing-rise 0.45s ease-out both; }
+  .code-grid {
+    background-image:
+      linear-gradient(rgba(91, 106, 135, 0.11) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(91, 106, 135, 0.11) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent 88%);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .landing-caret { animation: none; }
+    .landing-rise { animation: none; }
+  }
+}
+
+@keyframes landing-caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes landing-rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
