@@ -25,6 +25,10 @@ test("real shell serves Thrallo capabilities and production SPA", { timeout: 15_
   assert.equal(capabilities.product, "Thrallo");
   assert.equal(capabilities.apiVersion, "v1");
 
+  const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).ok, true);
+
   const page = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(page.status, 200);
   assert.match(await page.text(), /Thrallo/);

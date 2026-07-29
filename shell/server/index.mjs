@@ -146,8 +146,12 @@ async function deepHealth() {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
   ]);
-  const supabase = await bounded(serviceClient().from("projects").select("id").limit(1))
-    .then(({ error }) => !error).catch(() => false);
+  const store = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
+  const table = CODE_AGENT_STANDALONE ? "ca_runs" : "projects";
+  const supabase = CODE_AGENT_STANDALONE && store === "memory"
+    ? true
+    : await bounded(serviceClient().from(table).select("id").limit(1))
+      .then(({ error }) => !error).catch(() => false);
   const mode = publicConfig().previewMode;
   const provisiond = mode !== "vps" || await bounded(fetch(`${optionalEnv("PROVISIOND_URL", "")}/health`))
     .then((r) => r.ok).catch(() => false);
