@@ -39,6 +39,19 @@ repository baseline.
 Production uses `CODE_AGENT_STORE=supabase`. `memory` exists for local interface work and fast unit
 tests only; it intentionally does not survive a process restart.
 
+## GitHub webhook lifecycle
+
+The webhook route verifies GitHub's HMAC signature before parsing or persisting the payload.
+`X-GitHub-Delivery` is the primary key in the server-only `ca_github_webhook_deliveries` ledger, so
+redeliveries are acknowledged without repeating lifecycle work. A background worker atomically
+claims pending deliveries with `FOR UPDATE SKIP LOCKED`; stale claims are recovered after ten
+minutes and transient GitHub failures use bounded exponential retry.
+
+Installation suspension or deletion disconnects every linked repository. Installation activation,
+permission acceptance, and repository-selection changes refresh the authoritative installation and
+accessible repository list from GitHub. New and retried agent runs reject disconnected
+repositories. Raw payloads have no browser grants and a restrictive RLS deny policy.
+
 ## Current state machine
 
 ```text
@@ -66,7 +79,6 @@ call. Commands are bounded by a 600-second maximum and repository paths reject t
 
 ## Known production gaps
 
-- Durable/idempotent GitHub webhook delivery ledger and installation lifecycle synchronization.
 - Sandboxed network egress allowlist and policy approvals.
 - Gemini, encrypted per-user BYOK, and managed provider-routing policy.
 - Artifact object storage and checkpoint resume.

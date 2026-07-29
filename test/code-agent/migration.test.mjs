@@ -7,6 +7,7 @@ const githubMigrationPath = new URL("../../supabase/migrations/20260729140251_gi
 const hardeningMigrationPath = new URL("../../supabase/migrations/20260729164642_harden_code_agent_schema.sql", import.meta.url);
 const anonLockdownMigrationPath = new URL("../../supabase/migrations/20260729165131_lock_down_code_agent_anon_access.sql", import.meta.url);
 const webhookMigrationPath = new URL("../../supabase/migrations/20260729231426_github_webhook_ledger.sql", import.meta.url);
+const policyRolesMigrationPath = new URL("../../supabase/migrations/20260729232141_restrict_code_agent_policy_roles.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -83,4 +84,15 @@ test("GitHub webhook ledger is private, idempotent, and safely claimable", async
   assert.match(sql, /status = 'processing'[\s\S]*interval '10 minutes'/i);
   assert.match(sql, /revoke all on function public\.claim_github_webhook_deliveries\(integer\)[\s\S]*from public, anon, authenticated/i);
   assert.match(sql, /grant execute on function public\.claim_github_webhook_deliveries\(integer\)[\s\S]*to service_role/i);
+});
+
+test("owner-readable control-plane policies explicitly require authentication", async () => {
+  const sql = await readFile(policyRolesMigrationPath, "utf8");
+  for (const policy of [
+    "ca_repositories_owner_read", "ca_agents_owner_read", "ca_runs_owner_read",
+    "ca_run_events_owner_read", "ca_checkpoints_owner_read", "ca_artifacts_owner_read",
+    "ca_usage_owner_read", "ca_github_installations_owner_read",
+  ]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"[\\s\\S]*?to authenticated`, "i"));
+  }
 });

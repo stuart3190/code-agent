@@ -63,12 +63,14 @@ tests, then creates a production web build.
 
 ## Roadmap
 
-1. Durable webhook delivery ledger plus repository installation lifecycle synchronization.
-2. Add Gemini, managed cost/latency routing, encrypted per-user BYOK, and provider evaluation suites.
-3. Hybrid repository indexer, incremental embeddings, symbol graph, and context retrieval.
-4. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
-5. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
-6. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
-7. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
+Completed: durable webhook delivery ledger plus GitHub installation and repository lifecycle
+synchronization.
+
+1. Add Gemini, managed cost/latency routing, encrypted per-user BYOK, and provider evaluation suites.
+2. Hybrid repository indexer, incremental embeddings, symbol graph, and context retrieval.
+3. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
+4. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
+5. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
+6. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

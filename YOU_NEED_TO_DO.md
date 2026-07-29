@@ -42,6 +42,9 @@ values. Codex will keep everything else moving locally.
 - [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
 - [x] In Supabase Authentication → URL Configuration, set both the Site URL and an allowed redirect
   URL to `https://app.thrallo.com`.
+- [ ] In Supabase Authentication security settings, enable leaked-password protection before
+  public sign-ups. This requires the project owner and is the only remaining advisor action that
+  Codex cannot complete.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.
