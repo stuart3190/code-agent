@@ -3,6 +3,8 @@
 Thrallo shares the Buildr101 VPS but not its application directory, service, port, environment,
 database, or credentials.
 
+Initial production installation completed on 2026-07-29. DNS activation remains account-owned.
+
 ## Topology
 
 - Repository: `/home/ubuntu/code-agent`
