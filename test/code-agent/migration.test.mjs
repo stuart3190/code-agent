@@ -6,6 +6,8 @@ const migrationPath = new URL("../../supabase/migrations/20260729122234_code_age
 const githubMigrationPath = new URL("../../supabase/migrations/20260729140251_github_app_installations.sql", import.meta.url);
 const hardeningMigrationPath = new URL("../../supabase/migrations/20260729164642_harden_code_agent_schema.sql", import.meta.url);
 const anonLockdownMigrationPath = new URL("../../supabase/migrations/20260729165131_lock_down_code_agent_anon_access.sql", import.meta.url);
+const webhookMigrationPath = new URL("../../supabase/migrations/20260729231426_github_webhook_ledger.sql", import.meta.url);
+const policyRolesMigrationPath = new URL("../../supabase/migrations/20260729232141_restrict_code_agent_policy_roles.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -61,4 +63,36 @@ test("anonymous role has no Code Agent table privileges", async () => {
     assert.match(sql, new RegExp(`public\\.${table}`, "i"));
   }
   assert.match(sql, /revoke all privileges on table[\s\S]*from anon/i);
+});
+
+test("GitHub webhook ledger is private, idempotent, and safely claimable", async () => {
+  const sql = await readFile(webhookMigrationPath, "utf8");
+  assert.match(sql, /create table public\.ca_github_webhook_deliveries/i);
+  assert.match(sql, /delivery_id text primary key/i);
+  assert.match(sql, /payload_sha256[\s\S]*\^\[0-9a-f\]\{64\}\$/i);
+  assert.match(sql, /status in \('received', 'processing', 'processed', 'ignored', 'failed'\)/i);
+  assert.match(sql, /alter table public\.ca_github_webhook_deliveries enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_github_webhook_deliveries from public, anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table public\.ca_github_webhook_deliveries to service_role/i);
+  assert.match(sql, /as restrictive[\s\S]*to anon, authenticated[\s\S]*using \(false\)/i);
+  assert.match(sql, /ca_github_webhook_deliveries_pending_idx/i);
+  assert.match(sql, /ca_github_webhook_deliveries_installation_idx/i);
+  assert.match(sql, /ca_github_webhook_deliveries_owner_idx/i);
+  assert.match(sql, /create or replace function public\.claim_github_webhook_deliveries/i);
+  assert.match(sql, /security invoker/i);
+  assert.match(sql, /for update skip locked/i);
+  assert.match(sql, /status = 'processing'[\s\S]*interval '10 minutes'/i);
+  assert.match(sql, /revoke all on function public\.claim_github_webhook_deliveries\(integer\)[\s\S]*from public, anon, authenticated/i);
+  assert.match(sql, /grant execute on function public\.claim_github_webhook_deliveries\(integer\)[\s\S]*to service_role/i);
+});
+
+test("owner-readable control-plane policies explicitly require authentication", async () => {
+  const sql = await readFile(policyRolesMigrationPath, "utf8");
+  for (const policy of [
+    "ca_repositories_owner_read", "ca_agents_owner_read", "ca_runs_owner_read",
+    "ca_run_events_owner_read", "ca_checkpoints_owner_read", "ca_artifacts_owner_read",
+    "ca_usage_owner_read", "ca_github_installations_owner_read",
+  ]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"[\\s\\S]*?to authenticated`, "i"));
+  }
 });

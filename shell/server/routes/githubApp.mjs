@@ -1,6 +1,7 @@
 import { optionalEnv } from "../lib/env.mjs";
 import { CodeAgentInputError, publicRepository } from "../lib/codeAgentContracts.mjs";
 import { codeAgentStore } from "../lib/codeAgentStore.mjs";
+import { acceptGithubWebhook } from "../lib/githubWebhookService.mjs";
 import {
   getInstallation, githubAppConfigured, installationRow, installationUrl,
   githubWebhookConfigured, listInstallationRepositories, publicInstallation,
@@ -72,7 +73,7 @@ export async function handleGithubRepositoryConnect(_req, res, owner, body = {})
   sendJson(res, 201, { repository: publicRepository(repository) });
 }
 
-export function handleGithubWebhook(req, res, rawBody) {
+export async function handleGithubWebhook(req, res, rawBody) {
   if (!githubWebhookConfigured()) throw setupRequired();
   try {
     verifyGithubWebhook(rawBody, req.headers["x-hub-signature-256"]);
@@ -81,15 +82,23 @@ export function handleGithubWebhook(req, res, rawBody) {
   }
   const deliveryId = String(req.headers["x-github-delivery"] || "").trim();
   const event = String(req.headers["x-github-event"] || "").trim();
-  if (!deliveryId || !event) {
+  if (!deliveryId || deliveryId.length > 100 || !event || event.length > 100) {
     throw new CodeAgentInputError("GitHub webhook metadata is missing", 400, "invalid_github_webhook");
   }
   let payload;
   try { payload = JSON.parse(rawBody.toString("utf8")); } catch {
     throw new CodeAgentInputError("GitHub webhook body is invalid JSON", 400, "invalid_github_webhook");
   }
+  let accepted;
+  try {
+    accepted = await acceptGithubWebhook({ deliveryId, event, payload, rawBody });
+  } catch (error) {
+    if (error.status) throw new CodeAgentInputError(error.message, error.status, error.code);
+    throw error;
+  }
   sendJson(res, 202, {
     accepted: true,
+    duplicate: !accepted.isNew,
     deliveryId,
     event,
     action: payload.action || null,

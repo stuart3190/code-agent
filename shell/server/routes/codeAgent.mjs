@@ -39,6 +39,13 @@ export async function handleRunCreate(req, res, { owner, agentId, body }) {
   if (!agent) throw new CodeAgentInputError("Agent not found", 404, "agent_not_found");
   const repository = await store.getRepository(owner.id, agent.repository_id);
   if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  if (repository.status !== "ready") {
+    throw new CodeAgentInputError(
+      repository.last_error || "Repository access is unavailable",
+      409,
+      "repository_unavailable",
+    );
+  }
   const run = await store.createRun(owner.id, agent, repository, parseRunInput(body, agent));
   return sendJson(res, 202, { run: publicRun(run) });
 }
@@ -85,6 +92,13 @@ export async function handleRunRetry(_req, res, { owner, runId }) {
   const repository = await store.getRepository(owner.id, previous.repository_id);
   if (!agent || !repository) {
     throw new CodeAgentInputError("The agent or repository is no longer available", 409, "retry_source_missing");
+  }
+  if (repository.status !== "ready") {
+    throw new CodeAgentInputError(
+      repository.last_error || "Repository access is unavailable",
+      409,
+      "repository_unavailable",
+    );
   }
   const run = await store.createRun(owner.id, agent, repository, {
     prompt: previous.prompt,

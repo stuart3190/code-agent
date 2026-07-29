@@ -127,7 +127,9 @@ export function publicInstallation(data) {
     accountType: data.account_type,
     repositorySelection: data.repository_selection,
     permissions: data.permissions || {},
+    status: data.status || (data.suspended_at ? "suspended" : "active"),
     suspendedAt: data.suspended_at,
+    deletedAt: data.deleted_at || null,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   };
@@ -144,6 +146,8 @@ export function installationRow(owner, installation) {
     permissions: installation.permissions || {},
     events: installation.events || [],
     suspended_at: installation.suspended_at || null,
+    status: installation.suspended_at ? "suspended" : "active",
+    deleted_at: null,
   };
 }
 
