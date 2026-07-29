@@ -14,6 +14,8 @@ database, or credentials.
 - Database and authentication: dedicated Supabase project `zczgvcsokfafuyognvwx`
 
 Buildr101 remains on port `8787`; Thrallo uses `8788`.
+The tracked service definition is `ops/thrallo-shell.service`; the tracked proxy site definition is
+`ops/Caddyfile.thrallo`.
 
 ## Secret custody
 

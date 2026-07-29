@@ -1,0 +1,15 @@
+[Unit]
+Description=Thrallo web application and coding-agent API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/code-agent/shell
+ExecStart=/usr/bin/node server/index.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

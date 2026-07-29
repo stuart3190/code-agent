@@ -1,0 +1,16 @@
+# Import these site blocks before the generic on-demand TLS catch-all.
+app.thrallo.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	reverse_proxy 10.83.7.1:8788 {
+		flush_interval -1
+	}
+}
+
+thrallo.com, www.thrallo.com {
+	bind 10.83.7.2
+	redir https://app.thrallo.com{uri} permanent
+}
