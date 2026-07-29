@@ -25,7 +25,7 @@ values. Codex will keep everything else moving locally.
   - Authentication and paid inference are verified against `gpt-5.6-sol`.
   - The credit check completed using 10 input and 5 output tokens.
 - [x] Add OpenAI API credits before the first model-backed agent run.
-- [ ] Create the Thrallo GitHub App after DNS and TLS are live.
+- [x] Create the Thrallo GitHub App after DNS and TLS are live.
   - Setup URL: `https://app.thrallo.com/api/v1/github/callback`
   - Webhook URL: `https://app.thrallo.com/api/v1/github/webhook`
   - Repository permissions planned for the first release: Metadata read, Contents read/write,
@@ -33,13 +33,14 @@ values. Codex will keep everything else moving locally.
   - Generate a private key, a random state-signing secret, and a separate webhook secret; add them
     only to the server environment as `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_STATE_SECRET`, and
     `GITHUB_WEBHOOK_SECRET`.
+  - Installed on `stuart3190/code-agent`; signed delivery and PR publishing are verified.
 
 ## Required before public launch
 
 - [x] Choose the product name and domain: Thrallo at `thrallo.com`.
 - [x] Choose production hosting: isolated services on the existing Buildr101 VPS.
 - [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
-- [ ] In Supabase Authentication → URL Configuration, set both the Site URL and an allowed redirect
+- [x] In Supabase Authentication → URL Configuration, set both the Site URL and an allowed redirect
   URL to `https://app.thrallo.com`.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
