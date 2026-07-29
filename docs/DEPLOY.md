@@ -34,7 +34,12 @@ APP_URL=https://app.thrallo.com
 CODE_AGENT_STANDALONE=on
 CODE_AGENT_STORE=supabase
 CODE_AGENT_WORKER=on
+PLATFORM_ENC_KEY=<32 random bytes encoded as 64 hex characters>
 ```
+
+`@openai/codex` is pinned in the root production dependencies. The server uses its app-server
+protocol for device sign-in; user authentication state is encrypted with `PLATFORM_ENC_KEY`.
+Never copy a developer's local Codex login into production.
 
 ## Verification
 

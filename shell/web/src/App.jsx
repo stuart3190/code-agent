@@ -10,6 +10,7 @@ import {
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
 import { Logo } from "./auth/AuthGate.jsx";
+import AiProviderSettings from "./settings/AiProviderSettings.jsx";
 
 const terminalStates = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
 const nav = [
@@ -212,7 +213,8 @@ export default function App() {
               }} />
             )}
             {view === "usage" && <Usage />}
-            {!["agents", "repositories", "usage"].includes(view) && <ComingSoon view={view} caps={caps} />}
+            {view === "settings" && <AiProviderSettings />}
+            {!["agents", "repositories", "usage", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
           </div>
         </main>
       </div>

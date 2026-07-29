@@ -8,6 +8,12 @@ import { openAIConfigured } from "./openAIProvider.mjs";
 import { anthropicConfigured } from "./anthropicCodingProvider.mjs";
 import { haveSupabaseEnv } from "./supabase.mjs";
 import { githubAppConfigured, githubWebhookConfigured } from "./githubApp.mjs";
+import {
+  activeAiCredential,
+  aiCredentialStorageConfigured,
+  refreshCodexAuth,
+} from "./aiCredentialStore.mjs";
+import { createCodingModelForCredential } from "./modelGateway.mjs";
 
 let timer = null;
 let working = false;
@@ -21,6 +27,11 @@ export function codeAgentCapabilities() {
     store,
     controlPlane: { configured: controlPlaneConfigured, durable: store === "supabase" },
     runner: { id: "daytona", configured: daytonaConfigured() },
+    authentication: {
+      encryptedCredentialStorage: aiCredentialStorageConfigured(),
+      codexDeviceLogin: aiCredentialStorageConfigured(),
+      byok: aiCredentialStorageConfigured(),
+    },
     models: [
       { id: optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"), provider: "openai", configured: openAIConfigured(), managed: true },
       { id: optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"), provider: "anthropic", configured: anthropicConfigured(), managed: true },
@@ -69,7 +80,13 @@ async function poll() {
   }
 }
 
-export async function processRun(run, { runnerFactory = createDaytonaRunner, agentRunner = runCodingAgent } = {}) {
+export async function processRun(run, {
+  runnerFactory = createDaytonaRunner,
+  agentRunner = runCodingAgent,
+  credentialResolver = activeAiCredential,
+  credentialRefresher = refreshCodexAuth,
+  modelFactory = createCodingModelForCredential,
+} = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
   let runner = null;
@@ -88,9 +105,35 @@ export async function processRun(run, { runnerFactory = createDaytonaRunner, age
     });
     await emit("run.running", { branch: runner.branch, message: "Agent is working" });
 
-    const result = await agentRunner({
-      run, runner, emit, isCancelled: () => store.isCancellationRequested(run.id),
+    const credential = await credentialResolver(run.owner);
+    await emit("model.selected", {
+      provider: credential.provider,
+      message: credential.provider === "codex"
+        ? "Using your Codex subscription"
+        : `Using ${credential.provider === "managed" ? "Thrallo managed AI" : `your ${credential.provider} key`}`,
     });
+    const isCancelled = () => store.isCancellationRequested(run.id);
+    let result;
+    if (credential.provider === "codex") {
+      result = await runner.runCodex({
+        prompt: run.prompt,
+        authJson: credential.secret,
+        emit,
+        isCancelled,
+      });
+      if (result.refreshedAuthJson) {
+        await credentialRefresher(run.owner, result.refreshedAuthJson, credential.metadata);
+        delete result.refreshedAuthJson;
+      }
+    } else {
+      result = await agentRunner({
+        run,
+        runner,
+        emit,
+        isCancelled,
+        provider: modelFactory(credential, run.model),
+      });
+    }
     if (result.cancelled) {
       run = await store.updateRun(run, { state: "cancelled", result, usage: result.usage, finished_at: new Date().toISOString() });
       await persistUsage(store, run, result, executionStarted);

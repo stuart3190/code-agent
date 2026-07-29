@@ -11,6 +11,25 @@ export function createCodingModel(requested = "auto") {
   if (!openAIConfigured()) return createOpenAIProvider();
   return createOpenAIProvider({ model: selection.model });
 }
+
+export function createCodingModelForCredential(credential, requested = "auto") {
+  if (!credential || credential.provider === "managed") return createCodingModel(requested);
+  const selection = resolveModelSelection(requested);
+  if (credential.provider === "anthropic") {
+    const model = selection.provider === "anthropic"
+      ? selection.model
+      : optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6");
+    return createAnthropicCodingProvider({ apiKey: credential.secret, model });
+  }
+  if (credential.provider === "openai") {
+    const model = selection.provider === "openai"
+      ? selection.model
+      : optionalEnv("OPENAI_MODEL", "gpt-5.6-sol");
+    return createOpenAIProvider({ apiKey: credential.secret, model });
+  }
+  throw new Error(`Unsupported coding model credential: ${credential.provider}`);
+}
+
 export function resolveModelSelection(requested = "auto") {
   const value = String(requested || "auto").trim();
   if (value === "auto") {

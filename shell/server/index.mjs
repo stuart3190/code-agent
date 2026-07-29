@@ -65,10 +65,15 @@ import {
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
 import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentService.mjs";
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
+import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
   handleGithubInstallations, handleGithubRepositoryConnect,
 } from "./routes/githubApp.mjs";
+import {
+  handleAiByokConnect, handleAiConnections, handleAiProviderDisconnect, handleAiProviderSelect,
+  handleCodexLoginCancel, handleCodexLoginStart, handleCodexLoginStatus,
+} from "./routes/aiConnections.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -282,6 +287,35 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/repositories" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRepositories(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
+    }
+    if (p === "/api/v1/ai/connections" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiConnections(req, res, owner);
+    }
+    if (p === "/api/v1/ai/byok" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiByokConnect(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/provider" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiProviderSelect(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/disconnect" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiProviderDisconnect(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/codex/login/start" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleCodexLoginStart(req, res, owner);
+    }
+    const codexLoginMatch = p.match(/^\/api\/v1\/ai\/codex\/login\/([0-9a-f-]+)$/i);
+    if (codexLoginMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleCodexLoginStatus(req, res, owner, codexLoginMatch[1]);
+    }
+    if (codexLoginMatch && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleCodexLoginCancel(req, res, owner, codexLoginMatch[1]);
     }
     if (p === "/api/v1/github/installations/start" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -665,6 +699,7 @@ async function shutdown(signal) {
   stopActionWorker();
   stopCodeAgentWorker();
   stopGithubWebhookWorker();
+  await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
   }
