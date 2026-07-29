@@ -1,8 +1,6 @@
 import { optionalEnv } from "./env.mjs";
 import { createInstallationToken, createPullRequest } from "./githubApp.mjs";
 
-const workspacePath = "/workspace/repository";
-
 export function daytonaConfigured() {
   return !!optionalEnv("DAYTONA_API_KEY");
 }
@@ -22,6 +20,7 @@ export async function createDaytonaRunner({ run, repository, emit }) {
     autoDeleteInterval: Number(optionalEnv("DAYTONA_AUTO_DELETE_MINUTES", "1440")),
   });
   await emit("sandbox.created", { sandboxId: sandbox.id, message: "Secure workspace ready" });
+  const workspacePath = await resolveSandboxRepositoryPath(sandbox);
 
   const token = repository.installation_id
     ? (await createInstallationToken(repository.installation_id)).token
@@ -104,6 +103,7 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
   const daytona = new Daytona();
   const sandbox = await daytona.get(run.sandbox_id);
   if (sandbox.state !== "started") await sandbox.start(120);
+  const workspacePath = await resolveSandboxRepositoryPath(sandbox);
   const { token } = await createInstallationToken(repository.installation_id);
   const commitTitle = String(title || `Thrallo: ${run.prompt}`).replace(/\s+/g, " ").trim().slice(0, 120);
 
@@ -142,6 +142,14 @@ export async function discardDaytonaSandbox(sandboxId) {
   } catch {
     return false;
   }
+}
+
+export async function resolveSandboxRepositoryPath(sandbox) {
+  const workDir = String(await sandbox.getWorkDir()).replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!workDir.startsWith("/") || workDir.split("/").includes("..")) {
+    throw new Error("Daytona returned an invalid sandbox working directory.");
+  }
+  return `${workDir}/repository`;
 }
 
 function safeRelative(value) {
