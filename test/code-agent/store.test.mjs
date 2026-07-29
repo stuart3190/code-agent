@@ -30,6 +30,20 @@ test("queued cancellation is terminal and cannot be claimed", async () => {
   assert.deepEqual(await store.claimRuns(1), []);
 });
 
+test("latest agent run survives refresh and remains owner scoped", async () => {
+  const store = new MemoryCodeAgentStore();
+  const repo = await store.createRepository("owner-a", {
+    provider: "github", full_name: "a/repo", clone_url: "https://github.com/a/repo.git",
+    default_branch: "main", private: false,
+  });
+  const agent = await store.createAgent("owner-a", { repository_id: repo.id, name: "Agent", mode: "agent" });
+  await store.createRun("owner-a", agent, repo, { prompt: "First", mode: "agent", model: "auto" });
+  const latest = await store.createRun("owner-a", agent, repo, { prompt: "Second", mode: "agent", model: "auto" });
+
+  assert.equal((await store.getLatestRun("owner-a", agent.id)).id, latest.id);
+  assert.equal(await store.getLatestRun("owner-b", agent.id), null);
+});
+
 test("a GitHub installation cannot be reassigned between owners", async () => {
   const store = new MemoryCodeAgentStore();
   const installation = await store.upsertGithubInstallation("owner-a", {

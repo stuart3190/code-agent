@@ -89,6 +89,11 @@ export class MemoryCodeAgentStore {
     return row?.owner === owner ? row : null;
   }
 
+  async getLatestRun(owner, agentId) {
+    return [...this.runs.values()].reverse()
+      .find((x) => x.owner === owner && x.agent_id === agentId) || null;
+  }
+
   async claimRuns(limit = 1) {
     const rows = [...this.runs.values()]
       .filter((x) => x.state === "queued")
@@ -268,6 +273,11 @@ export class SupabaseCodeAgentStore {
 
   async getRun(owner, id) {
     return unwrapMaybe(await this.query("ca_runs", owner).eq("id", id).maybeSingle());
+  }
+
+  async getLatestRun(owner, agentId) {
+    return unwrapMaybe(await this.query("ca_runs", owner).eq("agent_id", agentId)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle());
   }
 
   async claimRuns(limit = 1) {

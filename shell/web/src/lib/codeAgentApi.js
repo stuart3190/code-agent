@@ -32,6 +32,7 @@ export const addAgent = (body) => request("/api/v1/agents", { method: "POST", bo
 export const createRun = (agentId, body) => request(`/api/v1/agents/${agentId}/runs`, {
   method: "POST", body: JSON.stringify(body),
 });
+export const getLatestRun = (agentId) => request(`/api/v1/agents/${agentId}/runs/latest`);
 export const getRun = (runId) => request(`/api/v1/runs/${runId}`);
 export const cancelRun = (runId) => request(`/api/v1/runs/${runId}/cancel`, { method: "POST" });
 export const publishRun = (runId, body = {}) => request(`/api/v1/runs/${runId}/publish`, {
