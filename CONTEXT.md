@@ -6,7 +6,9 @@ Phase 1 vertical slice is implemented: control-plane data model, v1 API, worker,
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. The product is now branded Thrallo and the public repository
-is `https://github.com/stuart3190/code-agent`.
+is `https://github.com/stuart3190/code-agent`. The production repository-to-pull-request proof
+completed on 2026-07-29 as PR #2, including Daytona execution, explicit publication approval,
+GitHub branch push, pull-request creation, and passing GitHub Actions verification.
 
 ## Verification state
 
@@ -27,13 +29,17 @@ is `https://github.com/stuart3190/code-agent`.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
+- The private `Thrallo Code Agent` GitHub App is installed on `stuart3190/code-agent`. App
+  authentication, short-lived installation tokens, signed webhook delivery, repository discovery,
+  branch push, and pull-request publishing are verified in production.
+- The first live run exposed and fixed Daytona writable-workdir, untracked-file diff, and
+  post-refresh run-restoration defects. The fixes are tracked in PR #1 and deployed.
 - Never reuse Buildr101 production Supabase, Stripe, or provider secrets for this product.
 
 ## Next implementation slice
 
-Complete production deployment and the first live repository-to-pull-request proof. Then add a
-durable, idempotent webhook-delivery ledger and synchronize GitHub installation lifecycle events,
-followed by incremental repository indexing and encrypted per-user BYOK.
+Add a durable, idempotent webhook-delivery ledger and synchronize GitHub installation lifecycle
+events, followed by incremental repository indexing and encrypted per-user BYOK.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
 

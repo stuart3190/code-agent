@@ -58,7 +58,7 @@ import { handleRuntimeConnectors, handleRuntimeMetaCallback } from "./routes/run
 import { handleRuntimeWebhook } from "./routes/runtimeWebhook.mjs";
 import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRuntimeCredentialDelete } from "./routes/capabilities.mjs";
 import {
-  handleAgents, handleCodeAgentCapabilities, handleRepositories, handleRunCancel,
+  handleAgents, handleCodeAgentCapabilities, handleLatestRunGet, handleRepositories, handleRunCancel,
   handleRunArtifacts, handleRunCreate, handleRunEvents, handleRunGet, handleRunPublish,
   handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
@@ -307,6 +307,11 @@ const server = http.createServer(async (req, res) => {
     if (createRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRunCreate(req, res, { owner, agentId: createRunMatch[1], body: await readJson(req, BODY_LIMITS.standard) });
+    }
+    const latestRunMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)\/runs\/latest$/i);
+    if (latestRunMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleLatestRunGet(req, res, { owner, agentId: latestRunMatch[1] });
     }
     const runMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)$/i);
     if (runMatch && method === "GET") {

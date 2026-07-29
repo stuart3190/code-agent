@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./lib/useSession.js";
 import { backend } from "./lib/backend.js";
 import {
-  addAgent, addRepository, cancelRun, capabilities, createRun, getRun,
+  addAgent, addRepository, cancelRun, capabilities, createRun, getLatestRun, getRun,
   connectGithubRepository, githubInstallationRepositories, githubInstallations,
   listAgents, listRepositories, publishRun, retryRun, runArtifacts, startGithubInstallation,
   streamRunEvents, usageSummary,
@@ -50,6 +50,34 @@ export default function App() {
     refresh().catch((e) => setError(e.message));
     return () => streamRef.current?.abort();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!selectedAgentId) {
+      setRun(null);
+      setArtifacts([]);
+      return undefined;
+    }
+    let cancelled = false;
+    let timer = null;
+    const hydrate = async () => {
+      try {
+        const result = await getLatestRun(selectedAgentId);
+        if (cancelled) return;
+        setRun(result.run);
+        setArtifacts(result.run ? (await runArtifacts(result.run.id)).artifacts : []);
+        if (result.run && !terminalStates.has(result.run.state) && result.run.state !== "waiting_for_approval") {
+          timer = setTimeout(hydrate, 2_000);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    };
+    hydrate();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [selectedAgentId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

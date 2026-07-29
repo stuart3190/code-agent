@@ -49,6 +49,11 @@ export async function handleRunGet(_req, res, { owner, runId }) {
   return sendJson(res, 200, { run: publicRun(run) });
 }
 
+export async function handleLatestRunGet(_req, res, { owner, agentId }) {
+  const run = await codeAgentStore().getLatestRun(owner.id, agentId);
+  return sendJson(res, 200, { run: publicRun(run) });
+}
+
 export async function handleRunCancel(_req, res, { owner, runId }) {
   const run = await codeAgentStore().requestCancel(owner.id, runId);
   if (!run) throw new CodeAgentInputError("Run not found", 404, "run_not_found");
