@@ -414,7 +414,7 @@ function unwrapMaybe({ data, error }) {
 }
 
 function installationClaimed() {
-  const error = new Error("This GitHub installation is already connected to another Code Agent account.");
+  const error = new Error("This GitHub installation is already connected to another Thrallo account.");
   error.code = "github_installation_claimed";
   error.status = 409;
   return error;

@@ -1,16 +1,16 @@
-# Code Agent handoff
+# Thrallo handoff
 
 ## Current milestone
 
-Phase 1 vertical slice is implemented locally: control-plane data model, v1 API, worker, commercial
+Phase 1 vertical slice is implemented: control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
-publishing, and the new web workspace. The remote repository exists but this work has not been
-pushed.
+publishing, and the new web workspace. The product is now branded Thrallo and the public repository
+is `https://github.com/stuart3190/code-agent`.
 
 ## Verification state
 
-- `npm run verify` passes.
+- `npm run verify` passes locally and in GitHub Actions.
 - Dedicated Supabase project `Code Agent` (`zczgvcsokfafuyognvwx`) is active and healthy in
   organization `nuzfrbtaqkoemvdajzfh`, region `eu-west-1`.
 - The four Code Agent migrations are applied remotely. All 11 tables have RLS, Security Advisor
@@ -20,13 +20,15 @@ pushed.
 - The ignored local environment now has verified Supabase, Daytona (`eu` target), and OpenAI
   credentials. Paid inference is verified against `gpt-5.6-sol`; reasoning effort is explicitly
   configurable and currently set to `medium`.
+- Production target: the existing Buildr101 VPS, isolated as `/home/ubuntu/code-agent`, systemd
+  service `thrallo-shell`, private port `8788`, and public origin `https://app.thrallo.com`.
 - Never reuse Buildr101 production Supabase, Stripe, or provider secrets for this product.
 
 ## Next implementation slice
 
-Add a durable, idempotent webhook-delivery ledger and synchronize GitHub installation lifecycle
-events. Then add incremental repository indexing and encrypted per-user BYOK to the normalized
-model gateway.
+Complete production deployment and the first live repository-to-pull-request proof. Then add a
+durable, idempotent webhook-delivery ledger and synchronize GitHub installation lifecycle events,
+followed by incremental repository indexing and encrypted per-user BYOK.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
 
@@ -37,4 +39,4 @@ User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
 - Worker: service role, model keys, GitHub installation tokens, Daytona credentials.
 - Sandbox: receives only the minimum short-lived clone credential; no platform service role.
 - Imported Buildr generation routes remain in the server temporarily for compatibility but are not
-  linked from the Code Agent UI. Remove them as the standalone control plane absorbs shared needs.
+  linked from the Thrallo UI. Remove them as the standalone control plane absorbs shared needs.

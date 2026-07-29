@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Code Agent control plane and cloud coding-agent runtime.",
+  "description": "Thrallo control plane and cloud coding-agent runtime.",
   "scripts": {
     "harness": "node harness/run.mjs",
     "baseline": "node harness/run.mjs --baseline",

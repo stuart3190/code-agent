@@ -1,17 +1,17 @@
-# Code Agent — actions for Stuart
+# Thrallo — actions for Stuart
 
 This is the short list of actions that require account ownership, billing confirmation, or secret
 values. Codex will keep everything else moving locally.
 
 ## Completed
 
-- [x] Approve and create a dedicated Supabase project for Code Agent.
+- [x] Approve and create a dedicated Supabase project for Thrallo.
   - Project: `Code Agent` (`zczgvcsokfafuyognvwx`)
   - Organization: `nuzfrbtaqkoemvdajzfh`
   - Region: `eu-west-1`
   - Quoted cost: $0/month
   - The separate `AppBuilder` project (`qgemqjcyhuejrsvjxkbh`) was not changed.
-- [x] Apply the Code Agent database migrations and verify RLS, grants, policies, and foreign-key
+- [x] Apply the Thrallo database migrations and verify RLS, grants, policies, and foreign-key
   indexes.
 - [x] Configure and verify the server-side Supabase secret key.
   - A live service-role query succeeded; the key remains only in ignored `shell/.env`.
@@ -25,11 +25,9 @@ values. Codex will keep everything else moving locally.
   - Authentication and paid inference are verified against `gpt-5.6-sol`.
   - The credit check completed using 10 input and 5 output tokens.
 - [x] Add OpenAI API credits before the first model-backed agent run.
-- [ ] Decide whether the first live repository test should use a public repository or a private
-  GitHub App installation.
-- [ ] Create the Code Agent GitHub App when the repository-installation UI is ready for live setup.
-  - Setup URL: `https://YOUR_CODE_AGENT_DOMAIN/api/v1/github/callback`
-  - Webhook URL: `https://YOUR_CODE_AGENT_DOMAIN/api/v1/github/webhook`
+- [ ] Create the Thrallo GitHub App after DNS and TLS are live.
+  - Setup URL: `https://app.thrallo.com/api/v1/github/callback`
+  - Webhook URL: `https://app.thrallo.com/api/v1/github/webhook`
   - Repository permissions planned for the first release: Metadata read, Contents read/write,
     Pull requests read/write, Checks read, and Issues read.
   - Generate a private key, a random state-signing secret, and a separate webhook secret; add them
@@ -38,7 +36,9 @@ values. Codex will keep everything else moving locally.
 
 ## Required before public launch
 
-- [ ] Choose the final product name and domain; `Code Agent` is currently a placeholder.
+- [x] Choose the product name and domain: Thrallo at `thrallo.com`.
+- [x] Choose production hosting: isolated services on the existing Buildr101 VPS.
+- [ ] Point the GoDaddy DNS records for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.

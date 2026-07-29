@@ -12,7 +12,7 @@ export default function Landing() {
     <div className="min-h-full overflow-auto bg-[#07080b] text-slate-200">
       <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#07080b]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center px-6">
-          <Logo /><span className="ml-2.5 font-display font-semibold text-white">Code Agent</span>
+          <Logo /><span className="ml-2.5 font-display font-semibold text-white">Thrallo</span>
           <nav className="ml-auto flex items-center gap-2">
             <a href="#system" className="hidden px-3 py-2 text-sm text-slate-500 hover:text-white sm:block">Architecture</a>
             <button onClick={() => showAuth("signin")} className="rounded-lg border border-white/10 px-3.5 py-2 text-sm text-slate-300 hover:bg-white/[0.05]">Sign in</button>

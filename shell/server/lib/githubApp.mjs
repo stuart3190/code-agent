@@ -104,7 +104,7 @@ export async function createPullRequest({
     auth: token,
     fetchImpl,
     json: {
-      title: String(title || "Code Agent changes").slice(0, 240),
+      title: String(title || "Thrallo changes").slice(0, 240),
       head: String(head || "").slice(0, 255),
       base: String(base || "").slice(0, 255),
       body: String(body || "").slice(0, 20_000),

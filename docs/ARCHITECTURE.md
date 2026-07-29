@@ -1,4 +1,4 @@
-# Code Agent architecture
+# Thrallo architecture
 
 ## Request path
 

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import test from "node:test";
 
-test("real shell serves Code Agent capabilities and production SPA", { timeout: 15_000 }, async (t) => {
+test("real shell serves Thrallo capabilities and production SPA", { timeout: 15_000 }, async (t) => {
   const port = await freePort();
   const child = spawn(process.execPath, ["shell/server/index.mjs"], {
     cwd: process.cwd(),
@@ -22,12 +22,12 @@ test("real shell serves Code Agent capabilities and production SPA", { timeout: 
     if (!response.ok) throw new Error(`capabilities returned ${response.status}`);
     return response.json();
   }, () => output);
-  assert.equal(capabilities.product, "Code Agent");
+  assert.equal(capabilities.product, "Thrallo");
   assert.equal(capabilities.apiVersion, "v1");
 
   const page = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Code Agent/);
+  assert.match(await page.text(), /Thrallo/);
 });
 async function freePort() {
   const server = net.createServer();

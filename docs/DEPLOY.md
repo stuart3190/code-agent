@@ -1,0 +1,45 @@
+# Thrallo production deployment
+
+Thrallo shares the Buildr101 VPS but not its application directory, service, port, environment,
+database, or credentials.
+
+## Topology
+
+- Repository: `/home/ubuntu/code-agent`
+- Web and API service: `thrallo-shell.service`
+- Private listener: `10.83.7.1:8788`
+- Public application: `https://app.thrallo.com`
+- Apex and `www`: redirect to `https://app.thrallo.com`
+- Reverse proxy: the existing `buildr-caddy` container
+- Database and authentication: dedicated Supabase project `zczgvcsokfafuyognvwx`
+
+Buildr101 remains on port `8787`; Thrallo uses `8788`.
+
+## Secret custody
+
+Production secrets live only in `/home/ubuntu/code-agent/shell/.env`, owned by `ubuntu` with mode
+`600`. Browser configuration lives in `/home/ubuntu/code-agent/shell/web/.env` and contains only
+the Supabase URL and publishable key. Neither file is shipped through Git.
+
+Required production overrides:
+
+```dotenv
+SHELL_PORT=8788
+SHELL_HOST=10.83.7.1
+APP_URL=https://app.thrallo.com
+CODE_AGENT_STANDALONE=on
+CODE_AGENT_STORE=supabase
+CODE_AGENT_WORKER=on
+```
+
+## Verification
+
+```sh
+sudo systemctl status thrallo-shell
+curl -fsS http://10.83.7.1:8788/api/health
+curl -fsS http://10.83.7.1:8788/api/v1/capabilities
+curl -fsS https://app.thrallo.com/api/v1/capabilities
+```
+
+After a code or environment update, rebuild the web application and restart only
+`thrallo-shell`. Do not restart Buildr101 services for a Thrallo-only change.

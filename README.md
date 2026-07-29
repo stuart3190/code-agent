@@ -1,16 +1,16 @@
-# Code Agent
+# Thrallo
 
-Code Agent is a standalone cloud coding-agent product. The first implemented slice connects a
+Thrallo is a standalone cloud coding-agent product. The first implemented slice connects a
 GitHub repository, creates a persistent agent, queues a durable run, executes the task in an
 isolated Daytona workspace, drives a commercial OpenAI Responses API tool loop, and streams an
 ordered timeline plus the final status and diff to the web workspace.
 
-This repository was forked from the Buildr101 backend, but it has its own `main` branch and a
-`buildr-backend-baseline` tag. Do not point it at Buildr101 production data or credentials.
+This repository was derived from the Buildr101 backend but was published with a clean standalone
+history. Do not point it at Buildr101 production data or credentials.
 
 ## What works now
 
-- Code Agent landing page and authenticated three-pane agent workspace.
+- Thrallo landing page and authenticated three-pane agent workspace.
 - Repository and agent creation with strict owner isolation.
 - Durable Supabase schema for repositories, agents, runs, events, tool calls, checkpoints,
   artifacts, usage, and privacy-first repository indexing.
@@ -49,13 +49,16 @@ installation tokens; `GITHUB_AGENT_TOKEN` remains a temporary development fallba
 The web app runs on `http://localhost:5173` and proxies API requests to the shell server according
 to the existing Vite configuration.
 
+Production is hosted separately from Buildr101 at `app.thrallo.com`, even though both products
+share the same VPS. See [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Verification
 
 ```powershell
 npm run verify
 ```
 
-This runs the Code Agent contract, tenant-isolation, cancellation, provider-wire, and agent-loop
+This runs the Thrallo contract, tenant-isolation, cancellation, provider-wire, and agent-loop
 tests, then creates a production web build.
 
 ## Roadmap

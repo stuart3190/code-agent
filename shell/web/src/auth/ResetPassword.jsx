@@ -30,7 +30,7 @@ export default function ResetPassword({ onDone }) {
       <div className="w-full max-w-sm panel p-7">
         <div className="flex items-center gap-2 mb-1">
           <Logo />
-          <span className="text-lg font-semibold tracking-tight text-slate-100">Code Agent</span>
+          <span className="text-lg font-semibold tracking-tight text-slate-100">Thrallo</span>
         </div>
         <p className="text-sm text-slate-400 mb-6">Choose a new password for your account.</p>
 

@@ -16,7 +16,7 @@ export function codeAgentCapabilities() {
   const store = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
   const controlPlaneConfigured = store === "memory" || haveSupabaseEnv();
   return {
-    product: "Code Agent",
+    product: "Thrallo",
     apiVersion: "v1",
     store,
     controlPlane: { configured: controlPlaneConfigured, durable: store === "supabase" },

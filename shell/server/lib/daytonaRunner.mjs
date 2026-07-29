@@ -105,11 +105,11 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
   const sandbox = await daytona.get(run.sandbox_id);
   if (sandbox.state !== "started") await sandbox.start(120);
   const { token } = await createInstallationToken(repository.installation_id);
-  const commitTitle = String(title || `Code Agent: ${run.prompt}`).replace(/\s+/g, " ").trim().slice(0, 120);
+  const commitTitle = String(title || `Thrallo: ${run.prompt}`).replace(/\s+/g, " ").trim().slice(0, 120);
 
   await emit("publish.started", { message: "Committing approved changes" });
   await sandbox.git.add(workspacePath, ["."]);
-  await sandbox.git.commit(workspacePath, commitTitle, "Code Agent", "code-agent@users.noreply.github.com", false);
+  await sandbox.git.commit(workspacePath, commitTitle, "Thrallo", "thrallo@users.noreply.github.com", false);
   const shaResult = await sandbox.process.executeCommand("git rev-parse HEAD", workspacePath, undefined, 20);
   const commitSha = commandResult(shaResult).output.trim();
   await sandbox.git.push(workspacePath, "x-access-token", token, run.work_branch, "origin", true);
@@ -121,7 +121,7 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
     head: run.work_branch,
     base: run.base_branch,
     title: commitTitle,
-    body: body || `Created by Code Agent for run ${run.id}.\n\n${run.result?.summary || ""}`,
+    body: body || `Created by Thrallo for run ${run.id}.\n\n${run.result?.summary || ""}`,
   });
   await emit("publish.pull_request_created", {
     message: `Pull request #${pullRequest.number} created`,

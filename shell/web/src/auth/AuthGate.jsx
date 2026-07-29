@@ -91,7 +91,7 @@ export function AuthCard({ mode, onMode }) {
         <button className="btn-primary w-full" disabled={busy || !backendConfigured}>
           {busy
             ? mode === "signup" ? "Creating account…" : mode === "signin" ? "Signing in…" : "Sending link…"
-            : mode === "signup" ? "Create Code Agent account" : mode === "signin" ? "Sign in" : "Send reset link"}
+            : mode === "signup" ? "Create Thrallo account" : mode === "signin" ? "Sign in" : "Send reset link"}
         </button>
       </form>
 
@@ -126,7 +126,7 @@ export default function AuthGate() {
   );
 }
 
-// Code Agent mark: paired brackets around an active execution cursor.
+// Thrallo mark: paired brackets around an active execution cursor.
 export function Logo({ className = "" }) {
   return (
     <span className={`inline-grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 shadow-[0_0_20px_rgba(79,70,229,.25)] ${className}`}>

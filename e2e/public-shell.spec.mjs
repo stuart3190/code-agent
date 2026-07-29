@@ -1,14 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-test("Code Agent landing page is usable without horizontal overflow", async ({ page }) => {
+test("Thrallo landing page is usable without horizontal overflow", async ({ page }) => {
   const browserErrors = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
   await page.goto("/");
-  await expect(page).toHaveTitle(/Code Agent/i);
+  await expect(page).toHaveTitle(/Thrallo/i);
   await expect(page.getByRole("heading", { name: /Software that builds/i }), browserErrors.join("\n")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
-  const createAccount = page.getByRole("button", { name: /Create Code Agent account/i });
+  const createAccount = page.getByRole("button", { name: /Create Thrallo account/i });
   await expect(createAccount).toBeVisible();
   const setupWarning = page.getByText(/Authentication setup required/i);
   if (await setupWarning.count()) {
@@ -32,7 +32,7 @@ test("public shell sends hardened headers and reports runtime setup honestly", a
   expect(response.ok()).toBeTruthy();
   const capability = await response.json();
   expect(capability).toMatchObject({
-    product: "Code Agent",
+    product: "Thrallo",
     apiVersion: "v1",
     runner: { id: "daytona" },
   });

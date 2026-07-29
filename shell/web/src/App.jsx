@@ -125,7 +125,7 @@ export default function App() {
         <aside className="flex min-h-0 flex-col border-r border-white/[0.07] bg-[#0b0d12]">
           <div className="flex h-16 items-center gap-2.5 border-b border-white/[0.06] px-5">
             <Logo />
-            <span className="font-display font-semibold tracking-tight text-white">Code Agent</span>
+            <span className="font-display font-semibold tracking-tight text-white">Thrallo</span>
             <span className="ml-auto rounded border border-violet-400/20 bg-violet-400/10 px-1.5 py-0.5 font-mono text-[9px] text-violet-300">ALPHA</span>
           </div>
           <nav className="flex-1 space-y-1 px-3 py-4">
@@ -157,7 +157,7 @@ export default function App() {
           <header className="flex h-16 shrink-0 items-center border-b border-white/[0.07] px-6">
             <div>
               <div className="text-sm font-medium text-white">{viewLabel(view)}</div>
-              <div className="text-[11px] text-slate-600">{view === "agents" ? selectedRepo?.fullName || "Cloud coding workspace" : "Code Agent control plane"}</div>
+              <div className="text-[11px] text-slate-600">{view === "agents" ? selectedRepo?.fullName || "Cloud coding workspace" : "Thrallo control plane"}</div>
             </div>
             <div className="ml-auto flex items-center gap-2">
               <StatusDot ok={caps?.ready} label={caps?.ready ? "Runtime ready" : "Setup required"} />
@@ -471,7 +471,7 @@ function SetupNotice({ caps }) {
 }
 
 function EmptyState({ onConnect }) {
-  return <div className="grid min-h-[calc(100vh-4rem)] place-items-center p-8"><div className="max-w-md text-center"><div className="text-5xl text-blue-400/70">⌘</div><h1 className="mt-5 text-2xl font-semibold text-white">Connect your first repository</h1><p className="mt-2 text-sm leading-6 text-slate-500">Code Agent needs a repository before it can inspect code, create an isolated branch, and run a task.</p><button onClick={onConnect} className="mt-6 rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-5 py-2 text-sm font-medium text-white">Connect GitHub repository</button></div></div>;
+  return <div className="grid min-h-[calc(100vh-4rem)] place-items-center p-8"><div className="max-w-md text-center"><div className="text-5xl text-blue-400/70">⌘</div><h1 className="mt-5 text-2xl font-semibold text-white">Connect your first repository</h1><p className="mt-2 text-sm leading-6 text-slate-500">Thrallo needs a repository before it can inspect code, create an isolated branch, and run a task.</p><button onClick={onConnect} className="mt-6 rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-5 py-2 text-sm font-medium text-white">Connect GitHub repository</button></div></div>;
 }
 
 function ComingSoon({ view, caps }) {
@@ -487,6 +487,6 @@ function ComingSoon({ view, caps }) {
 
 function Metric({ label, value }) { return <div className="rounded-lg border border-white/[0.06] bg-black/10 p-4"><div className="text-[10px] uppercase tracking-wide text-slate-600">{label}</div><div className="mt-1 text-sm text-slate-300">{value}</div></div>; }
 function StatusDot({ ok, label, className = "" }) { return <span className={`inline-flex items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px] text-slate-500 ${className}`}><span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />{label}</span>; }
-function viewLabel(view) { return ({ agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", settings: "Settings" })[view] || "Code Agent"; }
+function viewLabel(view) { return ({ agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", settings: "Settings" })[view] || "Thrallo"; }
 function formatNumber(value) { return new Intl.NumberFormat().format(Number(value || 0)); }
 function Splash() { return <div className="grid h-full place-items-center bg-[#07080b]"><Logo className="animate-pulse" /></div>; }
