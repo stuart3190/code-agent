@@ -52,3 +52,6 @@ curl -fsS https://app.thrallo.com/api/v1/capabilities
 
 After a code or environment update, rebuild the web application and restart only
 `thrallo-shell`. Do not restart Buildr101 services for a Thrallo-only change.
+
+Use the full root lockfile install (`npm ci`) before restart. The legacy shell still imports its QA
+runner at startup, so `npm ci --omit=dev` is not currently a valid production install.
