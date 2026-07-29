@@ -84,9 +84,7 @@ export async function createDaytonaRunner({ run, repository, emit }) {
       return commandResult(result).output.trim();
     },
     async diff() {
-      const result = await sandbox.process.executeCommand("git diff --no-ext-diff --stat && git diff --no-ext-diff",
-        workspacePath, undefined, 30);
-      return commandResult(result);
+      return collectWorkspaceDiff(sandbox, workspacePath);
     },
     async dispose() {
       try { await daytona.delete(sandbox); } catch { /* expiry policy remains the fallback */ }
@@ -150,6 +148,19 @@ export async function resolveSandboxRepositoryPath(sandbox) {
     throw new Error("Daytona returned an invalid sandbox working directory.");
   }
   return `${workDir}/repository`;
+}
+
+export async function collectWorkspaceDiff(sandbox, workspacePath) {
+  const intentToAdd = await sandbox.process.executeCommand(
+    "git add -N .",
+    workspacePath, undefined, 20,
+  );
+  commandResult(intentToAdd);
+  const result = await sandbox.process.executeCommand(
+    "git diff --no-ext-diff --stat && git diff --no-ext-diff",
+    workspacePath, undefined, 30,
+  );
+  return commandResult(result);
 }
 
 function safeRelative(value) {
