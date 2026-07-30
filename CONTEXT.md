@@ -2,8 +2,8 @@
 
 ## Current milestone
 
-Phase 16 is implemented. Phase 15 is live, and Phase 12's automatic PR reviews are active:
-the GitHub App subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 16 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
+subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -158,6 +158,10 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
   proven, the shell restarted healthy, and Buildr101 stayed healthy. The full local
   verification passed with 141 Code Agent tests and four Playwright checks. Marketplace
   publication (publisher account + vsce publish) is a documented Stuart action.
+- Phase 16's inline completion is deployed from main commit `ad2129f` on 2026-07-30 (no
+  migration). Production capabilities advertise `editor.inlineCompletion`, the completions
+  route requires authentication, the shell restarted healthy, and Buildr101 stayed healthy.
+  The full local verification passed with 148 Code Agent tests and four Playwright checks.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
