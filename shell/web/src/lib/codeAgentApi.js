@@ -79,6 +79,11 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
+export const listApiTokens = () => request("/api/v1/tokens");
+export const createApiToken = (name) => request("/api/v1/tokens", {
+  method: "POST", body: JSON.stringify({ name }),
+});
+export const revokeApiToken = (tokenId) => request(`/api/v1/tokens/${tokenId}`, { method: "DELETE" });
 export const githubInstallations = () => request("/api/v1/github/installations");
 export const startGithubInstallation = () => request("/api/v1/github/installations/start", { method: "POST" });
 export const githubInstallationRepositories = (installationId) =>

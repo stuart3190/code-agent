@@ -1,0 +1,68 @@
+{
+  "name": "thrallo",
+  "displayName": "Thrallo",
+  "description": "Run Thrallo cloud coding agents on your repositories from VS Code.",
+  "version": "0.1.0",
+  "publisher": "thrallo",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stuart3190/code-agent"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "thrallo",
+          "title": "Thrallo",
+          "icon": "media/thrallo.svg"
+        }
+      ]
+    },
+    "views": {
+      "thrallo": [
+        {
+          "id": "thralloAgents",
+          "name": "Agents"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "thrallo.connect", "title": "Thrallo: Connect" },
+      { "command": "thrallo.disconnect", "title": "Thrallo: Disconnect" },
+      { "command": "thrallo.refresh", "title": "Thrallo: Refresh Agents", "icon": "$(refresh)" },
+      { "command": "thrallo.runTask", "title": "Thrallo: Run Agent Task" },
+      { "command": "thrallo.showLatestRun", "title": "Thrallo: Show Latest Run" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "thrallo.refresh", "when": "view == thralloAgents", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "thrallo.runTask", "when": "view == thralloAgents && viewItem == agent" },
+        { "command": "thrallo.showLatestRun", "when": "view == thralloAgents && viewItem == agent" }
+      ]
+    },
+    "configuration": {
+      "title": "Thrallo",
+      "properties": {
+        "thrallo.serverUrl": {
+          "type": "string",
+          "default": "https://app.thrallo.com",
+          "description": "Thrallo control-plane origin."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  }
+}

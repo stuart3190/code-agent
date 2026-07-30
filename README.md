@@ -51,6 +51,10 @@ history. Do not point it at Buildr101 production data or credentials.
 - Per-owner burst protection (concurrent-run and hourly admission caps), past-due
   subscriptions metered at free-plan limits, and a retention sweeper that prunes run
   timelines and artifact content after a configurable window while keeping billing history.
+- Personal access tokens (SHA-256 hashed, shown once, revocable, session-managed only) that
+  authenticate editor and CLI clients against the same owner-scoped v1 API, and a
+  zero-dependency VS Code extension (`editor/vscode`) with an agents view, run launching,
+  live timeline streaming, diff review, approve/decline publication, and one-click resume.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -103,10 +107,11 @@ routing and provider evaluations; encrypted incremental hybrid repository indexi
 symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent context retrieval;
 subscription plans with managed usage budgets; operational telemetry; publish policies with
 protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
-command policies; per-owner rate controls; and retention pruning.
+command policies; per-owner rate controls; retention pruning; API tokens; and the VS Code
+extension.
 
 1. Live Stripe pricing, disaster recovery, and richer dunning.
-2. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
+2. Extension marketplace publication, inline completion, and desktop-application packaging.
 3. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

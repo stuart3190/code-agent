@@ -77,6 +77,10 @@ export function codeAgentCapabilities() {
       rateLimits: true,
       retentionDays: retentionDays(),
     },
+    editor: {
+      apiTokens: true,
+      vscodeExtension: true,
+    },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
       appConfigured: githubAppConfigured(),

@@ -162,7 +162,22 @@ storage objects) for runs finished more than `CODE_AGENT_RETENTION_DAYS` ago (90
 disables), marking each run `pruned_at`. Runs, checkpoints, and usage records are kept — they
 are the billing and audit history.
 
+## Editor clients and API tokens
+
+`ca_api_tokens` stores SHA-256 hashes of `thrallo_pat_` personal access tokens (plaintext shown
+once at creation, at most ten active per owner, revocable, last-use tracked). The shell's
+bearer authentication accepts either a Supabase session JWT or a PAT; PAT identities carry no
+verified email, so they can never pass the `ADMIN_EMAILS` operator gate, and token management
+routes require a real signed-in session so a leaked PAT cannot mint further tokens.
+
+`editor/vscode` is a zero-dependency VS Code extension speaking the same owner-scoped v1 API:
+agents tree view, task launching, SSE timeline streaming into an output channel, side-by-side
+diff review, modal approve/decline for pull-request publication, and resume for preserved
+workspaces. Its API client (`editor/vscode/lib/api.js`) has no `vscode` import and is covered
+by the repository test suite.
+
 ## Known production gaps
 
 - Live Stripe pricing, richer dunning, and disaster recovery.
-- Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.
+- Extension marketplace publication, inline completion, desktop packaging, review agents,
+  automations, CLI/SDK, and mobile.
