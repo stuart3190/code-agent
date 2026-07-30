@@ -3,9 +3,11 @@
 
 import { runCli } from "./lib/cli.mjs";
 
+// process.exitCode (not process.exit) lets libuv handles drain — process.exit here crashes
+// intermittently on Windows with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)".
 runCli(process.argv.slice(2))
-  .then((code) => process.exit(code))
+  .then((code) => { process.exitCode = code; })
   .catch((error) => {
     console.error(`thrallo: ${error.message}`);
-    process.exit(1);
+    process.exitCode = 1;
   });

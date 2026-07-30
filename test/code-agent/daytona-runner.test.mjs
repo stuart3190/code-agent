@@ -4,7 +4,15 @@ import {
   collectWorkspaceDiff,
   resolveSandboxRepositoryPath,
   runCodexInSandbox,
+  synthesizeTitle,
 } from "../../shell/server/lib/daytonaRunner.mjs";
+
+test("publication titles use the first sentence, capped conventionally", () => {
+  assert.equal(synthesizeTitle("Fix the retry loop. Also update docs and tests."), "Thrallo: Fix the retry loop");
+  assert.ok(synthesizeTitle("Add a 'version' command to the CLI at cli/lib/cli.mjs that prints the package version and update the HELP text").length <= 72);
+  assert.match(synthesizeTitle("x".repeat(200)), /\.\.\.$/);
+  assert.equal(synthesizeTitle("  "), "Thrallo: Changes");
+});
 
 test("Daytona repositories are created inside the sandbox working directory", async () => {
   const path = await resolveSandboxRepositoryPath({
