@@ -5,6 +5,7 @@ import { decryptSecret, encryptSecret } from "./secretCrypto.mjs";
 import {
   createProviderForCandidate,
   isRetryableProviderError,
+  modelCatalog,
   routeCandidates,
 } from "./modelRouting.mjs";
 
@@ -25,13 +26,12 @@ export async function runModelEvaluation(owner, input = {}, {
     throw evaluationError("Provider comparisons use managed AI or an API-key connection. Select one first.", 409);
   }
   const health = await store.listRecentAttempts(owner, 200);
-  const candidates = routeCandidates({
+  const candidates = evaluationCandidates({
     credential,
-    requested: "auto",
-    policy: { routingMode: input.routingMode || "balanced", allowFallback: false },
+    routingMode: input.routingMode || "balanced",
     prompt,
     health,
-  }).slice(0, 3);
+  });
   if (!candidates.length) throw evaluationError("No configured provider is available.", 503);
 
   const evaluation = await store.createEvaluation(owner, {
@@ -118,6 +118,28 @@ export async function runModelEvaluation(owner, input = {}, {
     completed_at: new Date().toISOString(),
   });
   return modelEvaluationSummary(owner, { store });
+}
+
+export function evaluationCandidates({ credential, routingMode, prompt, health }) {
+  const requestedTier = routingMode === "quality"
+    ? "quality"
+    : ["fast", "economy"].includes(routingMode) ? "fast" : "balanced";
+  const available = modelCatalog().filter((candidate) => credential.provider === "managed"
+    ? candidate.configured
+    : candidate.provider === credential.provider);
+  const ordered = [
+    ...available.filter((candidate) => candidate.tier === requestedTier),
+    ...available.filter((candidate) => candidate.tier !== requestedTier),
+  ];
+  const unique = [...new Map(ordered.map((candidate) => [candidate.key, candidate])).values()];
+  if (unique.length) return unique.slice(0, 3);
+  return routeCandidates({
+    credential,
+    requested: "auto",
+    policy: { routingMode, allowFallback: false },
+    prompt,
+    health,
+  }).slice(0, 3);
 }
 
 export async function modelEvaluationSummary(owner, { store = aiRoutingStore() } = {}) {

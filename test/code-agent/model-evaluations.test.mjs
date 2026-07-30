@@ -32,6 +32,11 @@ test("model evaluations encrypt prompts and outputs while returning owner-safe r
   });
 
   assert.equal(summary.evaluations[0].prompt, prompt);
+  assert.equal(summary.evaluations[0].results.length, 3);
+  assert.deepEqual(
+    summary.evaluations[0].results.map((result) => result.model),
+    ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"],
+  );
   assert.match(summary.evaluations[0].results[0].output, /empty array/);
   const stored = store.evaluations.get(summary.evaluations[0].id);
   assert.doesNotMatch(stored.prompt_encrypted, /reducer/);
