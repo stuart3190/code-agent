@@ -135,7 +135,7 @@ input { font: inherit; color: inherit; }
 
 /* ── conversation column ── */
 .room { position: absolute; inset: 60px 0 0 0; display: flex; }
-.thread-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; transition: all var(--dur-3) var(--ease-out); }
+.thread-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; position: relative; transition: all var(--dur-3) var(--ease-out); }
 .thread { width: min(720px, 92%); flex: 1; overflow-y: auto; padding: 18px 4px 190px; scrollbar-width: none; }
 .thread::-webkit-scrollbar { display: none; }
 
@@ -173,7 +173,9 @@ input { font: inherit; color: inherit; }
   display: flex; flex-direction: column; padding: 0; gap: 12px;
 }
 .rail.team { width: 300px; padding: 8px 22px 22px 0; }
-.rail.preview { width: 460px; padding: 8px 22px 22px 0; }
+/* Preview dominance: the preview is the product, so when it arrives it takes the room —
+ * the conversation yields to a comfortable reading column beside it. */
+.rail.preview { width: min(56vw, 880px); padding: 8px 22px 22px 0; }
 .team-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
   box-shadow: var(--shadow-1); padding: 14px; display: flex; flex-direction: column; gap: 4px;
@@ -218,8 +220,14 @@ input { font: inherit; color: inherit; }
   box-shadow: var(--shadow-2); display: flex; flex-direction: column; overflow: hidden; min-height: 0;
   opacity: 0; transform: translateX(24px);
 }
-.rail.preview .preview-pane { animation: paneIn var(--dur-3) var(--ease-out) 120ms both; }
-@keyframes paneIn { to { opacity: 1; transform: none; } }
+.rail.preview .preview-pane { animation: paneIn var(--dur-3) var(--ease-spring) 120ms both, paneGlow 1.9s var(--ease-out) 180ms both; }
+@keyframes paneIn { from { opacity: 0; transform: translateX(24px) scale(0.965); } to { opacity: 1; transform: none; } }
+/* one-time arrival glow — the eye goes to the preview the moment it exists */
+@keyframes paneGlow {
+  0% { box-shadow: 0 0 0 0 rgba(106, 90, 224, 0); }
+  30% { box-shadow: 0 0 0 7px rgba(106, 90, 224, 0.16), 0 8px 24px rgba(27, 24, 38, 0.1), 0 24px 64px rgba(27, 24, 38, 0.12); }
+  100% { box-shadow: 0 2px 6px rgba(27, 24, 38, 0.06), 0 12px 32px rgba(27, 24, 38, 0.08); }
+}
 .preview-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; }
 .url-pill {
   font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); border-radius: 999px; padding: 6px 13px;
@@ -273,6 +281,8 @@ input { font: inherit; color: inherit; }
 .chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 16px; font-size: var(--text-small); font-weight: 600; color: var(--ink-2); transition: all var(--dur-1) var(--ease-out); }
 .chip:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+.chip-live { border-color: var(--accent); color: var(--accent); display: inline-flex; align-items: center; gap: 8px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px rgba(31, 157, 99, 0.15); }
 .receipt { display: flex; align-items: center; gap: 9px; color: var(--ink-3); font-size: var(--text-small); padding: 8px 2px; }
 .receipt .r-check { color: var(--good); font-weight: 800; }
 .budget-bar { height: 8px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
@@ -393,14 +403,14 @@ input { font: inherit; color: inherit; }
       <button class="avatar" onclick="openSheet()">S</button>
     </div>
     <div class="begin-center">
-      <div class="begin-hello">Evening, Stuart.</div>
-      <div class="begin-q">What should we build?</div>
+      <div class="begin-hello">Welcome back, Stuart.</div>
+      <div class="begin-q">What are we building today?</div>
       <div class="composer begin-composer">
         <input placeholder="Describe anything — an app, a change, an idea…" onfocus="this.blur()" />
         <button class="send" onclick="go('build')" title="Send">↑</button>
       </div>
       <div class="begin-chips">
-        <button class="chip" onclick="go('build')">Continue FocusFlow</button>
+        <button class="chip chip-live" onclick="go('build')"><span class="live-dot"></span>Continue FocusFlow</button>
         <button class="chip" onclick="go('build')">Fix the login on Riftlands</button>
         <button class="chip" onclick="go('build')">Something new</button>
       </div>
@@ -417,6 +427,10 @@ input { font: inherit; color: inherit; }
     <div class="room">
       <div class="thread-wrap">
         <div class="thread" id="build-thread"></div>
+        <div class="composer">
+          <input placeholder="Message your team…" onfocus="this.blur()" />
+          <button class="send">↑</button>
+        </div>
       </div>
       <div class="rail" id="rail">
         <div class="team-card" id="team-card">
@@ -431,10 +445,6 @@ input { font: inherit; color: inherit; }
           <div class="preview-frame" id="pane-frame"></div>
         </div>
       </div>
-    </div>
-    <div class="composer">
-      <input placeholder="Message your team…" onfocus="this.blur()" />
-      <button class="send">↑</button>
     </div>
   </section>
 
@@ -706,7 +716,18 @@ function agentRow(key, status) {
     <span class="agent-status">${status}</span></span><span class="agent-check">✓</span>`;
   return el;
 }
-function spawn(key, status) { const rows = $("#team-rows"); rows.appendChild(agentRow(key, status)); $("#rail").classList.add("team"); }
+function spawn(key, status) {
+  const rows = $("#team-rows");
+  const existing = rows.querySelector(`[data-agent="${key}"]`);
+  if (existing) { // specialists are disposable — a returning one simply picks its seat back up
+    existing.classList.remove("done", "settled");
+    existing.classList.add("working");
+    existing.querySelector(".agent-status").textContent = status;
+    return;
+  }
+  rows.appendChild(agentRow(key, status));
+  $("#rail").classList.add("team");
+}
 function setStatus(key, status) { const row = $(`#team-rows [data-agent="${key}"]`); if (row) row.querySelector(".agent-status").textContent = status; }
 function done(key, settle = true) {
   const row = $(`#team-rows [data-agent="${key}"]`);
@@ -761,7 +782,7 @@ function runChoreography() {
   after(600, () => {
     spawn("lead", "Understanding request…");
     const b = bubble("lead", "", "Lead Agent");
-    after(500, () => stream(b, "On it. I'm putting a small team on FocusFlow — a clean pomodoro timer with work/break cycles and session tracking. You'll see a live preview here the moment it exists."));
+    after(500, () => stream(b, "Love it — FocusFlow it is. I'm pulling the team in now; you'll see it take shape right here."));
   });
 
   after(2600, () => { setStatus("lead", "Directing the team"); spawn("planner", "Planning the approach…"); });
@@ -783,9 +804,18 @@ function runChoreography() {
   after(9000, () => setStatus("builder", "Building the timer engine…"));
   after(10600, () => { setStatus("builder", "Wiring up break cycles…"); tickStep(2); });
   after(12200, () => { done("builder"); tickStep(3); spawn("tester", "Running quality checks…"); });
-  after(13800, () => { done("tester"); spawn("publisher", "Preparing your preview…"); });
 
-  after(15400, () => {
+  // Principle 9: the magic moment — the Lead Agent notices and acts before being asked.
+  after(13800, () => {
+    done("tester");
+    spawn("designer", "Polishing the break screen…");
+    const b = bubble("lead", "", "Lead Agent");
+    stream(b, "Checks pass. One thing — the break screen felt a bit flat next to the focus view, so I'm having it polished before you see it.");
+  });
+
+  after(17400, () => { done("designer"); spawn("publisher", "Preparing your preview…"); });
+
+  after(19000, () => {
     done("publisher"); tickStep(4); done("lead", false); setStatus("lead", "With you");
     $("#ctx-pill").classList.add("show");
     // preview card in-thread, unprompted (Principle 5)
@@ -802,7 +832,7 @@ function runChoreography() {
     after(700, () => openPane());
     after(1500, () => {
       const b2 = bubble("lead", "");
-      stream(b2, "FocusFlow is live on the right — try a session. Say the word and I'll publish it, or just tell me what to change. “Make it warmer” works fine.");
+      stream(b2, "I've got the first version ready — take a look. Run a full work/break cycle; the session dots fill as you go. Say the word and I'll publish it, or just tell me what to change — “make it warmer” works fine.");
     });
   });
 }
@@ -819,7 +849,7 @@ function publish() {
     $(".preview-pane .publish-btn").textContent = "Live ✓";
     $(".preview-pane .publish-btn").style.background = "var(--good)";
     const b = bubble("lead", "", "Lead Agent");
-    stream(b, "Published — FocusFlow is live at focusflow.thrallo.app. Installable on phones too. Want me to put it on a proper domain?", 44, () => {
+    stream(b, "Done — FocusFlow is live at focusflow.thrallo.app, and it installs on phones like a native app. Want me to put it on a proper domain?", 44, () => {
       const holder = document.createElement("div");
       holder.innerHTML = `<div class="chip-row"><button class="chip" onclick="toast('Okay — tell me the domain when you have it.')">Yes, use my domain</button><button class="chip" onclick="toast('No problem — it stays on thrallo.app.')">This is fine</button></div>`;
       b.appendChild(holder);

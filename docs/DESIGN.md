@@ -42,11 +42,18 @@ settings avatar right. There is no navigation because there is nowhere else to g
 ## The moments (what Phase 21 must reproduce)
 
 ### 1 · Begin
-A calm, almost-empty page. A time-aware greeting in display type ("Morning, Stuart."), one
-question — **"What should we build?"** — one beautiful input, and up to three
-memory-grounded chips ("Continue FocusFlow", "Something new"). No dashboard, no project
-list, no cards. Memory (Principle 8) is why chips can be this personal; the command palette
-(⌘K) is where old conversations/products are searched — never a permanent list.
+A calm, almost-empty page. A greeting in display type, one question — **"What are we
+building today?"** — one beautiful input, and up to three memory-grounded chips ("Continue
+FocusFlow", "Something new"). No dashboard, no project list, no cards. Memory (Principle 8)
+is why chips can be this personal; the command palette (⌘K) is where old
+conversations/products are searched — never a permanent list.
+
+**Greeting composition (never scripted-feeling, per Stuart's wireframe review):** the
+greeting is *generated from memory*, not templated small talk. Default: "Welcome back,
+Stuart." With active product context it becomes aware: "Welcome back — Thrallo is ready to
+continue your Competition Site." A chip for the active product carries a live dot when its
+preview is still up. First-ever visit: "Let's build something." The greeting is the Lead
+Agent speaking, so it obeys the Voice rules below.
 
 ### 2 · The team assembles (Principle 4, the "human feel")
 The Lead Agent replies in streaming plain English and commits to the work. Specialists
@@ -59,11 +66,14 @@ narrated sparsely — a team keeping you informed, not a log file.
 
 ### 3 · Preview is the hero (Principle 5)
 The moment the preview exists, a preview card slides into the thread unprompted *and* the
-rail glides into preview state. The card carries the natural next step — **Publish** — as
-an in-card action (approval surfaces, Platform Architecture 7), never a "Continue?".
-Publishing resolves the card into a receipt line ("Live at focusflow.thrallo.app ↗") that
-stays in history. Anticipation (Principle 9): the Lead Agent offers the obvious next step
-("Want a proper domain?") without being asked.
+rail glides into preview state. **The preview dominates (Stuart's wireframe review): it is
+the product, so on arrival it takes the room** — the rail expands to roughly half the
+viewport (56vw, capped), the conversation yields to a comfortable reading column beside it,
+and a one-time accent glow pulls the eye to it as the culmination of the team's work. The
+pane carries the natural next step — **Publish** — as an in-card action (approval surfaces,
+Platform Architecture 7), never a "Continue?". Publishing resolves the card into a receipt
+line ("Live at focusflow.thrallo.app ↗") that stays in history. Anticipation (Principle 9):
+the Lead Agent offers the obvious next step ("Want a proper domain?") without being asked.
 
 ### 4 · Everything else is conversation (Principles 1/2/10)
 "What's running?" and "how much budget is left?" are chat turns with tiny inline visuals
@@ -85,6 +95,23 @@ permanent elements survive; nothing extra appears.
 ### 7 · Power, hidden (⌘K)
 One command palette: publish, new conversation, switch product, search memory, settings.
 Doesn't count against the permanent four; invisible until summoned.
+
+## Voice — the Lead Agent sounds like a senior engineer you've worked with for years
+
+Added at Stuart's wireframe review; this is a hard rule for every string the Lead Agent
+produces (greeting included) and for Phase 21 copy reviews.
+
+- **First person, plain English, warm but not chatty.** "I've got the first version ready —
+  take a look." Never mechanical relay: "Publisher completed preview" is banned phrasing.
+- **Proactive observations are the magic (Principle 9).** The Lead Agent notices and acts
+  before being asked, and says so naturally: "The break screen felt a bit flat next to the
+  focus view, so I'm having it polished before you see it."
+- **Owns the team's work as "I/we", credits specialists only when it aids understanding.**
+  The user manages one relationship (Principle 11); the roster is ambient, not narrated.
+- **Ends with the obvious next step when there is one** ("Say the word and I'll publish
+  it") — an offer, never a gate.
+- Specialist *status lines* stay short and human ("Polishing the break screen…") — they are
+  captions on the roster, not sentences in the thread.
 
 ## Visual language (the tokens, in words)
 
