@@ -176,8 +176,25 @@ diff review, modal approve/decline for pull-request publication, and resume for 
 workspaces. Its API client (`editor/vscode/lib/api.js`) has no `vscode` import and is covered
 by the repository test suite.
 
+## Review agents
+
+A review run carries an optional `pull_request` number. The worker checks the PR head out into
+a local review branch inside the sandbox (token-authenticated fetch with the token redacted
+from any error), computes the diff against the base branch, and embeds it (bounded) in the
+review prompt. The review toolset removes `write_file` — the reviewer reads code and may run
+tests, but cannot edit — and the same command and network policies apply. The agent must
+answer with a single JSON review (verdict, summary, findings with path/line/severity); parsing
+tolerates fenced blocks and degrades unparseable answers to a comment-only review. Artifacts
+persist `review.md`, `review.json`, and the PR patch.
+
+Posting is approval-gated exactly like publication: the run waits with a `post_review` action,
+and approval posts a GitHub review through the App installation — verdict mapped
+conservatively (approve only with no major findings, blockers force request-changes), findings
+anchored as inline comments where GitHub accepts them, with a body-only retry when it does
+not. Reviews without a pull request complete directly with findings as the result.
+
 ## Known production gaps
 
 - Live Stripe pricing, richer dunning, and disaster recovery.
-- Extension marketplace publication, inline completion, desktop packaging, review agents,
-  automations, CLI/SDK, and mobile.
+- Extension marketplace publication, inline completion, desktop packaging, automations
+  (webhook-triggered reviews, scheduled runs), CLI/SDK, and mobile.

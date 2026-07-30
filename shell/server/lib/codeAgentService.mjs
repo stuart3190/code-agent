@@ -5,6 +5,11 @@ import {
   publishDaytonaRun,
 } from "./daytonaRunner.mjs";
 import { evaluatePublishPolicy } from "./publishPolicy.mjs";
+import {
+  REVIEW_INSTRUCTIONS, buildReviewPrompt, parseReviewOutput, renderReviewMarkdown,
+  reviewEventForVerdict, reviewTools,
+} from "./reviewAgent.mjs";
+import { createPullRequestReview } from "./githubApp.mjs";
 import { runCodingAgent } from "./codingAgent.mjs";
 import { openAIConfigured } from "./openAIProvider.mjs";
 import { anthropicConfigured } from "./anthropicCodingProvider.mjs";
@@ -80,6 +85,10 @@ export function codeAgentCapabilities() {
     editor: {
       apiTokens: true,
       vscodeExtension: true,
+    },
+    reviews: {
+      pullRequestReview: githubAppConfigured() && daytonaConfigured(),
+      approvalGatedPosting: true,
     },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
@@ -195,6 +204,16 @@ export async function processRun(run, {
         ? { branch: runner.branch, resumed_from: resumedRun.id }
         : { branch: run.base_branch },
     });
+    let reviewDiff = null;
+    if (run.mode === "review" && run.pull_request) {
+      const checkout = await runner.checkoutPullRequest(run.pull_request);
+      reviewDiff = checkout.diff;
+      await emit("review.checked_out", {
+        pullRequest: run.pull_request,
+        branch: checkout.branch,
+        message: `Checked out pull request #${run.pull_request} for review`,
+      });
+    }
     run = await store.updateRun(run, { state: "indexing" });
     await emit("run.indexing", { branch: runner.branch, message: "Preparing repository context" });
     let context = [];
@@ -224,7 +243,10 @@ export async function processRun(run, {
     run = await store.updateRun(run, { state: "running" });
     await emit("run.running", { branch: runner.branch, message: "Agent is working" });
 
-    const executionPrompt = resumedRun ? resumePreamble(resumedRun) + run.prompt : run.prompt;
+    const basePrompt = run.mode === "review" && run.pull_request
+      ? buildReviewPrompt(run.prompt, run.pull_request, reviewDiff)
+      : run.prompt;
+    const executionPrompt = resumedRun ? resumePreamble(resumedRun) + basePrompt : basePrompt;
     const credential = await credentialResolver(run.owner);
     billingSource = credential.provider === "managed" ? "managed"
       : credential.provider === "codex" ? "codex" : "byok";
@@ -267,6 +289,7 @@ export async function processRun(run, {
         repositoryMap,
         prompt: executionPrompt,
         commandPolicy: agent?.command_policy || "standard",
+        ...(run.mode === "review" ? { instructions: REVIEW_INSTRUCTIONS, tools: reviewTools() } : {}),
         tokenBudget: billingSource === "managed"
           ? budget.budgets.managedTokens.remaining
           : null,
@@ -279,6 +302,36 @@ export async function processRun(run, {
       });
       await persistUsage(store, run, result, executionStarted, billingSource);
       await emit("run.cancelled", { message: "Run cancelled" });
+      return run;
+    }
+    if (run.mode === "review") {
+      const review = parseReviewOutput(result.summary);
+      await persistReviewOutputs(store, run, result, review, reviewDiff);
+      await persistUsage(store, run, result, executionStarted, billingSource);
+      const reviewResult = {
+        review: true,
+        verdict: review.verdict,
+        summary: review.summary,
+        findings: review.findings,
+        provider: result.provider,
+        model: result.model,
+      };
+      if (run.pull_request && repository.installation_id) {
+        reviewResult.approval = { required: true, action: "post_review", pullRequest: run.pull_request };
+        run = await store.updateRun(run, {
+          state: "waiting_for_approval", result: reviewResult, usage: result.usage,
+        });
+        await emit("run.waiting_for_approval", {
+          message: `Review ready (${review.findings.length} findings, verdict: ${review.verdict}). Approve to post it to pull request #${run.pull_request}.`,
+          action: reviewResult.approval,
+        });
+        return run;
+      }
+      run = await store.updateRun(run, {
+        state: "succeeded", result: reviewResult, usage: result.usage, sandbox_state: "discarded",
+        finished_at: new Date().toISOString(),
+      });
+      await emit("run.succeeded", { message: "Review completed", result: reviewResult });
       return run;
     }
     await persistRunOutputs(store, run, result);
@@ -383,6 +436,7 @@ function resumePreamble(previous) {
 
 export async function approveRunPublication(owner, runId, input = {}, {
   publisher = publishDaytonaRun,
+  reviewPoster = createPullRequestReview,
 } = {}) {
   const store = codeAgentStore();
   let run = await store.getRun(owner, runId);
@@ -395,6 +449,10 @@ export async function approveRunPublication(owner, runId, input = {}, {
     throw serviceError("A GitHub App repository is required to publish this run", "github_installation_required", 409);
   }
   const emit = (type, payload) => store.appendEvent(run, type, payload);
+
+  if (run.result?.approval?.action === "post_review" && run.pull_request) {
+    return postApprovedReview({ store, run, repository, emit, reviewPoster });
+  }
   run = await store.updateRun(run, { state: "running", error_code: null, error: null });
   await emit("publish.approved", { message: "Pull-request publication approved" });
   try {
@@ -433,8 +491,74 @@ export async function approveRunPublication(owner, runId, input = {}, {
   }
 }
 
+async function postApprovedReview({ store, run, repository, emit, reviewPoster }) {
+  run = await store.updateRun(run, { state: "running", error_code: null, error: null });
+  await emit("publish.approved", { message: `Posting the review to pull request #${run.pull_request}` });
+  try {
+    const review = {
+      verdict: run.result.verdict || "comment",
+      summary: run.result.summary || "Review completed.",
+      findings: Array.isArray(run.result.findings) ? run.result.findings : [],
+    };
+    const posted = await reviewPoster({
+      installationId: repository.installation_id,
+      repository: repository.full_name,
+      pullNumber: run.pull_request,
+      body: renderReviewMarkdown(review, run.pull_request),
+      event: reviewEventForVerdict(review.verdict, review.findings),
+      comments: review.findings.map((finding) => ({
+        path: finding.path,
+        line: finding.line,
+        body: `**${finding.title}** (${finding.severity})\n\n${finding.detail}`,
+      })),
+    });
+    const result = { ...run.result, publication: { review: posted } };
+    run = await store.updateRun(run, {
+      state: "succeeded", result, finished_at: new Date().toISOString(),
+    });
+    await emit("run.succeeded", {
+      message: `Review posted to pull request #${run.pull_request}`,
+      result,
+    });
+    return run;
+  } catch (error) {
+    run = await store.updateRun(run, {
+      state: "waiting_for_approval",
+      error_code: error.code || "review_post_failed",
+      error: error.message,
+    });
+    await emit("publish.failed", { code: error.code || "review_post_failed", error: error.message });
+    throw error;
+  }
+}
+
 export async function discardRunSandbox(run) {
   return discardDaytonaSandbox(run?.sandbox_id);
+}
+
+async function persistReviewOutputs(store, run, result, review, reviewDiff) {
+  const artifacts = [
+    {
+      type: "report",
+      name: "review.md",
+      content: renderReviewMarkdown(review, run.pull_request || 0),
+      content_type: "text/markdown",
+    },
+    {
+      type: "report",
+      name: "review.json",
+      content: JSON.stringify({ verdict: review.verdict, summary: review.summary, findings: review.findings }, null, 2),
+      content_type: "application/json",
+    },
+    { type: "diff", name: "pull-request.patch", content: reviewDiff || "", content_type: "text/x-diff" },
+  ];
+  for (const artifact of artifacts) {
+    await store.createArtifact(run, {
+      ...artifact,
+      size_bytes: Buffer.byteLength(artifact.content),
+      metadata: { provider: result.provider, model: result.model, review: true },
+    });
+  }
 }
 
 async function persistRunOutputs(store, run, result) {

@@ -45,6 +45,8 @@ export async function runCodingAgent({
   tokenBudget = null,
   prompt = null,
   commandPolicy = "standard",
+  instructions = INSTRUCTIONS,
+  tools = CODING_TOOLS,
 }) {
   const model = provider || createCodingModel(run.model);
   const input = [{ role: "user", content: augmentPromptWithContext(prompt ?? run.prompt, context, repositoryMap) }];
@@ -56,9 +58,9 @@ export async function runCodingAgent({
     if (await isCancelled()) return { cancelled: true, usage };
     await emit("model.turn_started", { turn, model: model.model, message: `Thinking · turn ${turn}` });
     const response = await model.turn({
-      instructions: INSTRUCTIONS,
+      instructions,
       input,
-      tools: CODING_TOOLS,
+      tools,
       safetyIdentifier: run.owner,
     });
     selectedProvider = response.provider || model.id;

@@ -52,7 +52,10 @@ export async function createDaytonaRunner({ run, repository, emit, networkPolicy
   await emit("repository.cloned", { branch, message: `Checked out ${repository.full_name}` });
   await applyNetworkPolicy(sandbox, networkPolicy, emit);
 
-  return runnerInterface({ daytona, sandbox, workspacePath, branch, run });
+  return runnerInterface({
+    daytona, sandbox, workspacePath, branch, run,
+    cloneToken: token, cloneUrl: repository.clone_url,
+  });
 }
 
 // The clone needs GitHub, so offline blocking happens only after checkout. Fails closed:
@@ -113,10 +116,46 @@ function withCode(error, code) {
   return error;
 }
 
-function runnerInterface({ daytona, sandbox, workspacePath, branch, run }) {
+function runnerInterface({ daytona, sandbox, workspacePath, branch, run, cloneToken = null, cloneUrl = null }) {
+  const redact = (text) => (cloneToken ? String(text || "").replaceAll(cloneToken, "***") : String(text || ""));
   return {
     id: sandbox.id,
     branch,
+    // Checks out a pull request's head into a local review branch and returns the diff
+    // against the base branch the sandbox was cloned from.
+    async checkoutPullRequest(number) {
+      const pull = Math.floor(Number(number));
+      if (!Number.isFinite(pull) || pull <= 0) throw new Error("Invalid pull request number");
+      const reviewBranch = `thrallo-review-${pull}`;
+      const remote = cloneToken && cloneUrl
+        ? cloneUrl.replace(/^https:\/\//, `https://x-access-token:${cloneToken}@`)
+        : "origin";
+      try {
+        commandResult(await sandbox.process.executeCommand(
+          `git fetch ${shellQuote(remote)} 'pull/${pull}/head:${reviewBranch}' --depth 50 && git checkout '${reviewBranch}'`,
+          workspacePath, undefined, 120,
+        ));
+      } catch (error) {
+        const failure = new Error(`Could not fetch pull request #${pull}: ${redact(error.message)}`);
+        failure.code = "pull_request_unavailable";
+        throw failure;
+      }
+      const range = shellQuote(`origin/${run.base_branch}...HEAD`);
+      const endpoints = `${shellQuote(`origin/${run.base_branch}`)} HEAD`;
+      let diff;
+      try {
+        diff = commandResult(await sandbox.process.executeCommand(
+          `git diff ${range} --stat && git diff ${range}`,
+          workspacePath, undefined, 60,
+        ));
+      } catch {
+        diff = commandResult(await sandbox.process.executeCommand(
+          `git diff ${endpoints} --stat && git diff ${endpoints}`,
+          workspacePath, undefined, 60,
+        ));
+      }
+      return { branch: reviewBranch, diff: redact(diff.output) };
+    },
     async runCodex({ prompt, authJson, isCancelled = async () => false }) {
       if (await isCancelled()) return { cancelled: true, provider: "codex", model: "codex-subscription", usage: {} };
       return runCodexInSandbox({

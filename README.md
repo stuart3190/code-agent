@@ -55,6 +55,10 @@ history. Do not point it at Buildr101 production data or credentials.
   authenticate editor and CLI clients against the same owner-scoped v1 API, and a
   zero-dependency VS Code extension (`editor/vscode`) with an agents view, run launching,
   live timeline streaming, diff review, approve/decline publication, and one-click resume.
+- Repository-aware pull-request review agents: the reviewer checks out the PR head in the
+  sandbox, reads changed code in context with a read-only toolset (it can still run tests),
+  produces structured findings with severities and line anchors, and posts the review to
+  GitHub — verdict-mapped with inline comments — only after explicit approval.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -107,11 +111,12 @@ routing and provider evaluations; encrypted incremental hybrid repository indexi
 symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent context retrieval;
 subscription plans with managed usage budgets; operational telemetry; publish policies with
 protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
-command policies; per-owner rate controls; retention pruning; API tokens; and the VS Code
-extension.
+command policies; per-owner rate controls; retention pruning; API tokens; the VS Code
+extension; and approval-gated pull-request review agents.
 
 1. Live Stripe pricing, disaster recovery, and richer dunning.
 2. Extension marketplace publication, inline completion, and desktop-application packaging.
-3. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
+3. Automations (webhook-triggered reviews and scheduled runs), CLI/SDK/plugin system,
+   enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

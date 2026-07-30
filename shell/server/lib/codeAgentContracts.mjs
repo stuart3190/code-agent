@@ -122,11 +122,22 @@ function parseAgentPolicy(body, { defaults }) {
 export function parseRunInput(body = {}, agent) {
   const mode = String(body.mode || agent.mode || "agent").toLowerCase();
   if (!AGENT_MODES.has(mode)) throw new CodeAgentInputError("Unsupported run mode");
-  return {
+  const input = {
     prompt: requiredString(body.prompt, "prompt", { max: 50_000 }),
     mode,
     model: optionalString(body.model, { max: 120 }) || "auto",
   };
+  if (body.pullRequestNumber !== undefined && body.pullRequestNumber !== null) {
+    const number = Math.floor(Number(body.pullRequestNumber));
+    if (!Number.isFinite(number) || number <= 0) {
+      throw new CodeAgentInputError("pullRequestNumber must be a positive integer");
+    }
+    if (mode !== "review") {
+      throw new CodeAgentInputError("pullRequestNumber is only valid for review runs");
+    }
+    input.pull_request = number;
+  }
+  return input;
 }
 
 export function publicRun(run) {
@@ -143,6 +154,7 @@ export function publicRun(run) {
     startedAt: started_at, finishedAt: finished_at, createdAt: created_at, updatedAt: updated_at,
     resumedFromRunId: run.resumed_from_run_id || null,
     resumable: isRunResumable(run),
+    pullRequest: run.pull_request ? Number(run.pull_request) : null,
   };
 }
 

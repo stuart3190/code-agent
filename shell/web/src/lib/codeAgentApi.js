@@ -38,6 +38,7 @@ export const searchRepositorySymbols = (repositoryId, query) =>
   request(`/api/v1/repositories/${repositoryId}/symbols/search`, {
     method: "POST", body: JSON.stringify({ query }),
   });
+export const repositoryPulls = (repositoryId) => request(`/api/v1/repositories/${repositoryId}/pulls`);
 export const repositoryFileGraph = (repositoryId, path) =>
   request(`/api/v1/repositories/${repositoryId}/graph`, {
     method: "POST", body: JSON.stringify({ path }),

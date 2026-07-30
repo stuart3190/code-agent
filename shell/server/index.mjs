@@ -63,6 +63,7 @@ import {
   handleRunArtifacts, handleRunArtifactContent, handleRunCreate, handleRunEvents, handleRunGet,
   handleRunPublish, handleRunResume,
   handleRepositoryFileGraph, handleRepositoryIndexGet, handleRepositoryIndexRefresh,
+  handleRepositoryPulls,
   handleRepositorySearch, handleRepositorySymbolSearch, handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
@@ -330,6 +331,11 @@ const server = http.createServer(async (req, res) => {
         owner,
         repositoryId: repositoryIndexRefreshMatch[1],
       });
+    }
+    const repositoryPullsMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/pulls$/i);
+    if (repositoryPullsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositoryPulls(req, res, { owner, repositoryId: repositoryPullsMatch[1] });
     }
     const repositorySearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/search$/i);
     if (repositorySearchMatch && method === "POST") {
