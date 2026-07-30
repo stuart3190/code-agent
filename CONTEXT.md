@@ -2,10 +2,26 @@
 
 ## Current milestone
 
-Phase 17 — the genuine Code - OSS-based Thrallo Desktop editor — is implemented to its first
-verified milestone on Windows. Phase 16 is live, and Phase 12's automatic PR reviews are
-active: the GitHub App subscribes to `["pull_request", "push"]`, verified from the live
-installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+**The v2 pivot is approved and underway.** `docs/PRINCIPLES.md` (12 principles +
+implementation emphases + platform architecture) is the source of truth for every
+implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
+with a Stuart approval gate at the end of each.
+
+Phase 18 (v2) — the conversation platform — is implemented and live: Capability Registry
+(the Lead Agent's tools are generated from it; extension proven by test), the durable Lead
+Agent loop with specialist lifecycle events over resumable conversation SSE, the three-layer
+Memory System (encrypted owner profile, named products, episodic memories), run
+dispatch/relay, budget metering, stale-thinking recovery, and a temporary chat pane in the
+existing console. Live production proof on 2026-07-30: a real conversation invoked
+get_status (accurate live run states and budget numbers) and remember (product persisted to
+ca_products/ca_memories), replying in plain English. One live-verification fix (#40):
+strict tool schemas need all-properties-required with nullable optionals. Deployed from main
+`bd5280a`; migration `conversation_platform` applied (6 service-only encrypted tables).
+**Awaiting Stuart's Phase 18 review before Phase 19 begins.**
+
+Prior state: Phase 17's Code - OSS Thrallo Desktop reached its first verified Windows
+milestone (dev + packaged builds 5/5 smoke-verified). Phase 12's automatic PR reviews are
+active: the GitHub App subscribes to `["pull_request", "push"]`. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -206,12 +222,11 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 17 (corrected by Stuart on 2026-07-30, superseding an unauthorized substitution): the
-genuine Code - OSS-based Thrallo Desktop editor. The earlier VS Code extension remains and is
-reused as the desktop build's built-in extension, but it is not a replacement for the desktop
-application. Windows is the release priority; macOS builds stay private ("Coming soon to
-macOS" in all public copy until Stuart approves); Linux is configured. No certificates,
-stores, notarization, or paid accounts. Roadmap substitutions require asking Stuart first.
+Phase 19 (v2 roadmap): the app-build capability on Thrallo infrastructure — Buildr engine
+re-pointed at Thrallo's Supabase and budgets, live previews under `*.preview.thrallo.com`
+(needs Stuart: wildcard DNS), shared-Caddy re-homing done while buildr services still run.
+**Blocked on Stuart's Phase 18 approval — per-phase gates are standing policy.** Roadmap
+substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
