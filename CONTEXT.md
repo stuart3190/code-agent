@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 9 is implemented. Phase 8 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 9 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -93,6 +93,12 @@ and a retention sweeper pruning run timelines and artifact content after
   advertise approval policies, auto-publish, protected paths, resume, and artifact storage; the
   full local verification passed with 97 Code Agent tests and four Playwright checks, and
   Buildr101 stayed healthy after the restart.
+- Phase 9 egress/command policies, rate controls, and retention are deployed from main commit
+  `7ddef64` on 2026-07-30. The `egress_command_policies_retention` migration is applied
+  remotely and verified (policy columns, `pruned_at`, partial retention index). Production
+  capabilities advertise network policies, command policies, rate limits, and 90-day
+  retention; the full local verification passed with 105 Code Agent tests and four Playwright
+  checks, and Buildr101 stayed healthy after the restart.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
