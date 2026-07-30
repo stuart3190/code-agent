@@ -12,6 +12,8 @@ import {
   artifactContent, resumeRun, updateAgent,
   repositoryPulls,
   createAutomation, deleteAutomation, listAutomations, updateAutomation,
+  getConversation, listConversations, sendConversationMessage, startConversation,
+  streamConversationEvents,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -21,6 +23,7 @@ import ApiTokens from "./settings/ApiTokens.jsx";
 
 const terminalStates = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
 const nav = [
+  ["chat", "Lead Agent", "◈"],
   ["agents", "Agents", "⌁"], ["repositories", "Repositories", "⌘"], ["automations", "Automations", "↻"],
   ["reviews", "Reviews", "✓"], ["usage", "Usage", "◫"], ["downloads", "Downloads", "↓"],
 ];
@@ -232,6 +235,7 @@ export default function App() {
                 setSelectedAgentId(created.agent.id); setView("agents");
               }} />
             )}
+            {view === "chat" && <LeadAgentChat />}
             {view === "reviews" && (
               <Reviews repos={repos} agents={agents} onAgentCreated={(agent) => setAgents((items) => [agent, ...items])} />
             )}
@@ -245,7 +249,7 @@ export default function App() {
               </div>
             )}
             {view === "downloads" && <Downloads />}
-            {!["agents", "repositories", "reviews", "automations", "usage", "ops", "downloads", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
+            {!["chat", "agents", "repositories", "reviews", "automations", "usage", "ops", "downloads", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
           </div>
         </main>
       </div>
@@ -1427,6 +1431,133 @@ function Automations({ repos }) {
   );
 }
 
+// TEMPORARY Phase 18 chat pane — exercises the Lead Agent end-to-end before the Phase 21
+// conversation-first redesign. Deliberately minimal; replaced wholesale by the new surface.
+function LeadAgentChat() {
+  const [conversation, setConversation] = useState(null);
+  const [items, setItems] = useState([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const streamRef = useRef(null);
+  const endRef = useRef(null);
+
+  useEffect(() => {
+    listConversations().then(async (result) => {
+      const latest = result.conversations[0];
+      if (latest) await openConversation(latest.id);
+    }).catch((err) => setError(err.message));
+    return () => streamRef.current?.abort();
+  }, []);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items]);
+
+  function appendEvent(event) {
+    setItems((current) => {
+      if (current.some((item) => item.sequence === event.sequence)) return current;
+      return [...current, event];
+    });
+    if (["message", "question_asked", "lead_error", "lead_recovered"].includes(event.type)) setBusy(false);
+  }
+
+  async function openConversation(conversationId) {
+    streamRef.current?.abort();
+    const controller = new AbortController();
+    streamRef.current = controller;
+    const result = await getConversation(conversationId);
+    setConversation(result.conversation);
+    setItems(result.turns.map((turn) => ({
+      sequence: `t${turn.sequence}`, type: "message",
+      payload: { role: turn.role, text: turn.content },
+    })));
+    streamConversationEvents(conversationId, appendEvent, { signal: controller.signal }).catch(() => {});
+  }
+
+  async function send() {
+    const message = text.trim();
+    if (!message || busy) return;
+    setBusy(true); setError(""); setText("");
+    try {
+      if (!conversation) {
+        const created = await startConversation(message);
+        await openConversation(created.conversation.id);
+      } else {
+        await sendConversationMessage(conversation.id, message);
+      }
+    } catch (err) { setError(err.message); setBusy(false); }
+  }
+
+  return (
+    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-3xl flex-col p-6">
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-400">Phase 18 preview</div>
+          <h1 className="text-xl font-semibold text-white">Lead Agent</h1>
+        </div>
+        <button onClick={() => { streamRef.current?.abort(); setConversation(null); setItems([]); }}
+          className="rounded border border-white/[0.1] px-2.5 py-1 text-[11px] text-slate-400 hover:bg-white/[0.05]">
+          New conversation
+        </button>
+      </div>
+      {error && <div className="mb-2 rounded-lg border border-red-400/20 bg-red-400/[0.05] p-2.5 text-xs text-red-300">{error}</div>}
+      <div className="flex-1 space-y-2 overflow-auto rounded-xl border border-white/[0.07] bg-white/[0.01] p-4">
+        {!items.length && <div className="mt-16 text-center text-sm text-slate-600">Tell the Lead Agent what you want built, reviewed, or checked.</div>}
+        {items.map((item) => <ChatItem key={item.sequence} item={item} />)}
+        {busy && <div className="flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-pulse rounded-full bg-violet-400" />The team is working…</div>}
+        <div ref={endRef} />
+      </div>
+      <div className="mt-3 flex gap-2">
+        <input value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+          placeholder='e.g. "Review the latest pull request" or "What is running right now?"'
+          className="flex-1 rounded-xl border border-white/[0.1] bg-[#10131a] px-4 py-2.5 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-400/40" />
+        <button onClick={send} disabled={busy || !text.trim()}
+          className="rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-30">
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ChatItem({ item }) {
+  const payload = item.payload || {};
+  if (item.type === "message") {
+    const isUser = payload.role === "user";
+    return (
+      <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+        <div className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+          isUser ? "bg-blue-500/15 text-slate-100" : "bg-white/[0.04] text-slate-300"
+        }`}>{payload.text}</div>
+      </div>
+    );
+  }
+  if (["agent_spawned", "agent_status", "agent_done"].includes(item.type)) {
+    return (
+      <div className="flex items-center gap-2 pl-1 text-[11px] text-slate-500">
+        <span className={`h-1.5 w-1.5 rounded-full ${item.type === "agent_done" ? (payload.ok === false ? "bg-red-400" : "bg-emerald-400") : "bg-violet-400 animate-pulse"}`} />
+        <span className="font-medium text-slate-400">{payload.agent}</span>
+        <span>{item.type === "agent_done" ? (payload.ok === false ? "hit a problem" : "✓ done") : payload.status}</span>
+      </div>
+    );
+  }
+  if (item.type === "plan.created") {
+    return (
+      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-xs text-slate-400">
+        <div className="font-medium text-slate-300">{payload.title}</div>
+        <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">{(payload.steps || []).map((step, i) => <li key={i}>{step}</li>)}</ol>
+      </div>
+    );
+  }
+  if (item.type === "question_asked") {
+    return <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.05] p-3 text-xs text-amber-200/80">{payload.question}</div>;
+  }
+  if (["run_linked", "approval_card", "lead_recovered", "lead_error"].includes(item.type)) {
+    return <div className="pl-1 text-[11px] text-slate-600">{payload.message || payload.error}</div>;
+  }
+  return null;
+}
+
 function Downloads() {
   return (
     <div className="mx-auto max-w-4xl p-8">
@@ -1482,7 +1613,7 @@ function ComingSoon({ view, caps }) {
 
 function Metric({ label, value }) { return <div className="rounded-lg border border-white/[0.06] bg-black/10 p-4"><div className="text-[10px] uppercase tracking-wide text-slate-600">{label}</div><div className="mt-1 text-sm text-slate-300">{value}</div></div>; }
 function StatusDot({ ok, label, className = "" }) { return <span className={`inline-flex items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px] text-slate-500 ${className}`}><span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />{label}</span>; }
-function viewLabel(view) { return ({ agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", ops: "Operations", settings: "Settings" })[view] || "Thrallo"; }
+function viewLabel(view) { return ({ chat: "Lead Agent", agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", ops: "Operations", settings: "Settings" })[view] || "Thrallo"; }
 function formatNumber(value) { return new Intl.NumberFormat().format(Number(value || 0)); }
 function formatCompact(value) { return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value || 0)); }
 function Splash() { return <div className="grid h-full place-items-center bg-[#07080b]"><Logo className="animate-pulse" /></div>; }

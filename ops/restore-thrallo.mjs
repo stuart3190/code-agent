@@ -45,6 +45,12 @@ export const RESTORE_ORDER = [
   "ca_model_evaluation_results",
   "ca_subscriptions",
   "ca_api_tokens",
+  "ca_products",
+  "ca_conversations",
+  "ca_conversation_turns",
+  "ca_conversation_events",
+  "ca_owner_profile",
+  "ca_memories",
 ];
 
 const BATCH = 500;

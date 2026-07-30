@@ -248,6 +248,28 @@ test("automations migration is server-only with provenance and due-scan indexes"
   assert.match(sql, /as restrictive for all to anon, authenticated/i);
 });
 
+test("conversation platform migration is encrypted-at-rest and server-only", async () => {
+  const sql = await readFile(
+    new URL("../../supabase/migrations/20260730220000_conversation_platform.sql", import.meta.url),
+    "utf8",
+  );
+  for (const table of [
+    "ca_products", "ca_conversations", "ca_conversation_turns",
+    "ca_conversation_events", "ca_owner_profile", "ca_memories",
+  ]) {
+    assert.match(sql, new RegExp(`create table public\\.${table}`, "i"));
+    assert.match(sql, new RegExp(`alter table public\\.${table} enable row level security`, "i"));
+    assert.match(sql, new RegExp(`${table}_browser_deny`, "i"));
+  }
+  assert.match(sql, /profile_encrypted/i);
+  assert.match(sql, /content_encrypted text not null/i);
+  assert.match(sql, /unique \(conversation_id, sequence\)/i);
+  assert.match(sql, /unique \(owner, name\)/i);
+  assert.match(sql, /state in \('idle', 'thinking', 'waiting_user', 'archived'\)/i);
+  assert.match(sql, /grant usage, select on sequence public\.ca_conversation_events_id_seq to service_role/i);
+  assert.match(sql, /revoke all on table[\s\S]*from public, anon, authenticated/i);
+});
+
 test("api-token migration stores only hashes and stays server-only", async () => {
   const sql = await readFile(apiTokensMigrationPath, "utf8");
   assert.match(sql, /create table public\.ca_api_tokens/i);
