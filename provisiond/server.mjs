@@ -22,6 +22,7 @@ import { existsSync } from "node:fs";
 import {
   ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
   destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs, PUBLISH_ROOT,
+  containerExists,
 } from "./docker.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -358,6 +359,16 @@ const server = http.createServer(async (req, res) => {
       const { domain } = await readJson(req);
       if (!domain) return send(res, 400, { error: "domain required" });
       return send(res, 200, await detachDomain(domain));
+    }
+    // On-demand-TLS support: does this label correspond to a real preview container or published
+    // site? The shell's /api/domain-check asks before Caddy is allowed to mint a certificate —
+    // without this, any stranger connecting to the VPS with an invented SNI could burn through
+    // the CA rate limit for the preview suffix.
+    if (p === "/exists" && req.method === "GET") {
+      const label = String(url.searchParams.get("label") || "").toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(label)) return send(res, 200, { exists: false });
+      const exists = (await containerExists(label)) || existsSync(path.join(PUBLISH_ROOT, label));
+      return send(res, 200, { exists });
     }
     if (p === "/get" && req.method === "GET") {
       const projectId = url.searchParams.get("projectId");

@@ -30,15 +30,16 @@ import { fromScaffold, clone } from "../../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
 import { makeFileTools } from "../../../src/tools/fileTools.mjs";
 import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
-import { createRoutingProvider } from "../../../src/providers/routingProvider.mjs";
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { buildTree, ensureDeps } from "../../../harness/workspace.mjs";
-import { ledger } from "./services.mjs";
-import { getDecryptedKey } from "./byokStore.mjs";
+// Phase 19 re-point: the credit ledger and legacy BYOK/welcome-grant seams are replaced by
+// Thrallo budget accounting and the Thrallo AI-connection store. The affordability logic
+// below is unchanged — it now runs against remaining monthly managed-token budget.
+import { createBudgetLedger, ensureBudgetGrant as ensureWelcomeGrant } from "./appBuild/budgetLedger.mjs";
+import { resolveBuildContext } from "./appBuild/buildContext.mjs";
 import { previewProvider } from "../preview/index.mjs";
 import { withRuntimeEnv } from "./runtimeEnv.mjs";
 import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "./images.mjs";
-import { ensureWelcomeGrant } from "./welcome.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { managedAffordableCreditLimit } from "./billingLimits.mjs";
@@ -49,7 +50,7 @@ import {
   normalizeDesignProfile, normalizeStyle, parseDesignProfile, renderDesignBrief,
 } from "../../../src/design/designProfile.mjs";
 
-const BYOK_MODEL = "claude-sonnet-4-6"; // adapter default for the BYOK (Anthropic) lane; a picker is deferred
+
 
 // Independent per-job runaway limits. These are NOT prices or minimum balances: any positive
 // managed balance may start, and settlement charges actual usage (capped at the balance remaining).
@@ -383,7 +384,7 @@ async function runJob(job) {
   const projectId = job.projectId;
   const mode = job.mode;
   const owner = job.owner;
-  const led = ledger();
+  const led = createBudgetLedger();
   let failureMeter = null;
 
   const withKnowledge = (p) =>
@@ -392,15 +393,13 @@ async function runJob(job) {
   try {
     setPhase(job, "preparing");
 
-    // BYOK: if the user has saved a provider key, generation runs on THEIR account and debits NO
-    // platform credits. The decrypted key stays server-side (never in any frame, never logged).
-    let byokKey = null;
-    try { byokKey = await getDecryptedKey(owner.id); } catch { byokKey = null; }
-    const byok = !!byokKey;
-    const providerConfig = byok
-      ? { provider: "anthropic", strong: BYOK_MODEL, apiKey: byokKey }
-      : { provider: "codex", strong: "gpt-5.5" };
-    const buildProvider = (intent) => createRoutingProvider({ config: providerConfig, turnMeta: { intent } });
+    // BYOK: if the owner's active Thrallo AI connection is their own Anthropic/OpenAI key,
+    // generation runs on THEIR account and consumes no managed budget. The decrypted key
+    // stays server-side (never in any frame, never logged). Otherwise: Thrallo managed OpenAI.
+    const buildContext = await resolveBuildContext(owner.id);
+    const byok = buildContext.byok;
+    const providerConfig = { provider: buildContext.providerLabel, strong: buildContext.strongModel };
+    const buildProvider = buildContext.buildProvider;
 
     await ensureWelcomeGrant(owner.id);
     const preBal = await led.getBalance(owner.id);

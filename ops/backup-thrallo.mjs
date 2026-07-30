@@ -21,8 +21,9 @@ import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 
-// Every ca_* table in supabase/migrations — test/code-agent/backup-coverage.test.mjs fails
-// the build if a new migration adds a table that is missing here.
+// Every control-plane table in supabase/migrations (ca_* plus the Phase-19 app-build tables) —
+// test/code-agent/backup-coverage.test.mjs fails the build if a new migration adds a table
+// that is missing here.
 export const CA_TABLES = [
   "ca_repositories",
   "ca_github_installations",
@@ -53,6 +54,8 @@ export const CA_TABLES = [
   "ca_conversation_events",
   "ca_owner_profile",
   "ca_memories",
+  "projects",
+  "build_jobs",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
