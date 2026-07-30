@@ -7,6 +7,21 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 21 (v2) — the conversation-first production UI — is live at https://app.thrallo.com/
+(the console is preserved at /console during the transition; /design keeps the wireframes):
+`shell/web/src/chat/` — ChatShell (Begin → thread → living rail with preview dominance →
+settings sheet → ⌘K palette; mobile team strip + full-screen preview sheet),
+`conversationState.js` (pure reducer: thread/roster/rail derive from
+ca_conversation_events replay + live SSE `after`-resume — tested against the real Phase-19
+production stream), escaped-first markdown, canonical tokens (light default + dark).
+Permanent UI is exactly the four; the rail's Publish action just posts a sentence to the
+Lead Agent. Real defect fixed en route: CSP `frame-src` still only allowed buildr101
+domains — Thrallo preview iframes would have been blocked (httpSecurity.mjs). Playwright
+converse→team→preview flows run at desktop+mobile with a stubbed API + seeded session
+(e2e/chat-shell.spec.mjs; skips without local auth env; test:ui includes it). PR #47,
+main `a471518`, verify 186/186 + 8/8. **Awaiting Stuart's production UI review — the
+Phase 21 gate — before Phase 22 (publish/automations/notifications as conversation).**
+
 Phase 20 (v2) — design system + wireframes — is implemented and live at
 https://app.thrallo.com/design/ (static, unlinked, noindex): `docs/DESIGN.md` is the
 experience brief (permanent UI = exactly conversation + living agent rail + preview +
@@ -265,10 +280,10 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 21 (v2 roadmap): the conversation-first web UI rebuild at `/` (console moves to
-`/console`), built from the approved Phase 20 wireframes + tokens. **Blocked on Stuart's
-Phase 20 wireframe approval — per-phase gates are standing policy.** Roadmap substitutions
-require asking Stuart first.
+Phase 22 (v2 roadmap): publish, deploy, and automations as conversation — publish
+capability to `*.app.thrallo.com` (approval-gated), custom domains, notifications.
+**Blocked on Stuart's Phase 21 production UI review — per-phase gates are standing
+policy.** Roadmap substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
