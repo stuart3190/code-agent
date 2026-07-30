@@ -20,7 +20,6 @@
   "linuxIconName": "thrallo",
   "urlProtocol": "thrallo",
   "applicationScheme": "thrallo",
-  "quality": "stable",
   "extensionsGallery": {
     "serviceUrl": "https://open-vsx.org/vscode/gallery",
     "itemUrl": "https://open-vsx.org/vscode/item",

@@ -24,6 +24,8 @@ test("the product overlay carries Thrallo identity, Open VSX, and no Microsoft m
   assert.equal(overrides.extensionsGallery.serviceUrl, "https://open-vsx.org/vscode/gallery");
   assert.equal(overrides.enableTelemetry, false);
   assert.equal(overrides.updateUrl, "", "updates stay disabled until an update server exists");
+  assert.equal(overrides.quality, undefined,
+    "quality must stay unset: stable/insider flips the win32 packager into the appx branch, which needs Microsoft-proprietary win32ContextMenu DLL config");
   const raw = JSON.stringify(overrides);
   assert.doesNotMatch(raw, /marketplace\.visualstudio\.com/i, "Microsoft's marketplace is not licensed for forks");
   assert.doesNotMatch(raw, /vscode-unpkg\.net|az764295\.vo\.msecnd\.net/i);
