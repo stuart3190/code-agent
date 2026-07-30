@@ -137,6 +137,51 @@ test("transient GitHub failures are retained for an exponential retry", async ()
   assert.equal(failed.result.retryable, true);
 });
 
+test("default-branch pushes queue an automatic repository refresh", async () => {
+  const store = new MemoryCodeAgentStore();
+  await store.upsertGithubInstallation("owner-a", {
+    installation_id: 42,
+    account_login: "example",
+    status: "active",
+  });
+  const repository = await store.createRepository("owner-a", {
+    provider: "github",
+    external_id: 7,
+    installation_id: 42,
+    full_name: "a/repo",
+    clone_url: "https://github.com/a/repo.git",
+    default_branch: "main",
+    private: true,
+  });
+  await store.recordGithubWebhookDelivery({
+    delivery_id: "delivery-push",
+    event: "push",
+    action: null,
+    owner: "owner-a",
+    installation_id: 42,
+    payload_sha256: "b".repeat(64),
+    payload: {
+      installation: { id: 42 },
+      repository: { id: 7 },
+      ref: "refs/heads/main",
+      after: "abc123",
+    },
+  });
+  let request = null;
+  const [processed] = await drainGithubWebhookDeliveries({
+    store,
+    refreshRequester: async (owner, queuedRepository, options) => {
+      request = { owner, repository: queuedRepository, options };
+    },
+  });
+  assert.equal(processed.status, "processed");
+  assert.equal(processed.result.refreshQueued, true);
+  assert.equal(request.owner, "owner-a");
+  assert.equal(request.repository.id, repository.id);
+  assert.equal(request.options.reason, "github_push");
+  assert.equal(request.options.requestedHeadSha, "abc123");
+});
+
 function delivery({
   delivery_id,
   event,

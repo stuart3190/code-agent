@@ -1,8 +1,20 @@
+import crypto from "node:crypto";
 import { optionalEnv } from "./env.mjs";
 import { createInstallationToken, createPullRequest } from "./githubApp.mjs";
 
 export function daytonaConfigured() {
   return !!optionalEnv("DAYTONA_API_KEY");
+}
+
+export function createDaytonaIndexRunner({ repository, emit = async () => {} }) {
+  return createDaytonaRunner({
+    repository,
+    emit,
+    run: {
+      id: crypto.randomUUID(),
+      base_branch: repository.default_branch || "main",
+    },
+  });
 }
 
 export async function createDaytonaRunner({ run, repository, emit }) {

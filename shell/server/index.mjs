@@ -60,11 +60,13 @@ import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRu
 import {
   handleAgents, handleCodeAgentCapabilities, handleLatestRunGet, handleRepositories, handleRunCancel,
   handleRunArtifacts, handleRunCreate, handleRunEvents, handleRunGet, handleRunPublish,
-  handleRepositoryIndexGet, handleRepositorySearch, handleRunRetry, handleUsage,
+  handleRepositoryFileGraph, handleRepositoryIndexGet, handleRepositoryIndexRefresh,
+  handleRepositorySearch, handleRepositorySymbolSearch, handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
 import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentService.mjs";
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
+import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -293,12 +295,38 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRepositoryIndexGet(req, res, { owner, repositoryId: repositoryIndexMatch[1] });
     }
+    const repositoryIndexRefreshMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/index\/refresh$/i);
+    if (repositoryIndexRefreshMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositoryIndexRefresh(req, res, {
+        owner,
+        repositoryId: repositoryIndexRefreshMatch[1],
+      });
+    }
     const repositorySearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/search$/i);
     if (repositorySearchMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRepositorySearch(req, res, {
         owner,
         repositoryId: repositorySearchMatch[1],
+        body: await readJson(req, BODY_LIMITS.standard),
+      });
+    }
+    const repositorySymbolSearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/symbols\/search$/i);
+    if (repositorySymbolSearchMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositorySymbolSearch(req, res, {
+        owner,
+        repositoryId: repositorySymbolSearchMatch[1],
+        body: await readJson(req, BODY_LIMITS.standard),
+      });
+    }
+    const repositoryGraphMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/graph$/i);
+    if (repositoryGraphMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositoryFileGraph(req, res, {
+        owner,
+        repositoryId: repositoryGraphMatch[1],
         body: await readJson(req, BODY_LIMITS.standard),
       });
     }
@@ -702,6 +730,7 @@ server.listen(PORT, HOST, () => {
   }
   startCodeAgentWorker();
   startGithubWebhookWorker();
+  startRepositoryIndexWorker();
 });
 
 let shuttingDown = false;
@@ -713,6 +742,7 @@ async function shutdown(signal) {
   stopActionWorker();
   stopCodeAgentWorker();
   stopGithubWebhookWorker();
+  stopRepositoryIndexWorker();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));

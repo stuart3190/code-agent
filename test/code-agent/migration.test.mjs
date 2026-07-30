@@ -11,6 +11,7 @@ const policyRolesMigrationPath = new URL("../../supabase/migrations/202607292321
 const aiConnectionsMigrationPath = new URL("../../supabase/migrations/20260729234551_ai_provider_connections.sql", import.meta.url);
 const rejectAnonymousMigrationPath = new URL("../../supabase/migrations/20260729234651_reject_anonymous_code_agent_access.sql", import.meta.url);
 const repositoryIndexMigrationPath = new URL("../../supabase/migrations/20260730001803_repository_hybrid_index.sql", import.meta.url);
+const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/20260730063059_repository_code_intelligence.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -142,4 +143,23 @@ test("repository hybrid index encrypts source and exposes search to service role
   assert.match(sql, /security invoker/i);
   assert.match(sql, /revoke all on function public\.search_repository_index[\s\S]*from public, anon, authenticated/i);
   assert.match(sql, /grant execute on function public\.search_repository_index[\s\S]*to service_role/i);
+});
+
+test("repository intelligence graph is private, indexed, and durably claimable", async () => {
+  const sql = await readFile(repositoryIntelligenceMigrationPath, "utf8");
+  assert.match(sql, /create table public\.ca_repository_symbols/i);
+  assert.match(sql, /create table public\.ca_repository_relations/i);
+  assert.match(sql, /name_ciphertext text not null/i);
+  assert.match(sql, /name_hash text not null/i);
+  assert.doesNotMatch(sql, /\bname text\b/i);
+  assert.match(sql, /ca_repository_symbols_repo_name_idx/i);
+  assert.match(sql, /ca_repository_relations_source_file_kind_idx/i);
+  assert.match(sql, /ca_repository_relations_target_file_kind_idx/i);
+  assert.match(sql, /alter table public\.ca_repository_symbols enable row level security/i);
+  assert.match(sql, /alter table public\.ca_repository_relations enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_repository_symbols, public\.ca_repository_relations[\s\S]*from public, anon, authenticated/i);
+  assert.match(sql, /create or replace function public\.claim_repository_index_refreshes/i);
+  assert.match(sql, /security invoker/i);
+  assert.match(sql, /for update skip locked/i);
+  assert.match(sql, /grant execute on function public\.claim_repository_index_refreshes\(integer\)[\s\S]*to service_role/i);
 });

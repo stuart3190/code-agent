@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { optionalEnv } from "./env.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { getInstallation, installationRow, listInstallationRepositories } from "./githubApp.mjs";
+import { requestRepositoryRefresh } from "./repositoryIndexService.mjs";
 
 const MAX_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60 * 60_000;
@@ -69,6 +70,7 @@ export async function drainGithubWebhookDeliveries({
   store = codeAgentStore(),
   getInstallationFn = getInstallation,
   listRepositoriesFn = listInstallationRepositories,
+  refreshRequester = requestRepositoryRefresh,
 } = {}) {
   if (draining) return [];
   draining = true;
@@ -81,6 +83,7 @@ export async function drainGithubWebhookDeliveries({
           store,
           getInstallationFn,
           listRepositoriesFn,
+          refreshRequester,
         });
         results.push(result);
       } catch (error) {
@@ -111,6 +114,7 @@ export async function processGithubWebhookDelivery(delivery, {
   store = codeAgentStore(),
   getInstallationFn = getInstallation,
   listRepositoriesFn = listInstallationRepositories,
+  refreshRequester = requestRepositoryRefresh,
 } = {}) {
   const installationId = positiveInteger(delivery.installation_id);
   const existing = installationId
@@ -171,6 +175,30 @@ export async function processGithubWebhookDelivery(delivery, {
       store,
       getInstallationFn,
       listRepositoriesFn,
+    });
+  }
+
+  if (delivery.event === "push") {
+    const repository = await store.findRepositoryByExternalId(
+      installationId,
+      delivery.payload?.repository?.id,
+    );
+    if (!repository) return finish(store, delivery, "ignored", { reason: "unconnected_repository" });
+    if (repository.status !== "ready") {
+      return finish(store, delivery, "ignored", { reason: "repository_unavailable" });
+    }
+    const expectedRef = `refs/heads/${repository.default_branch || "main"}`;
+    if (delivery.payload?.ref !== expectedRef || /^0+$/.test(String(delivery.payload?.after || ""))) {
+      return finish(store, delivery, "ignored", { reason: "non_default_branch_push" });
+    }
+    await refreshRequester(repository.owner, repository, {
+      reason: "github_push",
+      requestedHeadSha: String(delivery.payload.after),
+    });
+    return finish(store, delivery, "processed", {
+      repositoryId: repository.id,
+      refreshQueued: true,
+      headSha: String(delivery.payload.after),
     });
   }
 

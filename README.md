@@ -29,7 +29,12 @@ history. Do not point it at Buildr101 production data or credentials.
   guaranteed credential cleanup before the workspace is preserved or discarded.
 - Incremental repository indexing with AES-GCM encrypted paths/source, HMAC exact-identifier
   lookup, OpenAI code embeddings, hybrid retrieval, and relevant context injection before each run.
-- Owner-authenticated repository index status and code search in the web workspace.
+- Encrypted language-aware definitions, references, calls, inheritance, imports, and file dependency
+  graphs across TypeScript/JavaScript, Python, Go, Rust, Java-family languages, Ruby, PHP, and SQL.
+- Owner-authenticated code/definition search, reference navigation, dependency views, live indexing
+  progress, and manual reindexing in the web workspace.
+- Automatic durable reindexing after default-branch GitHub pushes, including follow-up refreshes
+  when a newer push arrives during an active index.
 - Bounded coding loop, cancellation, stale-run recovery, clean-baseline retry, checkpoints,
   durable diff/log/report artifacts, terminal states, setup diagnostics, and usage capture.
 - Functional usage dashboard for model tokens and sandbox compute.
@@ -72,13 +77,13 @@ tests, then creates a production web build.
 ## Roadmap
 
 Completed: encrypted per-user Codex, OpenAI, and Anthropic connections with selectable managed
-routing; encrypted incremental hybrid repository indexing and context retrieval.
+routing; encrypted incremental hybrid repository indexing; language-aware symbol/reference graphs;
+manual and GitHub-triggered repository refreshes; and agent context retrieval.
 
-1. Add a richer language-aware symbol/reference graph and repository reindex controls.
-2. Add Gemini, managed cost/latency routing, and provider evaluation suites.
-3. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
-4. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
-5. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
-6. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
+1. Add Gemini, managed cost/latency routing, and provider evaluation suites.
+2. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
+3. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
+4. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
+5. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

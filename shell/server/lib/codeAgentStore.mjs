@@ -39,6 +39,12 @@ export class MemoryCodeAgentStore {
     return row?.owner === owner ? row : null;
   }
 
+  async findRepositoryByExternalId(installationId, externalId) {
+    return [...this.repositories.values()].find((row) =>
+      Number(row.installation_id) === Number(installationId)
+      && Number(row.external_id) === Number(externalId)) || null;
+  }
+
   async listGithubInstallations(owner) {
     return [...this.installations.values()]
       .filter((x) => x.owner === owner && (x.status || "active") === "active")
@@ -314,6 +320,13 @@ export class SupabaseCodeAgentStore {
 
   async getRepository(owner, id) {
     return unwrapMaybe(await this.query("ca_repositories", owner).eq("id", id).maybeSingle());
+  }
+
+  async findRepositoryByExternalId(installationId, externalId) {
+    return unwrapMaybe(await this.client.from("ca_repositories").select("*")
+      .eq("installation_id", Number(installationId))
+      .eq("external_id", Number(externalId))
+      .maybeSingle());
   }
 
   async listGithubInstallations(owner) {
