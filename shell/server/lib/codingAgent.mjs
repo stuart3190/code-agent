@@ -45,6 +45,8 @@ export async function runCodingAgent({
   const model = provider || createCodingModel(run.model);
   const input = [{ role: "user", content: augmentPromptWithContext(run.prompt, context, repositoryMap) }];
   const usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 };
+  let selectedProvider = model.id;
+  let selectedModel = model.model;
 
   for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
     if (await isCancelled()) return { cancelled: true, usage };
@@ -55,6 +57,18 @@ export async function runCodingAgent({
       tools: CODING_TOOLS,
       safetyIdentifier: run.owner,
     });
+    selectedProvider = response.provider || model.id;
+    selectedModel = response.model || model.model;
+    if (response.routing?.fallbackFrom) {
+      await emit("model.fallback", {
+        fromProvider: response.routing.fallbackFrom.provider,
+        fromModel: response.routing.fallbackFrom.model,
+        provider: selectedProvider,
+        model: selectedModel,
+        reason: response.routing.reason,
+        message: `Switched to ${selectedProvider} after a temporary provider failure`,
+      });
+    }
     mergeUsage(usage, response.usage);
     input.push(...response.output);
     const calls = response.output.filter((item) => item.type === "function_call");
@@ -67,8 +81,8 @@ export async function runCodingAgent({
         summary: response.text || "Task completed.",
         diff: diff.output,
         status: status.output,
-        provider: model.id,
-        model: model.model,
+        provider: selectedProvider,
+        model: selectedModel,
         usage,
       };
     }

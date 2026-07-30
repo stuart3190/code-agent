@@ -74,6 +74,7 @@ import {
 } from "./routes/githubApp.mjs";
 import {
   handleAiByokConnect, handleAiConnections, handleAiProviderDisconnect, handleAiProviderSelect,
+  handleAiEvaluationRun, handleAiEvaluations, handleAiRoutingUpdate,
   handleCodexLoginCancel, handleCodexLoginStart, handleCodexLoginStatus,
 } from "./routes/aiConnections.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
@@ -345,6 +346,18 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/ai/disconnect" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleAiProviderDisconnect(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/routing" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiRoutingUpdate(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/evaluations" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiEvaluations(req, res, owner);
+    }
+    if (p === "/api/v1/ai/evaluations" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAiEvaluationRun(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/codex/login/start" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;

@@ -6,7 +6,7 @@ export function anthropicConfigured() {
 }
 export function createAnthropicCodingProvider({
   apiKey = optionalEnv("ANTHROPIC_API_KEY"),
-  model = optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+  model = optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5"),
 } = {}) {
   if (!apiKey) {
     const error = new Error("Anthropic is not connected. Set ANTHROPIC_API_KEY on the server.");

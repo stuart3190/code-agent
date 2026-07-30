@@ -6,6 +6,7 @@ import {
 import { runCodingAgent } from "./codingAgent.mjs";
 import { openAIConfigured } from "./openAIProvider.mjs";
 import { anthropicConfigured } from "./anthropicCodingProvider.mjs";
+import { geminiConfigured } from "./geminiCodingProvider.mjs";
 import { haveSupabaseEnv } from "./supabase.mjs";
 import { githubAppConfigured, githubWebhookConfigured } from "./githubApp.mjs";
 import {
@@ -13,7 +14,7 @@ import {
   aiCredentialStorageConfigured,
   refreshCodexAuth,
 } from "./aiCredentialStore.mjs";
-import { createCodingModelForCredential } from "./modelGateway.mjs";
+import { createRoutedCodingModel, modelCatalog } from "./modelRouting.mjs";
 import { embeddingsConfigured, embeddingModel } from "./embeddingProvider.mjs";
 import {
   augmentPromptWithContext,
@@ -49,10 +50,9 @@ export function codeAgentCapabilities() {
       manualRefresh: daytonaConfigured(),
       embeddingModel: embeddingsConfigured() ? embeddingModel() : null,
     },
-    models: [
-      { id: optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"), provider: "openai", configured: openAIConfigured(), managed: true },
-      { id: optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"), provider: "anthropic", configured: anthropicConfigured(), managed: true },
-    ],
+    models: modelCatalog().map(({ id, provider, tier, configured }) => ({
+      id, provider, tier, configured, managed: true,
+    })),
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
       appConfigured: githubAppConfigured(),
@@ -61,7 +61,8 @@ export function codeAgentCapabilities() {
       temporaryTokenConfigured: !!optionalEnv("GITHUB_AGENT_TOKEN"),
       mode: githubAppConfigured() ? "github-app" : "temporary-token",
     },
-    ready: controlPlaneConfigured && daytonaConfigured() && (openAIConfigured() || anthropicConfigured()),
+    ready: controlPlaneConfigured && daytonaConfigured()
+      && (openAIConfigured() || anthropicConfigured() || geminiConfigured()),
   };
 }
 
@@ -102,7 +103,7 @@ export async function processRun(run, {
   agentRunner = runCodingAgent,
   credentialResolver = activeAiCredential,
   credentialRefresher = refreshCodexAuth,
-  modelFactory = createCodingModelForCredential,
+  modelFactory = null,
   repositoryIndexer = indexRepository,
   contextRetriever = retrieveRepositoryContext,
   repositoryMapRetriever = retrieveRepositoryMap,
@@ -173,12 +174,21 @@ export async function processRun(run, {
         delete result.refreshedAuthJson;
       }
     } else {
+      const selectedModel = modelFactory
+        ? await modelFactory(credential, run.model)
+        : await createRoutedCodingModel({
+          owner: run.owner,
+          run,
+          credential,
+          requested: run.model,
+          policy: credential.routing,
+        });
       result = await agentRunner({
         run,
         runner,
         emit,
         isCancelled,
-        provider: modelFactory(credential, run.model),
+        provider: selectedModel,
         context,
         repositoryMap,
       });

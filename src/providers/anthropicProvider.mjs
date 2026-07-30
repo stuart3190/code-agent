@@ -15,7 +15,7 @@ import { anthropicRatesFor } from "../cost.mjs";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-sonnet-4-6"; // 2048-tok cache minimum (vs Opus's 4096) — caches on short cases
+const DEFAULT_MODEL = "claude-sonnet-4-6"; // Preserve the existing site-generation lane; Code Agent passes its own current model.
 const DEFAULT_MAX_TOKENS = 16000; // a generous cap (billed only for tokens actually emitted)
 
 // ---- neutral -> Messages API translation (pure; exported for offline tests) ----
@@ -200,7 +200,10 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
 
     if (!res.ok) {
       const errBody = await res.text(); // Anthropic errors do not echo the key
-      throw new Error(`Anthropic messages HTTP ${res.status}: ${errBody}`);
+      const error = new Error(`Anthropic messages HTTP ${res.status}: ${errBody}`);
+      error.status = res.status;
+      error.code = res.status === 429 ? "anthropic_rate_limit" : "anthropic_request_failed";
+      throw error;
     }
 
     // Parse the SSE stream line by line, feeding each `data:` event to the accumulator.

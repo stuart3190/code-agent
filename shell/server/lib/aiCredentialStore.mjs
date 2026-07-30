@@ -2,8 +2,9 @@ import { optionalEnv } from "./env.mjs";
 import { decryptSecret, encryptedStorageConfigured, encryptSecret, secretHint } from "./secretCrypto.mjs";
 import { serviceClient } from "./supabase.mjs";
 
-const API_KEY_PROVIDERS = new Set(["openai", "anthropic"]);
+const API_KEY_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
 const ACTIVE_PROVIDERS = new Set(["managed", "codex", ...API_KEY_PROVIDERS]);
+const ROUTING_MODES = new Set(["balanced", "quality", "fast", "economy", "manual"]);
 const now = () => new Date().toISOString();
 
 export function aiCredentialStorageConfigured() {
@@ -18,6 +19,7 @@ export async function aiConnectionSummary(owner, { store = aiCredentialStore() }
   return {
     configured: aiCredentialStorageConfigured(),
     activeProvider: preference?.active_provider || "managed",
+    routing: publicRoutingPreference(preference),
     connections: credentials.map(publicCredential),
   };
 }
@@ -118,8 +120,10 @@ export async function disconnectAiProvider(owner, provider, { store = aiCredenti
 }
 
 export async function activeAiCredential(owner, { store = aiCredentialStore() } = {}) {
-  const provider = (await store.getPreference(owner))?.active_provider || "managed";
-  if (provider === "managed") return { provider, authMode: "managed", secret: null };
+  const preference = await store.getPreference(owner);
+  const provider = preference?.active_provider || "managed";
+  const routing = publicRoutingPreference(preference);
+  if (provider === "managed") return { provider, authMode: "managed", secret: null, routing };
   const credential = await store.getCredential(owner, provider);
   if (!credential || credential.status !== "connected") {
     const error = new Error(`The selected ${providerLabel(provider)} connection is unavailable.`);
@@ -131,7 +135,23 @@ export async function activeAiCredential(owner, { store = aiCredentialStore() } 
     authMode: credential.auth_mode,
     secret: decryptSecret(credential.secret_encrypted),
     metadata: credential.metadata || {},
+    routing,
   };
+}
+
+export async function updateAiRoutingPolicy(owner, input = {}, { store = aiCredentialStore() } = {}) {
+  const routingMode = String(input.routingMode || "").toLowerCase();
+  if (!ROUTING_MODES.has(routingMode)) throw inputError("Choose a valid routing mode.");
+  const preferredModel = safeString(input.preferredModel, 200);
+  if (routingMode === "manual" && !preferredModel) {
+    throw inputError("Choose a preferred model for manual routing.");
+  }
+  await store.setPreference(owner, {
+    routing_mode: routingMode,
+    preferred_model: routingMode === "manual" ? preferredModel : null,
+    allow_fallback: input.allowFallback !== false,
+  });
+  return aiConnectionSummary(owner, { store });
 }
 
 export class MemoryAiCredentialStore {
@@ -175,12 +195,17 @@ export class MemoryAiCredentialStore {
     return this.preferences.get(owner) || null;
   }
 
-  async setPreference(owner, activeProvider) {
+  async setPreference(owner, input) {
     const existing = this.preferences.get(owner);
+    const patch = typeof input === "string" ? { active_provider: input } : input;
     const row = {
       owner,
-      active_provider: activeProvider,
+      active_provider: existing?.active_provider || "managed",
+      routing_mode: existing?.routing_mode || "balanced",
+      preferred_model: existing?.preferred_model || null,
+      allow_fallback: existing?.allow_fallback ?? true,
       created_at: existing?.created_at || now(),
+      ...patch,
       updated_at: now(),
     };
     this.preferences.set(owner, row);
@@ -220,9 +245,10 @@ export class SupabaseAiCredentialStore {
       .eq("owner", owner).maybeSingle());
   }
 
-  async setPreference(owner, activeProvider) {
+  async setPreference(owner, input) {
+    const patch = typeof input === "string" ? { active_provider: input } : input;
     const { data, error } = await this.client.from("ca_ai_preferences")
-      .upsert({ owner, active_provider: activeProvider, updated_at: now() }, { onConflict: "owner" })
+      .upsert({ owner, ...patch, updated_at: now() }, { onConflict: "owner" })
       .select("*").single();
     return unwrapOne(data, error);
   }
@@ -234,9 +260,12 @@ async function verifyApiKey(provider, key, fetchImpl) {
       url: "https://api.openai.com/v1/models",
       headers: { Authorization: `Bearer ${key}` },
     }
-    : {
+    : provider === "anthropic" ? {
       url: "https://api.anthropic.com/v1/models?limit=1",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+    } : {
+      url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+      headers: { "x-goog-api-key": key },
     };
   const response = await fetchImpl(request.url, {
     headers: request.headers,
@@ -259,6 +288,9 @@ function validateApiKey(provider, key) {
   }
   if (provider === "anthropic" && !key.startsWith("sk-ant-")) {
     throw inputError("Anthropic API keys should start with sk-ant-.");
+  }
+  if (provider === "gemini" && !key.startsWith("AIza")) {
+    throw inputError("Gemini API keys should start with AIza.");
   }
 }
 
@@ -290,7 +322,15 @@ function publicCredential(row) {
 }
 
 function providerLabel(provider) {
-  return ({ codex: "Codex", openai: "OpenAI", anthropic: "Anthropic" })[provider] || "provider";
+  return ({ codex: "Codex", openai: "OpenAI", anthropic: "Anthropic", gemini: "Gemini" })[provider] || "provider";
+}
+
+function publicRoutingPreference(preference) {
+  return {
+    routingMode: preference?.routing_mode || "balanced",
+    preferredModel: preference?.preferred_model || null,
+    allowFallback: preference?.allow_fallback ?? true,
+  };
 }
 
 function safeString(value, max) {

@@ -74,6 +74,13 @@ export const selectAiProvider = (provider) => request("/api/v1/ai/provider", {
 export const disconnectAiProvider = (provider) => request("/api/v1/ai/disconnect", {
   method: "POST", body: JSON.stringify({ provider }),
 });
+export const updateAiRouting = (body) => request("/api/v1/ai/routing", {
+  method: "POST", body: JSON.stringify(body),
+});
+export const aiEvaluations = () => request("/api/v1/ai/evaluations");
+export const runAiEvaluation = (body) => request("/api/v1/ai/evaluations", {
+  method: "POST", body: JSON.stringify(body),
+});
 export const startCodexLogin = () => request("/api/v1/ai/codex/login/start", { method: "POST" });
 export const codexLoginStatus = (sessionId) => request(`/api/v1/ai/codex/login/${sessionId}`);
 export const cancelCodexLogin = (sessionId) => request(`/api/v1/ai/codex/login/${sessionId}`, {

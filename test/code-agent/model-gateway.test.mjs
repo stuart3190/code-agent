@@ -8,6 +8,12 @@ test("model gateway resolves explicit commercial providers", () => {
   assert.deepEqual(resolveModelSelection("anthropic:claude-sonnet-4-6"), {
     provider: "anthropic", model: "claude-sonnet-4-6",
   });
+  assert.deepEqual(resolveModelSelection("gemini:gemini-3.6-flash"), {
+    provider: "gemini", model: "gemini-3.6-flash",
+  });
+  assert.deepEqual(resolveModelSelection("gemini-3.5-flash-lite"), {
+    provider: "gemini", model: "gemini-3.5-flash-lite",
+  });
   assert.deepEqual(resolveModelSelection("claude-opus-4-1"), { provider: "anthropic", model: "claude-opus-4-1" });
 });
 test("Anthropic adapter preserves user, tool call, and tool output history", () => {

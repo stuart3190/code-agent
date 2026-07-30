@@ -12,6 +12,7 @@ const aiConnectionsMigrationPath = new URL("../../supabase/migrations/2026072923
 const rejectAnonymousMigrationPath = new URL("../../supabase/migrations/20260729234651_reject_anonymous_code_agent_access.sql", import.meta.url);
 const repositoryIndexMigrationPath = new URL("../../supabase/migrations/20260730001803_repository_hybrid_index.sql", import.meta.url);
 const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/20260730063059_repository_code_intelligence.sql", import.meta.url);
+const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083259_model_routing_and_evaluations.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -162,4 +163,22 @@ test("repository intelligence graph is private, indexed, and durably claimable",
   assert.match(sql, /security invoker/i);
   assert.match(sql, /for update skip locked/i);
   assert.match(sql, /grant execute on function public\.claim_repository_index_refreshes\(integer\)[\s\S]*to service_role/i);
+});
+
+test("model routing telemetry and encrypted evaluations are server-only", async () => {
+  const sql = await readFile(modelRoutingMigrationPath, "utf8");
+  for (const table of [
+    "ca_model_attempts", "ca_model_evaluations", "ca_model_evaluation_results",
+  ]) {
+    assert.match(sql, new RegExp(`create table public\\.${table}`, "i"));
+    assert.match(sql, new RegExp(`alter table public\\.${table} enable row level security`, "i"));
+  }
+  assert.match(sql, /prompt_encrypted text not null/i);
+  assert.match(sql, /output_encrypted text/i);
+  assert.doesNotMatch(sql, /\bprompt text\b/i);
+  assert.doesNotMatch(sql, /\boutput text\b/i);
+  assert.match(sql, /revoke all on table[\s\S]*from public, anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table[\s\S]*to service_role/i);
+  assert.equal((sql.match(/as restrictive for all to anon, authenticated/g) || []).length, 3);
+  assert.match(sql, /ca_model_attempts_run_id_idx[\s\S]*where run_id is not null/i);
 });
