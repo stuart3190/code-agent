@@ -78,6 +78,10 @@ import {
   handleCodexLoginCancel, handleCodexLoginStart, handleCodexLoginStatus,
 } from "./routes/aiConnections.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
+import {
+  handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
+  handleOpsTelemetry, handlePlanSelect,
+} from "./routes/subscription.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
@@ -250,6 +254,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/github/webhook" && method === "POST") {
       const raw = await readBody(req, BODY_LIMITS.webhook);
       return handleGithubWebhook(req, res, raw);
+    }
+    if (p === "/api/v1/billing/webhook" && method === "POST") {
+      const raw = await readBody(req, BODY_LIMITS.webhook);
+      return handleBillingWebhook(req, res, raw);
     }
 
     if (p === "/api/connectors/oauth/google/callback" && method === "GET") {
@@ -440,6 +448,26 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/usage" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
+    }
+    if (p === "/api/v1/billing" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleBillingOverview(req, res, owner);
+    }
+    if (p === "/api/v1/billing/plan" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handlePlanSelect(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/billing/budgets" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleBudgetUpdate(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/billing/portal" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleBillingPortal(req, res, owner);
+    }
+    if (p === "/api/v1/ops/telemetry" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleOpsTelemetry(req, res, owner);
     }
     if (p === "/api/features" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

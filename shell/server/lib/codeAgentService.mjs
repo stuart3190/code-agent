@@ -11,9 +11,13 @@ import { haveSupabaseEnv } from "./supabase.mjs";
 import { githubAppConfigured, githubWebhookConfigured } from "./githubApp.mjs";
 import {
   activeAiCredential,
+  activeAiProviderName,
   aiCredentialStorageConfigured,
   refreshCodexAuth,
 } from "./aiCredentialStore.mjs";
+import { assertRunWithinBudget } from "./usageBudgets.mjs";
+import { planCatalog } from "./subscriptionPlans.mjs";
+import { thralloStripeConfigured } from "./subscriptionBilling.mjs";
 import { createRoutedCodingModel, modelCatalog } from "./modelRouting.mjs";
 import { embeddingsConfigured, embeddingModel } from "./embeddingProvider.mjs";
 import {
@@ -53,6 +57,12 @@ export function codeAgentCapabilities() {
     models: modelCatalog().map(({ id, provider, tier, configured }) => ({
       id, provider, tier, configured, managed: true,
     })),
+    billing: {
+      plans: planCatalog().map(({ id, priceApproved }) => ({ id, priceApproved })),
+      budgets: true,
+      stripeConfigured: thralloStripeConfigured(),
+      operationalTelemetry: true,
+    },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
       appConfigured: githubAppConfigured(),
@@ -107,15 +117,22 @@ export async function processRun(run, {
   repositoryIndexer = indexRepository,
   contextRetriever = retrieveRepositoryContext,
   repositoryMapRetriever = retrieveRepositoryMap,
+  budgetGuard = assertRunWithinBudget,
+  providerNameResolver = activeAiProviderName,
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
   let runner = null;
   let preserveRunner = false;
+  let billingSource = "unknown";
   const executionStarted = Date.now();
   try {
     const repository = await store.getRepository(run.owner, run.repository_id);
     if (!repository) throw withCode(new Error("Repository is no longer available"), "repository_missing");
+    // A queued run can outlive the allowance that admitted it; re-check before spending.
+    const credentialProvider = await providerNameResolver(run.owner).catch(() => "managed");
+    const budget = await budgetGuard(run.owner, { credentialProvider, store })
+      .catch((error) => { throw withCode(new Error(error.message), "budget_exhausted"); });
     await emit("run.provisioning", { message: "Creating an isolated cloud workspace" });
     runner = await runnerFactory({ run, repository, emit });
     run = await store.updateRun(run, { sandbox_id: runner.id, work_branch: runner.branch, state: "running" });
@@ -154,6 +171,8 @@ export async function processRun(run, {
     await emit("run.running", { branch: runner.branch, message: "Agent is working" });
 
     const credential = await credentialResolver(run.owner);
+    billingSource = credential.provider === "managed" ? "managed"
+      : credential.provider === "codex" ? "codex" : "byok";
     await emit("model.selected", {
       provider: credential.provider,
       message: credential.provider === "codex"
@@ -191,16 +210,19 @@ export async function processRun(run, {
         provider: selectedModel,
         context,
         repositoryMap,
+        tokenBudget: billingSource === "managed"
+          ? budget.budgets.managedTokens.remaining
+          : null,
       });
     }
     if (result.cancelled) {
       run = await store.updateRun(run, { state: "cancelled", result, usage: result.usage, finished_at: new Date().toISOString() });
-      await persistUsage(store, run, result, executionStarted);
+      await persistUsage(store, run, result, executionStarted, billingSource);
       await emit("run.cancelled", { message: "Run cancelled" });
       return run;
     }
     await persistRunOutputs(store, run, result);
-    await persistUsage(store, run, result, executionStarted);
+    await persistUsage(store, run, result, executionStarted, billingSource);
     const durableResult = {
       summary: result.summary,
       status: result.status,
@@ -229,6 +251,10 @@ export async function processRun(run, {
     await emit("run.succeeded", { message: "Run completed", result: durableResult, artifacts: 3 });
     return run;
   } catch (error) {
+    if (error.usage) {
+      await persistUsage(store, run, { usage: error.usage }, executionStarted, billingSource)
+        .catch((usageError) => console.error("[code-agent] usage persistence:", usageError));
+    }
     run = await store.updateRun(run, {
       state: "failed", error_code: error.code || "run_failed", error: error.message,
       finished_at: new Date().toISOString(),
@@ -310,7 +336,7 @@ async function persistRunOutputs(store, run, result) {
   }
 }
 
-async function persistUsage(store, run, result, executionStarted) {
+async function persistUsage(store, run, result, executionStarted, billingSource = "unknown") {
   const usage = result.usage || {};
   await store.recordUsage(run, {
     provider: result.provider || "unknown",
@@ -321,6 +347,7 @@ async function persistUsage(store, run, result, executionStarted) {
     reasoning_tokens: usage.reasoningTokens || 0,
     compute_seconds: (Date.now() - executionStarted) / 1000,
     amount_gbp: 0,
+    billing_source: billingSource,
     metadata: { total_tokens: usage.totalTokens || 0 },
   });
 }

@@ -47,7 +47,20 @@ values. Codex will keep everything else moving locally.
 - [ ] Upgrade Supabase before public sign-ups if you want leaked-password protection. Supabase
   currently exposes this setting only on a paid plan; it is not blocking development or private use.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
-- [ ] Approve subscription prices, included usage, and overage policy.
+- [ ] Approve subscription prices, included usage, and overage policy. Phase 7 shipped the
+  plans (Free/Starter/Pro), budgets, and dormant Stripe wiring; to flip paid plans live:
+  1. Approve the included monthly allowances (defaults: Free 20 runs / 1.5M managed tokens /
+     3h compute; Starter 200 / 20M / 30h; Pro 1,000 / 100M / 120h) and the two prices.
+  2. Create a **dedicated Thrallo Stripe account** (never Buildr101's), add two subscription
+     products with monthly GBP prices, and a webhook endpoint for
+     `https://app.thrallo.com/api/v1/billing/webhook` subscribed to `checkout.session.completed`,
+     `customer.subscription.updated`, and `customer.subscription.deleted`.
+  3. Set in the server environment: `THRALLO_STRIPE_SECRET_KEY`, `THRALLO_STRIPE_WEBHOOK_SECRET`,
+     `THRALLO_STRIPE_PRICE_STARTER`, `THRALLO_STRIPE_PRICE_PRO`, `THRALLO_STARTER_PRICE_GBP`,
+     and `THRALLO_PRO_PRICE_GBP`, then restart `thrallo-shell`. Until then the free plan is
+     fully enforced and upgrades show "not available yet".
+- [ ] Optional: set `ADMIN_EMAILS=stuart3190@gmail.com` in the Thrallo server environment to
+  see the operator Operations view (platform telemetry) in the workspace.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.
 
 ## Optional: use your ChatGPT Codex allowance

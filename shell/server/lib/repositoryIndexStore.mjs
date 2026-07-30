@@ -43,6 +43,15 @@ export class MemoryRepositoryIndexStore {
     return row?.owner === owner ? row : null;
   }
 
+  async indexStatusCounts() {
+    const counts = {};
+    for (const row of this.indexes.values()) {
+      const status = row.status || "unknown";
+      counts[status] = (counts[status] || 0) + 1;
+    }
+    return counts;
+  }
+
   async requestRefresh(owner, repositoryId, {
     reason = "manual",
     requestedBy = null,
@@ -307,6 +316,17 @@ export class SupabaseRepositoryIndexStore {
   async getIndex(owner, repositoryId) {
     return unwrapMaybe(await this.client.from("ca_repository_indexes").select("*")
       .eq("owner", owner).eq("repository_id", repositoryId).maybeSingle());
+  }
+
+  async indexStatusCounts() {
+    const rows = unwrap(await this.client.from("ca_repository_indexes")
+      .select("status").limit(5_000));
+    const counts = {};
+    for (const row of rows) {
+      const status = row.status || "unknown";
+      counts[status] = (counts[status] || 0) + 1;
+    }
+    return counts;
   }
 
   async requestRefresh(owner, repositoryId, {

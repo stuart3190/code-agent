@@ -41,6 +41,7 @@ export async function runCodingAgent({
   provider = null,
   context = [],
   repositoryMap = [],
+  tokenBudget = null,
 }) {
   const model = provider || createCodingModel(run.model);
   const input = [{ role: "user", content: augmentPromptWithContext(run.prompt, context, repositoryMap) }];
@@ -70,6 +71,14 @@ export async function runCodingAgent({
       });
     }
     mergeUsage(usage, response.usage);
+    if (tokenBudget != null && usage.totalTokens > tokenBudget) {
+      await emit("run.budget_exhausted", {
+        message: "The monthly managed-model token allowance ran out during this run.",
+        usedTokens: usage.totalTokens,
+      });
+      throw agentError("The monthly managed-model token allowance ran out during this run. "
+        + "Upgrade your plan or connect your own provider key to continue.", "budget_exhausted", usage);
+    }
     input.push(...response.output);
     const calls = response.output.filter((item) => item.type === "function_call");
 
@@ -105,9 +114,15 @@ export async function runCodingAgent({
       input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });
     }
   }
-  const error = new Error(`Agent exceeded the ${MAX_TURNS}-turn safety limit`);
-  error.code = "turn_limit";
-  throw error;
+  throw agentError(`Agent exceeded the ${MAX_TURNS}-turn safety limit`, "turn_limit", usage);
+}
+
+// Errors carry accumulated usage so the worker can still meter tokens spent by a failed run.
+function agentError(message, code, usage) {
+  const error = new Error(message);
+  error.code = code;
+  error.usage = { ...usage };
+  return error;
 }
 
 async function executeTool(runner, name, args) {

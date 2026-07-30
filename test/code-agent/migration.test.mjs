@@ -13,6 +13,7 @@ const rejectAnonymousMigrationPath = new URL("../../supabase/migrations/20260729
 const repositoryIndexMigrationPath = new URL("../../supabase/migrations/20260730001803_repository_hybrid_index.sql", import.meta.url);
 const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/20260730063059_repository_code_intelligence.sql", import.meta.url);
 const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083259_model_routing_and_evaluations.sql", import.meta.url);
+const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730143000_subscriptions_budgets_telemetry.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -181,4 +182,18 @@ test("model routing telemetry and encrypted evaluations are server-only", async 
   assert.match(sql, /grant all privileges on table[\s\S]*to service_role/i);
   assert.equal((sql.match(/as restrictive for all to anon, authenticated/g) || []).length, 3);
   assert.match(sql, /ca_model_attempts_run_id_idx[\s\S]*where run_id is not null/i);
+});
+
+test("subscription and budget tables stay server-only with metered billing source", async () => {
+  const sql = await readFile(subscriptionsMigrationPath, "utf8");
+  assert.match(sql, /create table public\.ca_subscriptions/i);
+  assert.match(sql, /plan text not null default 'free' check \(plan in \('free', 'starter', 'pro'\)\)/i);
+  assert.match(sql, /alter table public\.ca_subscriptions enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_subscriptions from public, anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table public\.ca_subscriptions to service_role/i);
+  assert.match(sql, /as restrictive for all to anon, authenticated/i);
+  assert.match(sql, /ca_subscriptions_stripe_customer_idx[\s\S]*where stripe_customer_id is not null/i);
+  assert.match(sql, /alter table public\.ca_usage_records[\s\S]*add column billing_source/i);
+  assert.match(sql, /billing_source in \('managed', 'byok', 'codex', 'unknown'\)/i);
+  assert.match(sql, /ca_runs_state_created_idx/i);
 });

@@ -37,7 +37,15 @@ history. Do not point it at Buildr101 production data or credentials.
   when a newer push arrives during an active index.
 - Bounded coding loop, cancellation, stale-run recovery, clean-baseline retry, checkpoints,
   durable diff/log/report artifacts, terminal states, setup diagnostics, and usage capture.
-- Functional usage dashboard for model tokens and sandbox compute.
+- Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
+  sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
+  can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
+  at worker claim, and mid-run for managed tokens.
+- Dormant Stripe subscription wiring behind dedicated `THRALLO_STRIPE_*` configuration; paid
+  upgrades stay disabled until pricing is approved and the products exist.
+- Usage & billing workspace view with plan cards, budget meters, and spend guards, plus an
+  operator-only Operations view backed by `/api/v1/ops/telemetry` (runs, queue depth, failure
+  rates, provider reliability, webhook and indexing health).
 - Unit tests and GitHub Actions verification.
 
 ## Local setup
@@ -76,14 +84,14 @@ tests, then creates a production web build.
 
 ## Roadmap
 
-Completed: encrypted per-user Codex, OpenAI, and Anthropic connections with selectable managed
-routing; encrypted incremental hybrid repository indexing; language-aware symbol/reference graphs;
-manual and GitHub-triggered repository refreshes; and agent context retrieval.
+Completed: encrypted per-user Codex, OpenAI, Anthropic, and Gemini connections with smart managed
+routing and provider evaluations; encrypted incremental hybrid repository indexing; language-aware
+symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent context retrieval;
+subscription plans with managed usage budgets; and operational telemetry.
 
-1. Add Gemini, managed cost/latency routing, and provider evaluation suites.
-2. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
-3. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
-4. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
-5. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
+1. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
+2. Live Stripe pricing, rate controls, abuse defenses, retention, and disaster recovery.
+3. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
+4. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

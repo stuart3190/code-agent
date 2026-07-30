@@ -8,6 +8,7 @@ import {
   repositoryIndex, retryRun, runArtifacts, searchRepository, searchRepositorySymbols,
   startGithubInstallation,
   streamRunEvents, usageSummary,
+  billingOverview, billingPortal, opsTelemetry, selectPlan, updateBudgets,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -27,6 +28,7 @@ export default function App() {
   const [agents, setAgents] = useState([]);
   const [selectedAgentId, setSelectedAgentId] = useState(null);
   const [caps, setCaps] = useState(null);
+  const [opsSnapshot, setOpsSnapshot] = useState(null);
   const [events, setEvents] = useState([]);
   const [run, setRun] = useState(null);
   const [artifacts, setArtifacts] = useState([]);
@@ -47,6 +49,7 @@ export default function App() {
     setAgents(agentResult.agents);
     setCaps(capabilityResult);
     setSelectedAgentId((current) => current || agentResult.agents[0]?.id || null);
+    opsTelemetry().then(setOpsSnapshot).catch(() => setOpsSnapshot(null));
   }, [user]);
 
   useEffect(() => {
@@ -160,7 +163,7 @@ export default function App() {
             <span className="ml-auto rounded border border-violet-400/20 bg-violet-400/10 px-1.5 py-0.5 font-mono text-[9px] text-violet-300">ALPHA</span>
           </div>
           <nav className="flex-1 space-y-1 px-3 py-4">
-            {nav.map(([id, label, icon]) => (
+            {[...nav, ...(opsSnapshot ? [["ops", "Operations", "◉"]] : [])].map(([id, label, icon]) => (
               <button key={id} onClick={() => setView(id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${
                   view === id ? "bg-white/[0.07] text-white" : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300"
@@ -215,8 +218,9 @@ export default function App() {
               }} />
             )}
             {view === "usage" && <Usage />}
+            {view === "ops" && <Operations initial={opsSnapshot} />}
             {view === "settings" && <AiProviderSettings />}
-            {!["agents", "repositories", "usage", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
+            {!["agents", "repositories", "usage", "ops", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
           </div>
         </main>
       </div>
@@ -305,15 +309,94 @@ function AgentWorkspace({ repos, agents, selectedAgent, onSelect, events, run, p
 
 function Usage() {
   const [data, setData] = useState(null);
+  const [billing, setBilling] = useState(null);
   const [error, setError] = useState("");
-  useEffect(() => { usageSummary().then(setData).catch((err) => setError(err.message)); }, []);
+  const [notice, setNotice] = useState("");
+  const [busyPlan, setBusyPlan] = useState("");
+
+  const refreshBilling = useCallback(() => {
+    billingOverview().then(setBilling).catch((err) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    usageSummary().then(setData).catch((err) => setError(err.message));
+    refreshBilling();
+  }, [refreshBilling]);
+
+  async function choosePlan(planId) {
+    setBusyPlan(planId); setError(""); setNotice("");
+    try {
+      const result = await selectPlan(planId);
+      if (result.url) { window.location.href = result.url; return; }
+      setBilling(result);
+      setNotice(`You are on the ${planId === "free" ? "Free" : planId} plan.`);
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusyPlan(""); }
+  }
+
   const totals = data?.totals || {};
   return (
     <div className="mx-auto max-w-5xl p-8">
       <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-400">Metered execution</div>
-      <h1 className="mt-2 text-3xl font-semibold text-white">Usage</h1>
-      <p className="mt-2 text-sm text-slate-500">Model tokens and sandbox compute recorded by completed agent runs.</p>
+      <h1 className="mt-2 text-3xl font-semibold text-white">Usage & billing</h1>
+      <p className="mt-2 text-sm text-slate-500">Your plan allowance, monthly budgets, and the model tokens and sandbox compute recorded by agent runs.</p>
       {error && <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/[0.05] p-3 text-xs text-red-300">{error}</div>}
+      {notice && <div className="mt-5 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] p-3 text-xs text-emerald-300">{notice}</div>}
+
+      {billing && (
+        <>
+          <div className="mt-8 grid gap-3 lg:grid-cols-3">
+            {billing.plans.map((plan) => {
+              const current = billing.subscription.plan === plan.id;
+              return (
+                <div key={plan.id} className={`rounded-xl border p-5 ${current ? "border-blue-400/30 bg-blue-400/[0.05]" : "border-white/[0.07] bg-white/[0.02]"}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-white">{plan.name}</span>
+                    {current && <span className="rounded border border-blue-400/25 px-1.5 py-0.5 font-mono text-[9px] uppercase text-blue-300">Current</span>}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{plan.description}</div>
+                  <div className="mt-3 text-lg font-semibold text-slate-200">
+                    {plan.priceGbp === 0 ? "£0" : plan.priceApproved ? `£${plan.priceGbp}/mo` : <span className="text-xs font-normal text-slate-500">Pricing coming soon</span>}
+                  </div>
+                  <ul className="mt-3 space-y-1 text-[11px] text-slate-500">
+                    <li>{formatNumber(plan.monthly.runs)} runs / month</li>
+                    <li>{formatCompact(plan.monthly.managedTokens)} managed tokens</li>
+                    <li>{Math.round(plan.monthly.computeSeconds / 3600)}h sandbox compute</li>
+                  </ul>
+                  {!current && (
+                    <button onClick={() => choosePlan(plan.id)}
+                      disabled={busyPlan === plan.id || (plan.id !== "free" && !billing.stripeConfigured)}
+                      className="mt-4 w-full rounded-lg border border-white/[0.1] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.05] disabled:opacity-35">
+                      {plan.id === "free" ? "Switch to Free" : billing.stripeConfigured ? `Upgrade to ${plan.name}` : "Not available yet"}
+                    </button>
+                  )}
+                  {current && billing.subscription.stripeManaged && (
+                    <button onClick={() => billingPortal().then((r) => { window.location.href = r.url; }).catch((err) => setError(err.message))}
+                      className="mt-4 w-full rounded-lg border border-white/[0.1] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.05]">
+                      Manage billing
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-8 rounded-xl border border-white/[0.07] bg-white/[0.02] p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-white">This period's budgets</span>
+              <span className="font-mono text-[10px] text-slate-600">resets {new Date(billing.period.end).toLocaleDateString()}</span>
+            </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <BudgetMeter label="Agent runs" meter={billing.budgets.runs} format={formatNumber} />
+              <BudgetMeter label="Managed tokens" meter={billing.budgets.managedTokens} format={formatCompact} />
+              <BudgetMeter label="Sandbox compute" meter={billing.budgets.computeSeconds} format={(v) => `${Math.round(v / 60)}m`} />
+            </div>
+            <SpendGuards billing={billing} onSaved={setBilling} onError={setError} />
+          </div>
+        </>
+      )}
+
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Input tokens" value={formatNumber(totals.inputTokens)} />
         <Metric label="Output tokens" value={formatNumber(totals.outputTokens)} />
@@ -331,6 +414,144 @@ function Usage() {
           </div>
         ))}
         {data && !data.records.length && <div className="border-t border-white/[0.06] p-6 text-center text-xs text-slate-600">No completed run usage yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+function BudgetMeter({ label, meter, format }) {
+  const ratio = meter.limit ? Math.min(meter.used / meter.limit, 1) : 0;
+  const tone = ratio >= 1 ? "bg-red-400" : ratio >= 0.8 ? "bg-amber-400" : "bg-blue-400";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-[11px]">
+        <span className="text-slate-400">{label}</span>
+        <span className="font-mono text-slate-500">{format(meter.used)} / {format(meter.limit)}</span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(ratio * 100, meter.used ? 2 : 0)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SpendGuards({ billing, onSaved, onError }) {
+  const overrides = billing.subscription.overrides;
+  const [open, setOpen] = useState(false);
+  const [runs, setRuns] = useState(overrides.runs || "");
+  const [tokens, setTokens] = useState(overrides.managedTokens || "");
+  const [compute, setCompute] = useState(overrides.computeSeconds || "");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true); onError("");
+    try {
+      onSaved(await updateBudgets({
+        runs: runs === "" ? null : Number(runs),
+        managedTokens: tokens === "" ? null : Number(tokens),
+        computeSeconds: compute === "" ? null : Number(compute),
+      }));
+      setOpen(false);
+    } catch (err) { onError(err.message); } finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="mt-4 text-[11px] text-slate-500 underline decoration-white/20 underline-offset-2 hover:text-slate-300">
+        {overrides.runs || overrides.managedTokens || overrides.computeSeconds ? "Edit personal spend guards" : "Set personal spend guards"}
+      </button>
+    );
+  }
+  return (
+    <div className="mt-4 rounded-lg border border-white/[0.07] bg-black/20 p-4">
+      <div className="text-[11px] text-slate-400">Personal spend guards cap this account below the plan allowance. Leave a field empty to use the plan limit.</div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <GuardInput label="Max runs" value={runs} onChange={setRuns} />
+        <GuardInput label="Max managed tokens" value={tokens} onChange={setTokens} />
+        <GuardInput label="Max compute seconds" value={compute} onChange={setCompute} />
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button onClick={save} disabled={busy} className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Save guards</button>
+        <button onClick={() => setOpen(false)} className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-slate-400">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function GuardInput({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-wide text-slate-600">{label}</span>
+      <input type="number" min="1" value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder="Plan limit"
+        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-transparent px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-700 focus:border-blue-400/40" />
+    </label>
+  );
+}
+
+function Operations({ initial }) {
+  const [snapshot, setSnapshot] = useState(initial);
+  const [error, setError] = useState("");
+  useEffect(() => { opsTelemetry().then(setSnapshot).catch((err) => setError(err.message)); }, []);
+  if (!snapshot) return <div className="p-8 text-sm text-slate-500">{error || "Loading operational telemetry…"}</div>;
+  const day = snapshot.runs.last24h;
+  const week = snapshot.runs.last7d;
+  return (
+    <div className="mx-auto max-w-5xl p-8">
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-400">Operator telemetry</div>
+      <h1 className="mt-2 text-3xl font-semibold text-white">Operations</h1>
+      <p className="mt-2 text-sm text-slate-500">Platform-wide runs, queue health, provider reliability, and metered usage. Generated {new Date(snapshot.generatedAt).toLocaleTimeString()}.</p>
+      {error && <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/[0.05] p-3 text-xs text-red-300">{error}</div>}
+
+      <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Runs · 24h" value={formatNumber(day.total)} />
+        <Metric label="Failure rate · 24h" value={`${Math.round(day.failureRate * 100)}%`} />
+        <Metric label="Avg duration · 24h" value={`${day.averageDurationSeconds}s`} />
+        <Metric label="Queue depth" value={formatNumber(snapshot.runs.queueDepth)} />
+        <Metric label="Active runs" value={formatNumber(snapshot.runs.active)} />
+        <Metric label="Awaiting approval" value={formatNumber(snapshot.runs.waitingForApproval)} />
+        <Metric label="Tokens · 7d" value={formatCompact(snapshot.usage.last7d.tokens)} />
+        <Metric label="Compute · 7d" value={`${Math.round(snapshot.usage.last7d.computeSeconds / 60)}m`} />
+      </div>
+
+      <h2 className="mt-10 text-sm font-semibold text-white">Provider reliability · 7d</h2>
+      <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.07]">
+        <div className="grid grid-cols-[1fr_1fr_80px_80px_100px] bg-white/[0.025] px-4 py-2 text-[10px] uppercase tracking-wide text-slate-600">
+          <span>Provider</span><span>Model</span><span>Attempts</span><span>Errors</span><span>Avg latency</span>
+        </div>
+        {snapshot.providers.map((row) => (
+          <div key={`${row.provider}:${row.model}`} className="grid grid-cols-[1fr_1fr_80px_80px_100px] border-t border-white/[0.06] px-4 py-2.5 text-xs text-slate-400">
+            <span>{row.provider}</span><span className="truncate">{row.model}</span>
+            <span>{formatNumber(row.attempts)}</span>
+            <span className={row.errorRate > 0.1 ? "text-red-300" : ""}>{Math.round(row.errorRate * 100)}%</span>
+            <span>{formatNumber(row.averageLatencyMs)}ms</span>
+          </div>
+        ))}
+        {!snapshot.providers.length && <div className="border-t border-white/[0.06] p-5 text-center text-xs text-slate-600">No model attempts recorded in the last 7 days.</div>}
+      </div>
+
+      <div className="mt-8 grid gap-3 lg:grid-cols-3">
+        <StatusList title="Run states · 7d" entries={week.byState} />
+        <StatusList title="Webhook deliveries" entries={snapshot.webhooks} />
+        <StatusList title="Repository indexes" entries={snapshot.indexing} />
+      </div>
+    </div>
+  );
+}
+
+function StatusList({ title, entries }) {
+  const keys = Object.keys(entries || {});
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="text-xs font-semibold text-white">{title}</div>
+      <div className="mt-3 space-y-1.5">
+        {keys.map((key) => (
+          <div key={key} className="flex justify-between text-[11px]">
+            <span className="text-slate-500">{key}</span>
+            <span className="font-mono text-slate-400">{formatNumber(entries[key])}</span>
+          </div>
+        ))}
+        {!keys.length && <div className="text-[11px] text-slate-600">Nothing recorded yet.</div>}
       </div>
     </div>
   );
@@ -725,6 +946,7 @@ function ComingSoon({ view, caps }) {
 
 function Metric({ label, value }) { return <div className="rounded-lg border border-white/[0.06] bg-black/10 p-4"><div className="text-[10px] uppercase tracking-wide text-slate-600">{label}</div><div className="mt-1 text-sm text-slate-300">{value}</div></div>; }
 function StatusDot({ ok, label, className = "" }) { return <span className={`inline-flex items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px] text-slate-500 ${className}`}><span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />{label}</span>; }
-function viewLabel(view) { return ({ agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", settings: "Settings" })[view] || "Thrallo"; }
+function viewLabel(view) { return ({ agents: "Agent workspace", repositories: "Repositories", automations: "Automations", reviews: "Code reviews", usage: "Usage & billing", downloads: "Downloads", ops: "Operations", settings: "Settings" })[view] || "Thrallo"; }
 function formatNumber(value) { return new Intl.NumberFormat().format(Number(value || 0)); }
+function formatCompact(value) { return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value || 0)); }
 function Splash() { return <div className="grid h-full place-items-center bg-[#07080b]"><Logo className="animate-pulse" /></div>; }

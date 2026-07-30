@@ -93,10 +93,34 @@ selection; explicit model values may use `openai:model` or `anthropic:model`.
 The orchestrator allows at most 25 turns and checks cancellation before every model turn and tool
 call. Commands are bounded by a 600-second maximum and repository paths reject traversal.
 
+## Subscriptions, budgets, and telemetry
+
+`ca_subscriptions` is a service-role-only row per owner holding the plan, Stripe identifiers,
+billing period, and optional budget overrides. The plan catalog is code-defined with
+env-overridable allowances; paid prices surface only when `THRALLO_<PLAN>_PRICE_GBP` is set, and
+Stripe checkout/portal/webhook wiring stays dormant until the dedicated `THRALLO_STRIPE_*`
+secrets exist. A missing row means the active free plan.
+
+Budget metering sums `ca_usage_records` (tagged with a `billing_source` of managed, byok, or
+codex) and non-cancelled run counts over the current period — the Stripe billing window when
+one is active, otherwise the UTC calendar month. Run-count and sandbox-compute budgets apply to
+every run; the managed-token budget applies only to managed-key runs. Personal spend guards may
+only tighten the plan allowance. Enforcement happens three times: run creation returns 402
+`budget_exceeded`, the worker re-checks before provisioning (a queued run can outlive its
+allowance), and the coding loop aborts a managed run whose accumulated tokens pass the remaining
+budget. Failed runs still persist their token usage so budget accounting cannot be escaped by
+erroring out.
+
+`/api/v1/ops/telemetry` is gated by the verified-email `ADMIN_EMAILS` allowlist and aggregates
+bounded windows of runs (state counts, failure rate, duration, queue depth), webhook-ledger
+health, provider reliability from `ca_model_attempts`, platform usage by billing source, and
+repository-index states. It reads existing durable tables on demand; a rollup table can replace
+the aggregation once traffic outgrows it.
+
 ## Known production gaps
 
 - Sandboxed network egress allowlist and policy approvals.
-- Gemini, encrypted per-user BYOK, and managed provider-routing policy.
 - Artifact object storage and checkpoint resume.
-- Billing, budgets, abuse protection, observability, retention controls, and disaster recovery.
+- Live Stripe pricing, rate controls on paid tiers, abuse defenses, retention controls, and
+  disaster recovery.
 - Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.

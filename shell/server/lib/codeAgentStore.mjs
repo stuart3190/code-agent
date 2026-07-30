@@ -16,6 +16,7 @@ export class MemoryCodeAgentStore {
     this.artifacts = new Map();
     this.usageRecords = new Map();
     this.checkpoints = new Map();
+    this.subscriptions = new Map();
     this.bus = new EventEmitter();
     this.bus.setMaxListeners(100);
   }
@@ -295,6 +296,53 @@ export class MemoryCodeAgentStore {
   async usageSummary(owner) {
     return summarizeUsage([...this.usageRecords.values()].filter((x) => x.owner === owner));
   }
+
+  async getSubscription(owner) {
+    return this.subscriptions.get(owner) || null;
+  }
+
+  async upsertSubscription(owner, patch) {
+    const row = this.subscriptions.get(owner)
+      || { owner, plan: "free", status: "active", metadata: {}, created_at: now() };
+    Object.assign(row, patch, { owner, updated_at: now() });
+    this.subscriptions.set(owner, row);
+    return row;
+  }
+
+  async findSubscriptionByStripeCustomer(customerId) {
+    return [...this.subscriptions.values()]
+      .find((x) => x.stripe_customer_id === customerId) || null;
+  }
+
+  async usageTotalsSince(owner, sinceIso) {
+    const rows = [...this.usageRecords.values()]
+      .filter((x) => x.owner === owner && x.created_at >= sinceIso);
+    return sumBudgetUsage(rows);
+  }
+
+  async countRunsSince(owner, sinceIso) {
+    return [...this.runs.values()].filter((run) => run.owner === owner
+      && run.created_at >= sinceIso
+      && (run.started_at || run.state !== "cancelled")).length;
+  }
+
+  async opsRunRows(sinceIso) {
+    return [...this.runs.values()]
+      .filter((run) => run.created_at >= sinceIso || !TERMINAL_RUN_STATES.has(run.state))
+      .map(({ state, created_at, started_at, finished_at }) =>
+        ({ state, created_at, started_at, finished_at }));
+  }
+
+  async opsWebhookStatusCounts() {
+    return countBy([...this.webhookDeliveries.values()], (row) => row.status);
+  }
+
+  async opsUsageRows(sinceIso) {
+    return [...this.usageRecords.values()]
+      .filter((row) => row.created_at >= sinceIso)
+      .map(({ billing_source, input_tokens, output_tokens, compute_seconds, created_at }) =>
+        ({ billing_source, input_tokens, output_tokens, compute_seconds, created_at }));
+  }
 }
 
 export class SupabaseCodeAgentStore {
@@ -546,6 +594,56 @@ export class SupabaseCodeAgentStore {
       .eq("owner", owner).order("created_at", { ascending: false }).limit(500));
     return summarizeUsage(rows);
   }
+
+  async getSubscription(owner) {
+    return unwrapMaybe(await this.client.from("ca_subscriptions").select("*")
+      .eq("owner", owner).maybeSingle());
+  }
+
+  async upsertSubscription(owner, patch) {
+    const { data, error } = await this.client.from("ca_subscriptions")
+      .upsert({ owner, ...patch, updated_at: now() }, { onConflict: "owner" }).select("*").single();
+    return unwrapOne(data, error);
+  }
+
+  async findSubscriptionByStripeCustomer(customerId) {
+    return unwrapMaybe(await this.client.from("ca_subscriptions").select("*")
+      .eq("stripe_customer_id", customerId).maybeSingle());
+  }
+
+  async usageTotalsSince(owner, sinceIso) {
+    const rows = unwrap(await this.client.from("ca_usage_records")
+      .select("billing_source,input_tokens,cached_tokens,output_tokens,reasoning_tokens,compute_seconds")
+      .eq("owner", owner).gte("created_at", sinceIso).limit(5_000));
+    return sumBudgetUsage(rows);
+  }
+
+  async countRunsSince(owner, sinceIso) {
+    const { count, error } = await this.client.from("ca_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("owner", owner).gte("created_at", sinceIso)
+      .or("started_at.not.is.null,state.neq.cancelled");
+    if (error) throw new Error(error.message);
+    return Number(count || 0);
+  }
+
+  async opsRunRows(sinceIso) {
+    return unwrap(await this.client.from("ca_runs")
+      .select("state,created_at,started_at,finished_at")
+      .gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(5_000));
+  }
+
+  async opsWebhookStatusCounts() {
+    const rows = unwrap(await this.client.from("ca_github_webhook_deliveries")
+      .select("status").order("received_at", { ascending: false }).limit(5_000));
+    return countBy(rows, (row) => row.status);
+  }
+
+  async opsUsageRows(sinceIso) {
+    return unwrap(await this.client.from("ca_usage_records")
+      .select("billing_source,input_tokens,output_tokens,compute_seconds,created_at")
+      .gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(5_000));
+  }
 }
 
 function byNewest(a, b) {
@@ -554,6 +652,26 @@ function byNewest(a, b) {
 
 function byCreated(a, b) {
   return a.created_at.localeCompare(b.created_at);
+}
+
+function sumBudgetUsage(rows) {
+  const totals = { managedTokens: 0, totalTokens: 0, computeSeconds: 0 };
+  for (const row of rows) {
+    const tokens = Number(row.input_tokens || 0) + Number(row.output_tokens || 0);
+    totals.totalTokens += tokens;
+    totals.computeSeconds += Number(row.compute_seconds || 0);
+    if ((row.billing_source || "unknown") === "managed") totals.managedTokens += tokens;
+  }
+  return totals;
+}
+
+function countBy(rows, key) {
+  const counts = {};
+  for (const row of rows) {
+    const value = key(row) || "unknown";
+    counts[value] = (counts[value] || 0) + 1;
+  }
+  return counts;
 }
 
 function summarizeUsage(rows) {

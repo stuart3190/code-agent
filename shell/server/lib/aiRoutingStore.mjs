@@ -22,6 +22,10 @@ export class MemoryAiRoutingStore {
     return this.attempts.filter((row) => row.owner === owner).slice(-limit).reverse();
   }
 
+  async listAttemptsSince(sinceIso, limit = 5_000) {
+    return this.attempts.filter((row) => row.created_at >= sinceIso).slice(-limit).reverse();
+  }
+
   async createEvaluation(owner, input) {
     const row = { id: newId(), owner, status: "running", created_at: now(), completed_at: null, ...input };
     this.evaluations.set(row.id, row);
@@ -66,6 +70,12 @@ export class SupabaseAiRoutingStore {
   async listRecentAttempts(owner, limit = 200) {
     return unwrap(await this.client.from("ca_model_attempts").select("*")
       .eq("owner", owner).order("created_at", { ascending: false }).limit(limit));
+  }
+
+  async listAttemptsSince(sinceIso, limit = 5_000) {
+    return unwrap(await this.client.from("ca_model_attempts")
+      .select("provider,model,status,latency_ms,retryable,created_at")
+      .gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(limit));
   }
 
   async createEvaluation(owner, input) {

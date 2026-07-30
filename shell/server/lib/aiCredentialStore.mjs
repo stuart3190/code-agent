@@ -119,6 +119,12 @@ export async function disconnectAiProvider(owner, provider, { store = aiCredenti
   return aiConnectionSummary(owner, { store });
 }
 
+// Lightweight provider lookup for budget checks — no secret decryption.
+export async function activeAiProviderName(owner, { store = aiCredentialStore() } = {}) {
+  const preference = await store.getPreference(owner);
+  return preference?.active_provider || "managed";
+}
+
 export async function activeAiCredential(owner, { store = aiCredentialStore() } = {}) {
   const preference = await store.getPreference(owner);
   const provider = preference?.active_provider || "managed";
