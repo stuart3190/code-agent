@@ -175,7 +175,8 @@ export class MemoryCodeAgentStore {
   async createRun(owner, agent, repository, input) {
     const row = {
       id: newId(), owner, agent_id: agent.id, repository_id: repository.id,
-      resumed_from_run_id: null, sandbox_state: null, pruned_at: null, pull_request: null, ...input,
+      resumed_from_run_id: null, sandbox_state: null, pruned_at: null, pull_request: null,
+      automation_id: null, ...input,
       base_branch: repository.default_branch, work_branch: null, state: "queued",
       sandbox_id: null, snapshot_id: null, result: null, usage: {}, error_code: null, error: null,
       cancel_requested_at: null, started_at: null, finished_at: null, created_at: now(), updated_at: now(),

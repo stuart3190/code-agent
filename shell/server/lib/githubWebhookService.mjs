@@ -3,6 +3,7 @@ import { optionalEnv } from "./env.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { getInstallation, installationRow, listInstallationRepositories } from "./githubApp.mjs";
 import { requestRepositoryRefresh } from "./repositoryIndexService.mjs";
+import { triggerPullRequestAutomations } from "./automationService.mjs";
 
 const MAX_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60 * 60_000;
@@ -115,6 +116,7 @@ export async function processGithubWebhookDelivery(delivery, {
   getInstallationFn = getInstallation,
   listRepositoriesFn = listInstallationRepositories,
   refreshRequester = requestRepositoryRefresh,
+  automationTrigger = triggerPullRequestAutomations,
 } = {}) {
   const installationId = positiveInteger(delivery.installation_id);
   const existing = installationId
@@ -199,6 +201,33 @@ export async function processGithubWebhookDelivery(delivery, {
       repositoryId: repository.id,
       refreshQueued: true,
       headSha: String(delivery.payload.after),
+    });
+  }
+
+  if (delivery.event === "pull_request") {
+    if (!["opened", "ready_for_review"].includes(delivery.action)) {
+      return finish(store, delivery, "ignored", { reason: "unsupported_pull_request_action" });
+    }
+    const repository = await store.findRepositoryByExternalId(
+      installationId,
+      delivery.payload?.repository?.id,
+    );
+    if (!repository) return finish(store, delivery, "ignored", { reason: "unconnected_repository" });
+    if (repository.status !== "ready") {
+      return finish(store, delivery, "ignored", { reason: "repository_unavailable" });
+    }
+    const pullNumber = positiveInteger(delivery.payload?.pull_request?.number);
+    if (!pullNumber) return finish(store, delivery, "ignored", { reason: "missing_pull_request_number" });
+    const triggers = await automationTrigger({
+      repository,
+      pullNumber,
+      title: delivery.payload?.pull_request?.title || "",
+      draft: !!delivery.payload?.pull_request?.draft,
+    });
+    return finish(store, delivery, "processed", {
+      repositoryId: repository.id,
+      pullNumber,
+      triggers,
     });
   }
 

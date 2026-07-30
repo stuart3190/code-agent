@@ -88,6 +88,8 @@ import {
 } from "./routes/subscription.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
+import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
+import { startAutomationSweeper, stopAutomationSweeper } from "./lib/automationService.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
@@ -493,6 +495,23 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
     }
+    if (p === "/api/v1/automations" && ["GET", "POST"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAutomations(req, res, {
+        owner, method, body: method === "POST" ? await readJson(req) : null,
+      });
+    }
+    const automationMatch = p.match(/^\/api\/v1\/automations\/([0-9a-f-]+)$/i);
+    if (automationMatch && method === "PATCH") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAutomationUpdate(req, res, {
+        owner, automationId: automationMatch[1], body: await readJson(req),
+      });
+    }
+    if (automationMatch && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAutomationDelete(req, res, { owner, automationId: automationMatch[1] });
+    }
     if (p === "/api/v1/tokens" && ["GET", "POST"].includes(method)) {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
       if (method === "GET") return handleTokenList(req, res, owner);
@@ -827,6 +846,7 @@ server.listen(PORT, HOST, () => {
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
   startRetentionSweeper();
+  startAutomationSweeper();
 });
 
 let shuttingDown = false;
@@ -840,6 +860,7 @@ async function shutdown(signal) {
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
+  stopAutomationSweeper();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));

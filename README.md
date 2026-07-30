@@ -59,6 +59,11 @@ history. Do not point it at Buildr101 production data or credentials.
   sandbox, reads changed code in context with a read-only toolset (it can still run tests),
   produces structured findings with severities and line anchors, and posts the review to
   GitHub — verdict-mapped with inline comments — only after explicit approval.
+- Automations: every new pull request can be reviewed automatically (draft filtering,
+  optional auto-posting that explicitly opts out of the approval gate), and recurring
+  maintenance tasks run on an hourly-to-weekly schedule. Automated runs pass the same budget
+  and rate-limit admission as manual runs, carry provenance on the run row, and record
+  skipped triggers on the automation instead of retrying into a spiral.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -112,11 +117,11 @@ symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent
 subscription plans with managed usage budgets; operational telemetry; publish policies with
 protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
 command policies; per-owner rate controls; retention pruning; API tokens; the VS Code
-extension; and approval-gated pull-request review agents.
+extension; approval-gated pull-request review agents; and automations (webhook-triggered
+reviews and scheduled runs).
 
 1. Live Stripe pricing, disaster recovery, and richer dunning.
 2. Extension marketplace publication, inline completion, and desktop-application packaging.
-3. Automations (webhook-triggered reviews and scheduled runs), CLI/SDK/plugin system,
-   enterprise controls, and mobile companion.
+3. CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

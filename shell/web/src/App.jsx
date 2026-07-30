@@ -11,6 +11,7 @@ import {
   billingOverview, billingPortal, opsTelemetry, selectPlan, updateBudgets,
   artifactContent, resumeRun, updateAgent,
   repositoryPulls,
+  createAutomation, deleteAutomation, listAutomations, updateAutomation,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -234,6 +235,7 @@ export default function App() {
             {view === "reviews" && (
               <Reviews repos={repos} agents={agents} onAgentCreated={(agent) => setAgents((items) => [agent, ...items])} />
             )}
+            {view === "automations" && <Automations repos={repos} />}
             {view === "usage" && <Usage />}
             {view === "ops" && <Operations initial={opsSnapshot} />}
             {view === "settings" && (
@@ -243,7 +245,7 @@ export default function App() {
               </div>
             )}
             {view === "downloads" && <Downloads />}
-            {!["agents", "repositories", "reviews", "usage", "ops", "downloads", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
+            {!["agents", "repositories", "reviews", "automations", "usage", "ops", "downloads", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
           </div>
         </main>
       </div>
@@ -1238,6 +1240,184 @@ function Reviews({ repos, agents, onAgentCreated }) {
           {run?.error && <div className="mt-3 rounded bg-red-400/[0.06] p-2 text-[11px] text-red-300">{run.error}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+function Automations({ repos }) {
+  const readyRepos = repos.filter((repo) => repo.status === "ready");
+  const [automations, setAutomations] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [kind, setKind] = useState("pr_review");
+  const [repoId, setRepoId] = useState("");
+  const [prompt, setPromptText] = useState("");
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [autoPost, setAutoPost] = useState(false);
+  const [includeDrafts, setIncludeDrafts] = useState(false);
+  const [mode, setMode] = useState("agent");
+
+  const repoName = (id) => repos.find((repo) => repo.id === id)?.fullName || "removed repository";
+
+  useEffect(() => {
+    listAutomations().then((result) => setAutomations(result.automations)).catch((err) => setError(err.message));
+  }, []);
+
+  async function create() {
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await createAutomation({
+        kind,
+        repositoryId: repoId || readyRepos[0]?.id,
+        intervalHours: kind === "scheduled_task" ? Number(intervalHours) : undefined,
+        config: { prompt, autoPost, includeDrafts, ...(kind === "scheduled_task" ? { mode } : {}) },
+      });
+      setAutomations((items) => [result.automation, ...(items || [])]);
+      setCreating(false); setPromptText(""); setAutoPost(false); setIncludeDrafts(false);
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function toggle(automation) {
+    setBusy(true); setError("");
+    try {
+      const result = await updateAutomation(automation.id, { enabled: !automation.enabled });
+      setAutomations((items) => items.map((item) => (item.id === automation.id ? result.automation : item)));
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function remove(automation) {
+    setBusy(true); setError("");
+    try {
+      await deleteAutomation(automation.id);
+      setAutomations((items) => items.filter((item) => item.id !== automation.id));
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl p-8">
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-400">Hands-off agents</div>
+      <h1 className="mt-2 text-3xl font-semibold text-white">Automations</h1>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+        Review every new pull request automatically, or run recurring maintenance tasks. Automated runs
+        obey the same budgets and rate limits as manual ones, and reviews stay approval-gated unless you
+        opt an automation into auto-posting.
+      </p>
+      {error && <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/[0.05] p-3 text-xs text-red-300">{error}</div>}
+
+      {!creating && (
+        <button onClick={() => setCreating(true)} disabled={!readyRepos.length}
+          className="mt-6 rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-35">
+          New automation
+        </button>
+      )}
+
+      {creating && (
+        <div className="mt-6 rounded-xl border border-white/[0.07] bg-white/[0.02] p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-slate-600">Type</span>
+              <select value={kind} onChange={(e) => setKind(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-[#0b0d12] px-3 py-1.5 text-xs text-slate-200 outline-none">
+                <option value="pr_review">Review new pull requests</option>
+                <option value="scheduled_task">Scheduled task</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-slate-600">Repository</span>
+              <select value={repoId || readyRepos[0]?.id || ""} onChange={(e) => setRepoId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-[#0b0d12] px-3 py-1.5 text-xs text-slate-200 outline-none">
+                {readyRepos.map((repo) => <option key={repo.id} value={repo.id}>{repo.fullName}</option>)}
+              </select>
+            </label>
+            {kind === "scheduled_task" && (
+              <>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-600">Every (hours)</span>
+                  <input type="number" min="1" max="168" value={intervalHours}
+                    onChange={(e) => setIntervalHours(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/[0.08] bg-transparent px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-400/40" />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-600">Run mode</span>
+                  <select value={mode} onChange={(e) => setMode(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/[0.08] bg-[#0b0d12] px-3 py-1.5 text-xs text-slate-200 outline-none">
+                    <option value="agent">Agent (can change code)</option>
+                    <option value="review">Review (read-only audit)</option>
+                  </select>
+                </label>
+              </>
+            )}
+          </div>
+          <label className="mt-3 block">
+            <span className="text-[10px] uppercase tracking-wide text-slate-600">
+              {kind === "pr_review" ? "Reviewer focus (optional)" : "Task prompt"}
+            </span>
+            <textarea value={prompt} onChange={(e) => setPromptText(e.target.value)} rows={2}
+              placeholder={kind === "pr_review"
+                ? "e.g. Focus on correctness, security, and missing tests"
+                : "e.g. Update dependencies and make sure the test suite passes"}
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-transparent px-3 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-400/40" />
+          </label>
+          {kind === "pr_review" && (
+            <div className="mt-3 flex flex-wrap gap-4 text-[11px] text-slate-400">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} />
+                Post reviews without asking me
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={includeDrafts} onChange={(e) => setIncludeDrafts(e.target.checked)} />
+                Include draft pull requests
+              </label>
+            </div>
+          )}
+          <div className="mt-4 flex gap-2">
+            <button onClick={create} disabled={busy || (kind === "scheduled_task" && !prompt.trim())}
+              className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
+              Create automation
+            </button>
+            <button onClick={() => setCreating(false)} className="rounded-lg border border-white/[0.08] px-4 py-2 text-xs text-slate-400">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 space-y-3">
+        {(automations || []).map((automation) => (
+          <div key={automation.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+            <div className="flex items-center gap-3">
+              <span className={`h-2 w-2 rounded-full ${automation.enabled ? "bg-emerald-400" : "bg-slate-600"}`} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-slate-200">
+                  {automation.kind === "pr_review" ? "Review new pull requests" : "Scheduled task"}
+                  <span className="ml-2 text-xs text-slate-500">{repoName(automation.repositoryId)}</span>
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-slate-600">
+                  {automation.kind === "scheduled_task"
+                    ? `every ${automation.intervalHours}h · next ${automation.nextRunAt ? new Date(automation.nextRunAt).toLocaleString() : "—"}`
+                    : automation.config?.autoPost ? "auto-posts reviews" : "reviews wait for approval"}
+                  {automation.lastTriggeredAt && ` · last ${new Date(automation.lastTriggeredAt).toLocaleString()}`}
+                </div>
+                {automation.config?.prompt && <div className="mt-1 truncate text-[11px] text-slate-500">{automation.config.prompt}</div>}
+                {automation.lastError && <div className="mt-1 text-[11px] text-red-300">{automation.lastError}</div>}
+              </div>
+              <button onClick={() => toggle(automation)} disabled={busy}
+                className="rounded border border-white/[0.1] px-2.5 py-1 text-[11px] text-slate-300 hover:bg-white/[0.05] disabled:opacity-40">
+                {automation.enabled ? "Pause" : "Enable"}
+              </button>
+              <button onClick={() => remove(automation)} disabled={busy}
+                className="rounded border border-red-400/20 px-2.5 py-1 text-[11px] text-red-300 hover:bg-red-400/[0.06] disabled:opacity-40">
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+        {automations && !automations.length && !creating && (
+          <div className="rounded-xl border border-dashed border-white/[0.08] p-8 text-center text-xs text-slate-600">
+            No automations yet.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

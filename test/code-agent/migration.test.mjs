@@ -232,6 +232,22 @@ test("review-run migration adds a validated pull-request column", async () => {
   assert.match(sql, /pull_request is null or pull_request > 0/i);
 });
 
+test("automations migration is server-only with provenance and due-scan indexes", async () => {
+  const sql = await readFile(
+    new URL("../../supabase/migrations/20260731020000_automations.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /create table public\.ca_automations/i);
+  assert.match(sql, /kind in \('pr_review', 'scheduled_task'\)/i);
+  assert.match(sql, /interval_hours between 1 and 168/i);
+  assert.match(sql, /kind <> 'scheduled_task' or interval_hours is not null/i);
+  assert.match(sql, /ca_automations_due_idx[\s\S]*where enabled and kind = 'scheduled_task'/i);
+  assert.match(sql, /alter table public\.ca_runs[\s\S]*add column automation_id uuid references public\.ca_automations/i);
+  assert.match(sql, /alter table public\.ca_automations enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_automations from public, anon, authenticated/i);
+  assert.match(sql, /as restrictive for all to anon, authenticated/i);
+});
+
 test("api-token migration stores only hashes and stays server-only", async () => {
   const sql = await readFile(apiTokensMigrationPath, "utf8");
   assert.match(sql, /create table public\.ca_api_tokens/i);

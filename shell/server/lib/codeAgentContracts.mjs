@@ -155,6 +155,7 @@ export function publicRun(run) {
     resumedFromRunId: run.resumed_from_run_id || null,
     resumable: isRunResumable(run),
     pullRequest: run.pull_request ? Number(run.pull_request) : null,
+    automationId: run.automation_id || null,
   };
 }
 
