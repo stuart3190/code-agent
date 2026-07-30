@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 11 is implemented. Phase 10 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 11 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -112,6 +112,10 @@ and inline comments.
   advertise API tokens and the extension, the token routes require authentication, and
   Buildr101 stayed healthy after the restart. The full local verification passed with 114
   Code Agent tests and four Playwright checks.
+- Phase 11 review agents are deployed from main commit `7c15810` on 2026-07-30. The
+  `review_runs` migration is applied remotely; production capabilities advertise pull-request
+  review and approval-gated posting, and Buildr101 stayed healthy after the restart. The full
+  local verification passed with 122 Code Agent tests and four Playwright checks.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
