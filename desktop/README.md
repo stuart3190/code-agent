@@ -22,8 +22,12 @@ cloned at an exact pinned commit and overlaid.
 
 ## Building (Windows)
 
-Prerequisites: Node 24.x, Python 3.12, Visual Studio 2022 Build Tools (C++ workload) — all
-free. Then:
+Prerequisites: Node 24.x, Python 3.12, Visual Studio 2022 Build Tools (C++ workload
+**including Spectre-mitigated libs**, or native modules fail with MSB8040) — all free. For
+`package`, the Windows SDK's `signtool.exe` must be on PATH (e.g.
+`C:\Program Files (x86)\Windows Kits\10\bin\<sdk>\x64`): the pipeline uses it only to STRIP
+Microsoft's signatures from bundled binaries before stamping Thrallo version resources —
+nothing gets signed and no certificate is involved. Then:
 
 ```powershell
 node desktop/build.mjs bootstrap

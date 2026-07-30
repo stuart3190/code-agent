@@ -102,6 +102,12 @@ export async function prepare({ log = console.log } = {}) {
   cpSync(path.join(assets, "thrallo.icns"), path.join(CHECKOUT_DIR, "resources", "darwin", "code.icns"));
   log("icons replaced (win32/linux/darwin)");
 
+  // Thrallo ships its own agent; the upstream copilot built-in is a Microsoft service
+  // integration and its vendored cross-platform binaries also break win32 packaging
+  // (rcedit cannot patch the bundled Linux .node files).
+  rmSync(path.join(CHECKOUT_DIR, "extensions", "copilot"), { recursive: true, force: true });
+  log("removed upstream copilot built-in extension");
+
   const builtinDir = path.join(CHECKOUT_DIR, "extensions", "thrallo");
   rmSync(builtinDir, { recursive: true, force: true });
   cpSync(path.join(REPO_ROOT, "editor", "vscode"), builtinDir, {
