@@ -15,3 +15,6 @@ key.txt
 !.env.example
 !**/.env.example
 editor/vscode/*.vsix
+desktop/vscode/
+desktop/out/
+desktop/VSCode-*/

@@ -2,8 +2,10 @@
 
 ## Current milestone
 
-Phase 16 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
-subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 17 — the genuine Code - OSS-based Thrallo Desktop editor — is implemented to its first
+verified milestone on Windows. Phase 16 is live, and Phase 12's automatic PR reviews are
+active: the GitHub App subscribes to `["pull_request", "push"]`, verified from the live
+installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -170,6 +172,24 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
   Windows exit crash (process.exitCode), prompt-sliced pull-request titles (synthesizeTitle),
   and publication copy shown for review-run approvals in the Agents workspace. The
   `claude-dogfood` API token and the repository's pr_review automation remain active.
+- Thrallo Desktop reached its first verified milestone on 2026-07-30, on Windows, against the
+  pinned Code - OSS 1.131.0 commit `3a03d6f7`: toolchain installed (MSVC 14.44 + Spectre
+  libs + Python 3.12), `npm ci` and full compile clean, and the dev build's `Thrallo.exe`
+  passed a 5/5 Playwright-driven smoke test — branded window, real local folder, file edit
+  persisted to disk, integrated terminal executed a command, and the built-in Thrallo
+  extension signed into production with an API token and listed live agents with run states
+  in the THRALLO: AGENTS view (screenshots under desktop/out/smoke, gitignored). The
+  packaged unsigned win32 build also completed and passed the same 5/5 smoke test as
+  "Thrallo Desktop" (`desktop/VSCode-win32-x64/Thrallo.exe`, archived to
+  `desktop/out/thrallo-win32-x64.zip`, 263.8 MB); getting there surfaced and fixed four real
+  packaging constraints, one found by Thrallo's own automated review of this PR (no
+  vscode-*-archive gulp task; quality=stable requires proprietary win32ContextMenu config;
+  signtool needed on PATH for signature STRIPPING only; the upstream copilot builtin removed
+  plus a guarded tolerance patch). VERIFIED: everything above, on Windows. CONFIGURED BUT
+  UNVERIFIED: darwin/linux targets — macOS stays "Coming soon" in all public copy until
+  Stuart approves. Nothing is signed, notarised, or store-published, and no paid accounts
+  were created. No installer beyond the archive exists yet (Inno Setup integration is future
+  work).
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
@@ -186,9 +206,12 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 17: SDK/plugin surface or dunning polish. The remaining pre-launch work is Stuart-owned
-(Stripe products, marketplace publisher, business identity); the engineering roadmap's big
-items are now desktop packaging, SDK, enterprise controls, and mobile.
+Phase 17 (corrected by Stuart on 2026-07-30, superseding an unauthorized substitution): the
+genuine Code - OSS-based Thrallo Desktop editor. The earlier VS Code extension remains and is
+reused as the desktop build's built-in extension, but it is not a replacement for the desktop
+application. Windows is the release priority; macOS builds stay private ("Coming soon to
+macOS" in all public copy until Stuart approves); Linux is configured. No certificates,
+stores, notarization, or paid accounts. Roadmap substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

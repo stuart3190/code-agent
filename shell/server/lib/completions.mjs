@@ -45,6 +45,16 @@ export function parseCompletionInput(body = {}) {
   const path = String(body.path || "").slice(0, 500);
   const prefix = String(body.prefix || "");
   if (!prefix.trim()) throw inputError("prefix is required");
+  const localContext = Array.isArray(body.localContext)
+    ? body.localContext.slice(0, 20).map((excerpt) => ({
+      path: String(excerpt?.path || "").slice(0, 500),
+      startLine: Math.max(Math.floor(Number(excerpt?.startLine) || 1), 1),
+      endLine: Math.max(Math.floor(Number(excerpt?.endLine) || 1), 1),
+      content: String(excerpt?.content || "").slice(0, 1_500),
+    }))
+      .filter((excerpt) => excerpt.path && excerpt.content.trim())
+      .slice(0, CONTEXT_LIMIT)
+    : [];
   return {
     repositoryId: String(body.repositoryId || "").slice(0, 64),
     repositoryFullName: String(body.repositoryFullName || "").slice(0, 255),
@@ -52,6 +62,7 @@ export function parseCompletionInput(body = {}) {
     language: String(body.language || "").slice(0, 60),
     prefix: prefix.slice(-PREFIX_LIMIT),
     suffix: String(body.suffix || "").slice(0, SUFFIX_LIMIT),
+    localContext,
   };
 }
 
@@ -87,12 +98,16 @@ export async function completeCode(owner, input, {
     }
   }
 
+  // Editor-supplied local excerpts take priority (they reflect the working tree right now);
+  // the server-side encrypted index fills any remaining slots.
   const repository = await resolveRepository(store, owner, input);
-  let context = [];
-  if (repository) {
+  let context = (input.localContext || []).slice(0, CONTEXT_LIMIT);
+  if (repository && context.length < CONTEXT_LIMIT) {
     const query = completionQuery(input);
-    context = await contextRetriever(owner, repository.id, query, { limit: CONTEXT_LIMIT })
-      .catch(() => []);
+    const remote = await contextRetriever(owner, repository.id, query, {
+      limit: CONTEXT_LIMIT - context.length,
+    }).catch(() => []);
+    context = [...context, ...remote];
   }
 
   const provider = providerFactory(candidate, credential);

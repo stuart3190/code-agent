@@ -240,7 +240,23 @@ completions and fall back to managed keys when configured. Responses are cleaned
 stripped, length bounded) and failures degrade to no suggestion — typing is never
 interrupted.
 
+## Thrallo Desktop (Code - OSS)
+
+The desktop application is a real Code - OSS build, not a wrapper. `desktop/upstream.json`
+pins an exact MIT-licensed `microsoft/vscode` commit; `desktop/bootstrap.mjs` shallow-clones
+it (never committed) and overlays the Thrallo identity: product configuration (names,
+`.thrallo` data folder, `thrallo://` protocol, telemetry off, updates off until an update
+server exists), generated icons, and the repository's `editor/vscode` extension copied in as
+the built-in `extensions/thrallo`. The extension gallery is **Open VSX** — Microsoft's
+marketplace is licensed only for Microsoft's own builds and is deliberately absent.
+`desktop/build.mjs` drives install/compile/dev/package; Windows x64 is the release target,
+darwin/linux are configured from the same pipeline and remain unverified until built and run
+on their platforms ("Coming soon to macOS" in all public copy until approved). Completions
+in the editor lead with a bounded local workspace index (built in-editor; at most three
+excerpts leave the machine) and the server's encrypted index backfills.
+
 ## Known production gaps
 
-- Live Stripe pricing and richer dunning.
-- Extension marketplace publication, desktop packaging, SDK, and mobile.
+- Desktop editor: Windows packaging/distribution polish, macOS/Linux verification.
+- Live Stripe pricing and richer dunning; Open VSX publication of the extension.
+- SDK/plugin system, enterprise controls, and mobile.

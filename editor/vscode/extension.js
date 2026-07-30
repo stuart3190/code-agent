@@ -6,6 +6,7 @@
 
 const vscode = require("vscode");
 const { ThralloClient, describeEvent, TERMINAL_STATES } = require("./lib/api.js");
+const { buildLocalIndex, queryLocalIndex, isIndexableFile } = require("./lib/localIndex.js");
 
 const TOKEN_KEY = "thrallo.apiToken";
 
@@ -38,12 +39,54 @@ function activate(context) {
   restoreConnection(context);
 }
 
+// Bounded local workspace index: built inside the editor, refreshed lazily after saves.
+// Only the top three scored excerpts are ever sent with a completion request.
+class LocalWorkspaceIndex {
+  constructor() {
+    this.index = null;
+    this.dirty = true;
+    this.building = null;
+    vscode.workspace.onDidSaveTextDocument(() => { this.dirty = true; });
+  }
+
+  async ensure() {
+    if (this.index && !this.dirty) return this.index;
+    if (this.building) return this.building;
+    this.building = this.build().finally(() => { this.building = null; });
+    return this.building;
+  }
+
+  async build() {
+    const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,build,out,coverage}/**", 800);
+    const files = [];
+    for (const uri of uris) {
+      const relative = vscode.workspace.asRelativePath(uri, false);
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (!isIndexableFile(relative, bytes.byteLength)) continue;
+        const content = Buffer.from(bytes).toString("utf8");
+        if (content.includes("\0")) continue;
+        files.push({ path: relative, content });
+      } catch { /* unreadable files are skipped */ }
+      if (files.length >= 500) break;
+    }
+    this.index = buildLocalIndex(files);
+    this.dirty = false;
+    return this.index;
+  }
+
+  query(queryText, options) {
+    return this.index ? queryLocalIndex(this.index, queryText, options) : [];
+  }
+}
+
 // Opt-in inline completions: debounced, cancellable, and silent on any failure so typing is
-// never interrupted. Uses the configured (or single connected) repository's index context.
+// never interrupted. Local excerpts lead; the server's encrypted repository index backfills.
 class ThralloCompletionProvider {
   constructor() {
     this.repositoryName = null;
     this.repositoryChecked = false;
+    this.local = new LocalWorkspaceIndex();
   }
 
   async resolveRepositoryName() {
@@ -73,15 +116,26 @@ class ThralloCompletionProvider {
       new vscode.Position(endLine, document.lineAt(endLine).text.length),
     )).slice(0, 2_000);
 
+    const relativePath = vscode.workspace.asRelativePath(document.uri, false);
+    let localContext = [];
+    try {
+      await this.local.ensure();
+      const tail = prefix.split("\n").filter((line) => line.trim()).slice(-4).join("\n");
+      localContext = this.local.query(`${relativePath} ${tail}`, { limit: 3, excludePath: relativePath })
+        .map(({ path, startLine, endLine, content }) => ({ path, startLine, endLine, content }));
+    } catch { /* completions work without local context */ }
+    if (token.isCancellationRequested) return [];
+
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
     try {
       const result = await client.complete({
         repositoryFullName: await this.resolveRepositoryName(),
-        path: vscode.workspace.asRelativePath(document.uri, false),
+        path: relativePath,
         language: document.languageId,
         prefix,
         suffix,
+        localContext,
       }, { signal: controller.signal });
       if (token.isCancellationRequested || !result.completion) return [];
       return [new vscode.InlineCompletionItem(result.completion, new vscode.Range(position, position))];

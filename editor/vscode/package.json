@@ -63,6 +63,36 @@
       { "command": "thrallo.runTask", "title": "Thrallo: Run Agent Task" },
       { "command": "thrallo.showLatestRun", "title": "Thrallo: Show Latest Run" }
     ],
+    "walkthroughs": [
+      {
+        "id": "thrallo.welcome",
+        "title": "Get started with Thrallo",
+        "description": "Connect your account and put cloud coding agents to work.",
+        "steps": [
+          {
+            "id": "thrallo.welcome.connect",
+            "title": "Connect to Thrallo",
+            "description": "Create an API token in the Thrallo web workspace (Settings → API tokens), then connect.\n[Connect](command:thrallo.connect)",
+            "media": { "markdown": "media/walkthrough/connect.md" },
+            "completionEvents": ["onCommand:thrallo.connect"]
+          },
+          {
+            "id": "thrallo.welcome.run",
+            "title": "Run your first agent task",
+            "description": "Pick an agent in the Thrallo view and describe a change. The run streams live into the Thrallo output channel.\n[Run a task](command:thrallo.runTask)",
+            "media": { "markdown": "media/walkthrough/run.md" },
+            "completionEvents": ["onCommand:thrallo.runTask"]
+          },
+          {
+            "id": "thrallo.welcome.completions",
+            "title": "Enable inline completions",
+            "description": "Completions use your Thrallo allowance, so they are opt-in.\n[Open settings](command:workbench.action.openSettings?%22thrallo.completions%22)",
+            "media": { "markdown": "media/walkthrough/completions.md" },
+            "completionEvents": ["onSettingChanged:thrallo.completions.enabled"]
+          }
+        ]
+      }
+    ],
     "menus": {
       "view/title": [
         { "command": "thrallo.refresh", "when": "view == thralloAgents", "group": "navigation" }
