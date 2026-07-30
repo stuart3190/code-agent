@@ -37,12 +37,12 @@ values. Codex will keep everything else moving locally.
 
 ## Required before public launch
 
-- [ ] Build the disaster-recovery kit (10 minutes, genuinely important): copy
-  `/home/ubuntu/code-agent/shell/.env` from the VPS to somewhere safe OFF the server (password
-  manager attachment or encrypted USB). It contains `PLATFORM_ENC_KEY` — without it every
-  encrypted credential and source excerpt in any backup is permanently unreadable. Also copy a
-  recent `~/thrallo-backups/thrallo-<stamp>/` folder off-host now and then. Details in
-  `docs/DISASTER-RECOVERY.md`.
+- [x] Disaster-recovery kit, part 1 (done 2026-07-30): `shell/.env` (containing
+  `PLATFORM_ENC_KEY`) is stored safely off the VPS. Remember to refresh the copy whenever a
+  new secret is added to the server environment (e.g. the future `THRALLO_STRIPE_*` keys).
+- [ ] Disaster-recovery kit, part 2 (recurring, low urgency): now and then copy a recent
+  `~/thrallo-backups/thrallo-<stamp>/` folder off-host too, so a total VPS loss cannot take
+  the newest backup with it. Details in `docs/DISASTER-RECOVERY.md`.
 
 - [x] In GitHub App settings for **Thrallo Code Agent**, subscribe to the **Push** event.
   - Verified from the live installation: subscribed events now report `["push"]`.
