@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Thrallo control plane and cloud coding-agent runtime.",
+  "bin": {
+    "thrallo": "cli/thrallo.mjs"
+  },
   "scripts": {
     "harness": "node harness/run.mjs",
     "baseline": "node harness/run.mjs --baseline",

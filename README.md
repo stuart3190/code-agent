@@ -64,6 +64,9 @@ history. Do not point it at Buildr101 production data or credentials.
   maintenance tasks run on an hourly-to-weekly schedule. Automated runs pass the same budget
   and rate-limit admission as manual runs, carry provenance on the run row, and record
   skipped triggers on the automation instead of retrying into a spiral.
+- A zero-dependency CLI (`cli/thrallo.mjs`, installable via the package `bin`): login with an
+  API token, list repositories/agents/usage, launch runs and PR reviews with a live streamed
+  timeline, and approve or decline publication from the terminal (`--yes` to auto-approve).
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -117,11 +120,11 @@ symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent
 subscription plans with managed usage budgets; operational telemetry; publish policies with
 protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
 command policies; per-owner rate controls; retention pruning; API tokens; the VS Code
-extension; approval-gated pull-request review agents; and automations (webhook-triggered
-reviews and scheduled runs).
+extension; approval-gated pull-request review agents; automations (webhook-triggered reviews
+and scheduled runs); and the terminal CLI.
 
 1. Live Stripe pricing, disaster recovery, and richer dunning.
 2. Extension marketplace publication, inline completion, and desktop-application packaging.
-3. CLI/SDK/plugin system, enterprise controls, and mobile companion.
+3. SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

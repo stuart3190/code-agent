@@ -176,6 +176,12 @@ diff review, modal approve/decline for pull-request publication, and resume for 
 workspaces. Its API client (`editor/vscode/lib/api.js`) has no `vscode` import and is covered
 by the repository test suite.
 
+`cli/thrallo.mjs` (package `bin: thrallo`) reuses that same client for the terminal: login
+stores the token at `~/.thrallo/config.json` with mode 0600 after a live probe, `run` and
+`review` stream the timeline and end in an interactive approve/decline (or `--yes`), and
+`repos`/`agents`/`usage`/`status`/`resume`/`cancel` cover the rest. All command logic lives in
+`cli/lib/cli.mjs` with injected fetch/io, exercised against a mock server in the test suite.
+
 ## Review agents
 
 A review run carries an optional `pull_request` number. The worker checks the PR head out into
