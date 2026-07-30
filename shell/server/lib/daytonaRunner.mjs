@@ -315,7 +315,7 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
   try { await sandbox.updateNetworkSettings({ networkBlockAll: false }); } catch { /* full-network sandbox */ }
   const workspacePath = await resolveSandboxRepositoryPath(sandbox);
   const { token } = await createInstallationToken(repository.installation_id);
-  const commitTitle = String(title || `Thrallo: ${run.prompt}`).replace(/\s+/g, " ").trim().slice(0, 120);
+  const commitTitle = String(title || "").trim() || synthesizeTitle(run.prompt);
 
   await emit("publish.started", { message: "Committing approved changes" });
   await sandbox.git.add(workspacePath, ["."]);
@@ -339,6 +339,15 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
   });
   await daytona.delete(sandbox);
   return { commitSha, branch: run.work_branch, pullRequest };
+}
+
+// Slicing a long prompt made ugly PR titles; use the first sentence, conventionally capped.
+export function synthesizeTitle(prompt) {
+  const collapsed = String(prompt || "").replace(/\s+/g, " ").trim();
+  const sentence = collapsed.split(/(?<=[.!?])\s/)[0] || collapsed;
+  const base = sentence.replace(/[.!?]+$/, "").trim() || "Changes";
+  const title = `Thrallo: ${base}`;
+  return title.length <= 72 ? title : `${title.slice(0, 69).trimEnd()}...`;
 }
 
 export async function discardDaytonaSandbox(sandboxId) {

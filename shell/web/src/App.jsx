@@ -1011,21 +1011,26 @@ function RunSummary({ run, onRetry, onPublish, onDecline, onResume, busy }) {
       <div className="flex items-center justify-between"><span className="text-xs text-slate-500">Run status</span><span className={`font-mono text-[10px] uppercase ${color}`}>{run.state}</span></div>
       {run.workBranch && <div className="mt-2 truncate font-mono text-[10px] text-slate-600">{run.workBranch}</div>}
       {run.error && <div className="mt-3 rounded bg-red-400/[0.06] p-2 text-[11px] leading-5 text-red-300">{run.error}</div>}
-      {run.state === "waiting_for_approval" && (
-        <div className="mt-3 space-y-2">
-          <div className="rounded border border-amber-300/15 bg-amber-300/[0.05] p-2 text-[11px] leading-5 text-amber-200/75">
-            Review the diff below. Publishing will commit this branch, push it, and open a pull request.
+      {run.state === "waiting_for_approval" && (() => {
+        const isReview = run.result?.approval?.action === "post_review";
+        return (
+          <div className="mt-3 space-y-2">
+            <div className="rounded border border-amber-300/15 bg-amber-300/[0.05] p-2 text-[11px] leading-5 text-amber-200/75">
+              {isReview
+                ? `Review of PR #${run.pullRequest} is ready (${(run.result?.findings || []).length} findings, verdict: ${String(run.result?.verdict || "comment").replace("_", " ")}). Approving posts it to GitHub — see the Reviews tab for details.`
+                : "Review the diff below. Publishing will commit this branch, push it, and open a pull request."}
+            </div>
+            <button onClick={onPublish} disabled={busy}
+              className="w-full rounded-md bg-gradient-to-r from-blue-500 to-violet-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
+              {busy ? "Working…" : isReview ? "Approve & post review" : "Approve & open pull request"}
+            </button>
+            <button onClick={onDecline} disabled={busy}
+              className="w-full rounded-md border border-white/[0.08] px-2 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.04] disabled:opacity-40">
+              {isReview ? "Discard review" : "Decline & discard workspace"}
+            </button>
           </div>
-          <button onClick={onPublish} disabled={busy}
-            className="w-full rounded-md bg-gradient-to-r from-blue-500 to-violet-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
-            {busy ? "Publishingâ€¦" : "Approve & open pull request"}
-          </button>
-          <button onClick={onDecline} disabled={busy}
-            className="w-full rounded-md border border-white/[0.08] px-2 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.04] disabled:opacity-40">
-            Decline & discard workspace
-          </button>
-        </div>
-      )}
+        );
+      })()}
       {run.result?.publication?.pullRequest?.url && (
         <a href={run.result.publication.pullRequest.url} target="_blank" rel="noreferrer"
           className="mt-3 block rounded-md border border-emerald-400/20 bg-emerald-400/[0.06] px-2 py-2 text-center text-[11px] text-emerald-300">
