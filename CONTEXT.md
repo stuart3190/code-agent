@@ -7,6 +7,36 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 19 (v2) — app builds on Thrallo infrastructure — is implemented and live-proven
+(2026-07-30): the Buildr generation pipeline runs entirely on Thrallo. `projects` +
+`build_jobs` live in Thrallo's own Supabase (service-role only); the legacy credit ledger is
+replaced by `appBuild/budgetLedger.mjs` (Thrallo budgets behind the legacy ledger interface,
+spend recorded as standalone usage rows `kind: app_build`); `appBuild/openaiEngineProvider.mjs`
+gives the engine its `runTurn` contract over the OpenAI Responses API (managed key), with
+`buildContext.mjs` resolving BYOK (Anthropic via routing provider / owner's OpenAI key) per
+owner. The engine is exposed ONLY through the Capability Registry as `app_build`
+(`appBuildService.mjs` relays build phases as the staged Planner/Designer/Builder/Tester/
+Publisher team and fires `preview_ready` unprompted). Preview infra: a second, Thrallo-owned
+provisiond instance (`ops/thrallo-provisiond.service`, port 8791, own token, suffix
+`preview.thrallo.com`), the shared Caddy front re-homed to the Thrallo-owned
+`ops/Caddyfile.unified` (adds `*.preview.thrallo.com` on-demand TLS; deployed byte-identical
+to /home/ubuntu/provisiond/Caddyfile.tls AND /home/ubuntu/code-agent/provisiond/Caddyfile.tls —
+replace IN PLACE, the bind mount is by inode, and `admin off` means `docker restart
+buildr-caddy` to apply), and the ask gate re-homed onto Thrallo's shell
+(`routes/previewDomainCheck.mjs` + provisiond `/exists`: preview labels validated against
+real containers so strangers can't mint certs; everything else passes through to the frozen
+Buildr101 gate so customer domains keep renewing). Live proof: conversation "Build me a
+pomodoro timer" → Lead Agent discovered `app_build` via the registry → 27-file FocusFlow app
+generated (tree/design persisted server-side) → Let's Encrypt cert minted on demand →
+https://pa12f1def1d17432b8d6facc8d785ea37.preview.thrallo.com/ served HTTP 200 → usage row
+(gpt-5.6-sol, 48,493 in / 6,771 out, managed) recorded against Thrallo budgets. Buildr101
+production (Supabase qgemqjcyhuejrsvjxkbh, its provisiond :8790, Stripe) untouched. PR #42
+merged from main `99ef131`; migration `app_build_platform` applied; verify 177/177. NOTE:
+previews use per-label on-demand certs (the Cloudflare token only covers the buildr101.com
+zone) — Let's Encrypt caps ~50 new certs/week per registered domain; fine now, revisit with a
+thrallo.com DNS token (wildcard DNS-01) before launch scale. **Awaiting Stuart's Phase 19
+review before Phase 20 (design system + wireframes, Stuart gate).**
+
 Phase 18 (v2) — the conversation platform — is implemented and live: Capability Registry
 (the Lead Agent's tools are generated from it; extension proven by test), the durable Lead
 Agent loop with specialist lifecycle events over resumable conversation SSE, the three-layer
@@ -17,7 +47,7 @@ get_status (accurate live run states and budget numbers) and remember (product p
 ca_products/ca_memories), replying in plain English. One live-verification fix (#40):
 strict tool schemas need all-properties-required with nullable optionals. Deployed from main
 `bd5280a`; migration `conversation_platform` applied (6 service-only encrypted tables).
-**Awaiting Stuart's Phase 18 review before Phase 19 begins.**
+Phase 18 was approved and Phase 19 built on it directly.
 
 Prior state: Phase 17's Code - OSS Thrallo Desktop reached its first verified Windows
 milestone (dev + packaged builds 5/5 smoke-verified). Phase 12's automatic PR reviews are
@@ -222,11 +252,10 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 19 (v2 roadmap): the app-build capability on Thrallo infrastructure — Buildr engine
-re-pointed at Thrallo's Supabase and budgets, live previews under `*.preview.thrallo.com`
-(needs Stuart: wildcard DNS), shared-Caddy re-homing done while buildr services still run.
-**Blocked on Stuart's Phase 18 approval — per-phase gates are standing policy.** Roadmap
-substitutions require asking Stuart first.
+Phase 20 (v2 roadmap): design system + wireframes — theme tokens (light default), component
+spec for the conversational shell, clickable desktop + mobile wireframes. **Blocked on
+Stuart's Phase 19 approval, and Phase 20 itself ends in a Stuart wireframe-approval gate —
+per-phase gates are standing policy.** Roadmap substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
