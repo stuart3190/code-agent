@@ -12,7 +12,7 @@
 // Nothing here signs, notarises, or publishes anything.
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHECKOUT_DIR, ensureCheckout, prepare } from "./bootstrap.mjs";
@@ -67,8 +67,27 @@ if (command === "bootstrap") {
     throw new Error(`--platform must be one of ${PLATFORMS.join(", ")}`);
   }
   run("npx", ["gulp", `vscode-${platformArg}-min`]);
-  run("npx", ["gulp", `vscode-${platformArg}-archive`]);
-  console.log(`\nUnsigned ${platformArg} build + archive complete (see ../VSCode-${platformArg} and ../vscode-${platformArg}.zip beside the checkout).`);
+  // The pinned build has no vscode-*-archive gulp task (upstream zips separately in CI),
+  // so create the unsigned archive ourselves from the min output directory.
+  const desktopDir = path.dirname(fileURLToPath(import.meta.url));
+  const builtDir = path.resolve(desktopDir, `VSCode-${platformArg}`);
+  if (!existsSync(builtDir)) {
+    throw new Error(`expected build output at ${builtDir} — did the min task change its layout?`);
+  }
+  const outDir = path.join(desktopDir, "out");
+  mkdirSync(outDir, { recursive: true });
+  const archivePath = path.join(outDir, `thrallo-${platformArg}.zip`);
+  rmSync(archivePath, { force: true });
+  if (process.platform === "win32") {
+    run("powershell", [
+      "-NoProfile", "-Command",
+      `Compress-Archive -Path '${builtDir}\\*' -DestinationPath '${archivePath}' -CompressionLevel Optimal`,
+    ], { cwd: desktopDir, shell: false });
+  } else {
+    run("zip", ["-qry", archivePath, path.basename(builtDir)], { cwd: path.dirname(builtDir) });
+  }
+  console.log(`\nUnsigned ${platformArg} build: ${builtDir}`);
+  console.log(`Unsigned ${platformArg} archive: ${archivePath}`);
   if (platformArg.startsWith("darwin")) {
     console.log("Reminder: macOS output is UNVERIFIED until launched on a Mac, and public copy stays 'Coming soon to macOS'.");
   }
