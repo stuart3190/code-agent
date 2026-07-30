@@ -226,7 +226,21 @@ foreign-key-safe order with the automation↔run cross-links patched in a second
 `PLATFORM_ENC_KEY`, without which encrypted columns in any backup are unreadable) plus a
 periodically copied backup run.
 
+## Inline completion
+
+`POST /api/v1/completions` serves editor clients a single fill-in-the-middle suggestion: the
+bounded prefix/suffix plus up to three excerpts retrieved from the encrypted repository index
+go to the fastest configured model tier through the existing provider adapters. Completions
+are opt-in in the extension (`thrallo.completions.enabled`) because they spend real tokens:
+managed calls are refused once the monthly managed-token budget is spent (BYOK keys are
+exempt but still metered), every call writes a standalone usage row (`run_id` null,
+`metadata.kind: "completion"`), and a per-owner in-memory limiter caps
+`CODE_AGENT_COMPLETIONS_PER_MINUTE` (30). Codex subscriptions cannot serve single-shot
+completions and fall back to managed keys when configured. Responses are cleaned (fences
+stripped, length bounded) and failures degrade to no suggestion — typing is never
+interrupted.
+
 ## Known production gaps
 
 - Live Stripe pricing and richer dunning.
-- Extension marketplace publication, inline completion, desktop packaging, SDK, and mobile.
+- Extension marketplace publication, desktop packaging, SDK, and mobile.

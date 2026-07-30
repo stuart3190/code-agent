@@ -2,8 +2,8 @@
 
 ## Current milestone
 
-Phase 15 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
-subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 16 is implemented. Phase 15 is live, and Phase 12's automatic PR reviews are active:
+the GitHub App subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -58,7 +58,12 @@ restore script, and the `docs/DISASTER-RECOVERY.md` runbook (offline kit: `shell
 extension marketplace-ready — generated PNG icon, license, changelog, gallery metadata, a
 proven `thrallo-0.2.0.vsix` package build — and adds inline run status: a live status-bar
 indicator during runs and per-agent latest-run states with themed icons in the Agents view.
-Marketplace publication is a documented Stuart action.
+Marketplace publication is a documented Stuart action. Phase 16 adds opt-in inline code
+completion: `POST /api/v1/completions` (fill-in-the-middle on the fastest configured tier,
+enriched with encrypted-index excerpts, budget-gated for managed calls, standalone-metered,
+per-owner rate-limited, Codex falling back to managed) and the extension's debounced
+cancellable provider behind `thrallo.completions.enabled` (repository auto-detected when one
+is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Verification state
 
@@ -169,8 +174,9 @@ Marketplace publication is a documented Stuart action.
 
 ## Next implementation slice
 
-Phase 16: inline completion backed by the repository index, or dunning polish. Stripe go-live
-stays parked until Stuart supplies products closer to launch.
+Phase 17: SDK/plugin surface or dunning polish. The remaining pre-launch work is Stuart-owned
+(Stripe products, marketplace publisher, business identity); the engineering roadmap's big
+items are now desktop packaging, SDK, enterprise controls, and mobile.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

@@ -20,6 +20,7 @@ import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits } from "../lib/usageBudgets.mjs";
 import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
 import { listPullRequests } from "../lib/githubApp.mjs";
+import { completeCode, parseCompletionInput } from "../lib/completions.mjs";
 
 async function assertBudgetAllowsRun(ownerId) {
   const credentialProvider = await activeAiProviderName(ownerId).catch(() => "managed");
@@ -289,6 +290,18 @@ export async function handleRunArtifactContent(_req, res, { owner, runId, artifa
     "Cache-Control": "private, max-age=300",
   });
   return res.end(artifact.content);
+}
+
+export async function handleCompletion(_req, res, { owner, body }) {
+  try {
+    const result = await completeCode(owner.id, parseCompletionInput(body));
+    return sendJson(res, 200, result);
+  } catch (error) {
+    if (error.status || error.code) {
+      throw new CodeAgentInputError(error.message, error.status || 400, error.code || "completion_failed");
+    }
+    throw error;
+  }
 }
 
 export async function handleUsage(_req, res, owner) {

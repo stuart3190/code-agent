@@ -30,8 +30,65 @@ function activate(context) {
     vscode.commands.registerCommand("thrallo.runTask", (item) => runTask(item)),
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
     vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
+    vscode.languages.registerInlineCompletionItemProvider(
+      { pattern: "**" },
+      new ThralloCompletionProvider(),
+    ),
   );
   restoreConnection(context);
+}
+
+// Opt-in inline completions: debounced, cancellable, and silent on any failure so typing is
+// never interrupted. Uses the configured (or single connected) repository's index context.
+class ThralloCompletionProvider {
+  constructor() {
+    this.repositoryName = null;
+    this.repositoryChecked = false;
+  }
+
+  async resolveRepositoryName() {
+    const configured = vscode.workspace.getConfiguration("thrallo").get("completions.repository");
+    if (configured) return configured;
+    if (this.repositoryChecked) return this.repositoryName;
+    this.repositoryChecked = true;
+    try {
+      const { repositories } = await client.listRepositories();
+      if (repositories.length === 1) this.repositoryName = repositories[0].fullName;
+    } catch { /* completions stay context-free */ }
+    return this.repositoryName;
+  }
+
+  async provideInlineCompletionItems(document, position, _context, token) {
+    if (!client) return [];
+    if (!vscode.workspace.getConfiguration("thrallo").get("completions.enabled")) return [];
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (token.isCancellationRequested) return [];
+
+    const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position)).slice(-6_000);
+    if (!prefix.trim()) return [];
+    const endLine = Math.min(document.lineCount - 1, position.line + 40);
+    const suffix = document.getText(new vscode.Range(
+      position,
+      new vscode.Position(endLine, document.lineAt(endLine).text.length),
+    )).slice(0, 2_000);
+
+    const controller = new AbortController();
+    token.onCancellationRequested(() => controller.abort());
+    try {
+      const result = await client.complete({
+        repositoryFullName: await this.resolveRepositoryName(),
+        path: vscode.workspace.asRelativePath(document.uri, false),
+        language: document.languageId,
+        prefix,
+        suffix,
+      }, { signal: controller.signal });
+      if (token.isCancellationRequested || !result.completion) return [];
+      return [new vscode.InlineCompletionItem(result.completion, new vscode.Range(position, position))];
+    } catch {
+      return [];
+    }
+  }
 }
 
 function setStatus(text, { spin = false, tooltip = "" } = {}) {
