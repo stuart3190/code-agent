@@ -16,6 +16,7 @@ const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083
 const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730143000_subscriptions_budgets_telemetry.sql", import.meta.url);
 const phase8MigrationPath = new URL("../../supabase/migrations/20260730170000_approval_policies_resume_artifacts.sql", import.meta.url);
 const phase9MigrationPath = new URL("../../supabase/migrations/20260730200000_egress_command_policies_retention.sql", import.meta.url);
+const apiTokensMigrationPath = new URL("../../supabase/migrations/20260730223000_api_tokens.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -220,4 +221,15 @@ test("phase 9 migration adds egress/command policies and retention tracking", as
   assert.match(sql, /command_policy in \('standard', 'restricted'\)/i);
   assert.match(sql, /add column pruned_at timestamptz/i);
   assert.match(sql, /ca_runs_retention_idx[\s\S]*where pruned_at is null and finished_at is not null/i);
+});
+
+test("api-token migration stores only hashes and stays server-only", async () => {
+  const sql = await readFile(apiTokensMigrationPath, "utf8");
+  assert.match(sql, /create table public\.ca_api_tokens/i);
+  assert.match(sql, /token_hash text not null unique check \(char_length\(token_hash\) = 64\)/i);
+  assert.doesNotMatch(sql, /\btoken text\b/i);
+  assert.match(sql, /alter table public\.ca_api_tokens enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_api_tokens from public, anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table public\.ca_api_tokens to service_role/i);
+  assert.match(sql, /as restrictive for all to anon, authenticated/i);
 });

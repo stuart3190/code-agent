@@ -15,6 +15,7 @@ import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
 import { Logo } from "./auth/AuthGate.jsx";
 import AiProviderSettings from "./settings/AiProviderSettings.jsx";
+import ApiTokens from "./settings/ApiTokens.jsx";
 
 const terminalStates = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
 const nav = [
@@ -231,8 +232,14 @@ export default function App() {
             )}
             {view === "usage" && <Usage />}
             {view === "ops" && <Operations initial={opsSnapshot} />}
-            {view === "settings" && <AiProviderSettings />}
-            {!["agents", "repositories", "usage", "ops", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
+            {view === "settings" && (
+              <div>
+                <AiProviderSettings />
+                <div className="mx-auto max-w-5xl px-8 pb-10"><ApiTokens /></div>
+              </div>
+            )}
+            {view === "downloads" && <Downloads />}
+            {!["agents", "repositories", "usage", "ops", "downloads", "settings"].includes(view) && <ComingSoon view={view} caps={caps} />}
           </div>
         </main>
       </div>
@@ -1041,6 +1048,34 @@ function SetupNotice({ caps }) {
 
 function EmptyState({ onConnect }) {
   return <div className="grid min-h-[calc(100vh-4rem)] place-items-center p-8"><div className="max-w-md text-center"><div className="text-5xl text-blue-400/70">⌘</div><h1 className="mt-5 text-2xl font-semibold text-white">Connect your first repository</h1><p className="mt-2 text-sm leading-6 text-slate-500">Thrallo needs a repository before it can inspect code, create an isolated branch, and run a task.</p><button onClick={onConnect} className="mt-6 rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 px-5 py-2 text-sm font-medium text-white">Connect GitHub repository</button></div></div>;
+}
+
+function Downloads() {
+  return (
+    <div className="mx-auto max-w-4xl p-8">
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-400">Editor integrations</div>
+      <h1 className="mt-2 text-3xl font-semibold text-white">Downloads</h1>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+        Bring Thrallo agents into your editor. Authentication uses a personal access token from
+        Settings → API tokens.
+      </p>
+      <div className="mt-8 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-white/[0.035] to-transparent p-6">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl border border-blue-400/20 bg-blue-500/10 text-lg">⌁</span>
+          <div>
+            <div className="text-sm font-semibold text-white">Thrallo for VS Code</div>
+            <div className="text-xs text-slate-500">Browse agents, launch runs, stream the timeline, review diffs, approve pull requests.</div>
+          </div>
+        </div>
+        <ol className="mt-5 list-decimal space-y-1.5 pl-5 text-xs leading-5 text-slate-400">
+          <li>Create an API token in <span className="text-slate-200">Settings → API tokens</span>.</li>
+          <li>Get the extension from the <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[10px]">editor/vscode</code> directory of the Thrallo repository (package with <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[10px]">npx vsce package</code>, then install the .vsix).</li>
+          <li>Run <span className="text-slate-200">Thrallo: Connect</span> in VS Code and paste your token.</li>
+        </ol>
+        <div className="mt-4 text-[11px] text-slate-600">Marketplace publication and the desktop application are on the roadmap; this extension is the first supported editor client.</div>
+      </div>
+    </div>
+  );
 }
 
 function ComingSoon({ view, caps }) {

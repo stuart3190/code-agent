@@ -85,6 +85,8 @@ import {
   handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
   handleOpsTelemetry, handlePlanSelect,
 } from "./routes/subscription.mjs";
+import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
+import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
 
@@ -210,8 +212,22 @@ async function serveStatic(req, res) {
 }
 
 async function requireOwner(req, res) {
-  const owner = await ownerFromToken(bearer(req));
+  const token = bearer(req);
+  const owner = isApiTokenBearer(token)
+    ? await ownerFromApiToken(token)
+    : await ownerFromToken(token);
   if (!owner) { sendJson(res, 401, { error: "unauthorized — sign in first" }); return null; }
+  return owner;
+}
+
+// Token management requires a real signed-in session: a leaked PAT must not mint more PATs.
+async function requireSessionOwner(req, res) {
+  const owner = await requireOwner(req, res);
+  if (!owner) return null;
+  if (owner.viaToken) {
+    sendJson(res, 403, { error: "API tokens cannot manage tokens; sign in to the web workspace." });
+    return null;
+  }
   return owner;
 }
 
@@ -470,6 +486,16 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/usage" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
+    }
+    if (p === "/api/v1/tokens" && ["GET", "POST"].includes(method)) {
+      const owner = await requireSessionOwner(req, res); if (!owner) return;
+      if (method === "GET") return handleTokenList(req, res, owner);
+      return handleTokenCreate(req, res, owner, await readJson(req));
+    }
+    const tokenRevokeMatch = p.match(/^\/api\/v1\/tokens\/([0-9a-f-]+)$/i);
+    if (tokenRevokeMatch && method === "DELETE") {
+      const owner = await requireSessionOwner(req, res); if (!owner) return;
+      return handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
     }
     if (p === "/api/v1/billing" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

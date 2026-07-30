@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 9 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 10 is implemented. Phase 9 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -35,7 +35,11 @@ egress after checkout, restored only for publishing; relaxed with a warning for 
 restricted command policies in the tool loop (in-sandbox publication always refused),
 per-owner concurrent and hourly run admission caps, past-due metering at free-plan limits,
 and a retention sweeper pruning run timelines and artifact content after
-`CODE_AGENT_RETENTION_DAYS`.
+`CODE_AGENT_RETENTION_DAYS`. Phase 10 adds hashed personal access tokens (session-managed,
+never operator-capable) authenticating the v1 API for editor clients, token management in
+Settings, a real Downloads view, and the zero-dependency `editor/vscode` extension with an
+agents view, run launching, live timeline streaming, diff review, approve/decline
+publication, and resume.
 
 ## Verification state
 
@@ -115,8 +119,9 @@ and a retention sweeper pruning run timelines and artifact content after
 
 ## Next implementation slice
 
-Phase 10: Code OSS desktop application groundwork — or, if Stuart supplies Stripe products
-first, flip paid plans live and add dunning polish.
+Phase 11: review agents (repository-aware pull-request review mode) or extension polish
+(marketplace packaging, inline run status). Stripe go-live stays parked until Stuart supplies
+products closer to launch.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
