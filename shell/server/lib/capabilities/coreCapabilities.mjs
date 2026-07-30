@@ -8,10 +8,14 @@ import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from ".
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
 
-const strings = (properties, required = Object.keys(properties)) => ({
-  type: "object", properties, required, additionalProperties: false,
+// Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
+// is expressed as a nullable type, and invokes treat null as absent.
+const strings = (properties) => ({
+  type: "object", properties, required: Object.keys(properties), additionalProperties: false,
 });
 const str = (description) => ({ type: "string", description });
+const optionalStr = (description) => ({ type: ["string", "null"], description: `${description} (null when not applicable)` });
+const optionalNum = (description) => ({ type: ["number", "null"], description: `${description} (null when not applicable)` });
 
 export function registerCoreCapabilities() {
   registerCapability({
@@ -40,9 +44,9 @@ export function registerCoreCapabilities() {
     description: "Make a code change in one of the user's connected GitHub repositories: an autonomous cloud run that edits code, runs tests, and prepares a pull request. Use for fixes, features, and refactors on existing repositories.",
     costProfile: "run",
     inputSchema: strings({
-      repositoryFullName: str("owner/name of the connected repository (omit if only one is connected)"),
+      repositoryFullName: optionalStr("owner/name of the connected repository; null if only one is connected"),
       task: str("What to change, as a complete engineering brief"),
-    }, ["task"]),
+    }),
     async invoke(ctx, input) {
       const run = await dispatchRun(ctx, input, "agent");
       return { runId: run.id, state: run.state, note: "Run dispatched; progress streams into this conversation." };
@@ -56,10 +60,10 @@ export function registerCoreCapabilities() {
     description: "Run a read-only repository-aware review: either of an open pull request (give pullRequestNumber) or a general audit. Produces structured findings; posting to GitHub stays approval-gated.",
     costProfile: "run",
     inputSchema: strings({
-      repositoryFullName: str("owner/name of the connected repository (omit if only one is connected)"),
+      repositoryFullName: optionalStr("owner/name of the connected repository; null if only one is connected"),
       focus: str("What the review should focus on"),
-      pullRequestNumber: { type: "number", description: "Open PR number to review; omit for a general audit" },
-    }, ["focus"]),
+      pullRequestNumber: optionalNum("Open PR number to review; null for a general audit"),
+    }),
     async invoke(ctx, input) {
       const run = await dispatchRun(ctx, {
         repositoryFullName: input.repositoryFullName,
@@ -105,8 +109,8 @@ export function registerCoreCapabilities() {
     inputSchema: strings({
       kind: { type: "string", enum: ["preference", "fact", "episode"], description: "What kind of memory this is" },
       content: str("The thing to remember, written so it is useful months later without context"),
-      productName: str("Product this belongs to, if any (creates/updates the named product)"),
-    }, ["kind", "content"]),
+      productName: optionalStr("Product this belongs to (creates/updates the named product)"),
+    }),
     async invoke(ctx, input) {
       let productId = null;
       if (input.productName?.trim()) {
