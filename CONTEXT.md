@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 11 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 12 is implemented. Phase 11 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -43,7 +43,11 @@ publication, and resume. Phase 11 adds repository-aware pull-request review agen
 checkout in the sandbox, a read-only review toolset that can still run tests, structured
 findings (verdict/severity/line anchors), review artifacts, a Reviews workspace view listing
 open PRs, and approval-gated posting of the GitHub review with conservatively mapped verdicts
-and inline comments.
+and inline comments. Phase 12 adds automations: webhook-triggered reviews of new pull
+requests (draft filtering, explicit autoPost opt-out of the approval gate, requires the App's
+Pull request event subscription — a pending Stuart action) and scheduled maintenance runs
+every 1–168 hours via an optimistically claimed sweeper, all passing the same budget and
+rate-limit admission with run provenance and recorded skips.
 
 ## Verification state
 
@@ -132,8 +136,10 @@ and inline comments.
 
 ## Next implementation slice
 
-Phase 12: automations — webhook-triggered PR reviews and scheduled maintenance runs. Stripe
-go-live stays parked until Stuart supplies products closer to launch.
+Phase 13: CLI (thin command-line client over the token-authenticated v1 API) or extension
+marketplace packaging. Stripe go-live stays parked until Stuart supplies products closer to
+launch; the GitHub App's Pull request event subscription is the one pending Stuart action for
+Phase 12's automatic reviews.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

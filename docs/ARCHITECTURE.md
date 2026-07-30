@@ -193,8 +193,23 @@ conservatively (approve only with no major findings, blockers force request-chan
 anchored as inline comments where GitHub accepts them, with a body-only retry when it does
 not. Reviews without a pull request complete directly with findings as the result.
 
+## Automations
+
+`ca_automations` is service-role only and holds two kinds. `pr_review` automations fire from
+the GitHub webhook worker on `pull_request` opened / ready-for-review deliveries (the App must
+subscribe to the Pull request event): drafts are skipped unless opted in, and the created run
+is a normal review run unless the automation's `autoPost` flag explicitly opts out of the
+approval gate — in which case the finished review posts directly, falling back to manual
+approval if posting fails. `scheduled_task` automations run every 1–168 hours; a sweeper
+claims due rows optimistically (advancing `next_run_at` so concurrent sweepers cannot
+double-fire) and creates agent or review runs.
+
+Every automated run passes the same admission guards as a manual one — rate limits and
+budgets — and carries `automation_id` provenance on the run row. A rejected or failed trigger
+is recorded on the automation (`last_error`) and skipped rather than retried.
+
 ## Known production gaps
 
 - Live Stripe pricing, richer dunning, and disaster recovery.
-- Extension marketplace publication, inline completion, desktop packaging, automations
-  (webhook-triggered reviews, scheduled runs), CLI/SDK, and mobile.
+- Extension marketplace publication, inline completion, desktop packaging, CLI/SDK, and
+  mobile.

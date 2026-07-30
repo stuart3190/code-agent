@@ -80,6 +80,16 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
+export const listAutomations = () => request("/api/v1/automations");
+export const createAutomation = (body) => request("/api/v1/automations", {
+  method: "POST", body: JSON.stringify(body),
+});
+export const updateAutomation = (automationId, body) => request(`/api/v1/automations/${automationId}`, {
+  method: "PATCH", body: JSON.stringify(body),
+});
+export const deleteAutomation = (automationId) => request(`/api/v1/automations/${automationId}`, {
+  method: "DELETE",
+});
 export const listApiTokens = () => request("/api/v1/tokens");
 export const createApiToken = (name) => request("/api/v1/tokens", {
   method: "POST", body: JSON.stringify({ name }),

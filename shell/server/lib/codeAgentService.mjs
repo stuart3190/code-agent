@@ -90,6 +90,11 @@ export function codeAgentCapabilities() {
       pullRequestReview: githubAppConfigured() && daytonaConfigured(),
       approvalGatedPosting: true,
     },
+    automations: {
+      pullRequestReviews: githubWebhookConfigured(),
+      scheduledTasks: true,
+      autoPost: true,
+    },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
       appConfigured: githubAppConfigured(),
@@ -148,6 +153,8 @@ export async function processRun(run, {
   providerNameResolver = activeAiProviderName,
   attachRunnerFactory = attachDaytonaRunner,
   publisher = publishDaytonaRun,
+  reviewPoster = createPullRequestReview,
+  automationResolver = defaultAutomationResolver,
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
@@ -317,6 +324,41 @@ export async function processRun(run, {
         model: result.model,
       };
       if (run.pull_request && repository.installation_id) {
+        // An automation with autoPost opted out of the manual gate; a posting failure
+        // falls back to waiting for approval instead of failing the run.
+        const automation = run.automation_id ? await automationResolver(run.automation_id) : null;
+        if (automation?.config?.autoPost) {
+          try {
+            const posted = await reviewPoster({
+              installationId: repository.installation_id,
+              repository: repository.full_name,
+              pullNumber: run.pull_request,
+              body: renderReviewMarkdown(review, run.pull_request),
+              event: reviewEventForVerdict(review.verdict, review.findings),
+              comments: review.findings.map((finding) => ({
+                path: finding.path,
+                line: finding.line,
+                body: `**${finding.title}** (${finding.severity})\n\n${finding.detail}`,
+              })),
+            });
+            const autoPosted = { ...reviewResult, publication: { review: posted, auto: true } };
+            run = await store.updateRun(run, {
+              state: "succeeded", result: autoPosted, usage: result.usage, sandbox_state: "discarded",
+              finished_at: new Date().toISOString(),
+            });
+            await emit("run.succeeded", {
+              message: `Review posted automatically to pull request #${run.pull_request}`,
+              result: autoPosted,
+            });
+            return run;
+          } catch (error) {
+            await emit("publish.failed", {
+              code: error.code || "review_post_failed",
+              error: error.message,
+              message: "Automatic review posting failed; approve manually to retry",
+            });
+          }
+        }
         reviewResult.approval = { required: true, action: "post_review", pullRequest: run.pull_request };
         run = await store.updateRun(run, {
           state: "waiting_for_approval", result: reviewResult, usage: result.usage,
@@ -424,6 +466,11 @@ export async function processRun(run, {
   } finally {
     if (!preserveRunner) await runner?.dispose?.();
   }
+}
+
+async function defaultAutomationResolver(automationId) {
+  const { automationsStore } = await import("./automationsStore.mjs");
+  return automationsStore().getById(automationId);
 }
 
 function resumePreamble(previous) {

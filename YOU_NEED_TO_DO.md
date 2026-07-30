@@ -39,6 +39,9 @@ values. Codex will keep everything else moving locally.
 
 - [x] In GitHub App settings for **Thrallo Code Agent**, subscribe to the **Push** event.
   - Verified from the live installation: subscribed events now report `["push"]`.
+- [ ] In GitHub App settings for **Thrallo Code Agent**, also subscribe to the **Pull request**
+  event. Phase 12's automatic PR reviews are deployed and waiting; without this subscription
+  GitHub never delivers `pull_request` webhooks, so the automation simply stays idle.
 - [x] Choose the product name and domain: Thrallo at `thrallo.com`.
 - [x] Choose production hosting: isolated services on the existing Buildr101 VPS.
 - [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
