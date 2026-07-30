@@ -15,6 +15,7 @@ import { registerCoreCapabilities } from "./capabilities/coreCapabilities.mjs";
 import { activeAiCredential } from "./aiCredentialStore.mjs";
 import { createRoutedCodingModel } from "./modelRouting.mjs";
 import { budgetOverview } from "./usageBudgets.mjs";
+import { notifyOwnerIfAway } from "./notifications/notificationService.mjs";
 
 const MAX_TURNS = 12;
 const HISTORY_TURNS = 30;
@@ -164,6 +165,11 @@ export async function processConversation(conversation, {
             businessConsequence: output.businessConsequence,
           });
           await store.updateConversation(conversation, { state: "waiting_user", last_activity_at: nowIso() });
+          notifyOwnerIfAway(conversation.owner, conversation.id, {
+            title: "Quick decision needed",
+            body: String(output.question).slice(0, 140),
+            tag: `question-${conversation.id}`,
+          }).catch(() => {});
           return;
         }
         input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });

@@ -6,6 +6,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
+import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
 
 // Build phases → the specialist the user watches. Sequential: each phase change retires the
 // previous specialist (✓) and spawns the next, so the team appears as work actually begins.
@@ -101,10 +102,21 @@ function relayBuildJob(ctx, { job, projectId }) {
           const text = `${summary}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
           await ctx.emit("message", { role: "lead", text, projectId });
+          notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
+            title: "Preview ready",
+            body: "Your app is built — take a look.",
+            url: data.result?.previewUrl || null,
+            tag: `build-${projectId}`,
+          }).catch(() => {});
         } else {
           const text = `The build ${data.status}${data.error ? `: ${String(data.error).slice(0, 300)}` : "."} Tell me to try again and I will.`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
           await ctx.emit("message", { role: "lead", text, projectId });
+          notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
+            title: "Build needs attention",
+            body: "The build didn't finish — open the conversation and I'll explain.",
+            tag: `build-${projectId}`,
+          }).catch(() => {});
         }
       }
     } catch (error) {

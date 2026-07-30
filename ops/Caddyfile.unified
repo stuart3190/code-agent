@@ -55,6 +55,24 @@
 	reverse_proxy {http.request.host.labels.3}:5173
 }
 
+# Thrallo published apps (Phase 22). <slug>.app.thrallo.com serves the built SPA from the
+# read-only /publish/<slug> mount (shared publish root; Thrallo slugs are collision-checked
+# against existing labels at claim time). Certs are per-label ON DEMAND, gated by the ask
+# endpoint (published dir must exist). The *.app.thrallo.com A record must be DNS-only.
+*.app.thrallo.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		on_demand
+	}
+	root * /publish/{http.request.host.labels.3}
+	try_files {path} /index.html
+	file_server
+}
+
 # Production shell: buildr101.com serves the product itself (the shell's node server on the
 # docker proxy-net gateway — serving the built web UI statically and the /api routes, incl. the
 # /api/generate SSE stream). www redirects to the apex. Same DNS-01 cert mechanics; both the apex

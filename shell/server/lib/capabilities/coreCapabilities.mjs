@@ -8,8 +8,11 @@ import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from ".
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
 import { startAppBuild } from "../appBuild/appBuildService.mjs";
+import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
+import { automationsStore, nextRunAt } from "../automationsStore.mjs";
+import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
 // is expressed as a nullable type, and invokes treat null as absent.
@@ -68,6 +71,85 @@ export function registerCoreCapabilities() {
         description: String(input.description),
         productName: input.productName || null,
       });
+    },
+  });
+
+  registerCapability({
+    id: "publish",
+    specialist: "Publisher",
+    statusText: "Publishing…",
+    description: "Take the user's built app live at a real https URL (their-name.app.thrallo.com). Use when the user asks to publish, ship, go live, or share their app publicly. The user asking IS the approval — never ask them to confirm again.",
+    costProfile: "run",
+    inputSchema: strings({
+      siteName: optionalStr("Preferred site name for the URL (slugified); defaults to the app's name"),
+      productName: optionalStr("Which product to publish when the conversation has several"),
+    }),
+    requirements: () => (publishConfigured() ? { ok: true } : { ok: false, reason: "Publishing infrastructure is not configured." }),
+    async invoke(ctx, input) {
+      return publishApp(ctx, { siteName: input.siteName || null, productName: input.productName || null });
+    },
+  });
+
+  registerCapability({
+    id: "configure_domain",
+    specialist: "Publisher",
+    statusText: "Connecting the domain…",
+    description: "Connect the user's own domain (e.g. mybusiness.com) to their published app. Returns the DNS record they must set; certificates issue automatically once DNS points at Thrallo. Requires the app to be published first.",
+    costProfile: "free",
+    inputSchema: strings({
+      domain: str("The domain to connect, e.g. mybusiness.com"),
+      productName: optionalStr("Which product's site to attach it to"),
+    }),
+    requirements: () => (publishConfigured() ? { ok: true } : { ok: false, reason: "Publishing infrastructure is not configured." }),
+    async invoke(ctx, input) {
+      return connectDomain(ctx, { domain: input.domain, productName: input.productName || null });
+    },
+  });
+
+  registerCapability({
+    id: "create_automation",
+    specialist: "Planner",
+    statusText: "Setting up the automation…",
+    description: "Create a standing automation on a connected repository: automatic review of every new pull request (kind pr_review), or a recurring scheduled task described in plain English (kind scheduled_task, runs every intervalHours). Use when the user wants something to happen automatically from now on.",
+    costProfile: "free",
+    inputSchema: strings({
+      repositoryFullName: optionalStr("owner/name of the connected repository; null if only one is connected"),
+      kind: { type: "string", enum: ["pr_review", "scheduled_task"], description: "What kind of automation" },
+      instructions: optionalStr("What the automation should focus on or do, in plain English"),
+      intervalHours: optionalNum("For scheduled tasks: how often to run, in hours (1-168)"),
+    }),
+    async invoke(ctx, input) {
+      const store = codeAgentStore();
+      const repositories = (await store.listRepositories(ctx.owner)).filter((r) => r.status === "ready");
+      let repository = null;
+      if (input.repositoryFullName) {
+        repository = repositories.find((r) => r.full_name.toLowerCase() === String(input.repositoryFullName).toLowerCase()) || null;
+        if (!repository) throw withCode(new Error(`Repository ${input.repositoryFullName} is not connected.`), "repository_not_found");
+      } else if (repositories.length === 1) {
+        repository = repositories[0];
+      } else {
+        throw withCode(new Error("Specify which connected repository this automation is for."), "ambiguous_repository");
+      }
+      if (input.kind === "pr_review" && !repository.installation_id) {
+        throw withCode(new Error("Automatic PR review needs the GitHub App connection on that repository."), "github_installation_required");
+      }
+      const parsed = parseAutomationInput({
+        kind: input.kind,
+        intervalHours: input.intervalHours ?? undefined,
+        config: { prompt: String(input.instructions || "").slice(0, 10_000) },
+      });
+      const row = await automationsStore().create(ctx.owner, {
+        ...parsed,
+        repository_id: repository.id,
+        next_run_at: parsed.kind === "scheduled_task" ? nextRunAt(parsed.interval_hours) : null,
+      });
+      await ctx.emit("run_linked", {
+        runId: null, repository: repository.full_name, mode: "automation",
+        message: parsed.kind === "pr_review"
+          ? `Every new pull request on ${repository.full_name} now gets an automatic review.`
+          : `Scheduled task created on ${repository.full_name} — every ${parsed.interval_hours}h.`,
+      });
+      return { automation: publicAutomation(row) };
     },
   });
 

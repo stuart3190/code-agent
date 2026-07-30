@@ -129,6 +129,11 @@ produces (greeting included) and for Phase 21 copy reviews.
   a hard implementation rule): every transition must direct attention, explain progress, or
   reinforce continuity. Any animation that exists only because it looks impressive is
   removed in review.
+- **The user should never wonder whether Thrallo is working** (Stuart, Phase 22 approval —
+  a hard implementation rule): every long-running action communicates meaningful progress
+  through the Lead Agent, the specialist team, or a visible state transition. Silence must
+  never be mistakable for inactivity — a capability that can take more than a moment MUST
+  emit specialist status updates while it runs.
 - **Depth**: layered soft shadows, no borders-as-boxes; hairlines at 8% ink where structure
   is needed.
 

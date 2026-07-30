@@ -53,6 +53,9 @@ export const RESTORE_ORDER = [
   "ca_memories",
   "projects",     // references ca_products -> restore after it
   "build_jobs",
+  "published_sites",
+  "custom_domains",
+  "ca_push_subscriptions",
 ];
 
 const BATCH = 500;
