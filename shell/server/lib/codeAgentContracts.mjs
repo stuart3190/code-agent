@@ -53,6 +53,8 @@ export function parseRepositoryInput(body = {}) {
 }
 
 export const PUBLISH_MODES = new Set(["require_approval", "auto_publish"]);
+export const NETWORK_POLICIES = new Set(["full", "offline"]);
+export const COMMAND_POLICIES = new Set(["standard", "restricted"]);
 
 export function parseAgentInput(body = {}) {
   const mode = String(body.mode || "agent").toLowerCase();
@@ -99,6 +101,20 @@ function parseAgentPolicy(body, { defaults }) {
       }
       return pattern;
     });
+  }
+  if (body.networkPolicy !== undefined || defaults) {
+    const value = String(body.networkPolicy || "full").toLowerCase();
+    if (!NETWORK_POLICIES.has(value)) {
+      throw new CodeAgentInputError("networkPolicy must be full or offline");
+    }
+    policy.network_policy = value;
+  }
+  if (body.commandPolicy !== undefined || defaults) {
+    const value = String(body.commandPolicy || "standard").toLowerCase();
+    if (!COMMAND_POLICIES.has(value)) {
+      throw new CodeAgentInputError("commandPolicy must be standard or restricted");
+    }
+    policy.command_policy = value;
   }
   return policy;
 }
@@ -149,6 +165,8 @@ export function publicAgent(row) {
     id: row.id, repositoryId: row.repository_id, name: row.name, mode: row.mode,
     publishMode: row.publish_mode || "require_approval",
     protectedPaths: Array.isArray(row.protected_paths) ? row.protected_paths : [],
+    networkPolicy: row.network_policy || "full",
+    commandPolicy: row.command_policy || "standard",
     archivedAt: row.archived_at, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

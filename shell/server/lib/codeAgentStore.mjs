@@ -175,7 +175,7 @@ export class MemoryCodeAgentStore {
   async createRun(owner, agent, repository, input) {
     const row = {
       id: newId(), owner, agent_id: agent.id, repository_id: repository.id,
-      resumed_from_run_id: null, sandbox_state: null, ...input,
+      resumed_from_run_id: null, sandbox_state: null, pruned_at: null, ...input,
       base_branch: repository.default_branch, work_branch: null, state: "queued",
       sandbox_id: null, snapshot_id: null, result: null, usage: {}, error_code: null, error: null,
       cancel_requested_at: null, started_at: null, finished_at: null, created_at: now(), updated_at: now(),
@@ -340,6 +340,28 @@ export class MemoryCodeAgentStore {
     return [...this.runs.values()].filter((run) => run.owner === owner
       && run.created_at >= sinceIso
       && (run.started_at || run.state !== "cancelled")).length;
+  }
+
+  async countActiveRuns(owner) {
+    return [...this.runs.values()].filter((run) => run.owner === owner
+      && ["queued", "provisioning", "indexing", "running"].includes(run.state)).length;
+  }
+
+  async listPrunableRuns(cutoffIso, limit = 50) {
+    return [...this.runs.values()]
+      .filter((run) => run.finished_at && run.finished_at < cutoffIso && !run.pruned_at)
+      .sort((a, b) => a.finished_at.localeCompare(b.finished_at))
+      .slice(0, limit);
+  }
+
+  async pruneRun(run) {
+    this.events.delete(run.id);
+    for (const [id, artifact] of this.artifacts) {
+      if (artifact.run_id === run.id) this.artifacts.delete(id);
+    }
+    const current = this.runs.get(run.id);
+    if (current) Object.assign(current, { pruned_at: now(), updated_at: now() });
+    return current || run;
   }
 
   async opsRunRows(sinceIso) {
@@ -677,6 +699,37 @@ export class SupabaseCodeAgentStore {
       .or("started_at.not.is.null,state.neq.cancelled");
     if (error) throw new Error(error.message);
     return Number(count || 0);
+  }
+
+  async countActiveRuns(owner) {
+    const { count, error } = await this.client.from("ca_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("owner", owner).in("state", ["queued", "provisioning", "indexing", "running"]);
+    if (error) throw new Error(error.message);
+    return Number(count || 0);
+  }
+
+  async listPrunableRuns(cutoffIso, limit = 50) {
+    return unwrap(await this.client.from("ca_runs").select("id,owner,finished_at")
+      .is("pruned_at", null).not("finished_at", "is", null).lt("finished_at", cutoffIso)
+      .order("finished_at").limit(limit));
+  }
+
+  async pruneRun(run) {
+    const artifacts = unwrap(await this.client.from("ca_artifacts")
+      .select("storage_key").eq("run_id", run.id).not("storage_key", "is", null));
+    const keys = artifacts.map((row) => row.storage_key).filter(Boolean);
+    if (keys.length) {
+      const { error } = await this.client.storage.from(artifactBucket()).remove(keys);
+      if (error) throw new Error(`artifact storage cleanup failed: ${error.message}`);
+    }
+    const { error: artifactError } = await this.client.from("ca_artifacts").delete().eq("run_id", run.id);
+    if (artifactError) throw new Error(artifactError.message);
+    const { error: eventError } = await this.client.from("ca_run_events").delete().eq("run_id", run.id);
+    if (eventError) throw new Error(eventError.message);
+    const { data, error } = await this.client.from("ca_runs")
+      .update({ pruned_at: now() }).eq("id", run.id).select("*").single();
+    return unwrapOne(data, error);
   }
 
   async opsRunRows(sinceIso) {

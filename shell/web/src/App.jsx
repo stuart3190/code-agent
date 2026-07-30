@@ -925,6 +925,14 @@ function AgentPolicy({ agent, onChange }) {
         <span>{auto ? "Auto-publish PRs" : "Ask before PR"}</span>
         <span className={`h-2 w-2 rounded-full ${auto ? "bg-emerald-400" : "bg-amber-400"}`} />
       </button>
+      <PolicyToggle busy={busy} value={agent.networkPolicy === "offline"}
+        onLabel="Offline sandbox" offLabel="Full network"
+        title="Offline blocks all outbound network access after checkout (Codex runs keep network)."
+        onToggle={(next) => onChange(agent.id, { networkPolicy: next ? "offline" : "full" })} />
+      <PolicyToggle busy={busy} value={agent.commandPolicy === "restricted"}
+        onLabel="Restricted commands" offLabel="Standard commands"
+        title="Restricted blocks network-transfer, remote-shell, and privilege commands in the tool loop."
+        onToggle={(next) => onChange(agent.id, { commandPolicy: next ? "restricted" : "standard" })} />
       {!pathsOpen && (
         <button onClick={() => setPathsOpen(true)} className="mt-2 text-[10px] text-slate-600 underline decoration-white/15 underline-offset-2 hover:text-slate-400">
           Protected paths {agent.protectedPaths?.length ? `(${agent.protectedPaths.length})` : ""}
@@ -943,6 +951,21 @@ function AgentPolicy({ agent, onChange }) {
         </div>
       )}
     </div>
+  );
+}
+
+function PolicyToggle({ busy, value, onLabel, offLabel, title, onToggle }) {
+  const [saving, setSaving] = useState(false);
+  async function toggle() {
+    setSaving(true);
+    try { await onToggle(!value); } finally { setSaving(false); }
+  }
+  return (
+    <button onClick={toggle} disabled={busy || saving} title={title}
+      className="mt-2 flex w-full items-center justify-between rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-white/[0.04] disabled:opacity-40">
+      <span>{value ? onLabel : offLabel}</span>
+      <span className={`h-2 w-2 rounded-full ${value ? "bg-violet-400" : "bg-slate-600"}`} />
+    </button>
   );
 }
 

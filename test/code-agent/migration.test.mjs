@@ -15,6 +15,7 @@ const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/2
 const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083259_model_routing_and_evaluations.sql", import.meta.url);
 const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730143000_subscriptions_budgets_telemetry.sql", import.meta.url);
 const phase8MigrationPath = new URL("../../supabase/migrations/20260730170000_approval_policies_resume_artifacts.sql", import.meta.url);
+const phase9MigrationPath = new URL("../../supabase/migrations/20260730200000_egress_command_policies_retention.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -209,4 +210,14 @@ test("phase 8 migration adds policies, resume lineage, and a private artifact bu
   assert.match(sql, /ca_runs_resumed_from_idx[\s\S]*where resumed_from_run_id is not null/i);
   assert.match(sql, /insert into storage\.buckets \(id, name, public\)[\s\S]*'thrallo-artifacts', false/i);
   assert.match(sql, /on conflict \(id\) do nothing/i);
+});
+
+test("phase 9 migration adds egress/command policies and retention tracking", async () => {
+  const sql = await readFile(phase9MigrationPath, "utf8");
+  assert.match(sql, /network_policy text not null default 'full'/i);
+  assert.match(sql, /network_policy in \('full', 'offline'\)/i);
+  assert.match(sql, /command_policy text not null default 'standard'/i);
+  assert.match(sql, /command_policy in \('standard', 'restricted'\)/i);
+  assert.match(sql, /add column pruned_at timestamptz/i);
+  assert.match(sql, /ca_runs_retention_idx[\s\S]*where pruned_at is null and finished_at is not null/i);
 });

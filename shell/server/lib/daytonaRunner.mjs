@@ -17,7 +17,7 @@ export function createDaytonaIndexRunner({ repository, emit = async () => {} }) 
   });
 }
 
-export async function createDaytonaRunner({ run, repository, emit }) {
+export async function createDaytonaRunner({ run, repository, emit, networkPolicy = "full" }) {
   if (!daytonaConfigured()) {
     const error = new Error("Daytona is not connected. Set DAYTONA_API_KEY on the server.");
     error.code = "daytona_setup_required";
@@ -50,14 +50,32 @@ export async function createDaytonaRunner({ run, repository, emit }) {
   const branch = `code-agent/${run.id.slice(0, 8)}`;
   await sandbox.git.createBranch(workspacePath, branch);
   await emit("repository.cloned", { branch, message: `Checked out ${repository.full_name}` });
+  await applyNetworkPolicy(sandbox, networkPolicy, emit);
 
   return runnerInterface({ daytona, sandbox, workspacePath, branch, run });
+}
+
+// The clone needs GitHub, so offline blocking happens only after checkout. Fails closed:
+// a sandbox that cannot be blocked never runs an offline-policy agent.
+async function applyNetworkPolicy(sandbox, networkPolicy, emit) {
+  if (networkPolicy !== "offline") return;
+  try {
+    await sandbox.updateNetworkSettings({ networkBlockAll: true });
+  } catch (error) {
+    throw withCode(
+      new Error(`Could not apply the offline network policy: ${error.message}`),
+      "network_policy_failed",
+    );
+  }
+  await emit("network.blocked", {
+    message: "Outbound network access is blocked for this run per the agent's policy",
+  });
 }
 
 // Re-attaches to a preserved sandbox from an earlier run so a resume keeps the workspace,
 // branch, and all uncommitted changes. Throws when the sandbox has expired; the caller
 // falls back to a clean clone.
-export async function attachDaytonaRunner({ run, previous, emit }) {
+export async function attachDaytonaRunner({ run, previous, emit, networkPolicy = "full" }) {
   if (!daytonaConfigured()) {
     const error = new Error("Daytona is not connected. Set DAYTONA_API_KEY on the server.");
     error.code = "daytona_setup_required";
@@ -86,6 +104,7 @@ export async function attachDaytonaRunner({ run, previous, emit }) {
     branch: previous.work_branch,
     message: "Reconnected to the preserved workspace",
   });
+  await applyNetworkPolicy(sandbox, networkPolicy, emit);
   return runnerInterface({ daytona, sandbox, workspacePath, branch: previous.work_branch, run });
 }
 
@@ -253,6 +272,8 @@ export async function publishDaytonaRun({ run, repository, title, body, emit = a
   const daytona = new Daytona();
   const sandbox = await daytona.get(run.sandbox_id);
   if (sandbox.state !== "started") await sandbox.start(120);
+  // Publishing needs GitHub, so lift any offline block; harmless on unblocked sandboxes.
+  try { await sandbox.updateNetworkSettings({ networkBlockAll: false }); } catch { /* full-network sandbox */ }
   const workspacePath = await resolveSandboxRepositoryPath(sandbox);
   const { token } = await createInstallationToken(repository.installation_id);
   const commitTitle = String(title || `Thrallo: ${run.prompt}`).replace(/\s+/g, " ").trim().slice(0, 120);
