@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 10 is implemented. Phase 9 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 10 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -103,6 +103,11 @@ publication, and resume.
   capabilities advertise network policies, command policies, rate limits, and 90-day
   retention; the full local verification passed with 105 Code Agent tests and four Playwright
   checks, and Buildr101 stayed healthy after the restart.
+- Phase 10 API tokens and the VS Code extension are deployed from main commit `72a840a` on
+  2026-07-30. The `api_tokens` migration is applied remotely; production capabilities
+  advertise API tokens and the extension, the token routes require authentication, and
+  Buildr101 stayed healthy after the restart. The full local verification passed with 114
+  Code Agent tests and four Playwright checks.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
