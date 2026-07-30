@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 7 is implemented. Phase 6 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 7 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -67,6 +67,16 @@ until pricing is approved, the Usage & billing workspace view, and the `ADMIN_EM
   suite passed with 63 Code Agent tests and four desktop/mobile Playwright checks. Supabase
   verification confirmed RLS enabled, no anon/authenticated table access, and service-role access
   for routing attempts and encrypted evaluation records.
+- Phase 7 subscriptions, budgets, and telemetry are deployed from main commit `2fca243` on
+  2026-07-30. The `subscriptions_budgets_telemetry` migration is applied remotely with RLS
+  enabled, zero browser grants, a restrictive deny policy, the partial Stripe-customer unique
+  index, the `billing_source` usage column, and the run-state telemetry index; the security
+  advisor reports only the pre-existing leaked-password notice. Production capabilities
+  advertise the three plans (free approved, paid pending pricing), budgets, and operational
+  telemetry; `/api/v1/billing/webhook` answers 501 while dormant and the billing and ops routes
+  require authentication. `ADMIN_EMAILS` is set to Stuart's account so the Operations view is
+  visible to him. Local verification passed with 84 Code Agent tests and four Playwright checks,
+  and Buildr101 stayed healthy after the restart.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
