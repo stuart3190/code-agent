@@ -95,6 +95,13 @@ test("repository index is encrypted, incremental, owner-scoped, and retrievable"
   assert.equal(verifyToken.path, "src/auth.js");
   assert.ok(verifyToken.references.some((reference) => reference.path === "src/app.js"));
   assert.ok([...store.symbols.values()].every((row) => !row.name_ciphertext.includes("verifyToken")));
+  const exactRepositoryMap = await retrieveRepositoryMap(
+    "owner-a",
+    repository.id,
+    "Please locate verifyToken call sites",
+    { store, limit: 1 },
+  );
+  assert.equal(exactRepositoryMap[0].name, "verifyToken");
 
   const graph = await retrieveFileGraph("owner-a", repository.id, "src/app.js", { store });
   assert.deepEqual(graph.dependencies, ["src/auth.js"]);

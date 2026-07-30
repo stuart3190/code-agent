@@ -48,7 +48,10 @@ symbol-map context injection before agent execution.
   verified against `stuart3190/code-agent`.
 - Phase 5 repository intelligence is deployed on 2026-07-30. Definitions, relationships, dependency
   graph routes, manual refresh queue, progress reporting, and agent symbol-map retrieval are
-  implemented with encrypted-at-rest source metadata and service-only graph tables.
+  implemented with encrypted-at-rest source metadata and service-only graph tables. Production
+  indexed main commit `2788881` into 353 files, 572 context chunks, 1,925 definitions, 33,441
+  relationships, and 849 dependency edges; exact definition lookup and forward/reverse file
+  dependencies were decrypted successfully through the server-only retrieval layer.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.

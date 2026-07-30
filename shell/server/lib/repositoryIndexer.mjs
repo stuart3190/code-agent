@@ -277,9 +277,26 @@ export async function retrieveRepositoryMap(owner, repositoryId, query, {
   store = repositoryIndexStore(),
   limit = 20,
 } = {}) {
-  const names = codeTokens(query).filter((token) => !/^\d+$/.test(token)).slice(0, 40);
+  const names = codeTokens(query)
+    .filter((token) => !/^\d+$/.test(token))
+    .sort((left, right) => right.length - left.length)
+    .slice(0, 40);
   const nameHashes = names.map((name) => blindIndex(name, `repository-symbol:${repositoryId}`));
-  const symbols = await store.findSymbols(owner, repositoryId, nameHashes, limit);
+  const boundedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const exactHash = nameHashes[0];
+  const exactSymbols = exactHash
+    ? await store.findSymbols(owner, repositoryId, [exactHash], boundedLimit)
+    : [];
+  const remainingHashes = nameHashes.slice(1);
+  const secondarySymbols = exactSymbols.length < boundedLimit && remainingHashes.length
+    ? await store.findSymbols(
+      owner,
+      repositoryId,
+      remainingHashes,
+      boundedLimit - exactSymbols.length,
+    )
+    : [];
+  const symbols = [...exactSymbols, ...secondarySymbols].slice(0, boundedLimit);
   if (!symbols.length) return [];
   const relations = await store.relationsForSymbols(
     owner,
