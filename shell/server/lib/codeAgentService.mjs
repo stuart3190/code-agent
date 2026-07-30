@@ -14,6 +14,12 @@ import {
   refreshCodexAuth,
 } from "./aiCredentialStore.mjs";
 import { createCodingModelForCredential } from "./modelGateway.mjs";
+import { embeddingsConfigured, embeddingModel } from "./embeddingProvider.mjs";
+import {
+  augmentPromptWithContext,
+  indexRepository,
+  retrieveRepositoryContext,
+} from "./repositoryIndexer.mjs";
 
 let timer = null;
 let working = false;
@@ -31,6 +37,12 @@ export function codeAgentCapabilities() {
       encryptedCredentialStorage: aiCredentialStorageConfigured(),
       codexDeviceLogin: aiCredentialStorageConfigured(),
       byok: aiCredentialStorageConfigured(),
+    },
+    indexing: {
+      encrypted: aiCredentialStorageConfigured(),
+      exactCodeSearch: aiCredentialStorageConfigured(),
+      semanticSearch: aiCredentialStorageConfigured() && embeddingsConfigured(),
+      embeddingModel: embeddingsConfigured() ? embeddingModel() : null,
     },
     models: [
       { id: optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"), provider: "openai", configured: openAIConfigured(), managed: true },
@@ -86,6 +98,8 @@ export async function processRun(run, {
   credentialResolver = activeAiCredential,
   credentialRefresher = refreshCodexAuth,
   modelFactory = createCodingModelForCredential,
+  repositoryIndexer = indexRepository,
+  contextRetriever = retrieveRepositoryContext,
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
@@ -103,6 +117,30 @@ export async function processRun(run, {
       git_sha: await runner.headSha(),
       metadata: { branch: run.base_branch },
     });
+    run = await store.updateRun(run, { state: "indexing" });
+    await emit("run.indexing", { branch: runner.branch, message: "Preparing repository context" });
+    let context = [];
+    try {
+      await repositoryIndexer({
+        owner: run.owner,
+        repository,
+        runner,
+        emit,
+      });
+      context = await contextRetriever(run.owner, repository.id, run.prompt);
+      await emit("context.ready", {
+        message: context.length
+          ? `Loaded ${context.length} relevant code excerpts`
+          : "Repository index is ready; no preloaded excerpts matched",
+        matches: context.length,
+      });
+    } catch (error) {
+      await emit("context.unavailable", {
+        message: `Continuing with live repository tools: ${error.message}`,
+        code: error.code || "context_unavailable",
+      });
+    }
+    run = await store.updateRun(run, { state: "running" });
     await emit("run.running", { branch: runner.branch, message: "Agent is working" });
 
     const credential = await credentialResolver(run.owner);
@@ -116,7 +154,7 @@ export async function processRun(run, {
     let result;
     if (credential.provider === "codex") {
       result = await runner.runCodex({
-        prompt: run.prompt,
+        prompt: augmentPromptWithContext(run.prompt, context),
         authJson: credential.secret,
         emit,
         isCancelled,
@@ -132,6 +170,7 @@ export async function processRun(run, {
         emit,
         isCancelled,
         provider: modelFactory(credential, run.model),
+        context,
       });
     }
     if (result.cancelled) {

@@ -4,7 +4,8 @@ import { backend } from "./lib/backend.js";
 import {
   addAgent, addRepository, cancelRun, capabilities, createRun, getLatestRun, getRun,
   connectGithubRepository, githubInstallationRepositories, githubInstallations,
-  listAgents, listRepositories, publishRun, retryRun, runArtifacts, startGithubInstallation,
+  listAgents, listRepositories, publishRun, repositoryIndex, retryRun, runArtifacts,
+  searchRepository, startGithubInstallation,
   streamRunEvents, usageSummary,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
@@ -342,6 +343,13 @@ function Repositories({ repos, caps, onAdded }) {
   const [installations, setInstallations] = useState([]);
   const [available, setAvailable] = useState([]);
   const [githubBusy, setGithubBusy] = useState(false);
+  const [indexes, setIndexes] = useState({});
+  const [searchRepoId, setSearchRepoId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchComplete, setSearchComplete] = useState(false);
 
   useEffect(() => {
     githubInstallations().then(async (result) => {
@@ -352,6 +360,19 @@ function Repositories({ repos, caps, onAdded }) {
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(repos.map(async (repo) => {
+      try { return [repo.id, (await repositoryIndex(repo.id)).index]; } catch { return [repo.id, null]; }
+    })).then((entries) => {
+      if (!cancelled) {
+        setIndexes(Object.fromEntries(entries));
+        setSearchRepoId((current) => current || repos[0]?.id || "");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [repos]);
 
   async function installGithub() {
     setGithubBusy(true); setError("");
@@ -376,6 +397,19 @@ function Repositories({ repos, caps, onAdded }) {
       setFullName(""); await onAdded(result.repository);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
+  async function searchCode(e) {
+    e.preventDefault();
+    if (!searchRepoId || !searchQuery.trim()) return;
+    setSearchBusy(true); setSearchError(""); setSearchComplete(false);
+    try {
+      const result = await searchRepository(searchRepoId, searchQuery);
+      setSearchResults(result.results);
+      setIndexes((current) => ({ ...current, [searchRepoId]: result.index }));
+    } catch (err) {
+      setSearchResults([]);
+      setSearchError(err.message);
+    } finally { setSearchBusy(false); setSearchComplete(true); }
+  }
   return (
     <div className="mx-auto max-w-5xl p-8">
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -388,10 +422,64 @@ function Repositories({ repos, caps, onAdded }) {
               <div key={repo.id} className="flex items-center gap-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
                 <span className="grid h-10 w-10 place-items-center rounded-lg bg-white/[0.05] font-mono text-slate-400">⌘</span>
                 <div><div className="text-sm text-slate-200">{repo.fullName}</div><div className="mt-1 text-[11px] text-slate-600">{repo.defaultBranch} · {repo.private ? "private" : "public"}</div></div>
-                <StatusDot ok={repo.status === "ready"} label={repo.status} className="ml-auto" />
+                <div className="ml-auto flex flex-col items-end gap-1">
+                  <StatusDot ok={repo.status === "ready"} label={repo.status} />
+                  <span className={`font-mono text-[9px] uppercase ${
+                    indexes[repo.id]?.status === "ready" ? "text-emerald-400/70" : "text-slate-700"
+                  }`}>
+                    {indexes[repo.id]?.status === "ready"
+                      ? `${indexes[repo.id].fileCount} files indexed`
+                      : indexes[repo.id]?.status === "indexing" ? "indexing" : "index after first run"}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
+          {repos.length > 0 && (
+            <form onSubmit={searchCode} className="mt-8 rounded-2xl border border-white/[0.08] bg-[#0e1117] p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-400">Encrypted hybrid index</div>
+                  <h2 className="mt-1 text-lg font-semibold text-white">Search your codebase</h2>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Find exact identifiers and semantically related code across an indexed repository.</p>
+                </div>
+                <span className="rounded-full border border-white/[0.08] px-2 py-1 font-mono text-[9px] text-slate-600">PRIVATE</span>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-[220px_1fr_auto]">
+                <select className="field" value={searchRepoId} onChange={(event) => {
+                  setSearchRepoId(event.target.value); setSearchResults([]); setSearchError(""); setSearchComplete(false);
+                }}>
+                  {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.fullName}</option>)}
+                </select>
+                <input className="field" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Where is authentication handled?" />
+                <button disabled={searchBusy || !searchQuery.trim() || indexes[searchRepoId]?.status !== "ready"}
+                  className="btn-primary !px-5 disabled:opacity-40">
+                  {searchBusy ? "Searching…" : "Search"}
+                </button>
+              </div>
+              {searchError && <p className="mt-3 text-xs text-red-300">{searchError}</p>}
+              {indexes[searchRepoId]?.status !== "ready" && (
+                <p className="mt-3 text-[10px] text-amber-300/60">Run this repository&apos;s agent once to build the first index.</p>
+              )}
+              {searchComplete && !searchError && searchResults.length === 0 && (
+                <p className="mt-3 text-xs text-slate-600">No matching code was found.</p>
+              )}
+              {searchResults.length > 0 && (
+                <div className="mt-4 grid gap-3">
+                  {searchResults.map((result, index) => (
+                    <div key={`${result.path}-${result.startLine}-${index}`} className="overflow-hidden rounded-xl border border-white/[0.07] bg-black/15">
+                      <div className="flex items-center border-b border-white/[0.06] px-3 py-2">
+                        <span className="truncate font-mono text-[10px] text-cyan-300/80">{result.path}</span>
+                        <span className="ml-auto pl-3 font-mono text-[9px] text-slate-700">L{result.startLine}–{result.endLine}</span>
+                      </div>
+                      <pre className="max-h-56 overflow-auto whitespace-pre-wrap p-3 font-mono text-[10px] leading-5 text-slate-500">{result.content}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </form>
+          )}
           {available.length > 0 && (
             <div className="mt-8">
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">

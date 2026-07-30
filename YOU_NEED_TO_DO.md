@@ -42,15 +42,14 @@ values. Codex will keep everything else moving locally.
 - [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.
 - [x] In Supabase Authentication → URL Configuration, set both the Site URL and an allowed redirect
   URL to `https://app.thrallo.com`.
-- [ ] In Supabase Authentication security settings, enable leaked-password protection before
-  public sign-ups. This requires the project owner and is the only remaining advisor action that
-  Codex cannot complete.
+- [ ] Upgrade Supabase before public sign-ups if you want leaked-password protection. Supabase
+  currently exposes this setting only on a paid plan; it is not blocking development or private use.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.
 
 ## Optional: use your ChatGPT Codex allowance
 
-- [ ] In Thrallo, open **Settings**, click **Continue with Codex**, open the OpenAI sign-in page,
+- [x] In Thrallo, open **Settings**, click **Continue with Codex**, open the OpenAI sign-in page,
   enter the one-time code, and approve the account. This is per Thrallo user and does not require
   you to create an OAuth application or paste an API key.

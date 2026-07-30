@@ -30,6 +30,7 @@ test("GitHub App runs wait for approval before publishing", async () => {
   });
 
   let disposed = false;
+  let receivedContext = null;
   const waiting = await processRun(run, {
     runnerFactory: async () => ({
       id: "sandbox-1",
@@ -39,20 +40,28 @@ test("GitHub App runs wait for approval before publishing", async () => {
       status: async () => ({ output: " M a.js", exitCode: 0 }),
       dispose: async () => { disposed = true; },
     }),
-    agentRunner: async () => ({
+    agentRunner: async ({ context }) => {
+      receivedContext = context;
+      return ({
       summary: "Fixed the bug",
       diff: "diff --git a/a.js b/a.js\n+fixed",
       status: " M a.js",
       provider: "openai",
       model: "test-model",
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-    }),
+      });
+    },
     modelFactory: () => ({ id: "test", model: "test-model" }),
+    repositoryIndexer: async () => ({ status: "ready" }),
+    contextRetriever: async () => [{
+      path: "src/a.js", startLine: 1, endLine: 2, language: "javascript", content: "const fixed = true;",
+    }],
   });
 
   assert.equal(waiting.state, "waiting_for_approval");
   assert.equal(waiting.result.approval.action, "create_pull_request");
   assert.equal(disposed, false);
+  assert.equal(receivedContext[0].path, "src/a.js");
   assert.equal((await store.listArtifacts("owner", run.id)).length, 3);
 
   const published = await approveRunPublication("owner", run.id, {}, {

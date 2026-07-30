@@ -30,6 +30,14 @@ export function decryptSecret(stored) {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
 
+export function blindIndex(value, namespace = "default") {
+  return crypto.createHmac("sha256", encryptionKey())
+    .update(String(namespace))
+    .update("\0")
+    .update(String(value))
+    .digest("hex");
+}
+
 export function secretHint(value) {
   const text = String(value);
   if (text.length <= 8) return `••••${text.slice(-2)}`;

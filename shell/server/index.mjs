@@ -60,7 +60,7 @@ import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRu
 import {
   handleAgents, handleCodeAgentCapabilities, handleLatestRunGet, handleRepositories, handleRunCancel,
   handleRunArtifacts, handleRunCreate, handleRunEvents, handleRunGet, handleRunPublish,
-  handleRunRetry, handleUsage,
+  handleRepositoryIndexGet, handleRepositorySearch, handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
 import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentService.mjs";
@@ -287,6 +287,20 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/repositories" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRepositories(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
+    }
+    const repositoryIndexMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/index$/i);
+    if (repositoryIndexMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositoryIndexGet(req, res, { owner, repositoryId: repositoryIndexMatch[1] });
+    }
+    const repositorySearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/search$/i);
+    if (repositorySearchMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRepositorySearch(req, res, {
+        owner,
+        repositoryId: repositorySearchMatch[1],
+        body: await readJson(req, BODY_LIMITS.standard),
+      });
     }
     if (p === "/api/v1/ai/connections" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

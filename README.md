@@ -27,6 +27,9 @@ history. Do not point it at Buildr101 production data or credentials.
   Anthropic BYOK, and managed-provider selection.
 - Codex subscription runs inside the isolated Daytona workspace with ephemeral auth injection and
   guaranteed credential cleanup before the workspace is preserved or discarded.
+- Incremental repository indexing with AES-GCM encrypted paths/source, HMAC exact-identifier
+  lookup, OpenAI code embeddings, hybrid retrieval, and relevant context injection before each run.
+- Owner-authenticated repository index status and code search in the web workspace.
 - Bounded coding loop, cancellation, stale-run recovery, clean-baseline retry, checkpoints,
   durable diff/log/report artifacts, terminal states, setup diagnostics, and usage capture.
 - Functional usage dashboard for model tokens and sandbox compute.
@@ -69,9 +72,9 @@ tests, then creates a production web build.
 ## Roadmap
 
 Completed: encrypted per-user Codex, OpenAI, and Anthropic connections with selectable managed
-routing.
+routing; encrypted incremental hybrid repository indexing and context retrieval.
 
-1. Hybrid repository indexer, incremental embeddings, symbol graph, and context retrieval.
+1. Add a richer language-aware symbol/reference graph and repository reindex controls.
 2. Add Gemini, managed cost/latency routing, and provider evaluation suites.
 3. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
 4. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.

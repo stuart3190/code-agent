@@ -1,4 +1,5 @@
 import { createCodingModel } from "./modelGateway.mjs";
+import { augmentPromptWithContext } from "./repositoryIndexer.mjs";
 
 const MAX_TURNS = 25;
 
@@ -32,9 +33,9 @@ You may edit files and run non-interactive commands. Never attempt to access cre
 Run relevant tests or builds before finishing. Your final response must summarize the outcome, verification, and any genuine remaining limitation.
 Do not claim success when tests fail.`;
 
-export async function runCodingAgent({ run, runner, emit, isCancelled, provider = null }) {
+export async function runCodingAgent({ run, runner, emit, isCancelled, provider = null, context = [] }) {
   const model = provider || createCodingModel(run.model);
-  const input = [{ role: "user", content: run.prompt }];
+  const input = [{ role: "user", content: augmentPromptWithContext(run.prompt, context) }];
   const usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 };
 
   for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
