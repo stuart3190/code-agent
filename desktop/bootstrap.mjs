@@ -108,6 +108,20 @@ export async function prepare({ log = console.log } = {}) {
   rmSync(path.join(CHECKOUT_DIR, "extensions", "copilot"), { recursive: true, force: true });
   log("removed upstream copilot built-in extension");
 
+  // The packaging pipeline hard-requires the copilot builtin in one place; make that step
+  // tolerate its removal. Idempotent text patch, applied only when the guard is absent.
+  const copilotLibPath = path.join(CHECKOUT_DIR, "build", "lib", "copilot.ts");
+  const copilotLib = readFileSync(copilotLibPath, "utf8");
+  const guard = "\n\tif (!fs.existsSync(builtInCopilotExtensionDir)) { return; } // thrallo: copilot builtin removed";
+  const shimSignature = "export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string, builtInCopilotExtensionDir: string, appNodeModulesDir: string): void {";
+  if (!copilotLib.includes("thrallo: copilot builtin removed")) {
+    if (!copilotLib.includes(shimSignature)) {
+      throw new Error("copilot.ts shim signature changed upstream; update the bootstrap patch");
+    }
+    writeFileSync(copilotLibPath, copilotLib.replace(shimSignature, shimSignature + guard));
+    log("patched build/lib/copilot.ts to tolerate the removed builtin");
+  }
+
   const builtinDir = path.join(CHECKOUT_DIR, "extensions", "thrallo");
   rmSync(builtinDir, { recursive: true, force: true });
   cpSync(path.join(REPO_ROOT, "editor", "vscode"), builtinDir, {
