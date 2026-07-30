@@ -27,6 +27,10 @@ export async function capabilities() {
 
 export const listRepositories = () => request("/api/v1/repositories");
 export const addRepository = (body) => request("/api/v1/repositories", { method: "POST", body: JSON.stringify(body) });
+export const repositoryIndex = (repositoryId) => request(`/api/v1/repositories/${repositoryId}/index`);
+export const searchRepository = (repositoryId, query) => request(`/api/v1/repositories/${repositoryId}/search`, {
+  method: "POST", body: JSON.stringify({ query }),
+});
 export const listAgents = () => request("/api/v1/agents");
 export const addAgent = (body) => request("/api/v1/agents", { method: "POST", body: JSON.stringify(body) });
 export const createRun = (agentId, body) => request(`/api/v1/agents/${agentId}/runs`, {

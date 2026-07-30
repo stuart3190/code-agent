@@ -35,11 +35,20 @@ CODE_AGENT_STANDALONE=on
 CODE_AGENT_STORE=supabase
 CODE_AGENT_WORKER=on
 PLATFORM_ENC_KEY=<32 random bytes encoded as 64 hex characters>
+CODE_AGENT_EMBEDDING_MODEL=text-embedding-3-small
+CODE_AGENT_INDEX_MAX_FILES=600
+CODE_AGENT_INDEX_MAX_BYTES=10000000
+CODE_AGENT_INDEX_MAX_FILE_BYTES=350000
 ```
 
 `@openai/codex` is pinned in the root production dependencies. The server uses its app-server
 protocol for device sign-in; user authentication state is encrypted with `PLATFORM_ENC_KEY`.
 Never copy a developer's local Codex login into production.
+
+The same encryption key protects repository paths and source excerpts and derives scoped HMAC
+blind indexes. `OPENAI_API_KEY` enables semantic embeddings; if embedding generation is temporarily
+unavailable, agent runs continue with live workspace tools and exact lookup remains available for
+an already-built index.
 
 ## Verification
 

@@ -60,6 +60,20 @@ export async function createDaytonaRunner({ run, repository, emit }) {
       );
       return commandResult(result);
     },
+    async listIndexFiles() {
+      const result = await sandbox.process.executeCommand(
+        "git ls-files -co --exclude-standard -z",
+        workspacePath, undefined, 30,
+      );
+      const checked = commandResult(result);
+      return checked.output.split("\0").filter(Boolean);
+    },
+    async readIndexFile(path, maxBytes = 350_000) {
+      const safe = safeRelative(path);
+      const buffer = await sandbox.fs.downloadFile(`${workspacePath}/${safe}`);
+      if (buffer.length > maxBytes || buffer.subarray(0, 8_192).includes(0)) return null;
+      return { content: buffer.toString("utf8"), sizeBytes: buffer.length };
+    },
     async readFile(path) {
       const buffer = await sandbox.fs.downloadFile(`${workspacePath}/${safeRelative(path)}`);
       return buffer.toString("utf8").slice(0, 200_000);

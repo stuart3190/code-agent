@@ -1,11 +1,16 @@
 import {
-  CodeAgentInputError, parseAgentInput, parseRepositoryInput, parseRunInput,
+  CodeAgentInputError, parseAgentInput, parseRepositoryInput, parseRunInput, requiredString,
   publicAgent, publicRepository, publicRun, TERMINAL_RUN_STATES,
 } from "../lib/codeAgentContracts.mjs";
 import { codeAgentStore } from "../lib/codeAgentStore.mjs";
 import {
   approveRunPublication, codeAgentCapabilities, discardRunSandbox,
 } from "../lib/codeAgentService.mjs";
+import {
+  publicIndexStatus,
+  repositoryIndexStore,
+} from "../lib/repositoryIndexStore.mjs";
+import { retrieveRepositoryContext } from "../lib/repositoryIndexer.mjs";
 
 export function handleCodeAgentCapabilities(_req, res) {
   sendJson(res, 200, codeAgentCapabilities());
@@ -18,6 +23,40 @@ export async function handleRepositories(req, res, { owner, method, body }) {
   }
   const repository = await store.createRepository(owner.id, parseRepositoryInput(body));
   return sendJson(res, 201, { repository: publicRepository(repository) });
+}
+
+export async function handleRepositoryIndexGet(_req, res, { owner, repositoryId }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  const index = await repositoryIndexStore().getIndex(owner.id, repositoryId);
+  return sendJson(res, 200, { index: publicIndexStatus(index) });
+}
+
+export async function handleRepositorySearch(_req, res, { owner, repositoryId, body }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  const index = await repositoryIndexStore().getIndex(owner.id, repositoryId);
+  if (index?.status !== "ready") {
+    throw new CodeAgentInputError(
+      "Run this repository's agent once to build its code index.",
+      409,
+      "repository_index_not_ready",
+    );
+  }
+  const query = requiredString(body?.query, "query", { max: 2_000 });
+  const results = await retrieveRepositoryContext(owner.id, repositoryId, query, { limit: 20 });
+  return sendJson(res, 200, {
+    query,
+    index: publicIndexStatus(index),
+    results: results.map((result) => ({
+      path: result.path,
+      language: result.language,
+      startLine: result.startLine,
+      endLine: result.endLine,
+      content: result.content,
+      score: result.score,
+    })),
+  });
 }
 
 export async function handleAgents(req, res, { owner, method, body }) {

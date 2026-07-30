@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 3 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 4 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -12,14 +12,19 @@ is `https://github.com/stuart3190/code-agent`. The production repository-to-pull
 completed on 2026-07-29 as PR #2, including Daytona execution, explicit publication approval,
 GitHub branch push, pull-request creation, and passing GitHub Actions verification. Phase 3 adds
 encrypted per-user Codex device sign-in, OpenAI and Anthropic BYOK, managed-provider selection,
-and isolated Codex subscription execution.
+and isolated Codex subscription execution. Phase 4 adds bounded incremental repository scanning,
+AES-GCM encrypted paths and source excerpts, scoped HMAC exact-code lookup, 1536-dimension OpenAI
+embeddings, database-side hybrid ranking, owner-authenticated code search, and relevant context
+injection before agent execution.
 
 ## Verification state
 
 - `npm run verify` passes locally and in GitHub Actions.
 - Dedicated Supabase project `Code Agent` (`zczgvcsokfafuyognvwx`) is active and healthy in
   organization `nuzfrbtaqkoemvdajzfh`, region `eu-west-1`.
-- The eight Code Agent migrations are applied remotely. All 14 tables have RLS. Browser roles have
+- The nine Code Agent migrations are applied remotely. The repository index tables have restrictive
+  RLS and no browser grants; hybrid search is executable only by the service role. All control-plane
+  tables have RLS. Browser roles have
   no webhook-ledger or AI-credential grants, owner-readable policies reject anonymous identities, and
   Performance Advisor reports no missing foreign-key indexes. Unused-index info notices are
   expected until the young project receives traffic.
@@ -31,9 +36,13 @@ and isolated Codex subscription execution.
   service `thrallo-shell`, private port `8788`, and public origin `https://app.thrallo.com`.
 - Production service and Caddy routes were installed on 2026-07-29. Internal `/api/health` and
   `/api/v1/capabilities` are green, and Buildr101 remained healthy after the proxy reload.
-- Phase 3 was deployed from commit `8dd6d7d` on 2026-07-29. Production reports encrypted credential
+- Phase 3 was deployed from main commit `8539b2f` on 2026-07-29. Production reports encrypted credential
   storage, Codex device login, and BYOK as enabled. A real app-server device flow and the complete
   authenticated start/cancel HTTP route both returned `auth.openai.com` and cleaned up successfully.
+- Phase 4 repository indexing is deployed on 2026-07-30. A paid
+  `text-embedding-3-small` call returned one 1536-dimension vector, the database hybrid-search
+  transaction returned the expected match, and the production repository index/search route is
+  verified against `stuart3190/code-agent`.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
@@ -50,8 +59,8 @@ and isolated Codex subscription execution.
 
 ## Next implementation slice
 
-Build incremental repository indexing and context retrieval, followed by richer managed routing,
-provider evaluation, and operational telemetry.
+Build richer language-aware symbol/reference navigation, followed by managed routing, provider
+evaluation, subscription controls, and operational telemetry.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
 

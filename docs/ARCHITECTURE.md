@@ -9,6 +9,7 @@ React workspace
   -> queued ca_runs row
   -> single-claim worker
   -> Daytona sandbox + dedicated git branch
+  -> encrypted incremental repository index + hybrid context retrieval
   -> commercial model adapter
   -> strict coding tools
   -> ordered run events + final diff/status
@@ -36,6 +37,14 @@ Completed runs persist separate diff, git-status, and summary artifacts plus nor
 records. Stale active runs are marked interrupted on worker startup and can be retried from a clean
 repository baseline.
 
+Repository paths and source excerpts are encrypted with AES-256-GCM before persistence. Stable
+HMAC blind indexes support exact identifier lookup without storing plaintext tokens. Semantic
+vectors use `text-embedding-3-small` at 1536 dimensions, and a service-role-only database function
+combines token and cosine ranks. The worker indexes only bounded, Git-visible text files, skips
+generated outputs and lockfiles, reuses unchanged files by content hash, and skips the entire pass
+when the Git head and embedding model are current. Retrieved excerpts are marked as untrusted
+source context, and the agent must verify them against the live sandbox before editing.
+
 Production uses `CODE_AGENT_STORE=supabase`. `memory` exists for local interface work and fast unit
 tests only; it intentionally does not survive a process restart.
 
@@ -55,14 +64,14 @@ repositories. Raw payloads have no browser grants and a restrictive RLS deny pol
 ## Current state machine
 
 ```text
-queued -> provisioning -> running -> succeeded
-    |          |            |
-    +----------+------------+-> failed
-    +----------+------------+-> cancelled
+queued -> provisioning -> indexing -> running -> succeeded
+    |          |             |          |
+    +----------+-------------+----------+-> failed
+    +----------+-------------+----------+-> cancelled
 ```
 
-The schema already reserves indexing, approval, user-wait, interruption, checkpoints, artifacts,
-usage records, and encrypted-path index tables for the next slices.
+The schema and service implement indexing, approval, interruption, checkpoints, artifacts, usage
+records, and encrypted repository context. User-wait and richer resume flows remain reserved.
 
 ## Model loop
 
@@ -82,6 +91,6 @@ call. Commands are bounded by a 600-second maximum and repository paths reject t
 - Sandboxed network egress allowlist and policy approvals.
 - Gemini, encrypted per-user BYOK, and managed provider-routing policy.
 - Artifact object storage and checkpoint resume.
-- Incremental repository indexer and symbol graph.
+- Language-aware symbol/reference graph beyond the current hashed symbol extraction.
 - Billing, budgets, abuse protection, observability, retention controls, and disaster recovery.
 - Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.
