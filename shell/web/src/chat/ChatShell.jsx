@@ -11,7 +11,7 @@ import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
-  streamConversationEvents, usageSummary,
+  streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications,
 } from "../lib/codeAgentApi.js";
 import {
   applyEvent, emptyConversationView, replayEvents, railState,
@@ -282,6 +282,14 @@ function ThreadItem({ item, showWho, onOpenPreview }) {
   if (item.kind === "receipt") {
     return <div className="ct-receipt"><span className="ct-rcheck">✓</span> {item.text}</div>;
   }
+  if (item.kind === "published") {
+    return (
+      <div className="ct-receipt">
+        <span className="ct-rcheck">✓</span> {item.text}
+        {item.url && <a href={item.url} target="_blank" rel="noreferrer noopener" style={{ color: "var(--accent)", textDecoration: "none" }}>Open ↗</a>}
+      </div>
+    );
+  }
   if (item.kind === "error") {
     return <div className="ct-error">Something went wrong: {item.text} — say “try again” and I will.</div>;
   }
@@ -407,6 +415,7 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
             <a className="ct-btn-quiet" href="/console" style={{ textDecoration: "none" }}>Manage</a>
           </div>
         </div>
+        <NotificationSettings />
         <div className="ct-set-group">
           <div className="ct-set-label">Appearance</div>
           <div className="ct-set-row">
@@ -419,6 +428,57 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
         </div>
       </div>
     </aside>
+  );
+}
+
+// Browser notifications need a user gesture + permission prompt, so this one row lives in
+// the sheet (like credentials). Everything about WHEN to notify stays conversational —
+// Thrallo only speaks up when the user is away and something needs them.
+function NotificationSettings() {
+  const supported = "serviceWorker" in navigator && "PushManager" in window;
+  const [state, setState] = useState("idle"); // idle | on | busy | unavailable
+  useEffect(() => {
+    if (!supported) { setState("unavailable"); return; }
+    navigator.serviceWorker.getRegistration().then(async (reg) => {
+      const sub = await reg?.pushManager?.getSubscription();
+      if (sub) setState("on");
+    }).catch(() => {});
+  }, [supported]);
+
+  const enable = async () => {
+    setState("busy");
+    try {
+      const config = await notificationsConfig();
+      if (!config.vapidPublicKey) { setState("unavailable"); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { setState("idle"); return; }
+      const raw = atob(config.vapidPublicKey.replace(/-/g, "+").replace(/_/g, "/"));
+      const key = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+      const subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await subscribeNotifications(subscription.toJSON());
+      setState("on");
+    } catch {
+      setState("idle");
+    }
+  };
+
+  return (
+    <div className="ct-set-group">
+      <div className="ct-set-label">Notifications</div>
+      <div className="ct-set-row">
+        <div>When you're away<div className="ct-hint">
+          {state === "on" ? "I'll let you know when something needs you." :
+            state === "unavailable" ? "Not available in this browser yet." :
+            "Previews ready, questions, and finished work."}
+        </div></div>
+        {state === "on"
+          ? <span className="ct-hint" style={{ color: "var(--good)", fontWeight: 700 }}>On</span>
+          : <button className="ct-btn-quiet" disabled={state !== "idle"} onClick={enable}>
+              {state === "busy" ? "Enabling…" : "Enable"}
+            </button>}
+      </div>
+    </div>
   );
 }
 

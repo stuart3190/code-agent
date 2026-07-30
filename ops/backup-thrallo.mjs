@@ -56,6 +56,9 @@ export const CA_TABLES = [
   "ca_memories",
   "projects",
   "build_jobs",
+  "published_sites",
+  "custom_domains",
+  "ca_push_subscriptions",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";

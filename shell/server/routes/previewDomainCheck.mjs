@@ -17,28 +17,45 @@ const json = (res, code, obj) => {
 };
 
 const previewSuffix = () => (process.env.PREVIEW_DOMAIN_SUFFIX || "preview.thrallo.com").toLowerCase();
+const appSuffix = () => (process.env.APP_DOMAIN_SUFFIX || "app.thrallo.com").toLowerCase();
 const LABEL_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+async function labelExists(label, fetchImpl) {
+  const base = process.env.PROVISIOND_URL;
+  if (!LABEL_RE.test(label) || !base) return false;
+  try {
+    const r = await fetchImpl(`${base}/exists?label=${encodeURIComponent(label)}`, {
+      headers: { Authorization: `Bearer ${process.env.PROVISIOND_TOKEN || ""}` },
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!r.ok) return false;
+    const data = await r.json().catch(() => ({}));
+    return data.exists === true;
+  } catch {
+    return false;
+  }
+}
+
+// Thrallo custom domains (Phase 22): approved once the custom_domains row exists.
+async function thralloCustomDomain(domain) {
+  try {
+    const { serviceClient } = await import("../lib/supabase.mjs");
+    const { data } = await serviceClient().from("custom_domains")
+      .select("domain").eq("domain", domain).maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
+}
 
 export async function previewDomainAllowed(domain, { fetchImpl = fetch } = {}) {
   const d = String(domain || "").trim().toLowerCase();
-  const suffix = `.${previewSuffix()}`;
 
-  if (d.endsWith(suffix)) {
-    const label = d.slice(0, -suffix.length);
-    const base = process.env.PROVISIOND_URL;
-    if (!LABEL_RE.test(label) || !base) return false;
-    try {
-      const r = await fetchImpl(`${base}/exists?label=${encodeURIComponent(label)}`, {
-        headers: { Authorization: `Bearer ${process.env.PROVISIOND_TOKEN || ""}` },
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!r.ok) return false;
-      const data = await r.json().catch(() => ({}));
-      return data.exists === true;
-    } catch {
-      return false;
-    }
+  for (const suffix of [`.${previewSuffix()}`, `.${appSuffix()}`]) {
+    if (d.endsWith(suffix)) return labelExists(d.slice(0, -suffix.length), fetchImpl);
   }
+
+  if (await thralloCustomDomain(d)) return true;
 
   const legacy = process.env.LEGACY_DOMAIN_CHECK_URL;
   if (legacy) {

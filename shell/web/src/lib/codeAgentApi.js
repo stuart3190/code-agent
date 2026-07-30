@@ -89,6 +89,10 @@ export const sendConversationMessage = (conversationId, text) =>
   request(`/api/v1/conversations/${conversationId}/messages`, {
     method: "POST", body: JSON.stringify({ text }),
   });
+export const notificationsConfig = () => request("/api/v1/notifications/config");
+export const subscribeNotifications = (subscription) => request("/api/v1/notifications/subscribe", {
+  method: "POST", body: JSON.stringify({ subscription }),
+});
 export async function streamConversationEvents(conversationId, onEvent, { signal, after = 0 } = {}) {
   const token = await accessToken();
   const response = await fetch(`/api/v1/conversations/${conversationId}/events?after=${after}`, {

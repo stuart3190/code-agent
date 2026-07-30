@@ -74,6 +74,13 @@ export function applyEvent(view, event) {
       next.previewUrl = payload.url || next.previewUrl;
       push({ kind: "preview", url: payload.url, projectId: payload.projectId || null });
       break;
+    case "published":
+      push({
+        kind: "published",
+        url: payload.url,
+        text: payload.note || `Live at ${String(payload.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
+      });
+      break;
     case "question_asked":
       push({ kind: "question", question: payload.question || "", consequence: payload.businessConsequence || "" });
       next.waiting = true;

@@ -94,6 +94,9 @@ import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } fro
 import {
   handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
 } from "./routes/conversations.mjs";
+import {
+  notificationChannels, vapidPublicKey, saveSubscription, removeSubscription,
+} from "./lib/notifications/notificationService.mjs";
 import { startLeadAgentRecovery, stopLeadAgentRecovery } from "./lib/leadAgentService.mjs";
 import { startAutomationSweeper, stopAutomationSweeper } from "./lib/automationService.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
@@ -505,6 +508,30 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/usage" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
+    }
+    if (p === "/api/v1/notifications/config" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ vapidPublicKey: vapidPublicKey(), channels: notificationChannels() }));
+    }
+    if (p === "/api/v1/notifications/subscribe" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      try {
+        const out = await saveSubscription(owner.id, body?.subscription);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(out));
+      } catch (error) {
+        res.writeHead(error.status || 500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: error.message }));
+      }
+    }
+    if (p === "/api/v1/notifications/unsubscribe" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      const out = await removeSubscription(owner.id, body?.endpoint);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify(out));
     }
     if (p === "/api/v1/conversations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
