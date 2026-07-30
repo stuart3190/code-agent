@@ -7,6 +7,19 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 20 (v2) — design system + wireframes — is implemented and live at
+https://app.thrallo.com/design/ (static, unlinked, noindex): `docs/DESIGN.md` is the
+experience brief (permanent UI = exactly conversation + living agent rail + preview +
+settings sheet; the rail is ONE surface with three states empty→team→team+preview; preview
+is the hero; approvals/questions are in-thread cards; ⌘K hides the power; explicit removals
+listed), canonical tokens at `shell/web/src/theme/tokens.css` (light default + dark, violet
+accent + specialist hues, Space Grotesk/Manrope — NOT imported by App.jsx yet), and a
+self-contained clickable prototype at `shell/web/public/design/` (four scenes incl. an
+auto-choreographed Build→Preview replay of the real Phase-19 event vocabulary, mobile
+frames, settings sheet, palette, publish flow, dark toggle; token parity + self-containment
+guarded by test). PR #44, main `2141c82`, verify 179/179. **Awaiting Stuart's wireframe
+approval — the Phase 20 gate — before Phase 21 builds the production UI.**
+
 Phase 19 (v2) — app builds on Thrallo infrastructure — is implemented and live-proven
 (2026-07-30): the Buildr generation pipeline runs entirely on Thrallo. `projects` +
 `build_jobs` live in Thrallo's own Supabase (service-role only); the legacy credit ledger is
@@ -252,10 +265,10 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 20 (v2 roadmap): design system + wireframes — theme tokens (light default), component
-spec for the conversational shell, clickable desktop + mobile wireframes. **Blocked on
-Stuart's Phase 19 approval, and Phase 20 itself ends in a Stuart wireframe-approval gate —
-per-phase gates are standing policy.** Roadmap substitutions require asking Stuart first.
+Phase 21 (v2 roadmap): the conversation-first web UI rebuild at `/` (console moves to
+`/console`), built from the approved Phase 20 wireframes + tokens. **Blocked on Stuart's
+Phase 20 wireframe approval — per-phase gates are standing policy.** Roadmap substitutions
+require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
