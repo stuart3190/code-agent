@@ -1,0 +1,90 @@
+/* Thrallo design tokens — Phase 20 (docs/DESIGN.md is the experience brief).
+ * Light is the default (Principle 6); dark is a first-class variant via [data-theme="dark"].
+ * The /design prototype inlines these same values; test/code-agent/design-tokens.test.mjs
+ * fails the build if the two drift. Phase 21 imports this file — App.jsx does not (yet). */
+
+:root {
+  /* canvas + ink */
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --surface-2: #f4f3f0;
+  --ink: #1b1826;
+  --ink-2: #5f5b6b;
+  --ink-3: #9b97a6;
+  --line: rgba(27, 24, 38, 0.08);
+
+  /* the one accent (Lead Agent, primary actions, focus) */
+  --accent: #6a5ae0;
+  --accent-strong: #5847d1;
+  --accent-soft: rgba(106, 90, 224, 0.1);
+  --accent-ink: #ffffff;
+
+  /* semantic */
+  --good: #1f9d63;
+  --warn: #c77e1a;
+  --bad: #d64545;
+
+  /* specialist identity hues (quiet, avatar dots + status accents) */
+  --agent-lead: #6a5ae0;
+  --agent-planner: #0ea5e9;
+  --agent-designer: #ec4899;
+  --agent-builder: #f59e0b;
+  --agent-tester: #10b981;
+  --agent-publisher: #6366f1;
+
+  /* type */
+  --font-ui: "Manrope Variable", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk Variable", "Space Grotesk", var(--font-ui);
+  --text-display: 32px;
+  --text-title: 20px;
+  --text-body: 15.5px;
+  --text-small: 13px;
+  --text-micro: 11.5px;
+  --leading-body: 1.6;
+
+  /* shape */
+  --radius-chip: 10px;
+  --radius-bubble: 14px;
+  --radius-card: 18px;
+  --radius-pane: 24px;
+
+  /* spacing scale (4-base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* depth — layered soft shadows, hairlines only where structure needs them */
+  --shadow-1: 0 1px 2px rgba(27, 24, 38, 0.05), 0 2px 8px rgba(27, 24, 38, 0.04);
+  --shadow-2: 0 2px 6px rgba(27, 24, 38, 0.06), 0 12px 32px rgba(27, 24, 38, 0.08);
+  --shadow-3: 0 8px 24px rgba(27, 24, 38, 0.1), 0 24px 64px rgba(27, 24, 38, 0.12);
+
+  /* motion — the product feeling alive */
+  --dur-1: 150ms;
+  --dur-2: 240ms;
+  --dur-3: 420ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.4, 1);
+}
+
+[data-theme="dark"] {
+  --bg: #121017;
+  --surface: #1a1722;
+  --surface-2: #221e2d;
+  --ink: #f2f0f7;
+  --ink-2: #a9a4b8;
+  --ink-3: #6f6a80;
+  --line: rgba(242, 240, 247, 0.09);
+  --accent: #8577ec;
+  --accent-strong: #9a8df2;
+  --accent-soft: rgba(133, 119, 236, 0.16);
+  --accent-ink: #16131f;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.38);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.5);
+}
