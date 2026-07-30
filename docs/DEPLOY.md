@@ -39,6 +39,7 @@ CODE_AGENT_EMBEDDING_MODEL=text-embedding-3-small
 CODE_AGENT_INDEX_MAX_FILES=600
 CODE_AGENT_INDEX_MAX_BYTES=10000000
 CODE_AGENT_INDEX_MAX_FILE_BYTES=350000
+CODE_AGENT_INDEX_POLL_MS=2500
 ```
 
 `@openai/codex` is pinned in the root production dependencies. The server uses its app-server

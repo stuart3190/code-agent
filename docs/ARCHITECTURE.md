@@ -9,7 +9,7 @@ React workspace
   -> queued ca_runs row
   -> single-claim worker
   -> Daytona sandbox + dedicated git branch
-  -> encrypted incremental repository index + hybrid context retrieval
+  -> encrypted incremental repository index + symbol/reference graph + hybrid context retrieval
   -> commercial model adapter
   -> strict coding tools
   -> ordered run events + final diff/status
@@ -44,6 +44,13 @@ combines token and cosine ranks. The worker indexes only bounded, Git-visible te
 generated outputs and lockfiles, reuses unchanged files by content hash, and skips the entire pass
 when the Git head and embedding model are current. Retrieved excerpts are marked as untrusted
 source context, and the agent must verify them against the live sandbox before editing.
+
+Definitions, signatures, and qualified names are also AES-GCM encrypted. HMAC hashes make
+owner-scoped exact symbol lookup possible without plaintext names. Relationship rows connect
+imports, calls, references, inheritance, and file dependencies using opaque IDs and hashes. The
+browser receives only decrypted results from owner-authenticated routes. Manual refreshes and
+default-branch GitHub pushes enter a durable `FOR UPDATE SKIP LOCKED` queue; a newer push received
+during indexing remains queued for a follow-up pass.
 
 Production uses `CODE_AGENT_STORE=supabase`. `memory` exists for local interface work and fast unit
 tests only; it intentionally does not survive a process restart.
@@ -91,6 +98,5 @@ call. Commands are bounded by a 600-second maximum and repository paths reject t
 - Sandboxed network egress allowlist and policy approvals.
 - Gemini, encrypted per-user BYOK, and managed provider-routing policy.
 - Artifact object storage and checkpoint resume.
-- Language-aware symbol/reference graph beyond the current hashed symbol extraction.
 - Billing, budgets, abuse protection, observability, retention controls, and disaster recovery.
 - Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.

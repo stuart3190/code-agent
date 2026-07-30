@@ -19,6 +19,7 @@ import {
   augmentPromptWithContext,
   indexRepository,
   retrieveRepositoryContext,
+  retrieveRepositoryMap,
 } from "./repositoryIndexer.mjs";
 
 let timer = null;
@@ -42,6 +43,10 @@ export function codeAgentCapabilities() {
       encrypted: aiCredentialStorageConfigured(),
       exactCodeSearch: aiCredentialStorageConfigured(),
       semanticSearch: aiCredentialStorageConfigured() && embeddingsConfigured(),
+      symbolGraph: aiCredentialStorageConfigured(),
+      definitionReferences: aiCredentialStorageConfigured(),
+      automaticRefresh: githubWebhookConfigured() && daytonaConfigured(),
+      manualRefresh: daytonaConfigured(),
       embeddingModel: embeddingsConfigured() ? embeddingModel() : null,
     },
     models: [
@@ -100,6 +105,7 @@ export async function processRun(run, {
   modelFactory = createCodingModelForCredential,
   repositoryIndexer = indexRepository,
   contextRetriever = retrieveRepositoryContext,
+  repositoryMapRetriever = retrieveRepositoryMap,
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
@@ -120,6 +126,7 @@ export async function processRun(run, {
     run = await store.updateRun(run, { state: "indexing" });
     await emit("run.indexing", { branch: runner.branch, message: "Preparing repository context" });
     let context = [];
+    let repositoryMap = [];
     try {
       await repositoryIndexer({
         owner: run.owner,
@@ -128,11 +135,13 @@ export async function processRun(run, {
         emit,
       });
       context = await contextRetriever(run.owner, repository.id, run.prompt);
+      repositoryMap = await repositoryMapRetriever(run.owner, repository.id, run.prompt);
       await emit("context.ready", {
-        message: context.length
-          ? `Loaded ${context.length} relevant code excerpts`
-          : "Repository index is ready; no preloaded excerpts matched",
+        message: context.length || repositoryMap.length
+          ? `Loaded ${context.length} code excerpts and ${repositoryMap.length} symbol matches`
+          : "Repository index is ready; no preloaded context matched",
         matches: context.length,
+        symbolMatches: repositoryMap.length,
       });
     } catch (error) {
       await emit("context.unavailable", {
@@ -154,7 +163,7 @@ export async function processRun(run, {
     let result;
     if (credential.provider === "codex") {
       result = await runner.runCodex({
-        prompt: augmentPromptWithContext(run.prompt, context),
+        prompt: augmentPromptWithContext(run.prompt, context, repositoryMap),
         authJson: credential.secret,
         emit,
         isCancelled,
@@ -171,6 +180,7 @@ export async function processRun(run, {
         isCancelled,
         provider: modelFactory(credential, run.model),
         context,
+        repositoryMap,
       });
     }
     if (result.cancelled) {

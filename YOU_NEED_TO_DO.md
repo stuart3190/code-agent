@@ -37,6 +37,9 @@ values. Codex will keep everything else moving locally.
 
 ## Required before public launch
 
+- [ ] In GitHub App settings for **Thrallo Code Agent**, open **Permissions & events**, subscribe to
+  the **Push** event, and save. The installed app currently reports no subscribed events, so manual
+  reindexing works but automatic reindexing after a default-branch push will wait for this checkbox.
 - [x] Choose the product name and domain: Thrallo at `thrallo.com`.
 - [x] Choose production hosting: isolated services on the existing Buildr101 VPS.
 - [x] Point Cloudflare DNS for `thrallo.com` and `app.thrallo.com` to `51.195.136.189`.

@@ -10,7 +10,12 @@ import {
   publicIndexStatus,
   repositoryIndexStore,
 } from "../lib/repositoryIndexStore.mjs";
-import { retrieveRepositoryContext } from "../lib/repositoryIndexer.mjs";
+import {
+  retrieveFileGraph,
+  retrieveRepositoryContext,
+  retrieveRepositoryMap,
+} from "../lib/repositoryIndexer.mjs";
+import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
 
 export function handleCodeAgentCapabilities(_req, res) {
   sendJson(res, 200, codeAgentCapabilities());
@@ -30,6 +35,20 @@ export async function handleRepositoryIndexGet(_req, res, { owner, repositoryId 
   if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
   const index = await repositoryIndexStore().getIndex(owner.id, repositoryId);
   return sendJson(res, 200, { index: publicIndexStatus(index) });
+}
+
+export async function handleRepositoryIndexRefresh(_req, res, { owner, repositoryId }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  const current = await repositoryIndexStore().getIndex(owner.id, repositoryId);
+  if (["queued", "indexing"].includes(current?.status)) {
+    return sendJson(res, 202, { index: publicIndexStatus(current), alreadyQueued: true });
+  }
+  const index = await requestRepositoryRefresh(owner.id, repository, {
+    reason: "manual",
+    requestedBy: owner.id,
+  });
+  return sendJson(res, 202, { index: publicIndexStatus(index), alreadyQueued: false });
 }
 
 export async function handleRepositorySearch(_req, res, { owner, repositoryId, body }) {
@@ -57,6 +76,35 @@ export async function handleRepositorySearch(_req, res, { owner, repositoryId, b
       score: result.score,
     })),
   });
+}
+
+export async function handleRepositorySymbolSearch(_req, res, { owner, repositoryId, body }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  const index = await repositoryIndexStore().getIndex(owner.id, repositoryId);
+  if (index?.status !== "ready") {
+    throw new CodeAgentInputError("The repository intelligence index is not ready.", 409, "repository_index_not_ready");
+  }
+  const query = requiredString(body?.query, "query", { max: 500 });
+  const symbols = await retrieveRepositoryMap(owner.id, repositoryId, query, { limit: 30 });
+  return sendJson(res, 200, {
+    query,
+    index: publicIndexStatus(index),
+    symbols,
+  });
+}
+
+export async function handleRepositoryFileGraph(_req, res, { owner, repositoryId, body }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  const index = await repositoryIndexStore().getIndex(owner.id, repositoryId);
+  if (index?.status !== "ready") {
+    throw new CodeAgentInputError("The repository intelligence index is not ready.", 409, "repository_index_not_ready");
+  }
+  const path = requiredString(body?.path, "path", { max: 1_000 });
+  const graph = await retrieveFileGraph(owner.id, repositoryId, path);
+  if (!graph) throw new CodeAgentInputError("Indexed file not found", 404, "indexed_file_not_found");
+  return sendJson(res, 200, { index: publicIndexStatus(index), graph });
 }
 
 export async function handleAgents(req, res, { owner, method, body }) {

@@ -4,8 +4,9 @@ import { backend } from "./lib/backend.js";
 import {
   addAgent, addRepository, cancelRun, capabilities, createRun, getLatestRun, getRun,
   connectGithubRepository, githubInstallationRepositories, githubInstallations,
-  listAgents, listRepositories, publishRun, repositoryIndex, retryRun, runArtifacts,
-  searchRepository, startGithubInstallation,
+  listAgents, listRepositories, publishRun, refreshRepositoryIndex, repositoryFileGraph,
+  repositoryIndex, retryRun, runArtifacts, searchRepository, searchRepositorySymbols,
+  startGithubInstallation,
   streamRunEvents, usageSummary,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
@@ -347,9 +348,13 @@ function Repositories({ repos, caps, onAdded }) {
   const [searchRepoId, setSearchRepoId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
+  const [symbolResults, setSymbolResults] = useState([]);
+  const [searchMode, setSearchMode] = useState("code");
+  const [fileGraph, setFileGraph] = useState(null);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [searchComplete, setSearchComplete] = useState(false);
+  const [refreshing, setRefreshing] = useState({});
 
   useEffect(() => {
     githubInstallations().then(async (result) => {
@@ -373,6 +378,16 @@ function Repositories({ repos, caps, onAdded }) {
     });
     return () => { cancelled = true; };
   }, [repos]);
+
+  useEffect(() => {
+    if (!repos.some((repo) => ["queued", "indexing"].includes(indexes[repo.id]?.status))) return undefined;
+    const timer = setInterval(() => {
+      Promise.all(repos.map(async (repo) => {
+        try { return [repo.id, (await repositoryIndex(repo.id)).index]; } catch { return [repo.id, indexes[repo.id]]; }
+      })).then((entries) => setIndexes(Object.fromEntries(entries)));
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [repos, indexes]);
 
   async function installGithub() {
     setGithubBusy(true); setError("");
@@ -402,13 +417,38 @@ function Repositories({ repos, caps, onAdded }) {
     if (!searchRepoId || !searchQuery.trim()) return;
     setSearchBusy(true); setSearchError(""); setSearchComplete(false);
     try {
-      const result = await searchRepository(searchRepoId, searchQuery);
-      setSearchResults(result.results);
+      const result = searchMode === "code"
+        ? await searchRepository(searchRepoId, searchQuery)
+        : await searchRepositorySymbols(searchRepoId, searchQuery);
+      setSearchResults(result.results || []);
+      setSymbolResults(result.symbols || []);
+      setFileGraph(null);
       setIndexes((current) => ({ ...current, [searchRepoId]: result.index }));
     } catch (err) {
-      setSearchResults([]);
+      setSearchResults([]); setSymbolResults([]); setFileGraph(null);
       setSearchError(err.message);
     } finally { setSearchBusy(false); setSearchComplete(true); }
+  }
+  async function refreshIndex(repositoryId) {
+    setRefreshing((current) => ({ ...current, [repositoryId]: true }));
+    setSearchError("");
+    try {
+      const result = await refreshRepositoryIndex(repositoryId);
+      setIndexes((current) => ({ ...current, [repositoryId]: result.index }));
+    } catch (err) {
+      setSearchError(err.message);
+    } finally {
+      setRefreshing((current) => ({ ...current, [repositoryId]: false }));
+    }
+  }
+  async function loadFileGraph(path) {
+    setSearchError("");
+    try {
+      const result = await repositoryFileGraph(searchRepoId, path);
+      setFileGraph(result.graph);
+    } catch (err) {
+      setSearchError(err.message);
+    }
   }
   return (
     <div className="mx-auto max-w-5xl p-8">
@@ -416,10 +456,11 @@ function Repositories({ repos, caps, onAdded }) {
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-400">GitHub first</div>
           <h1 className="mt-2 text-3xl font-semibold text-white">Repository control</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Connect a repository to create a persistent agent. Private repository access uses the server-side GitHub token until the GitHub App installation flow lands.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Connect repositories through the Thrallo GitHub App, then create a persistent agent that can search, understand, and edit the codebase.</p>
           <div className="mt-8 grid gap-3">
             {repos.map((repo) => (
-              <div key={repo.id} className="flex items-center gap-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
+              <div key={repo.id} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
+                <div className="flex items-center gap-4">
                 <span className="grid h-10 w-10 place-items-center rounded-lg bg-white/[0.05] font-mono text-slate-400">⌘</span>
                 <div><div className="text-sm text-slate-200">{repo.fullName}</div><div className="mt-1 text-[11px] text-slate-600">{repo.defaultBranch} · {repo.private ? "private" : "public"}</div></div>
                 <div className="ml-auto flex flex-col items-end gap-1">
@@ -428,10 +469,32 @@ function Repositories({ repos, caps, onAdded }) {
                     indexes[repo.id]?.status === "ready" ? "text-emerald-400/70" : "text-slate-700"
                   }`}>
                     {indexes[repo.id]?.status === "ready"
-                      ? `${indexes[repo.id].fileCount} files indexed`
-                      : indexes[repo.id]?.status === "indexing" ? "indexing" : "index after first run"}
+                      ? `${indexes[repo.id].fileCount} files · ${indexes[repo.id].symbolCount || 0} symbols`
+                      : ["queued", "indexing"].includes(indexes[repo.id]?.status)
+                        ? indexes[repo.id]?.progress?.phase || indexes[repo.id].status
+                        : "index after first run"}
                   </span>
                 </div>
+                <button type="button" onClick={() => refreshIndex(repo.id)}
+                  disabled={refreshing[repo.id] || ["queued", "indexing"].includes(indexes[repo.id]?.status)}
+                  className="rounded-lg border border-white/[0.08] px-3 py-2 text-[10px] text-slate-400 hover:border-cyan-400/30 hover:text-cyan-200 disabled:opacity-30">
+                  {refreshing[repo.id] ? "Queuing…" : "Reindex"}
+                </button>
+                </div>
+                {["queued", "indexing"].includes(indexes[repo.id]?.status) && (
+                  <div className="mt-3">
+                    <div className="mb-1 flex justify-between font-mono text-[9px] uppercase text-slate-600">
+                      <span>{indexes[repo.id]?.progress?.phase || indexes[repo.id].status}</span>
+                      <span>{indexes[repo.id]?.progress?.current || 0}/{indexes[repo.id]?.progress?.total || 0}</span>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded bg-white/[0.05]">
+                      <div className="h-full rounded bg-gradient-to-r from-cyan-400 to-blue-500 transition-all"
+                        style={{ width: `${indexes[repo.id]?.progress?.total
+                          ? Math.min((indexes[repo.id].progress.current / indexes[repo.id].progress.total) * 100, 100)
+                          : 8}%` }} />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -440,19 +503,31 @@ function Repositories({ repos, caps, onAdded }) {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-400">Encrypted hybrid index</div>
-                  <h2 className="mt-1 text-lg font-semibold text-white">Search your codebase</h2>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">Find exact identifiers and semantically related code across an indexed repository.</p>
+                  <h2 className="mt-1 text-lg font-semibold text-white">Repository intelligence</h2>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Search source or inspect definitions, references and file dependencies.</p>
                 </div>
                 <span className="rounded-full border border-white/[0.08] px-2 py-1 font-mono text-[9px] text-slate-600">PRIVATE</span>
               </div>
+              <div className="mt-4 flex gap-1 rounded-lg border border-white/[0.07] bg-black/20 p-1">
+                {["code", "symbols"].map((mode) => (
+                  <button key={mode} type="button" onClick={() => {
+                    setSearchMode(mode); setSearchResults([]); setSymbolResults([]); setFileGraph(null); setSearchComplete(false);
+                  }} className={`rounded-md px-3 py-1.5 text-[10px] uppercase tracking-wide ${
+                    searchMode === mode ? "bg-white/[0.08] text-cyan-200" : "text-slate-600"
+                  }`}>
+                    {mode === "code" ? "Code search" : "Definitions & references"}
+                  </button>
+                ))}
+              </div>
               <div className="mt-4 grid gap-2 sm:grid-cols-[220px_1fr_auto]">
                 <select className="field" value={searchRepoId} onChange={(event) => {
-                  setSearchRepoId(event.target.value); setSearchResults([]); setSearchError(""); setSearchComplete(false);
+                  setSearchRepoId(event.target.value); setSearchResults([]); setSymbolResults([]);
+                  setFileGraph(null); setSearchError(""); setSearchComplete(false);
                 }}>
                   {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.fullName}</option>)}
                 </select>
                 <input className="field" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Where is authentication handled?" />
+                  placeholder={searchMode === "code" ? "Where is authentication handled?" : "verifyToken"} />
                 <button disabled={searchBusy || !searchQuery.trim() || indexes[searchRepoId]?.status !== "ready"}
                   className="btn-primary !px-5 disabled:opacity-40">
                   {searchBusy ? "Searching…" : "Search"}
@@ -462,8 +537,53 @@ function Repositories({ repos, caps, onAdded }) {
               {indexes[searchRepoId]?.status !== "ready" && (
                 <p className="mt-3 text-[10px] text-amber-300/60">Run this repository&apos;s agent once to build the first index.</p>
               )}
-              {searchComplete && !searchError && searchResults.length === 0 && (
+              {searchComplete && !searchError && searchResults.length === 0 && symbolResults.length === 0 && (
                 <p className="mt-3 text-xs text-slate-600">No matching code was found.</p>
+              )}
+              {symbolResults.length > 0 && (
+                <div className="mt-4 grid gap-3">
+                  {symbolResults.map((symbol) => (
+                    <div key={symbol.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-cyan-400/10 px-2 py-1 font-mono text-[9px] uppercase text-cyan-300">{symbol.kind}</span>
+                        <span className="font-mono text-xs text-white">{symbol.name}</span>
+                        <span className="ml-auto text-[10px] text-slate-600">{symbol.referenceCount} references</span>
+                      </div>
+                      <div className="mt-2 font-mono text-[10px] text-slate-500">{symbol.path}:L{symbol.startLine}</div>
+                      {symbol.signature && <pre className="mt-2 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-slate-400">{symbol.signature}</pre>}
+                      {symbol.references?.length > 0 && (
+                        <div className="mt-3 grid gap-1 border-t border-white/[0.05] pt-3">
+                          {symbol.references.slice(0, 6).map((reference, index) => (
+                            <div key={`${reference.path}-${reference.line}-${index}`} className="font-mono text-[9px] text-slate-600">
+                              {reference.kind} · {reference.path}:L{reference.line}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button type="button" onClick={() => loadFileGraph(symbol.path)}
+                        className="mt-3 text-[10px] text-cyan-400/70 hover:text-cyan-200">
+                        Show file dependencies
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {fileGraph && (
+                <div className="mt-4 rounded-xl border border-violet-400/15 bg-violet-400/[0.04] p-4">
+                  <div className="font-mono text-[10px] text-violet-200">{fileGraph.path}</div>
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wide text-slate-600">Depends on</div>
+                      {(fileGraph.dependencies || []).map((path) => <div key={path} className="mt-1 truncate font-mono text-[9px] text-slate-500">{path}</div>)}
+                      {!fileGraph.dependencies?.length && <div className="mt-1 text-[10px] text-slate-700">No internal imports</div>}
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wide text-slate-600">Used by</div>
+                      {(fileGraph.dependents || []).map((path) => <div key={path} className="mt-1 truncate font-mono text-[9px] text-slate-500">{path}</div>)}
+                      {!fileGraph.dependents?.length && <div className="mt-1 text-[10px] text-slate-700">No internal dependents</div>}
+                    </div>
+                  </div>
+                </div>
               )}
               {searchResults.length > 0 && (
                 <div className="mt-4 grid gap-3">
