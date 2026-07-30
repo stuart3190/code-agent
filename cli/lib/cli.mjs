@@ -9,6 +9,9 @@ import os from "node:os";
 
 const require = createRequire(import.meta.url);
 const { ThralloClient, describeEvent, TERMINAL_STATES } = require("../../editor/vscode/lib/api.js");
+const { version: PACKAGE_VERSION } = JSON.parse(
+  fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+);
 
 const DEFAULT_SERVER = "https://app.thrallo.com";
 
@@ -62,6 +65,7 @@ Usage: thrallo <command> [options]
 
   login [--server <url>] [--token <pat>]   Connect with an API token (Settings → API tokens)
   logout                                   Remove the stored credentials
+  version                                  Print the Thrallo package version
   status                                   Server capabilities and connection check
   repos                                    List connected repositories
   agents                                   List agents
@@ -88,6 +92,11 @@ export async function runCli(argv, {
 
   if (command === "help" || flags.help) {
     stdout(HELP);
+    return 0;
+  }
+
+  if (command === "version") {
+    stdout(PACKAGE_VERSION);
     return 0;
   }
 
