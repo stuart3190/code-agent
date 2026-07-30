@@ -17,12 +17,13 @@ import {
   retrieveRepositoryMap,
 } from "../lib/repositoryIndexer.mjs";
 import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
-import { assertRunWithinBudget } from "../lib/usageBudgets.mjs";
+import { assertRunWithinBudget, assertWithinRateLimits } from "../lib/usageBudgets.mjs";
 import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
 
 async function assertBudgetAllowsRun(ownerId) {
   const credentialProvider = await activeAiProviderName(ownerId).catch(() => "managed");
   try {
+    await assertWithinRateLimits(ownerId);
     await assertRunWithinBudget(ownerId, { credentialProvider });
   } catch (error) {
     throw new CodeAgentInputError(error.message, error.status || 402, error.code || "budget_exceeded");

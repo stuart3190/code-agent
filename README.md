@@ -44,6 +44,13 @@ history. Do not point it at Buildr101 production data or credentials.
   baseline when the sandbox expired.
 - Artifact content beyond an inline threshold is stored in a private Supabase Storage bucket
   and streamed to owners through an authenticated content route.
+- Per-agent sandbox network policy (full or offline — outbound access blocked after checkout,
+  restored only for publishing) and command policy (standard or restricted — network-transfer,
+  remote-shell, and privilege commands refused in the tool loop; in-sandbox publication is
+  always refused).
+- Per-owner burst protection (concurrent-run and hourly admission caps), past-due
+  subscriptions metered at free-plan limits, and a retention sweeper that prunes run
+  timelines and artifact content after a configurable window while keeping billing history.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -95,11 +102,11 @@ Completed: encrypted per-user Codex, OpenAI, Anthropic, and Gemini connections w
 routing and provider evaluations; encrypted incremental hybrid repository indexing; language-aware
 symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent context retrieval;
 subscription plans with managed usage budgets; operational telemetry; publish policies with
-protected paths; sandbox preserve/resume; and object-storage artifacts.
+protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
+command policies; per-owner rate controls; and retention pruning.
 
-1. Live Stripe pricing, rate controls, abuse defenses, retention, and disaster recovery.
-2. Sandboxed network egress allowlist and command-level policy approvals.
-3. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
-4. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
+1. Live Stripe pricing, disaster recovery, and richer dunning.
+2. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
+3. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

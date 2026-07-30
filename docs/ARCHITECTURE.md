@@ -140,9 +140,29 @@ private `thrallo-artifacts` Supabase Storage bucket instead of the Postgres row;
 no browser policies, so only the service role touches it and the shell streams content to
 authenticated owners via the artifact-content route.
 
+## Network and command policies, rate controls, and retention
+
+Agents carry a `network_policy` (`full` or `offline`) and a `command_policy` (`standard` or
+`restricted`). Offline sandboxes are blocked with Daytona's network controls immediately after
+checkout — failing closed if blocking fails — and the block is lifted only for publication.
+Codex subscription runs execute Codex's own tooling inside the sandbox and keep network access
+under an explicit timeline warning. The restricted command policy refuses network-transfer,
+remote-shell, privilege-escalation, DNS, and mail commands inside the tool loop; the refusal is
+returned to the model as a policy error and the run continues. Package publication and `git
+push` from inside the workspace are refused under every policy — publication always goes
+through the approval-gated server path.
+
+Run admission is bounded per owner independent of the monthly budget: at most
+`CODE_AGENT_MAX_ACTIVE_RUNS` concurrent runs and `CODE_AGENT_RUNS_PER_HOUR` admissions per
+rolling hour. Past-due paid subscriptions are metered at free-plan limits until Stripe reports
+recovery, without relabeling the owner's plan.
+
+A retention sweeper prunes run timelines (`ca_run_events`) and artifact content (rows plus
+storage objects) for runs finished more than `CODE_AGENT_RETENTION_DAYS` ago (90 by default, 0
+disables), marking each run `pruned_at`. Runs, checkpoints, and usage records are kept — they
+are the billing and audit history.
+
 ## Known production gaps
 
-- Sandboxed network egress allowlist and command-level policy approvals.
-- Live Stripe pricing, rate controls on paid tiers, abuse defenses, retention controls, and
-  disaster recovery.
+- Live Stripe pricing, richer dunning, and disaster recovery.
 - Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.

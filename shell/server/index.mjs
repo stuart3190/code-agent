@@ -69,6 +69,7 @@ import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
 import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentService.mjs";
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
+import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -793,6 +794,7 @@ server.listen(PORT, HOST, () => {
   startCodeAgentWorker();
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
+  startRetentionSweeper();
 });
 
 let shuttingDown = false;
@@ -805,6 +807,7 @@ async function shutdown(signal) {
   stopCodeAgentWorker();
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
+  stopRetentionSweeper();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));

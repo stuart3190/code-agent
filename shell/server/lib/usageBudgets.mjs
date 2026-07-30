@@ -6,6 +6,7 @@
 // Thrallo's managed model keys — Codex and BYOK runs spend the user's own tokens.
 
 import { codeAgentStore } from "./codeAgentStore.mjs";
+import { optionalEnv } from "./env.mjs";
 import {
   currentPeriod,
   effectiveBudget,
@@ -21,15 +22,20 @@ export async function ownerSubscription(owner, { store = codeAgentStore() } = {}
 
 export async function budgetOverview(owner, { store = codeAgentStore(), now = new Date() } = {}) {
   const subscription = await ownerSubscription(owner, { store });
-  const period = currentPeriod(subscription, now);
-  const budget = effectiveBudget(subscription);
+  // A past-due paid subscription meters at free-plan limits until payment recovers.
+  const metered = subscription.status === "past_due"
+    ? { ...subscription, plan: "free" }
+    : subscription;
+  const period = currentPeriod(metered, now);
+  const budget = effectiveBudget(metered);
   const [usage, runs] = await Promise.all([
     store.usageTotalsSince(owner, period.start),
     store.countRunsSince(owner, period.start),
   ]);
   return {
     subscription: publicSubscription(subscription),
-    plan: getPlan(subscription.plan) || getPlan("free"),
+    plan: getPlan(metered.plan) || getPlan("free"),
+    pastDue: subscription.status === "past_due",
     period,
     budgets: {
       runs: meter(runs, budget.runs),
@@ -37,6 +43,35 @@ export async function budgetOverview(owner, { store = codeAgentStore(), now = ne
       computeSeconds: meter(Math.round(usage.computeSeconds), budget.computeSeconds),
     },
   };
+}
+
+// Burst protection independent of the monthly budget: bounded concurrent execution and a
+// rolling one-hour admission cap per owner.
+export async function assertWithinRateLimits(owner, { store = codeAgentStore(), now = new Date() } = {}) {
+  const maxActive = boundedEnv("CODE_AGENT_MAX_ACTIVE_RUNS", 3);
+  const perHour = boundedEnv("CODE_AGENT_RUNS_PER_HOUR", 30);
+  const [active, lastHour] = await Promise.all([
+    store.countActiveRuns(owner),
+    store.countRunsSince(owner, new Date(now.getTime() - 60 * 60_000).toISOString()),
+  ]);
+  if (active >= maxActive) {
+    throw rateError(`You already have ${active} active runs. Wait for one to finish or cancel it.`);
+  }
+  if (lastHour >= perHour) {
+    throw rateError(`You have started ${lastHour} runs in the last hour. Please wait before starting another.`);
+  }
+}
+
+function boundedEnv(name, fallback) {
+  const value = Number(optionalEnv(name, ""));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function rateError(message) {
+  const error = new Error(message);
+  error.code = "rate_limited";
+  error.status = 429;
+  return error;
 }
 
 // Throws a status-carrying error when the owner cannot start another run. The managed-token

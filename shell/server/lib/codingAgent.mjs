@@ -1,5 +1,6 @@
 import { createCodingModel } from "./modelGateway.mjs";
 import { augmentPromptWithContext } from "./repositoryIndexer.mjs";
+import { evaluateCommand } from "./commandPolicy.mjs";
 
 const MAX_TURNS = 25;
 
@@ -43,6 +44,7 @@ export async function runCodingAgent({
   repositoryMap = [],
   tokenBudget = null,
   prompt = null,
+  commandPolicy = "standard",
 }) {
   const model = provider || createCodingModel(run.model);
   const input = [{ role: "user", content: augmentPromptWithContext(prompt ?? run.prompt, context, repositoryMap) }];
@@ -103,6 +105,17 @@ export async function runCodingAgent({
       try { args = JSON.parse(call.arguments || "{}"); } catch { args = {}; }
       await emit("tool.started", { callId: call.call_id, name: call.name, arguments: redactArguments(call.name, args) });
       let output;
+      if (call.name === "run_command") {
+        const verdict = evaluateCommand(commandPolicy, args.command);
+        if (!verdict.allowed) {
+          output = { ok: false, blocked: true, rule: verdict.rule, error: verdict.message };
+          await emit("tool.blocked", {
+            callId: call.call_id, name: call.name, rule: verdict.rule, message: verdict.message,
+          });
+          input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });
+          continue;
+        }
+      }
       try {
         output = await executeTool(runner, call.name, args);
         await emit("tool.completed", {

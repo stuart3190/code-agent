@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 8 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 9 is implemented. Phase 8 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -30,7 +30,12 @@ until pricing is approved, the Usage & billing workspace view, and the `ADMIN_EM
 (require-approval or auto-publish with protected-path globs that force approval), sandbox
 preservation on failure with linked resume runs that re-attach the same workspace and branch
 (clean-baseline fallback on expiry), and private Supabase Storage artifact offloading with an
-authenticated content route.
+authenticated content route. Phase 9 adds per-agent sandbox network policies (offline blocks
+egress after checkout, restored only for publishing; relaxed with a warning for Codex runs),
+restricted command policies in the tool loop (in-sandbox publication always refused),
+per-owner concurrent and hourly run admission caps, past-due metering at free-plan limits,
+and a retention sweeper pruning run timelines and artifact content after
+`CODE_AGENT_RETENTION_DAYS`.
 
 ## Verification state
 
@@ -104,8 +109,8 @@ authenticated content route.
 
 ## Next implementation slice
 
-Phase 9: sandboxed network egress allowlist, command-level policy approvals, rate controls,
-abuse defenses, and retention controls.
+Phase 10: Code OSS desktop application groundwork — or, if Stuart supplies Stripe products
+first, flip paid plans live and add dunning polish.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

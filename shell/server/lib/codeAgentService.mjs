@@ -20,6 +20,7 @@ import {
 import { assertRunWithinBudget } from "./usageBudgets.mjs";
 import { planCatalog } from "./subscriptionPlans.mjs";
 import { thralloStripeConfigured } from "./subscriptionBilling.mjs";
+import { retentionDays } from "./retentionService.mjs";
 import { createRoutedCodingModel, modelCatalog } from "./modelRouting.mjs";
 import { embeddingsConfigured, embeddingModel } from "./embeddingProvider.mjs";
 import {
@@ -71,6 +72,10 @@ export function codeAgentCapabilities() {
       protectedPaths: true,
       resume: daytonaConfigured(),
       artifactStorage: store === "supabase",
+      networkPolicies: daytonaConfigured(),
+      commandPolicies: true,
+      rateLimits: true,
+      retentionDays: retentionDays(),
     },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
@@ -147,12 +152,22 @@ export async function processRun(run, {
     const budget = await budgetGuard(run.owner, { credentialProvider, store })
       .catch((error) => { throw withCode(new Error(error.message), "budget_exhausted"); });
 
+    // Codex executes its own tooling inside the sandbox and needs the network; an offline
+    // policy is relaxed for Codex runs with an explicit timeline warning.
+    let networkPolicy = agent?.network_policy === "offline" ? "offline" : "full";
+    if (networkPolicy === "offline" && credentialProvider === "codex") {
+      networkPolicy = "full";
+      await emit("network.policy_relaxed", {
+        message: "Offline network policy does not apply to Codex subscription runs; the sandbox keeps network access.",
+      });
+    }
+
     if (run.resumed_from_run_id) {
       const previous = await store.getRun(run.owner, run.resumed_from_run_id);
       if (previous?.sandbox_id && previous.sandbox_state !== "discarded") {
         await emit("run.provisioning", { message: "Reconnecting to the preserved workspace" });
         try {
-          runner = await attachRunnerFactory({ run, repository, previous, emit });
+          runner = await attachRunnerFactory({ run, repository, previous, emit, networkPolicy });
           resumedRun = previous;
           // The sandbox now belongs to this run; the old run can no longer resume it.
           await store.updateRun(previous, { sandbox_state: "discarded" });
@@ -166,7 +181,7 @@ export async function processRun(run, {
     }
     if (!runner) {
       await emit("run.provisioning", { message: "Creating an isolated cloud workspace" });
-      runner = await runnerFactory({ run, repository, emit });
+      runner = await runnerFactory({ run, repository, emit, networkPolicy });
     }
     run = await store.updateRun(run, { sandbox_id: runner.id, work_branch: runner.branch, state: "running" });
     await store.createCheckpoint(run, {
@@ -247,6 +262,7 @@ export async function processRun(run, {
         context,
         repositoryMap,
         prompt: executionPrompt,
+        commandPolicy: agent?.command_policy || "standard",
         tokenBudget: billingSource === "managed"
           ? budget.budgets.managedTokens.remaining
           : null,
