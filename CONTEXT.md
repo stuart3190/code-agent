@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 5 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 6 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -18,14 +18,18 @@ embeddings, database-side hybrid ranking, owner-authenticated code search, and r
 injection before agent execution. Phase 5 adds encrypted language-aware definitions and signatures,
 imports/calls/references/inheritance relationships, file dependency graphs, definition/reference
 search, live indexing progress, durable manual refreshes, GitHub default-branch push refreshes, and
-symbol-map context injection before agent execution.
+symbol-map context injection before agent execution. Phase 6 adds Gemini Interactions API support,
+quality/balanced/fast/economy/manual model profiles, task-aware routing, retryable-error fallback,
+provider latency and reliability health, encrypted provider evaluations, Gemini BYOK, and routing
+and comparison controls in Settings.
 
 ## Verification state
 
 - `npm run verify` passes locally and in GitHub Actions.
 - Dedicated Supabase project `Code Agent` (`zczgvcsokfafuyognvwx`) is active and healthy in
   organization `nuzfrbtaqkoemvdajzfh`, region `eu-west-1`.
-- The ten Code Agent migrations are applied remotely. The repository index and intelligence tables have restrictive
+- The eleven Code Agent migrations are applied remotely. The repository index, intelligence, routing telemetry,
+  and encrypted evaluation tables have restrictive
   RLS and no browser grants; hybrid search is executable only by the service role. All control-plane
   tables have RLS. Browser roles have
   no webhook-ledger or AI-credential grants, owner-readable policies reject anonymous identities, and
@@ -52,6 +56,12 @@ symbol-map context injection before agent execution.
   indexed main commit `2788881` into 353 files, 572 context chunks, 1,925 definitions, 33,441
   relationships, and 849 dependency edges; exact definition lookup and forward/reverse file
   dependencies were decrypted successfully through the server-only retrieval layer.
+- Phase 6 smart model routing is deployed from main commit `6d78771` on 2026-07-30. Production
+  advertises the OpenAI Sol/Terra/Luna tiers, current Claude and Gemini catalogs, managed OpenAI
+  availability, and optional BYOK for OpenAI, Anthropic, and Gemini. The full local verification
+  suite passed with 63 Code Agent tests and four desktop/mobile Playwright checks. Supabase
+  verification confirmed RLS enabled, no anon/authenticated table access, and service-role access
+  for routing attempts and encrypted evaluation records.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
@@ -68,8 +78,7 @@ symbol-map context injection before agent execution.
 
 ## Next implementation slice
 
-Add Gemini, managed cost/latency routing, and provider evaluation, followed by subscription
-controls and operational telemetry.
+Phase 7: add subscription controls, managed usage budgets, and operational telemetry.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
 

@@ -55,3 +55,10 @@ values. Codex will keep everything else moving locally.
 - [x] In Thrallo, open **Settings**, click **Continue with Codex**, open the OpenAI sign-in page,
   enter the one-time code, and approve the account. This is per Thrallo user and does not require
   you to create an OAuth application or paste an API key.
+
+## Optional: add more model providers
+
+- [ ] If you want Gemini runs or comparisons, open **Settings → AI providers** and connect a Gemini
+  API key from Google AI Studio. Thrallo already works with managed OpenAI, so this is not required.
+- [ ] If you want Claude runs or comparisons, connect an Anthropic API key on the same page. This is
+  also optional.
