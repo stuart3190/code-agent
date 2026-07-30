@@ -47,6 +47,12 @@ export const CA_TABLES = [
   "ca_model_evaluation_results",
   "ca_subscriptions",
   "ca_api_tokens",
+  "ca_products",
+  "ca_conversations",
+  "ca_conversation_turns",
+  "ca_conversation_events",
+  "ca_owner_profile",
+  "ca_memories",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";

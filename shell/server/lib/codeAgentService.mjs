@@ -87,6 +87,11 @@ export function codeAgentCapabilities() {
       vscodeExtension: true,
       inlineCompletion: openAIConfigured() || anthropicConfigured() || geminiConfigured(),
     },
+    conversations: {
+      leadAgent: openAIConfigured() || anthropicConfigured() || geminiConfigured(),
+      capabilityRegistry: true,
+      memory: true,
+    },
     reviews: {
       pullRequestReview: githubAppConfigured() && daytonaConfigured(),
       approvalGatedPosting: true,

@@ -90,6 +90,10 @@ import {
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
+import {
+  handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
+} from "./routes/conversations.mjs";
+import { startLeadAgentRecovery, stopLeadAgentRecovery } from "./lib/leadAgentService.mjs";
 import { startAutomationSweeper, stopAutomationSweeper } from "./lib/automationService.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -500,6 +504,29 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
     }
+    if (p === "/api/v1/conversations" && ["GET", "POST"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConversations(req, res, {
+        owner, method, body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
+      });
+    }
+    const conversationMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)$/i);
+    if (conversationMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConversationGet(req, res, { owner, conversationId: conversationMatch[1] });
+    }
+    const conversationMessageMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/messages$/i);
+    if (conversationMessageMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConversationMessage(req, res, {
+        owner, conversationId: conversationMessageMatch[1], body: await readJson(req, BODY_LIMITS.standard),
+      });
+    }
+    const conversationEventsMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/events$/i);
+    if (conversationEventsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
+    }
     if (p === "/api/v1/automations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleAutomations(req, res, {
@@ -852,6 +879,7 @@ server.listen(PORT, HOST, () => {
   startRepositoryIndexWorker();
   startRetentionSweeper();
   startAutomationSweeper();
+  startLeadAgentRecovery();
 });
 
 let shuttingDown = false;
@@ -866,6 +894,7 @@ async function shutdown(signal) {
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
   stopAutomationSweeper();
+  stopLeadAgentRecovery();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));

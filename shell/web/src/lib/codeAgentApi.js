@@ -80,6 +80,42 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
+export const listConversations = () => request("/api/v1/conversations");
+export const startConversation = (text) => request("/api/v1/conversations", {
+  method: "POST", body: JSON.stringify({ text }),
+});
+export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
+export const sendConversationMessage = (conversationId, text) =>
+  request(`/api/v1/conversations/${conversationId}/messages`, {
+    method: "POST", body: JSON.stringify({ text }),
+  });
+export async function streamConversationEvents(conversationId, onEvent, { signal, after = 0 } = {}) {
+  const token = await accessToken();
+  const response = await fetch(`/api/v1/conversations/${conversationId}/events?after=${after}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+    signal,
+  });
+  if (!response.ok) throw new Error(`Conversation stream failed (${response.status})`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = block.split("\n").find((line) => line.startsWith("data: "));
+      if (!data) continue;
+      const event = JSON.parse(data.slice(6));
+      after = Math.max(after, Number(event.sequence || 0));
+      onEvent(event);
+    }
+  }
+  return after;
+}
 export const listAutomations = () => request("/api/v1/automations");
 export const createAutomation = (body) => request("/api/v1/automations", {
   method: "POST", body: JSON.stringify(body),
