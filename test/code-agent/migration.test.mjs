@@ -8,6 +8,8 @@ const hardeningMigrationPath = new URL("../../supabase/migrations/20260729164642
 const anonLockdownMigrationPath = new URL("../../supabase/migrations/20260729165131_lock_down_code_agent_anon_access.sql", import.meta.url);
 const webhookMigrationPath = new URL("../../supabase/migrations/20260729231426_github_webhook_ledger.sql", import.meta.url);
 const policyRolesMigrationPath = new URL("../../supabase/migrations/20260729232141_restrict_code_agent_policy_roles.sql", import.meta.url);
+const aiConnectionsMigrationPath = new URL("../../supabase/migrations/20260729234551_ai_provider_connections.sql", import.meta.url);
+const rejectAnonymousMigrationPath = new URL("../../supabase/migrations/20260729234651_reject_anonymous_code_agent_access.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -95,4 +97,30 @@ test("owner-readable control-plane policies explicitly require authentication", 
   ]) {
     assert.match(sql, new RegExp(`alter policy "${policy}"[\\s\\S]*?to authenticated`, "i"));
   }
+});
+
+test("AI credentials are encrypted before storage and inaccessible to browser roles", async () => {
+  const sql = await readFile(aiConnectionsMigrationPath, "utf8");
+  assert.match(sql, /create table public\.ca_ai_credentials/i);
+  assert.match(sql, /secret_encrypted text not null/i);
+  assert.doesNotMatch(sql, /\b(access_token|refresh_token|api_key)\s+text\b/i);
+  assert.match(sql, /alter table public\.ca_ai_credentials enable row level security/i);
+  assert.match(sql, /alter table public\.ca_ai_preferences enable row level security/i);
+  assert.match(sql, /revoke all on table public\.ca_ai_credentials, public\.ca_ai_preferences[\s\S]*from public, anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table public\.ca_ai_credentials, public\.ca_ai_preferences[\s\S]*to service_role/i);
+  assert.match(sql, /as restrictive[\s\S]*to anon, authenticated[\s\S]*using \(false\)/i);
+  assert.match(sql, /references auth\.users\(id\) on delete cascade/i);
+});
+
+test("owner metadata policies reject anonymous Supabase identities", async () => {
+  const sql = await readFile(rejectAnonymousMigrationPath, "utf8");
+  for (const policy of [
+    "ca_repositories_owner_read", "ca_agents_owner_read", "ca_runs_owner_read",
+    "ca_run_events_owner_read", "ca_checkpoints_owner_read", "ca_artifacts_owner_read",
+    "ca_usage_owner_read", "ca_github_installations_owner_read",
+  ]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"`, "i"));
+  }
+  assert.equal((sql.match(/auth\.jwt\(\)->>'is_anonymous'/g) || []).length, 8);
+  assert.equal((sql.match(/= 'false'/g) || []).length, 8);
 });

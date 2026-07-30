@@ -42,6 +42,16 @@ export async function createDaytonaRunner({ run, repository, emit }) {
   return {
     id: sandbox.id,
     branch,
+    async runCodex({ prompt, authJson, isCancelled = async () => false }) {
+      if (await isCancelled()) return { cancelled: true, provider: "codex", model: "codex-subscription", usage: {} };
+      return runCodexInSandbox({
+        sandbox,
+        workspacePath,
+        run,
+        prompt,
+        authJson,
+      });
+    },
     async listFiles(path = ".", depth = 4) {
       const safe = safeRelative(path);
       const result = await sandbox.process.executeCommand(
@@ -90,6 +100,75 @@ export async function createDaytonaRunner({ run, repository, emit }) {
       try { await daytona.delete(sandbox); } catch { /* expiry policy remains the fallback */ }
     },
   };
+}
+
+export async function runCodexInSandbox({
+  sandbox,
+  workspacePath,
+  run,
+  prompt,
+  authJson,
+}) {
+  const suffix = String(run?.id || "run").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "run";
+  const authDir = `/tmp/thrallo-codex-${suffix}`;
+  const authPath = `${authDir}/auth.json`;
+  const promptPath = `${authDir}/prompt.txt`;
+  const outputPath = `${authDir}/last-message.txt`;
+  const timeout = Math.min(Math.max(Number(optionalEnv("CODEX_RUN_TIMEOUT_SECONDS", "600")) || 600, 30), 600);
+  let output = "";
+  let refreshedAuthJson = null;
+
+  try {
+    commandResult(await sandbox.process.executeCommand(
+      `mkdir -p ${shellQuote(authDir)} && chmod 700 ${shellQuote(authDir)}`,
+      workspacePath, undefined, 20,
+    ));
+    await sandbox.fs.uploadFile(Buffer.from(normalizeCodexAuth(authJson), "utf8"), authPath);
+    await sandbox.fs.uploadFile(Buffer.from(String(prompt || ""), "utf8"), promptPath);
+    commandResult(await sandbox.process.executeCommand(
+      `chmod 600 ${shellQuote(authPath)} ${shellQuote(promptPath)}`,
+      workspacePath, undefined, 20,
+    ));
+
+    const command = [
+      `CODEX_HOME=${shellQuote(authDir)}`,
+      "npx --yes @openai/codex@0.146.0 exec",
+      "--json --color never",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--ephemeral --ignore-user-config --ignore-rules",
+      `--output-last-message ${shellQuote(outputPath)}`,
+      `-C ${shellQuote(workspacePath)} -`,
+      `< ${shellQuote(promptPath)}`,
+    ].join(" ");
+    const execution = commandResult(await sandbox.process.executeCommand(
+      command,
+      workspacePath,
+      undefined,
+      timeout,
+    ));
+    output = execution.output;
+    const lastMessage = await downloadUtf8(sandbox, outputPath);
+    const diff = (await collectWorkspaceDiff(sandbox, workspacePath)).output;
+    const status = commandResult(await sandbox.process.executeCommand(
+      "git status --short",
+      workspacePath, undefined, 20,
+    )).output;
+    refreshedAuthJson = await downloadUtf8(sandbox, authPath);
+    return {
+      summary: lastMessage.trim() || finalCodexMessage(output) || "Codex completed the run.",
+      diff,
+      status,
+      provider: "codex",
+      model: "codex-subscription",
+      usage: codexUsage(output),
+      refreshedAuthJson,
+    };
+  } finally {
+    await sandbox.process.executeCommand(
+      `rm -rf -- ${shellQuote(authDir)}`,
+      workspacePath, undefined, 20,
+    ).catch(() => {});
+  }
 }
 
 export async function publishDaytonaRun({ run, repository, title, body, emit = async () => {} }) {
@@ -168,6 +247,49 @@ function safeRelative(value) {
   if (path.split("/").includes("..")) throw new Error("Path traversal is not allowed");
   if (path.split("/")[0] === ".git") throw new Error("Direct access to git metadata is not allowed");
   return path || ".";
+}
+
+async function downloadUtf8(sandbox, filePath) {
+  const buffer = await sandbox.fs.downloadFile(filePath);
+  return buffer.toString("utf8").slice(0, 500_000);
+}
+
+function normalizeCodexAuth(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const parsed = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Codex authentication state is invalid.");
+  }
+  return JSON.stringify(parsed);
+}
+
+function finalCodexMessage(output) {
+  let text = "";
+  for (const event of jsonLines(output)) {
+    const item = event?.item;
+    if (event?.type === "item.completed" && item?.type === "agent_message" && item?.text) {
+      text = String(item.text);
+    }
+  }
+  return text.trim();
+}
+
+function codexUsage(output) {
+  const total = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 };
+  for (const event of jsonLines(output)) {
+    if (event?.type !== "turn.completed" || !event.usage) continue;
+    total.inputTokens += Number(event.usage.input_tokens || 0);
+    total.cachedTokens += Number(event.usage.cached_input_tokens || 0);
+    total.outputTokens += Number(event.usage.output_tokens || 0);
+  }
+  total.totalTokens = total.inputTokens + total.outputTokens;
+  return total;
+}
+
+function jsonLines(output) {
+  return String(output || "").split(/\r?\n/).flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  });
 }
 
 function shellQuote(value) {

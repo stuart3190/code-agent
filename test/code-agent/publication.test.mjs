@@ -47,6 +47,7 @@ test("GitHub App runs wait for approval before publishing", async () => {
       model: "test-model",
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
     }),
+    modelFactory: () => ({ id: "test", model: "test-model" }),
   });
 
   assert.equal(waiting.state, "waiting_for_approval");

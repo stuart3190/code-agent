@@ -48,3 +48,9 @@ values. Codex will keep everything else moving locally.
 - [ ] Supply business identity, support email, privacy, terms, and billing details.
 - [ ] Approve subscription prices, included usage, and overage policy.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.
+
+## Optional: use your ChatGPT Codex allowance
+
+- [ ] In Thrallo, open **Settings**, click **Continue with Codex**, open the OpenAI sign-in page,
+  enter the one-time code, and approve the account. This is per Thrallo user and does not require
+  you to create an OAuth application or paste an API key.

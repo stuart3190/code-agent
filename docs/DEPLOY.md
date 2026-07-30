@@ -34,7 +34,12 @@ APP_URL=https://app.thrallo.com
 CODE_AGENT_STANDALONE=on
 CODE_AGENT_STORE=supabase
 CODE_AGENT_WORKER=on
+PLATFORM_ENC_KEY=<32 random bytes encoded as 64 hex characters>
 ```
+
+`@openai/codex` is pinned in the root production dependencies. The server uses its app-server
+protocol for device sign-in; user authentication state is encrypted with `PLATFORM_ENC_KEY`.
+Never copy a developer's local Codex login into production.
 
 ## Verification
 
@@ -47,3 +52,6 @@ curl -fsS https://app.thrallo.com/api/v1/capabilities
 
 After a code or environment update, rebuild the web application and restart only
 `thrallo-shell`. Do not restart Buildr101 services for a Thrallo-only change.
+
+Use the full root lockfile install (`npm ci`) before restart. The legacy shell still imports its QA
+runner at startup, so `npm ci --omit=dev` is not currently a valid production install.

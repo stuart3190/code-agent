@@ -49,6 +49,21 @@ export const connectGithubRepository = (installationId, repositoryId) =>
   request("/api/v1/github/repositories/connect", {
     method: "POST", body: JSON.stringify({ installationId, repositoryId }),
   });
+export const aiConnections = () => request("/api/v1/ai/connections");
+export const connectAiKey = (provider, key) => request("/api/v1/ai/byok", {
+  method: "POST", body: JSON.stringify({ provider, key }),
+});
+export const selectAiProvider = (provider) => request("/api/v1/ai/provider", {
+  method: "POST", body: JSON.stringify({ provider }),
+});
+export const disconnectAiProvider = (provider) => request("/api/v1/ai/disconnect", {
+  method: "POST", body: JSON.stringify({ provider }),
+});
+export const startCodexLogin = () => request("/api/v1/ai/codex/login/start", { method: "POST" });
+export const codexLoginStatus = (sessionId) => request(`/api/v1/ai/codex/login/${sessionId}`);
+export const cancelCodexLogin = (sessionId) => request(`/api/v1/ai/codex/login/${sessionId}`, {
+  method: "DELETE",
+});
 
 export async function streamRunEvents(runId, onEvent, { signal, after = 0 } = {}) {
   const token = await accessToken();

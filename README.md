@@ -23,6 +23,10 @@ history. Do not point it at Buildr101 production data or credentials.
   opening a pull request.
 - Daytona sandbox creation, clone, dedicated branch, file/search/command tools, and cleanup.
 - Normalized commercial model gateway with OpenAI Responses and Anthropic Messages adapters.
+- Encrypted per-user AI connections: Codex device sign-in with a ChatGPT account, OpenAI and
+  Anthropic BYOK, and managed-provider selection.
+- Codex subscription runs inside the isolated Daytona workspace with ephemeral auth injection and
+  guaranteed credential cleanup before the workspace is preserved or discarded.
 - Bounded coding loop, cancellation, stale-run recovery, clean-baseline retry, checkpoints,
   durable diff/log/report artifacts, terminal states, setup diagnostics, and usage capture.
 - Functional usage dashboard for model tokens and sandbox compute.
@@ -30,8 +34,9 @@ history. Do not point it at Buildr101 production data or credentials.
 
 ## Local setup
 
-Requirements: Node.js 22+, an OpenAI or Anthropic API key, and a Daytona API key. The dedicated
-Supabase project is already provisioned; its server-side secret key is still required locally.
+Requirements: Node.js 22+, a Daytona API key, and either a managed model key or a user-connected
+Codex/OpenAI/Anthropic account. The dedicated Supabase project is already provisioned; its
+server-side secret key is still required locally.
 
 ```powershell
 npm install
@@ -63,11 +68,11 @@ tests, then creates a production web build.
 
 ## Roadmap
 
-Completed: durable webhook delivery ledger plus GitHub installation and repository lifecycle
-synchronization.
+Completed: encrypted per-user Codex, OpenAI, and Anthropic connections with selectable managed
+routing.
 
-1. Add Gemini, managed cost/latency routing, encrypted per-user BYOK, and provider evaluation suites.
-2. Hybrid repository indexer, incremental embeddings, symbol graph, and context retrieval.
+1. Hybrid repository indexer, incremental embeddings, symbol graph, and context retrieval.
+2. Add Gemini, managed cost/latency routing, and provider evaluation suites.
 3. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
 4. Usage metering, subscriptions, budgets, rate controls, abuse defenses, and operational telemetry.
 5. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
