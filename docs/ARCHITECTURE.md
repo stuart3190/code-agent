@@ -214,8 +214,19 @@ Every automated run passes the same admission guards as a manual one — rate li
 budgets — and carries `automation_id` provenance on the run row. A rejected or failed trigger
 is recorded on the automation (`last_error`) and skipped rather than retried.
 
+## Disaster recovery
+
+`ops/backup-thrallo.mjs` runs nightly under `thrallo-backup.timer` and writes a validated,
+checksummed run: every `ca_*` table (the list is drift-guarded against the migrations by the
+test suite), auth users, and the artifact bucket's objects with an indexed manifest. Runs are
+pruned after `THRALLO_BACKUP_KEEP_DAYS`. `ops/restore-thrallo.mjs` is dry-run by default and
+writes only with explicit `RESTORE_TARGET_*` env plus `--confirm`, inserting in
+foreign-key-safe order with the automation↔run cross-links patched in a second pass.
+`docs/DISASTER-RECOVERY.md` is the runbook; the offline kit is `shell/.env` (above all
+`PLATFORM_ENC_KEY`, without which encrypted columns in any backup are unreadable) plus a
+periodically copied backup run.
+
 ## Known production gaps
 
-- Live Stripe pricing, richer dunning, and disaster recovery.
-- Extension marketplace publication, inline completion, desktop packaging, CLI/SDK, and
-  mobile.
+- Live Stripe pricing and richer dunning.
+- Extension marketplace publication, inline completion, desktop packaging, SDK, and mobile.
