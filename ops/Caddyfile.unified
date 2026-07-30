@@ -1,0 +1,141 @@
+# UNIFIED Caddy front for the shared VPS (Phase 19 re-homing — Thrallo owns this file).
+# Deployed to BOTH /home/ubuntu/provisiond/Caddyfile.tls (the live bind-mount into buildr-caddy)
+# and /home/ubuntu/code-agent/provisiond/Caddyfile.tls (what thrallo-provisiond would re-raise
+# with after a reboot) — the two copies MUST stay byte-identical so a re-raise from either
+# provisiond instance produces the same front. Certs persist in the buildr-caddy-data volume.
+#
+# The bind-mount is by inode: replace the file IN PLACE (cp/scp over it), never mv a new file
+# onto the path, then `docker exec buildr-caddy caddy reload --config /etc/caddy/Caddyfile`.
+{
+	admin off
+	# On-demand certs (Thrallo previews + legacy custom domains): issued at the first TLS
+	# handshake for any on-demand hostname — but only after the ask endpoint approves it.
+	# Phase 19: the ask gate is THRALLO's shell; it validates <label>.preview.thrallo.com
+	# against provisiond (/exists) and passes anything else through to the Buildr101 shell's
+	# own /api/domain-check so frozen customer domains keep renewing. Unauthenticated by
+	# design (read-only yes/no).
+	on_demand_tls {
+		ask http://10.83.7.1:8788/api/domain-check
+	}
+}
+
+# CP-4: bind the listener to Caddy's static proxy-net IP ONLY (docker.mjs CADDY_PROXY_IP). Legit
+# ingress arrives via the host -p 443:443 publish which DNATs to this IP; an app container reaching
+# Caddy over its own per-project net hits a DIFFERENT (internal-net) Caddy IP where nothing listens
+# -> the shared-proxy Host-header pivot is closed. Caddy->Vite is outbound, DNS-01 issuance is
+# outbound to Cloudflare — both unaffected by the bind.
+*.preview.buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy {http.request.host.labels.3}:5173
+}
+
+# Thrallo previews (Phase 19). Same label depth as the buildr wildcard (com=0 thrallo=1
+# preview=2 <label>=3) -> container <label>:5173, so Vite + HMR-over-wss route identically.
+# The Cloudflare token on this box only covers the buildr101.com zone, so certs here are
+# per-label ON DEMAND (HTTP-01/TLS-ALPN — no DNS access needed), gated by the ask endpoint
+# above. The *.preview.thrallo.com A record must be DNS-only/unproxied so this Caddy serves
+# its own cert directly.
+*.preview.thrallo.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		on_demand
+	}
+	reverse_proxy {http.request.host.labels.3}:5173
+}
+
+# Production shell: buildr101.com serves the product itself (the shell's node server on the
+# docker proxy-net gateway — serving the built web UI statically and the /api routes, incl. the
+# /api/generate SSE stream). www redirects to the apex. Same DNS-01 cert mechanics; both the apex
+# A record and the www CNAME are DNS-only/grey.
+buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	reverse_proxy 10.83.7.1:8787 {
+		flush_interval -1
+	}
+}
+
+www.buildr101.com {
+	bind 10.83.7.2
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	redir https://buildr101.com{uri} permanent
+}
+
+# F7 publish: static published apps. <label>.app.buildr101.com serves the built SPA from the
+# read-only /publish/<label> mount (docker.mjs PUBLISH_ROOT). try_files gives the SPA fallback
+# (client-side routes resolve to index.html). Same DNS-01 wildcard mechanics as previews; the
+# *.app.buildr101.com A record must also be DNS-only/grey.
+*.app.buildr101.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+	root * /publish/{http.request.host.labels.3}
+	try_files {path} /index.html
+	file_server
+}
+
+# Thrallo shares this VPS but runs as a separate systemd service and private listener. Its API is
+# same-origin under /api, so only the app host needs to reach the service. These certificates use
+# the normal HTTP-01/TLS-ALPN flow because thrallo.com is managed outside the Buildr101 Cloudflare
+# account.
+app.thrallo.com {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	reverse_proxy 10.83.7.1:8788 {
+		flush_interval -1
+	}
+}
+
+thrallo.com, www.thrallo.com {
+	bind 10.83.7.2
+	redir https://app.thrallo.com{uri} permanent
+}
+
+# Custom domains (catch-all: any hostname not matched by the named sites above). The user points
+# their domain's A record at this VPS; on-demand TLS issues the cert (gated by the ask endpoint),
+# and the site serves via the /publish/_domains/<host> symlink provisiond maintains. HTTP-01/
+# TLS-ALPN challenges need no DNS access — works for domains we don't control.
+https:// {
+	bind 10.83.7.2
+	log {
+		output stdout
+		format json
+	}
+	tls {
+		on_demand
+	}
+	root * /publish/_domains/{host}
+	try_files {path} /index.html
+	file_server
+}

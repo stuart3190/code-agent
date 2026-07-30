@@ -51,6 +51,8 @@ export const RESTORE_ORDER = [
   "ca_conversation_events",
   "ca_owner_profile",
   "ca_memories",
+  "projects",     // references ca_products -> restore after it
+  "build_jobs",
 ];
 
 const BATCH = 500;

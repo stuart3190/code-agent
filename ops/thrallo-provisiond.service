@@ -1,0 +1,37 @@
+# Thrallo's own provisiond instance (Phase 19): serves *.preview.thrallo.com preview containers
+# from the code-agent checkout, on its own port + token. Coexists with buildr-provisiond on the
+# same docker daemon — labels are per-project so container names never collide, and ensureCaddy
+# is a no-op while the shared front is already up with the right scheme.
+#
+# Environment (in /home/ubuntu/code-agent/provisiond/.env, NOT here — same custody model as
+# buildr's instance):
+#   PROVISIOND_PORT=8791
+#   PROVISIOND_TOKEN=<thrallo-only token>
+#   PREVIEW_PUBLIC_SUFFIX=preview.thrallo.com
+#   PREVIEW_SCHEME=https
+#   PUBLISH_DIR=/home/ubuntu/publish          # SAME dir as buildr's instance — the shared Caddy
+#                                             # mounts exactly one /publish, and a caddy re-raise
+#                                             # from either instance must be byte-equivalent.
+#                                             # Thrallo publishing itself lands in Phase 22.
+#   CLOUDFLARE_API_TOKEN=<same as buildr's>   # only so a re-raise keeps buildr's DNS-01 certs
+#                                             # renewing; Thrallo's own blocks never use it.
+#
+# Install: sudo cp ops/thrallo-provisiond.service /etc/systemd/system/ &&
+#          sudo systemctl daemon-reload && sudo systemctl enable --now thrallo-provisiond
+
+[Unit]
+Description=Thrallo provisiond (preview provisioning for *.preview.thrallo.com)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/code-agent/provisiond
+ExecStart=/usr/bin/node /home/ubuntu/code-agent/provisiond/server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

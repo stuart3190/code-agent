@@ -17,7 +17,7 @@ async function tablesFromMigrations() {
   for (const name of await readdir(migrationsDir)) {
     if (!name.endsWith(".sql")) continue;
     const sql = await readFile(new URL(name, migrationsDir), "utf8");
-    for (const match of sql.matchAll(/create table (?:if not exists )?public\.(ca_\w+)/gi)) {
+    for (const match of sql.matchAll(/create table (?:if not exists )?public\.(ca_\w+|projects|build_jobs)/gi)) {
       tables.add(match[1]);
     }
   }

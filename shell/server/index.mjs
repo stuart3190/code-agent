@@ -31,7 +31,8 @@ import { handlePreview } from "./routes/preview.mjs";
 import { handleExport } from "./routes/export.mjs";
 import { handlePublish, handleUnpublish } from "./routes/publish.mjs";
 import { handleAndroid } from "./routes/android.mjs";
-import { handleDomainCheck, handleDomainList, handleDomainConnect, handleDomainRemove } from "./routes/domains.mjs";
+import { handleDomainList, handleDomainConnect, handleDomainRemove } from "./routes/domains.mjs";
+import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleProjectDelete } from "./routes/projects.mjs";
 import { handleAccountDelete } from "./routes/account.mjs";
 import { handleByokGet, handleByokSave, handleByokClear } from "./routes/settings.mjs";
@@ -316,9 +317,10 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req, BODY_LIMITS.webhook);
       return handleRuntimeWebhook(req, res, raw, url);
     }
-    // Caddy's on_demand_tls ask gate (read-only yes/no; see routes/domains.mjs).
+    // Caddy's on_demand_tls ask gate for the SHARED front (read-only yes/no; Phase 19
+    // re-homing — see routes/previewDomainCheck.mjs).
     if (p === "/api/domain-check" && method === "GET") {
-      return handleDomainCheck(req, res, url);
+      return handlePreviewDomainCheck(req, res, url);
     }
 
     // ── authenticated ───────────────────────────────────────────────────────────────────────

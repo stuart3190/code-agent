@@ -7,6 +7,9 @@ import { codeAgentStore } from "../codeAgentStore.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
+import { startAppBuild } from "../appBuild/appBuildService.mjs";
+import { openAIConfigured } from "../openAIProvider.mjs";
+import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
 // is expressed as a nullable type, and invokes treat null as absent.
@@ -34,6 +37,37 @@ export function registerCoreCapabilities() {
         steps: (input.steps || []).slice(0, 20).map((step) => String(step).slice(0, 300)),
       });
       return { recorded: true };
+    },
+  });
+
+  registerCapability({
+    id: "app_build",
+    specialist: "Builder",
+    statusText: "Assembling the build team…",
+    description: "Create a complete new application from a description: the team designs it, writes the code on a modern stack it chooses itself, verifies it builds, and serves a live preview into this conversation. Use for any 'build me a…' outcome that is not a change to an existing connected repository. Write the description as a full product brief — the user never chooses technology.",
+    costProfile: "run",
+    inputSchema: strings({
+      description: str("Complete product brief: what the app does, who uses it, key screens/flows, branding hints from memory"),
+      productName: optionalStr("Short product name (creates/updates the named product in memory)"),
+    }),
+    requirements: () => (openAIConfigured() || anthropicConfigured()
+      ? { ok: true }
+      : { ok: false, reason: "No build-capable model is configured." }),
+    async invoke(ctx, input) {
+      // Managed builds need remaining budget; BYOK owners build on their own key.
+      const credentialProvider = await activeAiProviderName(ctx.owner).catch(() => "managed");
+      if (!["anthropic", "openai"].includes(credentialProvider)) {
+        const overview = await budgetOverview(ctx.owner, { store: codeAgentStore() });
+        if (overview.budgets.managedTokens.remaining <= 0) {
+          const error = new Error("The monthly managed-model allowance is used up; builds need budget or a BYOK key.");
+          error.code = "budget_exceeded";
+          throw error;
+        }
+      }
+      return startAppBuild(ctx, {
+        description: String(input.description),
+        productName: input.productName || null,
+      });
     },
   });
 
