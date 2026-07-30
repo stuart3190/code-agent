@@ -67,6 +67,9 @@ history. Do not point it at Buildr101 production data or credentials.
 - A zero-dependency CLI (`cli/thrallo.mjs`, installable via the package `bin`): login with an
   API token, list repositories/agents/usage, launch runs and PR reviews with a live streamed
   timeline, and approve or decline publication from the terminal (`--yes` to auto-approve).
+- Nightly validated disaster-recovery backups (every control-plane table, auth users, and the
+  artifact bucket, checksummed and pruned) with a drift-guarded table list, a confirm-gated
+  FK-ordered restore script, and a full runbook in `docs/DISASTER-RECOVERY.md`.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -121,9 +124,10 @@ subscription plans with managed usage budgets; operational telemetry; publish po
 protected paths; sandbox preserve/resume; object-storage artifacts; sandbox network and
 command policies; per-owner rate controls; retention pruning; API tokens; the VS Code
 extension; approval-gated pull-request review agents; automations (webhook-triggered reviews
-and scheduled runs); and the terminal CLI.
+and scheduled runs); the terminal CLI; and verified disaster-recovery backups with a restore
+runbook.
 
-1. Live Stripe pricing, disaster recovery, and richer dunning.
+1. Live Stripe pricing and richer dunning.
 2. Extension marketplace publication, inline completion, and desktop-application packaging.
 3. SDK/plugin system, enterprise controls, and mobile companion.
 

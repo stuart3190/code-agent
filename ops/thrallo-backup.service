@@ -1,0 +1,10 @@
+[Unit]
+Description=Thrallo nightly control-plane backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/code-agent
+ExecStart=/usr/bin/node ops/backup-thrallo.mjs
+Nice=10

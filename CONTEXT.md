@@ -2,8 +2,8 @@
 
 ## Current milestone
 
-Phase 13 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
-now subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 14 is implemented. Phase 13 is live, and Phase 12's automatic PR reviews are active:
+the GitHub App subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -50,7 +50,11 @@ maintenance runs every 1–168 hours via an optimistically claimed sweeper, all 
 same budget and rate-limit admission with run provenance and recorded skips. Phase 13 adds
 the `thrallo` CLI: token login with 0600 config, run/review launching with streamed timelines
 and interactive (or `--yes`) approval, plus repos/agents/usage/status/resume/cancel, built on
-the shared zero-dependency API client.
+the shared zero-dependency API client. Phase 14 adds disaster recovery: nightly validated
+backups of every control-plane table, auth users, and the artifact bucket under
+`thrallo-backup.timer`, a migration-drift-guarded table list, a confirm-gated FK-ordered
+restore script, and the `docs/DISASTER-RECOVERY.md` runbook (offline kit: `shell/.env` with
+`PLATFORM_ENC_KEY` plus a copied backup run — a Stuart action).
 
 ## Verification state
 
@@ -149,8 +153,7 @@ the shared zero-dependency API client.
 
 ## Next implementation slice
 
-Phase 14: extension marketplace packaging and inline run status, or the first
-disaster-recovery slice (verified control-plane backups and a restore runbook). Stripe
+Phase 15: extension marketplace packaging and inline run status, or dunning polish. Stripe
 go-live stays parked until Stuart supplies products closer to launch.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
