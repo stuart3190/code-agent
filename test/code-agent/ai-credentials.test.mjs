@@ -12,6 +12,7 @@ const {
   connectApiKey,
   connectCodexAuth,
   disconnectAiProvider,
+  updateAiRoutingPolicy,
 } = await import("../../shell/server/lib/aiCredentialStore.mjs");
 const {
   _internal,
@@ -64,6 +65,29 @@ test("rejected API keys are never stored", async () => {
     (error) => error.code === "provider_key_rejected",
   );
   assert.equal((await store.listCredentials("owner-a")).length, 0);
+});
+
+test("Gemini keys are verified with a header and routing preferences are persisted", async () => {
+  const store = new MemoryAiCredentialStore();
+  const key = `AIza${"g".repeat(36)}`;
+  await connectApiKey("owner-g", "gemini", key, {
+    store,
+    fetchImpl: async (url, options) => {
+      assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1");
+      assert.equal(options.headers["x-goog-api-key"], key);
+      return { ok: true };
+    },
+  });
+  const summary = await updateAiRoutingPolicy("owner-g", {
+    routingMode: "quality",
+    allowFallback: false,
+  }, { store });
+  assert.equal(summary.activeProvider, "gemini");
+  assert.deepEqual(summary.routing, {
+    routingMode: "quality",
+    preferredModel: null,
+    allowFallback: false,
+  });
 });
 
 test("Codex auth state is encrypted and summaries expose account metadata only", async () => {

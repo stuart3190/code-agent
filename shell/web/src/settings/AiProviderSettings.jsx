@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   aiConnections,
+  aiEvaluations,
   cancelCodexLogin,
   codexLoginStatus,
   connectAiKey,
   disconnectAiProvider,
+  runAiEvaluation,
   selectAiProvider,
   startCodexLogin,
+  updateAiRouting,
 } from "../lib/codeAgentApi.js";
 
 const providers = {
@@ -30,15 +33,29 @@ const providers = {
     placeholder: "sk-ant-...",
     accent: "from-orange-400/15 to-amber-400/[0.04]",
   },
+  gemini: {
+    name: "Gemini API",
+    eyebrow: "Bring your own key",
+    description: "Use your Google AI Studio balance for agent runs.",
+    placeholder: "AIza...",
+    accent: "from-cyan-400/15 to-blue-400/[0.04]",
+  },
 };
 
 export default function AiProviderSettings() {
   const [data, setData] = useState(null);
-  const [keys, setKeys] = useState({ openai: "", anthropic: "" });
+  const [keys, setKeys] = useState({ openai: "", anthropic: "", gemini: "" });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [login, setLogin] = useState(null);
+  const [routing, setRouting] = useState({
+    routingMode: "balanced", preferredModel: "", allowFallback: true,
+  });
+  const [evaluations, setEvaluations] = useState({ health: [], evaluations: [] });
+  const [evaluationPrompt, setEvaluationPrompt] = useState(
+    "Review this JavaScript and explain the bug, then provide a corrected version: const total = items.reduce((sum, item) => sum + item.price);",
+  );
 
   const connections = useMemo(
     () => Object.fromEntries((data?.connections || []).map((item) => [item.provider, item])),
@@ -46,8 +63,22 @@ export default function AiProviderSettings() {
   );
 
   useEffect(() => {
-    aiConnections().then(setData).catch((err) => setError(err.message));
+    Promise.all([aiConnections(), aiEvaluations()])
+      .then(([connectionsData, evaluationData]) => {
+        setData(connectionsData);
+        setEvaluations(evaluationData);
+      })
+      .catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (!data?.routing) return;
+    setRouting({
+      routingMode: data.routing.routingMode || "balanced",
+      preferredModel: data.routing.preferredModel || "",
+      allowFallback: data.routing.allowFallback !== false,
+    });
+  }, [data?.routing]);
 
   useEffect(() => {
     if (!login?.sessionId || login.status !== "pending") return undefined;
@@ -123,6 +154,24 @@ export default function AiProviderSettings() {
     });
   }
 
+  async function saveRouting() {
+    await run("routing", async () => {
+      setData(await updateAiRouting(routing));
+      setNotice("Model routing settings were saved.");
+    });
+  }
+
+  async function evaluateModels() {
+    await run("evaluation", async () => {
+      const result = await runAiEvaluation({
+        prompt: evaluationPrompt,
+        routingMode: routing.routingMode === "manual" ? "balanced" : routing.routingMode,
+      });
+      setEvaluations(result);
+      setNotice("Provider comparison completed.");
+    });
+  }
+
   if (!data && !error) {
     return <div className="grid min-h-[calc(100vh-4rem)] place-items-center text-sm text-slate-600">Loading AI connections…</div>;
   }
@@ -177,7 +226,7 @@ export default function AiProviderSettings() {
           )}
         </ProviderCard>
 
-        {["openai", "anthropic"].map((provider) => (
+        {["openai", "anthropic", "gemini"].map((provider) => (
           <ProviderCard key={provider} provider={provider} connection={connections[provider]}
             active={data?.activeProvider === provider} busy={busy} onSelect={select} onDisconnect={disconnect}>
             {!connections[provider] && (
@@ -210,6 +259,86 @@ export default function AiProviderSettings() {
               Use managed AI
             </button>
           )}
+        </div>
+      </div>
+
+      <div className="mt-8 rounded-2xl border border-white/[0.08] bg-[#0e1117] p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <div className="flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-300">Smart routing</div>
+            <h2 className="mt-1 text-lg font-semibold text-white">Match each task to the right model</h2>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500">
+              Balanced adapts to the task. Quality prioritizes deeper reasoning. Fast and economy favor lower latency.
+              Temporary provider failures can automatically fall back to another connected managed provider.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[180px_240px_auto]">
+            <select className="field" value={routing.routingMode}
+              onChange={(event) => setRouting((current) => ({ ...current, routingMode: event.target.value }))}>
+              <option value="balanced">Balanced</option>
+              <option value="quality">Quality</option>
+              <option value="fast">Fast</option>
+              <option value="economy">Economy</option>
+              <option value="manual">Manual model</option>
+            </select>
+            {routing.routingMode === "manual" ? (
+              <select className="field" value={routing.preferredModel}
+                onChange={(event) => setRouting((current) => ({ ...current, preferredModel: event.target.value }))}>
+                <option value="">Choose a model</option>
+                {(data?.models || [])
+                  .filter((item) => data?.activeProvider === "managed"
+                    ? item.configured
+                    : item.provider === data?.activeProvider)
+                  .map((item) => (
+                  <option key={`${item.provider}:${item.id}`} value={`${item.provider}:${item.id}`}>
+                    {item.provider} / {item.id}
+                  </option>
+                  ))}
+              </select>
+            ) : (
+              <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 text-xs text-slate-400">
+                <input type="checkbox" checked={routing.allowFallback}
+                  onChange={(event) => setRouting((current) => ({ ...current, allowFallback: event.target.checked }))} />
+                Automatic fallback
+              </label>
+            )}
+            <button onClick={saveRouting}
+              disabled={!!busy || (routing.routingMode === "manual" && !routing.preferredModel)}
+              className="rounded-lg bg-white px-4 py-2.5 text-xs font-semibold text-black disabled:opacity-40">
+              {busy === "routing" ? "Saving..." : "Save routing"}
+            </button>
+          </div>
+        </div>
+        {!!evaluations.health?.length && (
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
+            <span className="py-1 text-[10px] uppercase tracking-wide text-slate-600">Recent health</span>
+            {evaluations.health.slice(0, 6).map((item) => (
+              <span key={`${item.provider}:${item.model}`}
+                className="rounded-full border border-white/[0.08] px-2.5 py-1 text-[10px] text-slate-400">
+                {item.provider} · {item.successRate}% · {item.averageLatencyMs} ms
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/[0.08] bg-[#0e1117] p-5">
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.15fr]">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-300">Provider evaluation</div>
+            <h2 className="mt-1 text-lg font-semibold text-white">Compare configured models</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              This sends one short paid request to up to three available models and compares their answer,
+              latency, and token use. It never gives models repository tools.
+            </p>
+            <textarea className="field mt-4 min-h-32 resize-y" maxLength={2000}
+              value={evaluationPrompt} onChange={(event) => setEvaluationPrompt(event.target.value)} />
+            <button onClick={evaluateModels} disabled={!!busy || !evaluationPrompt.trim()}
+              className="mt-2 rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] px-4 py-2.5 text-xs font-semibold text-cyan-100 disabled:opacity-40">
+              {busy === "evaluation" ? "Running comparison..." : "Run comparison"}
+            </button>
+          </div>
+          <EvaluationResults data={evaluations} />
         </div>
       </div>
 
@@ -256,4 +385,33 @@ function ProviderCard({ provider, connection, active, busy, onSelect, onDisconne
 
 function ActiveBadge() {
   return <span className="ml-auto rounded-full border border-emerald-400/25 bg-emerald-400/[0.08] px-2 py-1 text-[9px] uppercase tracking-wide text-emerald-300">Active</span>;
+}
+
+function EvaluationResults({ data }) {
+  const latest = data?.evaluations?.[0];
+  if (!latest) {
+    return <div className="grid min-h-48 place-items-center rounded-xl border border-dashed border-white/[0.08] text-xs text-slate-600">No comparisons yet</div>;
+  }
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <div className="text-sm font-medium text-white">{latest.label}</div>
+        <span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[9px] uppercase text-slate-500">{latest.status}</span>
+      </div>
+      <div className="mt-3 grid gap-3">
+        {latest.results.map((result) => (
+          <div key={result.id} className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+            <div className="flex flex-wrap items-center gap-2 text-[10px]">
+              <span className="font-semibold uppercase tracking-wide text-cyan-300">{result.provider}</span>
+              <span className="text-slate-500">{result.model}</span>
+              <span className="ml-auto text-slate-600">{result.latencyMs} ms · {result.totalTokens} tokens</span>
+            </div>
+            {result.output
+              ? <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-300">{result.output}</p>
+              : <p className="mt-3 text-xs text-red-300">{result.error || "Evaluation failed"}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
