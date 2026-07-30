@@ -162,6 +162,14 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
   migration). Production capabilities advertise `editor.inlineCompletion`, the completions
   route requires authentication, the shell restarted healthy, and Buildr101 stayed healthy.
   The full local verification passed with 148 Code Agent tests and four Playwright checks.
+- The first production dogfood session completed on 2026-07-30: a CLI-launched run (PAT auth)
+  executed via the Codex subscription, opened PR #35 adding the CLI `version` command, passed
+  CI, triggered the pull-request-review automation via the live webhook (the reviewer ran the
+  CLI tests itself, 8/8), had its review approved and posted to GitHub, and merged. Three
+  rough edges surfaced and were fixed and deployed from main commit `fc0e50d`: the CLI's
+  Windows exit crash (process.exitCode), prompt-sliced pull-request titles (synthesizeTitle),
+  and publication copy shown for review-run approvals in the Agents workspace. The
+  `claude-dogfood` API token and the repository's pr_review automation remain active.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
