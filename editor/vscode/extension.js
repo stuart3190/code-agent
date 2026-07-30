@@ -12,20 +12,37 @@ const TOKEN_KEY = "thrallo.apiToken";
 let client = null;
 let output = null;
 let treeProvider = null;
+let statusItem = null;
 
 function activate(context) {
   output = vscode.window.createOutputChannel("Thrallo");
   treeProvider = new AgentTreeProvider();
+  statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+  statusItem.name = "Thrallo";
+  statusItem.command = "thrallo.showOutput";
   context.subscriptions.push(
     output,
+    statusItem,
     vscode.window.registerTreeDataProvider("thralloAgents", treeProvider),
     vscode.commands.registerCommand("thrallo.connect", () => connect(context)),
     vscode.commands.registerCommand("thrallo.disconnect", () => disconnect(context)),
     vscode.commands.registerCommand("thrallo.refresh", () => treeProvider.refresh()),
     vscode.commands.registerCommand("thrallo.runTask", (item) => runTask(item)),
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
+    vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
   );
   restoreConnection(context);
+}
+
+function setStatus(text, { spin = false, tooltip = "" } = {}) {
+  if (!statusItem) return;
+  if (!text) {
+    statusItem.hide();
+    return;
+  }
+  statusItem.text = `${spin ? "$(sync~spin) " : "$(zap) "}Thrallo: ${text}`;
+  statusItem.tooltip = tooltip || "Open the Thrallo run timeline";
+  statusItem.show();
 }
 
 async function restoreConnection(context) {
@@ -91,6 +108,7 @@ async function runTask(item) {
 }
 
 async function followRun(runId) {
+  setStatus("starting…", { spin: true });
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Thrallo agent is working…", cancellable: true },
     async (progress, cancellation) => {
@@ -104,7 +122,10 @@ async function followRun(runId) {
         await client.streamRunEvents(runId, (event) => {
           output.appendLine(describeEvent(event));
           const message = event.payload?.message;
-          if (message) progress.report({ message: String(message).slice(0, 80) });
+          if (message) {
+            progress.report({ message: String(message).slice(0, 80) });
+            setStatus(String(message).slice(0, 48), { spin: true });
+          }
         }, { signal: controller.signal });
       } catch (error) {
         if (error.name !== "AbortError") output.appendLine(`Stream ended: ${error.message}`);
@@ -120,9 +141,14 @@ async function presentRunOutcome(runId) {
   try {
     run = (await client.getRun(runId)).run;
   } catch {
+    setStatus(null);
     return;
   }
-  if (!run) return;
+  if (!run) { setStatus(null); return; }
+  if (run.state === "succeeded") setStatus("succeeded");
+  else if (run.state === "waiting_for_approval") setStatus("awaiting approval");
+  else if (TERMINAL_STATES.has(run.state)) setStatus(run.state);
+  setTimeout(() => setStatus(null), 90_000);
   if (run.state === "waiting_for_approval") {
     await showDiff(runId);
     const choice = await vscode.window.showInformationMessage(
@@ -236,12 +262,18 @@ class AgentTreeProvider {
         client.listRepositories(),
       ]);
       const repoNames = new Map(repositories.map((repo) => [repo.id, repo.fullName]));
-      return agents.map((agent) => {
+      const latest = await Promise.all(agents.slice(0, 20).map((agent) =>
+        client.latestRun(agent.id).then((result) => result.run).catch(() => null)));
+      return agents.map((agent, index) => {
+        const run = latest[index] || null;
         const item = new vscode.TreeItem(agent.name);
-        item.description = repoNames.get(agent.repositoryId) || agent.mode;
+        item.description = run
+          ? `${runStateLabel(run.state)} · ${repoNames.get(agent.repositoryId) || agent.mode}`
+          : repoNames.get(agent.repositoryId) || agent.mode;
+        item.tooltip = run ? `Latest run: ${run.state}${run.error ? ` — ${run.error}` : ""}` : "No runs yet";
         item.contextValue = "agent";
         item.agent = agent;
-        item.iconPath = new vscode.ThemeIcon("hubot");
+        item.iconPath = runStateIcon(run?.state);
         item.command = { command: "thrallo.runTask", title: "Run task", arguments: [{ agent }] };
         return item;
       });
@@ -251,6 +283,28 @@ class AgentTreeProvider {
       return [item];
     }
   }
+}
+
+function runStateLabel(state) {
+  return ({
+    queued: "queued", provisioning: "starting", indexing: "indexing", running: "running",
+    waiting_for_approval: "awaiting approval", succeeded: "succeeded", failed: "failed",
+    cancelled: "cancelled", interrupted: "interrupted",
+  })[state] || state;
+}
+
+function runStateIcon(state) {
+  if (!state) return new vscode.ThemeIcon("hubot");
+  if (["queued", "provisioning", "indexing", "running"].includes(state)) {
+    return new vscode.ThemeIcon("sync~spin");
+  }
+  if (state === "waiting_for_approval") {
+    return new vscode.ThemeIcon("git-pull-request", new vscode.ThemeColor("charts.yellow"));
+  }
+  if (state === "succeeded") {
+    return new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"));
+  }
+  return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
 }
 
 function deactivate() {}

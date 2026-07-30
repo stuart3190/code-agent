@@ -14,3 +14,4 @@ key.txt
 .env.*
 !.env.example
 !**/.env.example
+editor/vscode/*.vsix

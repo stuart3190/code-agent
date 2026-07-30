@@ -62,3 +62,19 @@ test("event helpers tolerate malformed blocks and describe payloads", () => {
 test("client rejects non-http server URLs", () => {
   assert.throws(() => new ThralloClient({ serverUrl: "ftp://x", token: "t" }), /http/);
 });
+
+test("the extension is marketplace-packagable: metadata and assets are present", async () => {
+  const { readFile, access } = await import("node:fs/promises");
+  const root = new URL("../../editor/vscode/", import.meta.url);
+  const manifest = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
+  assert.equal(manifest.publisher, "thrallo");
+  assert.equal(manifest.icon, "media/icon.png");
+  assert.ok(manifest.repository?.url);
+  assert.ok(manifest.categories.includes("AI"));
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+  for (const file of ["media/icon.png", "LICENSE.txt", "CHANGELOG.md", "README.md", "extension.js"]) {
+    await access(new URL(file, root));
+  }
+  const icon = await readFile(new URL("media/icon.png", root));
+  assert.deepEqual([...icon.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], "icon must be a real PNG");
+});
