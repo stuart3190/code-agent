@@ -2,7 +2,7 @@
   "name": "thrallo",
   "displayName": "Thrallo — Cloud Coding Agents",
   "description": "Launch Thrallo cloud coding agents on your repositories: stream live run timelines, review diffs, approve pull requests, and resume preserved workspaces — without leaving VS Code.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "thrallo",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -79,6 +79,16 @@
           "type": "string",
           "default": "https://app.thrallo.com",
           "description": "Thrallo control-plane origin."
+        },
+        "thrallo.completions.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable inline code completions from Thrallo. Completions use your Thrallo model allowance (or BYOK key), so this is opt-in."
+        },
+        "thrallo.completions.repository": {
+          "type": "string",
+          "default": "",
+          "description": "Connected repository (owner/name) whose Thrallo index provides completion context. Auto-detected when exactly one repository is connected."
         }
       }
     }

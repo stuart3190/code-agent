@@ -85,6 +85,7 @@ export function codeAgentCapabilities() {
     editor: {
       apiTokens: true,
       vscodeExtension: true,
+      inlineCompletion: openAIConfigured() || anthropicConfigured() || geminiConfigured(),
     },
     reviews: {
       pullRequestReview: githubAppConfigured() && daytonaConfigured(),

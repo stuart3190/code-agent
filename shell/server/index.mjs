@@ -64,6 +64,7 @@ import {
   handleRunPublish, handleRunResume,
   handleRepositoryFileGraph, handleRepositoryIndexGet, handleRepositoryIndexRefresh,
   handleRepositoryPulls,
+  handleCompletion,
   handleRepositorySearch, handleRepositorySymbolSearch, handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
 import { CodeAgentInputError } from "./lib/codeAgentContracts.mjs";
@@ -490,6 +491,10 @@ const server = http.createServer(async (req, res) => {
     if (runEventsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRunEvents(req, res, { owner, runId: runEventsMatch[1], url });
+    }
+    if (p === "/api/v1/completions" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleCompletion(req, res, { owner, body: await readJson(req, BODY_LIMITS.standard) });
     }
     if (p === "/api/v1/usage" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

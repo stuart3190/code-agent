@@ -39,6 +39,14 @@ class ThralloClient {
   cancelRun(runId) { return this.request(`/api/v1/runs/${runId}/cancel`, { method: "POST" }); }
   resumeRun(runId) { return this.request(`/api/v1/runs/${runId}/resume`, { method: "POST", body: "{}" }); }
 
+  complete(body, { signal } = {}) {
+    return this.request("/api/v1/completions", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    });
+  }
+
   createRun(agentId, prompt, mode = "agent") {
     return this.request(`/api/v1/agents/${agentId}/runs`, {
       method: "POST",

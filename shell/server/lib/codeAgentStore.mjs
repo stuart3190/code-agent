@@ -310,6 +310,13 @@ export class MemoryCodeAgentStore {
     return row;
   }
 
+  async recordStandaloneUsage(owner, input) {
+    const row = { id: newId(), owner, run_id: null, created_at: now(),
+      amount_gbp: 0, compute_seconds: 0, metadata: {}, ...input };
+    this.usageRecords.set(row.id, row);
+    return row;
+  }
+
   async usageSummary(owner) {
     return summarizeUsage([...this.usageRecords.values()].filter((x) => x.owner === owner));
   }
@@ -661,6 +668,12 @@ export class SupabaseCodeAgentStore {
   async recordUsage(run, input) {
     const { data, error } = await this.client.from("ca_usage_records")
       .insert({ owner: run.owner, run_id: run.id, ...input }).select("*").single();
+    return unwrapOne(data, error);
+  }
+
+  async recordStandaloneUsage(owner, input) {
+    const { data, error } = await this.client.from("ca_usage_records")
+      .insert({ owner, run_id: null, ...input }).select("*").single();
     return unwrapOne(data, error);
   }
 
