@@ -19,6 +19,7 @@ import {
 import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits } from "../lib/usageBudgets.mjs";
 import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
+import { listPullRequests } from "../lib/githubApp.mjs";
 
 async function assertBudgetAllowsRun(ownerId) {
   const credentialProvider = await activeAiProviderName(ownerId).catch(() => "managed");
@@ -118,6 +119,27 @@ export async function handleRepositoryFileGraph(_req, res, { owner, repositoryId
   const graph = await retrieveFileGraph(owner.id, repositoryId, path);
   if (!graph) throw new CodeAgentInputError("Indexed file not found", 404, "indexed_file_not_found");
   return sendJson(res, 200, { index: publicIndexStatus(index), graph });
+}
+
+export async function handleRepositoryPulls(_req, res, { owner, repositoryId }) {
+  const repository = await codeAgentStore().getRepository(owner.id, repositoryId);
+  if (!repository) throw new CodeAgentInputError("Repository not found", 404, "repository_not_found");
+  if (!repository.installation_id) {
+    throw new CodeAgentInputError(
+      "Pull-request review requires a GitHub App repository connection",
+      409,
+      "github_installation_required",
+    );
+  }
+  try {
+    const pulls = await listPullRequests({
+      installationId: repository.installation_id,
+      repository: repository.full_name,
+    });
+    return sendJson(res, 200, { pulls });
+  } catch (error) {
+    throw new CodeAgentInputError(error.message, 502, "github_pulls_failed");
+  }
 }
 
 export async function handleAgents(req, res, { owner, method, body }) {

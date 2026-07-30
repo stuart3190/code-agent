@@ -223,6 +223,15 @@ test("phase 9 migration adds egress/command policies and retention tracking", as
   assert.match(sql, /ca_runs_retention_idx[\s\S]*where pruned_at is null and finished_at is not null/i);
 });
 
+test("review-run migration adds a validated pull-request column", async () => {
+  const sql = await readFile(
+    new URL("../../supabase/migrations/20260731003000_review_runs.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /alter table public\.ca_runs[\s\S]*add column pull_request bigint/i);
+  assert.match(sql, /pull_request is null or pull_request > 0/i);
+});
+
 test("api-token migration stores only hashes and stays server-only", async () => {
   const sql = await readFile(apiTokensMigrationPath, "utf8");
   assert.match(sql, /create table public\.ca_api_tokens/i);

@@ -118,6 +118,76 @@ export async function createPullRequest({
   };
 }
 
+export async function listPullRequests({ installationId, repository, fetchImpl = fetch }) {
+  const fullName = validRepositoryName(repository);
+  const { token } = await createInstallationToken(installationId, fetchImpl);
+  const result = await githubRequest(`/repos/${fullName}/pulls?state=open&per_page=30&sort=updated&direction=desc`, {
+    auth: token,
+    fetchImpl,
+  });
+  return (Array.isArray(result) ? result : []).map((pull) => ({
+    number: Number(pull.number),
+    title: pull.title,
+    url: pull.html_url,
+    author: pull.user?.login || null,
+    baseBranch: pull.base?.ref || null,
+    headBranch: pull.head?.ref || null,
+    draft: !!pull.draft,
+    updatedAt: pull.updated_at,
+  }));
+}
+
+// Posts a pull-request review. Findings that anchor to a changed line become inline comments;
+// GitHub rejects comments outside the diff, so the caller retries once with body-only.
+export async function createPullRequestReview({
+  installationId, repository, pullNumber, body, event = "COMMENT", comments = [], fetchImpl = fetch,
+}) {
+  const fullName = validRepositoryName(repository);
+  const { token } = await createInstallationToken(installationId, fetchImpl);
+  const payload = {
+    body: String(body || "").slice(0, 60_000),
+    event: ["APPROVE", "REQUEST_CHANGES", "COMMENT"].includes(event) ? event : "COMMENT",
+  };
+  const inline = comments
+    .filter((comment) => comment.path && Number(comment.line) > 0)
+    .slice(0, 40)
+    .map((comment) => ({
+      path: String(comment.path).slice(0, 500),
+      line: Math.floor(Number(comment.line)),
+      side: "RIGHT",
+      body: String(comment.body || "").slice(0, 10_000),
+    }));
+  const post = (withComments) => githubRequest(`/repos/${fullName}/pulls/${Math.floor(Number(pullNumber))}/reviews`, {
+    method: "POST",
+    auth: token,
+    fetchImpl,
+    json: withComments && inline.length ? { ...payload, comments: inline } : payload,
+  });
+  let result;
+  try {
+    result = await post(true);
+  } catch (error) {
+    if (!inline.length) throw error;
+    result = await post(false);
+    result.inlineCommentsDropped = inline.length;
+  }
+  return {
+    id: Number(result.id),
+    url: result.html_url,
+    state: result.state,
+    inlineComments: result.inlineCommentsDropped ? 0 : inline.length,
+    inlineCommentsDropped: result.inlineCommentsDropped || 0,
+  };
+}
+
+function validRepositoryName(repository) {
+  const fullName = String(repository || "");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
+    throw new Error("Invalid GitHub repository name");
+  }
+  return fullName;
+}
+
 export function publicInstallation(data) {
   return {
     id: data.id,

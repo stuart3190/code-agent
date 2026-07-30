@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 10 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 11 is implemented. Phase 10 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -39,7 +39,11 @@ and a retention sweeper pruning run timelines and artifact content after
 never operator-capable) authenticating the v1 API for editor clients, token management in
 Settings, a real Downloads view, and the zero-dependency `editor/vscode` extension with an
 agents view, run launching, live timeline streaming, diff review, approve/decline
-publication, and resume.
+publication, and resume. Phase 11 adds repository-aware pull-request review agents: PR head
+checkout in the sandbox, a read-only review toolset that can still run tests, structured
+findings (verdict/severity/line anchors), review artifacts, a Reviews workspace view listing
+open PRs, and approval-gated posting of the GitHub review with conservatively mapped verdicts
+and inline comments.
 
 ## Verification state
 
@@ -124,9 +128,8 @@ publication, and resume.
 
 ## Next implementation slice
 
-Phase 11: review agents (repository-aware pull-request review mode) or extension polish
-(marketplace packaging, inline run status). Stripe go-live stays parked until Stuart supplies
-products closer to launch.
+Phase 12: automations — webhook-triggered PR reviews and scheduled maintenance runs. Stripe
+go-live stays parked until Stuart supplies products closer to launch.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
