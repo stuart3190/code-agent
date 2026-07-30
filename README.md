@@ -134,8 +134,13 @@ extension; approval-gated pull-request review agents; automations (webhook-trigg
 and scheduled runs); the terminal CLI; verified disaster-recovery backups with a restore
 runbook; and inline code completion.
 
-1. Live Stripe pricing and richer dunning.
-2. Extension marketplace publication and desktop-application packaging.
+In progress: the Thrallo Desktop editor — a genuine Code - OSS build with Thrallo product
+identity, the agent extension built in, local workspace indexing, and Open VSX as the
+extension gallery (see [desktop/README.md](desktop/README.md)). Windows first; macOS is
+built privately and stays "Coming soon" publicly; Linux configured.
+
+1. Desktop editor completion and distribution (Windows release, then macOS approval).
+2. Live Stripe pricing and richer dunning; Open VSX / marketplace publication.
 3. SDK/plugin system, enterprise controls, and mobile companion.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and security boundaries.

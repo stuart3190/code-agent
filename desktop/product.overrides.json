@@ -1,0 +1,47 @@
+{
+  "nameShort": "Thrallo",
+  "nameLong": "Thrallo Desktop",
+  "applicationName": "thrallo",
+  "dataFolderName": ".thrallo",
+  "serverApplicationName": "thrallo-server",
+  "serverDataFolderName": ".thrallo-server",
+  "tunnelApplicationName": "thrallo-tunnel",
+  "win32DirName": "Thrallo",
+  "win32NameVersion": "Thrallo Desktop",
+  "win32RegValueName": "Thrallo",
+  "win32MutexName": "thrallo",
+  "win32ShellNameShort": "T&hrallo",
+  "win32AppUserModelId": "Thrallo.Desktop",
+  "win32x64AppId": "{{8F1E4E62-90D8-4F3B-9A46-1F5C33D5A101}",
+  "win32arm64AppId": "{{8F1E4E62-90D8-4F3B-9A46-1F5C33D5A102}",
+  "win32x64UserAppId": "{{8F1E4E62-90D8-4F3B-9A46-1F5C33D5A103}",
+  "win32arm64UserAppId": "{{8F1E4E62-90D8-4F3B-9A46-1F5C33D5A104}",
+  "darwinBundleIdentifier": "com.thrallo.desktop",
+  "linuxIconName": "thrallo",
+  "urlProtocol": "thrallo",
+  "applicationScheme": "thrallo",
+  "quality": "stable",
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "resourceUrlTemplate": "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}"
+  },
+  "extensionRecommendations": {},
+  "keywords": [
+    "thrallo",
+    "code editor",
+    "ai agents"
+  ],
+  "licenseName": "MIT",
+  "licenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+  "reportIssueUrl": "https://github.com/stuart3190/code-agent/issues",
+  "requestFeatureUrl": "https://github.com/stuart3190/code-agent/issues",
+  "documentationUrl": "https://app.thrallo.com",
+  "releaseNotesUrl": "https://github.com/stuart3190/code-agent/releases",
+  "updateUrl": "",
+  "enableTelemetry": false,
+  "crashReporter": {
+    "companyName": "Thrallo",
+    "productName": "Thrallo"
+  }
+}

@@ -1449,7 +1449,7 @@ function Downloads() {
           <li>Get the extension from the <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[10px]">editor/vscode</code> directory of the Thrallo repository (package with <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[10px]">npx vsce package</code>, then install the .vsix).</li>
           <li>Run <span className="text-slate-200">Thrallo: Connect</span> in VS Code and paste your token.</li>
         </ol>
-        <div className="mt-4 text-[11px] text-slate-600">The extension is marketplace-ready (packaged as thrallo-0.2.0.vsix with a live status-bar run indicator and per-agent run states); public marketplace listing arrives with launch.</div>
+        <div className="mt-4 text-[11px] text-slate-600">The extension is marketplace-ready and is also built into Thrallo Desktop, the Code - OSS-based editor now in development — Windows first, coming soon to macOS.</div>
       </div>
       <div className="mt-4 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-white/[0.035] to-transparent p-6">
         <div className="flex items-center gap-3">

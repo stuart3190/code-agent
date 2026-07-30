@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/microsoft/vscode.git",
+  "tag": "1.131.0",
+  "commit": "3a03d6f72d628a7741c29f456b4ddbb5ae68502c",
+  "license": "MIT",
+  "node": "24.18.0",
+  "notes": "Code - OSS upstream pin. The checkout lives at desktop/vscode (gitignored); bootstrap.mjs clones this exact commit and injects the Thrallo product configuration. Microsoft's Visual Studio Marketplace is NOT licensed for third-party builds, so the extension gallery is Open VSX."
+}
