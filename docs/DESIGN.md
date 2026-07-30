@@ -125,6 +125,10 @@ produces (greeting included) and for Phase 21 copy reviews.
 - **Shape**: soft — 14px bubbles, 18px cards, 24px panes.
 - **Motion is the product feeling alive**: 150/240/420ms; standard decel ease plus a gentle
   spring for anything that *arrives* (specialists, cards, preview). Nothing bounces twice.
+- **Animation exists to communicate state, not decorate it** (Stuart, Phase 21 approval —
+  a hard implementation rule): every transition must direct attention, explain progress, or
+  reinforce continuity. Any animation that exists only because it looks impressive is
+  removed in review.
 - **Depth**: layered soft shadows, no borders-as-boxes; hairlines at 8% ink where structure
   is needed.
 

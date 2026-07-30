@@ -88,7 +88,7 @@ export function applySecurityHeaders(res) {
     "font-src 'self' data:",
     "img-src 'self' data: blob: https:",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.facebook.com",
-    "frame-src https://*.preview.buildr101.com https://*.app.buildr101.com http://localhost:* http://127.0.0.1:*",
+    "frame-src https://*.preview.thrallo.com https://*.app.thrallo.com https://*.preview.buildr101.com https://*.app.buildr101.com http://localhost:* http://127.0.0.1:*",
     "form-action 'self' https://checkout.stripe.com",
   ].join("; "));
 }
