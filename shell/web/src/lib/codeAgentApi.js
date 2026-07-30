@@ -55,6 +55,20 @@ export const publishRun = (runId, body = {}) => request(`/api/v1/runs/${runId}/p
 });
 export const runArtifacts = (runId) => request(`/api/v1/runs/${runId}/artifacts`);
 export const retryRun = (runId) => request(`/api/v1/runs/${runId}/retry`, { method: "POST" });
+export const resumeRun = (runId, body = {}) => request(`/api/v1/runs/${runId}/resume`, {
+  method: "POST", body: JSON.stringify(body),
+});
+export const updateAgent = (agentId, body) => request(`/api/v1/agents/${agentId}`, {
+  method: "PATCH", body: JSON.stringify(body),
+});
+export async function artifactContent(runId, artifactId) {
+  const token = await accessToken();
+  const response = await fetch(`/api/v1/runs/${runId}/artifacts/${artifactId}/content`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(`Artifact content failed (${response.status})`);
+  return response.text();
+}
 export const usageSummary = () => request("/api/v1/usage");
 export const billingOverview = () => request("/api/v1/billing");
 export const selectPlan = (plan) => request("/api/v1/billing/plan", {

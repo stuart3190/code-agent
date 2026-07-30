@@ -58,8 +58,10 @@ import { handleRuntimeConnectors, handleRuntimeMetaCallback } from "./routes/run
 import { handleRuntimeWebhook } from "./routes/runtimeWebhook.mjs";
 import { handleActionSchedule, handleCapabilities, handleKnowledgeBase, handleRuntimeCredentialDelete } from "./routes/capabilities.mjs";
 import {
-  handleAgents, handleCodeAgentCapabilities, handleLatestRunGet, handleRepositories, handleRunCancel,
-  handleRunArtifacts, handleRunCreate, handleRunEvents, handleRunGet, handleRunPublish,
+  handleAgents, handleAgentUpdate, handleCodeAgentCapabilities, handleLatestRunGet,
+  handleRepositories, handleRunCancel,
+  handleRunArtifacts, handleRunArtifactContent, handleRunCreate, handleRunEvents, handleRunGet,
+  handleRunPublish, handleRunResume,
   handleRepositoryFileGraph, handleRepositoryIndexGet, handleRepositoryIndexRefresh,
   handleRepositorySearch, handleRepositorySymbolSearch, handleRunRetry, handleUsage,
 } from "./routes/codeAgent.mjs";
@@ -401,6 +403,11 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleAgents(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
     }
+    const agentPatchMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)$/i);
+    if (agentPatchMatch && method === "PATCH") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleAgentUpdate(req, res, { owner, agentId: agentPatchMatch[1], body: await readJson(req) });
+    }
     const createRunMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)\/runs$/i);
     if (createRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -434,6 +441,20 @@ const server = http.createServer(async (req, res) => {
     if (runArtifactsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleRunArtifacts(req, res, { owner, runId: runArtifactsMatch[1] });
+    }
+    const artifactContentMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/artifacts\/([0-9a-f-]+)\/content$/i);
+    if (artifactContentMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRunArtifactContent(req, res, {
+        owner, runId: artifactContentMatch[1], artifactId: artifactContentMatch[2],
+      });
+    }
+    const resumeRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/resume$/i);
+    if (resumeRunMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return handleRunResume(req, res, {
+        owner, runId: resumeRunMatch[1], body: await readJson(req, BODY_LIMITS.standard),
+      });
     }
     const retryRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/retry$/i);
     if (retryRunMatch && method === "POST") {

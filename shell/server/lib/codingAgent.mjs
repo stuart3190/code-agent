@@ -42,9 +42,10 @@ export async function runCodingAgent({
   context = [],
   repositoryMap = [],
   tokenBudget = null,
+  prompt = null,
 }) {
   const model = provider || createCodingModel(run.model);
-  const input = [{ role: "user", content: augmentPromptWithContext(run.prompt, context, repositoryMap) }];
+  const input = [{ role: "user", content: augmentPromptWithContext(prompt ?? run.prompt, context, repositoryMap) }];
   const usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 };
   let selectedProvider = model.id;
   let selectedModel = model.model;

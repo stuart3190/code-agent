@@ -51,6 +51,50 @@ export async function createDaytonaRunner({ run, repository, emit }) {
   await sandbox.git.createBranch(workspacePath, branch);
   await emit("repository.cloned", { branch, message: `Checked out ${repository.full_name}` });
 
+  return runnerInterface({ daytona, sandbox, workspacePath, branch, run });
+}
+
+// Re-attaches to a preserved sandbox from an earlier run so a resume keeps the workspace,
+// branch, and all uncommitted changes. Throws when the sandbox has expired; the caller
+// falls back to a clean clone.
+export async function attachDaytonaRunner({ run, previous, emit }) {
+  if (!daytonaConfigured()) {
+    const error = new Error("Daytona is not connected. Set DAYTONA_API_KEY on the server.");
+    error.code = "daytona_setup_required";
+    throw error;
+  }
+  if (!previous?.sandbox_id || !previous.work_branch) {
+    throw withCode(new Error("The previous run's workspace is no longer available."), "sandbox_expired");
+  }
+  const { Daytona } = await import("@daytona/sdk");
+  const daytona = new Daytona();
+  let sandbox;
+  try {
+    sandbox = await daytona.get(previous.sandbox_id);
+    if (sandbox.state !== "started") await sandbox.start(120);
+  } catch (error) {
+    throw withCode(new Error(`The preserved workspace has expired: ${error.message}`), "sandbox_expired");
+  }
+  const workspacePath = await resolveSandboxRepositoryPath(sandbox);
+  try {
+    commandResult(await sandbox.process.executeCommand("git rev-parse --git-dir", workspacePath, undefined, 20));
+  } catch (error) {
+    throw withCode(new Error(`The preserved workspace is unusable: ${error.message}`), "sandbox_expired");
+  }
+  await emit("sandbox.resumed", {
+    sandboxId: sandbox.id,
+    branch: previous.work_branch,
+    message: "Reconnected to the preserved workspace",
+  });
+  return runnerInterface({ daytona, sandbox, workspacePath, branch: previous.work_branch, run });
+}
+
+function withCode(error, code) {
+  error.code = code;
+  return error;
+}
+
+function runnerInterface({ daytona, sandbox, workspacePath, branch, run }) {
   return {
     id: sandbox.id,
     branch,
@@ -121,6 +165,9 @@ export async function createDaytonaRunner({ run, repository, emit }) {
     },
     async diff() {
       return collectWorkspaceDiff(sandbox, workspacePath);
+    },
+    async stop() {
+      try { await sandbox.stop(); } catch { /* auto-stop remains the fallback */ }
     },
     async dispose() {
       try { await daytona.delete(sandbox); } catch { /* expiry policy remains the fallback */ }

@@ -52,6 +52,8 @@ export function parseRepositoryInput(body = {}) {
   };
 }
 
+export const PUBLISH_MODES = new Set(["require_approval", "auto_publish"]);
+
 export function parseAgentInput(body = {}) {
   const mode = String(body.mode || "agent").toLowerCase();
   if (!AGENT_MODES.has(mode)) throw new CodeAgentInputError("Unsupported agent mode");
@@ -59,7 +61,46 @@ export function parseAgentInput(body = {}) {
     repository_id: requiredString(body.repositoryId, "repositoryId", { max: 64 }),
     name: optionalString(body.name, { max: 120 }) || "New agent",
     mode,
+    ...parseAgentPolicy(body, { defaults: true }),
   };
+}
+
+// Partial policy update for PATCH /agents/:id — only the provided fields change.
+export function parseAgentPatch(body = {}) {
+  const patch = {};
+  if (body.name !== undefined) {
+    patch.name = requiredString(body.name, "name", { max: 120 });
+  }
+  Object.assign(patch, parseAgentPolicy(body, { defaults: false }));
+  if (!Object.keys(patch).length) {
+    throw new CodeAgentInputError("Provide name, publishMode, or protectedPaths");
+  }
+  return patch;
+}
+
+function parseAgentPolicy(body, { defaults }) {
+  const policy = {};
+  if (body.publishMode !== undefined || defaults) {
+    const mode = String(body.publishMode || "require_approval").toLowerCase();
+    if (!PUBLISH_MODES.has(mode)) {
+      throw new CodeAgentInputError("publishMode must be require_approval or auto_publish");
+    }
+    policy.publish_mode = mode;
+  }
+  if (body.protectedPaths !== undefined || defaults) {
+    const raw = body.protectedPaths ?? [];
+    if (!Array.isArray(raw) || raw.length > 50) {
+      throw new CodeAgentInputError("protectedPaths must be an array of at most 50 glob patterns");
+    }
+    policy.protected_paths = raw.map((entry) => {
+      const pattern = String(entry ?? "").trim();
+      if (!pattern || pattern.length > 200) {
+        throw new CodeAgentInputError("Each protected path must be a non-empty glob of at most 200 characters");
+      }
+      return pattern;
+    });
+  }
+  return policy;
 }
 
 export function parseRunInput(body = {}, agent) {
@@ -84,7 +125,15 @@ export function publicRun(run) {
     baseBranch: base_branch, workBranch: work_branch, state, result, usage,
     errorCode: error_code, error, cancelRequestedAt: cancel_requested_at,
     startedAt: started_at, finishedAt: finished_at, createdAt: created_at, updatedAt: updated_at,
+    resumedFromRunId: run.resumed_from_run_id || null,
+    resumable: isRunResumable(run),
   };
+}
+
+export function isRunResumable(run) {
+  return !!(run?.sandbox_id
+    && ["failed", "interrupted"].includes(run.state)
+    && run.sandbox_state !== "discarded");
 }
 
 export function publicRepository(row) {
@@ -98,6 +147,8 @@ export function publicRepository(row) {
 export function publicAgent(row) {
   return {
     id: row.id, repositoryId: row.repository_id, name: row.name, mode: row.mode,
+    publishMode: row.publish_mode || "require_approval",
+    protectedPaths: Array.isArray(row.protected_paths) ? row.protected_paths : [],
     archivedAt: row.archived_at, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

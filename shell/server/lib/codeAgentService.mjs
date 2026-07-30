@@ -1,8 +1,10 @@
 import { optionalEnv } from "./env.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import {
-  createDaytonaRunner, daytonaConfigured, discardDaytonaSandbox, publishDaytonaRun,
+  attachDaytonaRunner, createDaytonaRunner, daytonaConfigured, discardDaytonaSandbox,
+  publishDaytonaRun,
 } from "./daytonaRunner.mjs";
+import { evaluatePublishPolicy } from "./publishPolicy.mjs";
 import { runCodingAgent } from "./codingAgent.mjs";
 import { openAIConfigured } from "./openAIProvider.mjs";
 import { anthropicConfigured } from "./anthropicCodingProvider.mjs";
@@ -63,6 +65,13 @@ export function codeAgentCapabilities() {
       stripeConfigured: thralloStripeConfigured(),
       operationalTelemetry: true,
     },
+    execution: {
+      approvalPolicies: true,
+      autoPublish: true,
+      protectedPaths: true,
+      resume: daytonaConfigured(),
+      artifactStorage: store === "supabase",
+    },
     github: {
       configured: githubAppConfigured() || !!optionalEnv("GITHUB_AGENT_TOKEN"),
       appConfigured: githubAppConfigured(),
@@ -119,27 +128,53 @@ export async function processRun(run, {
   repositoryMapRetriever = retrieveRepositoryMap,
   budgetGuard = assertRunWithinBudget,
   providerNameResolver = activeAiProviderName,
+  attachRunnerFactory = attachDaytonaRunner,
+  publisher = publishDaytonaRun,
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
   let runner = null;
   let preserveRunner = false;
   let billingSource = "unknown";
+  let resumedRun = null;
   const executionStarted = Date.now();
   try {
     const repository = await store.getRepository(run.owner, run.repository_id);
     if (!repository) throw withCode(new Error("Repository is no longer available"), "repository_missing");
+    const agent = await store.getAgent(run.owner, run.agent_id);
     // A queued run can outlive the allowance that admitted it; re-check before spending.
     const credentialProvider = await providerNameResolver(run.owner).catch(() => "managed");
     const budget = await budgetGuard(run.owner, { credentialProvider, store })
       .catch((error) => { throw withCode(new Error(error.message), "budget_exhausted"); });
-    await emit("run.provisioning", { message: "Creating an isolated cloud workspace" });
-    runner = await runnerFactory({ run, repository, emit });
+
+    if (run.resumed_from_run_id) {
+      const previous = await store.getRun(run.owner, run.resumed_from_run_id);
+      if (previous?.sandbox_id && previous.sandbox_state !== "discarded") {
+        await emit("run.provisioning", { message: "Reconnecting to the preserved workspace" });
+        try {
+          runner = await attachRunnerFactory({ run, repository, previous, emit });
+          resumedRun = previous;
+          // The sandbox now belongs to this run; the old run can no longer resume it.
+          await store.updateRun(previous, { sandbox_state: "discarded" });
+        } catch (error) {
+          await emit("resume.fallback", {
+            code: error.code || "sandbox_expired",
+            message: `Preserved workspace unavailable (${error.message}); starting from a clean baseline`,
+          });
+        }
+      }
+    }
+    if (!runner) {
+      await emit("run.provisioning", { message: "Creating an isolated cloud workspace" });
+      runner = await runnerFactory({ run, repository, emit });
+    }
     run = await store.updateRun(run, { sandbox_id: runner.id, work_branch: runner.branch, state: "running" });
     await store.createCheckpoint(run, {
-      label: "Repository baseline",
+      label: resumedRun ? "Resumed workspace" : "Repository baseline",
       git_sha: await runner.headSha(),
-      metadata: { branch: run.base_branch },
+      metadata: resumedRun
+        ? { branch: runner.branch, resumed_from: resumedRun.id }
+        : { branch: run.base_branch },
     });
     run = await store.updateRun(run, { state: "indexing" });
     await emit("run.indexing", { branch: runner.branch, message: "Preparing repository context" });
@@ -170,6 +205,7 @@ export async function processRun(run, {
     run = await store.updateRun(run, { state: "running" });
     await emit("run.running", { branch: runner.branch, message: "Agent is working" });
 
+    const executionPrompt = resumedRun ? resumePreamble(resumedRun) + run.prompt : run.prompt;
     const credential = await credentialResolver(run.owner);
     billingSource = credential.provider === "managed" ? "managed"
       : credential.provider === "codex" ? "codex" : "byok";
@@ -183,7 +219,7 @@ export async function processRun(run, {
     let result;
     if (credential.provider === "codex") {
       result = await runner.runCodex({
-        prompt: augmentPromptWithContext(run.prompt, context, repositoryMap),
+        prompt: augmentPromptWithContext(executionPrompt, context, repositoryMap),
         authJson: credential.secret,
         emit,
         isCancelled,
@@ -210,13 +246,17 @@ export async function processRun(run, {
         provider: selectedModel,
         context,
         repositoryMap,
+        prompt: executionPrompt,
         tokenBudget: billingSource === "managed"
           ? budget.budgets.managedTokens.remaining
           : null,
       });
     }
     if (result.cancelled) {
-      run = await store.updateRun(run, { state: "cancelled", result, usage: result.usage, finished_at: new Date().toISOString() });
+      run = await store.updateRun(run, {
+        state: "cancelled", result, usage: result.usage, sandbox_state: "discarded",
+        finished_at: new Date().toISOString(),
+      });
       await persistUsage(store, run, result, executionStarted, billingSource);
       await emit("run.cancelled", { message: "Run cancelled" });
       return run;
@@ -231,22 +271,58 @@ export async function processRun(run, {
     };
     if (repository.installation_id && String(result.diff || "").trim()) {
       preserveRunner = true;
+      const policy = evaluatePublishPolicy(agent, result.status);
+      if (policy.action === "auto_publish") {
+        run = await store.updateRun(run, { result: durableResult, usage: result.usage });
+        await emit("publish.auto_approved", {
+          message: "Publishing automatically per this agent's policy",
+          publishMode: "auto_publish",
+        });
+        try {
+          const publication = await publisher({ run, repository, emit });
+          await store.createCheckpoint(run, {
+            label: "Published pull request",
+            git_sha: publication.commitSha,
+            metadata: { branch: publication.branch, pull_request: publication.pullRequest, auto: true },
+          });
+          const published = { ...durableResult, publication };
+          run = await store.updateRun(run, {
+            state: "succeeded", result: published, sandbox_state: "discarded",
+            finished_at: new Date().toISOString(),
+          });
+          await emit("run.succeeded", {
+            message: `Pull request #${publication.pullRequest.number} published automatically`,
+            result: published,
+          });
+          return run;
+        } catch (error) {
+          await emit("publish.failed", {
+            code: error.code || "publish_failed",
+            error: error.message,
+            message: "Automatic publication failed; approve manually to retry",
+          });
+        }
+      }
       durableResult.approval = {
         required: true,
         action: "create_pull_request",
         branch: run.work_branch,
+        ...(policy.reason === "protected_path" ? { reason: "protected_path", protectedTouched: policy.protectedTouched.slice(0, 20) } : {}),
       };
       run = await store.updateRun(run, {
         state: "waiting_for_approval", result: durableResult, usage: result.usage,
       });
       await emit("run.waiting_for_approval", {
-        message: "Changes are ready. Approve to commit, push, and open a pull request.",
+        message: policy.reason === "protected_path"
+          ? `Protected files changed (${policy.protectedTouched.slice(0, 3).join(", ")}); approval is required.`
+          : "Changes are ready. Approve to commit, push, and open a pull request.",
         action: durableResult.approval,
       });
       return run;
     }
     run = await store.updateRun(run, {
-      state: "succeeded", result: durableResult, usage: result.usage, finished_at: new Date().toISOString(),
+      state: "succeeded", result: durableResult, usage: result.usage, sandbox_state: "discarded",
+      finished_at: new Date().toISOString(),
     });
     await emit("run.succeeded", { message: "Run completed", result: durableResult, artifacts: 3 });
     return run;
@@ -255,15 +331,34 @@ export async function processRun(run, {
       await persistUsage(store, run, { usage: error.usage }, executionStarted, billingSource)
         .catch((usageError) => console.error("[code-agent] usage persistence:", usageError));
     }
+    // Keep the workspace so the owner can resume instead of restarting from a clean clone.
+    // Daytona's auto-stop/archive/delete limits cap the cost of preserved sandboxes.
+    const preservable = !!runner;
     run = await store.updateRun(run, {
       state: "failed", error_code: error.code || "run_failed", error: error.message,
+      sandbox_state: preservable ? "preserved" : null,
       finished_at: new Date().toISOString(),
     });
     await emit("run.failed", { code: error.code || "run_failed", error: error.message });
+    if (preservable) {
+      preserveRunner = true;
+      await runner.stop?.();
+      await emit("run.resumable", {
+        message: "The workspace is preserved. Resume this run to continue from where it stopped.",
+      });
+    }
     return run;
   } finally {
     if (!preserveRunner) await runner?.dispose?.();
   }
+}
+
+function resumePreamble(previous) {
+  const error = previous.error ? ` It stopped with: ${previous.error}` : "";
+  const summary = previous.result?.summary ? `\nPrevious progress summary: ${String(previous.result.summary).slice(0, 2_000)}` : "";
+  return `You are resuming an earlier run in the same workspace.${error}${summary}\n`
+    + "Your earlier uncommitted changes are still present — inspect git status and git diff before continuing, "
+    + "verify what was already done, and complete the task below.\n\nTask:\n";
 }
 
 export async function approveRunPublication(owner, runId, input = {}, {
@@ -299,6 +394,7 @@ export async function approveRunPublication(owner, runId, input = {}, {
     run = await store.updateRun(run, {
       state: "succeeded",
       result,
+      sandbox_state: "discarded",
       finished_at: new Date().toISOString(),
     });
     await emit("run.succeeded", {

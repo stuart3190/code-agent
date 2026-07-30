@@ -117,10 +117,32 @@ health, provider reliability from `ca_model_attempts`, platform usage by billing
 repository-index states. It reads existing durable tables on demand; a rollup table can replace
 the aggregation once traffic outgrows it.
 
+## Publish policies, resume, and artifact storage
+
+Each agent carries a `publish_mode` — `require_approval` (default) or `auto_publish` — plus
+`protected_paths` globs. When a run finishes with a diff on a GitHub App repository, the worker
+evaluates the policy against the touched paths from `git status`: auto-publish commits, pushes,
+and opens the pull request immediately; a touched protected glob (or a publication failure)
+falls back to the manual approval gate with the reason recorded on the run result. Glob
+matching is segment-aware (`*` stays within one path segment, `**` crosses segments, a bare
+directory protects everything beneath it).
+
+A failed or interrupted run no longer discards its sandbox: the workspace is stopped and marked
+`preserved`, and Daytona's auto-stop/archive/delete limits cap its cost and lifetime. Resuming
+creates a new run linked by `resumed_from_run_id`; the worker re-attaches to the preserved
+sandbox and branch, briefs the agent with the previous error and progress summary, and tells it
+to inspect the existing uncommitted changes before continuing. Ownership of the sandbox
+transfers to the resuming run, and an expired sandbox falls back to a clean clone with an
+explicit timeline event. Budget checks treat a resume as a new run.
+
+Artifact content above `CODE_AGENT_ARTIFACT_INLINE_BYTES` (16 KB default) is written to the
+private `thrallo-artifacts` Supabase Storage bucket instead of the Postgres row; the bucket has
+no browser policies, so only the service role touches it and the shell streams content to
+authenticated owners via the artifact-content route.
+
 ## Known production gaps
 
-- Sandboxed network egress allowlist and policy approvals.
-- Artifact object storage and checkpoint resume.
+- Sandboxed network egress allowlist and command-level policy approvals.
 - Live Stripe pricing, rate controls on paid tiers, abuse defenses, retention controls, and
   disaster recovery.
 - Desktop editor, extension host, completion service, review agents, automations, CLI, and mobile.
