@@ -2,7 +2,8 @@
 
 ## Current milestone
 
-Phase 12 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 13 is implemented. Phase 12 is live, and its automatic PR reviews are active: the
+GitHub App now subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -44,10 +45,12 @@ checkout in the sandbox, a read-only review toolset that can still run tests, st
 findings (verdict/severity/line anchors), review artifacts, a Reviews workspace view listing
 open PRs, and approval-gated posting of the GitHub review with conservatively mapped verdicts
 and inline comments. Phase 12 adds automations: webhook-triggered reviews of new pull
-requests (draft filtering, explicit autoPost opt-out of the approval gate, requires the App's
-Pull request event subscription — a pending Stuart action) and scheduled maintenance runs
-every 1–168 hours via an optimistically claimed sweeper, all passing the same budget and
-rate-limit admission with run provenance and recorded skips.
+requests (draft filtering, explicit autoPost opt-out of the approval gate) and scheduled
+maintenance runs every 1–168 hours via an optimistically claimed sweeper, all passing the
+same budget and rate-limit admission with run provenance and recorded skips. Phase 13 adds
+the `thrallo` CLI: token login with 0600 config, run/review launching with streamed timelines
+and interactive (or `--yes`) approval, plus repos/agents/usage/status/resume/cancel, built on
+the shared zero-dependency API client.
 
 ## Verification state
 
@@ -142,10 +145,9 @@ rate-limit admission with run provenance and recorded skips.
 
 ## Next implementation slice
 
-Phase 13: CLI (thin command-line client over the token-authenticated v1 API) or extension
-marketplace packaging. Stripe go-live stays parked until Stuart supplies products closer to
-launch; the GitHub App's Pull request event subscription is the one pending Stuart action for
-Phase 12's automatic reviews.
+Phase 14: extension marketplace packaging and inline run status, or the first
+disaster-recovery slice (verified control-plane backups and a restore runbook). Stripe
+go-live stays parked until Stuart supplies products closer to launch.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

@@ -1446,6 +1446,20 @@ function Downloads() {
         </ol>
         <div className="mt-4 text-[11px] text-slate-600">Marketplace publication and the desktop application are on the roadmap; this extension is the first supported editor client.</div>
       </div>
+      <div className="mt-4 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-white/[0.035] to-transparent p-6">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-lg">▸</span>
+          <div>
+            <div className="text-sm font-semibold text-white">Thrallo CLI</div>
+            <div className="text-xs text-slate-500">Launch runs, follow the timeline, review PRs, and approve — from your terminal.</div>
+          </div>
+        </div>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-black/30 p-3 font-mono text-[11px] leading-6 text-slate-300">{`npm install -g github:stuart3190/code-agent   # or run from a clone: node cli/thrallo.mjs
+thrallo login          # paste an API token from Settings
+thrallo run "fix the flaky retry test" --repo you/repo
+thrallo review 42 --repo you/repo`}</pre>
+        <div className="mt-3 text-[11px] text-slate-600">Credentials live in ~/.thrallo/config.json (0600). Add --yes to auto-approve publication.</div>
+      </div>
     </div>
   );
 }
