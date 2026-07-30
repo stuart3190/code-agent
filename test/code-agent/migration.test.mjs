@@ -14,6 +14,7 @@ const repositoryIndexMigrationPath = new URL("../../supabase/migrations/20260730
 const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/20260730063059_repository_code_intelligence.sql", import.meta.url);
 const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083259_model_routing_and_evaluations.sql", import.meta.url);
 const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730143000_subscriptions_budgets_telemetry.sql", import.meta.url);
+const phase8MigrationPath = new URL("../../supabase/migrations/20260730170000_approval_policies_resume_artifacts.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -196,4 +197,16 @@ test("subscription and budget tables stay server-only with metered billing sourc
   assert.match(sql, /alter table public\.ca_usage_records[\s\S]*add column billing_source/i);
   assert.match(sql, /billing_source in \('managed', 'byok', 'codex', 'unknown'\)/i);
   assert.match(sql, /ca_runs_state_created_idx/i);
+});
+
+test("phase 8 migration adds policies, resume lineage, and a private artifact bucket", async () => {
+  const sql = await readFile(phase8MigrationPath, "utf8");
+  assert.match(sql, /publish_mode text not null default 'require_approval'/i);
+  assert.match(sql, /publish_mode in \('require_approval', 'auto_publish'\)/i);
+  assert.match(sql, /protected_paths jsonb not null default '\[\]'::jsonb/i);
+  assert.match(sql, /resumed_from_run_id uuid references public\.ca_runs\(id\) on delete set null/i);
+  assert.match(sql, /sandbox_state in \('preserved', 'discarded'\)/i);
+  assert.match(sql, /ca_runs_resumed_from_idx[\s\S]*where resumed_from_run_id is not null/i);
+  assert.match(sql, /insert into storage\.buckets \(id, name, public\)[\s\S]*'thrallo-artifacts', false/i);
+  assert.match(sql, /on conflict \(id\) do nothing/i);
 });

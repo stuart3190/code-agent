@@ -165,9 +165,17 @@ export class MemoryCodeAgentStore {
     return row?.owner === owner ? row : null;
   }
 
+  async updateAgent(owner, id, patch) {
+    const row = await this.getAgent(owner, id);
+    if (!row) return null;
+    Object.assign(row, patch, { updated_at: now() });
+    return row;
+  }
+
   async createRun(owner, agent, repository, input) {
     const row = {
-      id: newId(), owner, agent_id: agent.id, repository_id: repository.id, ...input,
+      id: newId(), owner, agent_id: agent.id, repository_id: repository.id,
+      resumed_from_run_id: null, sandbox_state: null, ...input,
       base_branch: repository.default_branch, work_branch: null, state: "queued",
       sandbox_id: null, snapshot_id: null, result: null, usage: {}, error_code: null, error: null,
       cancel_requested_at: null, started_at: null, finished_at: null, created_at: now(), updated_at: now(),
@@ -276,6 +284,14 @@ export class MemoryCodeAgentStore {
     const run = await this.getRun(owner, runId);
     if (!run) return null;
     return [...this.artifacts.values()].filter((x) => x.run_id === runId).sort(byCreated);
+  }
+
+  async getArtifactContent(owner, runId, artifactId) {
+    const run = await this.getRun(owner, runId);
+    if (!run) return null;
+    const row = this.artifacts.get(artifactId);
+    if (!row || row.run_id !== runId) return null;
+    return { content: row.content || "", contentType: row.content_type || "text/plain" };
   }
 
   async createCheckpoint(run, input) {
@@ -470,6 +486,12 @@ export class SupabaseCodeAgentStore {
     return unwrapMaybe(await this.query("ca_agents", owner).eq("id", id).maybeSingle());
   }
 
+  async updateAgent(owner, id, patch) {
+    return unwrapMaybe(await this.client.from("ca_agents")
+      .update({ ...patch, updated_at: now() })
+      .eq("owner", owner).eq("id", id).select("*").maybeSingle());
+  }
+
   async createRun(owner, agent, repository, input) {
     const { data, error } = await this.client.from("ca_runs").insert({
       owner, agent_id: agent.id, repository_id: repository.id, base_branch: repository.default_branch, ...input,
@@ -560,9 +582,24 @@ export class SupabaseCodeAgentStore {
     return !!data.cancel_requested_at;
   }
 
+  // Content beyond the inline threshold is offloaded to the private artifact bucket so large
+  // diffs and logs never bloat Postgres rows; the row keeps only the storage key.
   async createArtifact(run, input) {
+    const record = { owner: run.owner, run_id: run.id, ...input };
+    const content = String(record.content ?? "");
+    if (Buffer.byteLength(content) > artifactInlineLimit()) {
+      const storageKey = `${run.owner}/${run.id}/${newId()}-${String(record.name || "artifact").replace(/[^\w.-]/g, "_")}`;
+      const { error: uploadError } = await this.client.storage.from(artifactBucket())
+        .upload(storageKey, Buffer.from(content, "utf8"), {
+          contentType: record.content_type || "text/plain",
+          upsert: true,
+        });
+      if (uploadError) throw new Error(`artifact upload failed: ${uploadError.message}`);
+      record.storage_key = storageKey;
+      record.content = null;
+    }
     const { data, error } = await this.client.from("ca_artifacts")
-      .insert({ owner: run.owner, run_id: run.id, ...input }).select("*").single();
+      .insert(record).select("*").single();
     return unwrapOne(data, error);
   }
 
@@ -571,6 +608,21 @@ export class SupabaseCodeAgentStore {
     if (!run) return null;
     return unwrap(await this.client.from("ca_artifacts").select("*").eq("owner", owner)
       .eq("run_id", runId).order("created_at"));
+  }
+
+  async getArtifactContent(owner, runId, artifactId) {
+    const row = unwrapMaybe(await this.client.from("ca_artifacts").select("*")
+      .eq("owner", owner).eq("run_id", runId).eq("id", artifactId).maybeSingle());
+    if (!row) return null;
+    if (row.content != null || !row.storage_key) {
+      return { content: row.content || "", contentType: row.content_type || "text/plain" };
+    }
+    const { data, error } = await this.client.storage.from(artifactBucket()).download(row.storage_key);
+    if (error) throw new Error(`artifact download failed: ${error.message}`);
+    return {
+      content: Buffer.from(await data.arrayBuffer()).toString("utf8"),
+      contentType: row.content_type || "text/plain",
+    };
   }
 
   async createCheckpoint(run, input) {
@@ -652,6 +704,15 @@ function byNewest(a, b) {
 
 function byCreated(a, b) {
   return a.created_at.localeCompare(b.created_at);
+}
+
+function artifactInlineLimit() {
+  const value = Number(optionalEnv("CODE_AGENT_ARTIFACT_INLINE_BYTES", "16384"));
+  return Number.isFinite(value) && value > 0 ? value : 16_384;
+}
+
+function artifactBucket() {
+  return optionalEnv("CODE_AGENT_ARTIFACT_BUCKET", "thrallo-artifacts");
 }
 
 function sumBudgetUsage(rows) {

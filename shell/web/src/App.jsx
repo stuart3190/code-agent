@@ -9,6 +9,7 @@ import {
   startGithubInstallation,
   streamRunEvents, usageSummary,
   billingOverview, billingPortal, opsTelemetry, selectPlan, updateBudgets,
+  artifactContent, resumeRun, updateAgent,
 } from "./lib/codeAgentApi.js";
 import Landing from "./landing/Landing.jsx";
 import ResetPassword from "./auth/ResetPassword.jsx";
@@ -135,6 +136,16 @@ export default function App() {
     await launchRun(() => retryRun(run.id));
   }
 
+  async function resumeCurrentRun() {
+    if (!run?.resumable || busy) return;
+    await launchRun(() => resumeRun(run.id));
+  }
+
+  async function saveAgentPolicy(agentId, patch) {
+    const updated = await updateAgent(agentId, patch);
+    setAgents((items) => items.map((item) => (item.id === agentId ? updated.agent : item)));
+  }
+
   async function stopRun() {
     if (!run) return;
     setRun((await cancelRun(run.id)).run);
@@ -206,7 +217,8 @@ export default function App() {
                 onSelect={setSelectedAgentId} events={events} run={run} prompt={prompt}
                 setPrompt={setPrompt} onRun={runTask} onCancel={stopRun} busy={busy}
                 caps={caps} artifacts={artifacts} onRetry={retryCurrentRun}
-                onPublish={publishCurrentRun}
+                onPublish={publishCurrentRun} onResume={resumeCurrentRun}
+                onPolicyChange={saveAgentPolicy}
                 onConnect={() => setView("repositories")} />
             )}
             {view === "repositories" && (
@@ -228,7 +240,7 @@ export default function App() {
   );
 }
 
-function AgentWorkspace({ repos, agents, selectedAgent, onSelect, events, run, prompt, setPrompt, onRun, onCancel, busy, caps, artifacts, onRetry, onPublish, onConnect }) {
+function AgentWorkspace({ repos, agents, selectedAgent, onSelect, events, run, prompt, setPrompt, onRun, onCancel, busy, caps, artifacts, onRetry, onPublish, onResume, onPolicyChange, onConnect }) {
   if (!repos.length) return <EmptyState onConnect={onConnect} />;
 
   return (
@@ -252,6 +264,7 @@ function AgentWorkspace({ repos, agents, selectedAgent, onSelect, events, run, p
             </button>
           ))}
         </div>
+        {selectedAgent && <AgentPolicy key={selectedAgent.id} agent={selectedAgent} onChange={onPolicyChange} />}
       </section>
 
       <section className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-col border-r border-white/[0.06]">
@@ -294,13 +307,8 @@ function AgentWorkspace({ repos, agents, selectedAgent, onSelect, events, run, p
           <span className="py-3 text-slate-600">Artifacts</span>
         </div>
         <div className="p-4">
-          <RunSummary run={run} onRetry={onRetry} onPublish={onPublish} onDecline={onCancel} busy={busy} />
-          {artifacts.map((artifact) => (
-            <div key={artifact.name} className="mt-3 overflow-hidden rounded-lg border border-white/[0.07]">
-              <div className="border-b border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-slate-400">{artifact.name}</div>
-              <pre className="max-h-[38vh] overflow-auto whitespace-pre-wrap p-3 font-mono text-[10px] leading-5 text-slate-500">{artifact.content || "No content"}</pre>
-            </div>
-          ))}
+          <RunSummary run={run} onRetry={onRetry} onPublish={onPublish} onDecline={onCancel} onResume={onResume} busy={busy} />
+          {artifacts.map((artifact) => <ArtifactCard key={artifact.id || artifact.name} artifact={artifact} />)}
         </div>
       </section>
     </div>
@@ -886,7 +894,80 @@ function TimelineEvent({ event }) {
   );
 }
 
-function RunSummary({ run, onRetry, onPublish, onDecline, busy }) {
+function AgentPolicy({ agent, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [pathsOpen, setPathsOpen] = useState(false);
+  const [paths, setPaths] = useState((agent.protectedPaths || []).join("\n"));
+  const auto = agent.publishMode === "auto_publish";
+
+  async function toggleMode() {
+    setBusy(true);
+    try {
+      await onChange(agent.id, { publishMode: auto ? "require_approval" : "auto_publish" });
+    } finally { setBusy(false); }
+  }
+
+  async function savePaths() {
+    setBusy(true);
+    try {
+      await onChange(agent.id, {
+        protectedPaths: paths.split("\n").map((line) => line.trim()).filter(Boolean),
+      });
+      setPathsOpen(false);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Publish policy</div>
+      <button onClick={toggleMode} disabled={busy}
+        className="mt-2 flex w-full items-center justify-between rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-white/[0.04] disabled:opacity-40">
+        <span>{auto ? "Auto-publish PRs" : "Ask before PR"}</span>
+        <span className={`h-2 w-2 rounded-full ${auto ? "bg-emerald-400" : "bg-amber-400"}`} />
+      </button>
+      {!pathsOpen && (
+        <button onClick={() => setPathsOpen(true)} className="mt-2 text-[10px] text-slate-600 underline decoration-white/15 underline-offset-2 hover:text-slate-400">
+          Protected paths {agent.protectedPaths?.length ? `(${agent.protectedPaths.length})` : ""}
+        </button>
+      )}
+      {pathsOpen && (
+        <div className="mt-2">
+          <textarea value={paths} onChange={(e) => setPaths(e.target.value)} rows={3}
+            placeholder={"One glob per line, e.g.\nsrc/config/**\n*.sql"}
+            className="w-full rounded-md border border-white/[0.08] bg-transparent px-2 py-1.5 font-mono text-[10px] text-slate-300 outline-none placeholder:text-slate-700 focus:border-blue-400/40" />
+          <div className="mt-1.5 flex gap-2">
+            <button onClick={savePaths} disabled={busy} className="rounded bg-blue-500/80 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40">Save</button>
+            <button onClick={() => setPathsOpen(false)} className="rounded border border-white/[0.08] px-2 py-1 text-[10px] text-slate-500">Cancel</button>
+          </div>
+          <div className="mt-1 text-[9px] leading-4 text-slate-700">Changes touching these globs always wait for your approval, even with auto-publish on.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArtifactCard({ artifact }) {
+  const [content, setContent] = useState(artifact.content);
+  useEffect(() => {
+    setContent(artifact.content);
+    if (artifact.content == null && artifact.sizeBytes > 0 && artifact.id && artifact.runId) {
+      artifactContent(artifact.runId, artifact.id).then(setContent).catch(() => setContent("Failed to load artifact content"));
+    }
+  }, [artifact.id, artifact.runId, artifact.content, artifact.sizeBytes]);
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-white/[0.07]">
+      <div className="flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-slate-400">
+        <span>{artifact.name}</span>
+        {artifact.sizeBytes > 0 && <span className="font-mono text-[9px] text-slate-600">{formatNumber(artifact.sizeBytes)} B</span>}
+      </div>
+      <pre className="max-h-[38vh] overflow-auto whitespace-pre-wrap p-3 font-mono text-[10px] leading-5 text-slate-500">
+        {content == null && artifact.sizeBytes > 0 ? "Loading…" : content || "No content"}
+      </pre>
+    </div>
+  );
+}
+
+function RunSummary({ run, onRetry, onPublish, onDecline, onResume, busy }) {
   if (!run) return <div className="rounded-lg border border-dashed border-white/[0.08] p-5 text-center text-xs text-slate-700">Run output will appear here</div>;
   const color = run.state === "succeeded" ? "text-emerald-300" : run.state === "failed" ? "text-red-300" : "text-blue-300";
   return (
@@ -914,6 +995,12 @@ function RunSummary({ run, onRetry, onPublish, onDecline, busy }) {
           className="mt-3 block rounded-md border border-emerald-400/20 bg-emerald-400/[0.06] px-2 py-2 text-center text-[11px] text-emerald-300">
           Open pull request #{run.result.publication.pullRequest.number}
         </a>
+      )}
+      {run.resumable && (
+        <button onClick={onResume} disabled={busy}
+          className="mt-3 w-full rounded-md bg-gradient-to-r from-blue-500 to-violet-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
+          Resume from preserved workspace
+        </button>
       )}
       {terminalStates.has(run.state) && run.state !== "succeeded" && (
         <button onClick={onRetry} disabled={busy} className="mt-3 w-full rounded-md border border-white/[0.08] px-2 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.04] disabled:opacity-40">

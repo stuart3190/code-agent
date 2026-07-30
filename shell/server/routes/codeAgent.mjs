@@ -1,5 +1,6 @@
 import {
-  CodeAgentInputError, parseAgentInput, parseRepositoryInput, parseRunInput, requiredString,
+  CodeAgentInputError, isRunResumable, optionalString, parseAgentInput, parseAgentPatch,
+  parseRepositoryInput, parseRunInput, requiredString,
   publicAgent, publicRepository, publicRun, TERMINAL_RUN_STATES,
 } from "../lib/codeAgentContracts.mjs";
 import { codeAgentStore } from "../lib/codeAgentStore.mjs";
@@ -131,6 +132,12 @@ export async function handleAgents(req, res, { owner, method, body }) {
   return sendJson(res, 201, { agent: publicAgent(agent) });
 }
 
+export async function handleAgentUpdate(_req, res, { owner, agentId, body }) {
+  const agent = await codeAgentStore().updateAgent(owner.id, agentId, parseAgentPatch(body));
+  if (!agent) throw new CodeAgentInputError("Agent not found", 404, "agent_not_found");
+  return sendJson(res, 200, { agent: publicAgent(agent) });
+}
+
 export async function handleRunCreate(req, res, { owner, agentId, body }) {
   const store = codeAgentStore();
   const agent = await store.getAgent(owner.id, agentId);
@@ -161,9 +168,13 @@ export async function handleLatestRunGet(_req, res, { owner, agentId }) {
 }
 
 export async function handleRunCancel(_req, res, { owner, runId }) {
-  const run = await codeAgentStore().requestCancel(owner.id, runId);
+  const store = codeAgentStore();
+  let run = await store.requestCancel(owner.id, runId);
   if (!run) throw new CodeAgentInputError("Run not found", 404, "run_not_found");
-  if (run.state === "cancelled" && run.sandbox_id) await discardRunSandbox(run);
+  if (run.state === "cancelled" && run.sandbox_id) {
+    await discardRunSandbox(run);
+    run = await store.updateRun(run, { sandbox_state: "discarded" });
+  }
   return sendJson(res, 202, { run: publicRun(run) });
 }
 
@@ -208,10 +219,53 @@ export async function handleRunRetry(_req, res, { owner, runId }) {
   return sendJson(res, 202, { run: publicRun(run), retriedFrom: previous.id });
 }
 
+export async function handleRunResume(_req, res, { owner, runId, body }) {
+  const store = codeAgentStore();
+  const previous = await store.getRun(owner.id, runId);
+  if (!previous) throw new CodeAgentInputError("Run not found", 404, "run_not_found");
+  if (!isRunResumable(previous)) {
+    throw new CodeAgentInputError(
+      "Only a failed or interrupted run with a preserved workspace can be resumed",
+      409,
+      "run_not_resumable",
+    );
+  }
+  const agent = await store.getAgent(owner.id, previous.agent_id);
+  const repository = await store.getRepository(owner.id, previous.repository_id);
+  if (!agent || !repository) {
+    throw new CodeAgentInputError("The agent or repository is no longer available", 409, "resume_source_missing");
+  }
+  if (repository.status !== "ready") {
+    throw new CodeAgentInputError(
+      repository.last_error || "Repository access is unavailable",
+      409,
+      "repository_unavailable",
+    );
+  }
+  await assertBudgetAllowsRun(owner.id);
+  const run = await store.createRun(owner.id, agent, repository, {
+    prompt: optionalString(body?.prompt, { max: 50_000 }) || previous.prompt,
+    mode: previous.mode,
+    model: previous.model,
+    resumed_from_run_id: previous.id,
+  });
+  return sendJson(res, 202, { run: publicRun(run), resumedFrom: previous.id });
+}
+
 export async function handleRunArtifacts(_req, res, { owner, runId }) {
   const rows = await codeAgentStore().listArtifacts(owner.id, runId);
   if (!rows) throw new CodeAgentInputError("Run not found", 404, "run_not_found");
   return sendJson(res, 200, { artifacts: rows.map(publicArtifact) });
+}
+
+export async function handleRunArtifactContent(_req, res, { owner, runId, artifactId }) {
+  const artifact = await codeAgentStore().getArtifactContent(owner.id, runId, artifactId);
+  if (!artifact) throw new CodeAgentInputError("Artifact not found", 404, "artifact_not_found");
+  res.writeHead(200, {
+    "Content-Type": `${artifact.contentType || "text/plain"}; charset=utf-8`,
+    "Cache-Control": "private, max-age=300",
+  });
+  return res.end(artifact.content);
 }
 
 export async function handleUsage(_req, res, owner) {

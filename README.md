@@ -37,6 +37,13 @@ history. Do not point it at Buildr101 production data or credentials.
   when a newer push arrives during an active index.
 - Bounded coding loop, cancellation, stale-run recovery, clean-baseline retry, checkpoints,
   durable diff/log/report artifacts, terminal states, setup diagnostics, and usage capture.
+- Per-agent publish policies: ask-before-PR (default) or auto-publish, with protected-path
+  globs that always force manual approval when touched.
+- Failed and interrupted runs preserve their stopped sandbox; resume reconnects the same
+  workspace and branch with the agent briefed on prior progress, falling back to a clean
+  baseline when the sandbox expired.
+- Artifact content beyond an inline threshold is stored in a private Supabase Storage bucket
+  and streamed to owners through an authenticated content route.
 - Subscription plans (Free/Starter/Pro) with monthly managed usage budgets: run count and
   sandbox compute apply to every run, managed-model tokens only to managed-key runs, and owners
   can set personal spend guards below the plan allowance. Budgets are enforced at run creation,
@@ -87,10 +94,11 @@ tests, then creates a production web build.
 Completed: encrypted per-user Codex, OpenAI, Anthropic, and Gemini connections with smart managed
 routing and provider evaluations; encrypted incremental hybrid repository indexing; language-aware
 symbol/reference graphs; manual and GitHub-triggered repository refreshes; agent context retrieval;
-subscription plans with managed usage budgets; and operational telemetry.
+subscription plans with managed usage budgets; operational telemetry; publish policies with
+protected paths; sandbox preserve/resume; and object-storage artifacts.
 
-1. Rich approval policies, sandbox snapshots, retry/resume, and object-storage artifacts.
-2. Live Stripe pricing, rate controls, abuse defenses, retention, and disaster recovery.
+1. Live Stripe pricing, rate controls, abuse defenses, retention, and disaster recovery.
+2. Sandboxed network egress allowlist and command-level policy approvals.
 3. Code OSS desktop application with local indexing, inline completion, chat/edit/agent modes.
 4. Review agents, automations, CLI/SDK/plugin system, enterprise controls, and mobile companion.
 
