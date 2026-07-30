@@ -1,0 +1,5 @@
+Copyright (c) 2026 Thrallo
+
+All rights reserved. This extension is provided for use with the Thrallo
+service (https://app.thrallo.com). Redistribution or modification without
+permission is not allowed.

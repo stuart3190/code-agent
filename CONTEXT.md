@@ -2,8 +2,8 @@
 
 ## Current milestone
 
-Phase 14 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
-subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 15 is implemented. Phase 14 is live, and Phase 12's automatic PR reviews are active:
+the GitHub App subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -54,7 +54,11 @@ the shared zero-dependency API client. Phase 14 adds disaster recovery: nightly 
 backups of every control-plane table, auth users, and the artifact bucket under
 `thrallo-backup.timer`, a migration-drift-guarded table list, a confirm-gated FK-ordered
 restore script, and the `docs/DISASTER-RECOVERY.md` runbook (offline kit: `shell/.env` with
-`PLATFORM_ENC_KEY` plus a copied backup run — a Stuart action).
+`PLATFORM_ENC_KEY` plus a copied backup run — a Stuart action). Phase 15 makes the VS Code
+extension marketplace-ready — generated PNG icon, license, changelog, gallery metadata, a
+proven `thrallo-0.2.0.vsix` package build — and adds inline run status: a live status-bar
+indicator during runs and per-agent latest-run states with themed icons in the Agents view.
+Marketplace publication is a documented Stuart action.
 
 ## Verification state
 
@@ -160,8 +164,8 @@ restore script, and the `docs/DISASTER-RECOVERY.md` runbook (offline kit: `shell
 
 ## Next implementation slice
 
-Phase 15: extension marketplace packaging and inline run status, or dunning polish. Stripe
-go-live stays parked until Stuart supplies products closer to launch.
+Phase 16: inline completion backed by the repository index, or dunning polish. Stripe go-live
+stays parked until Stuart supplies products closer to launch.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

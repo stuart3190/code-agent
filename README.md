@@ -53,8 +53,10 @@ history. Do not point it at Buildr101 production data or credentials.
   timelines and artifact content after a configurable window while keeping billing history.
 - Personal access tokens (SHA-256 hashed, shown once, revocable, session-managed only) that
   authenticate editor and CLI clients against the same owner-scoped v1 API, and a
-  zero-dependency VS Code extension (`editor/vscode`) with an agents view, run launching,
-  live timeline streaming, diff review, approve/decline publication, and one-click resume.
+  zero-dependency, marketplace-ready VS Code extension (`editor/vscode`, packaged as a .vsix
+  with `npm run package`) with an agents view showing latest-run states, run launching, live
+  timeline streaming plus a status-bar run indicator, diff review, approve/decline
+  publication, and one-click resume.
 - Repository-aware pull-request review agents: the reviewer checks out the PR head in the
   sandbox, reads changed code in context with a read-only toolset (it can still run tests),
   produces structured findings with severities and line anchors, and posts the review to

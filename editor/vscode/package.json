@@ -1,19 +1,40 @@
 {
   "name": "thrallo",
-  "displayName": "Thrallo",
-  "description": "Run Thrallo cloud coding agents on your repositories from VS Code.",
-  "version": "0.1.0",
+  "displayName": "Thrallo — Cloud Coding Agents",
+  "description": "Launch Thrallo cloud coding agents on your repositories: stream live run timelines, review diffs, approve pull requests, and resume preserved workspaces — without leaving VS Code.",
+  "version": "0.2.0",
   "publisher": "thrallo",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0b0d12",
+    "theme": "dark"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "code review",
+    "automation",
+    "cloud"
+  ],
+  "homepage": "https://app.thrallo.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/stuart3190/code-agent"
+  },
+  "bugs": {
+    "url": "https://github.com/stuart3190/code-agent/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "AI",
     "Other"
+  ],
+  "extensionKind": [
+    "ui",
+    "workspace"
   ],
   "main": "./extension.js",
   "activationEvents": [],
@@ -63,6 +84,6 @@
     }
   },
   "scripts": {
-    "package": "vsce package"
+    "package": "npx --yes @vscode/vsce package"
   }
 }

@@ -72,6 +72,13 @@ values. Codex will keep everything else moving locally.
 - [ ] Optional: set `ADMIN_EMAILS=stuart3190@gmail.com` in the Thrallo server environment to
   see the operator Operations view (platform telemetry) in the workspace.
 - [ ] Approve GitHub App permissions and marketplace-facing copy after the implementation is ready.
+- [ ] Publish the VS Code extension when you want public installs (it is packaged and ready —
+  `thrallo-0.2.0.vsix` builds from `editor/vscode` with `npm run package`):
+  1. Create a [VS Code Marketplace publisher](https://marketplace.visualstudio.com/manage)
+     named `thrallo` (needs a Microsoft/Azure DevOps account and a Personal Access Token with
+     Marketplace → Manage scope).
+  2. From `editor/vscode`: `npx @vscode/vsce login thrallo`, then `npx @vscode/vsce publish`.
+  Until then, the .vsix installs directly via VS Code → Extensions → “Install from VSIX”.
 
 ## Optional: use your ChatGPT Codex allowance
 
