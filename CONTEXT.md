@@ -2,8 +2,8 @@
 
 ## Current milestone
 
-Phase 14 is implemented. Phase 13 is live, and Phase 12's automatic PR reviews are active:
-the GitHub App subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 14 is implemented and live. Phase 12's automatic PR reviews are active: the GitHub App
+subscribes to `["pull_request", "push"]`, verified from the live installation. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -137,6 +137,13 @@ restore script, and the `docs/DISASTER-RECOVERY.md` runbook (offline kit: `shell
   shell restarted healthy, `node cli/thrallo.mjs help` works on the production checkout, and
   Buildr101 stayed healthy. The full local verification passed with 136 Code Agent tests and
   four Playwright checks.
+- Phase 14 disaster recovery is deployed from main commit `ee861b8` on 2026-07-30 (no
+  migration). `thrallo-backup.timer` is installed and active on the VPS, the first real
+  production backup succeeded and self-validated (25 files, every ca_ table plus auth users
+  and the artifact bucket, ~14 MB gzipped), and the dry-run restore re-validated the run end
+  to end. The full local verification passed with 140 Code Agent tests and four Playwright
+  checks, and Buildr101 stayed healthy. The offline DR kit (shell/.env + a copied backup run)
+  is a pending Stuart action in YOU_NEED_TO_DO.md.
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.
