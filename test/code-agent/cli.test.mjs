@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
 import test from "node:test";
 
@@ -42,6 +43,23 @@ test("argument parsing separates commands, positionals, and flags", () => {
   assert.deepEqual(parsed.positional, ["fix", "the", "bug"]);
   assert.equal(parsed.flags.repo, "o/r");
   assert.equal(parsed.flags.yes, true);
+});
+
+test("version prints the repository package version without a stored connection", async () => {
+  const { version } = JSON.parse(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  );
+  const { lines, options } = harness({ config: null });
+  const code = await runCli(["version"], options("http://x"));
+  assert.equal(code, 0);
+  assert.deepEqual(lines, [version]);
+});
+
+test("help lists the version command", async () => {
+  const { lines, options } = harness({ config: null });
+  const code = await runCli(["help"], options("http://x"));
+  assert.equal(code, 0);
+  assert.match(lines[0], /^\s*version\s+Print the Thrallo package version$/m);
 });
 
 test("login validates the token shape and stores the config after a probe", async () => {
