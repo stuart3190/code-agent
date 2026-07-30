@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Phase 6 is implemented and live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
+Phase 7 is implemented. Phase 6 is live. The Phase 1 vertical slice includes the control-plane data model, v1 API, worker, commercial
 OpenAI/Anthropic tool loop, Daytona runner, GitHub App installation flow, durable run artifacts,
 usage metering, stale-run recovery, retry, signed GitHub webhooks, approval-gated commit/push/PR
 publishing, and the new web workspace. Phase 2 adds a private, idempotent webhook-delivery ledger,
@@ -21,7 +21,12 @@ search, live indexing progress, durable manual refreshes, GitHub default-branch 
 symbol-map context injection before agent execution. Phase 6 adds Gemini Interactions API support,
 quality/balanced/fast/economy/manual model profiles, task-aware routing, retryable-error fallback,
 provider latency and reliability health, encrypted provider evaluations, Gemini BYOK, and routing
-and comparison controls in Settings.
+and comparison controls in Settings. Phase 7 adds Free/Starter/Pro subscription plans, monthly
+managed usage budgets (runs and sandbox compute for every run, managed tokens for managed-key
+runs) enforced at run creation, worker claim, and mid-run, personal spend guards, billing-source
+usage tagging, dormant `THRALLO_STRIPE_*` checkout/portal/webhook wiring that stays disabled
+until pricing is approved, the Usage & billing workspace view, and the `ADMIN_EMAILS`-gated
+`/api/v1/ops/telemetry` Operations view.
 
 ## Verification state
 
@@ -78,9 +83,12 @@ and comparison controls in Settings.
 
 ## Next implementation slice
 
-Phase 7: add subscription controls, managed usage budgets, and operational telemetry.
+Phase 8: rich approval policies, sandbox snapshots, checkpoint retry/resume, and object-storage
+artifacts.
 
-User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`.
+User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
+live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
+and set the `THRALLO_STRIPE_*` environment.
 
 ## Important boundaries
 

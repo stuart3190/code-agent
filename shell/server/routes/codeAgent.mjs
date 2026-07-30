@@ -16,6 +16,17 @@ import {
   retrieveRepositoryMap,
 } from "../lib/repositoryIndexer.mjs";
 import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
+import { assertRunWithinBudget } from "../lib/usageBudgets.mjs";
+import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
+
+async function assertBudgetAllowsRun(ownerId) {
+  const credentialProvider = await activeAiProviderName(ownerId).catch(() => "managed");
+  try {
+    await assertRunWithinBudget(ownerId, { credentialProvider });
+  } catch (error) {
+    throw new CodeAgentInputError(error.message, error.status || 402, error.code || "budget_exceeded");
+  }
+}
 
 export function handleCodeAgentCapabilities(_req, res) {
   sendJson(res, 200, codeAgentCapabilities());
@@ -133,6 +144,7 @@ export async function handleRunCreate(req, res, { owner, agentId, body }) {
       "repository_unavailable",
     );
   }
+  await assertBudgetAllowsRun(owner.id);
   const run = await store.createRun(owner.id, agent, repository, parseRunInput(body, agent));
   return sendJson(res, 202, { run: publicRun(run) });
 }
@@ -187,6 +199,7 @@ export async function handleRunRetry(_req, res, { owner, runId }) {
       "repository_unavailable",
     );
   }
+  await assertBudgetAllowsRun(owner.id);
   const run = await store.createRun(owner.id, agent, repository, {
     prompt: previous.prompt,
     mode: previous.mode,

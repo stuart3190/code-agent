@@ -56,6 +56,15 @@ export const publishRun = (runId, body = {}) => request(`/api/v1/runs/${runId}/p
 export const runArtifacts = (runId) => request(`/api/v1/runs/${runId}/artifacts`);
 export const retryRun = (runId) => request(`/api/v1/runs/${runId}/retry`, { method: "POST" });
 export const usageSummary = () => request("/api/v1/usage");
+export const billingOverview = () => request("/api/v1/billing");
+export const selectPlan = (plan) => request("/api/v1/billing/plan", {
+  method: "POST", body: JSON.stringify({ plan }),
+});
+export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
+  method: "POST", body: JSON.stringify(body),
+});
+export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
+export const opsTelemetry = () => request("/api/v1/ops/telemetry");
 export const githubInstallations = () => request("/api/v1/github/installations");
 export const startGithubInstallation = () => request("/api/v1/github/installations/start", { method: "POST" });
 export const githubInstallationRepositories = (installationId) =>
