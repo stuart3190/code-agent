@@ -178,11 +178,18 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
   passed a 5/5 Playwright-driven smoke test — branded window, real local folder, file edit
   persisted to disk, integrated terminal executed a command, and the built-in Thrallo
   extension signed into production with an API token and listed live agents with run states
-  in the THRALLO: AGENTS view (screenshots under desktop/out/smoke, gitignored). VERIFIED:
-  Windows dev build and everything above. CONFIGURED BUT UNVERIFIED: the packaged win32
-  archive (in progress at time of writing), and the darwin/linux targets — macOS stays
-  "Coming soon" in all public copy until Stuart approves. Nothing is signed, notarised, or
-  store-published, and no paid accounts were created.
+  in the THRALLO: AGENTS view (screenshots under desktop/out/smoke, gitignored). The
+  packaged unsigned win32 build also completed and passed the same 5/5 smoke test as
+  "Thrallo Desktop" (`desktop/VSCode-win32-x64/Thrallo.exe`, archived to
+  `desktop/out/thrallo-win32-x64.zip`, 263.8 MB); getting there surfaced and fixed four real
+  packaging constraints, one found by Thrallo's own automated review of this PR (no
+  vscode-*-archive gulp task; quality=stable requires proprietary win32ContextMenu config;
+  signtool needed on PATH for signature STRIPPING only; the upstream copilot builtin removed
+  plus a guarded tolerance patch). VERIFIED: everything above, on Windows. CONFIGURED BUT
+  UNVERIFIED: darwin/linux targets — macOS stays "Coming soon" in all public copy until
+  Stuart approves. Nothing is signed, notarised, or store-published, and no paid accounts
+  were created. No installer beyond the archive exists yet (Inno Setup integration is future
+  work).
 - Cloudflare DNS and automatic TLS are live. `https://thrallo.com` and `https://www.thrallo.com`
   redirect to `https://app.thrallo.com`; the public SPA, health endpoint, and capabilities endpoint
   all pass externally.

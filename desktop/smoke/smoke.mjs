@@ -26,7 +26,15 @@ function record(step, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? ` — ${detail}` : ""}`);
 }
 
+// THRALLO_SMOKE_PACKAGED=1 targets the packaged min build instead of the dev build.
+const PACKAGED = process.env.THRALLO_SMOKE_PACKAGED === "1";
+
 function electronExecutable() {
+  if (PACKAGED) {
+    const exe = path.join(DESKTOP, "VSCode-win32-x64", "Thrallo.exe");
+    if (!existsSync(exe)) throw new Error("no packaged build — run `node desktop/build.mjs package` first");
+    return exe;
+  }
   const dir = path.join(CHECKOUT, ".build", "electron");
   const exe = readdirSync(dir).find((name) => name.endsWith(".exe"));
   if (!exe) throw new Error("no electron executable in .build/electron — run `npm run electron` first");
@@ -51,7 +59,7 @@ console.log(`launching ${path.basename(executable)}…`);
 const app = await _electron.launch({
   executablePath: executable,
   args: [
-    CHECKOUT,
+    ...(PACKAGED ? [] : [CHECKOUT]),
     "--no-sandbox",
     "--disable-gpu-sandbox",
     "--disable-workspace-trust",
@@ -61,8 +69,10 @@ const app = await _electron.launch({
     `--extensions-dir=${path.join(OUT, "extensions")}`,
     workspace,
   ],
-  cwd: CHECKOUT,
-  env: { ...process.env, VSCODE_DEV: "1", VSCODE_SKIP_NODE_VERSION_CHECK: "1" },
+  cwd: PACKAGED ? path.dirname(executable) : CHECKOUT,
+  env: PACKAGED
+    ? { ...process.env }
+    : { ...process.env, VSCODE_DEV: "1", VSCODE_SKIP_NODE_VERSION_CHECK: "1" },
   timeout: 120_000,
 });
 
