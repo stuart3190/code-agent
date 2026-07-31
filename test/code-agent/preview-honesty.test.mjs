@@ -65,3 +65,32 @@ test("backendRuntimeReady reports missing app-auth and missing entities", async 
     process.env.SUPABASE_ANON_KEY = saved.k ?? ""; if (!saved.k) delete process.env.SUPABASE_ANON_KEY;
   }
 });
+
+// Verification Agent pieces (2026-07-31): repair prompts preserve design; the capability set
+// includes repair_app; report shaping is pure.
+import { repairPrompt } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
+
+test("repairPrompt names the failures and the preservation rules", () => {
+  const p = repairPrompt(["Signup: no fields", "Network: 500 on /entities"]);
+  assert.match(p, /REPAIR MODE/);
+  assert.match(p, /Signup: no fields/);
+  assert.match(p, /preserve the existing design, layout, colours, branding/);
+  assert.match(p, /minimum code change/);
+});
+
+test("repair_app and show_preview are registered capabilities", () => {
+  const saved = { u: process.env.PROVISIOND_URL, t: process.env.PROVISIOND_TOKEN, k: process.env.OPENAI_API_KEY };
+  process.env.PROVISIOND_URL = "http://127.0.0.1:1"; process.env.PROVISIOND_TOKEN = "t"; process.env.OPENAI_API_KEY = "sk-unit";
+  try {
+    resetCapabilityRegistryForTests();
+    registerCoreCapabilities();
+    const ids = listCapabilities().map((c) => c.id);
+    assert.ok(ids.includes("repair_app"));
+    assert.ok(ids.includes("show_preview"));
+  } finally {
+    resetCapabilityRegistryForTests();
+    process.env.PROVISIOND_URL = saved.u ?? ""; if (!saved.u) delete process.env.PROVISIOND_URL;
+    process.env.PROVISIOND_TOKEN = saved.t ?? ""; if (!saved.t) delete process.env.PROVISIOND_TOKEN;
+    process.env.OPENAI_API_KEY = saved.k ?? ""; if (!saved.k) delete process.env.OPENAI_API_KEY;
+  }
+});

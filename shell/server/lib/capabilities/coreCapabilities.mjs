@@ -7,7 +7,7 @@ import { codeAgentStore } from "../codeAgentStore.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild, showPreview } from "../appBuild/appBuildService.mjs";
+import { startAppBuild, showPreview, repairApp } from "../appBuild/appBuildService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
@@ -71,6 +71,24 @@ export function registerCoreCapabilities() {
         description: String(input.description),
         productName: input.productName || null,
       });
+    },
+  });
+
+  registerCapability({
+    id: "repair_app",
+    specialist: "Builder",
+    statusText: "Repairing…",
+    description: "Surgically FIX a reported problem in the user's existing built app (\"auth is broken\", \"API returns 500\", \"database isn't saving\", \"payments don't work\", …) WITHOUT rebuilding or redesigning it. Always prefer this over app_build when the user reports something broken in an app that already exists. Design, layout, colours, branding, UX and component structure are preserved; only the minimum code changes. The repaired build is re-verified before completion is announced.",
+    costProfile: "run",
+    inputSchema: strings({
+      issue: str("The reported problem, verbatim plus any diagnostic detail"),
+      productName: optionalStr("Which product to repair when the conversation has several"),
+    }),
+    requirements: () => (openAIConfigured() || anthropicConfigured()
+      ? { ok: true }
+      : { ok: false, reason: "No build-capable model is configured." }),
+    async invoke(ctx, input) {
+      return repairApp(ctx, { issue: String(input.issue), productName: input.productName || null });
     },
   });
 
