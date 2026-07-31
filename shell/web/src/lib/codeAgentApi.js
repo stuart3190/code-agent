@@ -85,6 +85,7 @@ export const startConversation = (text, workspaceContext = null) => request("/ap
   method: "POST", body: JSON.stringify({ text, workspaceContext }),
 });
 export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
+export const deleteConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`, { method: "DELETE" });
 export const sendConversationMessage = (conversationId, text, workspaceContext = null) =>
   request(`/api/v1/conversations/${conversationId}/messages`, {
     method: "POST", body: JSON.stringify({ text, workspaceContext }),

@@ -503,6 +503,28 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleConversationGet(req, res, { owner, conversationId: conversationMatch[1] });
     }
+    if (conversationMatch && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      try {
+        const { deleteConversationCascade } = await import("./lib/conversationDelete.mjs");
+        const { serviceClient } = await import("./lib/supabase.mjs");
+        const provisiond = (process.env.PROVISIOND_URL && process.env.PROVISIOND_TOKEN)
+          ? async (route, body) => fetch(`${process.env.PROVISIOND_URL}${route}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.PROVISIOND_TOKEN}` },
+              body: JSON.stringify(body),
+            })
+          : null;
+        const out = await deleteConversationCascade(owner.id, conversationMatch[1], {
+          client: serviceClient(), provisiond,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(out));
+      } catch (error) {
+        res.writeHead(error.status || 500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: error.message, step: error.step || null }));
+      }
+    }
     const conversationMessageMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/messages$/i);
     if (conversationMessageMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
