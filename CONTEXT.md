@@ -63,6 +63,28 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+DESKTOP DISTRIBUTION (2026-07-31, PR #79, deployed + fully verified): Thrallo Desktop
+v1.131.0 ships as real Windows downloads. `desktop/installer/Thrallo.iss` (Inno Setup 6,
+ISCC at %LOCALAPPDATA%\Programs\Inno Setup 6) → `Thrallo-Setup-x64.exe` (218MB): user-level
+(%LOCALAPPDATA%\Programs\Thrallo, no admin), Start menu + optional desktop shortcut,
+standard uninstall, signed-ready (SignTool directive commented). Portable =
+`Thrallo-Portable-x64.zip` (323MB, same build). Distribution: `releaseDownloads.mjs` —
+GET /api/v1/downloads (manifest: version/sizes/sha256/date/notes) + GET|HEAD
+/downloads/:name (Range-capable resumable streaming); ONLY files listed in manifest.json
+under THRALLO_RELEASES_DIR (VPS /home/ubuntu/thrallo-releases, env in shell/.env) are
+reachable — traversal/stray 404. `scripts/build-release-manifest.mjs` hashes artifacts.
+Downloads screen = real "Download for Windows" + "Portable ZIP" buttons w/ version, size,
+date, copyable SHA-256, notes, Windows x64 badge — npx/coming-soon copy REMOVED. Smoke
+gained THRALLO_SMOKE_EXE (any installed/portable exe). VERIFIED: silent install → installed
+app 6/6 smoke (launch/brand/file-edit/terminal/prod sign-in/conversation webview) → silent
+uninstall clean (dir + shortcut gone); portable extract 6/6 (use tar -xf + SHORT dest —
+Expand-Archive dies on long paths); live: manifest 200, both links HEAD/Range/206, FULL
+installer download sha256 == manifest. GOTCHAS: PowerShell `*>` logs UTF-16 (grep watchers
+miss ASCII markers — build "hang" was actually done); package build syncs web dist at START
+(rebuild dist first, or refresh resources/app/extensions/thrallo/media/app in output after).
+Release update procedure: build → ISCC → rename zip → build-release-manifest → scp all 3 to
+thrallo-releases. Binaries unsigned until Stuart buys a cert (SmartScreen warnings expected).
+
 THEME REPAIR (2026-07-31, PR #77, deployed + live-proven): after Stuart reported "light
 mode has disappeared" — investigation showed tokens/light-default were intact and nothing
 auto-darkens; the real gaps: theme applied only after the workspace mounted (flash +
