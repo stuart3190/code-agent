@@ -75,6 +75,21 @@ export function registerCoreCapabilities() {
   });
 
   registerCapability({
+    id: "open_view",
+    specialist: "Lead Agent",
+    statusText: "Opening it…",
+    description: "Instantly open a rich visual surface in the user's Thrallo window when it serves their goal better than prose: 'repos' (connect GitHub, repository status, indexing, policies, open pull requests), 'usage' (budgets, plan, spend guards, usage records), 'ops' (admin-only platform telemetry). Use whenever the user asks to see, manage, or connect these things — then narrate briefly. Never describe data the view already shows.",
+    costProfile: "free",
+    inputSchema: strings({
+      view: { type: "string", enum: ["repos", "usage", "ops"], description: "Which surface to open" },
+    }),
+    async invoke(ctx, input) {
+      await ctx.emit("open_view", { view: input.view });
+      return { opened: input.view, note: "The view is open on the user's screen — narrate briefly, do not repeat its contents." };
+    },
+  });
+
+  registerCapability({
     id: "publish",
     specialist: "Publisher",
     statusText: "Publishing…",
