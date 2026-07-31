@@ -18,10 +18,11 @@ test("polish screenshots", async ({ page }, testInfo) => {
     access_token: "e2e-token", token_type: "bearer", expires_at: Math.floor(Date.now() / 1000) + 3600,
     refresh_token: "e2e-refresh", user: { id: "u-e2e", email: "e2e@thrallo.com", user_metadata: { full_name: "Enid Tester" } },
   };
-  await page.addInitScript(([key, session]) => {
+  await page.addInitScript(([key, session, theme]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
     window.localStorage.setItem("thrallo-returning", "1");
-  }, [`sb-${REF}-auth-token`, SESSION]);
+    if (theme) window.localStorage.setItem("thrallo-theme", theme);
+  }, [`sb-${REF}-auth-token`, SESSION, process.env.SHOTS_THEME || ""]);
   await page.route(`https://${REF}.supabase.co/**`, (route) => route.fulfill({ json: {} }));
   await page.route(`https://${REF}.supabase.co/auth/v1/user**`, (route) => route.fulfill({ json: SESSION.user }));
   await page.route("**/api/v1/conversations", (route) => route.fulfill({ json: { conversations: [

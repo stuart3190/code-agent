@@ -26,14 +26,43 @@ import DownloadsSettings from "../manage/DownloadsSettings.jsx";
 import "./chat.css";
 
 const THEME_KEY = "thrallo-theme";
+const THEME_OPTIONS = ["light", "dark", "system"];
 
-function useTheme() {
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
+function applyTheme(pref) {
+  const dark = pref === "dark" ||
+    (pref === "system" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  if (dark) document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+}
+
+// Light is the default (Principle 6). The preference persists locally for instant boot
+// (main.jsx applies it before React renders) and in the account's user_metadata so it
+// follows the user across devices; "system" tracks the OS setting live.
+function useTheme(user) {
+  const [theme, setThemeState] = useState(() => {
+    const stored = localStorage.getItem(THEME_KEY);
+    return THEME_OPTIONS.includes(stored) ? stored : "light";
+  });
   useEffect(() => {
-    if (theme === "dark") document.documentElement.dataset.theme = "dark";
-    else delete document.documentElement.dataset.theme;
+    if (!localStorage.getItem(THEME_KEY)) {
+      const remote = user?.user_metadata?.thrallo_theme;
+      if (THEME_OPTIONS.includes(remote)) setThemeState(remote);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.user_metadata?.thrallo_theme]);
+  useEffect(() => {
+    applyTheme(theme);
     localStorage.setItem(THEME_KEY, theme);
+    if (theme !== "system" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, [theme]);
+  const setTheme = useCallback((next) => {
+    setThemeState(next);
+    client().auth.updateUser({ data: { thrallo_theme: next } }).catch(() => {});
+  }, []);
   return [theme, setTheme];
 }
 
@@ -60,7 +89,7 @@ export default function ChatShell() {
 const FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches;
 
 function Workspace({ user }) {
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme] = useTheme(user);
   const [conversations, setConversations] = useState([]);
   const [convosLoaded, setConvosLoaded] = useState(false);
   const [active, setActive] = useState(null);        // conversation row
@@ -748,6 +777,7 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
             <div className="ct-toggle" role="group" aria-label="Theme">
               <button className={theme === "light" ? "on" : ""} aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
               <button className={theme === "dark" ? "on" : ""} aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
+              <button className={theme === "system" ? "on" : ""} aria-pressed={theme === "system"} onClick={() => setTheme("system")}>System</button>
             </div>
           </div>
         </div>

@@ -39,7 +39,7 @@
     "prove:billing": "node harness/proveBilling.mjs",
     "prove:jobs": "node shell/harness/prove-jobs.mjs",
     "test:code-agent": "node --test test/code-agent/*.test.mjs",
-    "test:ui": "playwright test e2e/public-shell.spec.mjs e2e/chat-shell.spec.mjs",
+    "test:ui": "playwright test e2e/public-shell.spec.mjs e2e/chat-shell.spec.mjs e2e/theme-check.spec.mjs",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },
