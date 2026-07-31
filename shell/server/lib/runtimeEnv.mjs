@@ -38,7 +38,10 @@ export function withRuntimeEnv(tree, projectId) {
       `VITE_ACTIONS_URL=${url}/functions/v1/app-actions`,
       `VITE_RUNTIME_URL=${url}/functions/v1/app-runtime`,
       `VITE_CONNECTORS_URL=${platformUrl}/api/runtime/connectors`,
-      `VITE_ANALYTICS_URL=${url}/functions/v1/app-analytics`,
+      // VITE_ANALYTICS_URL deliberately NOT injected: the app-analytics function is a
+      // publish-time feature not deployed on Thrallo yet, and pointing previews at a
+      // missing endpoint litters every generated app with CORS/network errors (caught by
+      // the Verification Agent, 2026-07-31). The SDK no-ops cleanly without it.
       "",
     ].join("\n"),
   };
