@@ -7,6 +7,21 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+PREVIEW INCIDENT + FIXES (2026-07-31, PRs #59/#60, deployed): Stuart reported a build
+claiming 'the preview is live' with no card. Chain: the Phase 24 route codemod had
+SILENTLY SWALLOWED the /api/domain-check dispatch (verification grepped only the import
+line) → every on-demand cert ask 404'd since that deploy → provisiond's readiness probe
+failed through Caddy while containers were healthy → runJob recorded previewUrl:null →
+the relay still claimed 'live'. Fixes: (1) dispatch restored + e2e regression test
+asserting the gate's own {ok:false} JSON shape (generic no-route now fails CI); (2)
+buildEndSummary() pure helper — never claims a preview without a URL ('warming up'
+instead); (3) recoverPreview() polls ~3min after a URL-less success and delivers the card
+late + away-notification; (4) show_preview capability revives reaped/missing previews from
+the stored tree (Publisher choreography); (5) provisiond waitReady 120s→240s
+(PREVIEW_READY_TIMEOUT_MS). Orbit healed live: preview_ready delivered, HTTP 200, fresh LE
+cert. LESSONS: codemod verification must grep the DISPATCH, not the import; a 'timeout'
+whose artifact later works points at the probe path, not the workload.
+
 OWNER ACCOUNTS (2026-07-31, PR #57, deployed + live-proven): Thrallo staff
 (THRALLO_OWNER_EMAILS in shell/.env — currently stuart3190@gmail.com,support@thrallo.com;
 resolved owner-id→email via auth admin, cached 5min, fail-closed) bypass EVERY enforcement
