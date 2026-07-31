@@ -78,6 +78,7 @@ export function normalizeSubscription(owner, row) {
     run_limit_override: row?.run_limit_override || null,
     managed_token_limit_override: row?.managed_token_limit_override || null,
     compute_seconds_limit_override: row?.compute_seconds_limit_override || null,
+    preview_plan: PLAN_IDS.includes(row?.preview_plan) ? row.preview_plan : null,
   };
 }
 

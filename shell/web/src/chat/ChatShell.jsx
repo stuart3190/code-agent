@@ -11,6 +11,7 @@ import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications,
+  setPreviewPlan,
 } from "../lib/codeAgentApi.js";
 import {
   applyEvent, emptyConversationView, replayEvents, railState,
@@ -460,9 +461,30 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
         <div className="ct-set-group">
           <div className="ct-set-label">Account</div>
           <div className="ct-set-row">
-            <div>{user.email}<div className="ct-hint">{usage?.plan?.name || usage?.plan?.id || "Free"} plan</div></div>
+            <div>
+              {user.email}
+              <div className="ct-hint">
+                {usage?.ownerAccount ? "Owner — limits are never enforced" : `${usage?.plan?.name || usage?.plan?.id || "Free"} plan`}
+              </div>
+            </div>
             {!user.desktop && <button className="ct-btn-quiet" onClick={() => client().auth.signOut()}>Sign out</button>}
           </div>
+          {usage?.ownerAccount && (
+            <div className="ct-set-row">
+              <div>View as<div className="ct-hint">Experience the product on a customer plan — usage still records, nothing blocks you.</div></div>
+              <div className="ct-toggle">
+                {[["actual", "Owner"], ["free", "Free"], ["starter", "Starter"], ["pro", "Pro"]].map(([id, label]) => (
+                  <button key={id}
+                    className={(usage.previewPlan || "actual") === id ? "on" : ""}
+                    onClick={() => setPreviewPlan(id === "actual" ? null : id)
+                      .then(() => usageSummary().then(setUsage))
+                      .catch(() => {})}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="ct-set-group">
           <div className="ct-set-label">AI connection</div>

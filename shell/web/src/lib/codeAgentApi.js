@@ -89,6 +89,9 @@ export const sendConversationMessage = (conversationId, text, workspaceContext =
   request(`/api/v1/conversations/${conversationId}/messages`, {
     method: "POST", body: JSON.stringify({ text, workspaceContext }),
   });
+export const setPreviewPlan = (plan) => request("/api/v1/owner/preview-plan", {
+  method: "POST", body: JSON.stringify({ plan }),
+});
 export const notificationsConfig = () => request("/api/v1/notifications/config");
 export const subscribeNotifications = (subscription) => request("/api/v1/notifications/subscribe", {
   method: "POST", body: JSON.stringify({ subscription }),

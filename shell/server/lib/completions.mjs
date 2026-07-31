@@ -74,7 +74,9 @@ export async function completeCode(owner, input, {
   overviewResolver = budgetOverview,
   now = Date.now(),
 } = {}) {
-  if (!completionRateAllowed(owner, now)) {
+  const { isOwnerAccount } = await import("./ownerAccounts.mjs");
+  const ownerAccount = await isOwnerAccount(owner);
+  if (!ownerAccount && !completionRateAllowed(owner, now)) {
     throw serviceError("Completion rate limit reached; slow down.", 429, "rate_limited");
   }
 
@@ -93,7 +95,7 @@ export async function completeCode(owner, input, {
   const billingSource = credential.provider === "managed" ? "managed" : "byok";
   if (billingSource === "managed") {
     const overview = await overviewResolver(owner, { store });
-    if (overview.budgets.managedTokens.remaining <= 0) {
+    if (!overview.unlimited && overview.budgets.managedTokens.remaining <= 0) {
       throw serviceError("Your monthly managed-model token allowance is used up.", 402, "budget_exceeded");
     }
   }

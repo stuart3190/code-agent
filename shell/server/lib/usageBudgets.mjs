@@ -7,6 +7,7 @@
 
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { optionalEnv } from "./env.mjs";
+import { isOwnerAccount } from "./ownerAccounts.mjs";
 import {
   currentPeriod,
   effectiveBudget,
@@ -22,10 +23,17 @@ export async function ownerSubscription(owner, { store = codeAgentStore() } = {}
 
 export async function budgetOverview(owner, { store = codeAgentStore(), now = new Date() } = {}) {
   const subscription = await ownerSubscription(owner, { store });
+  const ownerAccount = await isOwnerAccount(owner);
+  // Owner accounts (Thrallo staff): a preview plan changes ONLY how budgets are presented —
+  // enforcement stays bypassed via `unlimited` so staff can experience Free/Starter/Pro
+  // views without ever being blocked by them.
+  const previewPlan = ownerAccount ? subscription.preview_plan : null;
   // A past-due paid subscription meters at free-plan limits until payment recovers.
-  const metered = subscription.status === "past_due"
-    ? { ...subscription, plan: "free" }
-    : subscription;
+  const metered = previewPlan
+    ? { ...subscription, plan: previewPlan, run_limit_override: null, managed_token_limit_override: null, compute_seconds_limit_override: null }
+    : subscription.status === "past_due"
+      ? { ...subscription, plan: "free" }
+      : subscription;
   const period = currentPeriod(metered, now);
   const budget = effectiveBudget(metered);
   const [usage, runs] = await Promise.all([
@@ -35,7 +43,10 @@ export async function budgetOverview(owner, { store = codeAgentStore(), now = ne
   return {
     subscription: publicSubscription(subscription),
     plan: getPlan(metered.plan) || getPlan("free"),
-    pastDue: subscription.status === "past_due",
+    pastDue: !previewPlan && subscription.status === "past_due",
+    ownerAccount,
+    previewPlan,
+    unlimited: ownerAccount,
     period,
     budgets: {
       runs: meter(runs, budget.runs),
@@ -48,6 +59,7 @@ export async function budgetOverview(owner, { store = codeAgentStore(), now = ne
 // Burst protection independent of the monthly budget: bounded concurrent execution and a
 // rolling one-hour admission cap per owner.
 export async function assertWithinRateLimits(owner, { store = codeAgentStore(), now = new Date() } = {}) {
+  if (await isOwnerAccount(owner)) return; // staff are never rate-blocked from their own product
   const maxActive = boundedEnv("CODE_AGENT_MAX_ACTIVE_RUNS", 3);
   const perHour = boundedEnv("CODE_AGENT_RUNS_PER_HOUR", 30);
   const [active, lastHour] = await Promise.all([
@@ -82,6 +94,7 @@ export async function assertRunWithinBudget(owner, {
   now = new Date(),
 } = {}) {
   const overview = await budgetOverview(owner, { store, now });
+  if (overview.unlimited) return overview; // owner accounts: metered, never blocked
   const { runs, managedTokens, computeSeconds } = overview.budgets;
   if (runs.remaining <= 0) {
     throw budgetError(`Your ${overview.plan.name} plan's monthly run allowance (${runs.limit}) is used up.`);
@@ -100,7 +113,24 @@ export async function assertRunWithinBudget(owner, {
 
 export async function remainingManagedTokens(owner, { store = codeAgentStore(), now = new Date() } = {}) {
   const overview = await budgetOverview(owner, { store, now });
+  if (overview.unlimited) return Number.MAX_SAFE_INTEGER; // owners: mid-run guards never trip
   return overview.budgets.managedTokens.remaining;
+}
+
+// Owner-only: view the product as another plan. Presentation only — enforcement stays off.
+export async function setPreviewPlan(owner, plan, { store = codeAgentStore() } = {}) {
+  if (!(await isOwnerAccount(owner))) {
+    const error = new Error("Plan preview is available to Thrallo owner accounts only.");
+    error.status = 403;
+    error.code = "owner_only";
+    throw error;
+  }
+  const normalized = plan === null || plan === "" || plan === "actual" ? null : String(plan);
+  if (normalized && !["free", "starter", "pro"].includes(normalized)) {
+    throw inputError("plan must be free, starter, pro, or null");
+  }
+  await store.upsertSubscription(owner, { preview_plan: normalized });
+  return budgetOverview(owner, { store });
 }
 
 const OVERRIDE_FIELDS = Object.freeze({
