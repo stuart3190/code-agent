@@ -56,6 +56,10 @@ export const RESTORE_ORDER = [
   "published_sites",
   "custom_domains",
   "ca_push_subscriptions",
+  "entities",       // owner references auth.users -> after users are ensured
+  "app_users",
+  "app_auth_events",
+  "app_password_resets",
 ];
 
 const BATCH = 500;

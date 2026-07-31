@@ -34,3 +34,34 @@ test("show_preview is a registered capability", () => {
     process.env.PROVISIOND_TOKEN = saved.token ?? ""; if (!saved.token) delete process.env.PROVISIOND_TOKEN;
   }
 });
+
+// Runtime honesty gate pieces (per-app backend, 2026-07-31).
+import { backendRuntimeReady, treeUsesBackendSdk, resetBackendRuntimeCacheForTests } from "../../shell/server/lib/appRuntimeStatus.mjs";
+
+test("treeUsesBackendSdk detects the shipped SDK", () => {
+  assert.equal(treeUsesBackendSdk({ "src/lib/backend/index.js": "x" }), true);
+  assert.equal(treeUsesBackendSdk({ "src/App.jsx": "x" }), false);
+});
+
+test("backendRuntimeReady reports missing app-auth and missing entities", async () => {
+  const saved = { u: process.env.SUPABASE_URL, k: process.env.SUPABASE_ANON_KEY };
+  process.env.SUPABASE_URL = "https://x.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  try {
+    resetBackendRuntimeCacheForTests();
+    let r = await backendRuntimeReady({ fetchImpl: async () => ({ status: 404 }), force: true });
+    assert.equal(r.ready, false);
+    assert.match(r.reason, /app-auth/);
+    r = await backendRuntimeReady({
+      fetchImpl: async (url) => ({ status: url.includes("/rest/") ? 404 : 204 }), force: true,
+    });
+    assert.equal(r.ready, false);
+    assert.match(r.reason, /entities/);
+    r = await backendRuntimeReady({ fetchImpl: async () => ({ status: 200 }), force: true });
+    assert.equal(r.ready, true);
+  } finally {
+    resetBackendRuntimeCacheForTests();
+    process.env.SUPABASE_URL = saved.u ?? ""; if (!saved.u) delete process.env.SUPABASE_URL;
+    process.env.SUPABASE_ANON_KEY = saved.k ?? ""; if (!saved.k) delete process.env.SUPABASE_ANON_KEY;
+  }
+});

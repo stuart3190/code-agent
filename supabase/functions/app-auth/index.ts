@@ -32,8 +32,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
-const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Buildr101 <noreply@buildr101.com>";
-const SYNTH_DOMAIN = "apps.buildr101.com";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Thrallo <noreply@thrallo.com>";
+const SYNTH_DOMAIN = "apps.thrallo.com";
 
 const RESET_TTL_MIN = 15;
 const RESET_MAX_ATTEMPTS = 5;
