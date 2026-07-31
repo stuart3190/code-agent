@@ -2,16 +2,18 @@
 
 import React, { useEffect, useState } from "react";
 import { createApiToken, listApiTokens, revokeApiToken } from "../lib/codeAgentApi.js";
+import { SkeletonRows, useCopy } from "./shared.jsx";
 
 export default function TokensSettings() {
-  const [tokens, setTokens] = useState([]);
+  const [tokens, setTokens] = useState(null); // null = loading
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [copied, copy] = useCopy();
 
   useEffect(() => {
-    listApiTokens().then((r) => setTokens(r.tokens || [])).catch((e) => setError(e.message));
+    listApiTokens().then((r) => setTokens(r.tokens || [])).catch((e) => { setError(e.message); setTokens([]); });
   }, []);
 
   async function create(e) {
@@ -32,7 +34,7 @@ export default function TokensSettings() {
     catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
-  const active = tokens.filter((token) => !token.revokedAt);
+  const active = (tokens || []).filter((token) => !token.revokedAt);
 
   return (
     <div>
@@ -42,9 +44,12 @@ export default function TokensSettings() {
       {fresh && (
         <div className="mg-card">
           <div style={{ fontWeight: 700, fontSize: 14 }}>Copy it now — it won't be shown again</div>
-          <div className="mg-mono" style={{ marginTop: 8, padding: "8px 10px", cursor: "pointer" }}
-            title="Copy" onClick={() => navigator.clipboard?.writeText(fresh)}>{fresh}</div>
-          <div className="ct-actions"><button className="ct-btn-quiet" onClick={() => setFresh(null)}>Done</button></div>
+          <button className="mg-mono" style={{ marginTop: 8, padding: "8px 10px", cursor: "pointer", display: "block", width: "100%", textAlign: "left" }}
+            title="Copy to clipboard" onClick={() => copy(fresh)}>{fresh}</button>
+          <div className="ct-actions">
+            <button className="ct-btn" onClick={() => copy(fresh)}>{copied ? "Copied ✓" : "Copy"}</button>
+            <button className="ct-btn-quiet" onClick={() => setFresh(null)}>Done</button>
+          </div>
         </div>
       )}
       <form onSubmit={create} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -52,7 +57,10 @@ export default function TokensSettings() {
         <button className="ct-btn" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create"}</button>
       </form>
       <div className="mg-card">
-        {!active.length && <div className="ct-hint">No active tokens.</div>}
+        {tokens === null && <SkeletonRows rows={2} />}
+        {tokens !== null && !active.length && (
+          <div className="ct-hint">No active tokens yet — create one above to connect the CLI, the VS Code extension, or Thrallo Desktop.</div>
+        )}
         {active.map((token) => (
           <div className="mg-row" key={token.id}>
             <div>{token.name}<div className="ct-hint">{token.prefix}… · {token.lastUsedAt ? `last used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "never used"}</div></div>

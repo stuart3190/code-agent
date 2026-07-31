@@ -11,7 +11,7 @@ import {
   connectGithubRepository, listAgents, updateAgent, listAutomations, updateAutomation,
   deleteAutomation, getLatestRun,
 } from "../lib/codeAgentApi.js";
-import { StatusDot, AgentPolicy } from "./shared.jsx";
+import { StatusDot, AgentPolicy, SkeletonRows } from "./shared.jsx";
 
 export default function RepositoriesView({ onSentence, onOpenRun }) {
   const [repos, setRepos] = useState(null);
@@ -95,8 +95,8 @@ export default function RepositoriesView({ onSentence, onOpenRun }) {
       ) : (
         <>
           <div className="mg-card">
-            {repos === null && <div className="ct-hint">Loading…</div>}
-            {repos?.length === 0 && <div className="ct-hint">Nothing connected yet — install the GitHub App below.</div>}
+            {repos === null && <SkeletonRows rows={2} />}
+            {repos?.length === 0 && <div className="ct-hint">Nothing connected yet — install the GitHub App below and pick a repository, or add one by name.</div>}
             {(repos || []).map((repo) => (
               <div className="mg-row" key={repo.id}>
                 <div style={{ minWidth: 0 }}>
@@ -220,8 +220,8 @@ function RepoDetail({ repo, index, agents, onBack, onSentence, onOpenRun, onAgen
 
       <div className="mg-label">Open pull requests</div>
       <div className="mg-card">
-        {pulls === null && <div className="ct-hint">Loading…</div>}
-        {pulls?.length === 0 && <div className="ct-hint">No open pull requests.</div>}
+        {pulls === null && <SkeletonRows rows={2} />}
+        {pulls?.length === 0 && <div className="ct-hint">No open pull requests — new ones appear here, and the team can review any of them for you.</div>}
         {(pulls || []).map((pull) => (
           <div className="mg-row" key={pull.number}>
             <div>#{pull.number} {pull.title}<div className="ct-hint">{pull.author ? `by ${pull.author}` : ""}{pull.draft ? " · draft" : ""}</div></div>
@@ -232,7 +232,7 @@ function RepoDetail({ repo, index, agents, onBack, onSentence, onOpenRun, onAgen
 
       <div className="mg-label">Automations</div>
       <div className="mg-card">
-        {automations === null && <div className="ct-hint">Loading…</div>}
+        {automations === null && <SkeletonRows rows={1} />}
         {automations?.length === 0 && (
           <div className="mg-row">
             <div className="ct-hint">None yet — just ask, e.g. “review every new PR here”.</div>
