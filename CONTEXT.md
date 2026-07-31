@@ -63,6 +63,18 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+NAVIGATION REPAIR (2026-07-31, PR #81, deployed): explicit "← Projects" pill beside the
+wordmark whenever a conversation is open (all states; wordmark stays Home, both with
+accessible labels; 44px mobile target, safe-area-aware, no strip overlap). goHome only
+closes the client stream — builds continue server-side; reopening replays durable events
+(history/plan/team/preview) and now restores per-conversation scroll position
+(scrollMemory ref map; the thread auto-follows the stream ONLY when the reader is at the
+bottom, <80px). Playwright proof "background navigation": leave a growing build → Home
+shows live status → start a second project → return → away-time events/team/preview
+present + `after`-resume asserted (expect.poll — the reconnect loop is on a 1.5s cadence);
+phone/tablet/desktop verified (nav-shots.spec.mjs SHOTS=1). Compact preview-rail shows
+agent status only in title attr — e2e must assert differently per form factor.
+
 DESKTOP DISTRIBUTION (2026-07-31, PR #79, deployed + fully verified): Thrallo Desktop
 v1.131.0 ships as real Windows downloads. `desktop/installer/Thrallo.iss` (Inno Setup 6,
 ISCC at %LOCALAPPDATA%\Programs\Inno Setup 6) → `Thrallo-Setup-x64.exe` (218MB): user-level
