@@ -21,7 +21,10 @@ export function createBudgetLedger({
 } = {}) {
   async function getBalance(owner) {
     const overview = await overviewResolver(owner, { store });
-    const credits = r4(Math.max(0, overview.budgets.managedTokens.remaining) / TOKENS_PER_CREDIT);
+    // Owner accounts are never blocked from building; spend still records via debit().
+    const credits = overview.unlimited
+      ? 1_000_000
+      : r4(Math.max(0, overview.budgets.managedTokens.remaining) / TOKENS_PER_CREDIT);
     return { bundle: credits, topup: 0, total: credits };
   }
 

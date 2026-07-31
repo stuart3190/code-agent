@@ -17,7 +17,7 @@ import {
   retrieveRepositoryMap,
 } from "../lib/repositoryIndexer.mjs";
 import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
-import { assertRunWithinBudget, assertWithinRateLimits } from "../lib/usageBudgets.mjs";
+import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../lib/usageBudgets.mjs";
 import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
 import { listPullRequests } from "../lib/githubApp.mjs";
 import { completeCode, parseCompletionInput } from "../lib/completions.mjs";
@@ -305,8 +305,16 @@ export async function handleCompletion(_req, res, { owner, body }) {
 }
 
 export async function handleUsage(_req, res, owner) {
-  const summary = await codeAgentStore().usageSummary(owner.id);
+  const [summary, overview] = await Promise.all([
+    codeAgentStore().usageSummary(owner.id),
+    budgetOverview(owner.id),
+  ]);
   return sendJson(res, 200, {
+    plan: overview.plan,
+    budgets: overview.budgets,
+    ownerAccount: overview.ownerAccount,
+    previewPlan: overview.previewPlan,
+    unlimited: overview.unlimited,
     totals: summary.totals,
     records: summary.records.map((row) => ({
       id: row.id,

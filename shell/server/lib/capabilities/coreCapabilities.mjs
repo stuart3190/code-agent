@@ -61,7 +61,7 @@ export function registerCoreCapabilities() {
       const credentialProvider = await activeAiProviderName(ctx.owner).catch(() => "managed");
       if (!["anthropic", "openai"].includes(credentialProvider)) {
         const overview = await budgetOverview(ctx.owner, { store: codeAgentStore() });
-        if (overview.budgets.managedTokens.remaining <= 0) {
+        if (!overview.unlimited && overview.budgets.managedTokens.remaining <= 0) {
           const error = new Error("The monthly managed-model allowance is used up; builds need budget or a BYOK key.");
           error.code = "budget_exceeded";
           throw error;

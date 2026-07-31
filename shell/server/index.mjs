@@ -447,6 +447,20 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return handleUsage(req, res, owner);
     }
+    // Owner accounts: view the product as another plan (presentation only).
+    if (p === "/api/v1/owner/preview-plan" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      try {
+        const { setPreviewPlan } = await import("./lib/usageBudgets.mjs");
+        const overview = await setPreviewPlan(owner.id, body?.plan ?? null);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ ownerAccount: overview.ownerAccount, previewPlan: overview.previewPlan, plan: overview.plan, budgets: overview.budgets }));
+      } catch (error) {
+        res.writeHead(error.status || 500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: error.message, code: error.code }));
+      }
+    }
     if (p === "/api/v1/notifications/config" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       res.writeHead(200, { "Content-Type": "application/json" });
