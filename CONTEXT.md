@@ -7,6 +7,20 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+VERIFICATION AGENT LIVE (2026-07-31, PRs #64-#67): a permanent Verifier specialist
+gates EVERY app build — Playwright drives the live preview as a real user (signup, login,
+session + database persistence across reload, edit/delete/upload where offered, console +
+network hygiene incl. 404/500/CORS). The gate is STRUCTURAL: completion messages only
+exist after PASS ('built, verified, and live' + ✓ summary); FAIL sends named failures to
+the Builder as a surgical repair job (design/layout/colours/branding/UX preserved, minimum
+diff) and re-verifies — two auto rounds then honest escalation. repair_app capability
+classifies 'X is broken' reports as precise fixes on the EXISTING tree, never rebuilds.
+First live run immediately caught real platform bugs: previews pointed at the undeployed
+app-analytics function (CORS noise on every app — injection removed) and show_preview/
+publish materialized RAW trees without withRuntimeEnv (fixed — one env seam everywhere).
+Playwright chromium installed on the VPS. FULL PASS achieved on ProofBook in production.
+Build once. Repair precisely. Verify completely.
+
 FULL-STACK GENERATED APPS DELIVERED (2026-07-31, PRs #62/#63, backend-pipeline
 investigation for Stuart): ROOT CAUSE — Thrallo produced frontend-only apps; withRuntimeEnv
 injected real config but the per-app runtime (entities + app-auth) deferred at P19 was
