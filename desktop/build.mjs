@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHECKOUT_DIR, ensureCheckout, prepare } from "./bootstrap.mjs";
+import { CHECKOUT_DIR, ensureCheckout, prepare, syncBuiltin, syncWebApp } from "./bootstrap.mjs";
 
 const PLATFORMS = ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"];
 
@@ -56,13 +56,19 @@ if (command === "bootstrap") {
   run("npm", ["ci"]);
 } else if (command === "compile") {
   requireCheckout();
+  syncBuiltin();
+  syncWebApp();
   run("npm", ["run", "compile"]);
 } else if (command === "dev") {
   requireCheckout();
+  syncBuiltin();
+  syncWebApp();
   const script = process.platform === "win32" ? "scripts\\code.bat" : "./scripts/code.sh";
   run(script, process.argv.slice(3));
 } else if (command === "package") {
   requireCheckout();
+  syncBuiltin();
+  syncWebApp();
   if (!PLATFORMS.includes(platformArg)) {
     throw new Error(`--platform must be one of ${PLATFORMS.join(", ")}`);
   }

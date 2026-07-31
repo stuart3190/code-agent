@@ -134,6 +134,11 @@ produces (greeting included) and for Phase 21 copy reviews.
   through the Lead Agent, the specialist team, or a visible state transition. Silence must
   never be mistakable for inactivity — a capability that can take more than a moment MUST
   emit specialist status updates while it runs.
+- **Conversation is the operating system, but never a bottleneck** (Stuart, Phase 23
+  approval — a hard implementation rule): rich artefacts (previews, code, diffs, logs,
+  builds) must be inspectable, comparable, and interactive WITHOUT interrupting the
+  conversation that created them. The desktop client is the natural home for those richer
+  workflows — same interaction model as the web, plus real editor tabs beside the thread.
 - **Depth**: layered soft shadows, no borders-as-boxes; hairlines at 8% ink where structure
   is needed.
 

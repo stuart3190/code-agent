@@ -1,8 +1,8 @@
-import { accessToken } from "./backend.js";
+import { accessToken, apiBase } from "./backend.js";
 
 async function request(path, options = {}) {
   const token = await accessToken();
-  const response = await fetch(path, {
+  const response = await fetch(`${apiBase()}${path}`, {
     ...options,
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -95,7 +95,7 @@ export const subscribeNotifications = (subscription) => request("/api/v1/notific
 });
 export async function streamConversationEvents(conversationId, onEvent, { signal, after = 0 } = {}) {
   const token = await accessToken();
-  const response = await fetch(`/api/v1/conversations/${conversationId}/events?after=${after}`, {
+  const response = await fetch(`${apiBase()}/api/v1/conversations/${conversationId}/events?after=${after}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
     signal,
   });
@@ -168,7 +168,7 @@ export const cancelCodexLogin = (sessionId) => request(`/api/v1/ai/codex/login/$
 
 export async function streamRunEvents(runId, onEvent, { signal, after = 0 } = {}) {
   const token = await accessToken();
-  const response = await fetch(`/api/v1/runs/${runId}/events?after=${after}`, {
+  const response = await fetch(`${apiBase()}/api/v1/runs/${runId}/events?after=${after}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
     signal,
   });

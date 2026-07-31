@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSession } from "../lib/useSession.js";
 import Landing from "../landing/Landing.jsx";
 import ResetPassword from "../auth/ResetPassword.jsx";
-import { client } from "../lib/backend.js";
+import { client, apiBase } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications,
@@ -372,6 +372,9 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
 function SettingsSheet({ open, user, theme, setTheme, onClose }) {
   const [usage, setUsage] = useState(null);
   useEffect(() => { if (open) usageSummary().then(setUsage).catch(() => setUsage(null)); }, [open]);
+  // Desktop mode: deep management flows open the web console in the browser; the PAT
+  // session has no browser sign-out.
+  const consoleHref = `${apiBase()}/console`;
   const tokens = usage?.budgets?.managedTokens;
   const used = tokens ? Math.max(0, (tokens.limit ?? 0) - (tokens.remaining ?? 0)) : 0;
   const pct = tokens?.limit ? Math.min(100, Math.round((used / tokens.limit) * 100)) : 0;
@@ -384,14 +387,14 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
           <div className="ct-set-label">Account</div>
           <div className="ct-set-row">
             <div>{user.email}<div className="ct-hint">{usage?.plan?.name || usage?.plan?.id || "Free"} plan</div></div>
-            <button className="ct-btn-quiet" onClick={() => client().auth.signOut()}>Sign out</button>
+            {!user.desktop && <button className="ct-btn-quiet" onClick={() => client().auth.signOut()}>Sign out</button>}
           </div>
         </div>
         <div className="ct-set-group">
           <div className="ct-set-label">AI connection</div>
           <div className="ct-set-row">
             <div>Model access<div className="ct-hint">Managed, or bring your own key</div></div>
-            <a className="ct-btn-quiet" href="/console" style={{ textDecoration: "none" }}>Manage</a>
+            <a className="ct-btn-quiet" href={consoleHref} style={{ textDecoration: "none" }}>Manage</a>
           </div>
         </div>
         <div className="ct-set-group">
@@ -412,7 +415,7 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
           <div className="ct-set-label">API tokens</div>
           <div className="ct-set-row">
             <div>CLI &amp; editor access<div className="ct-hint">Personal access tokens</div></div>
-            <a className="ct-btn-quiet" href="/console" style={{ textDecoration: "none" }}>Manage</a>
+            <a className="ct-btn-quiet" href={consoleHref} style={{ textDecoration: "none" }}>Manage</a>
           </div>
         </div>
         <NotificationSettings />
@@ -484,6 +487,7 @@ function NotificationSettings() {
 
 function Palette({ conversations, onNew, onOpen, onSettings }) {
   const [query, setQuery] = useState("");
+  const consoleHref = `${apiBase()}/console`;
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (conversations || []).filter((c) => !q || (c.title || "").toLowerCase().includes(q)).slice(0, 6);
@@ -494,7 +498,7 @@ function Palette({ conversations, onNew, onOpen, onSettings }) {
       <div className="ct-pal-sect">Actions</div>
       <button className="ct-pal-row" onClick={onNew}>＋ New conversation<span className="ct-pal-hint">start fresh</span></button>
       <button className="ct-pal-row" onClick={onSettings}>⚙ Settings</button>
-      <a className="ct-pal-row" href="/console" style={{ textDecoration: "none" }}>▤ Open Console<span className="ct-pal-hint">transition</span></a>
+      <a className="ct-pal-row" href={consoleHref} style={{ textDecoration: "none" }}>▤ Open Console<span className="ct-pal-hint">transition</span></a>
       {rows.length > 0 && <div className="ct-pal-sect">Conversations</div>}
       {rows.map((c) => (
         <button key={c.id} className="ct-pal-row" onClick={() => onOpen(c)}>{c.title || "Untitled"}</button>

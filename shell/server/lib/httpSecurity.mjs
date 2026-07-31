@@ -61,13 +61,20 @@ export function allowedOrigins(appUrl = "https://buildr101.com") {
   return origins;
 }
 
+// Thrallo Desktop's conversation panel is a VS Code webview whose fetches carry the
+// sandboxed webview origin. Auth is bearer-token only (no cookies), so allowing these
+// origins grants nothing by itself — the request still needs a valid PAT.
+function isDesktopWebviewOrigin(origin) {
+  return /^vscode-webview:\/\//.test(origin) || /^https:\/\/[a-z0-9-]+\.vscode-webview\.net$/i.test(origin);
+}
+
 export function applyCors(res, origin, origins) {
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
   res.setHeader("Access-Control-Max-Age", "86400");
   if (!origin) return true;
-  if (!origins.has(origin)) return false;
+  if (!origins.has(origin) && !isDesktopWebviewOrigin(origin)) return false;
   res.setHeader("Access-Control-Allow-Origin", origin);
   return true;
 }

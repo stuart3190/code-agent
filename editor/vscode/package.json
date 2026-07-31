@@ -37,7 +37,7 @@
     "workspace"
   ],
   "main": "./extension.js",
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -61,7 +61,8 @@
       { "command": "thrallo.disconnect", "title": "Thrallo: Disconnect" },
       { "command": "thrallo.refresh", "title": "Thrallo: Refresh Agents", "icon": "$(refresh)" },
       { "command": "thrallo.runTask", "title": "Thrallo: Run Agent Task" },
-      { "command": "thrallo.showLatestRun", "title": "Thrallo: Show Latest Run" }
+      { "command": "thrallo.showLatestRun", "title": "Thrallo: Show Latest Run" },
+      { "command": "thrallo.openConversation", "title": "Thrallo: Open Conversation" }
     ],
     "walkthroughs": [
       {

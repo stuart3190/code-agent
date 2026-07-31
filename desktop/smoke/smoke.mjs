@@ -160,6 +160,26 @@ try {
     return "agents listed in the Thrallo view";
   });
   await shot(window, "04-thrallo-signed-in");
+
+  await step("conversation surface opens and hosts the web bundle", async () => {
+    await palette(window, "Thrallo: Open Conversation");
+    await window.waitForSelector('.tab[aria-label*="Thrallo Conversation"]', { timeout: 30_000 });
+    // The webview should be up; give the bundle a moment, then look for the Begin screen
+    // inside the nested webview frames (best-effort — frame nesting varies by build).
+    await window.waitForTimeout(9_000);
+    let inner = "";
+    for (const frame of window.frames()) {
+      try { inner += (await frame.evaluate(() => document.body?.innerText || "").catch(() => "")) + "\n"; } catch {}
+    }
+    if (/What are we building today\?|Welcome back/.test(inner)) {
+      return "conversation bundle rendered (Begin screen text found in the webview)";
+    }
+    if (/Connect Thrallo/.test(inner)) throw new Error("panel still shows the connect prompt after sign-in");
+    const frameCount = window.frames().length;
+    if (frameCount < 2) throw new Error("no webview frame appeared for the conversation panel");
+    throw new Error(`webview present but Begin screen not found (${frameCount} frames)`);
+  });
+  await shot(window, "05-conversation");
 } catch (error) {
   record("smoke run", false, error.message);
 } finally {

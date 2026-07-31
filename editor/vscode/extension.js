@@ -7,8 +7,11 @@
 const vscode = require("vscode");
 const { ThralloClient, describeEvent, TERMINAL_STATES } = require("./lib/api.js");
 const { buildLocalIndex, queryLocalIndex, isIndexableFile } = require("./lib/localIndex.js");
+const { rewriteIndexHtml, connectHtml } = require("./lib/conversationPanel.js");
 
 const TOKEN_KEY = "thrallo.apiToken";
+
+let conversationPanel = null;
 
 let client = null;
 let output = null;
@@ -31,12 +34,83 @@ function activate(context) {
     vscode.commands.registerCommand("thrallo.runTask", (item) => runTask(item)),
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
     vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
+    vscode.commands.registerCommand("thrallo.openConversation", () => openConversation(context)),
     vscode.languages.registerInlineCompletionItemProvider(
       { pattern: "**" },
       new ThralloCompletionProvider(),
     ),
   );
   restoreConnection(context);
+
+  // Thrallo Desktop (Phase 23): the conversation surface is the primary view of the fork —
+  // it opens itself on startup. In stock VS Code the panel stays behind its command.
+  if (/thrallo/i.test(vscode.env.appName || "")) {
+    setTimeout(() => { openConversation(context).catch(() => {}); }, 400);
+  }
+}
+
+// ── Conversation surface (Phase 23) ─────────────────────────────────────────────────────
+// A webview hosting the SAME built web bundle as app.thrallo.com (media/app, copied in at
+// desktop bootstrap), running in desktop mode with the stored PAT. The editor stays free
+// beside it for the richer workflows — files, diffs, terminals — without interrupting the
+// conversation (docs/DESIGN.md, Phase 23 principle).
+async function openConversation(context) {
+  const path = require("path");
+  const appRoot = vscode.Uri.joinPath(context.extensionUri, "media", "app");
+  const indexPath = path.join(appRoot.fsPath, "index.html");
+  if (conversationPanel) {
+    conversationPanel.reveal(vscode.ViewColumn.One);
+    // Re-render on reveal: if the user connected a token since the panel first opened
+    // (e.g. it auto-opened before sign-in), the bundle replaces the connect prompt.
+    await renderConversation(context, conversationPanel, indexPath, appRoot);
+    return;
+  }
+
+  const panel = vscode.window.createWebviewPanel(
+    "thralloConversation",
+    "Thrallo Conversation",
+    vscode.ViewColumn.One,
+    { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [appRoot] },
+  );
+  conversationPanel = panel;
+  panel.onDidDispose(() => { conversationPanel = null; });
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "connect") {
+      await vscode.commands.executeCommand("thrallo.connect");
+      await renderConversation(context, panel, indexPath, appRoot);
+    }
+    if (message?.type === "openExternal" && message.url) {
+      vscode.env.openExternal(vscode.Uri.parse(String(message.url)));
+    }
+  });
+  await renderConversation(context, panel, indexPath, appRoot);
+}
+
+async function renderConversation(context, panel, indexPath, appRoot) {
+  const fs = require("fs");
+  const token = await context.secrets.get(TOKEN_KEY);
+  // Skip the no-op rewrite when the same state is already showing (webview reloads reset
+  // the thread scroll; only re-render on a real state change).
+  const stateKey = `${token ? "app" : "connect"}:${indexPath}`;
+  if (panel.__thralloState === stateKey) return;
+  panel.__thralloState = stateKey;
+  if (!fs.existsSync(indexPath)) {
+    panel.webview.html = `<!doctype html><body style="font-family:system-ui;padding:40px;color:#5f5b6b">
+      The conversation bundle is not present in this build (media/app missing). Run
+      <code>node desktop/build.mjs bootstrap</code> after <code>npm run build:web</code>.</body>`;
+    return;
+  }
+  if (!token) {
+    panel.webview.html = connectHtml();
+    return;
+  }
+  const html = fs.readFileSync(indexPath, "utf8");
+  panel.webview.html = rewriteIndexHtml(html, {
+    assetBase: panel.webview.asWebviewUri(appRoot).toString(),
+    cspSource: panel.webview.cspSource,
+    server: serverUrl(),
+    token,
+  });
 }
 
 // Bounded local workspace index: built inside the editor, refreshed lazily after saves.

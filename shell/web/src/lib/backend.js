@@ -9,6 +9,12 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const backendConfigured = !!(url && anonKey);
 
+// Desktop mode (Phase 23): the Thrallo Desktop conversation panel injects
+// window.__THRALLO_DESKTOP__ = { server, token, email? } — auth is the user's personal
+// access token, API calls go to the injected server, and Supabase browser auth is bypassed.
+export const desktopHost = () => (typeof window !== "undefined" ? window.__THRALLO_DESKTOP__ || null : null);
+export const apiBase = () => desktopHost()?.server?.replace(/\/$/, "") || "";
+
 let _backend = null;
 export function backend() {
   if (!backendConfigured) {
@@ -25,6 +31,8 @@ export function client() {
 }
 
 export async function accessToken() {
+  const desktop = desktopHost();
+  if (desktop?.token) return desktop.token;
   const auth = client().auth;
   let { data } = await auth.getSession();
   let session = data?.session ?? null;
