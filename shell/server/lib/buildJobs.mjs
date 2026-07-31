@@ -624,6 +624,23 @@ async function runJob(job) {
       serverLog(job, `capabilities: PASS (${capabilityManifest.length} configured action(s))`);
     }
 
+    // Runtime honesty gate: if the generated app uses the backend SDK but the per-app
+    // runtime is down/missing, the build must NOT report success — the app would render
+    // with every backend call failing.
+    {
+      const { backendRuntimeReady, treeUsesBackendSdk } = await import("./appRuntimeStatus.mjs");
+      if (treeUsesBackendSdk(tree)) {
+        const runtime = await backendRuntimeReady();
+        if (!runtime.ready) {
+          qualityWarnings.push(`Backend runtime unavailable: ${runtime.reason}`);
+          build = { ...build, ok: false };
+          serverLog(job, `backend runtime: FAIL (${runtime.reason})`);
+        } else {
+          serverLog(job, "backend runtime: PASS (app-auth + entities reachable)");
+        }
+      }
+    }
+
     setPhase(job, "finalizing");
     const { need, balance } = await settle(combinedUsage.summary(), provider.model, "gen");
 
