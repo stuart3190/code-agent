@@ -6,7 +6,33 @@ export async function handleConversations(req, res, { owner, method, body }) {
   const store = conversationStore();
   if (method === "GET") {
     const rows = await store.listConversations(owner.id);
-    return sendJson(res, 200, { conversations: rows.map(publicConversation) });
+    // Workspace home: each conversation carries its live activity (who's working + on
+    // what), derived from the durable event stream — the same truth the thread shows.
+    const conversations = await Promise.all(rows.slice(0, 20).map(async (row) => {
+      const summary = publicConversation(row);
+      try {
+        const events = await store.listEvents(owner.id, row.id, 0);
+        const working = new Map();
+        let lastStatus = null;
+        for (const event of events || []) {
+          if (event.type === "agent_spawned" || event.type === "agent_status") {
+            working.set(event.payload?.agent, event.payload?.status || "");
+            lastStatus = { agent: event.payload?.agent, status: event.payload?.status || "" };
+          }
+          if (event.type === "agent_done") working.delete(event.payload?.agent);
+          if (event.type === "verification") summary.verified = event.payload?.pass === true;
+          if (event.type === "lead_error") summary.failed = true;
+          if (event.type === "preview_ready") summary.hasPreview = true;
+        }
+        const active = [...working.entries()].filter(([agent]) => agent && agent !== "Lead Agent");
+        if (active.length) {
+          const [agent, status] = active[active.length - 1];
+          summary.activity = { agent, status: status || lastStatus?.status || "Working…" };
+        }
+      } catch { /* activity is best-effort */ }
+      return summary;
+    }));
+    return sendJson(res, 200, { conversations });
   }
   return wrap(async () => {
     const { conversation } = await postUserMessage(owner.id, {

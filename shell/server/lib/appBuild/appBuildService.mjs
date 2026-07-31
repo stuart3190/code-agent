@@ -71,9 +71,37 @@ export async function startAppBuild(ctx, { description, productName = null }) {
   return { jobId: job.id, projectId: project.id, note: "Build dispatched; the team's progress streams into this conversation." };
 }
 
+// Milestone copy for phase transitions during LONG builds — an engineering manager keeping
+// the user informed, only when there's real progress to report.
+const PHASE_MILESTONES = {
+  designing: "Planning's done — the Designer is shaping the look and feel now.",
+  building: "Design's locked in. The Builder has started implementation.",
+  "quality-checking": "Implementation is in — running quality checks on the build.",
+  polishing: "Checks pass. Giving the design a final polish.",
+  finalizing: "Nearly there — packaging the build and preparing your preview.",
+};
+const MILESTONE_MIN_PHASE_MS = 2 * 60_000;   // fast builds stay quiet; the roster covers them
+const REASSURE_AFTER_MS = 4 * 60_000;        // never silent for long, never noisy either
+
 function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
   const jobId = job.id;
   let lastSpecialist = null;
+  let phaseStartedAt = Date.now();
+  let lastEventAt = Date.now();
+  let reassured = false;
+  const sayProgress = async (text) => {
+    await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId, progress: true } });
+    await ctx.emit("message", { role: "lead", text, projectId });
+  };
+  // Reassurance heartbeat: if nothing meaningful has happened for a while mid-build, say
+  // so once, honestly — "still working…" spam is banned.
+  const heartbeat = setInterval(() => {
+    if (Date.now() - lastEventAt > REASSURE_AFTER_MS && !reassured) {
+      reassured = true;
+      sayProgress("Long stretch of deep work — the team is progressing normally; nothing needs you yet.").catch(() => {});
+    }
+  }, 60_000);
+  heartbeat.unref?.();
 
   const finishSpecialist = async (ok = true) => {
     if (lastSpecialist) {
@@ -85,6 +113,8 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
   const unsubscribe = subscribe(job, async (name, data) => {
     try {
       if (name === "phase") {
+        lastEventAt = Date.now();
+        reassured = false;
         const specialist = PHASE_SPECIALISTS[data.phase];
         if (!specialist) return;
         if (specialist.agent !== lastSpecialist) {
@@ -94,9 +124,15 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
         } else {
           await ctx.emit("agent_status", { agent: specialist.agent, status: specialist.status });
         }
+        // Milestone message only when the finished phase genuinely took a while.
+        if (Date.now() - phaseStartedAt > MILESTONE_MIN_PHASE_MS && PHASE_MILESTONES[data.phase]) {
+          sayProgress(PHASE_MILESTONES[data.phase]).catch(() => {});
+        }
+        phaseStartedAt = Date.now();
         return;
       }
       if (name === "end") {
+        clearInterval(heartbeat);
         unsubscribe();
         const ok = data.status === "complete" && data.result?.buildOk !== false;
         await finishSpecialist(ok);

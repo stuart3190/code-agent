@@ -89,6 +89,27 @@
 .ct-send:hover { background: var(--accent-strong); }
 .ct-send:disabled { opacity: 0.45; cursor: default; }
 
+/* ── workspace home + live state (UX polish pass) ── */
+button.ct-wordmark { cursor: pointer; border-radius: 12px; padding: 6px 10px; margin-left: -10px; transition: background var(--dur-1); }
+button.ct-wordmark:hover { background: var(--surface-2); }
+.ct-workspace { width: min(640px, 90%); margin-top: 30px; padding-bottom: 60px; }
+.ct-ws-label { font-size: var(--text-micro); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); margin: 18px 2px 8px; }
+.ct-project { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-1); padding: 13px 16px; margin-bottom: 8px; transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1); }
+.ct-project:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.ct-pstate { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--ink-3); }
+.ct-pstate-active { background: var(--good); animation: ct-pulse-anim 1.6s var(--ease-out) infinite; }
+.ct-pstate-waiting { background: var(--warn); animation: ct-pulse-anim 2.2s var(--ease-out) infinite; }
+.ct-pstate-failed { background: var(--bad); }
+.ct-pstate-done { background: var(--good); }
+.ct-pstate-idle { background: var(--ink-3); }
+.ct-pmeta { min-width: 0; flex: 1; }
+.ct-pname { display: block; font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-pactivity { display: block; font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-popen { font-size: var(--text-small); font-weight: 600; color: var(--accent); flex-shrink: 0; }
+/* state pulse — communicates "actively working", never decoration */
+.ct-pulse { animation: ct-pulse-anim 1.6s var(--ease-out) infinite; }
+@keyframes ct-pulse-anim { 0% { box-shadow: 0 0 0 0 rgba(31, 157, 99, 0.45); } 70% { box-shadow: 0 0 0 7px rgba(31, 157, 99, 0); } 100% { box-shadow: 0 0 0 0 rgba(31, 157, 99, 0); } }
+
 /* workspace context (Phase 24) — implicit but always visible */
 .ct-context-chip { display: inline-flex; align-items: center; gap: 7px; width: 100%; order: -1; padding: 4px 2px 8px; font-size: 12.5px; color: var(--ink-2); }
 .ct-context-chip .ct-context-glyph { color: var(--accent); font-weight: 700; }
@@ -223,8 +244,15 @@
 .ct-mobile-sheet { display: none; }
 @media (max-width: 820px) {
   .ct-rail { display: none; }
-  .ct-thread { width: min(720px, 100%); padding: 8px 16px 110px; }
-  .ct-composer { width: calc(100% - 24px); bottom: 14px; }
+  .ct-thread { width: min(720px, 100%); padding: 8px 16px 120px; }
+  /* native feel: respect device safe areas; keyboard pushes the composer naturally */
+  .ct-topbar { height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .ct-room, .ct-begin { top: calc(52px + env(safe-area-inset-top)); }
+  .ct-composer { width: calc(100% - 24px); bottom: max(12px, env(safe-area-inset-bottom)); }
+  .ct-card, .ct-msg.lead .ct-bubble { max-width: 100%; }
+  .ct-workspace { width: 100%; padding: 0 14px 60px; }
+  .ct-begin .ct-composer { width: calc(100% - 28px); }
+  .ct-question { font-size: 26px; padding: 0 16px; }
   .ct-context { display: none; }
   /* team strip under the top bar */
   .ct-strip { display: flex; align-items: center; gap: 8px; margin: 0 14px 4px; background: var(--surface-2); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--ink-2); }
