@@ -7,6 +7,23 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+THE CONSOLE MERGE (2026-07-31, Stuart's final consolidation directive, PR #55, deployed):
+**there is now exactly one Thrallo application** — /console is deleted (old bookmarks land
+home) and every former console capability lives natively in the conversation-first app,
+redesigned around user goals rather than ported: the Settings sheet is the one settings
+experience with drill-ins for what must live there (AI connection incl. BYOK keys + the
+Codex device flow + smart routing + provider health/comparison; API tokens; Downloads —
+secrets never enter the conversation); summonable token-styled views in
+`shell/web/src/manage/` (RepositoriesView — GitHub App connect, index progress/reindex,
+per-repo drill-in where old per-agent policies became repository policies, open PRs whose
+[Review] sends a sentence, per-repo automations, code/symbol search; UsageView — meters,
+spend guards, plan switch/portal, records; OpsView — admin telemetry; RunOverlay — live
+timeline, artifacts, full approval machine); and the `open_view` capability makes
+conversation the entry point ("Show me my repositories" → the view opens instantly, Lead
+narrates one line — LIVE-PROVEN in production). The agents CRUD workspace, dashboards, and
+manual run launching were dissolved, not ported. Net −800 LOC. The desktop ships this same
+unified bundle. Verify 197/197 + 8/8; every surface screenshot-reviewed.
+
 Phase 24 (v2) — Buildr101 retirement + cleanup — is in progress (2026-07-31), with
 everything not gated on Stuart complete: **workspace context** (Stuart's final principle)
 is live end-to-end — the desktop extension streams active file/selection/diagnostics to the
