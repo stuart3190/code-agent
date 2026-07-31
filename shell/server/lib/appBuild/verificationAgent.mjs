@@ -74,7 +74,7 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
         const signup = page.getByRole("button", { name: /sign ?up|create account|register/i });
         if (await signup.count()) await signup.first().click(); else await page.keyboard.press("Enter");
         const enteredApp = await page
-          .locator("textarea, input[type=text], [role=main] button, main button")
+          .locator("textarea, input[type=text]")
           .first().waitFor({ timeout: 20_000 }).then(() => true, () => false);
         check("signup", "Signup", enteredApp ? "pass" : "fail", enteredApp ? email : "signed-in view never appeared");
 
