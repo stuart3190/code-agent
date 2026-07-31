@@ -23,9 +23,14 @@ imports pieces, e.g. `slugify` from routes/publish.mjs); the orphaned Buildr web
 deleted (builder/, legal/, TopBar, BillingPanel, SettingsPanel, lib/api.js + friends —
 verified importer-free first). `/console` is KEPT deliberately: AI connection, API tokens,
 repos, reviews, automations management still live there until conversational parity.
-Remaining steps are Stuart-gated (YOU_NEED_TO_DO.md §Phase 24): stop the Meta ad, audit/
-cancel Stripe subs → then freeze, reboot test, stop buildr-* services, retire monitoring/
-email. **Desktop packaging waits for this phase to complete (Stuart's instruction).**
+Deployed 2026-07-31 and live-verified: Thrallo surfaces all 200, buildr101.com and
+focusflow.app.thrallo.com unaffected, legacy `/api/generate` properly 404. LIVE
+context proof: a production message carrying workspaceContext (file/selection/diagnostic)
+got a Lead Agent reply that named the file, quoted the selection, and explained the
+warning — nothing pasted by the user. Remaining steps are Stuart-gated (YOU_NEED_TO_DO.md
+§Phase 24): stop the Meta ad, audit/cancel Stripe subs → then freeze, reboot test, stop
+buildr-* services, retire monitoring/email. **Desktop packaging waits for this phase to
+complete (Stuart's instruction).**
 
 Phase 23 (v2) — Thrallo Desktop adopts the conversation surface — is built and
 smoke-proven (2026-07-31): the desktop's primary view is the SAME built web bundle as
