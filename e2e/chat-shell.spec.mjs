@@ -140,6 +140,89 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByText("New conversation")).toBeVisible();
 });
 
+test("background navigation: leave a running build, start another, return — stream continues", async ({ page, isMobile }) => {
+  await stubApi(page);
+  // The "server": c9's durable event log keeps growing while the user is elsewhere.
+  const buildEvents = [
+    [1, "message", { role: "user", text: "Build me a big CRM called Atlas" }],
+    [2, "agent_spawned", { agent: "Lead Agent", status: "Understanding request…" }],
+    [3, "plan.created", { title: "Build Atlas", steps: ["Schema", "UI", "Verify"] }],
+    [4, "agent_spawned", { agent: "Builder", status: "Writing the schema…" }],
+  ];
+  const afters = [];
+  let created = false;
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => {
+    if (route.request().method() === "POST") {
+      created = true;
+      return route.fulfill({ json: { conversation: { id: "c2", title: "Second Project", state: "thinking" } } });
+    }
+    return route.fulfill({ json: { conversations: [
+      { id: "c9", title: "Atlas", activity: { agent: "Builder", status: "Writing the schema…" } },
+      ...(created ? [{ id: "c2", title: "Second Project" }] : []),
+    ] } });
+  });
+  await page.route("**/api/v1/conversations/c9/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    afters.push(after);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(buildEvents.filter(([s]) => s > after)) });
+  });
+  await page.route("**/api/v1/conversations/c2/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(
+      [[1, "message", { role: "user", text: "Start the second project" }]].filter(([s]) => s > after)) });
+  });
+  await page.goto("/");
+
+  // 1. Open the long-running build. The back affordance is plainly visible mid-build.
+  await page.getByRole("button", { name: /Open Atlas/ }).click();
+  await expect(page.getByText("Build me a big CRM called Atlas")).toBeVisible();
+  await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
+  const back = page.getByRole("button", { name: /Back to your projects/ });
+  await expect(back).toBeVisible();
+
+  // 2. Press ← Projects. 3. Home shows the project's LIVE status while the build keeps
+  // going server-side (its event log grows while we're away).
+  await back.click();
+  await expect(page.getByText("Builder · Writing the schema…")).toBeVisible();
+  buildEvents.push(
+    [5, "message", { role: "lead", text: "Schema is in — wiring the UI now." }],
+    [6, "agent_status", { agent: "Builder", status: "Wiring the UI…" }],
+    [7, "preview_ready", { url: "https://demo.preview.thrallo.com/", projectId: "p9" }],
+  );
+
+  // 4. Start another project immediately — the first build never pauses.
+  await page.getByPlaceholder(/Describe anything/).fill("Start the second project");
+  await page.getByPlaceholder(/Describe anything/).press("Enter");
+  await expect(page.getByText("Start the second project").first()).toBeVisible();
+  await expect(back).toBeVisible();
+
+  // 5. Return to the original project via ← Projects → its card.
+  await back.click();
+  await page.getByRole("button", { name: /Open Atlas/ }).click();
+
+  // 6. Everything restored — history, plan, team state, preview — PLUS the work that
+  // happened while we were away, proving the stream and build continued.
+  await expect(page.getByText("Build me a big CRM called Atlas")).toBeVisible();
+  await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
+  await expect(page.getByText("Schema is in — wiring the UI now.")).toBeVisible();
+  if (isMobile) {
+    await expect(page.getByText("Builder — Wiring the UI…")).toBeVisible(); // team strip
+  } else {
+    await expect(page.locator('.ct-agent[title="Builder — Wiring the UI…"]')).toBeVisible(); // compact rail
+  }
+  await expect(page.locator(".ct-preview-thumb").first()).toBeVisible();
+  await expect(back).toBeVisible();
+  // The live loop resumes with `after` (not only cold replays from 0).
+  await expect.poll(() => afters.some((a) => a >= 7), { timeout: 8000 }).toBe(true);
+
+  // Tablet width: the affordance stays visible and tappable.
+  await page.setViewportSize({ width: 834, height: 1112 });
+  await expect(back).toBeVisible();
+  const box = await back.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(40);
+});
+
 test("Downloads screen renders real release buttons from the manifest", async ({ page }) => {
   await stubApi(page);
   await page.route("**/api/v1/downloads", (route) => route.fulfill({ json: {

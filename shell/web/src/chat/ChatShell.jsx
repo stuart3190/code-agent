@@ -105,6 +105,7 @@ function Workspace({ user }) {
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
+  const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
 
@@ -219,17 +220,28 @@ function Workspace({ user }) {
   const initial = (user.email || "?")[0].toUpperCase();
   const workingAgent = [...view.roster].reverse().find((r) => r.state === "working");
 
+  // Home never interrupts anything — builds run entirely server-side; the stream is simply
+  // closed here and resumed (with `after`) when the conversation reopens.
+  const goHome = useCallback(() => {
+    streamAbort.current?.abort();
+    setActive(null); setView(emptyConversationView()); setMobilePreview(false);
+    listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+  }, []);
+
   return (
     <div className="chat-root">
       <header className="ct-topbar">
-        <button className="ct-wordmark" title="Home — builds keep running"
-          onClick={() => {
-            streamAbort.current?.abort();
-            setActive(null); setView(emptyConversationView()); setMobilePreview(false);
-            listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
-          }}>
-          <span className="ct-dot" />Thrallo
-        </button>
+        <div className="ct-topleft">
+          <button className="ct-wordmark" title="Home — builds keep running" aria-label="Home — your projects"
+            onClick={goHome}>
+            <span className="ct-dot" />Thrallo
+          </button>
+          {active && (
+            <button className="ct-back" onClick={goHome} aria-label="Back to your projects — the build keeps running">
+              <span aria-hidden="true">←</span> Projects
+            </button>
+          )}
+        </div>
         <div className={`ct-context ${active?.title ? "show" : ""}`}>
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
@@ -261,7 +273,8 @@ function Workspace({ user }) {
       ) : (
         <div className="ct-room">
           <div className="ct-thread-wrap">
-            <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)} />
+            <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
+              scrollKey={active.id} scrollMemory={scrollMemory} />
             <Composer onSend={send} waiting={view.waiting} thinking={view.thinking}
               context={wsContextOn ? wsContext : null} onDismissContext={() => setWsContextOn(false)} />
           </div>
@@ -459,9 +472,38 @@ function DeleteConfirm({ project, busy, error, permanent = false, onCancel, onCo
   );
 }
 
-function Thread({ view, pending, onOpenPreview }) {
+function Thread({ view, pending, onOpenPreview, scrollKey = null, scrollMemory = null }) {
   const ref = useRef(null);
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [view.items.length, pending, view.thinking]);
+  const atBottom = useRef(true);   // follow the stream only while the user is at the bottom
+  const restored = useRef(false);
+  useEffect(() => {
+    restored.current = false;
+    const saved = scrollMemory?.current.get(scrollKey);
+    atBottom.current = !(saved && !saved.atBottom);
+  }, [scrollKey, scrollMemory]);
+  // Leaving the conversation remembers where the reader was (goHome unmounts the thread).
+  useEffect(() => () => {
+    if (scrollMemory && scrollKey && ref.current) {
+      scrollMemory.current.set(scrollKey, { top: ref.current.scrollTop, atBottom: atBottom.current });
+    }
+  }, [scrollKey, scrollMemory]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const saved = scrollMemory?.current.get(scrollKey);
+    if (!restored.current && saved && !saved.atBottom) {
+      if (el.scrollHeight >= saved.top + el.clientHeight) {
+        el.scrollTop = saved.top;
+        restored.current = true;
+      }
+      return; // replaying history — don't yank a returning reader to the bottom
+    }
+    if (atBottom.current) el.scrollTo({ top: el.scrollHeight });
+  }, [view.items.length, pending, view.thinking, scrollKey, scrollMemory]);
+  const onScroll = () => {
+    const el = ref.current;
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
   let lastRole = null;
   // History is still replaying — show conversation-shaped placeholders, not a blank room.
   if (!view.items.length && !pending && !view.thinking) {
@@ -473,7 +515,7 @@ function Thread({ view, pending, onOpenPreview }) {
     );
   }
   return (
-    <div className="ct-thread" ref={ref} aria-label="Conversation">
+    <div className="ct-thread" ref={ref} aria-label="Conversation" onScroll={onScroll}>
       {view.items.map((item) => {
         const showWho = item.kind !== "message" ? false : item.role === "lead" && lastRole !== "lead";
         if (item.kind === "message") lastRole = item.role; else lastRole = null;
