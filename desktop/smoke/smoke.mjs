@@ -27,9 +27,15 @@ function record(step, ok, detail = "") {
 }
 
 // THRALLO_SMOKE_PACKAGED=1 targets the packaged min build instead of the dev build.
-const PACKAGED = process.env.THRALLO_SMOKE_PACKAGED === "1";
+// THRALLO_SMOKE_EXE=<path to Thrallo.exe> targets any packaged copy (installed / portable).
+const PACKAGED = process.env.THRALLO_SMOKE_PACKAGED === "1" || !!process.env.THRALLO_SMOKE_EXE;
 
 function electronExecutable() {
+  if (process.env.THRALLO_SMOKE_EXE) {
+    const exe = process.env.THRALLO_SMOKE_EXE;
+    if (!existsSync(exe)) throw new Error(`THRALLO_SMOKE_EXE not found: ${exe}`);
+    return exe;
+  }
   if (PACKAGED) {
     const exe = path.join(DESKTOP, "VSCode-win32-x64", "Thrallo.exe");
     if (!existsSync(exe)) throw new Error("no packaged build — run `node desktop/build.mjs package` first");

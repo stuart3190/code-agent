@@ -37,7 +37,24 @@ node desktop/build.mjs dev         # launch the editor from sources
 node desktop/build.mjs package --platform win32-x64   # unsigned min build + archive
 ```
 
-Nothing is signed, notarised, or store-published; no paid accounts are involved.
+## Release packaging (Windows)
+
+After `package`, two distributables are produced:
+
+- **Installer** — `desktop/out/Thrallo-Setup-x64.exe` via Inno Setup 6:
+  `ISCC.exe desktop\installer\Thrallo.iss`. User-level (no admin prompt, installs to
+  `%LOCALAPPDATA%\Programs\Thrallo`), Start menu shortcut, optional desktop shortcut,
+  standard uninstall. Signed-ready: enable the `SignTool` directive in `Thrallo.iss`
+  once a code-signing certificate exists.
+- **Portable ZIP** — rename `desktop/out/thrallo-win32-x64.zip` to
+  `Thrallo-Portable-x64.zip`; extract and run `Thrallo.exe`, no install needed.
+
+Publish: copy both into the VPS `/home/ubuntu/thrallo-releases` directory and run
+`node scripts/build-release-manifest.mjs <dir> <version> "<notes>"` there (or locally and
+scp the manifest). The shell serves them at `/downloads/<name>` (Range-capable) and the
+manifest at `/api/v1/downloads`; the in-app Downloads screen renders the buttons from it.
+
+Binaries are unsigned until a certificate exists; nothing is store-published.
 
 ## What the editor includes
 

@@ -42,6 +42,7 @@ import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubW
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
 import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
+import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownloads.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -275,6 +276,15 @@ const server = http.createServer(async (req, res) => {
     // broke every new preview/publish certificate until it was restored.
     if (p === "/api/domain-check" && method === "GET") {
       return await handlePreviewDomainCheck(req, res, url);
+    }
+    // Desktop release distribution: manifest + artifact streaming (Range-capable). Public —
+    // only files listed in the release manifest are ever served.
+    if (p === "/api/v1/downloads" && method === "GET") {
+      return await handleReleaseManifest(req, res);
+    }
+    const downloadMatch = p.match(/^\/downloads\/([^/]+)$/);
+    if (downloadMatch && ["GET", "HEAD"].includes(method)) {
+      return await handleReleaseDownload(req, res, { name: decodeURIComponent(downloadMatch[1]) });
     }
 
 
