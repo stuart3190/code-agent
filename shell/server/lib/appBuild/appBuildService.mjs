@@ -71,7 +71,7 @@ export async function startAppBuild(ctx, { description, productName = null }) {
   return { jobId: job.id, projectId: project.id, note: "Build dispatched; the team's progress streams into this conversation." };
 }
 
-function relayBuildJob(ctx, { job, projectId }) {
+function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
   const jobId = job.id;
   let lastSpecialist = null;
 
@@ -109,6 +109,12 @@ function relayBuildJob(ctx, { job, projectId }) {
               projectId,
               message: "Preview ready — take a look.",
             });
+            if (data.result?.buildOk !== false) {
+              // The Verification Agent gate: completion is only announced after PASS.
+              runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt })
+                .catch((error) => console.error("[app-build] verification:", error.message));
+              return;
+            }
           } else if (data.result?.buildOk !== false) {
             // Cold starts can outlive provisiond's readiness window while the container
             // keeps coming up — recover in the background and deliver the card late
@@ -142,6 +148,54 @@ function relayBuildJob(ctx, { job, projectId }) {
   });
 }
 
+// The Verification Agent gate (Stuart, 2026-07-31): before ANY completion message, the
+// Verifier drives the live preview like a real user. PASS → completion + ✓ summary.
+// FAIL → the build is rejected, the failures go back to the Builder in surgical repair
+// mode (design/layout/branding preserved), and the repaired build is re-verified — up to
+// two automatic repair rounds before reporting honestly.
+async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1 }) {
+  const { verifyApp, repairPrompt } = await import("./verificationAgent.mjs");
+  const { treeUsesBackendSdk } = await import("../appRuntimeStatus.mjs");
+  await ctx.emit("agent_spawned", { agent: "Verifier", status: "Verifying the app like a real user…" });
+  let verdict;
+  try {
+    verdict = await verifyApp({ previewUrl, usesBackend: treeUsesBackendSdk(result?.tree) });
+  } catch (error) {
+    verdict = { pass: false, failures: [`Verification could not run: ${error.message}`], summary: "" };
+  }
+
+  if (verdict.pass) {
+    await ctx.emit("agent_done", { agent: "Verifier", ok: true });
+    await ctx.emit("verification", { pass: true, summary: verdict.summary, projectId });
+    const text = `Your app is built, verified, and live in this conversation.\n\n${verdict.summary}${result?.finalText ? `\n\n${String(result.finalText).slice(0, 300)}` : ""}`;
+    await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId, verified: true } });
+    await ctx.emit("message", { role: "lead", text, projectId });
+    notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
+      title: "App verified", body: "Built, tested as a real user, and live.", url: previewUrl, tag: `build-${projectId}`,
+    }).catch(() => {});
+    return;
+  }
+
+  await ctx.emit("agent_done", { agent: "Verifier", ok: false });
+  await ctx.emit("verification", { pass: false, failures: verdict.failures, projectId });
+
+  if (attempt <= 2) {
+    const text = `Verification found real problems (${verdict.failures.slice(0, 3).join("; ")}). I'm sending it back to the Builder to repair — design untouched, minimum change.`;
+    await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
+    await ctx.emit("message", { role: "lead", text, projectId });
+    const { job } = await createJob({
+      owner: { id: ctx.owner }, projectId, mode: "iterate",
+      prompt: repairPrompt(verdict.failures),
+    });
+    relayBuildJob(ctx, { job, projectId, verificationAttempt: attempt + 1 });
+    return;
+  }
+
+  const text = `The build is up at the preview, but verification still fails after two repair rounds:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nTell me which to prioritise and I'll fix it with you.`;
+  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
+  await ctx.emit("message", { role: "lead", text, projectId });
+}
+
 // Late preview recovery: the container often finishes warming up shortly after the build
 // relay ends. Poll the provider, and the moment a URL exists, deliver the card + an honest
 // follow-up. If it never comes up, say so — with the sentence that fixes it.
@@ -167,6 +221,41 @@ async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 }
   const text = "The preview couldn't be brought up automatically. Say “show me the preview” and I'll start it fresh.";
   await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
   await ctx.emit("message", { role: "lead", text, projectId });
+}
+
+// repair_app capability backing: surgical fix on the EXISTING tree (iterate mode) with the
+// preservation rules baked into the prompt. Build once, repair precisely, verify completely.
+export async function repairApp(ctx, { issue, productName = null }) {
+  const client = serviceClient();
+  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
+    .eq("owner", ctx.owner).not("tree", "is", null)
+    .order("updated_at", { ascending: false }).limit(1);
+  if (productName) {
+    const { data: product } = await client.from("ca_products")
+      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
+    if (product) query = query.eq("product_id", product.id);
+  }
+  const { data } = await query;
+  const project = data?.[0];
+  if (!project) {
+    const error = new Error("There's no existing app to repair — describe what you want built instead.");
+    error.code = "nothing_to_repair";
+    throw error;
+  }
+  const prompt = [
+    `REPAIR MODE — fix ONLY this reported problem in the existing app "${project.name}":`,
+    issue,
+    "",
+    "Hard rules: preserve the existing design, layout, colours, branding, UX and component",
+    "structure exactly. Do NOT redesign, restyle, or rebuild anything. Make the minimum code",
+    "change that fixes the reported problem. Do not touch unrelated files.",
+  ].join("\n");
+  const { job } = await createJob({
+    owner: { id: ctx.owner }, projectId: project.id, mode: "iterate", prompt,
+  });
+  relayBuildJob(ctx, { job, projectId: project.id });
+  await ctx.emit("build_started", { jobId: job.id, projectId: project.id, message: "Repairing — design untouched." });
+  return { jobId: job.id, projectId: project.id, note: "Repair dispatched; the fix will be verified before completion is announced." };
 }
 
 // show_preview capability backing: (re)provision the preview for a project from its stored
