@@ -98,7 +98,7 @@ test("publish, configure_domain, and create_automation are registry capabilities
     resetCapabilityRegistryForTests();
     registerCoreCapabilities();
     const ids = listCapabilities().map((c) => c.id);
-    for (const id of ["publish", "configure_domain", "create_automation"]) {
+    for (const id of ["publish", "configure_domain", "create_automation", "open_view"]) {
       assert.ok(ids.includes(id), `${id} must be registered`);
     }
     const defs = await capabilityToolDefs({});

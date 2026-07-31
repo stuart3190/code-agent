@@ -1,14 +1,13 @@
-// Phase 21: the conversation-first production shell at `/`, built exactly from the
-// approved /design wireframes (docs/DESIGN.md). Permanent UI is the four elements only:
-// conversation, the living rail, preview, and the settings sheet. Everything else is a
-// card in the thread or a palette entry. The console remains at /console during the
-// transition.
+// The Thrallo application — conversation-first, built from the approved wireframes
+// (docs/DESIGN.md). Permanent UI is the four elements only: conversation, the living
+// rail, preview, and the settings sheet. Everything else is a card in the thread, a
+// summonable view, or a palette entry.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../lib/useSession.js";
 import Landing from "../landing/Landing.jsx";
 import ResetPassword from "../auth/ResetPassword.jsx";
-import { client, apiBase } from "../lib/backend.js";
+import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications,
@@ -18,6 +17,11 @@ import {
   SPECIALIST_HUES, agentInitials, beginChips,
 } from "./conversationState.js";
 import { renderMarkdown } from "./markdown.js";
+import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
+import RunOverlay from "../manage/RunOverlay.jsx";
+import AiSettings from "../manage/AiSettings.jsx";
+import TokensSettings from "../manage/TokensSettings.jsx";
+import DownloadsSettings from "../manage/DownloadsSettings.jsx";
 import "./chat.css";
 
 const THEME_KEY = "thrallo-theme";
@@ -55,6 +59,8 @@ function Workspace({ user }) {
   const [wsContextOn, setWsContextOn] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [manageView, setManageView] = useState(null); // null | repos | usage | ops
+  const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
   const streamAbort = useRef(null);
@@ -99,6 +105,14 @@ function Workspace({ user }) {
           after = await streamConversationEvents(conversation.id, (event) => {
             after = Math.max(after, Number(event.sequence || 0));
             if (event.payload?.role === "user") setPending(null);
+            // The Lead Agent can summon visual views (open_view capability) — the UI
+            // responds instantly; the reducer ignores this event type.
+            if (event.type === "open_view" && MANAGE_VIEW_IDS.includes(event.payload?.view)) {
+              setManageView(event.payload.view);
+            }
+            if (event.type === "open_view" && event.payload?.view === "run" && event.payload?.runId) {
+              setRunOverlayId(event.payload.runId);
+            }
             setView((v) => applyEvent(v, event));
           }, { signal: controller.signal, after });
         } catch {
@@ -133,7 +147,7 @@ function Workspace({ user }) {
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
-      if (e.key === "Escape") { setPaletteOpen(false); setSheetOpen(false); setMobilePreview(false); }
+      if (e.key === "Escape") { setPaletteOpen(false); setSheetOpen(false); setMobilePreview(false); setManageView(null); setRunOverlayId(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -189,14 +203,20 @@ function Workspace({ user }) {
         </div>
       )}
 
-      <div className={`ct-scrim ${sheetOpen || paletteOpen ? "show" : ""}`}
-        onClick={() => { setSheetOpen(false); setPaletteOpen(false); }} />
-      <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} onClose={() => setSheetOpen(false)} />
+      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`}
+        onClick={() => { setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null); }} />
+      <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} onClose={() => setSheetOpen(false)}
+        onOpenView={(v) => { setSheetOpen(false); setManageView(v); }} />
+      <ManageView view={manageView} onClose={() => setManageView(null)}
+        onSentence={(text) => { setManageView(null); send(text); }}
+        onOpenRun={(id) => setRunOverlayId(id)} />
+      {runOverlayId && <RunOverlay runId={runOverlayId} onClose={() => setRunOverlayId(null)} />}
       {paletteOpen && (
         <Palette conversations={conversations}
           onNew={() => { setActive(null); setView(emptyConversationView()); setPaletteOpen(false); }}
           onOpen={(c) => { openConversation(c); setPaletteOpen(false); }}
-          onSettings={() => { setPaletteOpen(false); setSheetOpen(true); }} />
+          onSettings={() => { setPaletteOpen(false); setSheetOpen(true); }}
+          onOpenView={(v) => { setPaletteOpen(false); setManageView(v); }} />
       )}
       <div className={`ct-toast ${toast ? "show" : ""}`}>{toast}</div>
     </div>
@@ -409,12 +429,26 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
   );
 }
 
-function SettingsSheet({ open, user, theme, setTheme, onClose }) {
+// The ONE settings experience: quick rows, with drill-in sections for the plumbing that
+// is technically required to live here (secrets never enter the conversation).
+function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
   const [usage, setUsage] = useState(null);
+  const [section, setSection] = useState(null); // null | ai | tokens | downloads
   useEffect(() => { if (open) usageSummary().then(setUsage).catch(() => setUsage(null)); }, [open]);
-  // Desktop mode: deep management flows open the web console in the browser; the PAT
-  // session has no browser sign-out.
-  const consoleHref = `${apiBase()}/console`;
+  useEffect(() => { if (!open) setSection(null); }, [open]);
+
+  if (section) {
+    const Section = section === "ai" ? AiSettings : section === "tokens" ? TokensSettings : DownloadsSettings;
+    return (
+      <aside className={`ct-sheet ${open ? "show" : ""}`}>
+        <div className="ct-sheet-head">
+          <button className="ct-btn-quiet" onClick={() => setSection(null)}>← Settings</button>
+          <button className="ct-btn-quiet" onClick={onClose}>Done</button>
+        </div>
+        <div className="ct-sheet-body"><Section /></div>
+      </aside>
+    );
+  }
   const tokens = usage?.budgets?.managedTokens;
   const used = tokens ? Math.max(0, (tokens.limit ?? 0) - (tokens.remaining ?? 0)) : 0;
   const pct = tokens?.limit ? Math.min(100, Math.round((used / tokens.limit) * 100)) : 0;
@@ -433,8 +467,8 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
         <div className="ct-set-group">
           <div className="ct-set-label">AI connection</div>
           <div className="ct-set-row">
-            <div>Model access<div className="ct-hint">Managed, or bring your own key</div></div>
-            <a className="ct-btn-quiet" href={consoleHref} style={{ textDecoration: "none" }}>Manage</a>
+            <div>Model access<div className="ct-hint">Managed, your own key, or ChatGPT Codex</div></div>
+            <button className="ct-btn-quiet" onClick={() => setSection("ai")}>Manage</button>
           </div>
         </div>
         <div className="ct-set-group">
@@ -449,13 +483,28 @@ function SettingsSheet({ open, user, theme, setTheme, onClose }) {
                 </>
               ) : <div className="ct-hint">Ask me “how much budget is left?” any time.</div>}
             </div>
+            <button className="ct-btn-quiet" onClick={() => onOpenView("usage")}>Details</button>
           </div>
         </div>
         <div className="ct-set-group">
           <div className="ct-set-label">API tokens</div>
           <div className="ct-set-row">
-            <div>CLI &amp; editor access<div className="ct-hint">Personal access tokens</div></div>
-            <a className="ct-btn-quiet" href={consoleHref} style={{ textDecoration: "none" }}>Manage</a>
+            <div>CLI, editor &amp; desktop access<div className="ct-hint">Personal access tokens</div></div>
+            <button className="ct-btn-quiet" onClick={() => setSection("tokens")}>Manage</button>
+          </div>
+        </div>
+        <div className="ct-set-group">
+          <div className="ct-set-label">Repositories</div>
+          <div className="ct-set-row">
+            <div>Connected code<div className="ct-hint">GitHub App, indexing, policies, pull requests</div></div>
+            <button className="ct-btn-quiet" onClick={() => onOpenView("repos")}>Open</button>
+          </div>
+        </div>
+        <div className="ct-set-group">
+          <div className="ct-set-label">Downloads</div>
+          <div className="ct-set-row">
+            <div>Editor, CLI &amp; desktop<div className="ct-hint">Bring Thrallo where you work</div></div>
+            <button className="ct-btn-quiet" onClick={() => setSection("downloads")}>Open</button>
           </div>
         </div>
         <NotificationSettings />
@@ -525,9 +574,8 @@ function NotificationSettings() {
   );
 }
 
-function Palette({ conversations, onNew, onOpen, onSettings }) {
+function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
   const [query, setQuery] = useState("");
-  const consoleHref = `${apiBase()}/console`;
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (conversations || []).filter((c) => !q || (c.title || "").toLowerCase().includes(q)).slice(0, 6);
@@ -538,7 +586,9 @@ function Palette({ conversations, onNew, onOpen, onSettings }) {
       <div className="ct-pal-sect">Actions</div>
       <button className="ct-pal-row" onClick={onNew}>＋ New conversation<span className="ct-pal-hint">start fresh</span></button>
       <button className="ct-pal-row" onClick={onSettings}>⚙ Settings</button>
-      <a className="ct-pal-row" href={consoleHref} style={{ textDecoration: "none" }}>▤ Open Console<span className="ct-pal-hint">transition</span></a>
+      <button className="ct-pal-row" onClick={() => onOpenView("repos")}>⌘ Repositories<span className="ct-pal-hint">connect · index · policies · PRs</span></button>
+      <button className="ct-pal-row" onClick={() => onOpenView("usage")}>▤ Usage &amp; plan<span className="ct-pal-hint">budgets · guards</span></button>
+      <button className="ct-pal-row" onClick={() => onOpenView("ops")}>⚡ Operations<span className="ct-pal-hint">admin</span></button>
       {rows.length > 0 && <div className="ct-pal-sect">Conversations</div>}
       {rows.map((c) => (
         <button key={c.id} className="ct-pal-row" onClick={() => onOpen(c)}>{c.title || "Untitled"}</button>
