@@ -140,6 +140,29 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByText("New conversation")).toBeVisible();
 });
 
+test("Downloads screen renders real release buttons from the manifest", async ({ page }) => {
+  await stubApi(page);
+  await page.route("**/api/v1/downloads", (route) => route.fulfill({ json: {
+    product: "Thrallo Desktop", version: "1.131.0", platform: "Windows 10/11 x64",
+    releasedAt: "2026-07-31T12:00:00.000Z", notes: "First public Windows build.",
+    files: {
+      setup: { name: "Thrallo-Setup-x64.exe", label: "Windows installer", sizeBytes: 120000000, sha256: "a".repeat(64), url: "/downloads/Thrallo-Setup-x64.exe" },
+      portable: { name: "Thrallo-Portable-x64.zip", label: "Portable ZIP", sizeBytes: 260000000, sha256: "b".repeat(64), url: "/downloads/Thrallo-Portable-x64.zip" },
+    },
+  } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "E", exact: true }).click();
+  await page.getByRole("button", { name: "Open" }).last().click(); // Downloads row
+  await expect(page.getByRole("link", { name: "Download for Windows" })).toHaveAttribute("href", "/downloads/Thrallo-Setup-x64.exe");
+  await expect(page.getByRole("link", { name: /Portable ZIP/ })).toHaveAttribute("href", "/downloads/Thrallo-Portable-x64.zip");
+  await expect(page.getByText(/Version 1\.131\.0 · 114 MB · released/)).toBeVisible();
+  await expect(page.getByText("First public Windows build.")).toBeVisible();
+  await expect(page.getByText("Windows x64")).toBeVisible();
+  await expect(page.getByText(/SHA-256/)).toBeVisible();
+  // No leftover manual packaging instructions or "coming soon" placeholders.
+  await expect(page.getByText(/npx vsce|coming soon/i)).toHaveCount(0);
+});
+
 test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboard nav", async ({ page }) => {
   await stubApi(page);
   await page.unroute("**/api/v1/conversations");
