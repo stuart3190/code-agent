@@ -161,7 +161,14 @@ function Workspace({ user }) {
   return (
     <div className="chat-root">
       <header className="ct-topbar">
-        <div className="ct-wordmark"><span className="ct-dot" />Thrallo</div>
+        <button className="ct-wordmark" title="Home — builds keep running"
+          onClick={() => {
+            streamAbort.current?.abort();
+            setActive(null); setView(emptyConversationView()); setMobilePreview(false);
+            listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+          }}>
+          <span className="ct-dot" />Thrallo
+        </button>
         <div className={`ct-context ${active?.title ? "show" : ""}`}>
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
@@ -224,24 +231,51 @@ function Workspace({ user }) {
   );
 }
 
+// Home is the workspace: what the team is doing right now, per project — switching away
+// never interrupts anything, because builds run entirely server-side.
+function projectState(c) {
+  if (c.activity) return { label: c.activity.status || `${c.activity.agent} working…`, tone: "active", agent: c.activity.agent };
+  if (c.state === "waiting_user") return { label: "Waiting for your input", tone: "waiting" };
+  if (c.failed && !c.verified && !c.hasPreview) return { label: "Needs attention", tone: "failed" };
+  if (c.verified) return { label: "Verified & complete", tone: "done" };
+  if (c.hasPreview) return { label: "Preview live", tone: "done" };
+  return { label: "Idle", tone: "idle" };
+}
+
 function Begin({ user, conversations, onSend, onContinue }) {
   const name = firstName(user);
-  const chips = beginChips(conversations);
   const fresh = !conversations.length;
+  const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
+  const rest = conversations.filter((c) => !active.includes(c)).slice(0, 6);
   return (
-    <div className="ct-begin">
+    <div className="ct-begin" style={{ justifyContent: fresh ? "center" : "flex-start", overflowY: "auto" }}>
       <div className="ct-halo" />
-      <div className="ct-hello">{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
+      <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
       <Composer autoFocus onSend={onSend} placeholder="Describe anything — an app, a change, an idea…" />
-      <div className="ct-begin-chips">
-        {chips.map((chip, i) => (
-          <button key={chip.id} className={`ct-chip ${i === 0 ? "ct-chip-live" : ""}`} onClick={() => onContinue(chip.id)}>
-            {i === 0 && <span className="ct-livedot" />}{chip.label}
-          </button>
-        ))}
-      </div>
+      {!fresh && (
+        <div className="ct-workspace">
+          {active.length > 0 && <div className="ct-ws-label">In progress</div>}
+          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} />)}
+          {rest.length > 0 && <div className="ct-ws-label">Projects</div>}
+          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} />)}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ProjectCard({ c, onOpen }) {
+  const s = projectState(c);
+  return (
+    <button className="ct-project" onClick={() => onOpen(c.id)}>
+      <span className={`ct-pstate ct-pstate-${s.tone}`} />
+      <span className="ct-pmeta">
+        <span className="ct-pname">{c.title || "Untitled project"}</span>
+        <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
+      </span>
+      <span className="ct-popen">Open</span>
+    </button>
   );
 }
 
@@ -254,7 +288,8 @@ function Thread({ view, pending, onOpenPreview }) {
       {view.items.map((item) => {
         const showWho = item.kind !== "message" ? false : item.role === "lead" && lastRole !== "lead";
         if (item.kind === "message") lastRole = item.role; else lastRole = null;
-        return <ThreadItem key={item.seq} item={item} showWho={showWho} onOpenPreview={onOpenPreview} />;
+        return <ThreadItem key={item.seq} item={item} showWho={showWho} onOpenPreview={onOpenPreview}
+          live={view.thinking || view.roster.some((r) => r.state === "working")} waiting={view.waiting} />;
       })}
       {pending && <div className="ct-msg user"><div className="ct-bubble">{pending}</div></div>}
       {view.thinking && (
@@ -264,7 +299,7 @@ function Thread({ view, pending, onOpenPreview }) {
   );
 }
 
-function ThreadItem({ item, showWho, onOpenPreview }) {
+function ThreadItem({ item, showWho, onOpenPreview, live = false, waiting = false }) {
   if (item.kind === "message") {
     if (item.role === "user") {
       return (
@@ -289,7 +324,11 @@ function ThreadItem({ item, showWho, onOpenPreview }) {
     return (
       <div className="ct-msg lead">
         <div className="ct-card">
-          <div className="ct-kicker"><span className="ct-kdot" style={{ background: "var(--agent-planner)" }} />Plan · {item.title}</div>
+          <div className="ct-kicker">
+            <span className={`ct-kdot ${live ? "ct-pulse" : ""}`}
+              style={{ background: waiting ? "var(--warn)" : live ? "var(--good)" : "var(--agent-planner)" }} />
+            Plan · {item.title}
+          </div>
           {item.steps.map((step, i) => (
             <div key={i} className="ct-plan-step"><span className="ct-tick" />{step}</div>
           ))}
