@@ -63,6 +63,27 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PROJECT DELETION + 7-DAY RECOVERY (2026-07-31, PRs #71/#72/#73, deployed + live-proven):
+Home cards carry an X → confirm modal → SOFT delete (`ca_conversations.deleted_at`,
+migration `soft_delete`): the project leaves Home instantly, keeps all data, and every
+normal access path 404s because list/get/messages/events all pass through the filtered
+`getConversation` (deleted ⇒ null ⇒ 404 — no per-route checks to forget). Recently Deleted
+section on Home (collapsed toggle, existing design language) shows title/deleted date/days
+remaining with owner-scoped Restore (single action, `POST /:id/restore`, row returns
+exactly as before) and Delete Now (`DELETE /:id?permanent=1` → the owner-checked
+`deleteConversationCascade`: provisiond stop/unpublish, entities, app users + synthetic
+auth accounts, domains, published site, build history, project row, product memory when
+orphaned, conversation LAST so failures never fake success; every permanent deletion logs
+an `audit: project_permanent_delete` JSON line). `deletedProjectSweeper` purges past-window
+rows hourly through the same cascade. Cascade/purge reach hidden rows via internal
+`*IncludingDeleted` store accessors — public reads stay filtered. CRITICAL FIX FOUND BY
+THE LIVE PROOF (PR #73): `return handleX(...)` inside the dispatcher's try/catch does NOT
+catch the handler's async throw (try exits before rejection), so handleConversationGet's
+404 crashed the whole shell — all 55 dispatches are now `return await handleX(...)` with a
+source-guard test. Tests: 224/224 node (12 deletion incl. hide/block/restore-exact/
+delete-now/cleanup-expiry/cross-owner) + 12/12 Playwright (full workflow); prod lifecycle
+curl-proven end to end.
+
 THE CONSOLE MERGE (2026-07-31, Stuart's final consolidation directive, PR #55, deployed):
 **there is now exactly one Thrallo application** — /console is deleted (old bookmarks land
 home) and every former console capability lives natively in the conversation-first app,
