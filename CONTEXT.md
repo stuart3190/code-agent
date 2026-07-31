@@ -7,6 +7,21 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+FULL-STACK GENERATED APPS DELIVERED (2026-07-31, PRs #62/#63, backend-pipeline
+investigation for Stuart): ROOT CAUSE — Thrallo produced frontend-only apps; withRuntimeEnv
+injected real config but the per-app runtime (entities + app-auth) deferred at P19 was
+never provisioned (app-auth 404, no entities; runJob's static gates reported success
+anyway; repairs could only regenerate frontend because no backend component existed). FIX —
+per_app_runtime migration (entities owner-RLS + app_id namespace, app_users, auth
+events/resets) applied; app-auth Edge Function DEPLOYED to zczgvcsokfafuyognvwx
+(synthetic domain apps.thrallo.com); runtime honesty gate in runJob
+(appRuntimeStatus.backendRuntimeReady — SDK-shipping builds fail loudly when the runtime is
+down); DR coverage extended; PUBLIC_URL set. PROOF — scripts/prove-app-backend.mjs 6/6 in
+prod through the exact shipped SDK (signup/persist/reload/namespace-isolation/RLS-deny),
+and a freshly generated ProofBook app passed 3/3 Playwright as a real user: account
+created, message saved, survives hard reload with session intact
+(p15dee53d96f34963a589d50a194f0d4e.preview.thrallo.com).
+
 PREVIEW INCIDENT + FIXES (2026-07-31, PRs #59/#60, deployed): Stuart reported a build
 claiming 'the preview is live' with no card. Chain: the Phase 24 route codemod had
 SILENTLY SWALLOWED the /api/domain-check dispatch (verification grepped only the import
