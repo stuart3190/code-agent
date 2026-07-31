@@ -13,7 +13,7 @@ const newId = () => crypto.randomUUID();
 
 export class MemoryConversationStore {
   async deleteConversation(owner, conversationId) {
-    const conversation = await this.getConversation(owner, conversationId);
+    const conversation = await this.getConversationIncludingDeleted(owner, conversationId);
     if (!conversation) throw new Error("not found");
     this.events.delete(conversationId);
     this.turns?.delete?.(conversationId);
@@ -43,12 +43,40 @@ export class MemoryConversationStore {
 
   async getConversation(owner, id) {
     const row = this.conversations.get(id);
+    return row?.owner === owner && !row.deleted_at ? row : null; // deleted = unreachable
+  }
+
+  async getConversationIncludingDeleted(owner, id) {
+    const row = this.conversations.get(id);
     return row?.owner === owner ? row : null;
   }
 
   async listConversations(owner, limit = 20) {
-    return [...this.conversations.values()].filter((x) => x.owner === owner)
+    return [...this.conversations.values()].filter((x) => x.owner === owner && !x.deleted_at)
       .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at)).slice(0, limit);
+  }
+
+  async listDeletedConversations(owner) {
+    return [...this.conversations.values()].filter((x) => x.owner === owner && x.deleted_at)
+      .sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
+  }
+
+  async softDeleteConversation(owner, id) {
+    const row = await this.getConversation(owner, id);
+    if (!row) return null;
+    row.deleted_at = now();
+    return row;
+  }
+
+  async restoreConversation(owner, id) {
+    const row = await this.getConversationIncludingDeleted(owner, id);
+    if (!row || !row.deleted_at) return null;
+    row.deleted_at = null;
+    return row;
+  }
+
+  async listExpiredDeleted(cutoffIso) {
+    return [...this.conversations.values()].filter((x) => x.deleted_at && x.deleted_at < cutoffIso);
   }
 
   async updateConversation(conversation, patch) {
@@ -107,6 +135,13 @@ export class MemoryConversationStore {
     const conversation = await this.getConversation(owner, conversationId);
     if (!conversation) return null;
     return (this.events.get(conversationId) || []).filter((x) => x.sequence > after);
+  }
+
+  // Internal (cascade/purge): reaches events of soft-deleted conversations too.
+  async listEventsIncludingDeleted(owner, conversationId) {
+    const conversation = await this.getConversationIncludingDeleted(owner, conversationId);
+    if (!conversation) return null;
+    return this.events.get(conversationId) || [];
   }
 
   subscribe(conversationId, listener) {
@@ -185,13 +220,43 @@ export class SupabaseConversationStore {
 
   async getConversation(owner, id) {
     return maybe(await this.client.from("ca_conversations").select("*")
+      .eq("owner", owner).eq("id", id).is("deleted_at", null).maybeSingle());
+  }
+
+  async getConversationIncludingDeleted(owner, id) {
+    return maybe(await this.client.from("ca_conversations").select("*")
       .eq("owner", owner).eq("id", id).maybeSingle());
   }
 
   async listConversations(owner, limit = 20) {
     return all(await this.client.from("ca_conversations").select("*")
-      .eq("owner", owner).neq("state", "archived")
+      .eq("owner", owner).neq("state", "archived").is("deleted_at", null)
       .order("last_activity_at", { ascending: false }).limit(limit));
+  }
+
+  async listDeletedConversations(owner) {
+    return all(await this.client.from("ca_conversations").select("*")
+      .eq("owner", owner).not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }));
+  }
+
+  async softDeleteConversation(owner, id) {
+    const { data } = await this.client.from("ca_conversations")
+      .update({ deleted_at: now(), updated_at: now() })
+      .eq("id", id).eq("owner", owner).is("deleted_at", null).select("*").maybeSingle();
+    return data || null;
+  }
+
+  async restoreConversation(owner, id) {
+    const { data } = await this.client.from("ca_conversations")
+      .update({ deleted_at: null, updated_at: now() })
+      .eq("id", id).eq("owner", owner).not("deleted_at", "is", null).select("*").maybeSingle();
+    return data || null;
+  }
+
+  async listExpiredDeleted(cutoffIso) {
+    return all(await this.client.from("ca_conversations").select("*")
+      .not("deleted_at", "is", null).lt("deleted_at", cutoffIso));
   }
 
   async updateConversation(conversation, patch) {
@@ -249,6 +314,14 @@ export class SupabaseConversationStore {
     if (!conversation) return null;
     return all(await this.client.from("ca_conversation_events").select("*")
       .eq("conversation_id", conversationId).gt("sequence", after).order("sequence"));
+  }
+
+  // Internal (cascade/purge): reaches events of soft-deleted conversations too.
+  async listEventsIncludingDeleted(owner, conversationId) {
+    const conversation = await this.getConversationIncludingDeleted(owner, conversationId);
+    if (!conversation) return null;
+    return all(await this.client.from("ca_conversation_events").select("*")
+      .eq("conversation_id", conversationId).order("sequence"));
   }
 
   subscribe(conversationId, listener) {

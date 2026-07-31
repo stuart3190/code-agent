@@ -63,6 +63,8 @@ async function stubApi(page) {
     }
     return route.fulfill({ json: { conversations: created ? [{ id: "c1", title: "FocusFlow" }] : [] } });
   });
+  await page.route("**/api/v1/conversations/deleted", (route) =>
+    route.fulfill({ json: { items: [], recoveryDays: 7 } }));
   await page.route("**/api/v1/conversations/c1/events**", (route) => {
     const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
     const pending = EVENTS.filter(([sequence]) => sequence > after);
@@ -138,15 +140,21 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByText("New conversation")).toBeVisible();
 });
 
-test("home project deletion: cancel keeps, confirm removes, errors stay honest", async ({ page }) => {
+test("soft delete → Recently Deleted → restore → Delete Now workflow", async ({ page }) => {
   await stubApi(page);
-  let deleted = false;
+  let softDeleted = false, restored = false, purged = false;
   await page.unroute("**/api/v1/conversations");
   await page.route("**/api/v1/conversations", (route) =>
-    route.fulfill({ json: { conversations: deleted ? [] : [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } }));
-  await page.route("**/api/v1/conversations/c1", (route) => {
-    if (route.request().method() === "DELETE") { deleted = true; return route.fulfill({ json: { deleted: true, projects: 1 } }); }
-    return route.fallback();
+    route.fulfill({ json: { conversations: softDeleted ? [] : [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } }));
+  await page.route(/\/api\/v1\/conversations\/c1(\?.*)?$/, (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    if (route.request().url().includes("permanent=1")) { purged = true; return route.fulfill({ json: { deleted: true, projects: 1 } }); }
+    softDeleted = true;
+    return route.fulfill({ json: { deleted: true, deletedAt: new Date().toISOString() } });
+  });
+  await page.route("**/api/v1/conversations/c1/restore", (route) => {
+    restored = true; softDeleted = false;
+    return route.fulfill({ json: { restored: true, id: "c1", title: "FocusFlow" } });
   });
   await page.goto("/");
   await expect(page.getByText("FocusFlow")).toBeVisible();
@@ -156,12 +164,33 @@ test("home project deletion: cancel keeps, confirm removes, errors stay honest",
   await expect(page.getByText("Delete this project?")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByText("FocusFlow")).toBeVisible();
-  expect(deleted).toBe(false);
+  expect(softDeleted).toBe(false);
 
-  // Confirm deletes and the card disappears immediately.
+  // Confirm soft-deletes: card disappears immediately, project appears in Recently Deleted.
   await page.locator(".ct-pdelete").first().click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("Project moved to Recently Deleted.")).toBeVisible();
+  await expect(page.locator(".ct-project:not(.ct-recent)")).toHaveCount(0);
+  expect(softDeleted).toBe(true);
+  expect(purged).toBe(false);
+
+  await page.getByRole("button", { name: /Recently Deleted \(1\)/ }).click();
+  await expect(page.getByText(/7 days left/)).toBeVisible();
+
+  // Restore brings it straight back to Home.
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("Project restored.")).toBeVisible();
+  await expect(page.locator(".ct-project:not(.ct-recent)")).toHaveCount(1);
+  expect(restored).toBe(true);
+
+  // Delete again, then Delete Now bypasses the waiting period after its own confirmation.
+  await page.locator(".ct-pdelete").first().click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: /Recently Deleted \(1\)/ }).click();
+  await page.getByRole("button", { name: "Delete now" }).click();
+  await expect(page.getByText("Delete this project forever?")).toBeVisible();
   await page.getByRole("button", { name: "Delete permanently" }).click();
-  await expect(page.getByText("Project deleted.")).toBeVisible();
-  await expect(page.locator(".ct-project")).toHaveCount(0);
-  expect(deleted).toBe(true);
+  await expect(page.getByText("Project permanently deleted.")).toBeVisible();
+  await expect(page.locator(".ct-recent")).toHaveCount(0);
+  expect(purged).toBe(true);
 });

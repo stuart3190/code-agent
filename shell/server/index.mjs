@@ -41,6 +41,7 @@ import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentServic
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
+import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -189,6 +190,16 @@ async function serveStatic(req, res) {
   } catch {
     sendJson(res, 404, { error: "not found" });
   }
+}
+
+// Preview/publish teardown bridge used by permanent deletion; null when provisiond is absent.
+function provisiondCall() {
+  if (!process.env.PROVISIOND_URL || !process.env.PROVISIOND_TOKEN) return null;
+  return async (route, body) => fetch(`${process.env.PROVISIOND_URL}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.PROVISIOND_TOKEN}` },
+    body: JSON.stringify(body),
+  });
 }
 
 async function requireOwner(req, res) {
@@ -505,25 +516,58 @@ const server = http.createServer(async (req, res) => {
     }
     if (conversationMatch && method === "DELETE") {
       const owner = await requireOwner(req, res); if (!owner) return;
+      const permanent = url.searchParams.get("permanent") === "1";
       try {
-        const { deleteConversationCascade } = await import("./lib/conversationDelete.mjs");
-        const { serviceClient } = await import("./lib/supabase.mjs");
-        const provisiond = (process.env.PROVISIOND_URL && process.env.PROVISIOND_TOKEN)
-          ? async (route, body) => fetch(`${process.env.PROVISIOND_URL}${route}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.PROVISIOND_TOKEN}` },
-              body: JSON.stringify(body),
-            })
-          : null;
-        const out = await deleteConversationCascade(owner.id, conversationMatch[1], {
-          client: serviceClient(), provisiond,
-        });
+        if (permanent) {
+          // Delete Now: the full cascade, no waiting period.
+          const { deleteConversationCascade } = await import("./lib/conversationDelete.mjs");
+          const { serviceClient } = await import("./lib/supabase.mjs");
+          const out = await deleteConversationCascade(owner.id, conversationMatch[1], {
+            client: serviceClient(), provisiond: provisiondCall(),
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify(out));
+        }
+        // Default: soft delete into Recently Deleted — all data retained for the recovery window.
+        const { conversationStore } = await import("./lib/conversationStore.mjs");
+        const row = await conversationStore().softDeleteConversation(owner.id, conversationMatch[1]);
+        if (!row) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Project not found." }));
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify(out));
+        return res.end(JSON.stringify({ deleted: true, deletedAt: row.deleted_at }));
       } catch (error) {
         res.writeHead(error.status || 500, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: error.message, step: error.step || null }));
       }
+    }
+    if (p === "/api/v1/conversations/deleted" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const { conversationStore } = await import("./lib/conversationStore.mjs");
+      const { RECOVERY_DAYS } = await import("./lib/conversationDelete.mjs");
+      const rows = await conversationStore().listDeletedConversations(owner.id);
+      const items = rows.map((row) => {
+        const expiresAt = new Date(new Date(row.deleted_at).getTime() + RECOVERY_DAYS * 86400000);
+        return {
+          id: row.id, title: row.title, deletedAt: row.deleted_at,
+          daysRemaining: Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 86400000)),
+        };
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ items, recoveryDays: RECOVERY_DAYS }));
+    }
+    const conversationRestoreMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/restore$/i);
+    if (conversationRestoreMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const { conversationStore } = await import("./lib/conversationStore.mjs");
+      const row = await conversationStore().restoreConversation(owner.id, conversationRestoreMatch[1]);
+      if (!row) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "Project not found." }));
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ restored: true, id: row.id, title: row.title }));
     }
     const conversationMessageMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/messages$/i);
     if (conversationMessageMatch && method === "POST") {
@@ -623,6 +667,7 @@ server.listen(PORT, HOST, () => {
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
   startRetentionSweeper();
+  startDeletedProjectSweeper();
   startAutomationSweeper();
   startLeadAgentRecovery();
 });
@@ -638,6 +683,7 @@ async function shutdown(signal) {
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
+  stopDeletedProjectSweeper();
   stopAutomationSweeper();
   stopLeadAgentRecovery();
   await stopCodexLoginSessions();
