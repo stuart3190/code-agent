@@ -7,6 +7,18 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+OWNER ACCOUNTS (2026-07-31, PR #57, deployed + live-proven): Thrallo staff
+(THRALLO_OWNER_EMAILS in shell/.env — currently stuart3190@gmail.com,support@thrallo.com;
+resolved owner-id→email via auth admin, cached 5min, fail-closed) bypass EVERY enforcement
+point — run budgets/rate caps, mid-run token guards, build affordability, app_build
+admission, completions limits — while usage keeps recording for analytics
+(ownerAccounts.mjs; budgetOverview returns ownerAccount/unlimited/previewPlan and all
+enforcement sites honor unlimited). Plan preview: owners View-as Free/Starter/Pro
+(ca_subscriptions.preview_plan, POST /api/v1/owner/preview-plan, settings-sheet toggle) —
+presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage now
+returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
+ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
+
 THE CONSOLE MERGE (2026-07-31, Stuart's final consolidation directive, PR #55, deployed):
 **there is now exactly one Thrallo application** — /console is deleted (old bookmarks land
 home) and every former console capability lives natively in the conversation-first app,
