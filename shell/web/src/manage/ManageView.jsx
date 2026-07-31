@@ -18,7 +18,7 @@ export const MANAGE_VIEW_IDS = Object.keys(VIEWS);
 export default function ManageView({ view, onClose, onSentence, onOpenRun }) {
   const Active = VIEWS[view] || null;
   return (
-    <div className={`mg-panel ${Active ? "show" : ""}`} role="dialog" aria-label="Thrallo view">
+    <div className={`mg-panel ${Active ? "show" : ""}`} role="dialog" aria-modal="true" aria-label="Thrallo view">
       <div className="mg-body">
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button className="ct-btn-quiet" onClick={onClose}>Done</button>

@@ -13,6 +13,33 @@ export function formatCompact(value) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value || 0));
 }
 
+// Loading placeholder shaped like the rows it will become — used by every manage view so
+// nothing renders as a bare "Loading…" or an empty card.
+export function SkeletonRows({ rows = 2 }) {
+  return (
+    <div aria-hidden="true">
+      {Array.from({ length: rows }, (_, i) => (
+        <div className="mg-row mg-skel" key={i}>
+          <span className="mg-skel-line" style={{ width: `${46 + ((i * 17) % 30)}%` }} />
+          <span className="mg-skel-line" style={{ width: 64 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Clipboard with visible confirmation — silent copies read as broken buttons.
+export function useCopy() {
+  const [copied, setCopied] = useState(false);
+  const copy = (value) => {
+    navigator.clipboard?.writeText(value).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }).catch(() => {});
+  };
+  return [copied, copy];
+}
+
 export function StatusDot({ ok, label }) {
   return (
     <span className="mg-pill">

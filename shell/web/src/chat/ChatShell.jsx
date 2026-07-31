@@ -45,14 +45,24 @@ function firstName(user) {
 export default function ChatShell() {
   const { user, loading, recovery, clearRecovery } = useSession();
   if (recovery && user) return <ResetPassword onDone={clearRecovery} />;
-  if (loading) return <div className="chat-root" />;
+  if (loading) {
+    return (
+      <div className="chat-root ct-boot" aria-label="Loading Thrallo" role="status">
+        <span className="ct-dot ct-boot-dot" />
+      </div>
+    );
+  }
   if (!user) return <Landing />;
   return <Workspace user={user} />;
 }
 
+// True on touch-primary devices — autofocusing there pops the keyboard over the content.
+const FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches;
+
 function Workspace({ user }) {
   const [theme, setTheme] = useTheme();
   const [conversations, setConversations] = useState([]);
+  const [convosLoaded, setConvosLoaded] = useState(false);
   const [active, setActive] = useState(null);        // conversation row
   const [view, setView] = useState(emptyConversationView);
   const [pending, setPending] = useState(null);      // optimistic user text awaiting its event
@@ -76,9 +86,18 @@ function Workspace({ user }) {
   }, []);
 
   useEffect(() => {
-    listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+    listConversations()
+      .then((r) => setConversations(r.conversations || []))
+      .catch(() => {})
+      .finally(() => setConvosLoaded(true));
     listDeletedConversations().then((r) => setDeletedItems(r.items || [])).catch(() => {});
   }, []);
+
+  // The browser tab always names where you are.
+  useEffect(() => {
+    document.title = active?.title ? `${active.title} — Thrallo` : "Thrallo";
+    return () => { document.title = "Thrallo"; };
+  }, [active?.title]);
 
   // Desktop bridge (Phase 24 principle): the editor streams its active-file context here;
   // the chip in the composer keeps it transparent, and dismissal is respected until the
@@ -128,10 +147,13 @@ function Workspace({ user }) {
   }, []);
   useEffect(() => () => streamAbort.current?.abort(), []);
 
+  // Returns false on failure so the composer can restore the draft instead of losing it.
+  const sendingRef = useRef(false);
   const send = useCallback(async (text) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || sendingRef.current) return true;
     const context = wsContextOn && wsContext ? wsContext : null;
+    sendingRef.current = true;
     try {
       if (!active) {
         const r = await startConversation(trimmed, context);
@@ -141,17 +163,24 @@ function Workspace({ user }) {
         setPending(trimmed);
         await sendConversationMessage(active.id, trimmed, context);
       }
+      return true;
     } catch (error) {
       setPending(null);
-      showToast(error.message || "That didn't send — try again.");
+      showToast(error.message || "That didn't send — your message is still in the box.");
+      return false;
+    } finally {
+      sendingRef.current = false;
     }
   }, [active, openConversation, showToast, wsContext, wsContextOn]);
 
-  // ⌘K / Ctrl+K opens the palette; Escape closes overlays.
+  // ⌘K / Ctrl+K opens the palette; Escape closes whatever is on top.
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
-      if (e.key === "Escape") { setPaletteOpen(false); setSheetOpen(false); setMobilePreview(false); setManageView(null); setRunOverlayId(null); }
+      if (e.key === "Escape") {
+        setPaletteOpen(false); setSheetOpen(false); setMobilePreview(false); setManageView(null); setRunOverlayId(null);
+        setDeleting((d) => (d?.busy ? d : null));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -183,7 +212,7 @@ function Workspace({ user }) {
       )}
 
       {!active ? (
-        <Begin user={user} conversations={conversations} onSend={send}
+        <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
           onContinue={(id) => {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
@@ -221,12 +250,12 @@ function Workspace({ user }) {
 
       {view.previewUrl && (
         <div className={`ct-mobile-sheet ${mobilePreview ? "show" : ""}`}>
-          <div className="ct-grab" onClick={() => setMobilePreview(false)} />
+          <button className="ct-grab-hit" aria-label="Close preview" onClick={() => setMobilePreview(false)}><span className="ct-grab" /></button>
           <PreviewPane url={view.previewUrl} bare onPublish={() => { setMobilePreview(false); send("Publish this, please."); }} />
         </div>
       )}
 
-      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`}
+      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`} aria-hidden="true"
         onClick={() => { setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null); }} />
       <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} onClose={() => setSheetOpen(false)}
         onOpenView={(v) => { setSheetOpen(false); setManageView(v); }} />
@@ -269,7 +298,7 @@ function Workspace({ user }) {
             }} />
         </>
       )}
-      <div className={`ct-toast ${toast ? "show" : ""}`}>{toast}</div>
+      <div className={`ct-toast ${toast ? "show" : ""}`} role="status" aria-live="polite">{toast}</div>
     </div>
   );
 }
@@ -285,20 +314,37 @@ function projectState(c) {
   return { label: "Idle", tone: "idle" };
 }
 
-function Begin({ user, conversations, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow }) {
+const RETURNING_KEY = "thrallo-returning";
+
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [busyId, setBusyId] = useState(null);
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
-  const fresh = !conversations.length;
+  // Remember whether this account had projects so the greeting doesn't flash from
+  // "Let's build something." to "Welcome back" while the list loads.
+  const returning = loaded ? conversations.length > 0 : localStorage.getItem(RETURNING_KEY) === "1";
+  useEffect(() => {
+    if (loaded) localStorage.setItem(RETURNING_KEY, conversations.length ? "1" : "0");
+  }, [loaded, conversations.length]);
+  const fresh = !returning;
   const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
   const rest = conversations.filter((c) => !active.includes(c)).slice(0, 6);
+  const act = (id, run) => { setBusyId(id); Promise.resolve(run()).finally(() => setBusyId(null)); };
   return (
     <div className="ct-begin" style={{ justifyContent: fresh ? "center" : "flex-start", overflowY: "auto" }}>
       <div className="ct-halo" />
       <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
-      <Composer autoFocus onSend={onSend} placeholder="Describe anything — an app, a change, an idea…" />
-      {!fresh && (
+      <Composer autoFocus={FINE_POINTER} onSend={onSend} placeholder="Describe anything — an app, a change, an idea…" />
+      {!loaded && returning && (
+        <div className="ct-workspace" aria-hidden="true">
+          <div className="ct-ws-label">Projects</div>
+          <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "42%" }} /><i style={{ width: "63%" }} /></span></div>
+          <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "55%" }} /><i style={{ width: "38%" }} /></span></div>
+        </div>
+      )}
+      {loaded && conversations.length > 0 && (
         <div className="ct-workspace">
           {active.length > 0 && <div className="ct-ws-label">In progress</div>}
           {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
@@ -308,7 +354,7 @@ function Begin({ user, conversations, onSend, onContinue, onDelete, deletedItems
       )}
       {deletedItems.length > 0 && (
         <div className="ct-workspace" style={{ marginTop: conversations.length ? 6 : 28 }}>
-          <button className="ct-recent-toggle" onClick={() => setShowDeleted((v) => !v)}>
+          <button className="ct-recent-toggle" aria-expanded={showDeleted} onClick={() => setShowDeleted((v) => !v)}>
             Recently Deleted ({deletedItems.length})
           </button>
           {showDeleted && deletedItems.map((item) => (
@@ -321,8 +367,12 @@ function Begin({ user, conversations, onSend, onContinue, onDelete, deletedItems
                     : `${item.daysRemaining} day${item.daysRemaining === 1 ? "" : "s"} left`}
                 </span>
               </span>
-              <button className="ct-btn-quiet ct-recent-btn" onClick={() => onRestore(item)}>Restore</button>
-              <button className="ct-btn-quiet ct-recent-btn ct-recent-danger" onClick={() => onDeleteNow(item)}>Delete now</button>
+              <button className="ct-btn-quiet ct-recent-btn" disabled={busyId === item.id}
+                onClick={() => act(item.id, () => onRestore(item))}>
+                {busyId === item.id ? "Restoring…" : "Restore"}
+              </button>
+              <button className="ct-btn-quiet ct-recent-btn ct-recent-danger" disabled={busyId === item.id}
+                onClick={() => onDeleteNow(item)}>Delete now</button>
             </div>
           ))}
         </div>
@@ -335,7 +385,8 @@ function ProjectCard({ c, onOpen, onDelete }) {
   const s = projectState(c);
   return (
     <div className="ct-project" role="button" tabIndex={0} onClick={() => onOpen(c.id)}
-      onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }}>
+      aria-label={`Open ${c.title || "untitled project"} — ${s.label}`}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
       <span className={`ct-pstate ct-pstate-${s.tone}`} />
       <span className="ct-pmeta">
         <span className="ct-pname">{c.title || "Untitled project"}</span>
@@ -351,8 +402,11 @@ function ProjectCard({ c, onOpen, onDelete }) {
 // Confirmation before deletion. Default deletes into Recently Deleted (7-day recovery);
 // permanent (Delete Now) runs the irreversible cascade.
 function DeleteConfirm({ project, busy, error, permanent = false, onCancel, onConfirm }) {
+  // Focus lands on the safe action; Escape (handled globally) and the scrim both cancel.
+  const cancelRef = useRef(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
   return (
-    <div className="ct-palette show" role="dialog" aria-label="Delete this project?" style={{ padding: "22px 22px 18px" }}>
+    <div className="ct-palette show" role="dialog" aria-modal="true" aria-label="Delete this project?" style={{ padding: "22px 22px 18px" }}>
       <h3 style={{ fontFamily: "var(--font-display)", fontSize: 18, margin: 0 }}>
         {permanent ? "Delete this project forever?" : "Delete this project?"}
       </h3>
@@ -367,7 +421,7 @@ function DeleteConfirm({ project, busy, error, permanent = false, onCancel, onCo
       </p>
       {error && <div className="mg-error">{error}</div>}
       <div className="ct-actions" style={{ justifyContent: "flex-end" }}>
-        <button className="ct-btn-quiet" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button className="ct-btn-quiet" ref={cancelRef} disabled={busy} onClick={onCancel}>Cancel</button>
         <button className="ct-btn" style={{ background: "var(--bad)" }} disabled={busy} onClick={onConfirm}>
           {busy ? "Deleting…" : permanent ? "Delete permanently" : "Delete"}
         </button>
@@ -380,8 +434,17 @@ function Thread({ view, pending, onOpenPreview }) {
   const ref = useRef(null);
   useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [view.items.length, pending, view.thinking]);
   let lastRole = null;
+  // History is still replaying — show conversation-shaped placeholders, not a blank room.
+  if (!view.items.length && !pending && !view.thinking) {
+    return (
+      <div className="ct-thread" ref={ref} aria-label="Conversation" aria-busy="true">
+        <div className="ct-msg user" aria-hidden="true"><div className="ct-bubble ct-skel-bubble" style={{ width: "46%" }} /></div>
+        <div className="ct-msg lead" aria-hidden="true"><div className="ct-bubble ct-skel-bubble" style={{ width: "72%" }} /></div>
+      </div>
+    );
+  }
   return (
-    <div className="ct-thread" ref={ref}>
+    <div className="ct-thread" ref={ref} aria-label="Conversation">
       {view.items.map((item) => {
         const showWho = item.kind !== "message" ? false : item.role === "lead" && lastRole !== "lead";
         if (item.kind === "message") lastRole = item.role; else lastRole = null;
@@ -442,7 +505,7 @@ function ThreadItem({ item, showWho, onOpenPreview, live = false, waiting = fals
             <iframe src={item.url} title="Preview" loading="lazy" sandbox="allow-scripts allow-same-origin" tabIndex={-1} />
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <a className="ct-urlpill" href={item.url} target="_blank" rel="noreferrer noopener">
+            <a className="ct-urlpill" href={item.url} title={item.url} target="_blank" rel="noreferrer noopener">
               <span className="ct-lock">●</span><span>{String(item.url).replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
             </a>
             <a className="ct-btn" style={{ textDecoration: "none" }} href={item.url} target="_blank" rel="noreferrer noopener">Open</a>
@@ -501,7 +564,7 @@ function PreviewPane({ url, onPublish, bare = false }) {
   return (
     <div className="ct-pane" style={bare ? { border: 0, borderRadius: 0, boxShadow: "none", background: "transparent" } : undefined}>
       <div className="ct-pane-top">
-        <a className="ct-urlpill" href={url} target="_blank" rel="noreferrer noopener">
+        <a className="ct-urlpill" href={url} title={url} target="_blank" rel="noreferrer noopener">
           <span className="ct-lock">●</span><span>{String(url).replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
         </a>
         <button className="ct-btn" onClick={onPublish}>Publish</button>
@@ -541,7 +604,18 @@ function contextChipLabel(context) {
 function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null }) {
   const [text, setText] = useState("");
   const ref = useRef(null);
-  const submit = () => { onSend(text); setText(""); if (ref.current) ref.current.style.height = "auto"; };
+  // Clear immediately (feels instant); if sending fails, put the draft back untouched.
+  const submit = async () => {
+    const draft = text;
+    if (!draft.trim()) return;
+    setText("");
+    if (ref.current) ref.current.style.height = "auto";
+    const ok = await onSend(draft);
+    if (ok === false) {
+      setText((current) => current || draft);
+      ref.current?.focus();
+    }
+  };
   const hint = waiting ? "The team is waiting on your answer above…" : thinking ? "The team is working — you can still talk…" : placeholder;
   return (
     <div className="ct-composer" style={context ? { flexWrap: "wrap" } : undefined}>
@@ -549,11 +623,11 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
         <div className="ct-context-chip" title="Shared with your next message — the team sees exactly this">
           <span className="ct-context-glyph">⌁</span>
           <span className="ct-context-label">{contextChipLabel(context)}</span>
-          {onDismissContext && <button onClick={onDismissContext} title="Don't share editor context">×</button>}
+          {onDismissContext && <button onClick={onDismissContext} title="Don't share editor context" aria-label="Don't share editor context">×</button>}
         </div>
       )}
       <textarea
-        ref={ref} rows={1} value={text} autoFocus={autoFocus} placeholder={hint}
+        ref={ref} rows={1} value={text} autoFocus={autoFocus} placeholder={hint} aria-label="Message your team"
         onChange={(e) => {
           setText(e.target.value);
           e.target.style.height = "auto";
@@ -561,7 +635,7 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
         }}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
       />
-      <button className="ct-send" onClick={submit} disabled={!text.trim()} title="Send">↑</button>
+      <button className="ct-send" onClick={submit} disabled={!text.trim()} title="Send" aria-label="Send message">↑</button>
     </div>
   );
 }
@@ -608,10 +682,11 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
           {usage?.ownerAccount && (
             <div className="ct-set-row">
               <div>View as<div className="ct-hint">Experience the product on a customer plan — usage still records, nothing blocks you.</div></div>
-              <div className="ct-toggle">
+              <div className="ct-toggle" role="group" aria-label="View as plan">
                 {[["actual", "Owner"], ["free", "Free"], ["starter", "Starter"], ["pro", "Pro"]].map(([id, label]) => (
                   <button key={id}
                     className={(usage.previewPlan || "actual") === id ? "on" : ""}
+                    aria-pressed={(usage.previewPlan || "actual") === id}
                     onClick={() => setPreviewPlan(id === "actual" ? null : id)
                       .then(() => usageSummary().then(setUsage))
                       .catch(() => {})}>
@@ -670,9 +745,9 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
           <div className="ct-set-label">Appearance</div>
           <div className="ct-set-row">
             <div>Theme</div>
-            <div className="ct-toggle">
-              <button className={theme === "light" ? "on" : ""} onClick={() => setTheme("light")}>Light</button>
-              <button className={theme === "dark" ? "on" : ""} onClick={() => setTheme("dark")}>Dark</button>
+            <div className="ct-toggle" role="group" aria-label="Theme">
+              <button className={theme === "light" ? "on" : ""} aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
+              <button className={theme === "dark" ? "on" : ""} aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
             </div>
           </div>
         </div>
@@ -734,23 +809,66 @@ function NotificationSettings() {
 
 function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
   const [query, setQuery] = useState("");
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (conversations || []).filter((c) => !q || (c.title || "").toLowerCase().includes(q)).slice(0, 6);
-  }, [conversations, query]);
+  const [selected, setSelected] = useState(0);
+  const actions = useMemo(() => [
+    { key: "new", label: "＋ New conversation", hint: "start fresh", run: onNew },
+    { key: "settings", label: "⚙ Settings", run: onSettings },
+    { key: "repos", label: "⌘ Repositories", hint: "connect · index · policies · PRs", run: () => onOpenView("repos") },
+    { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: () => onOpenView("usage") },
+    { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
+  ], [onNew, onSettings, onOpenView]);
+  const q = query.trim().toLowerCase();
+  const shownActions = useMemo(
+    () => actions.filter((a) => !q || a.label.toLowerCase().includes(q) || (a.hint || "").includes(q)),
+    [actions, q],
+  );
+  const rows = useMemo(
+    () => (conversations || []).filter((c) => !q || (c.title || "").toLowerCase().includes(q)).slice(0, 6),
+    [conversations, q],
+  );
+  const flat = useMemo(() => [
+    ...shownActions.map((a) => ({ id: `a-${a.key}`, run: a.run })),
+    ...rows.map((c) => ({ id: `c-${c.id}`, run: () => onOpen(c) })),
+  ], [shownActions, rows, onOpen]);
+  // The ref is the source of truth for key handling — consecutive keystrokes must not
+  // race React's async re-render (state is only mirrored for highlighting).
+  const selRef = useRef(0);
+  const moveSel = (delta) => {
+    const max = Math.max(flat.length, 1);
+    selRef.current = (selRef.current + delta + max) % max;
+    setSelected(selRef.current);
+  };
+  useEffect(() => { selRef.current = 0; setSelected(0); }, [q]);
+  const sel = Math.min(selected, Math.max(flat.length - 1, 0));
+
   return (
-    <div className="ct-palette show">
-      <input autoFocus placeholder="Type a command or search conversations…" value={query} onChange={(e) => setQuery(e.target.value)} />
-      <div className="ct-pal-sect">Actions</div>
-      <button className="ct-pal-row" onClick={onNew}>＋ New conversation<span className="ct-pal-hint">start fresh</span></button>
-      <button className="ct-pal-row" onClick={onSettings}>⚙ Settings</button>
-      <button className="ct-pal-row" onClick={() => onOpenView("repos")}>⌘ Repositories<span className="ct-pal-hint">connect · index · policies · PRs</span></button>
-      <button className="ct-pal-row" onClick={() => onOpenView("usage")}>▤ Usage &amp; plan<span className="ct-pal-hint">budgets · guards</span></button>
-      <button className="ct-pal-row" onClick={() => onOpenView("ops")}>⚡ Operations<span className="ct-pal-hint">admin</span></button>
-      {rows.length > 0 && <div className="ct-pal-sect">Conversations</div>}
-      {rows.map((c) => (
-        <button key={c.id} className="ct-pal-row" onClick={() => onOpen(c)}>{c.title || "Untitled"}</button>
+    <div className="ct-palette show" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input autoFocus placeholder="Type a command or search conversations…" aria-label="Type a command or search conversations"
+        value={query} onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); moveSel(1); }
+          if (e.key === "ArrowUp") { e.preventDefault(); moveSel(-1); }
+          if (e.key === "Enter") {
+            const target = flat[Math.min(selRef.current, flat.length - 1)];
+            if (target) { e.preventDefault(); target.run(); }
+          }
+        }} />
+      {shownActions.length > 0 && <div className="ct-pal-sect">Actions</div>}
+      {shownActions.map((a, i) => (
+        <button key={a.key} className={`ct-pal-row ${sel === i ? "sel" : ""}`} onClick={a.run}
+          onMouseMove={() => { if (selRef.current !== i) { selRef.current = i; setSelected(i); } }}>
+          {a.label}{a.hint && <span className="ct-pal-hint">{a.hint}</span>}
+        </button>
       ))}
+      {rows.length > 0 && <div className="ct-pal-sect">Conversations</div>}
+      {rows.map((c, i) => (
+        <button key={c.id} className={`ct-pal-row ${sel === shownActions.length + i ? "sel" : ""}`}
+          onClick={() => onOpen(c)}
+          onMouseMove={() => { const n = shownActions.length + i; if (selRef.current !== n) { selRef.current = n; setSelected(n); } }}>
+          {c.title || "Untitled"}
+        </button>
+      ))}
+      {!flat.length && <div className="ct-pal-sect" style={{ paddingBottom: 14 }}>No matches — try a different word.</div>}
     </div>
   );
 }

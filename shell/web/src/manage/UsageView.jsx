@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { usageSummary, billingOverview, selectPlan, billingPortal, updateBudgets } from "../lib/codeAgentApi.js";
-import { BudgetMeter, Metric, formatNumber, formatCompact } from "./shared.jsx";
+import { BudgetMeter, Metric, SkeletonRows, formatNumber, formatCompact } from "./shared.jsx";
 
 export default function UsageView() {
   const [data, setData] = useState(null);
@@ -38,6 +38,7 @@ export default function UsageView() {
       {error && <div className="mg-error">{error}</div>}
       {notice && <div className="mg-ok">{notice}</div>}
 
+      {!billing && !error && <div className="mg-card"><SkeletonRows rows={3} /></div>}
       {billing && (
         <>
           <div className="mg-card">

@@ -140,6 +140,44 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByText("New conversation")).toBeVisible();
 });
 
+test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboard nav", async ({ page }) => {
+  await stubApi(page);
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => {
+    if (route.request().method() === "POST") {
+      return route.fulfill({ status: 500, json: { error: "The team is unreachable right now." } });
+    }
+    return route.fulfill({ json: { conversations: [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } });
+  });
+  await page.goto("/");
+  await expect(page.getByText("FocusFlow")).toBeVisible();
+
+  // A failed send reports the error and puts the draft back — never loses typed text.
+  const box = page.getByPlaceholder(/Describe anything/);
+  await box.fill("build me a store");
+  await box.press("Enter");
+  await expect(page.getByText("The team is unreachable right now.")).toBeVisible();
+  await expect(box).toHaveValue("build me a store");
+
+  // Escape dismisses the delete confirmation without deleting anything.
+  await page.locator(".ct-pdelete").first().click();
+  await expect(page.getByText("Delete this project?")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Delete this project?")).not.toBeVisible();
+  await expect(page.getByText("FocusFlow")).toBeVisible();
+
+  // Palette is fully keyboard-driven: arrows move the selection, Enter opens it.
+  await page.keyboard.press("Control+k");
+  const palInput = page.getByPlaceholder(/Type a command/);
+  await expect(palInput).toBeVisible();
+  await palInput.press("ArrowDown");
+  await expect(page.locator(".ct-pal-row.sel")).toHaveText(/Settings/);
+  await palInput.press("ArrowDown");
+  await expect(page.locator(".ct-pal-row.sel")).toHaveText(/Repositories/);
+  await palInput.press("Enter");
+  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+});
+
 test("soft delete → Recently Deleted → restore → Delete Now workflow", async ({ page }) => {
   await stubApi(page);
   let softDeleted = false, restored = false, purged = false;

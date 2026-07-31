@@ -8,6 +8,7 @@ import {
   aiConnections, aiEvaluations, cancelCodexLogin, codexLoginStatus, connectAiKey,
   disconnectAiProvider, runAiEvaluation, selectAiProvider, startCodexLogin, updateAiRouting,
 } from "../lib/codeAgentApi.js";
+import { SkeletonRows, useCopy } from "./shared.jsx";
 
 const PROVIDERS = {
   codex: { name: "ChatGPT Codex", hint: "Your ChatGPT plan and Codex limits — no API key." },
@@ -26,6 +27,7 @@ export default function AiSettings() {
   const [routing, setRouting] = useState({ routingMode: "balanced", preferredModel: "", allowFallback: true });
   const [evaluations, setEvaluations] = useState({ health: [], evaluations: [] });
   const [comparing, setComparing] = useState(false);
+  const [codeCopied, copyCode] = useCopy();
   const [evaluationPrompt, setEvaluationPrompt] = useState(
     "Review this JavaScript and explain the bug, then provide a corrected version: const total = items.reduce((sum, item) => sum + item.price);",
   );
@@ -94,7 +96,15 @@ export default function AiSettings() {
     setNotice(`${PROVIDERS[provider].name} is connected and selected.`);
   });
 
-  if (!data && !error) return <p className="mg-sub">Loading AI connections…</p>;
+  if (!data && !error) {
+    return (
+      <div>
+        <h3>AI connection</h3>
+        <p className="mg-sub">Choose how your team thinks. Keys are encrypted server-side and never shown again.</p>
+        <div className="mg-card"><SkeletonRows rows={4} /></div>
+      </div>
+    );
+  }
 
   const active = data?.activeProvider || "managed";
 
@@ -139,7 +149,7 @@ export default function AiSettings() {
             <div style={{ fontWeight: 700, fontSize: 14 }}>Finish signing in with OpenAI</div>
             <p className="ct-hint" style={{ margin: "4px 0 10px" }}>Open the sign-in page and enter this one-time code:</p>
             <button className="mg-mono" style={{ width: "100%", padding: "10px 0", fontSize: 18, letterSpacing: "0.25em", textAlign: "center", border: "1px dashed var(--accent)", background: "var(--accent-soft)", borderRadius: 12, cursor: "pointer" }}
-              title="Copy code" onClick={() => navigator.clipboard?.writeText(login.userCode)}>{login.userCode}</button>
+              title="Copy code" onClick={() => copyCode(login.userCode)}>{codeCopied ? "Copied ✓" : login.userCode}</button>
             <div className="ct-actions">
               <a className="ct-btn" style={{ textDecoration: "none" }} href={login.verificationUrl} target="_blank" rel="noreferrer">Open OpenAI sign-in</a>
               <button className="ct-btn-quiet" onClick={() => run("codex-cancel", async () => { await cancelCodexLogin(login.sessionId); setLogin(null); })}>Cancel</button>

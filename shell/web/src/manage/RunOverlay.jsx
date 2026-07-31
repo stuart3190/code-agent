@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { cancelRun, getRun, publishRun, resumeRun, retryRun, runArtifacts, streamRunEvents } from "../lib/codeAgentApi.js";
-import { RunSummary, TimelineEvent, ArtifactCard, terminalStates } from "./shared.jsx";
+import { RunSummary, TimelineEvent, ArtifactCard, SkeletonRows, terminalStates } from "./shared.jsx";
 
 export default function RunOverlay({ runId: initialRunId, onClose }) {
   const [runId, setRunId] = useState(initialRunId);
@@ -70,7 +70,7 @@ export default function RunOverlay({ runId: initialRunId, onClose }) {
   };
 
   return (
-    <div className={`mg-panel ${runId ? "show" : ""}`} role="dialog" aria-label="Run detail">
+    <div className={`mg-panel ${runId ? "show" : ""}`} role="dialog" aria-modal="true" aria-label="Run detail">
       <div className="mg-body">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3>{run ? String(run.prompt || "Run").slice(0, 90) : "Run"}</h3>
@@ -79,6 +79,7 @@ export default function RunOverlay({ runId: initialRunId, onClose }) {
         <p className="mg-sub">{run ? `${run.state}${run.model ? ` · ${run.model}` : ""}` : "Loading…"}</p>
         {error && <div className="mg-error">{error}</div>}
 
+        {!run && !error && <div className="mg-card"><SkeletonRows rows={3} /></div>}
         {run && (
           <RunSummary run={run} busy={busy}
             onPublish={act(() => publishRun(runId))}
