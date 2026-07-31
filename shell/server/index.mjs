@@ -256,25 +256,25 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
     if (p === "/api/v1/capabilities" && method === "GET") {
-      return handleCodeAgentCapabilities(req, res);
+      return await handleCodeAgentCapabilities(req, res);
     }
     if (p === "/api/v1/github/callback" && method === "GET") {
-      return handleGithubAppCallback(req, res, url);
+      return await handleGithubAppCallback(req, res, url);
     }
     if (p === "/api/v1/github/webhook" && method === "POST") {
       const raw = await readBody(req, BODY_LIMITS.webhook);
-      return handleGithubWebhook(req, res, raw);
+      return await handleGithubWebhook(req, res, raw);
     }
     if (p === "/api/v1/billing/webhook" && method === "POST") {
       const raw = await readBody(req, BODY_LIMITS.webhook);
-      return handleBillingWebhook(req, res, raw);
+      return await handleBillingWebhook(req, res, raw);
     }
     // Caddy's on_demand_tls ask gate for the SHARED front (read-only yes/no; unauthenticated
     // by design — Caddy blocks TLS handshakes on this answer). Regression-guarded by the
     // public-shell e2e: the Phase 24 route codemod silently swallowed this block once, which
     // broke every new preview/publish certificate until it was restored.
     if (p === "/api/domain-check" && method === "GET") {
-      return handlePreviewDomainCheck(req, res, url);
+      return await handlePreviewDomainCheck(req, res, url);
     }
 
 
@@ -285,17 +285,17 @@ const server = http.createServer(async (req, res) => {
     // ── authenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/v1/repositories" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositories(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
+      return await handleRepositories(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
     }
     const repositoryIndexMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/index$/i);
     if (repositoryIndexMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositoryIndexGet(req, res, { owner, repositoryId: repositoryIndexMatch[1] });
+      return await handleRepositoryIndexGet(req, res, { owner, repositoryId: repositoryIndexMatch[1] });
     }
     const repositoryIndexRefreshMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/index\/refresh$/i);
     if (repositoryIndexRefreshMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositoryIndexRefresh(req, res, {
+      return await handleRepositoryIndexRefresh(req, res, {
         owner,
         repositoryId: repositoryIndexRefreshMatch[1],
       });
@@ -303,12 +303,12 @@ const server = http.createServer(async (req, res) => {
     const repositoryPullsMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/pulls$/i);
     if (repositoryPullsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositoryPulls(req, res, { owner, repositoryId: repositoryPullsMatch[1] });
+      return await handleRepositoryPulls(req, res, { owner, repositoryId: repositoryPullsMatch[1] });
     }
     const repositorySearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/search$/i);
     if (repositorySearchMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositorySearch(req, res, {
+      return await handleRepositorySearch(req, res, {
         owner,
         repositoryId: repositorySearchMatch[1],
         body: await readJson(req, BODY_LIMITS.standard),
@@ -317,7 +317,7 @@ const server = http.createServer(async (req, res) => {
     const repositorySymbolSearchMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/symbols\/search$/i);
     if (repositorySymbolSearchMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositorySymbolSearch(req, res, {
+      return await handleRepositorySymbolSearch(req, res, {
         owner,
         repositoryId: repositorySymbolSearchMatch[1],
         body: await readJson(req, BODY_LIMITS.standard),
@@ -326,7 +326,7 @@ const server = http.createServer(async (req, res) => {
     const repositoryGraphMatch = p.match(/^\/api\/v1\/repositories\/([0-9a-f-]+)\/graph$/i);
     if (repositoryGraphMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRepositoryFileGraph(req, res, {
+      return await handleRepositoryFileGraph(req, res, {
         owner,
         repositoryId: repositoryGraphMatch[1],
         body: await readJson(req, BODY_LIMITS.standard),
@@ -334,95 +334,95 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/v1/ai/connections" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiConnections(req, res, owner);
+      return await handleAiConnections(req, res, owner);
     }
     if (p === "/api/v1/ai/byok" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiByokConnect(req, res, owner, await readJson(req));
+      return await handleAiByokConnect(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/provider" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiProviderSelect(req, res, owner, await readJson(req));
+      return await handleAiProviderSelect(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/disconnect" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiProviderDisconnect(req, res, owner, await readJson(req));
+      return await handleAiProviderDisconnect(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/routing" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiRoutingUpdate(req, res, owner, await readJson(req));
+      return await handleAiRoutingUpdate(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/evaluations" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiEvaluations(req, res, owner);
+      return await handleAiEvaluations(req, res, owner);
     }
     if (p === "/api/v1/ai/evaluations" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAiEvaluationRun(req, res, owner, await readJson(req));
+      return await handleAiEvaluationRun(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/codex/login/start" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleCodexLoginStart(req, res, owner);
+      return await handleCodexLoginStart(req, res, owner);
     }
     const codexLoginMatch = p.match(/^\/api\/v1\/ai\/codex\/login\/([0-9a-f-]+)$/i);
     if (codexLoginMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleCodexLoginStatus(req, res, owner, codexLoginMatch[1]);
+      return await handleCodexLoginStatus(req, res, owner, codexLoginMatch[1]);
     }
     if (codexLoginMatch && method === "DELETE") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleCodexLoginCancel(req, res, owner, codexLoginMatch[1]);
+      return await handleCodexLoginCancel(req, res, owner, codexLoginMatch[1]);
     }
     if (p === "/api/v1/github/installations/start" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleGithubAppStart(req, res, owner);
+      return await handleGithubAppStart(req, res, owner);
     }
     if (p === "/api/v1/github/installations" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleGithubInstallations(req, res, owner);
+      return await handleGithubInstallations(req, res, owner);
     }
     const githubRepositoriesMatch = p.match(/^\/api\/v1\/github\/installations\/(\d+)\/repositories$/);
     if (githubRepositoriesMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleGithubInstallationRepositories(req, res, owner, githubRepositoriesMatch[1]);
+      return await handleGithubInstallationRepositories(req, res, owner, githubRepositoriesMatch[1]);
     }
     if (p === "/api/v1/github/repositories/connect" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleGithubRepositoryConnect(req, res, owner, await readJson(req));
+      return await handleGithubRepositoryConnect(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/agents" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAgents(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
+      return await handleAgents(req, res, { owner, method, body: method === "POST" ? await readJson(req) : null });
     }
     const agentPatchMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)$/i);
     if (agentPatchMatch && method === "PATCH") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAgentUpdate(req, res, { owner, agentId: agentPatchMatch[1], body: await readJson(req) });
+      return await handleAgentUpdate(req, res, { owner, agentId: agentPatchMatch[1], body: await readJson(req) });
     }
     const createRunMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)\/runs$/i);
     if (createRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunCreate(req, res, { owner, agentId: createRunMatch[1], body: await readJson(req, BODY_LIMITS.standard) });
+      return await handleRunCreate(req, res, { owner, agentId: createRunMatch[1], body: await readJson(req, BODY_LIMITS.standard) });
     }
     const latestRunMatch = p.match(/^\/api\/v1\/agents\/([0-9a-f-]+)\/runs\/latest$/i);
     if (latestRunMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleLatestRunGet(req, res, { owner, agentId: latestRunMatch[1] });
+      return await handleLatestRunGet(req, res, { owner, agentId: latestRunMatch[1] });
     }
     const runMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)$/i);
     if (runMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunGet(req, res, { owner, runId: runMatch[1] });
+      return await handleRunGet(req, res, { owner, runId: runMatch[1] });
     }
     const cancelRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/cancel$/i);
     if (cancelRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunCancel(req, res, { owner, runId: cancelRunMatch[1] });
+      return await handleRunCancel(req, res, { owner, runId: cancelRunMatch[1] });
     }
     const publishRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/publish$/i);
     if (publishRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunPublish(req, res, {
+      return await handleRunPublish(req, res, {
         owner,
         runId: publishRunMatch[1],
         body: await readJson(req, BODY_LIMITS.standard),
@@ -431,39 +431,39 @@ const server = http.createServer(async (req, res) => {
     const runArtifactsMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/artifacts$/i);
     if (runArtifactsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunArtifacts(req, res, { owner, runId: runArtifactsMatch[1] });
+      return await handleRunArtifacts(req, res, { owner, runId: runArtifactsMatch[1] });
     }
     const artifactContentMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/artifacts\/([0-9a-f-]+)\/content$/i);
     if (artifactContentMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunArtifactContent(req, res, {
+      return await handleRunArtifactContent(req, res, {
         owner, runId: artifactContentMatch[1], artifactId: artifactContentMatch[2],
       });
     }
     const resumeRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/resume$/i);
     if (resumeRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunResume(req, res, {
+      return await handleRunResume(req, res, {
         owner, runId: resumeRunMatch[1], body: await readJson(req, BODY_LIMITS.standard),
       });
     }
     const retryRunMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/retry$/i);
     if (retryRunMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunRetry(req, res, { owner, runId: retryRunMatch[1] });
+      return await handleRunRetry(req, res, { owner, runId: retryRunMatch[1] });
     }
     const runEventsMatch = p.match(/^\/api\/v1\/runs\/([0-9a-f-]+)\/events$/i);
     if (runEventsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleRunEvents(req, res, { owner, runId: runEventsMatch[1], url });
+      return await handleRunEvents(req, res, { owner, runId: runEventsMatch[1], url });
     }
     if (p === "/api/v1/completions" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleCompletion(req, res, { owner, body: await readJson(req, BODY_LIMITS.standard) });
+      return await handleCompletion(req, res, { owner, body: await readJson(req, BODY_LIMITS.standard) });
     }
     if (p === "/api/v1/usage" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleUsage(req, res, owner);
+      return await handleUsage(req, res, owner);
     }
     // Owner accounts: view the product as another plan (presentation only).
     if (p === "/api/v1/owner/preview-plan" && method === "POST") {
@@ -505,14 +505,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/v1/conversations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleConversations(req, res, {
+      return await handleConversations(req, res, {
         owner, method, body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
       });
     }
     const conversationMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)$/i);
     if (conversationMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleConversationGet(req, res, { owner, conversationId: conversationMatch[1] });
+      return await handleConversationGet(req, res, { owner, conversationId: conversationMatch[1] });
     }
     if (conversationMatch && method === "DELETE") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -572,61 +572,61 @@ const server = http.createServer(async (req, res) => {
     const conversationMessageMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/messages$/i);
     if (conversationMessageMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleConversationMessage(req, res, {
+      return await handleConversationMessage(req, res, {
         owner, conversationId: conversationMessageMatch[1], body: await readJson(req, BODY_LIMITS.standard),
       });
     }
     const conversationEventsMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/events$/i);
     if (conversationEventsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
+      return await handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
     }
     if (p === "/api/v1/automations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAutomations(req, res, {
+      return await handleAutomations(req, res, {
         owner, method, body: method === "POST" ? await readJson(req) : null,
       });
     }
     const automationMatch = p.match(/^\/api\/v1\/automations\/([0-9a-f-]+)$/i);
     if (automationMatch && method === "PATCH") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAutomationUpdate(req, res, {
+      return await handleAutomationUpdate(req, res, {
         owner, automationId: automationMatch[1], body: await readJson(req),
       });
     }
     if (automationMatch && method === "DELETE") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleAutomationDelete(req, res, { owner, automationId: automationMatch[1] });
+      return await handleAutomationDelete(req, res, { owner, automationId: automationMatch[1] });
     }
     if (p === "/api/v1/tokens" && ["GET", "POST"].includes(method)) {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
-      if (method === "GET") return handleTokenList(req, res, owner);
-      return handleTokenCreate(req, res, owner, await readJson(req));
+      if (method === "GET") return await handleTokenList(req, res, owner);
+      return await handleTokenCreate(req, res, owner, await readJson(req));
     }
     const tokenRevokeMatch = p.match(/^\/api\/v1\/tokens\/([0-9a-f-]+)$/i);
     if (tokenRevokeMatch && method === "DELETE") {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
-      return handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
+      return await handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
     }
     if (p === "/api/v1/billing" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleBillingOverview(req, res, owner);
+      return await handleBillingOverview(req, res, owner);
     }
     if (p === "/api/v1/billing/plan" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handlePlanSelect(req, res, owner, await readJson(req));
+      return await handlePlanSelect(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/billing/budgets" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleBudgetUpdate(req, res, owner, await readJson(req));
+      return await handleBudgetUpdate(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/billing/portal" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleBillingPortal(req, res, owner);
+      return await handleBillingPortal(req, res, owner);
     }
     if (p === "/api/v1/ops/telemetry" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return handleOpsTelemetry(req, res, owner);
+      return await handleOpsTelemetry(req, res, owner);
     }
     {      const match = p.match(/^\/api\/test-runs\/([^/]+)$/);
     }
