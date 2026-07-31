@@ -106,6 +106,13 @@ test("markdown renderer escapes HTML and renders the basics", () => {
   assert.ok(html.includes("&lt;script&gt;"));
 });
 
+test("a context-bearing user message carries its transparent marker", () => {
+  const view = replayEvents([
+    ev(1, "message", { role: "user", text: "fix this", workspaceContext: { file: "src/App.jsx", hasSelection: true, diagnostics: 2 } }),
+  ]);
+  assert.deepEqual(view.items[0].workspaceContext, { file: "src/App.jsx", hasSelection: true, diagnostics: 2 });
+});
+
 test("begin chips continue the most recent conversations", () => {
   const chips = beginChips([
     { id: "a", title: "FocusFlow" },

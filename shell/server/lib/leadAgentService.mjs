@@ -44,7 +44,31 @@ Respond with tool calls to put the team to work, and finish with a short plain-l
 
 // ── message intake ────────────────────────────────────────────────────────────────────────
 
-export async function postUserMessage(owner, { conversationId = null, text }, {
+// Workspace context (Phase 24 principle): the desktop shares what the editor already
+// knows — bounded, structured, and always visible to the user before it is sent.
+export function sanitizeWorkspaceContext(context) {
+  if (!context || typeof context !== "object") return null;
+  const clean = {};
+  if (context.file) clean.file = String(context.file).slice(0, 300);
+  if (context.language) clean.language = String(context.language).slice(0, 40);
+  if (context.selection) clean.selection = String(context.selection).slice(0, 4_000);
+  if (Array.isArray(context.diagnostics)) {
+    clean.diagnostics = context.diagnostics.slice(0, 5).map((d) => String(d).slice(0, 300));
+  }
+  if (context.previewUrl) clean.previewUrl = String(context.previewUrl).slice(0, 300);
+  return Object.keys(clean).length ? clean : null;
+}
+
+function describeWorkspaceContext(context) {
+  const parts = [];
+  if (context.file) parts.push(`Active file: ${context.file}${context.language ? ` (${context.language})` : ""}`);
+  if (context.selection) parts.push(`Selected code:\n\`\`\`\n${context.selection}\n\`\`\``);
+  if (context.diagnostics?.length) parts.push(`Open problems:\n- ${context.diagnostics.join("\n- ")}`);
+  if (context.previewUrl) parts.push(`Active preview: ${context.previewUrl}`);
+  return parts.join("\n");
+}
+
+export async function postUserMessage(owner, { conversationId = null, text, workspaceContext = null }, {
   store = conversationStore(),
   processOptions = {},
 } = {}) {
@@ -52,6 +76,7 @@ export async function postUserMessage(owner, { conversationId = null, text }, {
   const trimmed = String(text || "").trim();
   if (!trimmed) throw inputError("Message text is required");
   if (trimmed.length > 20_000) throw inputError("Message is too long");
+  const context = sanitizeWorkspaceContext(workspaceContext);
 
   let conversation = conversationId ? await store.getConversation(owner, conversationId) : null;
   if (conversationId && !conversation) throw inputError("Conversation not found", 404, "conversation_not_found");
@@ -62,8 +87,14 @@ export async function postUserMessage(owner, { conversationId = null, text }, {
     throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
   }
 
-  await store.appendTurn(conversation, { role: "user", content: trimmed });
-  await store.appendEvent(conversation, "message", { role: "user", text: trimmed });
+  await store.appendTurn(conversation, {
+    role: "user", content: trimmed,
+    ...(context ? { payload: { workspace_context: context } } : {}),
+  });
+  await store.appendEvent(conversation, "message", {
+    role: "user", text: trimmed,
+    ...(context ? { workspaceContext: { file: context.file || null, hasSelection: !!context.selection, diagnostics: context.diagnostics?.length || 0 } } : {}),
+  });
   const claimed = await store.claimConversationThinking(conversation);
   if (!claimed) throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
 
@@ -212,10 +243,18 @@ async function assembleInput(store, conversation) {
   const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS });
   return (turns || [])
     .filter((turn) => ["user", "lead"].includes(turn.role) && turn.content)
-    .map((turn) => ({
-      role: turn.role === "user" ? "user" : "assistant",
-      content: turn.content,
-    }));
+    .map((turn) => {
+      // Workspace context rides the model turn only — the visible thread stays the user's
+      // own words, marked with a transparent context chip by the shell.
+      const context = turn.payload?.workspace_context;
+      const suffix = context
+        ? `\n\n[Shared automatically from the user's editor — visible to them as a context chip]\n${describeWorkspaceContext(context)}`
+        : "";
+      return {
+        role: turn.role === "user" ? "user" : "assistant",
+        content: `${turn.content}${suffix}`,
+      };
+    });
 }
 
 // ── run relay: specialist progress from dispatched runs flows into the conversation ───────

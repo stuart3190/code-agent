@@ -9,7 +9,9 @@ export async function handleConversations(req, res, { owner, method, body }) {
     return sendJson(res, 200, { conversations: rows.map(publicConversation) });
   }
   return wrap(async () => {
-    const { conversation } = await postUserMessage(owner.id, { text: body?.text });
+    const { conversation } = await postUserMessage(owner.id, {
+      text: body?.text, workspaceContext: body?.workspaceContext || null,
+    });
     sendJson(res, 201, { conversation: publicConversation(conversation) });
   });
 }
@@ -30,6 +32,7 @@ export async function handleConversationMessage(_req, res, { owner, conversation
     const { conversation } = await postUserMessage(owner.id, {
       conversationId,
       text: body?.text,
+      workspaceContext: body?.workspaceContext || null,
     });
     sendJson(res, 202, { conversation: publicConversation(conversation) });
   });

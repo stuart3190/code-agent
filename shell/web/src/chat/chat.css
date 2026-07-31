@@ -89,6 +89,14 @@
 .ct-send:hover { background: var(--accent-strong); }
 .ct-send:disabled { opacity: 0.45; cursor: default; }
 
+/* workspace context (Phase 24) — implicit but always visible */
+.ct-context-chip { display: inline-flex; align-items: center; gap: 7px; width: 100%; order: -1; padding: 4px 2px 8px; font-size: 12.5px; color: var(--ink-2); }
+.ct-context-chip .ct-context-glyph { color: var(--accent); font-weight: 700; }
+.ct-context-chip .ct-context-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-context-chip button { color: var(--ink-3); padding: 0 4px; border-radius: 6px; }
+.ct-context-chip button:hover { color: var(--ink); }
+.ct-context-shared { font-size: 11.5px; color: var(--ink-3); margin: 4px 2px 0; }
+
 /* ── the living rail ── */
 .ct-rail { width: 0; overflow: hidden; transition: width var(--dur-3) var(--ease-out); display: flex; flex-direction: column; gap: 12px; padding: 0; }
 .ct-rail.team { width: 300px; padding: 8px 22px 22px 0; }
