@@ -258,6 +258,13 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req, BODY_LIMITS.webhook);
       return handleBillingWebhook(req, res, raw);
     }
+    // Caddy's on_demand_tls ask gate for the SHARED front (read-only yes/no; unauthenticated
+    // by design — Caddy blocks TLS handshakes on this answer). Regression-guarded by the
+    // public-shell e2e: the Phase 24 route codemod silently swallowed this block once, which
+    // broke every new preview/publish certificate until it was restored.
+    if (p === "/api/domain-check" && method === "GET") {
+      return handlePreviewDomainCheck(req, res, url);
+    }
 
 
 
