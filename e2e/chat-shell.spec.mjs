@@ -137,3 +137,31 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByPlaceholder(/Type a command/)).toBeVisible();
   await expect(page.getByText("New conversation")).toBeVisible();
 });
+
+test("home project deletion: cancel keeps, confirm removes, errors stay honest", async ({ page }) => {
+  await stubApi(page);
+  let deleted = false;
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) =>
+    route.fulfill({ json: { conversations: deleted ? [] : [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } }));
+  await page.route("**/api/v1/conversations/c1", (route) => {
+    if (route.request().method() === "DELETE") { deleted = true; return route.fulfill({ json: { deleted: true, projects: 1 } }); }
+    return route.fallback();
+  });
+  await page.goto("/");
+  await expect(page.getByText("FocusFlow")).toBeVisible();
+
+  // Cancel does nothing.
+  await page.locator(".ct-pdelete").first().click();
+  await expect(page.getByText("Delete this project?")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText("FocusFlow")).toBeVisible();
+  expect(deleted).toBe(false);
+
+  // Confirm deletes and the card disappears immediately.
+  await page.locator(".ct-pdelete").first().click();
+  await page.getByRole("button", { name: "Delete permanently" }).click();
+  await expect(page.getByText("Project deleted.")).toBeVisible();
+  await expect(page.locator(".ct-project")).toHaveCount(0);
+  expect(deleted).toBe(true);
+});

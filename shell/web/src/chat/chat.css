@@ -265,3 +265,8 @@ button.ct-wordmark:hover { background: var(--surface-2); }
   .ct-mobile-sheet .ct-pane-top { padding: 8px 14px; }
   .ct-mobile-sheet .ct-pane-frame { margin: 0 12px 12px; flex: 1; }
 }
+
+/* project deletion — visible but unobtrusive; never intercepts opening */
+.ct-project { position: relative; padding-right: 34px; }
+.ct-pdelete { position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; border-radius: 8px; color: var(--ink-3); font-size: 15px; line-height: 1; display: grid; place-items: center; }
+.ct-pdelete:hover { color: var(--bad); background: var(--surface-2); }

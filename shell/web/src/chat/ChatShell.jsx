@@ -10,7 +10,7 @@ import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
-  streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications,
+  streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications, deleteConversation,
   setPreviewPlan,
 } from "../lib/codeAgentApi.js";
 import {
@@ -61,6 +61,7 @@ function Workspace({ user }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [manageView, setManageView] = useState(null); // null | repos | usage | ops
+  const [deleting, setDeleting] = useState(null);     // { project, busy, error } | null
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
@@ -184,7 +185,8 @@ function Workspace({ user }) {
           onContinue={(id) => {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
-          }} />
+          }}
+          onDelete={(c) => setDeleting({ project: c, busy: false, error: "" })} />
       ) : (
         <div className="ct-room">
           <div className="ct-thread-wrap">
@@ -226,6 +228,23 @@ function Workspace({ user }) {
           onSettings={() => { setPaletteOpen(false); setSheetOpen(true); }}
           onOpenView={(v) => { setPaletteOpen(false); setManageView(v); }} />
       )}
+      {deleting && (
+        <>
+          <div className="ct-scrim show" onClick={() => !deleting.busy && setDeleting(null)} />
+          <DeleteConfirm project={deleting.project} busy={deleting.busy} error={deleting.error}
+            onCancel={() => setDeleting(null)}
+            onConfirm={() => {
+              setDeleting((d) => ({ ...d, busy: true, error: "" }));
+              deleteConversation(deleting.project.id)
+                .then(() => {
+                  setConversations((list) => list.filter((c) => c.id !== deleting.project.id));
+                  setDeleting(null);
+                  showToast("Project deleted.");
+                })
+                .catch((error) => setDeleting((d) => ({ ...d, busy: false, error: error.message || "Deletion failed — the project is untouched." })));
+            }} />
+        </>
+      )}
       <div className={`ct-toast ${toast ? "show" : ""}`}>{toast}</div>
     </div>
   );
@@ -242,7 +261,7 @@ function projectState(c) {
   return { label: "Idle", tone: "idle" };
 }
 
-function Begin({ user, conversations, onSend, onContinue }) {
+function Begin({ user, conversations, onSend, onContinue, onDelete }) {
   const name = firstName(user);
   const fresh = !conversations.length;
   const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
@@ -256,26 +275,49 @@ function Begin({ user, conversations, onSend, onContinue }) {
       {!fresh && (
         <div className="ct-workspace">
           {active.length > 0 && <div className="ct-ws-label">In progress</div>}
-          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} />)}
+          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
           {rest.length > 0 && <div className="ct-ws-label">Projects</div>}
-          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} />)}
+          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
         </div>
       )}
     </div>
   );
 }
 
-function ProjectCard({ c, onOpen }) {
+function ProjectCard({ c, onOpen, onDelete }) {
   const s = projectState(c);
   return (
-    <button className="ct-project" onClick={() => onOpen(c.id)}>
+    <div className="ct-project" role="button" tabIndex={0} onClick={() => onOpen(c.id)}
+      onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }}>
       <span className={`ct-pstate ct-pstate-${s.tone}`} />
       <span className="ct-pmeta">
         <span className="ct-pname">{c.title || "Untitled project"}</span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
       </span>
       <span className="ct-popen">Open</span>
-    </button>
+      <button className="ct-pdelete" title="Delete project" aria-label={`Delete ${c.title || "project"}`}
+        onClick={(e) => { e.stopPropagation(); onDelete(c); }}>×</button>
+    </div>
+  );
+}
+
+// Confirmation before permanent deletion — the only destructive action on the Home screen.
+function DeleteConfirm({ project, busy, error, onCancel, onConfirm }) {
+  return (
+    <div className="ct-palette show" role="dialog" aria-label="Delete this project?" style={{ padding: "22px 22px 18px" }}>
+      <h3 style={{ fontFamily: "var(--font-display)", fontSize: 18, margin: 0 }}>Delete this project?</h3>
+      <p className="ct-hint" style={{ margin: "10px 0 4px", fontSize: 14 }}>
+        This will permanently delete <b>{project.title || "this project"}</b> and all data associated
+        with it. This action cannot be undone.
+      </p>
+      {error && <div className="mg-error">{error}</div>}
+      <div className="ct-actions" style={{ justifyContent: "flex-end" }}>
+        <button className="ct-btn-quiet" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button className="ct-btn" style={{ background: "var(--bad)" }} disabled={busy} onClick={onConfirm}>
+          {busy ? "Deleting…" : "Delete permanently"}
+        </button>
+      </div>
+    </div>
   );
 }
 

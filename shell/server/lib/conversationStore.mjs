@@ -12,6 +12,15 @@ const now = () => new Date().toISOString();
 const newId = () => crypto.randomUUID();
 
 export class MemoryConversationStore {
+  async deleteConversation(owner, conversationId) {
+    const conversation = await this.getConversation(owner, conversationId);
+    if (!conversation) throw new Error("not found");
+    this.events.delete(conversationId);
+    this.turns?.delete?.(conversationId);
+    this.conversations.delete(conversationId);
+    return { deleted: true };
+  }
+
   constructor() {
     this.conversations = new Map();
     this.turns = new Map();      // conversationId -> []
@@ -149,6 +158,18 @@ export class MemoryConversationStore {
 }
 
 export class SupabaseConversationStore {
+  async deleteConversation(owner, conversationId) {
+    const kill = async (table, column) => {
+      const { error } = await this.client.from(table).delete().eq(column, conversationId);
+      if (error) throw new Error(`${table}: ${error.message}`);
+    };
+    await kill("ca_conversation_events", "conversation_id");
+    await kill("ca_conversation_turns", "conversation_id");
+    const { error } = await this.client.from("ca_conversations").delete().eq("id", conversationId).eq("owner", owner);
+    if (error) throw new Error(`ca_conversations: ${error.message}`);
+    return { deleted: true };
+  }
+
   constructor(client = serviceClient()) {
     this.client = client;
     this.bus = new EventEmitter();
