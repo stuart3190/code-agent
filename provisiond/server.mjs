@@ -122,7 +122,10 @@ const hostFor = (label) => `${label}.${SUFFIX}`;
 // Poll the full path through Caddy (with the project's Host header) until Vite answers 200. In https
 // mode this hits :443 with SNI = the label host (cert won't match 127.0.0.1, so rejectUnauthorized off)
 // — polling :80 would only see Caddy's http->https redirect, not the 200.
-function waitReady(label, timeoutMs = 120_000) {
+// First builds cold-start npm deps inside the container and can exceed two minutes — a
+// too-short window here makes the shell report a "failed" preview whose container then
+// comes up fine (seen live 2026-07-31). Tunable; generous default.
+function waitReady(label, timeoutMs = Number(process.env.PREVIEW_READY_TIMEOUT_MS || 240_000)) {
   const host = hostFor(label);
   const deadline = Date.now() + timeoutMs;
   const mod = HTTPS ? https : http;

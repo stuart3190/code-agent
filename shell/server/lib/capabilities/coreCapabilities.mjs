@@ -7,7 +7,7 @@ import { codeAgentStore } from "../codeAgentStore.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild } from "../appBuild/appBuildService.mjs";
+import { startAppBuild, showPreview } from "../appBuild/appBuildService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
@@ -71,6 +71,21 @@ export function registerCoreCapabilities() {
         description: String(input.description),
         productName: input.productName || null,
       });
+    },
+  });
+
+  registerCapability({
+    id: "show_preview",
+    specialist: "Publisher",
+    statusText: "Bringing the preview up…",
+    description: "Bring up (or revive) the live preview of the user's most recent built app — previews idle out, and a fresh one starts from the stored code. Use whenever the user asks to see, reopen, or fix a missing/broken preview. The preview card lands in the conversation automatically.",
+    costProfile: "free",
+    inputSchema: strings({
+      productName: optionalStr("Which product's preview, when the conversation has several"),
+    }),
+    requirements: () => (publishConfigured() ? { ok: true } : { ok: false, reason: "Preview infrastructure is not configured." }),
+    async invoke(ctx, input) {
+      return showPreview(ctx, { productName: input.productName || null });
     },
   });
 
