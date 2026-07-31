@@ -7,6 +7,26 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 24 (v2) — Buildr101 retirement + cleanup — is in progress (2026-07-31), with
+everything not gated on Stuart complete: **workspace context** (Stuart's final principle)
+is live end-to-end — the desktop extension streams active file/selection/diagnostics to the
+conversation panel (debounced bridge in `editor/vscode/extension.js`), the composer shows a
+dismissible context chip, `postUserMessage` accepts a sanitized bounded `workspaceContext`
+(`sanitizeWorkspaceContext` in leadAgentService), the model turn carries it as a marked
+suffix while the visible thread stays the user's words with a "⌁ shared file" line.
+**Retirement step 3 done**: final validated Supabase export of qgemqjcyhuejrsvjxkbh stored
+off-box (`C:\Users\Administrator\buildr101-final-export-2026-07-31.tar.gz`, 33 tables, 109
+auth users). **Repo cleanup done**: the legacy Buildr HTTP surface (71 handlers across 29
+route modules — generate/builds/billing/templates/connectors/runtime/android/qa/owner
+console/…) is unmounted from `shell/server/index.mjs` (route FILES remain where Thrallo
+imports pieces, e.g. `slugify` from routes/publish.mjs); the orphaned Buildr web UI is
+deleted (builder/, legal/, TopBar, BillingPanel, SettingsPanel, lib/api.js + friends —
+verified importer-free first). `/console` is KEPT deliberately: AI connection, API tokens,
+repos, reviews, automations management still live there until conversational parity.
+Remaining steps are Stuart-gated (YOU_NEED_TO_DO.md §Phase 24): stop the Meta ad, audit/
+cancel Stripe subs → then freeze, reboot test, stop buildr-* services, retire monitoring/
+email. **Desktop packaging waits for this phase to complete (Stuart's instruction).**
+
 Phase 23 (v2) — Thrallo Desktop adopts the conversation surface — is built and
 smoke-proven (2026-07-31): the desktop's primary view is the SAME built web bundle as
 app.thrallo.com, hosted by the builtin extension in a webview running in desktop mode
@@ -322,13 +342,11 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 24 (v2 roadmap): Buildr101 retirement + cleanup in strict ops order (1 [Stuart] stop
-the Meta ad → 2 [Stuart] audit/cancel live Stripe subs + disable webhook → 3 final Supabase
-export → 4 freeze published apps → 5 Caddy reboot test → 6 stop buildr-* services → 7
-retire UptimeRobot/Resend/email routing), then repo cleanup (unmount legacy routes, delete
-orphaned Buildr UI + /console, prune src/, rewrite docs). Desktop packaging also awaits the
-Phase 23 gate. **Blocked on Stuart's Phase 23 desktop review — per-phase gates are standing
-policy.** Roadmap substitutions require asking Stuart first.
+Phase 24 completion: Stuart's steps 1-2 (Meta ad, Stripe audit — YOU_NEED_TO_DO.md), then
+my steps 4-7 (freeze, reboot test, stop buildr-* services, retire monitoring/email), then
+desktop packaging. Deeper src/ pruning of buildr-only modules is deferred until after the
+services stop (some legacy prove-harnesses still exercise them). Roadmap substitutions
+require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,

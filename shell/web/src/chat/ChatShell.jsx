@@ -51,6 +51,8 @@ function Workspace({ user }) {
   const [active, setActive] = useState(null);        // conversation row
   const [view, setView] = useState(emptyConversationView);
   const [pending, setPending] = useState(null);      // optimistic user text awaiting its event
+  const [wsContext, setWsContext] = useState(null);  // editor context from the desktop bridge
+  const [wsContextOn, setWsContextOn] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobilePreview, setMobilePreview] = useState(false);
@@ -66,6 +68,19 @@ function Workspace({ user }) {
 
   useEffect(() => {
     listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+  }, []);
+
+  // Desktop bridge (Phase 24 principle): the editor streams its active-file context here;
+  // the chip in the composer keeps it transparent, and dismissal is respected until the
+  // context itself changes.
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.data?.type !== "workspaceContext") return;
+      setWsContext(event.data.context || null);
+      setWsContextOn(true);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   // Live channel: replay history from seq 0, then keep streaming with `after` resume.
@@ -98,20 +113,21 @@ function Workspace({ user }) {
   const send = useCallback(async (text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const context = wsContextOn && wsContext ? wsContext : null;
     try {
       if (!active) {
-        const r = await startConversation(trimmed);
+        const r = await startConversation(trimmed, context);
         setConversations((list) => [r.conversation, ...list]);
         openConversation(r.conversation);
       } else {
         setPending(trimmed);
-        await sendConversationMessage(active.id, trimmed);
+        await sendConversationMessage(active.id, trimmed, context);
       }
     } catch (error) {
       setPending(null);
       showToast(error.message || "That didn't send — try again.");
     }
-  }, [active, openConversation, showToast]);
+  }, [active, openConversation, showToast, wsContext, wsContextOn]);
 
   // ⌘K / Ctrl+K opens the palette; Escape closes overlays.
   useEffect(() => {
@@ -151,7 +167,8 @@ function Workspace({ user }) {
         <div className="ct-room">
           <div className="ct-thread-wrap">
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)} />
-            <Composer onSend={send} waiting={view.waiting} thinking={view.thinking} />
+            <Composer onSend={send} waiting={view.waiting} thinking={view.thinking}
+              context={wsContextOn ? wsContext : null} onDismissContext={() => setWsContextOn(false)} />
           </div>
           <aside className={`ct-rail ${rail === "empty" ? "" : rail}`}>
             <div className={`ct-teamcard ${rail === "preview" ? "strip" : ""}`}>
@@ -229,7 +246,16 @@ function Thread({ view, pending, onOpenPreview }) {
 function ThreadItem({ item, showWho, onOpenPreview }) {
   if (item.kind === "message") {
     if (item.role === "user") {
-      return <div className="ct-msg user"><div className="ct-bubble">{item.text}</div></div>;
+      return (
+        <div className="ct-msg user">
+          <div className="ct-bubble">{item.text}</div>
+          {item.workspaceContext?.file && (
+            <div className="ct-context-shared">⌁ shared {item.workspaceContext.file}
+              {item.workspaceContext.hasSelection ? " · selection" : ""}
+              {item.workspaceContext.diagnostics ? ` · ${item.workspaceContext.diagnostics} problems` : ""}</div>
+          )}
+        </div>
+      );
     }
     return (
       <div className="ct-msg lead">
@@ -348,13 +374,27 @@ function MobileStrip({ roster, working, onPreview }) {
   );
 }
 
-function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false }) {
+function contextChipLabel(context) {
+  const bits = [context.file];
+  if (context.selection) bits.push("selection");
+  if (context.diagnostics?.length) bits.push(`${context.diagnostics.length} problem${context.diagnostics.length > 1 ? "s" : ""}`);
+  return bits.filter(Boolean).join(" · ");
+}
+
+function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null }) {
   const [text, setText] = useState("");
   const ref = useRef(null);
   const submit = () => { onSend(text); setText(""); if (ref.current) ref.current.style.height = "auto"; };
   const hint = waiting ? "The team is waiting on your answer above…" : thinking ? "The team is working — you can still talk…" : placeholder;
   return (
-    <div className="ct-composer">
+    <div className="ct-composer" style={context ? { flexWrap: "wrap" } : undefined}>
+      {context && (
+        <div className="ct-context-chip" title="Shared with your next message — the team sees exactly this">
+          <span className="ct-context-glyph">⌁</span>
+          <span className="ct-context-label">{contextChipLabel(context)}</span>
+          {onDismissContext && <button onClick={onDismissContext} title="Don't share editor context">×</button>}
+        </div>
+      )}
       <textarea
         ref={ref} rows={1} value={text} autoFocus={autoFocus} placeholder={hint}
         onChange={(e) => {

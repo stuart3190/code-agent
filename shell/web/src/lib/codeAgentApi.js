@@ -81,13 +81,13 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
 export const listConversations = () => request("/api/v1/conversations");
-export const startConversation = (text) => request("/api/v1/conversations", {
-  method: "POST", body: JSON.stringify({ text }),
+export const startConversation = (text, workspaceContext = null) => request("/api/v1/conversations", {
+  method: "POST", body: JSON.stringify({ text, workspaceContext }),
 });
 export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
-export const sendConversationMessage = (conversationId, text) =>
+export const sendConversationMessage = (conversationId, text, workspaceContext = null) =>
   request(`/api/v1/conversations/${conversationId}/messages`, {
-    method: "POST", body: JSON.stringify({ text }),
+    method: "POST", body: JSON.stringify({ text, workspaceContext }),
   });
 export const notificationsConfig = () => request("/api/v1/notifications/config");
 export const subscribeNotifications = (subscription) => request("/api/v1/notifications/subscribe", {

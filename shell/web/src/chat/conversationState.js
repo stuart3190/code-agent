@@ -45,7 +45,10 @@ export function applyEvent(view, event) {
 
   switch (event.type) {
     case "message":
-      push({ kind: "message", role: payload.role === "user" ? "user" : "lead", text: payload.text || "" });
+      push({
+        kind: "message", role: payload.role === "user" ? "user" : "lead", text: payload.text || "",
+        ...(payload.workspaceContext ? { workspaceContext: payload.workspaceContext } : {}),
+      });
       if (payload.role !== "user") next.thinking = false;
       else { next.thinking = true; next.waiting = false; }
       break;

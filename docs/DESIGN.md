@@ -139,6 +139,13 @@ produces (greeting included) and for Phase 21 copy reviews.
   builds) must be inspectable, comparable, and interactive WITHOUT interrupting the
   conversation that created them. The desktop client is the natural home for those richer
   workflows — same interaction model as the web, plus real editor tabs beside the thread.
+- **The conversation always understands the current workspace context** (Stuart, Phase 24
+  approval — a hard implementation rule): files, selections, diagnostics, diffs, terminals
+  and active previews become implicit Lead Agent context wherever appropriate — the user
+  never explains what the editor already knows. Transparency is mandatory: the composer
+  shows exactly what context rides along (a dismissible chip), and the thread marks
+  messages that carried it. Context is bounded and never includes more than the user can
+  see is being shared.
 - **Depth**: layered soft shadows, no borders-as-boxes; hairlines at 8% ink where structure
   is needed.
 

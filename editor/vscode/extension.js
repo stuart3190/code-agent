@@ -83,7 +83,48 @@ async function openConversation(context) {
       vscode.env.openExternal(vscode.Uri.parse(String(message.url)));
     }
   });
+  wireWorkspaceContext(context, panel);
   await renderConversation(context, panel, indexPath, appRoot);
+}
+
+// Phase 24 principle: the conversation always understands the workspace. The active file,
+// selection, and its diagnostics stream to the webview, which shows them as a dismissible
+// context chip and attaches them to the next message — implicit but always visible.
+function workspaceContextSnapshot() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") return null;
+  const doc = editor.document;
+  const selection = editor.selection && !editor.selection.isEmpty
+    ? doc.getText(editor.selection).slice(0, 4_000)
+    : null;
+  const diagnostics = vscode.languages.getDiagnostics(doc.uri)
+    .filter((d) => d.severity === vscode.DiagnosticSeverity.Error || d.severity === vscode.DiagnosticSeverity.Warning)
+    .slice(0, 5)
+    .map((d) => `${d.severity === vscode.DiagnosticSeverity.Error ? "error" : "warning"} L${d.range.start.line + 1}: ${d.message}`.slice(0, 300));
+  return {
+    file: vscode.workspace.asRelativePath(doc.uri),
+    language: doc.languageId,
+    ...(selection ? { selection } : {}),
+    ...(diagnostics.length ? { diagnostics } : {}),
+  };
+}
+
+function wireWorkspaceContext(context, panel) {
+  let timer = null;
+  const push = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      panel.webview.postMessage({ type: "workspaceContext", context: workspaceContextSnapshot() }).then(undefined, () => {});
+    }, 350);
+  };
+  const subs = [
+    vscode.window.onDidChangeActiveTextEditor(push),
+    vscode.window.onDidChangeTextEditorSelection(push),
+    vscode.languages.onDidChangeDiagnostics(push),
+  ];
+  panel.onDidDispose(() => subs.forEach((s) => s.dispose()));
+  context.subscriptions.push(...subs);
+  push();
 }
 
 async function renderConversation(context, panel, indexPath, appRoot) {

@@ -17,6 +17,30 @@ values. Codex will keep everything else moving locally.
   - A live service-role query succeeded; the key remains only in ignored `shell/.env`.
   - The project URL and publishable browser key are configured locally.
 
+## Phase 24 — Buildr101 retirement (strict order; your two steps unlock the rest)
+
+The code side is done: the final Supabase export of `qgemqjcyhuejrsvjxkbh` is validated and
+stored off-box (`C:\Users\Administrator\buildr101-final-export-2026-07-31.tar.gz`), the
+shared Caddy front is Thrallo-owned with a proven re-raise path, and the legacy Buildr HTTP
+surface is unmounted from the Thrallo shell. The remaining steps in order:
+
+1. [ ] **YOU — stop the Meta ad campaign** (`52681395849417`, ACTIVE at £5/day, drives
+   traffic to the domain being retired). Safe to do immediately.
+2. [ ] **YOU — audit and cancel live Buildr101 Stripe subscriptions** (you hold a £12/mo
+   dogfood sub; check whether any real customers exist), then disable the Stripe webhook
+   endpoint. Keep account-delete working until subscriptions are zero.
+3. [x] Final retained Supabase export (validated, off-box, 2026-07-31).
+4. [ ] ME after your steps — freeze published apps read-only per the approved decision
+   (nothing new built/published; `*.app.buildr101.com` keeps serving).
+5. [ ] ME — deliberate VPS reboot test (~2 min outage for BOTH products; the re-raise
+   already proved itself live twice).
+6. [ ] ME — stop/disable `buildr-*` services and timers (shell, provisiond, backup,
+   email-nudge, social poster, codex-keepalive, runtime-worker). Thrallo's provisiond keeps
+   serving previews/publishes.
+7. [ ] YOU+ME — retire UptimeRobot, the Resend domain, and Cloudflare email routing last.
+
+Desktop packaging is also gated on this phase completing (your instruction).
+
 ## Required before a live agent run
 
 - [x] Configure Daytona.
