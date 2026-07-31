@@ -11,7 +11,7 @@ import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications, deleteConversation,
-  setPreviewPlan,
+  listDeletedConversations, restoreConversation, setPreviewPlan,
 } from "../lib/codeAgentApi.js";
 import {
   applyEvent, emptyConversationView, replayEvents, railState,
@@ -61,7 +61,8 @@ function Workspace({ user }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [manageView, setManageView] = useState(null); // null | repos | usage | ops
-  const [deleting, setDeleting] = useState(null);     // { project, busy, error } | null
+  const [deleting, setDeleting] = useState(null);     // { project, busy, error, permanent } | null
+  const [deletedItems, setDeletedItems] = useState([]); // Recently Deleted (7-day recovery)
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
@@ -76,6 +77,7 @@ function Workspace({ user }) {
 
   useEffect(() => {
     listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+    listDeletedConversations().then((r) => setDeletedItems(r.items || [])).catch(() => {});
   }, []);
 
   // Desktop bridge (Phase 24 principle): the editor streams its active-file context here;
@@ -186,7 +188,18 @@ function Workspace({ user }) {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
           }}
-          onDelete={(c) => setDeleting({ project: c, busy: false, error: "" })} />
+          onDelete={(c) => setDeleting({ project: c, busy: false, error: "", permanent: false })}
+          deletedItems={deletedItems}
+          onRestore={(item) => restoreConversation(item.id)
+            .then(() => {
+              setDeletedItems((list) => list.filter((d) => d.id !== item.id));
+              listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+              showToast("Project restored.");
+            })
+            .catch((error) => showToast(error.message || "Restore failed — the project is still recoverable."))}
+          onDeleteNow={(item) => setDeleting({
+            project: { id: item.id, title: item.title }, busy: false, error: "", permanent: true,
+          })} />
       ) : (
         <div className="ct-room">
           <div className="ct-thread-wrap">
@@ -232,14 +245,25 @@ function Workspace({ user }) {
         <>
           <div className="ct-scrim show" onClick={() => !deleting.busy && setDeleting(null)} />
           <DeleteConfirm project={deleting.project} busy={deleting.busy} error={deleting.error}
+            permanent={deleting.permanent}
             onCancel={() => setDeleting(null)}
             onConfirm={() => {
+              const { permanent } = deleting;
               setDeleting((d) => ({ ...d, busy: true, error: "" }));
-              deleteConversation(deleting.project.id)
-                .then(() => {
-                  setConversations((list) => list.filter((c) => c.id !== deleting.project.id));
+              deleteConversation(deleting.project.id, { permanent })
+                .then((out) => {
+                  if (permanent) {
+                    setDeletedItems((list) => list.filter((d) => d.id !== deleting.project.id));
+                    showToast("Project permanently deleted.");
+                  } else {
+                    setConversations((list) => list.filter((c) => c.id !== deleting.project.id));
+                    setDeletedItems((list) => [{
+                      id: deleting.project.id, title: deleting.project.title,
+                      deletedAt: out.deletedAt, daysRemaining: 7,
+                    }, ...list]);
+                    showToast("Project moved to Recently Deleted.");
+                  }
                   setDeleting(null);
-                  showToast("Project deleted.");
                 })
                 .catch((error) => setDeleting((d) => ({ ...d, busy: false, error: error.message || "Deletion failed — the project is untouched." })));
             }} />
@@ -261,8 +285,10 @@ function projectState(c) {
   return { label: "Idle", tone: "idle" };
 }
 
-function Begin({ user, conversations, onSend, onContinue, onDelete }) {
+function Begin({ user, conversations, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow }) {
   const name = firstName(user);
+  const [showDeleted, setShowDeleted] = useState(false);
+  useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
   const fresh = !conversations.length;
   const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
   const rest = conversations.filter((c) => !active.includes(c)).slice(0, 6);
@@ -278,6 +304,27 @@ function Begin({ user, conversations, onSend, onContinue, onDelete }) {
           {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
           {rest.length > 0 && <div className="ct-ws-label">Projects</div>}
           {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
+        </div>
+      )}
+      {deletedItems.length > 0 && (
+        <div className="ct-workspace" style={{ marginTop: conversations.length ? 6 : 28 }}>
+          <button className="ct-recent-toggle" onClick={() => setShowDeleted((v) => !v)}>
+            Recently Deleted ({deletedItems.length})
+          </button>
+          {showDeleted && deletedItems.map((item) => (
+            <div className="ct-project ct-recent" key={item.id}>
+              <span className="ct-pmeta">
+                <span className="ct-pname">{item.title || "Untitled project"}</span>
+                <span className="ct-pactivity">
+                  Deleted {new Date(item.deletedAt).toLocaleDateString()} · {item.daysRemaining === 0
+                    ? "permanent deletion soon"
+                    : `${item.daysRemaining} day${item.daysRemaining === 1 ? "" : "s"} left`}
+                </span>
+              </span>
+              <button className="ct-btn-quiet ct-recent-btn" onClick={() => onRestore(item)}>Restore</button>
+              <button className="ct-btn-quiet ct-recent-btn ct-recent-danger" onClick={() => onDeleteNow(item)}>Delete now</button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -301,20 +348,28 @@ function ProjectCard({ c, onOpen, onDelete }) {
   );
 }
 
-// Confirmation before permanent deletion — the only destructive action on the Home screen.
-function DeleteConfirm({ project, busy, error, onCancel, onConfirm }) {
+// Confirmation before deletion. Default deletes into Recently Deleted (7-day recovery);
+// permanent (Delete Now) runs the irreversible cascade.
+function DeleteConfirm({ project, busy, error, permanent = false, onCancel, onConfirm }) {
   return (
     <div className="ct-palette show" role="dialog" aria-label="Delete this project?" style={{ padding: "22px 22px 18px" }}>
-      <h3 style={{ fontFamily: "var(--font-display)", fontSize: 18, margin: 0 }}>Delete this project?</h3>
+      <h3 style={{ fontFamily: "var(--font-display)", fontSize: 18, margin: 0 }}>
+        {permanent ? "Delete this project forever?" : "Delete this project?"}
+      </h3>
       <p className="ct-hint" style={{ margin: "10px 0 4px", fontSize: 14 }}>
-        This will permanently delete <b>{project.title || "this project"}</b> and all data associated
-        with it. This action cannot be undone.
+        {permanent ? (
+          <>This will permanently delete <b>{project.title || "this project"}</b> and all data
+          associated with it, right now. This action cannot be undone.</>
+        ) : (
+          <><b>{project.title || "This project"}</b> will move to Recently Deleted. You can restore
+          it within 7 days; after that it will be permanently deleted.</>
+        )}
       </p>
       {error && <div className="mg-error">{error}</div>}
       <div className="ct-actions" style={{ justifyContent: "flex-end" }}>
         <button className="ct-btn-quiet" disabled={busy} onClick={onCancel}>Cancel</button>
         <button className="ct-btn" style={{ background: "var(--bad)" }} disabled={busy} onClick={onConfirm}>
-          {busy ? "Deleting…" : "Delete permanently"}
+          {busy ? "Deleting…" : permanent ? "Delete permanently" : "Delete"}
         </button>
       </div>
     </div>

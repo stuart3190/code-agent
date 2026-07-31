@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MemoryConversationStore } from "../../shell/server/lib/conversationStore.mjs";
-import { deleteConversationCascade, projectIdsFromEvents } from "../../shell/server/lib/conversationDelete.mjs";
+import {
+  deleteConversationCascade, projectIdsFromEvents, purgeExpiredDeletedConversations, RECOVERY_DAYS,
+} from "../../shell/server/lib/conversationDelete.mjs";
 
 const OWNER = "owner-1";
 const OTHER = "owner-2";
@@ -105,4 +107,80 @@ test("cancel does nothing (no API call is the contract: cascade only runs on con
   // that nothing changes unless it is called.
   assert.ok(await store.getConversation(OWNER, mine.id));
   assert.equal(client.calls.length, 0);
+});
+
+// ---- Soft delete + 7-day recovery ----
+
+test("soft delete hides the project immediately and retains all data", async () => {
+  const { store, mine } = await seed();
+  const row = await store.softDeleteConversation(OWNER, mine.id);
+  assert.ok(row.deleted_at, "deletion timestamp recorded");
+  const listed = await store.listConversations(OWNER);
+  assert.equal(listed.find((c) => c.id === mine.id), undefined, "gone from Home immediately");
+  const deleted = await store.listDeletedConversations(OWNER);
+  assert.equal(deleted[0]?.id, mine.id, "visible in Recently Deleted");
+  // All data retained during the recovery period (internal accessor; normal reads are blocked).
+  assert.ok((await store.listEventsIncludingDeleted(OWNER, mine.id)).length > 0, "events retained");
+});
+
+test("deleted projects cannot be opened via normal access paths", async () => {
+  const { store, mine } = await seed();
+  await store.softDeleteConversation(OWNER, mine.id);
+  // getConversation is the single gate for GET/messages/events routes — null means 404.
+  assert.equal(await store.getConversation(OWNER, mine.id), null, "direct access blocked");
+});
+
+test("restore returns the project exactly as it was before deletion", async () => {
+  const { store, mine } = await seed();
+  const before = JSON.parse(JSON.stringify(await store.getConversation(OWNER, mine.id)));
+  const eventsBefore = (await store.listEvents(OWNER, mine.id, 0)).length;
+  await store.softDeleteConversation(OWNER, mine.id);
+  const restored = await store.restoreConversation(OWNER, mine.id);
+  assert.equal(restored.id, mine.id);
+  const after = await store.getConversation(OWNER, mine.id);
+  assert.deepEqual({ ...after, deleted_at: null }, { ...before, deleted_at: null }, "row identical");
+  assert.ok(!after.deleted_at, "no longer marked deleted");
+  assert.equal((await store.listEvents(OWNER, mine.id, 0)).length, eventsBefore, "history intact");
+  assert.ok((await store.listConversations(OWNER)).find((c) => c.id === mine.id), "back on Home");
+});
+
+test("Delete Now runs the permanent cascade without waiting for the recovery period", async () => {
+  const { store, mine, client } = await seed();
+  await store.softDeleteConversation(OWNER, mine.id);
+  const out = await deleteConversationCascade(OWNER, mine.id, { store, client });
+  assert.equal(out.deleted, true);
+  assert.equal(await store.getConversationIncludingDeleted(OWNER, mine.id), null, "fully gone");
+  assert.equal(client.rows.projects.find((p) => p.id === "proj-A"), undefined, "all resources removed");
+  assert.equal(client.rows.entities.find((e) => e.app_id === "proj-A"), undefined);
+});
+
+test("automatic cleanup permanently deletes only projects past the recovery window", async () => {
+  const { store, mine, theirs, client } = await seed();
+  await store.softDeleteConversation(OWNER, mine.id);
+  await store.softDeleteConversation(OTHER, theirs.id);
+  // Backdate one past the window; the other stays fresh.
+  store.conversations.get(mine.id).deleted_at =
+    new Date(Date.now() - (RECOVERY_DAYS + 1) * 86400000).toISOString();
+  const out = await purgeExpiredDeletedConversations({ store, client });
+  assert.equal(out.purged, 1);
+  assert.equal(out.failed, 0);
+  assert.equal(await store.getConversationIncludingDeleted(OWNER, mine.id), null, "expired purged");
+  assert.ok(await store.getConversationIncludingDeleted(OTHER, theirs.id), "fresh deletion survives");
+  assert.equal(client.rows.projects.find((p) => p.id === "proj-A"), undefined, "expired resources removed");
+  assert.ok(client.rows.projects.find((p) => p.id === "proj-B"), "other owner's project untouched");
+});
+
+test("other users cannot restore or permanently delete someone else's project", async () => {
+  const { store, mine, client } = await seed();
+  await store.softDeleteConversation(OWNER, mine.id);
+  assert.equal(await store.restoreConversation(OTHER, mine.id), null, "cross-owner restore refused");
+  await assert.rejects(deleteConversationCascade(OTHER, mine.id, { store, client }), /not found/i);
+  assert.ok(await store.getConversationIncludingDeleted(OWNER, mine.id), "project still recoverable");
+  assert.ok(client.rows.projects.find((p) => p.id === "proj-A"), "resources intact");
+});
+
+test("cross-owner soft delete is refused", async () => {
+  const { store, mine } = await seed();
+  assert.equal(await store.softDeleteConversation(OTHER, mine.id), null);
+  assert.ok(await store.getConversation(OWNER, mine.id), "still visible to its owner");
 });

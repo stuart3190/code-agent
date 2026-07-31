@@ -23,18 +23,22 @@ export function projectIdsFromEvents(events) {
   return [...ids];
 }
 
+export const RECOVERY_DAYS = 7;
+
 export async function deleteConversationCascade(ownerId, conversationId, {
   store = conversationStore(),
   client = null,           // Supabase service client (null in memory-store tests without projects)
   provisiond = null,       // async (route, body) => void — preview/publish teardown; null = skip
+  reason = "delete_now",   // audit trail: delete_now | expired
 } = {}) {
-  const conversation = await store.getConversation(ownerId, conversationId);
+  // Cascade must reach soft-deleted conversations (purge runs after they are hidden).
+  const conversation = await store.getConversationIncludingDeleted(ownerId, conversationId);
   if (!conversation || conversation.owner !== ownerId) {
     const e = new Error("Project not found.");
     e.status = 404;
     return Promise.reject(e);
   }
-  const events = await store.listEvents(ownerId, conversationId, 0);
+  const events = await store.listEventsIncludingDeleted(ownerId, conversationId);
   const projectIds = projectIdsFromEvents(events);
 
   if (client) {
@@ -82,5 +86,29 @@ export async function deleteConversationCascade(ownerId, conversationId, {
   } catch (error) {
     throw step("conversation history", error);
   }
+  console.log(JSON.stringify({
+    audit: "project_permanent_delete", owner: ownerId, conversation: conversationId,
+    title: conversation.title || null, projects: projectIds, reason, at: new Date().toISOString(),
+  }));
   return { deleted: true, projects: projectIds.length };
+}
+
+// Background cleanup: permanently delete anything past its recovery window. Failures on one
+// conversation never block the rest; each purge is the same audited cascade as Delete Now.
+export async function purgeExpiredDeletedConversations({
+  store = conversationStore(), client = null, provisiond = null, days = RECOVERY_DAYS,
+} = {}) {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const expired = await store.listExpiredDeleted(cutoff);
+  const results = { purged: 0, failed: 0 };
+  for (const row of expired) {
+    try {
+      await deleteConversationCascade(row.owner, row.id, { store, client, provisiond, reason: "expired" });
+      results.purged += 1;
+    } catch (error) {
+      results.failed += 1;
+      console.error(`[cleanup] purge failed for ${row.id}: ${error.message}`);
+    }
+  }
+  return results;
 }

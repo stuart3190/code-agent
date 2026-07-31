@@ -270,3 +270,8 @@ button.ct-wordmark:hover { background: var(--surface-2); }
 .ct-project { position: relative; padding-right: 34px; }
 .ct-pdelete { position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; border-radius: 8px; color: var(--ink-3); font-size: 15px; line-height: 1; display: grid; place-items: center; }
 .ct-pdelete:hover { color: var(--bad); background: var(--surface-2); }
+.ct-recent-toggle { align-self: flex-start; color: var(--ink-3); font-size: 13px; padding: 4px 0; }
+.ct-recent-toggle:hover { color: var(--ink-2); }
+.ct-recent { cursor: default; opacity: 0.85; }
+.ct-recent-btn { font-size: 12.5px; padding: 5px 10px; flex-shrink: 0; }
+.ct-recent-danger:hover { color: var(--bad); }
