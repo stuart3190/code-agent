@@ -13,13 +13,43 @@ import { previewProvider } from "../../preview/index.mjs";
 // (Stuart, 2026-07-31: "a build should never claim success unless the preview is actually
 // visible"). Pure and unit-tested.
 export function buildEndSummary(result) {
-  if (result?.buildOk === false) {
-    return "The app is generated but its build check failed — I'll fix that if you say the word.";
-  }
   if (!result?.previewUrl) {
     return "Your app is built. The preview is still warming up — I'll drop it into this conversation the moment it's ready.";
   }
   return "Your app is built and the preview is live in this conversation.";
+}
+
+// Autonomous failure handling (Stuart, 2026-07-31): a failed build is UNFINISHED WORK, not
+// a reason to hand control back. This pure planner decides the relay's next move — repair
+// and re-verify without asking, retry crashed jobs, and only stop at genuine exhaustion.
+// Routine failures (build checks, runtime config, tests, verification) NEVER ask permission.
+export const MAX_AUTO_ROUNDS = 3;
+
+export function planEndAction(data, { attempt = 1, maxAttempts = MAX_AUTO_ROUNDS } = {}) {
+  if (data.status === "complete" && data.result?.buildOk !== false) {
+    return { kind: data.result?.previewUrl ? "verify" : "warmup" };
+  }
+  const reasons = data.status === "complete"
+    ? (data.result?.qualityWarnings?.length ? data.result.qualityWarnings : ["the build's quality checks failed"])
+    : [`the build ${data.status}${data.error ? `: ${String(data.error).slice(0, 200)}` : ""}`];
+  if (attempt < maxAttempts) {
+    const brief = [
+      "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
+      "apply the smallest safe fix for each; change nothing else:",
+      ...reasons.map((r) => `- ${r}`),
+      "",
+      "Preserve the existing design, layout, branding and component structure exactly.",
+    ].join("\n");
+    return {
+      kind: data.status === "complete" ? "repair" : "retry",
+      brief,
+      announcement: `The build check found a problem (${String(reasons[0]).slice(0, 140)}). I'm repairing it now and will re-run verification.`,
+    };
+  }
+  return {
+    kind: "blocked",
+    message: `I attempted ${maxAttempts} autonomous repair rounds and this still fails:\n${reasons.map((r) => `- ${r}`).join("\n")}\nThis looks like a genuine blocker beyond routine repair — I need a decision from you on how to proceed.`,
+  };
 }
 
 // Build phases → the specialist the user watches. Sequential: each phase change retires the
@@ -134,49 +164,43 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
       if (name === "end") {
         clearInterval(heartbeat);
         unsubscribe();
-        const ok = data.status === "complete" && data.result?.buildOk !== false;
-        await finishSpecialist(ok);
-        if (data.status === "complete") {
-          await persistBuildResult(ctx.owner, projectId, data.result);
-          if (data.result?.previewUrl) {
-            // Preview-first: the card appears the moment the preview exists, unprompted.
-            await ctx.emit("preview_ready", {
-              url: data.result.previewUrl,
-              projectId,
-              message: "Preview ready — take a look.",
-            });
-            if (data.result?.buildOk !== false) {
-              // The Verification Agent gate: completion is only announced after PASS.
-              runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt })
-                .catch((error) => console.error("[app-build] verification:", error.message));
-              return;
-            }
-          } else if (data.result?.buildOk !== false) {
-            // Cold starts can outlive provisiond's readiness window while the container
-            // keeps coming up — recover in the background and deliver the card late
-            // rather than lying now.
-            recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
-          }
-          const summary = buildEndSummary(data.result);
-          const text = `${summary}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
-          await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
-          await ctx.emit("message", { role: "lead", text, projectId });
-          notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
-            title: "Preview ready",
-            body: "Your app is built — take a look.",
-            url: data.result?.previewUrl || null,
-            tag: `build-${projectId}`,
-          }).catch(() => {});
-        } else {
-          const text = `The build ${data.status}${data.error ? `: ${String(data.error).slice(0, 300)}` : "."} Tell me to try again and I will.`;
-          await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
-          await ctx.emit("message", { role: "lead", text, projectId });
-          notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
-            title: "Build needs attention",
-            body: "The build didn't finish — open the conversation and I'll explain.",
-            tag: `build-${projectId}`,
-          }).catch(() => {});
+        const action = planEndAction(data, { attempt: verificationAttempt });
+        await finishSpecialist(action.kind === "verify" || action.kind === "warmup");
+        if (data.status === "complete") await persistBuildResult(ctx.owner, projectId, data.result);
+
+        if (action.kind === "verify") {
+          await ctx.emit("preview_ready", { url: data.result.previewUrl, projectId, message: "Preview ready — take a look." });
+          // The Verification Agent gate: completion is only announced after PASS.
+          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt })
+            .catch((error) => console.error("[app-build] verification:", error.message));
+          return;
         }
+        if (action.kind === "warmup") {
+          recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
+          const text = `${buildEndSummary(data.result)}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
+          await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
+          await ctx.emit("message", { role: "lead", text, projectId });
+          return;
+        }
+        if (action.kind === "repair" || action.kind === "retry") {
+          // Autonomous: announce briefly, fix, re-verify. Never ask permission for routine failures.
+          await sayProgress(action.announcement);
+          const { job: next } = await createJob({
+            owner: { id: ctx.owner }, projectId,
+            mode: action.kind === "repair" ? "iterate" : (job.mode || "build"),
+            prompt: action.kind === "repair" ? action.brief : job.prompt,
+          });
+          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: verificationAttempt + 1 });
+          return;
+        }
+        // Genuine exhaustion — the only point control returns to the user.
+        await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: action.message, payload: { jobId, projectId } });
+        await ctx.emit("message", { role: "lead", text: action.message, projectId });
+        notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
+          title: "Build needs a decision",
+          body: "Autonomous repair is exhausted — open the conversation.",
+          tag: `build-${projectId}`,
+        }).catch(() => {});
       }
     } catch (error) {
       console.error("[app-build] relay:", error.message);
@@ -227,7 +251,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     return;
   }
 
-  const text = `The build is up at the preview, but verification still fails after two repair rounds:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nTell me which to prioritise and I'll fix it with you.`;
+  const text = `I ran the full repair loop and verification still fails:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nThis is beyond routine repair — I need a decision from you on how to proceed.`;
   await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
   await ctx.emit("message", { role: "lead", text, projectId });
 }
@@ -254,7 +278,7 @@ async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 }
       }
     } catch { /* provider hiccup — keep polling */ }
   }
-  const text = "The preview couldn't be brought up automatically. Say “show me the preview” and I'll start it fresh.";
+  const text = "The preview infrastructure isn't responding after repeated automatic attempts — the build itself is fine, and I'll bring the preview up the moment the infrastructure recovers.";
   await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
   await ctx.emit("message", { role: "lead", text, projectId });
 }
