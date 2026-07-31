@@ -63,6 +63,19 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+THEME REPAIR (2026-07-31, PR #77, deployed + live-proven): after Stuart reported "light
+mode has disappeared" — investigation showed tokens/light-default were intact and nothing
+auto-darkens; the real gaps: theme applied only after the workspace mounted (flash +
+unthemed early surfaces), no System option, preference trapped in one browser's
+localStorage (a device that once picked Dark looked stuck-dark). Fixes: stored preference
+applies PRE-PAINT in main.jsx; Appearance selector = Light/Dark/System (same toggle row;
+System tracks OS live via matchMedia change listener); persistence = localStorage +
+account user_metadata `thrallo_theme` via auth.updateUser (fresh devices adopt the account
+preference when local is empty). e2e/theme-check.spec.mjs (in test:ui): light default even
+on dark OS, round-trips, live System tracking both directions, reload persistence,
+cross-device adoption, measured WCAG contrast of token pairs in BOTH themes; dark+light
+screenshot passes reviewed. Landing stays dark by design. 224 node + 18 Playwright.
+
 PRODUCTION POLISH PASS (2026-07-31, PR #75, deployed): full UX audit, no redesign — boot
 splash + skeletons (project cards, thread bubbles, SkeletonRows/useCopy in manage/shared)
 everywhere async renders; greeting no longer flashes (localStorage `thrallo-returning`);
