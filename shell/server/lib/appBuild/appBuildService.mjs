@@ -7,6 +7,20 @@
 import { serviceClient } from "../supabase.mjs";
 import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
 import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
+import { previewProvider } from "../../preview/index.mjs";
+
+// The end-of-build message NEVER claims a live preview unless a URL actually exists
+// (Stuart, 2026-07-31: "a build should never claim success unless the preview is actually
+// visible"). Pure and unit-tested.
+export function buildEndSummary(result) {
+  if (result?.buildOk === false) {
+    return "The app is generated but its build check failed — I'll fix that if you say the word.";
+  }
+  if (!result?.previewUrl) {
+    return "Your app is built. The preview is still warming up — I'll drop it into this conversation the moment it's ready.";
+  }
+  return "Your app is built and the preview is live in this conversation.";
+}
 
 // Build phases → the specialist the user watches. Sequential: each phase change retires the
 // previous specialist (✓) and spawns the next, so the team appears as work actually begins.
@@ -95,10 +109,13 @@ function relayBuildJob(ctx, { job, projectId }) {
               projectId,
               message: "Preview ready — take a look.",
             });
+          } else if (data.result?.buildOk !== false) {
+            // Cold starts can outlive provisiond's readiness window while the container
+            // keeps coming up — recover in the background and deliver the card late
+            // rather than lying now.
+            recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
           }
-          const summary = data.result?.buildOk === false
-            ? "The app is generated but its build check failed — I'll fix that if you say the word."
-            : "Your app is built and the preview is live in this conversation.";
+          const summary = buildEndSummary(data.result);
           const text = `${summary}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
           await ctx.emit("message", { role: "lead", text, projectId });
@@ -123,6 +140,67 @@ function relayBuildJob(ctx, { job, projectId }) {
       console.error("[app-build] relay:", error.message);
     }
   });
+}
+
+// Late preview recovery: the container often finishes warming up shortly after the build
+// relay ends. Poll the provider, and the moment a URL exists, deliver the card + an honest
+// follow-up. If it never comes up, say so — with the sentence that fixes it.
+async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 } = {}) {
+  for (let i = 0; i < attempts; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      const preview = await previewProvider().get(projectId);
+      if (preview?.url) {
+        await serviceClient().from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
+          .eq("id", projectId).eq("owner", ctx.owner);
+        await ctx.emit("preview_ready", { url: preview.url, projectId, message: "Preview ready — take a look." });
+        const text = "Here's the preview — it needed a moment to warm up.";
+        await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
+        await ctx.emit("message", { role: "lead", text, projectId });
+        notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
+          title: "Preview ready", body: "Your app's preview is up — take a look.", url: preview.url, tag: `build-${projectId}`,
+        }).catch(() => {});
+        return;
+      }
+    } catch { /* provider hiccup — keep polling */ }
+  }
+  const text = "The preview couldn't be brought up automatically. Say “show me the preview” and I'll start it fresh.";
+  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
+  await ctx.emit("message", { role: "lead", text, projectId });
+}
+
+// show_preview capability backing: (re)provision the preview for a project from its stored
+// tree — heals reaped containers, warm-up timeouts, and old conversations alike.
+export async function showPreview(ctx, { productName = null } = {}) {
+  const client = serviceClient();
+  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
+    .eq("owner", ctx.owner).not("tree", "is", null)
+    .order("updated_at", { ascending: false }).limit(1);
+  if (productName) {
+    const { data: product } = await client.from("ca_products")
+      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
+    if (product) query = query.eq("product_id", product.id);
+  }
+  const { data } = await query;
+  const project = data?.[0];
+  if (!project) {
+    const error = new Error("There's no built app to preview yet — ask me to build something first.");
+    error.code = "nothing_to_preview";
+    throw error;
+  }
+  await ctx.emit("agent_spawned", { agent: "Publisher", status: "Bringing the preview up…" });
+  try {
+    const preview = await previewProvider().start(project.id, project.tree);
+    if (!preview?.url) throw new Error("The preview service returned no address.");
+    await client.from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
+      .eq("id", project.id).eq("owner", ctx.owner);
+    await ctx.emit("agent_done", { agent: "Publisher", ok: true });
+    await ctx.emit("preview_ready", { url: preview.url, projectId: project.id, message: "Preview ready — take a look." });
+    return { url: preview.url, projectId: project.id, note: "The preview card is in the conversation — do not repeat the URL." };
+  } catch (error) {
+    await ctx.emit("agent_done", { agent: "Publisher", ok: false });
+    throw error;
+  }
 }
 
 async function persistBuildResult(owner, projectId, result) {
