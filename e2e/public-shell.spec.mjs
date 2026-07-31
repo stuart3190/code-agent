@@ -22,6 +22,15 @@ test("Thrallo landing page is usable without horizontal overflow", async ({ page
   expect(browserErrors).toEqual([]);
 });
 
+test("the on-demand TLS ask gate is mounted and answers with its own JSON shape", async ({ request }) => {
+  // 404 {ok:false} = the gate ran and refused; the generic no-route error means the
+  // dispatch block is missing (this exact regression shipped once — never again).
+  const response = await request.get("/api/domain-check?domain=nosuch.preview.thrallo.com");
+  expect(response.status()).toBe(404);
+  const body = await response.json();
+  expect(body).toEqual({ ok: false });
+});
+
 test("public shell sends hardened headers and reports runtime setup honestly", async ({ request }) => {
   const page = await request.get("/");
   expect(page.ok()).toBeTruthy();
