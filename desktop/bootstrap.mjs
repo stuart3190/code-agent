@@ -66,6 +66,35 @@ export async function ensureCheckout({ log = console.log } = {}) {
 }
 
 // The overlay hash covers everything prepare() writes, so any change re-applies cleanly.
+// The builtin extension mirrors editor/vscode VERBATIM. Runs at prepare AND before every
+// dev/compile/package (the prepare marker hashes the COMMITTED tree, so uncommitted
+// extension work would otherwise never reach the builtin).
+export function syncBuiltin({ log = console.log } = {}) {
+  const builtinDir = path.join(CHECKOUT_DIR, "extensions", "thrallo");
+  rmSync(builtinDir, { recursive: true, force: true });
+  cpSync(path.join(REPO_ROOT, "editor", "vscode"), builtinDir, {
+    recursive: true,
+    filter: (source) => !/thrallo-.*\.vsix$/.test(source) && !source.includes("node_modules"),
+  });
+  log("built-in extension copied to extensions/thrallo");
+  // The copy just wiped media/app — the web bundle must always ride along.
+  syncWebApp({ log });
+}
+
+// Phase 23: the conversation surface is the SAME built web bundle the product ships —
+// copied into the builtin extension as media/app. Runs at prepare AND before every
+// dev/compile/package so a fresh `npm run build:web` always reaches the desktop.
+export function syncWebApp({ log = console.log } = {}) {
+  const dist = path.join(REPO_ROOT, "shell", "web", "dist");
+  if (!existsSync(path.join(dist, "index.html"))) {
+    throw new Error("shell/web/dist is missing — run `npm run build:web` before building the desktop");
+  }
+  const target = path.join(CHECKOUT_DIR, "extensions", "thrallo", "media", "app");
+  rmSync(target, { recursive: true, force: true });
+  cpSync(dist, target, { recursive: true, filter: (source) => !/[\\/]design([\\/]|$)/.test(path.relative(dist, source)) });
+  log("web bundle synced into extensions/thrallo/media/app");
+}
+
 export function overlayHash() {
   const hash = createHash("sha256");
   hash.update(readFileSync(path.join(DESKTOP_DIR, "product.overrides.json")));
@@ -122,13 +151,7 @@ export async function prepare({ log = console.log } = {}) {
     log("patched build/lib/copilot.ts to tolerate the removed builtin");
   }
 
-  const builtinDir = path.join(CHECKOUT_DIR, "extensions", "thrallo");
-  rmSync(builtinDir, { recursive: true, force: true });
-  cpSync(path.join(REPO_ROOT, "editor", "vscode"), builtinDir, {
-    recursive: true,
-    filter: (source) => !/thrallo-.*\.vsix$/.test(source) && !source.includes("node_modules"),
-  });
-  log("built-in extension copied to extensions/thrallo");
+  syncBuiltin({ log });
 
   writeFileSync(markerPath, `${expected}\n`);
   log("prepare complete");
