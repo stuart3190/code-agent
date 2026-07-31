@@ -14,7 +14,7 @@ test("the end-of-build summary never claims a preview that does not exist", () =
   assert.match(buildEndSummary({ buildOk: true, previewUrl: "https://x.preview.thrallo.com/" }), /preview is live/);
   assert.match(buildEndSummary({ buildOk: true, previewUrl: null }), /warming up/);
   assert.doesNotMatch(buildEndSummary({ buildOk: true, previewUrl: null }), /preview is live/);
-  assert.match(buildEndSummary({ buildOk: false, previewUrl: null }), /build check failed/);
+  // buildOk:false no longer reaches the user directly — planEndAction routes it to repair.
   assert.doesNotMatch(buildEndSummary(undefined), /preview is live/);
 });
 
@@ -93,4 +93,44 @@ test("repair_app and show_preview are registered capabilities", () => {
     process.env.PROVISIOND_TOKEN = saved.t ?? ""; if (!saved.t) delete process.env.PROVISIOND_TOKEN;
     process.env.OPENAI_API_KEY = saved.k ?? ""; if (!saved.k) delete process.env.OPENAI_API_KEY;
   }
+});
+
+// Autonomous failure handling (Stuart, 2026-07-31): failures auto-repair without asking;
+// completion only after verification; genuine exhaustion is the only pause point.
+import { planEndAction, buildEndSummary as summaryFn, MAX_AUTO_ROUNDS } from "../../shell/server/lib/appBuild/appBuildService.mjs";
+
+const BANNED = /say the word|would you like|tell me to (continue|try again)|if you say/i;
+
+test("a failed build automatically enters repair — no permission question", () => {
+  const action = planEndAction({ status: "complete", result: { buildOk: false, qualityWarnings: ["auth configuration invalid"] } }, { attempt: 1 });
+  assert.equal(action.kind, "repair");
+  assert.match(action.brief, /auth configuration invalid/);
+  assert.match(action.brief, /smallest safe fix/);
+  assert.match(action.announcement, /repairing it now and will re-run verification/i);
+  assert.doesNotMatch(action.announcement, BANNED);
+  assert.ok(!action.announcement.includes("?"), "routine repair must not ask");
+});
+
+test("a crashed job automatically retries", () => {
+  const action = planEndAction({ status: "failed", error: "sandbox died" }, { attempt: 1 });
+  assert.equal(action.kind, "retry");
+  assert.doesNotMatch(action.announcement, BANNED);
+});
+
+test("repair is followed by re-verification: success routes to the verify gate, never straight to complete", () => {
+  const action = planEndAction({ status: "complete", result: { buildOk: true, previewUrl: "https://x/" } }, { attempt: 2 });
+  assert.equal(action.kind, "verify", "completion is only reachable through the Verification Agent");
+});
+
+test("genuine exhaustion pauses and requests input — the only pause point", () => {
+  const action = planEndAction({ status: "complete", result: { buildOk: false, qualityWarnings: ["persistent failure"] } }, { attempt: MAX_AUTO_ROUNDS });
+  assert.equal(action.kind, "blocked");
+  assert.match(action.message, /need a decision from you/);
+});
+
+test("no user-facing builder copy contains banned permission-asking phrases", () => {
+  assert.doesNotMatch(summaryFn({ buildOk: true, previewUrl: null }), BANNED);
+  assert.doesNotMatch(summaryFn({ buildOk: true, previewUrl: "https://x/" }), BANNED);
+  const repair = planEndAction({ status: "complete", result: { buildOk: false, qualityWarnings: ["x"] } }, { attempt: 1 });
+  assert.doesNotMatch(repair.brief, BANNED);
 });
