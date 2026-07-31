@@ -7,6 +7,30 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 22 (v2) — publish, domains, notifications, automations as conversation — is live and
+proven (2026-07-30/31): `appBuild/appPublishService.mjs` (lean conversational publish:
+unique slug collision-checked against the shared publish root, real production build, ship
+to Thrallo provisiond, `published_sites` record) + `connectDomain` (custom_domains row +
+provisiond symlink; ask gate approves the domain immediately, A-record instructions
+returned). `notifications/`: dependency-free web push (RFC 8291 aes128gcm + RFC 8292 VAPID
+ES256 — proven by receiver-side decryption in tests), Resend email adapter dormant until
+`THRALLO_RESEND_KEY`, `notifyOwnerIfAway` skips channels while anyone streams the
+conversation; wired to preview_ready/build-failure/question_asked/publish. Capabilities
+`publish` / `configure_domain` / `create_automation` registered (registry only). Ask gate +
+`ops/Caddyfile.unified` extended for `*.app.thrallo.com` (on-demand certs) + Thrallo custom
+domains. Shell renders `published` receipts; settings sheet has the single notifications
+row; `public/sw.js`. Migration `app_publish_platform` applied; backups extended. LIVE
+PROOF: "Publish this, please." in the FocusFlow conversation → Publisher choreography
+(Building → Uploading → Going live) → **https://focusflow.app.thrallo.com/ HTTP 200, LE
+cert minted on demand**; "Every week, check…" → Lead Agent created a real scheduled_task
+automation via create_automation (deleted after proof so it never spends unattended);
+notifications config live (webpush on, VAPID keys in prod env; email off pending Resend
+key). OPS NOTE: `docker restart buildr-caddy` can fail on a reaped preview network — the
+fix IS the P19 design: restart `thrallo-provisiond`, whose boot ensureCaddy rm-f's and
+re-raises the front byte-identically (proven live; ~30s outage). PRs #49/#50, verify
+191/191 + 8/8. **Awaiting Stuart's Phase 22 review before Phase 23 (desktop conversation
+surface) and Phase 24 (Buildr101 retirement).**
+
 Phase 21 (v2) — the conversation-first production UI — is live at https://app.thrallo.com/
 (the console is preserved at /console during the transition; /design keeps the wireframes):
 `shell/web/src/chat/` — ChatShell (Begin → thread → living rail with preview dominance →
@@ -280,10 +304,10 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 22 (v2 roadmap): publish, deploy, and automations as conversation — publish
-capability to `*.app.thrallo.com` (approval-gated), custom domains, notifications.
-**Blocked on Stuart's Phase 21 production UI review — per-phase gates are standing
-policy.** Roadmap substitutions require asking Stuart first.
+Phase 23 (v2 roadmap): the desktop client adopts the conversation surface (builtin
+extension hosting the Phase 21 bundle; packaging only after Stuart approves). Then Phase 24:
+Buildr101 retirement in strict ops order. **Blocked on Stuart's Phase 22 review — per-phase
+gates are standing policy.** Roadmap substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
