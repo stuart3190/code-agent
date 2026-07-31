@@ -279,7 +279,8 @@ export async function showPreview(ctx, { productName = null } = {}) {
   }
   await ctx.emit("agent_spawned", { agent: "Publisher", status: "Bringing the preview up…" });
   try {
-    const preview = await previewProvider().start(project.id, project.tree);
+    const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
+    const preview = await previewProvider().start(project.id, withRuntimeEnv(project.tree, project.id));
     if (!preview?.url) throw new Error("The preview service returned no address.");
     await client.from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
       .eq("id", project.id).eq("owner", ctx.owner);

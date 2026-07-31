@@ -108,7 +108,8 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
     await ensureDeps(() => {});
     const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const build = await buildTree(project.tree, caseName, () => {});
+    const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
+    const build = await buildTree(withRuntimeEnv(project.tree, project.id), caseName, () => {});
     if (!build.ok) {
       const error = new Error("The production build failed — I can fix the app and retry.");
       error.code = "build_failed";
