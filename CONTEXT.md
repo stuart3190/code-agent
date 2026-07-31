@@ -63,6 +63,21 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PRODUCTION POLISH PASS (2026-07-31, PR #75, deployed): full UX audit, no redesign — boot
+splash + skeletons (project cards, thread bubbles, SkeletonRows/useCopy in manage/shared)
+everywhere async renders; greeting no longer flashes (localStorage `thrallo-returning`);
+Escape closes the delete modal + focus lands on Cancel + aria-modal on all dialogs;
+command palette is fully keyboard-driven — two real bugs found by its e2e test: rapid
+keystrokes raced React state (ref-backed selection `selRef`) and opening under the cursor
+let a phantom mouseenter steal selection (mousemove-based highlight, :hover rule removed);
+:focus-visible outlines, aria-live toast, aria-pressed toggles, Space on cards,
+prefers-reduced-motion; mobile 32px touch targets (pointer:coarse), grab-handle hit area,
+no autofocus on touch (FINE_POINTER), placeholder ellipsis, days-remaining never
+truncates; failed sends restore the draft (send() returns boolean, composer refills),
+double-submit guard (sendingRef), "Copied ✓" feedback, document.title follows the open
+project. e2e/polish-shots.spec.mjs = screenshot pass (SHOTS=1, skipped in CI). 224 node +
+14 Playwright.
+
 PROJECT DELETION + 7-DAY RECOVERY (2026-07-31, PRs #71/#72/#73, deployed + live-proven):
 Home cards carry an X → confirm modal → SOFT delete (`ca_conversations.deleted_at`,
 migration `soft_delete`): the project leaves Home instantly, keeps all data, and every
