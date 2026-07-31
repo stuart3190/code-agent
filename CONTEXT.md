@@ -7,6 +7,24 @@ implementation emphases + platform architecture) is the source of truth for ever
 implementation decision; the roadmap lives in `Desktop\Thrallo_V2_Roadmap.md`. Phases run
 with a Stuart approval gate at the end of each.
 
+Phase 23 (v2) — Thrallo Desktop adopts the conversation surface — is built and
+smoke-proven (2026-07-31): the desktop's primary view is the SAME built web bundle as
+app.thrallo.com, hosted by the builtin extension in a webview running in desktop mode
+(`editor/vscode/lib/conversationPanel.js` — asset-URI rewrite, strict CSP with a nonce for
+the injected bootstrap, `window.__THRALLO_DESKTOP__` = {server, PAT}); it auto-opens on
+startup in the Thrallo fork only, shows a one-action connect prompt without a token, and
+re-renders on reveal after connecting. Desktop-mode seams in the web bundle are inert on
+the web (accessToken → injected PAT, apiBase prefix, synthesized session). CORS now allows
+VS Code webview origins (bearer-only API — verified live with a preflight). Build plumbing:
+`syncBuiltin`+`syncWebApp` run before every dev/compile/package and always travel together
+(the prepare marker hashes the COMMITTED tree — uncommitted extension work never reached
+the builtin otherwise; the builtin copy wipes media/app). Desktop smoke has a STRICT sixth
+check (the Begin screen must render inside the webview; connect-prompt-only fails) — dev
+build passed 6/6 against live production. Three real defects found via that loop: CSP
+blocking the inline bootstrap (nonce), stale builtin, wiped bundle. PRs #51/#52, verify
+194/194 + 8/8 + smoke 6/6. **NO PACKAGING — awaiting Stuart's Phase 23 desktop review;
+then Phase 24 (Buildr101 retirement, strict ops order).**
+
 Phase 22 (v2) — publish, domains, notifications, automations as conversation — is live and
 proven (2026-07-30/31): `appBuild/appPublishService.mjs` (lean conversational publish:
 unique slug collision-checked against the shared publish root, real production build, ship
@@ -304,10 +322,13 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
 
 ## Next implementation slice
 
-Phase 23 (v2 roadmap): the desktop client adopts the conversation surface (builtin
-extension hosting the Phase 21 bundle; packaging only after Stuart approves). Then Phase 24:
-Buildr101 retirement in strict ops order. **Blocked on Stuart's Phase 22 review — per-phase
-gates are standing policy.** Roadmap substitutions require asking Stuart first.
+Phase 24 (v2 roadmap): Buildr101 retirement + cleanup in strict ops order (1 [Stuart] stop
+the Meta ad → 2 [Stuart] audit/cancel live Stripe subs + disable webhook → 3 final Supabase
+export → 4 freeze published apps → 5 Caddy reboot test → 6 stop buildr-* services → 7
+retire UptimeRobot/Resend/email routing), then repo cleanup (unmount legacy routes, delete
+orphaned Buildr UI + /console, prune src/, rewrite docs). Desktop packaging also awaits the
+Phase 23 gate. **Blocked on Stuart's Phase 23 desktop review — per-phase gates are standing
+policy.** Roadmap substitutions require asking Stuart first.
 
 User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flipping paid plans
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
