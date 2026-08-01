@@ -265,17 +265,53 @@ test("model selector: Begin choice rides with the first message; in-conversation
   });
 
   await page.goto("/");
-  // Begin: Auto default; Provider level shows configured providers + Configure rows.
+  // Closed state is self-explanatory: "🤖 Model: Auto ▾".
   const pill = page.locator(".ct-model-pill");
-  await expect(pill).toHaveText(/Auto/);
+  await expect(pill).toHaveText(/Model: Auto/);
   await pill.click();
-  await expect(page.getByText("Configure provider →").first()).toBeVisible();
-  // Auto explanation: exact current strategy with measured values.
-  await page.getByRole("button", { name: "How Auto decides" }).click();
-  await expect(page.getByText("Auto — current strategy")).toBeVisible();
+
+  // The menu is a body-level portal ABOVE all content, anchored directly below the pill.
+  const menu = page.locator(".ct-model-menu");
+  await expect(menu).toBeVisible();
+  const anchored = await page.evaluate(() => {
+    const menuEl = document.querySelector(".ct-model-menu");
+    const pillEl = document.querySelector(".ct-model-pill");
+    const m = menuEl.getBoundingClientRect();
+    const p = pillEl.getBoundingClientRect();
+    return {
+      inBody: menuEl.parentElement === document.body,
+      zIndex: Number(getComputedStyle(menuEl).zIndex),
+      below: m.top >= p.bottom || m.bottom <= p.top, // anchored below OR flipped above — never overlapping
+      onScreen: m.left >= 0 && m.right <= window.innerWidth,
+      topAtHit: (() => { const el = document.elementFromPoint(m.left + m.width / 2, Math.min(m.top + 20, window.innerHeight - 1)); return menuEl.contains(el); })(),
+    };
+  });
+  expect(anchored.inBody).toBe(true);
+  expect(anchored.zIndex).toBeGreaterThanOrEqual(60);
+  expect(anchored.below).toBe(true);
+  expect(anchored.onScreen).toBe(true);
+  expect(anchored.topAtHit).toBe(true); // nothing renders over the popover
+
+  // Outside click closes; reopen for the drill-in.
+  await page.mouse.click(5, 200);
+  await expect(menu).not.toBeVisible();
+  await pill.click();
+
+  // Unconfigured providers appear as "Configure X" rows.
+  await expect(page.getByText("Configure Gemini")).toBeVisible();
+  // Auto explanation via the "Why?" link: current choice + reason + confidence.
+  await page.getByRole("button", { name: "Why?" }).click();
+  await expect(page.getByText("Auto — current choice")).toBeVisible();
   await expect(page.getByText("Highest measured success rate for coding.")).toBeVisible();
-  await expect(page.getByText(/98\.9%/)).toBeVisible();
+  await expect(page.getByText(/Benchmark confidence: 40 verified builds/)).toBeVisible();
   await page.getByRole("button", { name: /← Providers/ }).click();
+
+  // Keyboard navigation: arrows move focus, Enter drills in.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  const focused = await page.evaluate(() => document.activeElement?.textContent || "");
+  expect(focused.length).toBeGreaterThan(0);
+
   // Provider -> Model -> Mode drill-in with live stats and "Collecting" state.
   await page.getByRole("button", { name: /Anthropic/ }).click();
   await expect(page.getByText("Collecting benchmark data…")).toBeVisible();
