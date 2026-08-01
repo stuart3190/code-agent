@@ -51,6 +51,17 @@ export function xaiModelMeta(model) {
   return XAI_MODELS[model] || null;
 }
 
+// Provider self-description for the model selector (see openAIProviderMeta).
+export const xaiProviderMeta = () => ({
+  id: "xai",
+  name: "xAI / Grok",
+  models: Object.entries(XAI_MODELS)
+    .filter(([id]) => xaiPolicy().permittedModels.has(id))
+    .map(([id, meta]) => ({ id, tier: meta.tier })),
+  supportedModes: ["fast", "balanced", "deep", "cheapest", "max_quality"],
+  modeMap: { fast: { reasoningEffort: "low" }, balanced: { reasoningEffort: "medium" }, deep: { reasoningEffort: "high" }, cheapest: { reasoningEffort: "low" }, max_quality: { reasoningEffort: "high" } },
+});
+
 export function xaiConfigured() {
   return Boolean(optionalEnv("XAI_API_KEY"));
 }

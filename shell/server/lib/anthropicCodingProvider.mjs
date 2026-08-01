@@ -1,6 +1,20 @@
 import { createAnthropicProvider } from "../../../src/providers/anthropicProvider.mjs";
 import { optionalEnv } from "./env.mjs";
 
+// Provider self-description for the model selector (see openAIProviderMeta). Anthropic's
+// adapter has no reasoning-effort knob here, so deep/max-quality map to the quality tier.
+export const anthropicProviderMeta = () => ({
+  id: "anthropic",
+  name: "Anthropic",
+  models: [
+    { id: optionalEnv("ANTHROPIC_QUALITY_MODEL", "claude-opus-5"), tier: "quality" },
+    { id: optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5"), tier: "balanced" },
+    { id: optionalEnv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5"), tier: "fast" },
+  ],
+  supportedModes: ["fast", "balanced", "deep", "cheapest", "max_quality"],
+  modeMap: { fast: {}, balanced: {}, deep: { tierHint: "quality" }, cheapest: { tierHint: "fast" }, max_quality: { tierHint: "quality" } },
+});
+
 export function anthropicConfigured() {
   return !!optionalEnv("ANTHROPIC_API_KEY");
 }

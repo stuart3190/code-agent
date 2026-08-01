@@ -7,7 +7,12 @@ process.env.CODE_AGENT_STORE = "memory";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { selectableModels, validateModelChoice, resolveConversationModel } from "../../shell/server/lib/modelSelector.mjs";
+import {
+  selectableModels, validateModelChoice, resolveConversationModel,
+  parseModelPref, formatModelPref, modesForProvider, mapModeForProvider,
+  modelStats, autoStrategy, MODES, STATS_MIN_SAMPLES,
+} from "../../shell/server/lib/modelSelector.mjs";
+import { providerOptionsForMode } from "../../shell/server/lib/modelRouting.mjs";
 import { MemoryConversationStore } from "../../shell/server/lib/conversationStore.mjs";
 import { postUserMessage } from "../../shell/server/lib/leadAgentService.mjs";
 
@@ -91,6 +96,84 @@ test("automatic fallback only occurs when enabled — never silently", () => {
   });
   assert.equal(healthy.requested, "openai:gpt-5.6-terra");
   assert.equal(healthy.warning, null);
+});
+
+test("providers and models load dynamically from adapter metadata (no hardcoded UI list)", () => {
+  const catalog = selectableModels({ credentials: [{ provider: "anthropic" }] });
+  const ids = catalog.providers.map((p) => p.id);
+  assert.deepEqual(ids.slice(0, 1), ["auto"], "Auto first");
+  for (const id of ["openai", "anthropic", "gemini", "xai"]) assert.ok(ids.includes(id), `${id} present`);
+  const anthropic = catalog.providers.find((p) => p.id === "anthropic");
+  assert.equal(anthropic.available, true);
+  assert.ok(anthropic.models.length >= 2, "models come from the adapter meta");
+  const gemini = catalog.providers.find((p) => p.id === "gemini");
+  assert.equal(gemini.available, false);
+  assert.equal(gemini.configure, true, "unconfigured -> Configure provider, never selectable");
+  // Env-config change flows straight into the catalog — no code change for new models.
+  process.env.OPENAI_BALANCED_MODEL = "gpt-9.9-nova";
+  const updated = selectableModels({ credentials: [] });
+  assert.ok(updated.providers.find((p) => p.id === "openai").models.some((m) => m.id === "gpt-9.9-nova"));
+  delete process.env.OPENAI_BALANCED_MODEL;
+});
+
+test("modes: full vocabulary, per-provider support, unsupported modes map to closest", () => {
+  assert.deepEqual(MODES.map((m) => m.id), ["fast", "balanced", "deep", "cheapest", "max_quality"]);
+  assert.ok(modesForProvider("openai").some((m) => m.id === "deep"));
+  assert.equal(modesForProvider("gemini").some((m) => m.id === "deep"), false, "unsupported mode hidden for gemini");
+  // Adapter mapping: openai deep -> high reasoning effort; xai fast -> low.
+  assert.equal(mapModeForProvider("openai", "deep").reasoningEffort, "high");
+  assert.equal(mapModeForProvider("xai", "fast").reasoningEffort, "low");
+  // Routing-layer options never leak tier hints into provider constructors.
+  assert.deepEqual(providerOptionsForMode("anthropic", "deep"), {}, "tierHint stripped — steering happens in tier selection");
+  assert.equal(providerOptionsForMode("openai", "deep").reasoningEffort, "high");
+  // Validation coerces an unsupported mode to balanced instead of storing nonsense.
+  process.env.GEMINI_API_KEY = "AIza-test-000000000000";
+  const catalog = selectableModels({ credentials: [{ provider: "gemini" }] });
+  const geminiModel = catalog.options.find((o) => o.provider === "gemini");
+  const stored = validateModelChoice(catalog, `${geminiModel.value}#deep`);
+  assert.equal(stored, geminiModel.value, "gemini has no deep mode -> falls back to balanced (no suffix)");
+  delete process.env.GEMINI_API_KEY;
+});
+
+test("preference format round-trips provider, model and mode", () => {
+  assert.deepEqual(parseModelPref("auto"), { value: "auto", mode: "balanced" });
+  assert.deepEqual(parseModelPref("openai:gpt-5.6-terra#deep"), { value: "openai:gpt-5.6-terra", mode: "deep" });
+  assert.equal(formatModelPref("openai:gpt-5.6-terra", "deep"), "openai:gpt-5.6-terra#deep");
+  assert.equal(formatModelPref("openai:gpt-5.6-terra", "balanced"), "openai:gpt-5.6-terra");
+  const catalog = selectableModels({ credentials: [] });
+  const openai = catalog.options.find((o) => o.provider === "openai");
+  assert.equal(validateModelChoice(catalog, `${openai.value}#deep`), `${openai.value}#deep`);
+  const resolved = resolveConversationModel({ model_pref: `${openai.value}#deep` }, catalog);
+  assert.equal(resolved.requested, openai.value);
+  assert.equal(resolved.mode, "deep", "mode reaches the routing policy");
+});
+
+test("benchmark stats aggregate from real telemetry and gate on sample count", async () => {
+  const rows = [];
+  for (let i = 0; i < 6; i += 1) {
+    rows.push({ model: "gpt-5.6-terra", status: i === 0 ? "failed" : "passed", duration_ms: 30_000, totals: { cost: 1.2 }, repair_rounds: i === 0 ? 2 : 0 });
+  }
+  rows.push({ model: "grok-4.5", status: "passed", duration_ms: 20_000, totals: { cost: 0.5 }, repair_rounds: 0 });
+  const fakeDb = { from: () => ({ select: () => ({ order: () => ({ limit: async () => ({ data: rows }) }) }) }) };
+  const stats = await modelStats({ client: fakeDb });
+  const terra = stats["gpt-5.6-terra"];
+  assert.equal(terra.samples, 6);
+  assert.equal(terra.successRate, Number(((5 / 6) * 100).toFixed(1)));
+  assert.equal(terra.avgCostCredits, 1.2);
+  assert.equal(terra.avgDurationMs, 30_000);
+  assert.ok(stats["grok-4.5"].collecting, `under ${STATS_MIN_SAMPLES} samples -> "Collecting benchmark data"`);
+});
+
+test("Auto explanation reflects the real routing decision and measured stats", () => {
+  const stats = { "gpt-5.6-sol": { successRate: 98.9, samples: 40, avgCostCredits: 1.1, avgDurationMs: 38_000, avgRepairRounds: 0.2 } };
+  const strategy = autoStrategy({ credential: { provider: "managed" }, routing: { routingMode: "balanced" }, stats: {} });
+  assert.ok(strategy.provider && strategy.model, "explains a concrete provider+model");
+  assert.equal(strategy.mode, "balanced");
+  assert.match(strategy.reason, /telemetry is still collecting/i, "honest before data exists");
+  const measured = autoStrategy({ credential: { provider: "managed" }, routing: { routingMode: "quality" }, stats });
+  if (measured.model === "gpt-5.6-sol") {
+    assert.match(measured.reason, /98\.9% verified/, "measured reason quotes real telemetry");
+  }
 });
 
 test("model usage flows into routing accounting with the requested model", async () => {

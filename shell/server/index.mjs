@@ -601,8 +601,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/v1/models" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      const { selectableModelsForOwner } = await import("./lib/modelSelector.mjs");
-      return sendJson(res, 200, await selectableModelsForOwner(owner.id));
+      const { modelSelectorPayload } = await import("./lib/modelSelector.mjs");
+      return sendJson(res, 200, await modelSelectorPayload(owner.id));
     }
     const conversationModelMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/model$/i);
     if (conversationModelMatch && method === "POST") {
