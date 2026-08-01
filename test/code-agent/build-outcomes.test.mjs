@@ -163,3 +163,22 @@ test("analytics never carry prompt text or user identifiers", async () => {
   const serialised = JSON.stringify(outcomes);
   assert.doesNotMatch(serialised, /owner|email|prompt|user_id/i, "aggregate output is anonymous");
 });
+
+test("a build's outcome window ends when the next build begins", () => {
+  // Superseded builds are settled immediately — the user moved on to new work, so later
+  // messages must not be counted against the earlier build.
+  const superseded = deriveOutcome({
+    run: run({ id: "early" }), signals: [], followUps: 1,
+    lastActivityAt: new Date(Date.now() - 90 * 60_000).toISOString(), superseded: true,
+  });
+  assert.equal(superseded.settled, true, "a later build settles this one");
+  assert.equal(superseded.accepted, true, "verified, kept, few follow-ups inside its own window");
+  assert.equal(superseded.followUps, 1, "only the follow-ups inside the window are counted");
+
+  // Without that windowing, a long session would make every early build look abandoned.
+  const active = deriveOutcome({
+    run: run({ id: "latest" }), signals: [], followUps: 0,
+    lastActivityAt: new Date().toISOString(), superseded: false,
+  });
+  assert.equal(active.settled, false, "the current build is still in play");
+});
