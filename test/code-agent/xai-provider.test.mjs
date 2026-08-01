@@ -72,7 +72,20 @@ test("admin policy: enable/disable, per-agent gating, model allowlist, reasoning
   assert.notEqual(xaiReasoningForTask("full_build"), "low");
 });
 
-test("smart routing respects configuration and admin restrictions", () => {
+// Both routing tests below compare Grok against another configured provider, so they must
+// supply that provider themselves. Relying on the ambient environment made them pass on a
+// developer box (shell/.env carries a real OPENAI_API_KEY) and fail in CI, where xAI was
+// the ONLY configured provider and therefore sorted first quite correctly.
+function withPlatformOpenAI(body) {
+  const previous = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "sk-test-platform-000000000000";
+  try { return body(); } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
+}
+
+test("smart routing respects configuration and admin restrictions", () => withPlatformOpenAI(() => {
   // Not configured -> grok never appears.
   delete process.env.XAI_API_KEY;
   const withoutKey = routeCandidates({ credential: { provider: "managed" }, policy: { routingMode: "balanced" } });
@@ -86,18 +99,24 @@ test("smart routing respects configuration and admin restrictions", () => {
   // Configured + enabled -> grok joins the pool without displacing the default.
   const enabled = routeCandidates({ credential: { provider: "managed" }, policy: { routingMode: "balanced" } });
   assert.equal(enabled.some((c) => c.provider === "xai"), true);
+  // The precondition, asserted rather than assumed: a rival provider is in the pool, so
+  // "grok is not first" is a statement about ranking and not about an empty catalog.
+  assert.ok(enabled.some((c) => c.provider !== "xai"), "another provider is configured to rank against");
   assert.notEqual(enabled[0].provider, "xai", "grok is never the assumed default");
   // BYOK xai credential -> only their grok connection is used.
   const byok = routeCandidates({ credential: { provider: "xai", secret: "xai-k" }, policy: {} });
   assert.equal(byok.length, 1);
   assert.equal(byok[0].provider, "xai");
   delete process.env.XAI_API_KEY;
-});
+}));
 
 test("provider fallback works and failed requests record zero usage (no duplicate charges)", async () => {
   const attempts = [];
   const fakeStore = { recordAttempt: async (_o, row) => { attempts.push(row); }, listRecentAttempts: async () => [] };
   process.env.XAI_API_KEY = "xai-test-key-000000000000";
+  // Fallback needs a provider to fall off: OpenAI must be in the pool and ranked first.
+  const previousOpenAI = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "sk-test-platform-000000000000";
   const factory = (candidate) => ({
     turn: async () => {
       if (candidate.provider === "openai") {
@@ -121,6 +140,8 @@ test("provider fallback works and failed requests record zero usage (no duplicat
   const success = attempts.filter((a) => a.status === "success");
   assert.equal(success.length, 1, "exactly one billable success recorded");
   delete process.env.XAI_API_KEY;
+  if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY;
+  else process.env.OPENAI_API_KEY = previousOpenAI;
 });
 
 test("adapter: usage normalization, internal retry bills once, cancellation stops generation", async () => {
