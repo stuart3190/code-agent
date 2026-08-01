@@ -133,6 +133,14 @@ test("export, publish and checkpoint restore each produce their signal", async (
     "a failed safety check must not record a successful export");
   assert.match(exportFn, /signalBuildOutcome\([^)]*\)\.catch\(\(\) => \{\}\)/s, "must be fire-and-forget");
 
+  // BOTH export entry points must record. A live production export proved that wiring only the
+  // capability under-counted: /api/export goes through routes/export.mjs and recorded nothing.
+  const exportRoute = await read("../../shell/server/routes/export.mjs");
+  assert.match(exportRoute, /signal: "exported"/,
+    "the HTTP export route must record too — it does not go through the capability");
+  assert.ok(exportRoute.indexOf("assertNoPlatformSecrets") < exportRoute.indexOf('signal: "exported"'),
+    "the route must also record only after the safety check passes");
+
   // deployed — only after the site is actually serving.
   assert.match(publish, /signal: "deployed"/);
   const publishFn = publish.slice(publish.indexOf("export async function publishApp"), publish.indexOf("export async function connectDomain"));
