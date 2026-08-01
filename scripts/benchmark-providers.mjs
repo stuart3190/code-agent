@@ -73,6 +73,29 @@ const TASKS_DEF = {
 
 // ── Providers through the engine seam ───────────────────────────────────────────────────
 
+// BYOK mode: resolve the owner's encrypted key through the credential store. Runs
+// server-side only (the store decrypts there); the key is never printed, written to the
+// results file, or exposed to the caller.
+const OWNER = arg("owner", null);
+const byokCache = new Map();
+async function byokKey(provider) {
+  if (!OWNER) return null;
+  if (byokCache.has(provider)) return byokCache.get(provider);
+  let key = null;
+  try {
+    const { aiCredentialStore } = await import("../shell/server/lib/aiCredentialStore.mjs");
+    const { decryptSecret } = await import("../shell/server/lib/secretCrypto.mjs");
+    const credential = await aiCredentialStore().getCredential(OWNER, provider);
+    // Decryption happens here, in-process on the server — the plaintext key stays in
+    // memory for the request and is never logged or written to the results file.
+    key = credential?.status === "connected" ? decryptSecret(credential.secret_encrypted) : null;
+  } catch (error) {
+    console.error(`  (credential lookup failed for ${provider}: ${error.message})`);
+  }
+  byokCache.set(provider, key);
+  return key;
+}
+
 async function makeProvider(name, taskType) {
   if (STUB) {
     let step = 0;
@@ -89,14 +112,20 @@ async function makeProvider(name, taskType) {
     };
   }
   if (name === "openai") {
-    if (!process.env.OPENAI_API_KEY) return null;
+    const key = process.env.OPENAI_API_KEY || await byokKey("openai");
+    if (!key) return null;
     const { createOpenAIEngineProvider } = await import("../shell/server/lib/appBuild/openaiEngineProvider.mjs");
-    return createOpenAIEngineProvider({ model: taskType === "full_build" ? (process.env.OPENAI_QUALITY_MODEL || "gpt-5.6-sol") : (process.env.OPENAI_BALANCED_MODEL || "gpt-5.6-terra") });
+    return createOpenAIEngineProvider({
+      apiKey: key,
+      model: taskType === "full_build" ? (process.env.OPENAI_QUALITY_MODEL || "gpt-5.6-sol") : (process.env.OPENAI_BALANCED_MODEL || "gpt-5.6-terra"),
+    });
   }
   if (name === "xai") {
-    if (!process.env.XAI_API_KEY) return null;
+    const key = process.env.XAI_API_KEY || await byokKey("xai");
+    if (!key) return null;
     const { createXaiEngineProvider, xaiReasoningForTask } = await import("../shell/server/lib/xaiProvider.mjs");
     return createXaiEngineProvider({
+      apiKey: key,
       model: taskType === "full_build" ? (process.env.XAI_QUALITY_MODEL || "grok-4.5") : (process.env.XAI_BALANCED_MODEL || "grok-build-0.1"),
       reasoningEffort: xaiReasoningForTask(taskType),
     });
