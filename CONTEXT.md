@@ -63,6 +63,26 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PROVIDER QUOTA MANAGEMENT (2026-08-02, PRs #102/#103, deployed + live-proven):
+`lib/providerQuota.mjs` — providerHeadroom (EXACT for managed via plan budget; ESTIMATE
+for BYOK from this month's ai_requests spend vs THRALLO_BYOK_SOFT_CEILING_CREDITS, labelled
+"roughly"; unknown → silent, never invents figures); thresholdCrossed returns the MOST
+URGENT crossed band (20/10/5) not the loosest — a jump straight to 9% warns at 10%;
+already-warned bands read back from durable quota_warning events (restart-safe);
+alternativeProviders lists only reachable providers (codex excluded as a build-time
+target). Copy: lowQuotaMessage / switchedMessage / exhaustedNoAlternativeMessage — plain
+English, no status codes. leadAgentService: announceQuotaState() before each turn;
+managed-exhaustion no longer hard-stops (fallback on → switch to a connected provider +
+"continued from the last successful step", loop state untouched so NOTHING restarts;
+fallback off → asks; nothing connected → explains + how to continue); router mid-run
+fallback surfaced the same way. provider_badge events (🤖 Building with X / ⚡ Switched to
+Y / 🧠 Deep Thinking) render in the rail. recordProviderSwitch writes reason (quota,
+rate_limit, outage, user_request, cost) to the private incident trail. TESTABILITY SEAM:
+processConversation accepts credentialStoreFactory. **TWO SANITISER BUGS FOUND HERE:
+(1) length>320 was nuking legitimate long help text → only unpunctuated blobs now;
+(2) length<3 was replacing short real replies ("OK") with the fallback → only empty text
+falls back (caught live post-deploy).** 294 node (10 new) + 28 PW.
+
 ERROR SHIELD (2026-08-02, PRs #99/#100, deployed): users NEVER see raw technical failure
 detail. `lib/errorShield.mjs`: captureIncident() writes the full private record to
 `diag_incidents` (migration; RLS deny-all, owner-scoped reads) — message, stack, DB/
