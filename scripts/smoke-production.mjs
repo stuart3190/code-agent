@@ -34,6 +34,10 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/admin/analytics", expect: [401], why: "admin analytics stays gated" },
   { method: "GET", path: "/api/v1/downloads", expect: [200], why: "desktop release manifest" },
 
+  // QA sweeps — unmounted by the same #53 sweep, restored in PR 3.
+  { method: "GET", path: "/api/test-runs?projectId=00000000-0000-4000-8000-000000000001", expect: [401], why: "QA run list" },
+  { method: "GET", path: "/api/test-runs/00000000-0000-4000-8000-000000000001", expect: [401], why: "QA run read (regression: unmounted by PR #53)" },
+
   // Source export — unmounted by the same #53 sweep, restored in PR 4.
   { method: "POST", path: "/api/export", expect: [401], why: "source export (regression: unmounted by PR #53)" },
 

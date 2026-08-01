@@ -1060,6 +1060,47 @@ export async function showPreview(ctx, { productName = null } = {}) {
   }
 }
 
+// run_qa capability backing: a responsive/multi-route sweep of the user's live app.
+//
+// Complements rather than duplicates the Verification Agent. That proves ONE path works at ONE
+// viewport (signup → data → reload → persistence); this crawls the app's routes at several
+// widths, collecting console errors and screenshots. Responsive quality had no coverage at all
+// before this — verificationAgent.mjs contains zero viewport handling.
+export async function runQaSweep(ctx, { productName = null } = {}) {
+  const client = serviceClient();
+  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
+    .eq("owner", ctx.owner).not("tree", "is", null)
+    .order("updated_at", { ascending: false }).limit(1);
+  if (productName) {
+    const { data: product } = await client.from("ca_products")
+      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
+    if (product) query = query.eq("product_id", product.id);
+  }
+  const { data } = await query;
+  const project = data?.[0];
+  if (!project) {
+    const error = new Error("There's no built app to test yet — ask me to build something first.");
+    error.code = "nothing_to_test";
+    throw error;
+  }
+
+  const { createQaRun } = await import("../qaRuns.mjs");
+  await ctx.emit("agent_spawned", { agent: "Tester", status: "Testing the app across screen sizes…" });
+  try {
+    const run = await createQaRun({ id: ctx.owner }, project.id, client);
+    if (!run) throw new Error("That project could not be found.");
+    return {
+      runId: run.id,
+      projectId: project.id,
+      status: run.status,
+      note: "The sweep is running; I'll report what it finds across phone, tablet and desktop widths.",
+    };
+  } catch (error) {
+    await ctx.emit("agent_done", { agent: "Tester", ok: false });
+    throw error;
+  }
+}
+
 // export_project capability backing: package the user's source as a downloadable ZIP.
 //
 // The artifact is theirs, not the platform's: dependencies, build output and every secret are

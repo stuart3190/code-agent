@@ -26,6 +26,7 @@ import { interruptLiveJobs, sweepInterrupted, sweepStaleJobs } from "./lib/build
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
 import { handleExport } from "./routes/export.mjs";
+import { handleQaStart, handleQaGet, handleQaList, handleQaArtifact } from "./routes/qa.mjs";
 import { sweepQaRuns } from "./lib/qaRuns.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import {
@@ -765,8 +766,6 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleOpsTelemetry(req, res, owner);
     }
-    {      const match = p.match(/^\/api\/test-runs\/([^/]+)$/);
-    }
     // Background build jobs: /api/builds/:jobId/events · /api/builds/:jobId/cancel ·
     // /api/projects/:id/active-build. Ids come from the path; ownership is checked in buildJobs.
     //
@@ -788,6 +787,29 @@ const server = http.createServer(async (req, res) => {
       if ((m = p.match(/^\/api\/projects\/([^/]+)\/active-build$/)) && method === "GET") {
         const owner = await requireOwner(req, res); if (!owner) return;
         return await handleActiveBuild(req, res, decodeURIComponent(m[1]), owner);
+      }
+    }
+
+    // QA / responsive verification. Unmounted by the PR #53 sweep; restored 2026-08-01 with
+    // its own qa_runs table, which had never been applied to Thrallo's Supabase.
+    if (p === "/api/test-runs" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleQaStart(req, res, await readJson(req), owner);
+    }
+    if (p === "/api/test-runs" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleQaList(req, res, new URL(req.url, "http://x"), owner);
+    }
+    {
+      const artifact = p.match(/^\/api\/test-runs\/([^/]+)\/artifacts\/([^/]+)$/);
+      if (artifact && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return await handleQaArtifact(req, res, decodeURIComponent(artifact[1]), decodeURIComponent(artifact[2]), owner);
+      }
+      const run = p.match(/^\/api\/test-runs\/([^/]+)$/);
+      if (run && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return await handleQaGet(req, res, decodeURIComponent(run[1]), owner);
       }
     }
 

@@ -38,7 +38,7 @@ export async function handleQaArtifact(req, res, runId, filename, owner) {
   if (!/^[a-z0-9-]+\.jpg$/.test(filename)) return json(res, 404, { error: "artifact not found" });
   const run = await getQaRun(owner.id, runId);
   if (!run) return json(res, 404, { error: "test run not found" });
-  const root = process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "buildr-qa");
+  const root = process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa");
   const file = path.join(root, run.id, filename);
   try {
     const data = await readFile(file);

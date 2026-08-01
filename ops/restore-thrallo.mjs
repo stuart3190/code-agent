@@ -70,6 +70,7 @@ export const RESTORE_ORDER = [
   "ai_requests",
   "build_signals",
   "build_checkpoints",
+  "qa_runs",   // references projects -> restore after it
 ];
 
 const BATCH = 500;

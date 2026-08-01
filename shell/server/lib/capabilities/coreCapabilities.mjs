@@ -7,7 +7,7 @@ import { codeAgentStore } from "../codeAgentStore.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild, showPreview, repairApp, exportProject } from "../appBuild/appBuildService.mjs";
+import { startAppBuild, showPreview, repairApp, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
@@ -104,6 +104,23 @@ export function registerCoreCapabilities() {
     requirements: () => (publishConfigured() ? { ok: true } : { ok: false, reason: "Preview infrastructure is not configured." }),
     async invoke(ctx, input) {
       return showPreview(ctx, { productName: input.productName || null });
+    },
+  });
+
+  registerCapability({
+    id: "run_qa",
+    specialist: "Tester",
+    statusText: "Testing the app across screen sizes…",
+    description: "Sweep the user's live app across phone, tablet and desktop widths and across its routes, capturing console errors and screenshots. Use when they ask how it looks on mobile, whether it works on different devices, or for a broader check than the build-time verification. This complements the Verification Agent, which proves one path works but does not test responsiveness.",
+    costProfile: "free",
+    inputSchema: strings({
+      productName: optionalStr("Which product to test, when the conversation has several"),
+    }),
+    requirements: () => (publishConfigured()
+      ? { ok: true }
+      : { ok: false, reason: "Preview infrastructure is not configured." }),
+    async invoke(ctx, input) {
+      return runQaSweep(ctx, { productName: input.productName || null });
     },
   });
 
