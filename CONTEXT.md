@@ -63,6 +63,28 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+XAI CONNECT INCIDENTS (2026-08-02, PRs #114/#115, deployed + prod-verified): TWO separate
+user-reported failures, both real, neither what they looked like.
+(1) "won't accept my Grok API key / something went wrong" → NOT the key. PR #90 shipped the
+xAI adapter/validation/routing/UI but the DB CHECK constraints on `ca_ai_credentials`
+(provider_check + provider_auth_check) AND `ca_ai_preferences.active_provider_check` still
+listed only codex/openai/anthropic/gemini, so the INSERT died on a constraint violation
+surfaced as a generic 500. Fixed by migration `allow_xai_provider`; **guard test parses
+API_KEY_PROVIDERS from aiCredentialStore and asserts every provider appears in the
+migration constraints — code can never outrun the schema again.** Diagnosis took one step
+because journalctl carried the raw error (the error shield logs privately, hides publicly).
+(2) "xAI disappeared completely from Settings" → NOT a rendering/catalogue/flag/cache
+regression: adapter, `/api/v1/ai/connections`, Settings list and filtering all intact, and
+e2e/provider-settings.spec.mjs run AGAINST PRODUCTION proved the row renders desktop+mobile
+with key field and Connect. Real defect was NAVIGATIONAL: the model selector's "Configure
+xAI / Grok" row called onOpenSettings → Settings ROOT, a screen that never mentions xAI →
+indistinguishable from "gone". SettingsSheet now takes `initialSection`; Configure rows
+deep-link to AI connection (avatar/palette still open root). New suite in test:ui,
+production-runnable via E2E_BASE_URL, also asserts a provider whose last validation FAILED
+stays listed and reconnectable. LESSON: when a user says a UI element vanished, verify
+rendering against PRODUCTION before touching the render path — the bug may be the route
+that gets them there.
+
 OUTCOME LEARNING (2026-08-02, PRs #111/#112, deployed + VALIDATED ON REAL PROD DATA):
 Auto learns from what users DO, not opinions. `lib/buildOutcomes.mjs` — signal vocabulary
 is a CLOSED validated list (preview_opened/exported/deployed/rolled_back/regenerated); no
