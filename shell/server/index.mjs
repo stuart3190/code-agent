@@ -633,6 +633,12 @@ const server = http.createServer(async (req, res) => {
       if (!summary) return sendJson(res, 404, { error: "No build summary for that Build ID." });
       return sendJson(res, 200, summary);
     }
+    if (p === "/api/v1/admin/intelligence" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
+      const { providerIntelligenceSnapshot } = await import("./lib/providerIntelligence.mjs");
+      return sendJson(res, 200, await providerIntelligenceSnapshot());
+    }
     if (p === "/api/v1/admin/analytics" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });

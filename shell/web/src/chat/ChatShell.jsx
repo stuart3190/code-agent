@@ -999,6 +999,7 @@ function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
     { key: "diagnostics", label: "◔ Build diagnostics", hint: "logs · repairs · costs", run: () => onOpenView("diagnostics") },
     { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
     { key: "analytics", label: "◈ Admin analytics", hint: "admin · spend · revenue", run: () => onOpenView("analytics") },
+    { key: "intelligence", label: "◎ Provider intelligence", hint: "admin · learned routing", run: () => onOpenView("intelligence") },
   ], [onNew, onSettings, onOpenView]);
   const q = query.trim().toLowerCase();
   const shownActions = useMemo(

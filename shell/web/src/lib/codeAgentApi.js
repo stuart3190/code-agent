@@ -83,6 +83,7 @@ export const opsTelemetry = () => request("/api/v1/ops/telemetry");
 export const usageInsights = () => request("/api/v1/usage/insights");
 export const buildCostSummary = (buildId) => request(`/api/v1/usage/builds/${buildId}`);
 export const adminAnalytics = () => request("/api/v1/admin/analytics");
+export const adminIntelligence = () => request("/api/v1/admin/intelligence");
 export const listDiagnostics = (projectId = null) =>
   request(`/api/v1/diagnostics${projectId ? `?project=${projectId}` : ""}`);
 export const getDiagnostics = (runId) => request(`/api/v1/diagnostics/${runId}`);
