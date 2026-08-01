@@ -37,7 +37,7 @@ const ABANDON_AFTER_MS = 30 * 60_000; // no further activity for 30 min after a 
 
 // One outcome row per build, combining explicit signals with behaviour derived from the
 // conversation and project records. Anonymous: only counts and timings survive.
-export function deriveOutcome({ run, signals = [], followUps = 0, lastActivityAt = null, deployed = false, now = Date.now() }) {
+export function deriveOutcome({ run, signals = [], followUps = 0, lastActivityAt = null, deployed = false, superseded = false, now = Date.now() }) {
   const set = new Set(signals);
   const finishedAt = run.finished_at ? new Date(run.finished_at).getTime() : null;
   const lastActivity = lastActivityAt ? new Date(lastActivityAt).getTime() : null;
@@ -50,7 +50,10 @@ export function deriveOutcome({ run, signals = [], followUps = 0, lastActivityAt
   const regenerated = set.has("regenerated");
   // Accepted = the user kept it: they exported, deployed, or simply stopped editing a
   // verified build without rolling back or regenerating.
-  const settled = finishedAt ? (now - Math.max(finishedAt, lastActivity || 0)) > ABANDON_AFTER_MS : false;
+  // Settled = the user has moved on: either a later build superseded this one, or nothing
+  // has happened for long enough that they are clearly finished with it.
+  const settled = superseded
+    || (finishedAt ? (now - Math.max(finishedAt, lastActivity || 0)) > ABANDON_AFTER_MS : false);
   const accepted = Boolean(verified && !rolledBack && !regenerated && (exported || deployedFlag || (settled && followUps <= 3)));
   const firstPass = Boolean(accepted && followUps === 0 && repairCycles === 0);
   // Abandoned = never verified or immediately dropped with nothing kept.
@@ -157,20 +160,48 @@ export async function collectOutcomes({ client = null, windowDays = 60, now = ne
     if (last) lastActivityByConversation.set(conversationId, last.created_at);
   }
 
+  // A build's outcome window ends when the NEXT build in the same conversation starts.
+  // Counting to the end of the conversation would blame an early build for every later
+  // piece of unrelated work — it made every build in a long session look abandoned.
+  const nextBuildStart = new Map();
+  const runsByConversation = new Map();
+  for (const run of runs || []) {
+    if (!run.conversation_id) continue;
+    if (!runsByConversation.has(run.conversation_id)) runsByConversation.set(run.conversation_id, []);
+    runsByConversation.get(run.conversation_id).push(run);
+  }
+  for (const list of runsByConversation.values()) {
+    const ordered = [...list].sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)));
+    for (let i = 0; i < ordered.length - 1; i += 1) {
+      nextBuildStart.set(ordered[i].id, new Date(ordered[i + 1].started_at).getTime());
+    }
+  }
+
   return (runs || [])
     .filter((run) => ["passed", "failed", "complete_unverified", "interrupted"].includes(run.status))
     .map((run) => {
       const turns = followUpsByConversation.get(run.conversation_id) || [];
       const finishedAt = run.finished_at ? new Date(run.finished_at).getTime() : null;
-      const followUps = finishedAt
-        ? turns.filter((t) => t.role === "user" && new Date(t.created_at).getTime() > finishedAt).length
-        : 0;
+      const windowEnd = nextBuildStart.get(run.id) ?? Infinity;
+      const inWindow = finishedAt
+        ? turns.filter((t) => {
+          const at = new Date(t.created_at).getTime();
+          return at > finishedAt && at < windowEnd;
+        })
+        : [];
+      const followUps = inWindow.filter((t) => t.role === "user").length;
+      // Last activity for THIS build: the final turn inside its own window. A superseded
+      // build is settled the moment the next build begins.
+      const lastInWindow = inWindow.length ? inWindow[inWindow.length - 1].created_at : null;
+      const supersededAt = nextBuildStart.get(run.id) || null;
       return deriveOutcome({
         run,
         signals: signalsByBuild.get(run.id) || [],
         followUps,
-        lastActivityAt: lastActivityByConversation.get(run.conversation_id) || null,
+        lastActivityAt: lastInWindow
+          || (supersededAt ? new Date(supersededAt).toISOString() : lastActivityByConversation.get(run.conversation_id) || null),
         deployed: run.project_id ? deployedProjects.has(run.project_id) : false,
+        superseded: Boolean(supersededAt),
         now: now.getTime(),
       });
     });
