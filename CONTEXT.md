@@ -63,6 +63,23 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+MODEL SELECTOR (2026-08-01, PR #92, deployed + live-proven): per-project provider/model
+choice. GET /api/v1/models (lib/modelSelector.mjs selectableModelsForOwner) = the owner's
+ACTUAL catalog: Auto first (default/Recommended), managed models (platform env keys),
+BYOK-covered providers ("Your API key"), Codex when connected ("Included plan"); each w/
+source, tier label, relative cost (modelWeight); unconfigured providers → "Configure
+providers" link, never selectable; zero secrets (tested). Begin: ModelSelector.jsx under
+composer, remembered in localStorage thrallo-model-pref, rides with the first message
+(postUserMessage modelPref → validated → ca_conversations.model_pref, migration
+conversation_model_pref). In-conversation: same pill above composer (ct-model-dock),
+POST /conversations/:id/model owner-scoped + catalog-validated, emits model_changed
+receipt; switching affects FUTURE requests only (tested: turns/events/state untouched).
+Lead loop: resolveConversationModel pins requested to the pref; unavailable pref NEVER
+silently switches — visible-notice fallback ONLY when routing allowFallback, else clear
+warning w/ escape hatches; pill shows warn state. Live-proven: catalog correct on prod
+(managed trio + codex, xai/anthropic/gemini unconfigured), set/read-back on DiagProof,
+invalid model 400, reset to auto. 277 node + 28 PW.
+
 XAI/GROK PROVIDER (2026-08-01, PR #90, deployed): first-class alongside OpenAI/Codex/
 Anthropic/Gemini — ALL Grok logic in `lib/xaiProvider.mjs` (both seams: lead `turn` +
 engine `runTurn` over api.x.ai OpenAI-compatible Responses API; retries/timeout/
