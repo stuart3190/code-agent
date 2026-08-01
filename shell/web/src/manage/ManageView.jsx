@@ -6,11 +6,13 @@ import React from "react";
 import RepositoriesView from "./RepositoriesView.jsx";
 import UsageView from "./UsageView.jsx";
 import OpsView from "./OpsView.jsx";
+import DiagnosticsView from "./DiagnosticsView.jsx";
 
 const VIEWS = {
   repos: RepositoriesView,
   usage: UsageView,
   ops: OpsView,
+  diagnostics: DiagnosticsView,
 };
 
 export const MANAGE_VIEW_IDS = Object.keys(VIEWS);

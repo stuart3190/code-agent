@@ -223,6 +223,50 @@ test("background navigation: leave a running build, start another, return — st
   expect(box.height).toBeGreaterThanOrEqual(40);
 });
 
+test("Build Diagnostics: browse runs, expand raw logs, evidence-grounded explanation", async ({ page }) => {
+  await stubApi(page);
+  const RUN = {
+    id: "d1d1d1d1-0000-4000-8000-000000000001", kind: "app_build", status: "failed",
+    prompt: "Build me a booking system", model: "gpt-5.6-sol", repair_rounds: 1,
+    totals: { totalTokens: 42000, cost: 0.31 }, started_at: "2026-07-31T10:00:00Z",
+    duration_ms: 312000, agents: ["Planner", "Builder", "Compiler"],
+  };
+  await page.route("**/api/v1/diagnostics", (r) => r.fulfill({ json: { runs: [RUN] } }));
+  await page.route("**/api/v1/diagnostics/prefs", (r) => r.fulfill({ json: { retentionDays: 90 } }));
+  await page.route(`**/api/v1/diagnostics/${RUN.id}`, (r) => r.fulfill({ json: { run: { ...RUN, steps: [
+    { seq: 1, round: 1, agent: "Builder", kind: "agent", label: "Initial implementation", status: "ok", prompt: "Build it", output: "Implemented booking flow", usage: { total: 40000 }, cost: 0.29 },
+    { seq: 2, round: 1, agent: "Compiler", kind: "compiler", label: "npm run build", status: "failed", output: "src/Booking.jsx: Unexpected token (22:7)", truncated: false },
+    { seq: 3, round: 2, agent: "Lead Agent", kind: "repair", label: "Repair round 2 dispatched", status: "ok", prompt: "AUTONOMOUS REPAIR — fix the syntax error" },
+  ] } } }));
+  await page.route(`**/api/v1/diagnostics/${RUN.id}/explain`, (r) => r.fulfill({ json: {
+    found: true, explanation: "The compiler output shows:\n```\nsrc/Booking.jsx: Unexpected token (22:7)\n```\nA stray token at line 22 broke the parse.",
+  } }));
+
+  await page.goto("/");
+  await expect(page.getByText("What are we building today?")).toBeVisible();
+  await page.keyboard.press("Control+k");
+  const pal = page.getByPlaceholder(/Type a command/);
+  await pal.fill("diagnostics");
+  await pal.press("Enter");
+  await expect(page.getByRole("heading", { name: "Build diagnostics" })).toBeVisible();
+  await expect(page.getByText("Build me a booking system")).toBeVisible();
+  await expect(page.getByText("1 repair round", { exact: false }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Inspect" }).click();
+  await expect(page.locator(".mg-label", { hasText: "Round 1" })).toBeVisible();
+  await expect(page.locator(".mg-label", { hasText: "Round 2" })).toBeVisible();
+  // Expand the failing compiler step — the RAW stored output appears.
+  await page.locator(".mg-card", { hasText: "npm run build" }).getByRole("button", { name: "Expand" }).click();
+  await expect(page.getByText("src/Booking.jsx: Unexpected token (22:7)")).toBeVisible();
+  // Download link points at the diagnostics bundle.
+  await expect(page.getByRole("link", { name: "Download diagnostics" }))
+    .toHaveAttribute("href", `/api/v1/diagnostics/${RUN.id}/download`);
+  // Explanation is grounded in the stored log, quoting it verbatim.
+  await page.getByRole("button", { name: "Explain this failure" }).click();
+  await expect(page.getByText(/A stray token at line 22/)).toBeVisible();
+  await expect(page.getByText(/Unexpected token \(22:7\)/).nth(1)).toBeVisible();
+});
+
 test("Downloads screen renders real release buttons from the manifest", async ({ page }) => {
   await stubApi(page);
   await page.route("**/api/v1/downloads", (route) => route.fulfill({ json: {

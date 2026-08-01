@@ -1,0 +1,243 @@
+// Build Diagnostics — the permanent audit trail for every build, repair and verification.
+// Browse runs, inspect every repair round, expand raw logs, compare iterations, download
+// the full bundle, and ask for an explanation grounded in the ACTUAL stored output.
+
+import React, { useEffect, useState } from "react";
+import {
+  listDiagnostics, getDiagnostics, getDiagnosticsStep, explainDiagnostics,
+  diagnosticsPrefs, setDiagnosticsPrefs,
+} from "../lib/codeAgentApi.js";
+import { SkeletonRows, formatCompact } from "./shared.jsx";
+
+const STATUS_TONE = {
+  passed: "var(--good)", complete_unverified: "var(--good)", running: "var(--accent)",
+  failed: "var(--bad)", interrupted: "var(--warn)",
+};
+const STATUS_LABEL = {
+  passed: "verified", complete_unverified: "complete (preview pending)", running: "running",
+  failed: "failed", interrupted: "interrupted",
+};
+
+const fmtDuration = (ms) => (ms == null ? "—" : ms >= 60_000 ? `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : `${Math.round(ms / 1000)}s`);
+const fmtCost = (totals) => (totals?.cost ? `${Number(totals.cost).toFixed(3)} cr` : "—");
+
+export default function DiagnosticsView() {
+  const [runs, setRuns] = useState(null);
+  const [open, setOpen] = useState(null); // run id
+  const [error, setError] = useState("");
+  const [prefs, setPrefs] = useState(null);
+
+  useEffect(() => {
+    listDiagnostics().then((r) => setRuns(r.runs || [])).catch((e) => { setError(e.message); setRuns([]); });
+    diagnosticsPrefs().then(setPrefs).catch(() => {});
+  }, []);
+
+  if (open) return <RunDetail runId={open} onBack={() => setOpen(null)} />;
+
+  return (
+    <div>
+      <h3>Build diagnostics</h3>
+      <p className="mg-sub">Every build keeps its complete audit trail — prompts, compiler output, tests, repairs, costs. Nothing is discarded, even when a build fails.</p>
+      {error && <div className="mg-error">{error}</div>}
+
+      {prefs && (
+        <div className="mg-card">
+          <div className="mg-row">
+            <div>Keep diagnostics for<div className="ct-hint">Older runs are compressed, then removed automatically.</div></div>
+            <select className="mg-select" style={{ width: 140 }}
+              value={prefs.retentionDays == null ? "forever" : String(prefs.retentionDays)}
+              onChange={(e) => {
+                const v = e.target.value === "forever" ? null : Number(e.target.value);
+                setDiagnosticsPrefs(v).then(setPrefs).catch((err) => setError(err.message));
+              }}>
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="365">365 days</option>
+              <option value="forever">Forever</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      <div className="mg-card">
+        {runs === null && <SkeletonRows rows={3} />}
+        {runs?.length === 0 && <div className="ct-hint">No builds recorded yet — diagnostics start with your next build.</div>}
+        {(runs || []).map((run) => (
+          <div className="mg-row" key={run.id}>
+            <div style={{ minWidth: 0 }}>
+              <span className="mg-mono" title={run.id}>{run.id.slice(0, 8)}</span> {run.prompt || run.kind}
+              <div className="ct-hint">
+                {new Date(run.started_at).toLocaleString()} · {run.kind} · {fmtDuration(run.duration_ms)} ·
+                {" "}{run.repair_rounds || 0} repair round{(run.repair_rounds || 0) === 1 ? "" : "s"} · {fmtCost(run.totals)}
+              </div>
+            </div>
+            <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+              <span className="mg-pill"><span className="dot" style={{ background: STATUS_TONE[run.status] || "var(--ink-3)" }} />{STATUS_LABEL[run.status] || run.status}</span>
+              <button className="ct-btn-quiet" onClick={() => setOpen(run.id)}>Inspect</button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RunDetail({ runId, onBack }) {
+  const [run, setRun] = useState(null);
+  const [error, setError] = useState("");
+  const [explaining, setExplaining] = useState(false);
+  const [explanation, setExplanation] = useState(null);
+  const [compare, setCompare] = useState([]); // selected rounds for comparison
+
+  useEffect(() => {
+    getDiagnostics(runId).then((r) => setRun(r.run)).catch((e) => setError(e.message));
+  }, [runId]);
+
+  const explain = () => {
+    setExplaining(true); setExplanation(null);
+    explainDiagnostics(runId)
+      .then((r) => setExplanation(r.explanation))
+      .catch((e) => setExplanation(`Explanation unavailable: ${e.message}`))
+      .finally(() => setExplaining(false));
+  };
+
+  const rounds = run ? [...new Set(run.steps.map((s) => s.round))].sort((a, b) => a - b) : [];
+  const toggleCompare = (round) => setCompare((c) =>
+    c.includes(round) ? c.filter((r) => r !== round) : [...c.slice(-1), round]);
+
+  return (
+    <div>
+      <button className="ct-btn-quiet" onClick={onBack}>← All builds</button>
+      {error && <div className="mg-error">{error}</div>}
+      {!run && !error && <div className="mg-card" style={{ marginTop: 10 }}><SkeletonRows rows={4} /></div>}
+      {run && (
+        <>
+          <h3 style={{ marginTop: 10 }}>Build <span className="mg-mono">{run.id.slice(0, 8)}</span></h3>
+          <p className="mg-sub">
+            {STATUS_LABEL[run.status] || run.status} · {run.kind} · {fmtDuration(run.duration_ms)} ·
+            {" "}{run.repair_rounds || 0} repair round{(run.repair_rounds || 0) === 1 ? "" : "s"} ·
+            {" "}{run.model || "model n/a"} · {formatCompact(run.totals?.totalTokens || 0)} tokens · {fmtCost(run.totals)}
+          </p>
+
+          <div className="mg-card">
+            <div className="mg-label" style={{ marginTop: 0 }}>Original request</div>
+            <div style={{ whiteSpace: "pre-wrap", fontSize: 14 }}>{run.prompt || "—"}</div>
+            {run.plan && (
+              <>
+                <div className="mg-label">Build plan</div>
+                <pre className="mg-mono" style={{ whiteSpace: "pre-wrap", margin: 0, padding: "8px 10px" }}>{run.plan}</pre>
+              </>
+            )}
+            <div className="ct-actions">
+              <a className="ct-btn-quiet" style={{ textDecoration: "none", border: "1px solid var(--line)" }}
+                href={`/api/v1/diagnostics/${run.id}/download`} download>Download diagnostics</a>
+              {["failed", "interrupted"].includes(run.status) && (
+                <button className="ct-btn" onClick={explain} disabled={explaining}>
+                  {explaining ? "Reading the logs…" : "Explain this failure"}
+                </button>
+              )}
+            </div>
+            {explanation && (
+              <div className="mg-card" style={{ marginTop: 10 }}>
+                <div className="mg-label" style={{ marginTop: 0 }}>Explanation (from the stored logs)</div>
+                <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5 }}>{explanation}</div>
+              </div>
+            )}
+          </div>
+
+          {rounds.length > 1 && (
+            <div className="mg-card">
+              <div className="mg-row" style={{ borderBottom: 0 }}>
+                <div>Compare repair rounds<div className="ct-hint">Pick two rounds to see their steps side by side.</div></div>
+                <span style={{ display: "flex", gap: 6 }}>
+                  {rounds.map((round) => (
+                    <button key={round} className={`ct-btn-quiet ${compare.includes(round) ? "on" : ""}`}
+                      style={compare.includes(round) ? { background: "var(--accent-soft)", color: "var(--accent)" } : { border: "1px solid var(--line)" }}
+                      onClick={() => toggleCompare(round)} aria-pressed={compare.includes(round)}>
+                      Round {round}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {compare.length === 2 ? (
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+              {compare.sort((a, b) => a - b).map((round) => (
+                <div key={round}>
+                  <div className="mg-label">Round {round}</div>
+                  {run.steps.filter((s) => s.round === round).map((step) => (
+                    <StepCard key={step.seq} runId={run.id} step={step} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            rounds.map((round) => (
+              <div key={round}>
+                <div className="mg-label">{rounds.length > 1 ? `Round ${round}` : "Steps"}</div>
+                {run.steps.filter((s) => s.round === round).map((step) => (
+                  <StepCard key={step.seq} runId={run.id} step={step} />
+                ))}
+              </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function StepCard({ runId, step }) {
+  const [openLog, setOpenLog] = useState(false);
+  const [full, setFull] = useState(null);
+  const failed = step.status === "failed";
+  const expand = () => {
+    setOpenLog((v) => !v);
+    if (!full && step.truncated) {
+      getDiagnosticsStep(runId, step.seq).then((r) => setFull(r.step.output)).catch(() => {});
+    }
+  };
+  const output = full ?? step.output;
+  return (
+    <div className="mg-card" style={failed ? { borderColor: "rgba(214, 69, 69, 0.4)" } : undefined}>
+      <div className="mg-row" style={{ borderBottom: 0, padding: "2px 0" }}>
+        <div style={{ minWidth: 0 }}>
+          <span className="mg-pill" style={{ marginRight: 8 }}>
+            <span className="dot" style={{ background: failed ? "var(--bad)" : "var(--good)" }} />
+            {step.kind}
+          </span>
+          {step.agent ? `${step.agent} · ` : ""}{step.label}
+          <div className="ct-hint">
+            #{step.seq}{step.durationMs != null ? ` · ${fmtDuration(step.durationMs)}` : ""}
+            {step.usage ? ` · ${formatCompact(step.usage.total || (step.usage.inputTokens || 0) + (step.usage.outputTokens || 0))} tokens` : ""}
+            {step.cost != null ? ` · ${Number(step.cost).toFixed(4)} cr` : ""}
+          </div>
+        </div>
+        {(output || step.prompt) && (
+          <button className="ct-btn-quiet" onClick={expand} aria-expanded={openLog}>{openLog ? "Collapse" : "Expand"}</button>
+        )}
+      </div>
+      {openLog && (
+        <>
+          {step.prompt && (
+            <>
+              <div className="mg-label">Prompt</div>
+              <pre className="mg-mono" style={{ whiteSpace: "pre-wrap", maxHeight: "30vh", overflow: "auto", margin: 0, padding: "8px 10px" }}>{step.prompt}</pre>
+            </>
+          )}
+          {output && (
+            <>
+              <div className="mg-label">Raw output</div>
+              <pre className="mg-mono" style={{ whiteSpace: "pre-wrap", maxHeight: "44vh", overflow: "auto", margin: 0, padding: "8px 10px" }}>
+                {output}{step.truncated && !full ? "\n… loading the full log …" : ""}
+              </pre>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+

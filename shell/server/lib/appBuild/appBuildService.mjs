@@ -8,6 +8,7 @@ import { serviceClient } from "../supabase.mjs";
 import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
 import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
 import { previewProvider } from "../../preview/index.mjs";
+import { startDiagSessionSafe, nullDiagSession } from "./buildDiagnostics.mjs";
 
 // The end-of-build message NEVER claims a live preview unless a URL actually exists
 // (Stuart, 2026-07-31: "a build should never claim success unless the preview is actually
@@ -85,20 +86,26 @@ export async function startAppBuild(ctx, { description, productName = null }) {
   }).select("*").single();
   if (error) throw new Error(`project creation failed: ${error.message}`);
 
+  const diag = await startDiagSessionSafe({
+    owner: ctx.owner, projectId: project.id, conversationId: ctx.conversation.id,
+    kind: "app_build", prompt: String(description),
+  });
   const { job } = await createJob({
     owner: { id: ctx.owner },
     projectId: project.id,
     mode: "build",
     prompt: String(description),
+    diag: diag.recorderForJob({ round: 1 }),
   });
 
-  relayBuildJob(ctx, { job, projectId: project.id });
+  relayBuildJob(ctx, { job, projectId: project.id, diag });
   await ctx.emit("build_started", {
     jobId: job.id,
     projectId: project.id,
+    buildId: diag.id,
     message: "The team is assembling to build this.",
   });
-  return { jobId: job.id, projectId: project.id, note: "Build dispatched; the team's progress streams into this conversation." };
+  return { jobId: job.id, projectId: project.id, buildId: diag.id, note: "Build dispatched; the team's progress streams into this conversation." };
 }
 
 // Milestone copy for phase transitions during LONG builds — an engineering manager keeping
@@ -113,7 +120,7 @@ const PHASE_MILESTONES = {
 const MILESTONE_MIN_PHASE_MS = 2 * 60_000;   // fast builds stay quiet; the roster covers them
 const REASSURE_AFTER_MS = 4 * 60_000;        // never silent for long, never noisy either
 
-function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
+function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nullDiagSession() }) {
   const jobId = job.id;
   let lastSpecialist = null;
   let phaseStartedAt = Date.now();
@@ -171,11 +178,12 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
         if (action.kind === "verify") {
           await ctx.emit("preview_ready", { url: data.result.previewUrl, projectId, message: "Preview ready — take a look." });
           // The Verification Agent gate: completion is only announced after PASS.
-          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt })
+          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt, diag })
             .catch((error) => console.error("[app-build] verification:", error.message));
           return;
         }
         if (action.kind === "warmup") {
+          diag.finish("complete_unverified");
           recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
           const text = `${buildEndSummary(data.result)}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
@@ -185,17 +193,23 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
         if (action.kind === "repair" || action.kind === "retry") {
           // Autonomous: announce briefly, fix, re-verify. Never ask permission for routine failures.
           await sayProgress(action.announcement);
+          const nextRound = verificationAttempt + 1;
+          diag.repairDispatched({ prompt: action.kind === "repair" ? action.brief : job.prompt, round: nextRound });
           const { job: next } = await createJob({
             owner: { id: ctx.owner }, projectId,
             mode: action.kind === "repair" ? "iterate" : (job.mode || "build"),
             prompt: action.kind === "repair" ? action.brief : job.prompt,
+            diag: diag.recorderForJob({ round: nextRound }),
           });
-          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: verificationAttempt + 1 });
+          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: nextRound, diag });
           return;
         }
-        // Genuine exhaustion — the only point control returns to the user.
-        await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: action.message, payload: { jobId, projectId } });
-        await ctx.emit("message", { role: "lead", text: action.message, projectId });
+        // Genuine exhaustion — the only point control returns to the user. The message
+        // carries the EXACT stored diagnostic output, never an unevidenced claim.
+        diag.finish("failed");
+        const blockedText = `${action.message}\n\n${diag.failureEvidence()}`;
+        await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: blockedText, payload: { jobId, projectId, buildId: diag.id } });
+        await ctx.emit("message", { role: "lead", text: blockedText, projectId });
         notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
           title: "Build needs a decision",
           body: "Autonomous repair is exhausted — open the conversation.",
@@ -213,18 +227,26 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1 }) {
 // FAIL → the build is rejected, the failures go back to the Builder in surgical repair
 // mode (design/layout/branding preserved), and the repaired build is re-verified — up to
 // two automatic repair rounds before reporting honestly.
-async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1 }) {
+async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1, diag = nullDiagSession() }) {
   const { verifyApp, repairPrompt } = await import("./verificationAgent.mjs");
   const { treeUsesBackendSdk } = await import("../appRuntimeStatus.mjs");
   await ctx.emit("agent_spawned", { agent: "Verifier", status: "Verifying the app like a real user…" });
+  const verifyStarted = Date.now();
   let verdict;
   try {
     verdict = await verifyApp({ previewUrl, usesBackend: treeUsesBackendSdk(result?.tree) });
   } catch (error) {
     verdict = { pass: false, failures: [`Verification could not run: ${error.message}`], summary: "" };
   }
+  diag.step({
+    agent: "Verifier", kind: "verification", label: `Verification (round ${attempt})`,
+    status: verdict.pass ? "ok" : "failed", round: attempt,
+    output: verdict.pass ? verdict.summary : (verdict.failures || []).join("\n"),
+    durationMs: Date.now() - verifyStarted,
+  });
 
   if (verdict.pass) {
+    diag.finish("passed");
     await ctx.emit("agent_done", { agent: "Verifier", ok: true });
     await ctx.emit("verification", { pass: true, summary: verdict.summary, projectId });
     const text = `Your app is built, verified, and live in this conversation.\n\n${verdict.summary}${result?.finalText ? `\n\n${String(result.finalText).slice(0, 300)}` : ""}`;
@@ -243,16 +265,21 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     const text = `Verification found real problems (${verdict.failures.slice(0, 3).join("; ")}). I'm sending it back to the Builder to repair — design untouched, minimum change.`;
     await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
     await ctx.emit("message", { role: "lead", text, projectId });
+    const nextRound = attempt + 1;
+    const brief = repairPrompt(verdict.failures);
+    diag.repairDispatched({ prompt: brief, round: nextRound });
     const { job } = await createJob({
       owner: { id: ctx.owner }, projectId, mode: "iterate",
-      prompt: repairPrompt(verdict.failures),
+      prompt: brief,
+      diag: diag.recorderForJob({ round: nextRound }),
     });
-    relayBuildJob(ctx, { job, projectId, verificationAttempt: attempt + 1 });
+    relayBuildJob(ctx, { job, projectId, verificationAttempt: nextRound, diag });
     return;
   }
 
-  const text = `I ran the full repair loop and verification still fails:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nThis is beyond routine repair — I need a decision from you on how to proceed.`;
-  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
+  diag.finish("failed");
+  const text = `I ran the full repair loop and verification still fails:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nThis is beyond routine repair — I need a decision from you on how to proceed.\n\n${diag.failureEvidence()}`;
+  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId, buildId: diag.id } });
   await ctx.emit("message", { role: "lead", text, projectId });
 }
 
@@ -310,12 +337,17 @@ export async function repairApp(ctx, { issue, productName = null }) {
     "structure exactly. Do NOT redesign, restyle, or rebuild anything. Make the minimum code",
     "change that fixes the reported problem. Do not touch unrelated files.",
   ].join("\n");
+  const diag = await startDiagSessionSafe({
+    owner: ctx.owner, projectId: project.id, conversationId: ctx.conversation.id,
+    kind: "repair", prompt: String(issue),
+  });
   const { job } = await createJob({
     owner: { id: ctx.owner }, projectId: project.id, mode: "iterate", prompt,
+    diag: diag.recorderForJob({ round: 1 }),
   });
-  relayBuildJob(ctx, { job, projectId: project.id });
-  await ctx.emit("build_started", { jobId: job.id, projectId: project.id, message: "Repairing — design untouched." });
-  return { jobId: job.id, projectId: project.id, note: "Repair dispatched; the fix will be verified before completion is announced." };
+  relayBuildJob(ctx, { job, projectId: project.id, diag });
+  await ctx.emit("build_started", { jobId: job.id, projectId: project.id, buildId: diag.id, message: "Repairing — design untouched." });
+  return { jobId: job.id, projectId: project.id, buildId: diag.id, note: "Repair dispatched; the fix will be verified before completion is announced." };
 }
 
 // show_preview capability backing: (re)provision the preview for a project from its stored

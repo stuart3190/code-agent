@@ -90,6 +90,7 @@ function db() { return serviceClient().from("build_jobs"); }
 
 function serverLog(job, line) {
   console.log(`[job ${job.id.slice(0, 8)}] ${String(line)}`);
+  job.diag?.terminal(line); // diagnostics: full terminal trail, never discarded
 }
 
 // Ordered write-through: chain updates per job so a slow UPDATE can't land after a later one.
@@ -136,6 +137,7 @@ function finish(job, status, { error = null } = {}) {
   job.phase = status;
   job.error = error;
   job.finishedAt = Date.now();
+  try { job.diag?.jobEnd(status); } catch { /* diagnostics must never break a build */ }
   persist(job, {
     status, phase: status, error,
     result: job.result ? publicResult(job) : null,
@@ -176,7 +178,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null }) {
   const existing = activeJobFor(owner.id, projectId);
   if (existing) return { job: existing, existing: true };
 
@@ -186,6 +188,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     input: { prompt, tree, plan, knowledge, style, designProfile, redesign }, // in-memory only; restart sweeps the job
     status: "queued", phase: "queued", error: null,
     result: null, buildStderr: null,
+    diag,                                  // diagnostics recorder (nullable, never throws)
     cancelled: false,
     subscribers: new Set(),
     createdAt: Date.now(), finishedAt: null,
@@ -454,11 +457,17 @@ async function runJob(job) {
         serverLog(job, `capabilities: plan context unavailable (${error.message})`);
       }
 
+      const planStarted = Date.now();
       const { telemetry, finalText } = await runAgent({
         provider, systemPrompt: planSystemPrompt, tools: [], toolImpls: {},
         tree: {}, prompt: withKnowledge(prompt), log, onUsage,
       });
       if (job.cancelled) throw new CancelledError();
+      job.diag?.step({
+        agent: "Planner", kind: "agent", label: "Plan generation",
+        prompt: withKnowledge(prompt), output: finalText,
+        usage: telemetry, model: provider.model, durationMs: Date.now() - planStarted,
+      });
 
       const { need, balance } = await settle(telemetry, provider.model, "plan");
       job.result = { finalText, need, balance: balance.total };
@@ -468,6 +477,7 @@ async function runJob(job) {
     // ── BUILD / ITERATE pass ────────────────────────────────────────────────────────────────
     const intent = mode === "iterate" ? "edit" : "generate";
     const provider = buildProvider(intent);
+    job.diag?.setModel?.(provider.model);
 
     const combinedUsage = usageBucket();
     const needsDesignPass = mode === "build" || redesign === true;
@@ -477,15 +487,23 @@ async function runJob(job) {
     let photography = { assets: [], unavailable: false };
     if (needsDesignPass) {
       setPhase(job, "designing");
+      const designStarted = Date.now();
       const directed = await directDesign({
         provider: buildProvider("generate"), prompt, projectId, style, knowledge, plan, log, onUsage,
       });
       designProfile = directed.profile;
       combinedUsage.add(directed.telemetry);
+      job.diag?.step({
+        agent: "Designer", kind: "agent", label: "Design direction",
+        prompt, output: JSON.stringify(designProfile, null, 2),
+        usage: directed.telemetry, model: buildProvider("generate").model,
+        durationMs: Date.now() - designStarted,
+      });
       photography = await preparePhotography(designProfile, log);
     }
 
     const tree = mode === "iterate" ? { ...inputTree } : clone(fromScaffold(REACT_VITE));
+    const diagBaseline = { ...tree }; // snapshot for created/modified/deleted + diffs
     if (mode === "iterate") {
       // The backend SDK is a protected platform seam, not user-authored app code. Persist the
       // latest version into edited legacy projects so future exports and builds keep new APIs.
@@ -549,12 +567,18 @@ async function runJob(job) {
       enginePrompt = `This is an explicit full-product frontend redesign. Preserve every working feature, route, data flow, form, and important piece of content while comprehensively replacing the visual system and composition. Read the shared shell and EVERY reachable screen component before editing. Apply one premium design language to the public page, dashboard, navigation destinations, forms, tables, calendars, modals, empty states and mobile menu. Keep an obvious route back to the public site from the app. At 360px, large mockups and floating panels must return to normal document flow and nothing may collide, clip or overlap unintentionally. Do not stop after making the landing page attractive.\n\n${enginePrompt}`;
     }
 
+    const builderStarted = Date.now();
     const initial = await runAgent({
       provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
     });
     combinedUsage.add(initial.telemetry);
     let finalText = initial.finalText;
     if (job.cancelled) throw new CancelledError();
+    job.diag?.step({
+      agent: "Builder", kind: "agent", label: mode === "iterate" ? "Code changes" : "Initial implementation",
+      prompt: enginePrompt, output: finalText,
+      usage: initial.telemetry, model: provider.model, durationMs: Date.now() - builderStarted,
+    });
 
     // Prove it builds (same bar as the harness) before we serve/save it. Runtime tree carries
     // the injected backend .env — the SAVED tree stays clean.
@@ -562,9 +586,16 @@ async function runJob(job) {
     await ensureDeps(() => {});
     let runtimeTree = withRuntimeEnv(tree, projectId);
     serverLog(job, "build: npm run build ...");
+    const compileStarted = Date.now();
     let build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
     serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
     if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
+    job.diag?.step({
+      agent: "Compiler", kind: "compiler", label: "npm run build",
+      status: build.ok ? "ok" : "failed",
+      output: build.ok ? "Build passed with no compiler errors." : build.stderr, // FULL output, untruncated
+      durationMs: Date.now() - compileStarted,
+    });
 
     let qualityWarnings = [];
     if (needsDesignPass && build.ok && designProfile) {
@@ -573,6 +604,11 @@ async function runJob(job) {
         profile: designProfile, assets: approvedPhotos, imageUnavailable: photography.unavailable,
       });
       qualityWarnings = audit.warnings;
+      job.diag?.step({
+        agent: "Tester", kind: "lint", label: "Design quality audit",
+        status: audit.issues.length ? "failed" : "ok",
+        output: JSON.stringify({ issues: audit.issues, warnings: audit.warnings }, null, 2),
+      });
 
       if (audit.issues.length) {
         setPhase(job, "polishing");
@@ -586,24 +622,39 @@ async function runJob(job) {
           polishImpls = { ...polishImpls, search_images: toolImpls.search_images };
           polishSystem = `${polishSystem}\n${IMAGES_PROMPT_BLOCK}`;
         }
+        const polishStarted = Date.now();
+        const polishPrompt = `The premium design audit found the issues below. Correct only these issues while preserving all behavior, routes, data, content, and working interactions. Re-read the relevant files and use apply_patch.\n\n${audit.issues.map((issue) => `- ${issue}`).join("\n")}`;
         const polished = await runAgent({
           provider: buildProvider("edit"),
           systemPrompt: polishSystem,
           tools: polishTools,
           toolImpls: polishImpls,
           tree,
-          prompt: `The premium design audit found the issues below. Correct only these issues while preserving all behavior, routes, data, content, and working interactions. Re-read the relevant files and use apply_patch.\n\n${audit.issues.map((issue) => `- ${issue}`).join("\n")}`,
+          prompt: polishPrompt,
           log, onUsage,
         });
         combinedUsage.add(polished.telemetry);
         if (polished.finalText) finalText = polished.finalText;
         if (job.cancelled) throw new CancelledError();
+        job.diag?.step({
+          agent: "Designer", kind: "agent", label: "Polish pass",
+          prompt: polishPrompt, output: polished.finalText,
+          usage: polished.telemetry, model: buildProvider("edit").model,
+          durationMs: Date.now() - polishStarted,
+        });
 
         runtimeTree = withRuntimeEnv(tree, projectId);
         serverLog(job, "build: verifying polished result ...");
+        const recompileStarted = Date.now();
         build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
         serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
         if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
+        job.diag?.step({
+          agent: "Compiler", kind: "compiler", label: "npm run build (after polish)",
+          status: build.ok ? "ok" : "failed",
+          output: build.ok ? "Build passed with no compiler errors." : build.stderr,
+          durationMs: Date.now() - recompileStarted,
+        });
         audit = auditDesign(tree, {
           profile: designProfile, assets: approvedPhotos, imageUnavailable: photography.unavailable,
         });
@@ -616,6 +667,11 @@ async function runJob(job) {
 
     const capabilityAudit = auditCapabilityTree(tree, capabilityManifest);
     qualityWarnings.push(...capabilityAudit.warnings);
+    job.diag?.step({
+      agent: "Tester", kind: "lint", label: "Capability safety audit",
+      status: capabilityAudit.hardIssues.length ? "failed" : "ok",
+      output: JSON.stringify({ hardIssues: capabilityAudit.hardIssues, warnings: capabilityAudit.warnings }, null, 2),
+    });
     if (capabilityAudit.hardIssues.length) {
       qualityWarnings.push(...capabilityAudit.hardIssues);
       build = { ...build, ok: false };
@@ -631,6 +687,11 @@ async function runJob(job) {
       const { backendRuntimeReady, treeUsesBackendSdk } = await import("./appRuntimeStatus.mjs");
       if (treeUsesBackendSdk(tree)) {
         const runtime = await backendRuntimeReady();
+        job.diag?.step({
+          agent: "Tester", kind: "runtime", label: "Backend runtime probe",
+          status: runtime.ready ? "ok" : "failed",
+          output: runtime.ready ? "app-auth + entities reachable" : `Backend runtime unavailable: ${runtime.reason}`,
+        });
         if (!runtime.ready) {
           qualityWarnings.push(`Backend runtime unavailable: ${runtime.reason}`);
           build = { ...build, ok: false };
@@ -655,6 +716,9 @@ async function runJob(job) {
       preview = { url: null };
     }
 
+    job.diag?.files(diagBaseline, tree, {
+      label: mode === "iterate" ? "Files changed by this repair/edit" : "Files authored by the build",
+    });
     job.result = {
       finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
       need, balance: balance.total, designProfile, qualityWarnings,
@@ -678,6 +742,10 @@ async function runJob(job) {
       finish(job, "failed", { error: e.message });
     } else {
       serverLog(job, `FAILED: ${e.stack || e.message}`);
+      job.diag?.step({
+        agent: "Platform", kind: "runtime", label: "Unhandled build error",
+        status: "failed", output: e.stack || e.message,
+      });
       // Human message only — raw errors can carry internals (models, paths, provider chatter).
       finish(job, "failed", { error: "The build hit an unexpected error — please try again." });
     }
