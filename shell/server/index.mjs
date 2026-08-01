@@ -46,6 +46,7 @@ import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownl
 import {
   handleDiagnosticsList, handleDiagnosticsRun, handleDiagnosticsStep,
   handleDiagnosticsDownload, handleDiagnosticsExplain, handleDiagnosticsPrefs,
+  handleDiagnosticsRequests,
 } from "./routes/diagnostics.mjs";
 import { startDiagnosticsSweeper, stopDiagnosticsSweeper } from "./lib/appBuild/buildDiagnostics.mjs";
 import { usageInsights, buildCostSummary, adminAnalytics } from "./lib/usageInsights.mjs";
@@ -638,6 +639,11 @@ const server = http.createServer(async (req, res) => {
     if (diagDownloadMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleDiagnosticsDownload(req, res, { owner, runId: diagDownloadMatch[1] });
+    }
+    const diagRequestsMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)\/requests$/i);
+    if (diagRequestsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsRequests(req, res, { owner, runId: diagRequestsMatch[1] });
     }
     const diagExplainMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)\/explain$/i);
     if (diagExplainMatch && method === "POST") {

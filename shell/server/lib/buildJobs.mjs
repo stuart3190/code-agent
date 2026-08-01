@@ -178,7 +178,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user" }) {
   const existing = activeJobFor(owner.id, projectId);
   if (existing) return { job: existing, existing: true };
 
@@ -189,6 +189,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     status: "queued", phase: "queued", error: null,
     result: null, buildStderr: null,
     diag,                                  // diagnostics recorder (nullable, never throws)
+    trigger,                               // user | autonomous_repair | verification_repair | external | scheduled
     cancelled: false,
     subscribers: new Set(),
     createdAt: Date.now(), finishedAt: null,
@@ -517,6 +518,22 @@ async function runJob(job) {
     }
     const tree = mode === "iterate" ? { ...iterateBase } : clone(fromScaffold(REACT_VITE));
     const diagBaseline = { ...tree }; // snapshot for created/modified/deleted + diffs
+
+    // Scoped context (audit 2026-08-01): edits and repairs run in seeded context-selection
+    // mode — entry file + direct imports ride along, everything else stays paths-only, and
+    // the engine prunes accumulated tool payloads out of re-sent history. Builds author
+    // from a scaffold and keep the default loop. Never blocks a user-triggered job.
+    const { scopeForJob, costGuard } = await import("./appBuild/contextScope.mjs");
+    const scope = scopeForJob({
+      mode, prompt, redesign, trigger: job.trigger || "user",
+      tree: mode === "iterate" ? tree : null,
+    });
+    for (const warning of scope.warnings) serverLog(job, `context: WARN ${warning}`);
+    const guard = costGuard({ estContextTokens: scope.estContextTokens, model: provider.model, trigger: job.trigger || "user" });
+    if (guard.blocked) {
+      throw new Error(`This ${scope.taskType} is projected at ~${guard.projectedCredits} credits — above the ${guard.threshold}-credit autonomous ceiling. It needs explicit approval before running.`);
+    }
+    serverLog(job, `context: ${scope.taskType} budget ${scope.budgetTokens} tok · est ${scope.estContextTokens} tok · ${scope.contextSelection ? `seeded ${scope.files.map((f) => f.path).join(", ")}` : "scaffold build"}`);
     if (mode === "iterate") {
       // The backend SDK is a protected platform seam, not user-authored app code. Persist the
       // latest version into edited legacy projects so future exports and builds keep new APIs.
@@ -583,6 +600,8 @@ async function runJob(job) {
     const builderStarted = Date.now();
     const initial = await runAgent({
       provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
+      contextSelection: scope.contextSelection,
+      entryFile: scope.entryFile || "__no_entry__", // no confident match -> manifest-only seeding
     });
     combinedUsage.add(initial.telemetry);
     let finalText = initial.finalText;
@@ -591,6 +610,15 @@ async function runJob(job) {
       agent: "Builder", kind: "agent", label: mode === "iterate" ? "Code changes" : "Initial implementation",
       prompt: enginePrompt, output: finalText,
       usage: initial.telemetry, model: provider.model, durationMs: Date.now() - builderStarted,
+      contextMeta: {
+        trigger: job.trigger || "user", runId: job.id,
+        taskType: scope.taskType, budgetTokens: scope.budgetTokens,
+        estContextTokens: scope.estContextTokens,
+        contextSelection: scope.contextSelection,
+        files: scope.files, warnings: scope.warnings,
+        promptTokens: Math.round(String(enginePrompt).length / 4),
+        systemTokens: Math.round(String(systemPrompt).length / 4),
+      },
     });
 
     // Prove it builds (same bar as the harness) before we serve/save it. Runtime tree carries

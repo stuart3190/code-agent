@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from "react";
 import {
   listDiagnostics, getDiagnostics, getDiagnosticsStep, explainDiagnostics,
-  diagnosticsPrefs, setDiagnosticsPrefs,
+  diagnosticsPrefs, setDiagnosticsPrefs, diagnosticsRequests,
 } from "../lib/codeAgentApi.js";
 import { SkeletonRows, formatCompact } from "./shared.jsx";
 
@@ -145,6 +145,8 @@ function RunDetail({ runId, onBack }) {
             )}
           </div>
 
+          <ContextInspector runId={run.id} />
+
           {rounds.length > 1 && (
             <div className="mg-card">
               <div className="mg-row" style={{ borderBottom: 0 }}>
@@ -185,6 +187,58 @@ function RunDetail({ runId, onBack }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// Context Inspector: exactly what each AI request carried — trigger, token classes,
+// task budget, and every seeded file with the reason it was included.
+function ContextInspector({ runId }) {
+  const [open, setOpen] = useState(false);
+  const [requests, setRequests] = useState(null);
+  const toggle = () => {
+    setOpen((v) => !v);
+    if (!requests) diagnosticsRequests(runId).then((r) => setRequests(r.requests)).catch(() => setRequests([]));
+  };
+  return (
+    <div className="mg-card">
+      <button className="mg-row" style={{ width: "100%", textAlign: "left", borderBottom: 0 }} onClick={toggle} aria-expanded={open}>
+        <div>Context Inspector<div className="ct-hint">What was actually sent to the model on every request</div></div>
+        <span className="ct-hint">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && requests && !requests.length && (
+        <div className="ct-hint">No per-request context records — this build predates context diagnostics.</div>
+      )}
+      {open && (requests || []).map((r, i) => (
+        <div className="mg-card" key={i} style={{ marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline", fontSize: 13 }}>
+            <strong>{r.agent || "Agent"}</strong>
+            <span className="ct-hint">{r.provider} / {r.model}</span>
+            {r.trigger && <span className="mg-pill">{r.trigger}</span>}
+            {r.context?.taskType && <span className="mg-pill"><span className="dot" style={{ background: "var(--accent)" }} />{r.context.taskType}</span>}
+            <span className="ct-hint" style={{ marginLeft: "auto" }}>
+              in {r.inputTokens} · cached {r.cachedTokens} · out {r.outputTokens}{r.cost != null ? ` · ${Number(r.cost).toFixed(4)} cr` : ""}
+            </span>
+          </div>
+          {r.context && (
+            <div className="ct-hint" style={{ marginTop: 6 }}>
+              Budget {r.context.budgetTokens} tok · estimated context {r.context.estContextTokens} tok
+              (system {r.context.systemTokens} · prompt {r.context.promptTokens})
+              {r.context.contextSelection ? " · seeded context selection" : " · scaffold build"}
+            </div>
+          )}
+          {r.context?.files?.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {r.context.files.map((f) => (
+                <div key={f.path} className="ct-hint"><span className="mg-mono">{f.path}</span> — {f.reason}</div>
+              ))}
+            </div>
+          )}
+          {r.context?.warnings?.length > 0 && r.context.warnings.map((w, j) => (
+            <div key={j} className="mg-error" style={{ margin: "6px 0 0" }}>{w}</div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
