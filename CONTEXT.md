@@ -63,6 +63,22 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+THREE-LEVEL SELECTOR (2026-08-01, PRs #94/#95, deployed + live-proven): Provider → Model
+→ Mode. Adapters self-describe via *ProviderMeta() exports (openAI/anthropic/gemini/xai:
+name, env-synced model list, supportedModes, modeMap) — adding a provider = registering
+its meta, ZERO provider-specific UI outside adapters (routing's providerOptionsForMode
+resolves knobs from the same maps, strips tierHint). Modes fast/balanced/deep/cheapest/
+max_quality: reasoning effort where native (openai/xai), tier steering under Auto
+(selectionTier honors policy.mode), unsupported hidden (gemini no deep) + validation
+coerces to balanced. Pref format `value#mode` (parseModelPref/formatModelPref); mode flows
+lead loop → policy.mode → provider ctors. Measured stats per model (modelStats over
+recent 500 diag_runs: success/cost/duration/repairs; "Collecting benchmark data…" <5
+samples, STATS_MIN_SAMPLES). Auto expansion = exact routeCandidates decision + measured
+reason + one-click pin (codex credential mapped→managed for truthfulness, #95).
+Conversation switch confirms "Future requests will use X • Mode." — future-only contract
+unchanged. 275 node (12 selector) + 28 PW; live: hierarchical catalog w/ collecting-stats
+on prod, deep-mode pref round-trip, auto strategy accurate.
+
 MODEL SELECTOR (2026-08-01, PR #92, deployed + live-proven): per-project provider/model
 choice. GET /api/v1/models (lib/modelSelector.mjs selectableModelsForOwner) = the owner's
 ACTUAL catalog: Auto first (default/Recommended), managed models (platform env keys),
