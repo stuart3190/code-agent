@@ -63,6 +63,25 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+XAI/GROK PROVIDER (2026-08-01, PR #90, deployed): first-class alongside OpenAI/Codex/
+Anthropic/Gemini — ALL Grok logic in `lib/xaiProvider.mjs` (both seams: lead `turn` +
+engine `runTurn` over api.x.ai OpenAI-compatible Responses API; retries/timeout/
+AbortSignal cancellation; usage incl cached+reasoning tokens; normalized xai_* errors;
+XAI_MODELS catalog grok-4.5/-fast/grok-build-0.1 w/ context limits, standard + LONG-context
+pricing tiers + thresholds, capability flags, rate limits; discoverXaiModels merges live
+/models). Exact cost xaiCostForUsage (long tier past threshold, cached always at cached
+rate); credit weights via XAI_RATES in src/cost.mjs (costModel ALL_RATES merge). BYOK:
+aiCredentialStore providers += xai (xai- prefix, live /models probe, hint-only public
+shape); Settings UI row. Routing: modelCatalog xaiCatalogEntries() gated on configured AND
+THRALLO_XAI_ENABLED + model allowlist; NEVER default (earns rank via health scoring);
+buildContext xai BYOK branch honors per-agent gating + task reasoning (simple edits low).
+Admin env knobs: THRALLO_XAI_{ENABLED,AGENTS,MODELS,DEFAULT_REASONING,MAX_CONTEXT_TOKENS,
+LONG_CONTEXT_APPROVAL,PER_REQUEST_LIMIT_CREDITS,DAILY_BUDGET_CREDITS,PER_USER_BUDGET_CREDITS,
+MAX_RETRIES}. Benchmark: scripts/benchmark-providers.mjs (identical tasks, real engine loop,
+local compile verification, judged by cost-to-verified-result; --stub offline; results →
+benchmark-results.json; OpenAI baseline recorded, Grok pending XAI key — YOU_NEED_TO_DO).
+8 tests in xai-provider.test.mjs. Live-proven: BYOK validation answers on prod, UI shipped.
+
 SCOPED CONTEXT PIPELINE (2026-08-01, PR #88, deployed): audit-first (scripts/
 measure-context.mjs — offline scripted-provider harness, zero API cost). AUDIT FINDINGS:
 engine NEVER sent whole-project contents (tool-based access; only paths via list_files),
