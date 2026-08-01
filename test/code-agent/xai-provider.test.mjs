@@ -209,34 +209,92 @@ test("xAI keys never reach the browser, logs, or generated apps (source guards)"
   for (const q of reads) assert.match(q, /eq\("owner"/, "credential queries are owner-scoped");
 });
 
-test("every application provider is permitted by the database constraints", async () => {
-  // A provider added in code but missing from the schema's CHECK constraints fails at
-  // INSERT with an opaque 500 — exactly what happened to xai (PR #90 shipped the adapter,
-  // the constraints still listed only the original providers). This guard keeps the
-  // migrations in step with the application's provider list.
+// The application's own provider registry, read from source so the test cannot drift from it.
+async function applicationProviders() {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    fileURLToPath(new URL("../../shell/server/lib/aiCredentialStore.mjs", import.meta.url)), "utf8");
+  return /const API_KEY_PROVIDERS = new Set\(\[([^\]]+)\]\)/.exec(source)[1]
+    .split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean);
+}
+
+// EVERY AI-provider CHECK constraint the migrations define, discovered by pattern rather than
+// by a hardcoded list of table names. Later migrations win, so a drop-and-recreate is honoured.
+async function providerConstraints() {
   const { readFile, readdir } = await import("node:fs/promises");
   const dir = fileURLToPath(new URL("../../supabase/migrations", import.meta.url));
   const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
-  let credentialConstraint = null;
-  let preferenceConstraint = null;
+  const found = new Map();
   for (const file of files) {
     const sql = await readFile(`${dir}/${file}`, "utf8");
-    for (const match of sql.matchAll(/ca_ai_credentials_provider_check[\s\S]*?check \(([^;]*?)\);/gi)) {
-      credentialConstraint = match[1];
+    // Named constraints: `<name>_provider[_x]_check ... check (...)`.
+    for (const match of sql.matchAll(/(\w*provider\w*_check)\b[\s\S]{0,80}?check\s*\(([\s\S]*?)\)\s*;/gi)) {
+      found.set(match[1], match[2]);
     }
-    for (const match of sql.matchAll(/ca_ai_preferences_active_provider_check[\s\S]*?check \(([^;]*?)\);/gi)) {
-      preferenceConstraint = match[1];
+    // Inline column constraints. The table BODY is captured first (up to its closing `);`) so a
+    // check belonging to a later table in the same file cannot be attributed to this one.
+    for (const table of sql.matchAll(/create table (?:if not exists )?public\.(\w+)\s*\(([\s\S]*?)\n\);/gi)) {
+      const inline = /check\s*\(\s*provider\s+in\s*\(([^)]*)\)/i.exec(table[2]);
+      if (!inline) continue;
+      const key = `${table[1]}__inline_provider`;
+      if (!found.has(key)) found.set(key, inline[1]);
     }
   }
-  assert.ok(credentialConstraint, "credential provider constraint found in migrations");
-  assert.ok(preferenceConstraint, "preference provider constraint found in migrations");
-  const { default: credStoreSource } = { default: await readFile(fileURLToPath(new URL("../../shell/server/lib/aiCredentialStore.mjs", import.meta.url)), "utf8") };
-  const appProviders = /const API_KEY_PROVIDERS = new Set\(\[([^\]]+)\]\)/.exec(credStoreSource)[1]
-    .split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean);
+  // A named constraint on a table SUPERSEDES that table's original inline definition — the
+  // inline form is what CREATE TABLE shipped, and a later ALTER drops and recreates it.
+  for (const key of [...found.keys()]) {
+    if (!key.endsWith("__inline_provider")) continue;
+    const table = key.replace("__inline_provider", "");
+    const superseded = [...found.keys()].some((other) => other !== key && other.startsWith(`${table}_`));
+    if (superseded) found.delete(key);
+  }
+  return found;
+}
+
+// A constraint governs AI providers if its permitted values overlap the AI provider universe.
+// Derived rather than name-listed, so `ca_repositories` (github) and `custom_oauth_providers`
+// (oauth2/oidc) exclude themselves, and a new AI-provider table includes itself automatically —
+// which is the whole point: a name list is what let two tables drift unnoticed.
+const AI_PROVIDER_UNIVERSE = ["openai", "anthropic", "gemini", "xai", "codex"];
+
+function governsAiProviders(definition) {
+  return AI_PROVIDER_UNIVERSE.some((provider) => definition.includes(`'${provider}'`));
+}
+
+test("every application provider is permitted by EVERY AI provider constraint", async () => {
+  // A provider added in code but missing from a schema CHECK fails at INSERT. When the write is
+  // fire-and-forget (modelRouting's recordAttempt swallows errors) the failure is *silent*:
+  // that is how xai reached production with ca_model_attempts and
+  // ca_model_evaluation_results still listing only openai/anthropic/gemini, leaving provider
+  // health scoring permanently blind to it. The previous version of this guard checked only the
+  // two credential constraints and passed throughout.
+  const appProviders = await applicationProviders();
   assert.ok(appProviders.includes("xai"), "xai is an application provider");
-  for (const provider of appProviders) {
-    assert.match(credentialConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_credentials constraint`);
-    assert.match(preferenceConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_preferences constraint`);
+
+  const constraints = await providerConstraints();
+  const aiConstraints = [...constraints].filter(([, definition]) => governsAiProviders(definition));
+  assert.ok(aiConstraints.length >= 4,
+    `expected to discover the AI provider constraints, found: ${aiConstraints.map(([n]) => n).join(", ")}`);
+
+  for (const [name, definition] of aiConstraints) {
+    for (const provider of appProviders) {
+      assert.match(definition, new RegExp(`'${provider}'`),
+        `${provider} must be permitted by ${name} — add it in a migration`);
+    }
+  }
+});
+
+test("the provider-constraint discovery actually sees the tables that drifted", async () => {
+  // Guards the guard: if the discovery regex stops matching these, the test above would pass
+  // vacuously for exactly the two tables that caused the incident.
+  const constraints = await providerConstraints();
+  for (const name of [
+    "ca_ai_credentials_provider_check",
+    "ca_ai_preferences_active_provider_check",
+    "ca_model_attempts_provider_check",
+    "ca_model_evaluation_results_provider_check",
+  ]) {
+    assert.ok(constraints.has(name), `${name} must be discovered by the constraint scan`);
   }
 });
 

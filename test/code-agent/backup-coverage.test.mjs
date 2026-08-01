@@ -12,25 +12,62 @@ import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs"
 
 const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
 
+// Tables a migration creates that are deliberately NOT in disaster recovery. Every entry needs
+// a reason: the point of this list is that skipping a table becomes a decision someone wrote
+// down, not an accident of a regex that never matched it.
+//
+// All of these belong to Buildr101-era migration files that were carried over at fork time and
+// **never applied to Thrallo's Supabase** — verified 2026-08-01 against information_schema: all
+// 28 are absent from production. Backing up a table that does not exist would fail the nightly
+// job, so they are excluded until (and unless) their feature is deliberately revived.
+//
+// IMPORTANT: if one of these is ever applied to production, it must MOVE to CA_TABLES. CI cannot
+// see the live database, so the scheduled migration-drift ops check owns that half: it compares
+// this list against the tables that actually exist and fails when one appears in production while
+// still excluded here.
+const UNAPPLIED_LEGACY = "defined by an unapplied Buildr101-era migration; absent from Thrallo production (verified 2026-08-01)";
+const INTENTIONALLY_NOT_BACKED_UP = new Map([
+  "feature_flags", "project_secrets", "project_integrations", "project_environments",
+  "project_releases", "background_tasks", "audit_events", "qa_runs", "payment_products",
+  "payment_orders", "brand_kits", "project_brand_settings", "app_notifications",
+  "app_analytics_events", "project_templates", "connector_oauth_states", "connector_workflows",
+  "project_actions", "app_jobs", "runtime_usage", "app_usage_ledger", "action_schedules",
+  "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",
+  "app_user_integrations", "app_connector_oauth_states",
+].map((table) => [table, UNAPPLIED_LEGACY]));
+
+// EVERY table any migration creates. This deliberately does NOT filter by name: the previous
+// version matched a hardcoded allowlist (`ca_\w+|projects|build_jobs|…`), so seven tables added
+// later — diag_runs, diag_steps, diag_incidents, diag_prefs, ai_requests, build_signals,
+// build_checkpoints — were invisible to the guard and silently absent from every snapshot.
 async function tablesFromMigrations() {
   const tables = new Set();
   for (const name of await readdir(migrationsDir)) {
     if (!name.endsWith(".sql")) continue;
     const sql = await readFile(new URL(name, migrationsDir), "utf8");
-    for (const match of sql.matchAll(/create table (?:if not exists )?public\.(ca_\w+|projects|build_jobs|published_sites|custom_domains|entities|app_users|app_auth_events|app_password_resets)\b/gi)) {
+    const code = sql.split("\n").filter((line) => !line.trim().startsWith("--")).join("\n");
+    for (const match of code.matchAll(/create table (?:if not exists )?public\.(\w+)/gi)) {
       tables.add(match[1]);
     }
   }
   return tables;
 }
 
-test("the backup covers every ca_ table any migration creates", async () => {
+test("the backup covers every table any migration creates", async () => {
   const migrated = await tablesFromMigrations();
   const backedUp = new Set(CA_TABLES);
-  const missing = [...migrated].filter((table) => !backedUp.has(table));
+  const missing = [...migrated]
+    .filter((table) => !backedUp.has(table) && !INTENTIONALLY_NOT_BACKED_UP.has(table));
   const extra = [...backedUp].filter((table) => !migrated.has(table));
-  assert.deepEqual(missing, [], `add these tables to CA_TABLES in ops/backup-thrallo.mjs: ${missing.join(", ")}`);
+  assert.deepEqual(missing, [],
+    `add these tables to CA_TABLES in ops/backup-thrallo.mjs, or justify them in INTENTIONALLY_NOT_BACKED_UP: ${missing.join(", ")}`);
   assert.deepEqual(extra, [], `CA_TABLES lists tables no migration creates: ${extra.join(", ")}`);
+});
+
+test("every deliberate backup exclusion carries a written reason", () => {
+  for (const [table, reason] of INTENTIONALLY_NOT_BACKED_UP) {
+    assert.ok(reason && reason.length > 20, `${table}: exclusions need a real justification`);
+  }
 });
 
 test("the restore order covers exactly the backed-up tables", () => {

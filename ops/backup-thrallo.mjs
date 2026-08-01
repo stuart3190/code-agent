@@ -63,6 +63,17 @@ export const CA_TABLES = [
   "app_users",
   "app_auth_events",
   "app_password_resets",
+  // Diagnostics, checkpoints and cost telemetry. Added 2026-08-01: these were missing because
+  // the coverage guard only ever checked `ca_`-prefixed tables, so seven non-`ca_` tables —
+  // including the permanent build audit trail and the usage data behind billing summaries and
+  // BYOK daily spend — were silently absent from every snapshot.
+  "diag_runs",
+  "diag_steps",
+  "diag_incidents",
+  "diag_prefs",
+  "ai_requests",
+  "build_signals",
+  "build_checkpoints",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
