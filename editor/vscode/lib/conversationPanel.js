@@ -9,8 +9,11 @@
 // Rewrite the built index.html for a VS Code webview: absolute /assets/ URLs become
 // webview resource URIs, favicon/manifest links (dead in a webview) are dropped, and a
 // strict CSP plus the desktop-mode global are injected at the top of <head>.
-function rewriteIndexHtml(html, { assetBase, cspSource, server, token, email = null }) {
-  const desktop = { server: String(server || "").replace(/\/+$/, ""), token, email };
+function rewriteIndexHtml(html, { assetBase, cspSource, server, token, email = null, version = null }) {
+  // `version` is the PACKAGED extension version. The bundled web app compares it against the
+  // release manifest so a desktop copy left behind by a web deploy can say so, rather than
+  // silently running an old build — the exact state the 2026-08-01 audit found it in.
+  const desktop = { server: String(server || "").replace(/\/+$/, ""), token, email, version };
   // The bootstrap global is an INLINE script — CSP requires a nonce for it (resource
   // sources only cover the bundle's own files).
   const nonce = require("node:crypto").randomBytes(16).toString("base64url");

@@ -151,6 +151,7 @@ async function renderConversation(context, panel, indexPath, appRoot) {
     cspSource: panel.webview.cspSource,
     server: serverUrl(),
     token,
+    version: vscode.extensions.getExtension("thrallo.thrallo")?.packageJSON?.version || null,
   });
 }
 

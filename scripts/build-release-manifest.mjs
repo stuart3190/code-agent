@@ -6,10 +6,26 @@ import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const [dir, version, notes] = process.argv.slice(2);
-if (!dir || !version) {
-  console.error('usage: node scripts/build-release-manifest.mjs <dir> <version> "<notes>"');
+const [dir, versionArg, notes] = process.argv.slice(2);
+if (!dir) {
+  console.error('usage: node scripts/build-release-manifest.mjs <dir> [version] "<notes>"');
   process.exit(1);
+}
+
+// The RELEASE version must be the one the packaged app knows about itself, or the desktop
+// update notice cannot work: the first release was published as "1.131.0" — the Code-OSS pin,
+// which never changes between Thrallo releases — while the packaged extension carries its own
+// increasing version. Comparing the two made the notice fire permanently.
+//
+// Defaulting to the extension's version keeps one source of truth; an explicit argument still
+// wins for a one-off.
+const packagedVersion = JSON.parse(
+  await readFile(new URL("../editor/vscode/package.json", import.meta.url), "utf8"),
+).version;
+const version = versionArg || packagedVersion;
+if (versionArg && versionArg !== packagedVersion) {
+  console.warn(`WARNING: publishing ${versionArg} but the packaged app reports ${packagedVersion} — `
+    + "the update notice compares these, so they should match.");
 }
 
 const FILES = {
