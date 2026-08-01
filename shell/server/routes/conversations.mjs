@@ -37,6 +37,7 @@ export async function handleConversations(req, res, { owner, method, body }) {
   return wrap(async () => {
     const { conversation } = await postUserMessage(owner.id, {
       text: body?.text, workspaceContext: body?.workspaceContext || null,
+      modelPref: body?.modelPref || null,
     });
     sendJson(res, 201, { conversation: publicConversation(conversation) });
   });
@@ -97,6 +98,7 @@ function publicConversation(row) {
     title: row.title,
     state: row.state,
     productId: row.product_id,
+    modelPref: row.model_pref || "auto",
     lastActivityAt: row.last_activity_at,
     createdAt: row.created_at,
   };

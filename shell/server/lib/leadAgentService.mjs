@@ -72,7 +72,7 @@ function describeWorkspaceContext(context) {
   return parts.join("\n");
 }
 
-export async function postUserMessage(owner, { conversationId = null, text, workspaceContext = null }, {
+export async function postUserMessage(owner, { conversationId = null, text, workspaceContext = null, modelPref = null }, {
   store = conversationStore(),
   processOptions = {},
 } = {}) {
@@ -86,6 +86,15 @@ export async function postUserMessage(owner, { conversationId = null, text, work
   if (conversationId && !conversation) throw inputError("Conversation not found", 404, "conversation_not_found");
   if (!conversation) {
     conversation = await store.createConversation(owner, { title: trimmed.slice(0, 80) });
+    // The Begin-screen model selector rides with the first message; validated against the
+    // owner's actual catalog so an unconfigured provider can never be stored.
+    if (modelPref && modelPref !== "auto") {
+      try {
+        const { selectableModelsForOwner, validateModelChoice } = await import("./modelSelector.mjs");
+        const value = validateModelChoice(await selectableModelsForOwner(owner), modelPref);
+        conversation = await store.updateConversation(conversation, { model_pref: value });
+      } catch { /* invalid preference — the conversation starts on Auto */ }
+    }
   }
   if (conversation.state === "thinking") {
     throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
@@ -140,12 +149,27 @@ export async function processConversation(conversation, {
       relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
     };
 
+    // Per-conversation model preference: honored when available; unavailable selections
+    // NEVER silently switch — they fall back only when the user enabled automatic
+    // fallback (with a visible notice), and otherwise stop with a clear warning.
+    const { selectableModelsForOwner, resolveConversationModel } = await import("./modelSelector.mjs");
+    const catalog = await selectableModelsForOwner(conversation.owner).catch(() => ({ options: [{ value: "auto", available: true }], allowFallback: true }));
+    const resolution = resolveConversationModel(conversation, catalog);
+    if (resolution.warning) {
+      await finishWithMessage(store, conversation, resolution.warning);
+      return;
+    }
+    if (resolution.notice) {
+      await store.appendTurn(conversation, { role: "lead", content: resolution.notice, payload: { progress: true } });
+      await emit("message", { role: "lead", text: resolution.notice });
+    }
+
     const model = modelFactory
-      ? await modelFactory(credential)
+      ? await modelFactory(credential, resolution.requested)
       : await createRoutedCodingModel({
         owner: conversation.owner,
         credential,
-        requested: "auto",
+        requested: resolution.requested,
         policy: credential.routing || {},
       });
 

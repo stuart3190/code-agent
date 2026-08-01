@@ -599,6 +599,29 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
     }
+    if (p === "/api/v1/models" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const { selectableModelsForOwner } = await import("./lib/modelSelector.mjs");
+      return sendJson(res, 200, await selectableModelsForOwner(owner.id));
+    }
+    const conversationModelMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/model$/i);
+    if (conversationModelMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      const { selectableModelsForOwner, validateModelChoice } = await import("./lib/modelSelector.mjs");
+      const { conversationStore } = await import("./lib/conversationStore.mjs");
+      const store = conversationStore();
+      const conversation = await store.getConversation(owner.id, conversationModelMatch[1]);
+      if (!conversation) return sendJson(res, 404, { error: "Project not found." });
+      try {
+        const value = validateModelChoice(await selectableModelsForOwner(owner.id), body?.value);
+        await store.updateConversation(conversation, { model_pref: value });
+        await store.appendEvent(conversation, "model_changed", { value });
+        return sendJson(res, 200, { value });
+      } catch (error) {
+        return sendJson(res, error.status || 500, { error: error.message, code: error.code || null });
+      }
+    }
     if (p === "/api/v1/usage/insights" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return sendJson(res, 200, await usageInsights(owner.id));

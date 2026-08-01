@@ -19,6 +19,8 @@ import {
 } from "./conversationState.js";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
+import ModelSelector, { MODEL_PREF_KEY } from "./ModelSelector.jsx";
+import { setConversationModel } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
 import AiSettings from "../manage/AiSettings.jsx";
 import TokensSettings from "../manage/TokensSettings.jsx";
@@ -102,6 +104,7 @@ function Workspace({ user }) {
   const [manageView, setManageView] = useState(null); // null | repos | usage | ops
   const [deleting, setDeleting] = useState(null);     // { project, busy, error, permanent } | null
   const [deletedItems, setDeletedItems] = useState([]); // Recently Deleted (7-day recovery)
+  const [modelPref, setModelPref] = useState(() => localStorage.getItem(MODEL_PREF_KEY) || "auto");
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
@@ -186,7 +189,7 @@ function Workspace({ user }) {
     sendingRef.current = true;
     try {
       if (!active) {
-        const r = await startConversation(trimmed, context);
+        const r = await startConversation(trimmed, context, modelPref);
         setConversations((list) => [r.conversation, ...list]);
         openConversation(r.conversation);
       } else {
@@ -201,7 +204,20 @@ function Workspace({ user }) {
     } finally {
       sendingRef.current = false;
     }
-  }, [active, openConversation, showToast, wsContext, wsContextOn]);
+  }, [active, openConversation, showToast, wsContext, wsContextOn, modelPref]);
+
+  // Conversation-scoped model change: future requests only — no rebuild, no memory reset.
+  const changeConversationModel = useCallback((value) => {
+    if (!active) return;
+    setConversationModel(active.id, value)
+      .then(() => {
+        setActive((current) => (current ? { ...current, model_pref: value, modelPref: value } : current));
+        setConversations((list) => list.map((c) => (c.id === active.id ? { ...c, modelPref: value } : c)));
+        localStorage.setItem(MODEL_PREF_KEY, value);
+        setModelPref(value);
+      })
+      .catch((error) => showToast(error.message || "That model isn't available."));
+  }, [active, showToast]);
 
   // ⌘K / Ctrl+K opens the palette; Escape closes whatever is on top.
   useEffect(() => {
@@ -254,6 +270,9 @@ function Workspace({ user }) {
 
       {!active ? (
         <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
+          modelPref={modelPref}
+          onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
+          onOpenSettings={() => setSheetOpen(true)}
           onContinue={(id) => {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
@@ -275,6 +294,11 @@ function Workspace({ user }) {
           <div className="ct-thread-wrap">
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               scrollKey={active.id} scrollMemory={scrollMemory} />
+            <div className="ct-model-dock">
+              <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
+                onChange={changeConversationModel}
+                onOpenSettings={() => setSheetOpen(true)} />
+            </div>
             <Composer onSend={send} waiting={view.waiting} thinking={view.thinking}
               context={wsContextOn ? wsContext : null} onDismissContext={() => setWsContextOn(false)} />
           </div>
@@ -358,7 +382,7 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow }) {
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -379,6 +403,11 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
       <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
       <Composer autoFocus={FINE_POINTER} onSend={onSend} placeholder="Describe anything — an app, a change, an idea…" />
+      {onModelChange && (
+        <div className="ct-model-begin">
+          <ModelSelector value={modelPref} onChange={onModelChange} onOpenSettings={onOpenSettings} />
+        </div>
+      )}
       {!loaded && returning && (
         <div className="ct-workspace" aria-hidden="true">
           <div className="ct-ws-label">Projects</div>
