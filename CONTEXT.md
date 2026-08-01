@@ -63,6 +63,40 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+REPAIR-PIPELINE HARDENING (2026-08-01, PR #119, merged + deployed + prod-verified):
+**ROOT CAUSE of four confirmed defects: `planEndAction` inferred retry eligibility from job
+`status` alone, so EVERY non-complete job became a blind paid retry.** (1) `cancelJob`
+finishes as `failed`/"Cancelled by user." and nothing unsubscribed the relay → a cancelled
+build was reclassified as a crash and RETRIED; (2) `ManagedBillingError` and the cost-guard
+throw surfaced as generic failures → a spent budget funded another attempt, and a provider
+quota exhaustion retried the SAME exhausted provider; (3) the retry path read `job.prompt`
+but `createJob` stores it at `job.input.prompt` → every retry dispatched `prompt: undefined`;
+(4) `managedAffordableCreditLimit` is PER JOB with nothing summing across the lifecycle → a
+three-job loop could spend 60+40+40.
+FIX: jobs stamp `build_jobs.stop_reason` where the truth is known; `classifyEndState`
+(endState.mjs) maps (status, stopReason, error, result) → one of ELEVEN explicit states;
+**only `transient_interruption` may auto-retry.** New modules: endState.mjs (classification
++ provider-condition + human-input detection), lifecycleBudget.mjs (aggregate credits/
+tokens/turns/jobs/repairs/elapsed, configurable per plan+mode via
+THRALLO_LIFECYCLE_<FIELD>_<PLAN>_<MODE>; free build 90cr / starter 140 / pro 220, jobs=3),
+byokSafety.mjs (5 OPTIONAL controls, ALL default null=disabled — **BYOK gets NO mandatory
+Thrallo spend cap**; loop safety comes from the structural limits instead),
+repairProgress.mjs (no-progress detection: compile/preview/runtime/verification-score/
+failure-count/subset-narrowing/meaningful-diff), buildCheckpoints.mjs (bounded in-memory
+ring, marks generated|compiled|preview-ready|verification-passed|verification-failed,
+last-known-good never evicted, auto-restore on regression — **deliberately NOT ca_checkpoints**,
+that table is the repo-agent pipeline's). A `lifecycle` object threads originalInput +
+budget + checkpoints + repairMemory + round history through every dispatch; provider
+fallback resumes from the same step keeping all counters (never restarts). Owner notified
+once on every terminal path. Wording corrected: "I completed the initial build and 2
+automatic repair attempts" (was the overstated "3 autonomous repair rounds").
+PRESERVED: three-job ceiling, failure fingerprinting, duplicate-brief detection, scoped
+context, diagnostics, verification gate, provider routing, agent structure.
+Migration `20260801120000_repair_pipeline_hardening` (build_jobs.stop_reason,
+ca_ai_preferences.byok_safety). Relay takes injectable `deps` so tests assert what is
+actually DISPATCHED, not just what the planner returns. 367 node + 38 Playwright green
+(45 new in test/code-agent/repair-pipeline.test.mjs).
+
 FIRST REAL GROK BENCHMARK (2026-08-02, PR #117): Grok connected (BYOK, active provider).
 Benchmark now resolves BYOK keys SERVER-SIDE via --owner (decrypts in-process; key never
 printed/logged/written to results) — run on the VPS, never locally. **LIVE PROBING KILLED
