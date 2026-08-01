@@ -80,7 +80,13 @@ async function stubApi(page) {
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 
-test("converse → team → preview on the conversation shell", async ({ page, isMobile }) => {
+// The shell swaps to its narrow layout at the CSS breakpoint (max-width: 820px), NOT on touch
+// capability. Playwright's `isMobile` means touch — true for iPads — so branching on it made
+// the tablet projects assert the phone layout at 834px, where the desktop rail is correct.
+const NARROW_BREAKPOINT = 820;
+const isNarrow = (page) => (page.viewportSize()?.width ?? 0) <= NARROW_BREAKPOINT;
+
+test("converse → team → preview on the conversation shell", async ({ page }) => {
   const errors = [];
   // Sandboxed preview iframes under Chromium storage partitioning throw a benign
   // localStorage access error that never reaches product code — ignore only that.
@@ -103,7 +109,7 @@ test("converse → team → preview on the conversation shell", async ({ page, i
   await expect(page.getByText("Plan · Build FocusFlow")).toBeVisible();
   await expect(page.getByText("Preview ready")).toBeVisible();
 
-  if (isMobile) {
+  if (isNarrow(page)) {
     // The rail is hidden; the team strip and the full-screen sheet carry the product.
     await expect(page.locator(".ct-strip")).toBeVisible();
     await page.locator(".ct-preview-thumb").click();
@@ -140,7 +146,7 @@ test("settings sheet and command palette stay within the permanent four", async 
   await expect(page.getByText("New conversation")).toBeVisible();
 });
 
-test("background navigation: leave a running build, start another, return — stream continues", async ({ page, isMobile }) => {
+test("background navigation: leave a running build, start another, return — stream continues", async ({ page }) => {
   await stubApi(page);
   // The "server": c9's durable event log keeps growing while the user is elsewhere.
   const buildEvents = [
@@ -206,7 +212,7 @@ test("background navigation: leave a running build, start another, return — st
   await expect(page.getByText("Build me a big CRM called Atlas")).toBeVisible();
   await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
   await expect(page.getByText("Schema is in — wiring the UI now.")).toBeVisible();
-  if (isMobile) {
+  if (isNarrow(page)) {
     await expect(page.getByText("Builder — Wiring the UI…")).toBeVisible(); // team strip
   } else {
     await expect(page.locator('.ct-agent[title="Builder — Wiring the UI…"]')).toBeVisible(); // compact rail
