@@ -94,8 +94,8 @@ export const setDiagnosticsPrefs = (retentionDays) => request("/api/v1/diagnosti
   method: "POST", body: JSON.stringify({ retentionDays }),
 });
 export const listConversations = () => request("/api/v1/conversations");
-export const startConversation = (text, workspaceContext = null) => request("/api/v1/conversations", {
-  method: "POST", body: JSON.stringify({ text, workspaceContext }),
+export const startConversation = (text, workspaceContext = null, modelPref = null) => request("/api/v1/conversations", {
+  method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref }),
 });
 export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
 export const deleteConversation = (conversationId, { permanent = false } = {}) =>
@@ -107,6 +107,9 @@ export const sendConversationMessage = (conversationId, text, workspaceContext =
   request(`/api/v1/conversations/${conversationId}/messages`, {
     method: "POST", body: JSON.stringify({ text, workspaceContext }),
   });
+export const listModels = () => request("/api/v1/models");
+export const setConversationModel = (conversationId, value) =>
+  request(`/api/v1/conversations/${conversationId}/model`, { method: "POST", body: JSON.stringify({ value }) });
 export const setPreviewPlan = (plan) => request("/api/v1/owner/preview-plan", {
   method: "POST", body: JSON.stringify({ plan }),
 });

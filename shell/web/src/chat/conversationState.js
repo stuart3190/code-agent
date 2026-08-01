@@ -67,6 +67,14 @@ export function applyEvent(view, event) {
     case "plan.created":
       push({ kind: "plan", title: payload.title || "Plan", steps: payload.steps || [] });
       break;
+    case "model_changed":
+      push({
+        kind: "receipt",
+        text: payload.value === "auto"
+          ? "Model set to Auto smart routing — affects future requests only."
+          : `Model set to ${String(payload.value || "").replace(":", " · ")} — affects future requests only.`,
+      });
+      break;
     case "run_linked":
       push({ kind: "receipt", text: payload.message || `Run started on ${payload.repository || "the repository"}` });
       break;

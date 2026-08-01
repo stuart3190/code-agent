@@ -223,6 +223,54 @@ test("background navigation: leave a running build, start another, return — st
   expect(box.height).toBeGreaterThanOrEqual(40);
 });
 
+test("model selector: Begin choice rides with the first message; in-conversation switch is future-only", async ({ page }) => {
+  await stubApi(page);
+  await page.route("**/api/v1/models", (r) => r.fulfill({ json: {
+    options: [
+      { value: "auto", provider: "auto", model: "Smart routing", source: "Thrallo managed", label: "Recommended", relCost: null, available: true },
+      { value: "openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
+      { value: "anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
+    ],
+    unconfigured: ["gemini", "xai"], allowFallback: true,
+  } }));
+  let startBody = null;
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => {
+    if (route.request().method() === "POST") {
+      startBody = route.request().postDataJSON();
+      return route.fulfill({ json: { conversation: { id: "c1", title: "FocusFlow", state: "thinking", modelPref: startBody.modelPref } } });
+    }
+    return route.fulfill({ json: { conversations: [] } });
+  });
+  let modelPost = null;
+  await page.route("**/api/v1/conversations/c1/model", (route) => {
+    modelPost = route.request().postDataJSON();
+    return route.fulfill({ json: { value: modelPost.value } });
+  });
+
+  await page.goto("/");
+  // Begin: selector shows Auto by default, only configured providers listed, Configure link present.
+  const pill = page.locator(".ct-model-pill");
+  await expect(pill).toHaveText(/Auto/);
+  await pill.click();
+  await expect(page.getByText("Configure providers (gemini, xai)", { exact: false })).toBeVisible();
+  await page.getByRole("option", { name: /Anthropic · claude-sonnet-5/ }).click();
+  await expect(pill).toHaveText(/Anthropic · claude-sonnet-5/);
+
+  // The choice rides with the first message.
+  const box = page.getByPlaceholder(/Describe anything/);
+  await box.fill("Build me a store");
+  await box.press("Enter");
+  await expect.poll(() => startBody?.modelPref).toBe("anthropic:claude-sonnet-5");
+
+  // Inside the conversation: switch model — POST fires, receipt appears, no rebuild call.
+  const dockPill = page.locator(".ct-model-dock .ct-model-pill");
+  await expect(dockPill).toBeVisible();
+  await dockPill.click();
+  await page.getByRole("option", { name: /OpenAI · gpt-5.6-terra/ }).click();
+  await expect.poll(() => modelPost?.value).toBe("openai:gpt-5.6-terra");
+});
+
 test("Usage & plan: clean dashboard, 90% warning, advanced section, admin gate", async ({ page }) => {
   await stubApi(page);
   await page.route("**/api/v1/usage", (r) => r.fulfill({ json: {
