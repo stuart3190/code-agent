@@ -1,5 +1,20 @@
 import { optionalEnv } from "./env.mjs";
 
+// Provider self-description for the model selector (see openAIProviderMeta). Gemini
+// exposes no per-request reasoning control in this adapter, so intensity modes map to
+// tier hints — the closest supported behaviour.
+export const geminiProviderMeta = () => ({
+  id: "gemini",
+  name: "Gemini",
+  models: [
+    { id: optionalEnv("GEMINI_QUALITY_MODEL", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash")), tier: "quality" },
+    { id: optionalEnv("GEMINI_MODEL", "gemini-3.6-flash"), tier: "balanced" },
+    { id: optionalEnv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite"), tier: "fast" },
+  ],
+  supportedModes: ["fast", "balanced", "cheapest", "max_quality"],
+  modeMap: { fast: {}, balanced: {}, cheapest: { tierHint: "fast" }, max_quality: { tierHint: "quality" } },
+});
+
 const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
 export function geminiConfigured() {

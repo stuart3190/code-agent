@@ -70,7 +70,7 @@ export async function createRoutedCodingModel({
         try {
           let provider = providers.get(candidate.key);
           if (!provider) {
-            provider = providerFactory(candidate, credential);
+            provider = providerFactory(candidate, credential, providerOptionsForMode(candidate.provider, policy.mode));
             providers.set(candidate.key, provider);
           }
           const response = await provider.turn(args);
@@ -155,6 +155,10 @@ export function isRetryableProviderError(error) {
 }
 
 function selectionTier(policy, prompt) {
+  // Execution mode (Provider→Model→Mode selector) steers the tier under Auto: intensity
+  // modes want the quality tier, economy modes the fast tier.
+  if (["deep", "max_quality"].includes(policy.mode)) return "quality";
+  if (["fast", "cheapest"].includes(policy.mode)) return "fast";
   const mode = ROUTING_MODES.includes(policy.routingMode) ? policy.routingMode : "balanced";
   if (mode === "quality") return "quality";
   if (mode === "fast" || mode === "economy") return "fast";
@@ -179,10 +183,28 @@ function credentialCandidate(credential, tier) {
   };
 }
 
+// Execution-mode knobs per provider, resolved through each adapter's own modeMap — no
+// provider conditionals leak out of the adapters.
+import { openAIProviderMeta } from "./openAIProvider.mjs";
+import { anthropicProviderMeta } from "./anthropicCodingProvider.mjs";
+import { geminiProviderMeta } from "./geminiCodingProvider.mjs";
+import { xaiProviderMeta } from "./xaiProvider.mjs";
+
+export function providerOptionsForMode(providerId, mode) {
+  if (!mode) return {};
+  const meta = [openAIProviderMeta(), anthropicProviderMeta(), geminiProviderMeta(), xaiProviderMeta()]
+    .find((m) => m.id === providerId);
+  if (!meta) return {};
+  const mapped = meta.modeMap[mode] || meta.modeMap.balanced || {};
+  const { tierHint, ...options } = mapped;
+  void tierHint; // tier steering happens in selectionTier; only real knobs reach the ctor
+  return options;
+}
+
 export function createProviderForCandidate(candidate, credential, options = {}) {
   const apiKey = credential?.provider === candidate.provider ? credential.secret : undefined;
   if (candidate.provider === "anthropic") {
-    return createAnthropicCodingProvider({ apiKey, model: candidate.model });
+    return createAnthropicCodingProvider({ apiKey, model: candidate.model, ...options });
   }
   if (candidate.provider === "gemini") {
     return createGeminiCodingProvider({ apiKey, model: candidate.model, ...options });
@@ -190,7 +212,7 @@ export function createProviderForCandidate(candidate, credential, options = {}) 
   if (candidate.provider === "xai") {
     return createXaiProvider({ apiKey, model: candidate.model, ...options });
   }
-  return createOpenAIProvider({ apiKey, model: candidate.model });
+  return createOpenAIProvider({ apiKey, model: candidate.model, ...options });
 }
 
 async function recordAttempt(store, owner, run, candidate, attemptOrder, result) {

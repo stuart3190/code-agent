@@ -1,6 +1,21 @@
 import crypto from "node:crypto";
 import { optionalEnv } from "./env.mjs";
 
+// Provider self-description for the model selector: display name, the models this
+// deployment offers (synced from env config — new models appear by env change, no UI
+// code), and which execution modes the adapter can honor (reasoning effort is native).
+export const openAIProviderMeta = () => ({
+  id: "openai",
+  name: "OpenAI",
+  models: [
+    { id: optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol")), tier: "quality" },
+    { id: optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra"), tier: "balanced" },
+    { id: optionalEnv("OPENAI_FAST_MODEL", "gpt-5.6-luna"), tier: "fast" },
+  ],
+  supportedModes: ["fast", "balanced", "deep", "cheapest", "max_quality"],
+  modeMap: { fast: { reasoningEffort: "low" }, balanced: { reasoningEffort: "medium" }, deep: { reasoningEffort: "high" }, cheapest: { reasoningEffort: "low" }, max_quality: { reasoningEffort: "high" } },
+});
+
 const endpoint = "https://api.openai.com/v1/responses";
 const REASONING_EFFORTS = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
 

@@ -225,12 +225,28 @@ test("background navigation: leave a running build, start another, return — st
 
 test("model selector: Begin choice rides with the first message; in-conversation switch is future-only", async ({ page }) => {
   await stubApi(page);
+  const MODES_STUB = [
+    { id: "fast", name: "Fast", icon: "⚡", badge: "Fastest", detail: "Lowest latency." },
+    { id: "balanced", name: "Balanced", icon: "⚖", badge: "Recommended", detail: "Default.", recommended: true },
+    { id: "deep", name: "Deep Thinking", icon: "🧠", badge: "Best Quality", detail: "Max reasoning." },
+  ];
   await page.route("**/api/v1/models", (r) => r.fulfill({ json: {
     options: [
-      { value: "auto", provider: "auto", model: "Smart routing", source: "Thrallo managed", label: "Recommended", relCost: null, available: true },
+      { value: "auto", provider: "auto", model: "Smart routing", source: "Thrallo managed", label: "Recommended", available: true },
       { value: "openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
       { value: "anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
     ],
+    providers: [
+      { id: "auto", name: "Auto", recommended: true, available: true, models: [] },
+      { id: "openai", name: "OpenAI", available: true, source: "Thrallo managed", modes: MODES_STUB,
+        models: [{ id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.00×", value: "openai:gpt-5.6-terra", stats: { successRate: 99.1, avgCostCredits: 1.1, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } }] },
+      { id: "anthropic", name: "Anthropic", available: true, source: "Your API key", modes: MODES_STUB,
+        models: [{ id: "claude-sonnet-5", name: "claude-sonnet-5", tier: "Best quality", relCost: "≈1.00×", value: "anthropic:claude-sonnet-5", stats: { collecting: true, samples: 2 } }] },
+      { id: "gemini", name: "Gemini", available: false, configure: true, models: [], modes: [] },
+      { id: "xai", name: "xAI / Grok", available: false, configure: true, models: [], modes: [] },
+    ],
+    modes: MODES_STUB,
+    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
     unconfigured: ["gemini", "xai"], allowFallback: true,
   } }));
   let startBody = null;
@@ -249,26 +265,41 @@ test("model selector: Begin choice rides with the first message; in-conversation
   });
 
   await page.goto("/");
-  // Begin: selector shows Auto by default, only configured providers listed, Configure link present.
+  // Begin: Auto default; Provider level shows configured providers + Configure rows.
   const pill = page.locator(".ct-model-pill");
   await expect(pill).toHaveText(/Auto/);
   await pill.click();
-  await expect(page.getByText("Configure providers (gemini, xai)", { exact: false })).toBeVisible();
-  await page.getByRole("option", { name: /Anthropic · claude-sonnet-5/ }).click();
-  await expect(pill).toHaveText(/Anthropic · claude-sonnet-5/);
+  await expect(page.getByText("Configure provider →").first()).toBeVisible();
+  // Auto explanation: exact current strategy with measured values.
+  await page.getByRole("button", { name: "How Auto decides" }).click();
+  await expect(page.getByText("Auto — current strategy")).toBeVisible();
+  await expect(page.getByText("Highest measured success rate for coding.")).toBeVisible();
+  await expect(page.getByText(/98\.9%/)).toBeVisible();
+  await page.getByRole("button", { name: /← Providers/ }).click();
+  // Provider -> Model -> Mode drill-in with live stats and "Collecting" state.
+  await page.getByRole("button", { name: /Anthropic/ }).click();
+  await expect(page.getByText("Collecting benchmark data…")).toBeVisible();
+  await page.getByRole("option", { name: /claude-sonnet-5/ }).click();
+  await expect(page.getByText("🧠 Deep Thinking")).toBeVisible();
+  await page.getByRole("option", { name: /Deep Thinking/ }).click();
+  await expect(pill).toHaveText(/Anthropic · claude-sonnet-5 • Deep Thinking/);
 
-  // The choice rides with the first message.
+  // The full provider:model#mode choice rides with the first message.
   const box = page.getByPlaceholder(/Describe anything/);
   await box.fill("Build me a store");
   await box.press("Enter");
-  await expect.poll(() => startBody?.modelPref).toBe("anthropic:claude-sonnet-5");
+  await expect.poll(() => startBody?.modelPref).toBe("anthropic:claude-sonnet-5#deep");
 
-  // Inside the conversation: switch model — POST fires, receipt appears, no rebuild call.
+  // Inside the conversation: switch to OpenAI · Balanced — POST fires + confirmation toast.
   const dockPill = page.locator(".ct-model-dock .ct-model-pill");
   await expect(dockPill).toBeVisible();
   await dockPill.click();
-  await page.getByRole("option", { name: /OpenAI · gpt-5.6-terra/ }).click();
+  await page.getByRole("button", { name: /OpenAI/ }).click();
+  await expect(page.getByText(/99\.1%/)).toBeVisible(); // measured stars/stats, not generic labels
+  await page.getByRole("option", { name: /gpt-5.6-terra/ }).click();
+  await page.getByRole("option", { name: /Balanced/ }).click();
   await expect.poll(() => modelPost?.value).toBe("openai:gpt-5.6-terra");
+  await expect(page.getByText("Future requests will use OpenAI · gpt-5.6-terra.")).toBeVisible();
 });
 
 test("Usage & plan: clean dashboard, 90% warning, advanced section, admin gate", async ({ page }) => {

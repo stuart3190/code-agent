@@ -19,7 +19,7 @@ import {
 } from "./conversationState.js";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
-import ModelSelector, { MODEL_PREF_KEY } from "./ModelSelector.jsx";
+import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
 import { setConversationModel } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
 import AiSettings from "../manage/AiSettings.jsx";
@@ -210,11 +210,13 @@ function Workspace({ user }) {
   const changeConversationModel = useCallback((value) => {
     if (!active) return;
     setConversationModel(active.id, value)
-      .then(() => {
-        setActive((current) => (current ? { ...current, model_pref: value, modelPref: value } : current));
-        setConversations((list) => list.map((c) => (c.id === active.id ? { ...c, modelPref: value } : c)));
-        localStorage.setItem(MODEL_PREF_KEY, value);
-        setModelPref(value);
+      .then((r) => {
+        const stored = r.value || value;
+        setActive((current) => (current ? { ...current, model_pref: stored, modelPref: stored } : current));
+        setConversations((list) => list.map((c) => (c.id === active.id ? { ...c, modelPref: stored } : c)));
+        localStorage.setItem(MODEL_PREF_KEY, stored);
+        setModelPref(stored);
+        showToast(`Future requests will use ${modelDisplayName(stored)}.`);
       })
       .catch((error) => showToast(error.message || "That model isn't available."));
   }, [active, showToast]);

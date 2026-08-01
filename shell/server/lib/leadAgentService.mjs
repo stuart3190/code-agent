@@ -170,7 +170,7 @@ export async function processConversation(conversation, {
         owner: conversation.owner,
         credential,
         requested: resolution.requested,
-        policy: credential.routing || {},
+        policy: { ...(credential.routing || {}), mode: resolution.mode || null },
       });
 
     const tools = await capabilityToolDefs(ctx);
