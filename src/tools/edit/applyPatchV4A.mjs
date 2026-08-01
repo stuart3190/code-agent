@@ -128,14 +128,31 @@ function applyUpdate(contents, hunks) {
       return { ok: false, reason: "hunk has no context or removed lines to locate the edit", failedHunk: hunkText(hunk) };
     }
 
-    let at = findSubsequence(lines, oldLines, cursor);
-    if (at === -1 && cursor > 0) at = findSubsequence(lines, oldLines, 0); // retry from top
-    if (at === -1) {
+    let match = locateHunk(lines, oldLines, cursor);
+    if (!match && cursor > 0) match = locateHunk(lines, oldLines, 0); // retry from top
+    if (!match) {
       return { ok: false, reason: "could not locate the hunk's context in the file (exact match failed)", failedHunk: hunkText(hunk) };
     }
+    const at = match.index;
 
-    lines = [...lines.slice(0, at), ...newLines, ...lines.slice(at + oldLines.length)];
-    cursor = at + newLines.length;
+    // When the context matched only after normalising whitespace, the FILE's lines are the
+    // truth — reusing the model's copies would silently reformat code it never meant to touch.
+    // Context lines are therefore taken from the file, and only `+` lines from the patch.
+    const replacement = match.exact
+      ? newLines
+      : (() => {
+        const out = [];
+        let offset = 0;
+        for (const entry of hunk) {
+          if (entry.kind === "+") out.push(entry.text);
+          else if (entry.kind === " ") out.push(lines[at + offset++]);
+          else offset++; // "-" consumes a file line without contributing one
+        }
+        return out;
+      })();
+
+    lines = [...lines.slice(0, at), ...replacement, ...lines.slice(at + oldLines.length)];
+    cursor = at + replacement.length;
   }
 
   return { ok: true, contents: lines.join("\n") };
@@ -143,14 +160,53 @@ function applyUpdate(contents, hunks) {
 
 // Find the start index where `needle` (array of lines) appears contiguously in
 // `hay` (array of lines), at or after `from`. -1 if absent.
-function findSubsequence(hay, needle, from) {
+function findSubsequence(hay, needle, from, equal = (a, b) => a === b) {
   outer: for (let i = from; i <= hay.length - needle.length; i++) {
     for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) continue outer;
+      if (!equal(hay[i + j], needle[j])) continue outer;
     }
     return i;
   }
   return -1;
+}
+
+// Every occurrence, so a tolerant match can refuse when it would be a guess.
+function findAll(hay, needle, equal) {
+  const hits = [];
+  for (let i = 0; i <= hay.length - needle.length; i++) {
+    let ok = true;
+    for (let j = 0; j < needle.length && ok; j++) if (!equal(hay[i + j], needle[j])) ok = false;
+    if (ok) hits.push(i);
+  }
+  return hits;
+}
+
+const rstrip = (s) => String(s).replace(/[\s﻿ ]+$/, "");
+const squash = (s) => String(s).trim().replace(/\s+/g, " ");
+
+// Locate a hunk's context, preferring an exact match and falling back only as far as needed.
+//
+// The matcher used to be exact-only, which produced the recurring
+// "could not locate the hunk's context" failures in production: every one of them followed a
+// read_file, i.e. the model reproducing context it had just been shown. Reproduced directly —
+// a single trailing space, one space of indentation, or a stray CR each defeated it, while the
+// intent was unambiguous.
+//
+// The fallbacks are deliberately graduated and the loosest one requires a UNIQUE match: silently
+// patching the wrong place is far worse than failing and letting the repair loop retry.
+function locateHunk(hay, needle, from) {
+  const exact = findSubsequence(hay, needle, from);
+  if (exact !== -1) return { index: exact, exact: true };
+
+  // 1. Trailing whitespace and line-ending noise only — still positionally anchored.
+  const trailing = findSubsequence(hay, needle, from, (a, b) => rstrip(a) === rstrip(b));
+  if (trailing !== -1) return { index: trailing, exact: false };
+
+  // 2. Indentation and internal whitespace. Whole-file scan, and only when unambiguous.
+  const squashed = findAll(hay, needle, (a, b) => squash(a) === squash(b));
+  if (squashed.length === 1) return { index: squashed[0], exact: false };
+
+  return null;
 }
 
 function hunkText(hunk) {
