@@ -633,6 +633,21 @@ const server = http.createServer(async (req, res) => {
       if (!summary) return sendJson(res, 404, { error: "No build summary for that Build ID." });
       return sendJson(res, 200, summary);
     }
+    // Anonymous outcome signal for a build (preview opened / exported / deployed / …).
+    // Owner-scoped write; no prompt text, nothing identifying, idempotent per signal.
+    const signalMatch = p.match(/^\/api\/v1\/builds\/([0-9a-f-]+)\/signal$/i);
+    if (signalMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      const { recordBuildSignal } = await import("./lib/buildOutcomes.mjs");
+      try {
+        return sendJson(res, 200, await recordBuildSignal({
+          buildId: signalMatch[1], owner: owner.id, signal: body?.signal,
+        }));
+      } catch (error) {
+        return sendJson(res, error.status || 500, { error: error.message });
+      }
+    }
     if (p === "/api/v1/admin/intelligence" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
