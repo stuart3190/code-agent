@@ -99,6 +99,7 @@ export function providerForModel(model = "") {
   const m = String(model).toLowerCase();
   if (m.startsWith("claude")) return "anthropic";
   if (m.startsWith("gemini")) return "google";
+  if (m.startsWith("grok")) return "xai";
   if (m.startsWith("gpt") || m.startsWith("o")) return "openai";
   return m ? "openai" : null;
 }

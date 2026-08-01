@@ -40,6 +40,26 @@ export async function resolveBuildContext(ownerId, {
     };
   }
 
+  if (credential.provider === "xai" && credential.secret) {
+    const { createXaiEngineProvider, xaiPolicy, xaiEligibleForAgent, xaiReasoningForTask } = await import("../xaiProvider.mjs");
+    const policy = xaiPolicy();
+    if (policy.enabled && xaiEligibleForAgent("build", policy)) {
+      const strong = optionalEnv("XAI_QUALITY_MODEL", "grok-4.5");
+      const editModel = optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1");
+      return {
+        byok: true,
+        providerLabel: "xai",
+        strongModel: strong,
+        buildProvider: (intent) => createXaiEngineProvider({
+          model: intent === "edit" ? editModel : strong,
+          apiKey: credential.secret,
+          reasoningEffort: xaiReasoningForTask(intent === "edit" ? "component_edit" : "full_build", policy),
+        }),
+      };
+    }
+    // Grok connected but admin-disabled for builds — fall through to managed.
+  }
+
   if (credential.provider === "openai" && credential.secret) {
     return {
       byok: true,

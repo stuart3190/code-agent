@@ -4,6 +4,7 @@ import { optionalEnv } from "./env.mjs";
 import { createGeminiCodingProvider, geminiConfigured } from "./geminiCodingProvider.mjs";
 import { resolveModelSelection } from "./modelGateway.mjs";
 import { createOpenAIProvider, openAIConfigured } from "./openAIProvider.mjs";
+import { createXaiProvider, xaiConfigured, xaiPolicy, XAI_MODELS } from "./xaiProvider.mjs";
 
 export const ROUTING_MODES = Object.freeze(["balanced", "quality", "fast", "economy", "manual"]);
 
@@ -18,7 +19,23 @@ export function modelCatalog() {
     model("gemini", "quality", optionalEnv("GEMINI_QUALITY_MODEL", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash")), geminiConfigured()),
     model("gemini", "balanced", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash"), geminiConfigured()),
     model("gemini", "fast", optionalEnv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite"), geminiConfigured()),
+    // xAI/Grok: eligible only when configured AND the admin policy enables it; model ids
+    // and permission come from the xAI adapter's central catalog + policy.
+    ...xaiCatalogEntries(),
   ];
+}
+
+function xaiCatalogEntries() {
+  const policy = xaiPolicy();
+  if (!policy.enabled) return [];
+  const configured = xaiConfigured();
+  const entries = [
+    model("xai", "quality", optionalEnv("XAI_QUALITY_MODEL", "grok-4.5"), configured),
+    model("xai", "balanced", optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1"), configured),
+    model("xai", "fast", optionalEnv("XAI_FAST_MODEL", "grok-4.5-fast"), configured),
+  ];
+  // Admin model allowlist applies to known catalog models; custom env overrides pass through.
+  return entries.filter((entry) => !(entry.model in XAI_MODELS) || policy.permittedModels.has(entry.model));
 }
 
 export async function createRoutedCodingModel({
@@ -155,7 +172,8 @@ function credentialCandidate(credential, tier) {
   return entry || {
     provider: credential.provider,
     model: credential.provider === "gemini" ? "gemini-3.6-flash"
-      : credential.provider === "anthropic" ? "claude-sonnet-5" : "gpt-5.6-terra",
+      : credential.provider === "anthropic" ? "claude-sonnet-5"
+        : credential.provider === "xai" ? "grok-4.5" : "gpt-5.6-terra",
     tier,
     key: `${credential.provider}:default`,
   };
@@ -168,6 +186,9 @@ export function createProviderForCandidate(candidate, credential, options = {}) 
   }
   if (candidate.provider === "gemini") {
     return createGeminiCodingProvider({ apiKey, model: candidate.model, ...options });
+  }
+  if (candidate.provider === "xai") {
+    return createXaiProvider({ apiKey, model: candidate.model, ...options });
   }
   return createOpenAIProvider({ apiKey, model: candidate.model });
 }
@@ -207,8 +228,10 @@ function prioritizeByHealth(candidates, attempts) {
 }
 
 function preferredProviderOrder() {
+  // Grok is never the platform default: it joins the candidate pool and earns priority
+  // through the health/latency scoring, not by assumption.
   const preferred = optionalEnv("CODE_AGENT_DEFAULT_PROVIDER", "openai").toLowerCase();
-  return [preferred, ...["openai", "anthropic", "gemini"].filter((provider) => provider !== preferred)];
+  return [preferred, ...["openai", "anthropic", "gemini", "xai"].filter((provider) => provider !== preferred)];
 }
 
 function uniqueModels(entries) {

@@ -37,6 +37,14 @@ export function anthropicRatesFor(model) {
   return ANTHROPIC_RATES[model] || ANTHROPIC_RATES["claude-sonnet-4-6"];
 }
 
+// xAI/Grok published rates (standard tier — long-context pricing is handled by the xAI
+// adapter's exact-cost calculator; these blended rates feed the credit WEIGHT system).
+export const XAI_RATES = {
+  "grok-4.5": { label: "grok-4.5 (xAI published rates)", usdPerMInput: 3.0, usdPerMOutput: 15.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
+  "grok-4.5-fast": { label: "grok-4.5-fast (xAI published rates)", usdPerMInput: 0.6, usdPerMOutput: 2.4, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
+  "grok-build-0.1": { label: "grok-build-0.1 (xAI published rates)", usdPerMInput: 1.2, usdPerMOutput: 6.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
+};
+
 // Active rate table used by telemetry's live per-turn log + summary (which create their cost inside
 // runAgent with no rate argument). The harness sets this ONCE before a run when it selects a
 // provider; default is the gpt-5.5 assumed model, so the Codex path is byte-identical to before.

@@ -10,7 +10,10 @@
 // build plan). NOT "1 credit = 1 turn" — turns vary wildly in tokens; a fixed token bucket keeps
 // cost-per-credit flat regardless of routing or app complexity.
 
-import { ANTHROPIC_RATES, GPT55_ASSUMED_RATES, TOKENS_PER_CREDIT, USD_GBP } from "../cost.mjs";
+import { ANTHROPIC_RATES, GPT55_ASSUMED_RATES, TOKENS_PER_CREDIT, USD_GBP, XAI_RATES } from "../cost.mjs";
+
+// One combined rate table: model weights + cached-token multipliers for every provider.
+const ALL_RATES = { ...ANTHROPIC_RATES, ...XAI_RATES };
 
 // ----------------------------------------------------------------------------------------------
 // 0. Measured token blend (the shape of a real building turn)
@@ -57,7 +60,7 @@ const blendedUsdPerToken = (rates) =>
 export const WEIGHT_ANCHOR_MODEL = "claude-sonnet-4-6";
 
 export function modelWeight(model) {
-  const rates = ANTHROPIC_RATES[model];
+  const rates = ALL_RATES[model];
   if (!rates) return 1; // unknown model -> neutral weight (anchor)
   const anchor = blendedUsdPerToken(ANTHROPIC_RATES[WEIGHT_ANCHOR_MODEL]);
   return blendedUsdPerToken(rates) / anchor;
@@ -83,7 +86,7 @@ export function billableTokensForUsage({ usage, model }) {
   const output = Math.max(0, Number(u.output || 0));
   const cached = Math.min(input, Math.max(0, Number(u.cached || 0)));
   const cacheWrite = Math.min(input - cached, Math.max(0, Number(u.cacheWrite || 0)));
-  const rates = ANTHROPIC_RATES[model] || GPT55_ASSUMED_RATES;
+  const rates = ALL_RATES[model] || GPT55_ASSUMED_RATES;
   const cacheReadMultiplier = Number(rates.cachedInputMultiplier ?? 1);
   const cacheWriteMultiplier = Number(rates.cacheWriteMultiplier ?? 1);
   return (input - cached - cacheWrite) +
