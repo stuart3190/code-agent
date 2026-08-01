@@ -63,6 +63,29 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+BUILD DIAGNOSTICS (2026-07-31, PR #83, deployed + live-proven): permanent audit trail for
+every build session under one Build ID — `appBuild/buildDiagnostics.mjs` (diag_runs/
+diag_steps/diag_prefs, migration `build_diagnostics`, service-role only). One diag SESSION
+spans build → autonomous repair rounds → verification (threaded through relayBuildJob/
+runVerificationGate; recorder attached per job as job.diag). Captured: user prompt, plan,
+agents, inter-agent prompts (engine/repair/polish prompts verbatim), FULL compiler stderr
+(job.buildStderr stays truncated for the client; diag keeps everything), design/capability
+audits, backend runtime probes, unhandled stacks, complete terminal log (serverLog tap),
+files created/modified/deleted + per-round diffs (prefix/suffix-trim line diff), rounds,
+status, duration, model, tokens + per-step/total cost (creditsForUsage). Recording is
+chained-async fire-and-forget — storage failures NEVER touch the pipeline (nullDiagSession
+for hook safety; tested). EVIDENCE-OR-NOTHING failures: blocked/exhausted messages append
+session.failureEvidence() quoting exact stored output; POST /diagnostics/:id/explain
+grounds the model in stored logs (provider.turn) and quotes verbatim; zero captured
+diagnostics → explicit "platform bug in the diagnostics recorder" statement, fabrication
+banned + regex-tested; LEAD_INSTRUCTIONS FAILURE EVIDENCE block added. API: GET
+/api/v1/diagnostics(+/:id, /:id/step/:seq, /:id/download, /prefs). UI: DiagnosticsView
+(manage view `diagnostics`, palette + settings): runs list w/ status/rounds/cost, per-round
+steps, expandable raw logs (lazy full fetch >12KB), round comparison, download bundle,
+explain button, retention select. Retention: diag_prefs 30/90/365/forever (default 90),
+6-hourly sweeper (purge audited via JSON log line, gzip >16KB at write + aged >7d inline
+logs, stale running → interrupted after 2h).
+
 NAVIGATION REPAIR (2026-07-31, PR #81, deployed): explicit "← Projects" pill beside the
 wordmark whenever a conversation is open (all states; wordmark stays Home, both with
 accessible labels; 44px mobile target, safe-area-aware, no strip overlap). goHome only
