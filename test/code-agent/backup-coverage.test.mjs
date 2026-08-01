@@ -29,7 +29,7 @@ const UNAPPLIED_LEGACY = "defined by an unapplied Buildr101-era migration; absen
 const INTENTIONALLY_NOT_BACKED_UP = new Map([
   "feature_flags", "project_secrets", "project_integrations", "project_environments",
   "project_releases", "background_tasks", "audit_events", "payment_products",
-  "payment_orders", "brand_kits", "project_brand_settings", "app_notifications",
+  "payment_orders", "brand_kits", "project_brand_settings",
   "app_analytics_events", "project_templates", "connector_oauth_states", "connector_workflows",
   "project_actions", "app_jobs", "runtime_usage", "app_usage_ledger", "action_schedules",
   "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",

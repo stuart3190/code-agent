@@ -248,17 +248,42 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     return out;
   };
 
+  // Notifications are owner-scoped by RLS: `list` and `markRead` reach only the signed-in
+  // user's rows, and `notifySelf` can only ever write a row owned by them. Notifications the
+  // user must NOT be able to forge — the welcome, and the "your password was changed" security
+  // alert — are written server-side with the service role and carry a `source`.
   const notifications = {
     async list({ unreadOnly = false, limit = 50 } = {}) {
-      let query = client.from("app_notifications").select("id,title,body,data,read_at,created_at")
+      let query = client.from("app_notifications").select("id,title,body,data,source,read_at,created_at")
         .eq("app_id", appId).order("created_at", { ascending: false }).limit(Math.max(1, Math.min(100, limit)));
       if (unreadOnly) query = query.is("read_at", null);
       return unwrap(await query);
     },
+    async unreadCount() {
+      const { count, error } = await client.from("app_notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("app_id", appId).is("read_at", null);
+      if (error) throw new Error(error.message);
+      return count || 0;
+    },
     async markRead(id) {
       return unwrap(await client.from("app_notifications").update({ read_at: new Date().toISOString() }).eq("id", id).eq("app_id", appId).select().single());
     },
-    async notifySelf({ title, body = "", data = {} }) { return actionPost("notify_self", { title, body, data }); },
+    async markAllRead() {
+      return unwrap(await client.from("app_notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("app_id", appId).is("read_at", null).select());
+    },
+    // Records a notification in the signed-in user's own stream. A direct insert rather than an
+    // Edge Function call: the RLS insert check (owner = auth.uid()) already provides the only
+    // guarantee that matters, so this needs no extra deployed surface to work.
+    async notifySelf({ title, body = "", data = {} }) {
+      const session = (await client.auth.getSession()).data.session;
+      if (!session?.user?.id) throw new Error("Sign in before using notifications.");
+      return unwrap(await client.from("app_notifications").insert({
+        owner: session.user.id, app_id: appId, title, body, data,
+      }).select().single());
+    },
     async emailSelf({ subject, text }) { return actionPost("email_self", { subject, text }); },
     async emit(event, payload = {}) { return actionPost("emit", { event, payload }); },
   };
