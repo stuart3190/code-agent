@@ -43,6 +43,7 @@ import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLO
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { managedAffordableCreditLimit } from "./billingLimits.mjs";
+import { STOP_REASONS, providerCondition, isTransientText } from "./appBuild/endState.mjs";
 import { connectorToolsForProject } from "./connectors.mjs";
 import { auditCapabilityTree } from "./capabilityAudit.mjs";
 import {
@@ -57,6 +58,12 @@ import {
 
 class ManagedBillingError extends Error {
   constructor(message, reason = "billing_error") { super(message); this.name = "ManagedBillingError"; this.reason = reason; }
+}
+
+// A pre-flight refusal by the oversized-request cost guard. Distinct from a crash: the
+// arithmetic that refused it will refuse an identical retry, so this must never be retried.
+class CostGuardError extends Error {
+  constructor(message) { super(message); this.name = "CostGuardError"; }
 }
 
 class ManagedCreditBudgetError extends ManagedBillingError {
@@ -122,6 +129,9 @@ export function publicJob(job) {
   return {
     jobId: job.id, projectId: job.projectId, mode: job.mode,
     status: job.status, phase: job.phase, error: job.error || null,
+    // Why the job stopped, recorded where the truth was known. Status alone cannot tell a
+    // user cancellation from a crash, and treating the two alike was retrying cancellations.
+    stopReason: job.stopReason || null,
     result: TERMINAL.has(job.status) ? publicResult(job) : null,
   };
 }
@@ -132,14 +142,15 @@ function setPhase(job, phase) {
   emit(job, "phase", { jobId: job.id, status: job.status, phase });
 }
 
-function finish(job, status, { error = null } = {}) {
+function finish(job, status, { error = null, stopReason = null } = {}) {
   job.status = status;
   job.phase = status;
   job.error = error;
+  job.stopReason = stopReason;
   job.finishedAt = Date.now();
   try { job.diag?.jobEnd(status); } catch { /* diagnostics must never break a build */ }
   persist(job, {
-    status, phase: status, error,
+    status, phase: status, error, stop_reason: stopReason,
     result: job.result ? publicResult(job) : null,
     build_stderr: job.buildStderr || null,
   });
@@ -178,7 +189,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null }) {
   const existing = activeJobFor(owner.id, projectId);
   if (existing) return { job: existing, existing: true };
 
@@ -191,6 +202,11 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     diag,                                  // diagnostics recorder (nullable, never throws)
     trigger,                               // user | autonomous_repair | verification_repair | external | scheduled
     taskHint,                              // the USER's own words, for task classification
+    budgetAllowance,                       // managed: what the LIFECYCLE budget has left for this job
+    byokCostLimit,                         // BYOK: only set when the user enabled a per-build limit
+    providerOverride,                      // set by a fallback switch — continue on a different provider
+    stopReason: null,                      // set at finish() — why this job stopped
+    measurements: null,                    // server-side only: what the relay compares between rounds
     cancelled: false,
     subscribers: new Set(),
     createdAt: Date.now(), finishedAt: null,
@@ -249,7 +265,7 @@ export async function cancelJob(ownerId, jobId) {
   if (job.status === "queued") {
     const i = waiting.indexOf(job.id);
     if (i >= 0) waiting.splice(i, 1);
-    finish(job, "failed", { error: "Cancelled by user." });
+    finish(job, "failed", { error: "Cancelled by user.", stopReason: STOP_REASONS.cancelled });
   }
   // Running: the log-callback check throws CancelledError between engine turns.
   return { ok: true };
@@ -384,6 +400,39 @@ async function preparePhotography(profile, log) {
   return { assets: assets.slice(0, 8), unavailable: assets.length === 0 };
 }
 
+// What changed in this round, and how healthy the result is. Pure measurement — the
+// judgement about whether it counts as progress lives in repairProgress.mjs.
+function measureRound({ baseline, tree, build, usage, credits, model, previewUrl, qualityWarnings }) {
+  let filesChanged = 0;
+  let diffChars = 0;
+  const paths = new Set([...Object.keys(baseline || {}), ...Object.keys(tree || {})]);
+  for (const path of paths) {
+    const before = baseline?.[path];
+    const after = tree?.[path];
+    if (before === after) continue;
+    filesChanged += 1;
+    diffChars += Math.abs(String(after || "").length - String(before || "").length)
+      || Math.max(String(after || "").length, String(before || "").length);
+  }
+  // Compiler error lines: a count, so "fewer errors than last round" is measurable.
+  const stderr = build?.ok ? "" : String(build?.stderr || "");
+  const compilerErrorCount = stderr
+    ? (stderr.match(/^.*\b(error|ERROR)\b.*$/gm) || []).length || (stderr ? 1 : 0)
+    : 0;
+  return {
+    compileOk: Boolean(build?.ok),
+    compilerErrorCount,
+    previewOk: Boolean(previewUrl),
+    filesChanged,
+    diffChars,
+    qualityWarnings: [...(qualityWarnings || [])],
+    usage: { ...usage },
+    turns: Number(usage?.turns || 0),
+    credits: Number(credits) || 0,
+    model,
+  };
+}
+
 async function runJob(job) {
   const { prompt, tree: inputTree, plan, knowledge, style, designProfile: inputDesignProfile, redesign } = job.input;
   const projectId = job.projectId;
@@ -401,17 +450,26 @@ async function runJob(job) {
     // BYOK: if the owner's active Thrallo AI connection is their own Anthropic/OpenAI key,
     // generation runs on THEIR account and consumes no managed budget. The decrypted key
     // stays server-side (never in any frame, never logged). Otherwise: Thrallo managed OpenAI.
-    const buildContext = await resolveBuildContext(owner.id);
+    const buildContext = await resolveBuildContext(owner.id, { preferProvider: job.providerOverride });
     const byok = buildContext.byok;
     const providerConfig = { provider: buildContext.providerLabel, strong: buildContext.strongModel };
     const buildProvider = buildContext.buildProvider;
 
     await ensureWelcomeGrant(owner.id);
     const preBal = await led.getBalance(owner.id);
-    const jobCreditLimit = managedAffordableCreditLimit({ balance: preBal.total, mode, redesign });
+    // Per-job runaway cap, further reduced by whatever the LIFECYCLE budget has left — a
+    // follow-up job no longer receives a completely fresh independent allowance.
+    const perJobLimit = managedAffordableCreditLimit({ balance: preBal.total, mode, redesign });
+    const jobCreditLimit = job.budgetAllowance == null
+      ? perJobLimit
+      : Math.min(perJobLimit, Number(job.budgetAllowance) || 0);
     const trackedUsage = usageBucket();
     failureMeter = byok ? null : { trackedUsage, model: providerConfig.strong };
-    const onUsage = byok ? null : managedUsageGuard(jobCreditLimit, providerConfig.strong, trackedUsage);
+    // BYOK has NO mandatory cap: a guard exists only when the user enabled a per-build
+    // limit themselves. Managed builds always carry one.
+    const onUsage = byok
+      ? (job.byokCostLimit ? managedUsageGuard(Number(job.byokCostLimit), providerConfig.strong, trackedUsage) : null)
+      : managedUsageGuard(jobCreditLimit, providerConfig.strong, trackedUsage);
 
     // Managed jobs are post-metered. Charge exact usage when the balance covers it; otherwise
     // consume the remaining prepaid balance down to zero. That lets a customer use every last
@@ -536,7 +594,7 @@ async function runJob(job) {
     for (const warning of scope.warnings) serverLog(job, `context: WARN ${warning}`);
     const guard = costGuard({ estContextTokens: scope.estContextTokens, model: provider.model, trigger: job.trigger || "user" });
     if (guard.blocked) {
-      throw new Error(`This ${scope.taskType} is projected at ~${guard.projectedCredits} credits — above the ${guard.threshold}-credit autonomous ceiling. It needs explicit approval before running.`);
+      throw new CostGuardError(`This ${scope.taskType} is projected at ~${guard.projectedCredits} credits — above the ${guard.threshold}-credit autonomous ceiling. It needs explicit approval before running.`);
     }
     serverLog(job, `context: ${scope.taskType} budget ${scope.budgetTokens} tok · est ${scope.estContextTokens} tok · ${scope.contextSelection ? `seeded ${scope.files.map((f) => f.path).join(", ")}` : "scaffold build"}`);
     if (mode === "iterate") {
@@ -765,6 +823,13 @@ async function runJob(job) {
     job.diag?.files(diagBaseline, tree, {
       label: mode === "iterate" ? "Files changed by this repair/edit" : "Files authored by the build",
     });
+    // Server-side measurements for no-progress detection and checkpointing. Never part of
+    // publicResult — the relay reads them off the live job object.
+    job.measurements = measureRound({
+      baseline: diagBaseline, tree, build, usage: combinedUsage.summary(),
+      credits: need, model: provider.model, previewUrl: preview?.url || null,
+      qualityWarnings,
+    });
     job.result = {
       finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
       need, balance: balance.total, designProfile, qualityWarnings,
@@ -773,7 +838,10 @@ async function runJob(job) {
   } catch (e) {
     if (e instanceof CancelledError) {
       serverLog(job, "cancelled between turns — no settle, no result");
-      finish(job, "failed", { error: "Cancelled by user." });
+      finish(job, "failed", { error: "Cancelled by user.", stopReason: STOP_REASONS.cancelled });
+    } else if (e instanceof CostGuardError) {
+      serverLog(job, `cost guard: refused before running (${e.message})`);
+      finish(job, "failed", { error: e.message, stopReason: STOP_REASONS.costGuard });
     } else if (e instanceof ManagedBillingError) {
       if (e.reason === "job_credit_limit" && failureMeter?.trackedUsage) {
         const usage = failureMeter.trackedUsage.summary();
@@ -785,15 +853,32 @@ async function runJob(job) {
         }
       }
       serverLog(job, `billing: stopped (${e.reason})`);
-      finish(job, "failed", { error: e.message });
+      finish(job, "failed", { error: e.message, stopReason: STOP_REASONS.managedBudget });
     } else {
       serverLog(job, `FAILED: ${e.stack || e.message}`);
       job.diag?.step({
         agent: "Platform", kind: "runtime", label: "Unhandled build error",
         status: "failed", output: e.stack || e.message,
       });
+      // Classify BEFORE reporting: a provider that is out of quota, rate limited or down
+      // needs a different provider, not another identical attempt on the same one. The raw
+      // text is read here and discarded — only the classification and a human sentence leave.
+      const raw = `${e.code || ""} ${e.status || ""} ${e.message || ""}`;
+      const condition = providerCondition(raw);
+      const stopReason = condition === "provider_quota_blocked" ? STOP_REASONS.providerQuota
+        : condition === "provider_rate_limited" ? STOP_REASONS.providerRateLimit
+          : condition === "provider_unavailable" ? STOP_REASONS.providerUnavailable
+            : isTransientText(raw) ? STOP_REASONS.transient
+              : null;
       // Human message only — raw errors can carry internals (models, paths, provider chatter).
-      finish(job, "failed", { error: "The build hit an unexpected error — please try again." });
+      const message = stopReason === STOP_REASONS.providerQuota
+        ? "The AI provider has reached its current limit."
+        : stopReason === STOP_REASONS.providerRateLimit
+          ? "The AI provider is rate limiting requests right now."
+          : stopReason === STOP_REASONS.providerUnavailable
+            ? "The AI provider is temporarily unavailable."
+            : "The build hit an unexpected error — please try again.";
+      finish(job, "failed", { error: message, stopReason });
     }
   }
 }

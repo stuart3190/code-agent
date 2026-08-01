@@ -8,8 +8,17 @@ import { serviceClient } from "../supabase.mjs";
 import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
 import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
 import { previewProvider } from "../../preview/index.mjs";
-import { startDiagSessionSafe, nullDiagSession } from "./buildDiagnostics.mjs";
+import { startDiagSessionSafe } from "./buildDiagnostics.mjs";
 import { fingerprintFailure, fingerprintPrompt } from "./contextScope.mjs";
+import {
+  classifyEndState, classifyVerificationState, humanInputNeed,
+  isAutomaticallyRetryable, isProviderBlocked,
+} from "./endState.mjs";
+import { createLifecycleBudget, budgetBlockedMessage } from "./lifecycleBudget.mjs";
+import { createCheckpointStore, restoreCheckpoint } from "./buildCheckpoints.mjs";
+import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
+import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
+import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
 
 // The end-of-build message NEVER claims a live preview unless a URL actually exists
 // (Stuart, 2026-07-31: "a build should never claim success unless the preview is actually
@@ -22,45 +31,363 @@ export function buildEndSummary(result) {
 }
 
 // Autonomous failure handling (Stuart, 2026-07-31): a failed build is UNFINISHED WORK, not
-// a reason to hand control back. This pure planner decides the relay's next move — repair
-// and re-verify without asking, retry crashed jobs, and only stop at genuine exhaustion.
-// Routine failures (build checks, runtime config, tests, verification) NEVER ask permission.
+// a reason to hand control back. Routine failures (build checks, runtime config, tests,
+// verification) NEVER ask permission.
+//
+// Rewritten 2026-08-01: retry eligibility is no longer inferred from `status`. Every job end
+// is classified into an explicit end state first (endState.mjs), and only genuine transient
+// interruptions enter the automatic retry path. A user cancellation, a managed-budget stop,
+// a cost-guard refusal and a provider-quota exhaustion each have their own outcome — before
+// this, all four were indistinguishable from a crash and were retried as paid work.
+//
+// MAX_AUTO_ROUNDS counts JOBS, not repairs: the initial build plus at most MAX_AUTO_REPAIRS
+// follow-ups. The old exhaustion copy said "3 autonomous repair rounds" when at most 2
+// repairs ever ran.
 export const MAX_AUTO_ROUNDS = 3;
+export const MAX_AUTO_REPAIRS = MAX_AUTO_ROUNDS - 1;
 
-export function planEndAction(data, { attempt = 1, maxAttempts = MAX_AUTO_ROUNDS, previousFingerprints = [] } = {}) {
-  if (data.status === "complete" && data.result?.buildOk !== false) {
-    return { kind: data.result?.previewUrl ? "verify" : "warmup" };
+// Accurate, plain-English account of what was actually attempted (§9).
+export function attemptSummary(attempt) {
+  const repairs = Math.max(0, Math.min(attempt, MAX_AUTO_ROUNDS) - 1);
+  if (repairs === 0) return "I completed the initial build.";
+  if (repairs === 1) return "I completed the initial build and 1 automatic repair attempt.";
+  return `I completed the initial build and ${repairs} automatic repair attempts.`;
+}
+
+// The calm in-progress status line: "Repairing the build — attempt 1 of 2."
+export function repairStatusLine(repairNumber, { improved = null } = {}) {
+  const line = `Repairing the build — attempt ${repairNumber} of ${MAX_AUTO_REPAIRS}.`;
+  if (improved === true) return `The last repair improved the build. ${line}`;
+  return line;
+}
+
+function repairBriefFor(reasons) {
+  return [
+    "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
+    "apply the smallest safe fix for each; change nothing else:",
+    ...reasons.map((r) => `- ${r}`),
+    "",
+    "Preserve the existing design, layout, branding and component structure exactly.",
+  ].join("\n");
+}
+
+function reasonsFor(data) {
+  if (data.status === "complete") {
+    return data.result?.qualityWarnings?.length ? data.result.qualityWarnings : ["the build's quality checks failed"];
   }
-  const reasons = data.status === "complete"
-    ? (data.result?.qualityWarnings?.length ? data.result.qualityWarnings : ["the build's quality checks failed"])
-    : [`the build ${data.status}${data.error ? `: ${String(data.error).slice(0, 200)}` : ""}`];
-  // Controlled repair loop: an identical failure after a repair round means the repair made
-  // no meaningful progress — stop immediately instead of burning the remaining rounds.
-  const fingerprint = fingerprintFailure(reasons);
-  if (previousFingerprints.includes(fingerprint)) {
+  return [`the build ${data.status}${data.error ? `: ${String(data.error).slice(0, 200)}` : ""}`];
+}
+
+// `data` is the job's terminal frame. Every other argument is state the relay owns: the
+// lifecycle budget verdict, the no-progress verdict for the round that just ended, the
+// providers actually available to switch to, and whether the owner enabled auto-fallback.
+export function planEndAction(data, {
+  attempt = 1,
+  maxAttempts = MAX_AUTO_ROUNDS,
+  previousFingerprints = [],
+  budgetCheck = { ok: true },
+  progress = null,
+  alternatives = [],
+  autoFallback = false,
+} = {}) {
+  const endState = classifyEndState(data);
+
+  // 1. The user asked us to stop. Nothing further is dispatched, nothing further is charged.
+  if (endState === "cancelled") {
     return {
-      kind: "blocked", fingerprint,
-      message: `The same failure came back unchanged after an autonomous repair — repeating the loop would spend your budget without progress:\n${reasons.map((r) => `- ${r}`).join("\n")}\nI need a decision from you on how to proceed.`,
+      kind: "cancelled", endState,
+      message: "Build cancelled. Your current progress has been saved.",
     };
   }
-  if (attempt < maxAttempts) {
-    const brief = [
-      "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
-      "apply the smallest safe fix for each; change nothing else:",
-      ...reasons.map((r) => `- ${r}`),
-      "",
-      "Preserve the existing design, layout, branding and component structure exactly.",
-    ].join("\n");
+
+  // 2. Success routes through the verification gate exactly as before.
+  if (endState === "success") {
+    return { kind: data.result?.previewUrl ? "verify" : "warmup", endState };
+  }
+
+  const reasons = reasonsFor(data);
+  const fingerprint = fingerprintFailure(reasons);
+
+  // 3. A provider limit needs a DIFFERENT provider, never another blind attempt on the same
+  //    one. With auto-fallback on we switch and continue from the same step; otherwise we
+  //    offer the switch and wait.
+  if (isProviderBlocked(endState)) {
+    const kindOfLimit = endState === "provider_quota_blocked" ? "quota"
+      : endState === "provider_rate_limited" ? "rate_limit" : "outage";
+    if (!alternatives.length) {
+      return {
+        kind: "request_user_input", endState, fingerprint, limit: kindOfLimit,
+        message: `${providerLabelFor(data)} has reached its current limit and no other provider is connected. Your progress is safe — connect another provider or wait for the limit to reset, and I'll continue from where I stopped.`,
+      };
+    }
     return {
-      kind: data.status === "complete" ? "repair" : "retry",
-      brief, fingerprint,
-      announcement: `The build check found a problem (${String(reasons[0]).slice(0, 140)}). I'm repairing it now and will re-run verification.`,
+      kind: "switch_provider", endState, fingerprint, limit: kindOfLimit,
+      alternatives, auto: Boolean(autoFallback),
+      message: autoFallback
+        ? null // the relay writes the "switched and continued" sentence after the switch lands
+        : `${providerLabelFor(data)} has reached its current limit. Your progress is safe — ${alternatives.map((a) => a.label || a).join(" or ")} is available. Switch and continue?`,
+    };
+  }
+
+  // 4. Money and human input both mean: pause, keep everything, ask.
+  if (endState === "managed_budget_blocked") {
+    return {
+      kind: "request_user_input", endState, fingerprint, reason: "budget",
+      message: null, // the relay renders this from the lifecycle budget, with real options
+    };
+  }
+  if (endState === "user_input_required") {
+    const need = humanInputNeed(reasons) || "something only you can provide";
+    return {
+      kind: "request_user_input", endState, fingerprint, reason: "human_input", need,
+      message: `I've stopped rather than guess: finishing this needs ${need}. ${attemptSummary(attempt)} Your current progress is saved, and I'll pick up from exactly here once you've sorted it.`,
+    };
+  }
+
+  // 5. Structural stops that apply to every remaining state.
+  if (!budgetCheck.ok) {
+    return { kind: "blocked", endState, fingerprint, budgetCheck, message: null };
+  }
+  if (attempt >= maxAttempts) {
+    return {
+      kind: "blocked", endState, fingerprint,
+      message: `${attemptSummary(attempt)} This still fails:\n${reasons.map((r) => `- ${r}`).join("\n")}\nThat's the safe automatic repair limit — your current work is saved. I need a decision from you on how to proceed.`,
+    };
+  }
+
+  // 6. A genuine transient interruption may retry — with the ORIGINAL prompt, which the
+  //    relay supplies from the lifecycle rather than from a field that never existed.
+  if (isAutomaticallyRetryable(endState)) {
+    return {
+      kind: "retry", endState, fingerprint,
+      announcement: "That was interrupted by a temporary infrastructure problem. I'm resuming it now — nothing needs you.",
+    };
+  }
+
+  // 7. Permanent failures are not repairable by definition.
+  if (endState === "permanent_failure") {
+    return {
+      kind: "blocked", endState, fingerprint,
+      message: `${attemptSummary(attempt)} This failed in a way that repeating won't fix. Your current work is saved — I need a decision from you on how to proceed.`,
+    };
+  }
+
+  // 8. Repairable failure. The two fingerprint guards and the no-progress guard all stop the
+  //    loop before it spends another job learning nothing.
+  if (previousFingerprints.includes(fingerprint)) {
+    return {
+      kind: "blocked", endState, fingerprint,
+      message: `The same failure came back unchanged after an automatic repair — repeating it would spend your budget without progress:\n${reasons.map((r) => `- ${r}`).join("\n")}\nYour current work is saved. I need a decision from you on how to proceed.`,
+    };
+  }
+  if (progress && progress.improved === false) {
+    return {
+      kind: "blocked", endState, fingerprint, progress,
+      message: `${attemptSummary(attempt)} The last repair didn't move the build forward, so I've stopped rather than keep spending:\n${reasons.map((r) => `- ${r}`).join("\n")}\nYour current work is saved. I need a decision from you on how to proceed.`,
+    };
+  }
+
+  const improved = progress?.improved === true && attempt > 1;
+  return {
+    kind: "repair", endState, fingerprint,
+    brief: repairBriefFor(reasons),
+    announcement: improved
+      ? `The last repair improved the build. I'm fixing the remaining issue now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`
+      : `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`,
+  };
+}
+
+function providerLabelFor(data) {
+  return providerLabel(data?.provider || "provider");
+}
+
+// The verification gate's planner. Verification failures are their own end state: the app
+// compiled and ran but behaved wrongly, which is repairable — unless it needs the user.
+export function planVerificationAction(verdict, {
+  attempt = 1,
+  maxAttempts = MAX_AUTO_ROUNDS,
+  previousFingerprints = [],
+  budgetCheck = { ok: true },
+  progress = null,
+} = {}) {
+  const failures = verdict?.failures || [];
+  const endState = classifyVerificationState(failures);
+  const fingerprint = fingerprintFailure(failures);
+
+  if (endState === "user_input_required") {
+    const need = humanInputNeed(failures) || "something only you can provide";
+    return {
+      kind: "request_user_input", endState, fingerprint, reason: "human_input", need,
+      message: `I've stopped rather than guess: the remaining problem needs ${need}. ${attemptSummary(attempt)} Your current progress is saved, and I'll pick up from exactly here once you've sorted it.`,
+    };
+  }
+  if (!budgetCheck.ok) {
+    return { kind: "blocked", endState, fingerprint, budgetCheck, message: null };
+  }
+  if (attempt >= maxAttempts || previousFingerprints.includes(fingerprint)) {
+    return {
+      kind: "blocked", endState, fingerprint,
+      message: `${attemptSummary(attempt)} Verification still finds:\n${failures.map((f) => `- ${f}`).join("\n")}\nThat's the safe automatic repair limit — your current work is saved. I need a decision from you on how to proceed.`,
+    };
+  }
+  if (progress && progress.improved === false) {
+    return {
+      kind: "blocked", endState, fingerprint, progress,
+      message: `${attemptSummary(attempt)} The last repair didn't move verification forward, so I've stopped rather than keep spending:\n${failures.map((f) => `- ${f}`).join("\n")}\nYour current work is saved. I need a decision from you on how to proceed.`,
     };
   }
   return {
-    kind: "blocked", fingerprint,
-    message: `I attempted ${maxAttempts} autonomous repair rounds and this still fails:\n${reasons.map((r) => `- ${r}`).join("\n")}\nThis looks like a genuine blocker beyond routine repair — I need a decision from you on how to proceed.`,
+    kind: "repair", endState, fingerprint,
+    announcement: `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`,
   };
+}
+
+// ── Lifecycle state ─────────────────────────────────────────────────────────────────────
+// One object per build lifecycle, threaded through every follow-up dispatch. Before this,
+// each dispatch received a fresh independent allowance and the original prompt was read
+// from a field that never existed on the job object.
+
+export async function createLifecycle({ owner, projectId, diag, originalInput, mode, redesign = false, client = null }) {
+  let managed = true;
+  let byokSafety = normalizeByokSafety(null);
+  let allowFallback = true;
+  let activeProvider = "managed";
+  let credentials = [];
+  let plan = "free";
+
+  try {
+    const { aiCredentialStore, activeAiCredential } = await import("../aiCredentialStore.mjs");
+    const store = aiCredentialStore();
+    const [preference, active, list] = await Promise.all([
+      store.getPreference(owner).catch(() => null),
+      activeAiCredential(owner).catch(() => ({ provider: "managed" })),
+      store.listCredentials(owner).catch(() => []),
+    ]);
+    activeProvider = active?.provider || "managed";
+    managed = activeProvider === "managed" || activeProvider === "codex" || !active?.secret;
+    byokSafety = normalizeByokSafety(preference?.byok_safety);
+    allowFallback = preference?.allow_fallback ?? true;
+    credentials = list || [];
+  } catch { /* an unreadable connection means managed defaults — never a crash */ }
+
+  try {
+    const { ownerSubscription } = await import("../usageBudgets.mjs");
+    plan = (await ownerSubscription(owner))?.plan || "free";
+  } catch { /* free-plan limits are the safe default */ }
+
+  return {
+    owner, projectId, diag, client: client || serviceClient(),
+    originalInput,                                   // the COMPLETE original job input
+    repairMemory: { fingerprints: [], briefs: [] },  // unchanged semantics, now lifecycle-scoped
+    budget: createLifecycleBudget({ plan, mode, redesign, managed }),
+    checkpoints: createCheckpointStore(),
+    rounds: [],                                      // measured signals, one per round
+    plan, managed, byokSafety, allowFallback,
+    activeProvider, credentials,
+    providerOverride: null,                          // set when a fallback switch happens
+    notify: notifyOwnerIfAway,                       // seam: every terminal path notifies once
+    switches: [],
+    notified: false,                                 // owner notification de-duplication
+    byokWarned: false,
+    endState: null,
+  };
+}
+
+// alternativeProviders returns provider IDs; the planner and its copy work in {id, label}
+// pairs. Only CONNECTED credentials are offered — a provider whose key last failed is not
+// an alternative.
+function alternativesFor(lifecycle) {
+  return alternativeProviders({
+    current: lifecycle.providerOverride || lifecycle.activeProvider,
+    credentials: (lifecycle.credentials || []).filter((c) => c.status === "connected"),
+    managedAvailable: lifecycle.activeProvider !== "managed",
+  }).map((id) => ({ id, label: providerLabel(id) }));
+}
+
+// One Diagnostics row per decision (§15). Raw technical detail stays here and never reaches
+// the conversation.
+function recordOutcome(lifecycle, { action, attempt, trigger, signals = null, progress = null, checkpointBefore = null, checkpointAfter = null, notified = false, extra = {} }) {
+  try {
+    lifecycle.diag?.step({
+      agent: "Lead Agent", kind: "outcome",
+      label: `End state: ${action.endState || "unknown"} → ${action.kind}`,
+      status: action.kind === "repair" || action.kind === "retry" || action.kind === "verify" || action.kind === "warmup" ? "ok" : "failed",
+      round: attempt,
+      output: JSON.stringify({
+        endState: action.endState || null,
+        action: action.kind,
+        trigger,
+        failureFingerprint: action.fingerprint || null,
+        briefFingerprint: extra.briefFingerprint || null,
+        attemptedStrategy: extra.strategy || null,
+        attempt,
+        maxAttempts: MAX_AUTO_ROUNDS,
+        filesChanged: signals?.filesChanged ?? null,
+        diffChars: signals?.diffChars ?? null,
+        checkpointBefore, checkpointAfter,
+        provider: extra.provider || lifecycle.providerOverride || lifecycle.activeProvider,
+        model: extra.model || null,
+        usage: signals?.usage || null,
+        managedCredits: lifecycle.managed ? lifecycle.budget.totals.credits : null,
+        byokCost: lifecycle.managed ? null : lifecycle.budget.totals.credits,
+        durationMs: lifecycle.budget.totals.elapsedMs,
+        verificationBefore: extra.verificationBefore ?? null,
+        verificationAfter: extra.verificationAfter ?? null,
+        progressMade: progress ? progress.improved : null,
+        decisionReason: progress?.reason || extra.reason || null,
+        ownerNotified: notified,
+        lifecycleTotals: lifecycle.budget.totals,
+      }, null, 2),
+    });
+  } catch { /* diagnostics must never break a build */ }
+}
+
+// Owner notification with de-duplication: every terminal blocked path notifies, once (§10).
+async function notifyTerminal(ctx, lifecycle, { title, body, url = null }) {
+  if (lifecycle.notified) return false;
+  lifecycle.notified = true;
+  const notify = lifecycle.notify || notifyOwnerIfAway;
+  await notify(ctx.owner, ctx.conversation.id, {
+    title, body, url, tag: `build-${lifecycle.projectId}`,
+  }).catch(() => {});
+  return true;
+}
+
+// The gate every follow-up dispatch must pass — aggregate managed budget for managed users,
+// the user's own optional controls for BYOK users (off unless enabled).
+function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
+  const budgetCheck = lifecycle.budget.canDispatch({ estimatedCredits });
+  if (!budgetCheck.ok) return { ok: false, kind: "budget", budgetCheck };
+  if (!lifecycle.managed) {
+    const totals = lifecycle.budget.totals;
+    const byok = byokDispatchCheck(lifecycle.byokSafety, {
+      lifecycleCost: totals.credits,
+      repairJobs: totals.repairRounds,
+      projectedCost: estimatedCredits,
+    });
+    if (!byok.ok) return { ok: false, kind: "byok", byok };
+  }
+  return { ok: true, budgetCheck };
+}
+
+// Measure the round that just ended, from the job's own server-side measurements.
+function signalsFromJob(job, data, { verdict = null, briefFingerprint = null } = {}) {
+  const m = job?.measurements || {};
+  const failures = verdict ? (verdict.failures || []) : (data?.result?.qualityWarnings || []);
+  const checks = verdict?.checks || [];
+  return roundSignals({
+    compileOk: m.compileOk ?? null,
+    compilerErrorCount: m.compilerErrorCount ?? null,
+    failures,
+    failureFingerprint: fingerprintFailure(failures),
+    briefFingerprint,
+    previewOk: m.previewOk ?? null,
+    verificationPassed: verdict ? verdict.pass : null,
+    verificationChecksPassed: checks.length ? checks.filter((c) => c.status === "pass").length : null,
+    verificationChecksTotal: checks.length || null,
+    filesChanged: m.filesChanged ?? 0,
+    diffChars: m.diffChars ?? 0,
+  });
 }
 
 // Build phases → the specialist the user watches. Sequential: each phase change retires the
@@ -100,15 +427,23 @@ export async function startAppBuild(ctx, { description, productName = null }) {
     owner: ctx.owner, projectId: project.id, conversationId: ctx.conversation.id,
     kind: "app_build", prompt: String(description),
   });
+  // The COMPLETE original input, kept for the lifetime of the lifecycle. A legitimate retry
+  // re-sends exactly this — untruncated and unmutated.
+  const originalInput = { mode: "build", prompt: String(description) };
+  const lifecycle = await createLifecycle({
+    owner: ctx.owner, projectId: project.id, diag, originalInput, mode: "build", client,
+  });
   const { job } = await createJob({
     owner: { id: ctx.owner },
     projectId: project.id,
-    mode: "build",
-    prompt: String(description),
+    ...originalInput,
     diag: diag.recorderForJob({ round: 1 }),
+    budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
+    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
   });
+  lifecycle.budget.noteJob();
 
-  relayBuildJob(ctx, { job, projectId: project.id, diag });
+  relayBuildJob(ctx, { job, projectId: project.id, lifecycle });
   await ctx.emit("build_started", {
     jobId: job.id,
     projectId: project.id,
@@ -130,7 +465,20 @@ const PHASE_MILESTONES = {
 const MILESTONE_MIN_PHASE_MS = 2 * 60_000;   // fast builds stay quiet; the roster covers them
 const REASSURE_AFTER_MS = 4 * 60_000;        // never silent for long, never noisy either
 
-function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nullDiagSession(), repairMemory = { fingerprints: [], briefs: [] } }) {
+// Injectable seams. Production always uses the real ones; the regression suite substitutes
+// them to assert what the relay actually DISPATCHES, not merely what the planner returns.
+const REAL_DEPS = {
+  createJob,
+  subscribe,
+  persistBuildResult: (owner, projectId, result) => persistBuildResult(owner, projectId, result),
+  verify: (ctx, args) => runVerificationGate(ctx, args),
+};
+
+export function __relayForTests(ctx, options) {
+  return relayBuildJob(ctx, options);
+}
+
+function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REAL_DEPS }) {
   const jobId = job.id;
   let lastSpecialist = null;
   let phaseStartedAt = Date.now();
@@ -157,7 +505,7 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
     }
   };
 
-  const unsubscribe = subscribe(job, async (name, data) => {
+  const unsubscribe = deps.subscribe(job, async (name, data) => {
     try {
       if (name === "phase") {
         lastEventAt = Date.now();
@@ -181,63 +529,145 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
       if (name === "end") {
         clearInterval(heartbeat);
         unsubscribe();
-        const action = planEndAction(data, { attempt: verificationAttempt, previousFingerprints: repairMemory.fingerprints });
+
+        // Fold this job's real usage into the LIFECYCLE totals before any decision — the
+        // aggregate budget is what the next dispatch is checked against.
+        const measurements = job.measurements || null;
+        lifecycle.budget.record({
+          usage: measurements?.usage, credits: measurements?.credits, turns: measurements?.turns,
+        });
+
+        const signals = signalsFromJob(job, data);
+        const previous = lifecycle.rounds[lifecycle.rounds.length - 1] || null;
+        const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
+        lifecycle.rounds.push(signals);
+
+        const check = dispatchCheck(lifecycle);
+        const action = planEndAction(data, {
+          attempt,
+          previousFingerprints: lifecycle.repairMemory.fingerprints,
+          budgetCheck: check.ok ? { ok: true } : (check.budgetCheck || { ok: false, reason: "byok" }),
+          progress,
+          alternatives: alternativesFor(lifecycle),
+          autoFallback: lifecycle.allowFallback,
+        });
+        lifecycle.endState = action.endState;
         await finishSpecialist(action.kind === "verify" || action.kind === "warmup");
-        if (data.status === "complete") await persistBuildResult(ctx.owner, projectId, data.result);
+
+        // Persist the latest state for every completed job so progress is never lost. A
+        // checkpoint of the state BEFORE this round already exists, so a regression can be
+        // undone at the terminal stop.
+        if (data.status === "complete") await deps.persistBuildResult(ctx.owner, projectId, data.result);
+        if (data.result?.tree) {
+          lifecycle.checkpoints.create({
+            tree: data.result.tree, buildId: lifecycle.diag.id, jobId, attempt,
+            status: data.status, compileOk: signals.compileOk, previewOk: signals.previewOk,
+            usageTotals: lifecycle.budget.totals, label: `round ${attempt}`,
+          });
+        }
+
+        // ── Cancellation: stop everything. No dispatch, no model call, no further spend. ──
+        if (action.kind === "cancelled") {
+          lifecycle.diag.finish("cancelled");
+          recordOutcome(lifecycle, { action, attempt, trigger: job.trigger || "user", signals, progress });
+          await ctx.conversations.appendTurn(ctx.conversation, {
+            role: "lead", content: action.message, payload: { jobId, projectId, cancelled: true },
+          });
+          await ctx.emit("message", { role: "lead", text: action.message, projectId });
+          return;
+        }
 
         if (action.kind === "verify") {
           await ctx.emit("preview_ready", { url: data.result.previewUrl, projectId, message: "Preview ready — take a look." });
-          // The Verification Agent gate: completion is only announced after PASS.
-          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt, diag, repairMemory })
+          deps.verify(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt, lifecycle, job, deps })
             .catch((error) => console.error("[app-build] verification:", error.message));
           return;
         }
         if (action.kind === "warmup") {
-          diag.finish("complete_unverified");
+          lifecycle.diag.finish("complete_unverified");
+          recordOutcome(lifecycle, { action, attempt, trigger: job.trigger || "user", signals, progress });
           recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
           const text = `${buildEndSummary(data.result)}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
           await ctx.emit("message", { role: "lead", text, projectId });
           return;
         }
-        if (action.kind === "repair" || action.kind === "retry") {
-          // Autonomous: announce briefly, fix, re-verify. Never ask permission for routine
-          // failures — but never send the identical repair brief twice either.
-          const nextBrief = action.kind === "repair" ? action.brief : job.prompt;
-          const briefFp = fingerprintPrompt(nextBrief);
-          if (repairMemory.briefs.includes(briefFp)) {
-            diag.finish("failed");
-            const text = `I stopped the repair loop: it was about to send the exact same repair instructions again, which means the previous attempt didn't change the outcome.\n\n${diag.failureEvidence()}`;
-            await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId, buildId: diag.id } });
-            await ctx.emit("message", { role: "lead", text, projectId });
-            return;
-          }
-          if (action.fingerprint) repairMemory.fingerprints.push(action.fingerprint);
-          repairMemory.briefs.push(briefFp);
-          await sayProgress(action.announcement);
-          const nextRound = verificationAttempt + 1;
-          diag.repairDispatched({ prompt: nextBrief, round: nextRound });
-          const { job: next } = await createJob({
-            owner: { id: ctx.owner }, projectId,
-            mode: action.kind === "repair" ? "iterate" : (job.mode || "build"),
-            prompt: nextBrief,
-            trigger: "autonomous_repair",
-            diag: diag.recorderForJob({ round: nextRound }),
+
+        // ── Provider limit: switch, never retry the same provider blindly. ───────────────
+        if (action.kind === "switch_provider") {
+          await handleProviderSwitch(ctx, {
+            action, lifecycle, attempt, jobId, projectId, signals, progress, job, deps,
           });
-          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: nextRound, diag, repairMemory });
           return;
         }
-        // Genuine exhaustion — the only point control returns to the user. The message
-        // carries the EXACT stored diagnostic output, never an unevidenced claim.
-        diag.finish("failed");
-        const blockedText = `${action.message}\n\n${diag.failureEvidence()}`;
-        await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: blockedText, payload: { jobId, projectId, buildId: diag.id } });
-        await ctx.emit("message", { role: "lead", text: blockedText, projectId });
-        notifyOwnerIfAway(ctx.owner, ctx.conversation.id, {
-          title: "Build needs a decision",
-          body: "Autonomous repair is exhausted — open the conversation.",
-          tag: `build-${projectId}`,
-        }).catch(() => {});
+
+        // ── Repair / legitimate retry ────────────────────────────────────────────────────
+        if (action.kind === "repair" || action.kind === "retry") {
+          const isRetry = action.kind === "retry";
+          // THE PROMPT FIX: a retry re-sends the complete ORIGINAL input from the lifecycle.
+          // `job.prompt` never existed — the prompt lives at job.input.prompt — so every
+          // retry used to dispatch with an undefined prompt.
+          const nextBrief = isRetry ? lifecycle.originalInput.prompt : action.brief;
+          if (!isRetry && !String(nextBrief || "").trim()) {
+            // Defensive: a repair with no brief is never dispatched.
+            await stopWithMessage(ctx, lifecycle, {
+              action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
+              text: `${attemptSummary(attempt)} I couldn't compose a safe repair for what failed, so I've stopped rather than guess. Your current work is saved.`,
+            });
+            return;
+          }
+          const briefFp = fingerprintPrompt(nextBrief);
+          if (!isRetry && lifecycle.repairMemory.briefs.includes(briefFp)) {
+            await stopWithMessage(ctx, lifecycle, {
+              action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
+              text: `I stopped the repair loop: it was about to send the exact same repair instructions again, which means the previous attempt didn't change the outcome.`,
+              briefFingerprint: briefFp,
+            });
+            return;
+          }
+          if (action.fingerprint) lifecycle.repairMemory.fingerprints.push(action.fingerprint);
+          if (!isRetry) lifecycle.repairMemory.briefs.push(briefFp);
+
+          const nextRound = attempt + 1;
+          // Checkpoint the state we are about to change, so a worse result can be undone.
+          const before = lifecycle.checkpoints.latest();
+          await sayProgress(action.announcement);
+          if (!lifecycle.managed) {
+            const warning = byokWarning(lifecycle.byokSafety, {
+              lifecycleCost: lifecycle.budget.totals.credits, alreadyWarned: lifecycle.byokWarned,
+            });
+            if (warning) { lifecycle.byokWarned = true; await sayProgress(warning); }
+          }
+          lifecycle.diag.repairDispatched({ prompt: nextBrief, round: nextRound });
+          if (!isRetry) lifecycle.budget.noteRepair();
+          recordOutcome(lifecycle, {
+            action, attempt, trigger: job.trigger || "user", signals, progress,
+            checkpointBefore: before?.id || null,
+            extra: { briefFingerprint: briefFp, strategy: isRetry ? "resume original request" : "targeted repair brief", reason: progress?.reason || null },
+          });
+
+          const { job: next } = await deps.createJob({
+            owner: { id: ctx.owner }, projectId,
+            // A retry resumes the ORIGINAL request; a repair is a targeted edit.
+            ...(isRetry
+              ? { ...lifecycle.originalInput }
+              : { mode: "iterate", prompt: nextBrief }),
+            trigger: isRetry ? "transient_retry" : "autonomous_repair",
+            diag: lifecycle.diag.recorderForJob({ round: nextRound }),
+            budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
+            byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+            providerOverride: lifecycle.providerOverride,
+          });
+          lifecycle.budget.noteJob();
+          relayBuildJob(ctx, { job: next, projectId, attempt: nextRound, lifecycle, deps });
+          return;
+        }
+
+        // ── Terminal: blocked, or waiting on the user ────────────────────────────────────
+        await stopWithMessage(ctx, lifecycle, {
+          action, attempt, jobId, projectId, signals, progress,
+          text: action.message || terminalMessageFor(lifecycle, action, check),
+        });
       }
     } catch (error) {
       console.error("[app-build] relay:", error.message);
@@ -245,14 +675,133 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
   });
 }
 
+// The message for a stop whose copy depends on live lifecycle state rather than the pure
+// planner: budget refusals and BYOK-control refusals.
+function terminalMessageFor(lifecycle, action, check) {
+  if (check && check.kind === "byok" && check.byok) return byokBlockedMessage(check.byok);
+  if (action.endState === "managed_budget_blocked" || check?.kind === "budget") {
+    return budgetBlockedMessage(check?.budgetCheck || { reason: "credits" }, {
+      alternatives: alternativesFor(lifecycle),
+    });
+  }
+  return `${attemptSummary(1)} I've reached the safe automatic repair limit. Your current work is saved.`;
+}
+
+// Every terminal stop goes through here: restore a better checkpoint if this round made
+// things worse, finish Diagnostics, tell the user calmly, and notify exactly once.
+async function stopWithMessage(ctx, lifecycle, { action, attempt, jobId, projectId, signals, progress, text, briefFingerprint = null }) {
+  // If the last round regressed, put the better version back before stopping (§8).
+  let restored = null;
+  const previous = lifecycle.rounds[lifecycle.rounds.length - 2] || null;
+  if (regressed(previous, signals)) {
+    const better = lifecycle.checkpoints.betterThanLatest();
+    if (better) {
+      restored = await restoreCheckpoint(better, {
+        client: lifecycle.client, owner: ctx.owner, projectId,
+      });
+    }
+  }
+
+  const needsUser = action.kind === "request_user_input";
+  lifecycle.diag.finish(needsUser ? "needs_input" : "failed");
+
+  const restoredLine = restored?.restored
+    ? "\n\nI've put the last working version back, so nothing you had is lost."
+    : "";
+  const body = `${text}${restoredLine}\n\n${lifecycle.diag.failureEvidence()}`;
+  await ctx.conversations.appendTurn(ctx.conversation, {
+    role: "lead", content: body, payload: { jobId, projectId, buildId: lifecycle.diag.id },
+  });
+  await ctx.emit("message", { role: "lead", text: body, projectId });
+
+  const notified = await notifyTerminal(ctx, lifecycle, {
+    title: needsUser ? "Build needs your input" : "Build needs a decision",
+    body: needsUser
+      ? "Something only you can provide is needed — open the conversation."
+      : "Automatic repair has stopped — open the conversation.",
+  });
+
+  recordOutcome(lifecycle, {
+    action, attempt, trigger: "lead", signals, progress, notified,
+    checkpointBefore: lifecycle.checkpoints.latest()?.id || null,
+    checkpointAfter: restored?.restored ? restored.checkpointId : null,
+    extra: { briefFingerprint, reason: progress?.reason || action.reason || null },
+  });
+}
+
+// Provider quota / rate limit / outage: preserve state, keep every lifecycle counter, and
+// either switch automatically (when the owner enabled fallback) or offer the switch.
+async function handleProviderSwitch(ctx, { action, lifecycle, attempt, jobId, projectId, signals, progress, job, deps = REAL_DEPS }) {
+  const target = action.alternatives[0];
+  const from = lifecycle.providerOverride || lifecycle.activeProvider;
+
+  if (!action.auto) {
+    lifecycle.diag.finish("needs_input");
+    await ctx.conversations.appendTurn(ctx.conversation, {
+      role: "lead", content: action.message, payload: { jobId, projectId, buildId: lifecycle.diag.id, providerSwitchOffered: true },
+    });
+    await ctx.emit("message", { role: "lead", text: action.message, projectId });
+    const notified = await notifyTerminal(ctx, lifecycle, {
+      title: "Build paused — provider limit",
+      body: "Your progress is safe. Open the conversation to switch provider.",
+    });
+    recordOutcome(lifecycle, { action, attempt, trigger: job.trigger || "user", signals, progress, notified, extra: { provider: from, reason: `offered switch to ${target?.id || "alternative"}` } });
+    return;
+  }
+
+  // Automatic fallback: switch and continue from the SAME step, keeping the lifecycle
+  // budget, repair memory and fingerprints intact — this is not a new build.
+  const check = dispatchCheck(lifecycle);
+  if (!check.ok) {
+    await stopWithMessage(ctx, lifecycle, {
+      action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
+      text: terminalMessageFor(lifecycle, action, check),
+    });
+    return;
+  }
+
+  lifecycle.providerOverride = target.id;
+  lifecycle.switches.push({ from, to: target.id, reason: action.limit });
+  await recordProviderSwitch({
+    owner: ctx.owner, conversationId: ctx.conversation.id, buildId: lifecycle.diag.id,
+    from, to: target.id, reason: action.limit === "rate_limit" ? "rate_limit" : action.limit === "outage" ? "outage" : "quota",
+    detail: `app build round ${attempt}`, client: lifecycle.client,
+  }).catch(() => {});
+
+  const text = switchedMessage({ from, to: target.id, reason: action.limit });
+  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId, providerSwitched: true } });
+  await ctx.emit("message", { role: "lead", text, projectId });
+
+  const nextRound = attempt + 1;
+  lifecycle.diag.repairDispatched({ prompt: lifecycle.originalInput.prompt, round: nextRound });
+  recordOutcome(lifecycle, {
+    action, attempt, trigger: job.trigger || "user", signals, progress,
+    checkpointBefore: lifecycle.checkpoints.latest()?.id || null,
+    extra: { provider: target.id, strategy: `switched from ${from} after ${action.limit}` },
+  });
+
+  const { job: next } = await deps.createJob({
+    owner: { id: ctx.owner }, projectId,
+    ...lifecycle.originalInput,
+    trigger: "provider_switch",
+    diag: lifecycle.diag.recorderForJob({ round: nextRound }),
+    budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
+    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+    providerOverride: target.id,
+  });
+  lifecycle.budget.noteJob();
+  relayBuildJob(ctx, { job: next, projectId, attempt: nextRound, lifecycle, deps });
+}
+
 // The Verification Agent gate (Stuart, 2026-07-31): before ANY completion message, the
 // Verifier drives the live preview like a real user. PASS → completion + ✓ summary.
 // FAIL → the build is rejected, the failures go back to the Builder in surgical repair
 // mode (design/layout/branding preserved), and the repaired build is re-verified — up to
 // two automatic repair rounds before reporting honestly.
-async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1, diag = nullDiagSession(), repairMemory = { fingerprints: [], briefs: [] } }) {
+async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1, lifecycle, job = null, deps = REAL_DEPS }) {
   const { verifyApp, repairPrompt } = await import("./verificationAgent.mjs");
   const { treeUsesBackendSdk } = await import("../appRuntimeStatus.mjs");
+  const diag = lifecycle.diag;
   await ctx.emit("agent_spawned", { agent: "Verifier", status: "Verifying the app like a real user…" });
   const verifyStarted = Date.now();
   let verdict;
@@ -284,30 +833,75 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   await ctx.emit("agent_done", { agent: "Verifier", ok: false });
   await ctx.emit("verification", { pass: false, failures: verdict.failures, projectId });
 
-  const failureFp = fingerprintFailure(verdict.failures);
-  if (attempt <= 2 && !repairMemory.fingerprints.includes(failureFp)) {
-    repairMemory.fingerprints.push(failureFp);
-    const text = `Verification found real problems (${verdict.failures.slice(0, 3).join("; ")}). I'm sending it back to the Builder to repair — design untouched, minimum change.`;
+  // Fold the verification result into this round's signals so no-progress detection can see
+  // whether the repair actually moved verification forward.
+  const signals = signalsFromJob(job, { result }, { verdict });
+  const previousIndex = lifecycle.rounds.length - 1;
+  if (previousIndex >= 0) lifecycle.rounds[previousIndex] = signals;
+  const previous = lifecycle.rounds[previousIndex - 1] || null;
+  const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
+
+  const check = dispatchCheck(lifecycle);
+  const action = planVerificationAction(verdict, {
+    attempt,
+    previousFingerprints: lifecycle.repairMemory.fingerprints,
+    budgetCheck: check.ok ? { ok: true } : (check.budgetCheck || { ok: false, reason: "byok" }),
+    progress,
+  });
+  lifecycle.endState = action.endState;
+
+  if (action.kind === "repair") {
+    const brief = repairPrompt(verdict.failures);
+    const briefFp = fingerprintPrompt(brief);
+    if (lifecycle.repairMemory.briefs.includes(briefFp)) {
+      await stopWithMessage(ctx, lifecycle, {
+        action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
+        text: "I stopped the repair loop: it was about to send the exact same repair instructions again, which means the previous attempt didn't change the outcome.",
+        briefFingerprint: briefFp,
+      });
+      return;
+    }
+    lifecycle.repairMemory.fingerprints.push(action.fingerprint);
+    lifecycle.repairMemory.briefs.push(briefFp);
+
+    const text = progress?.improved
+      ? `The last repair improved the build. I'm fixing the remaining issue now — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`
+      : `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`;
     await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
     await ctx.emit("message", { role: "lead", text, projectId });
+
     const nextRound = attempt + 1;
-    const brief = repairPrompt(verdict.failures);
-    repairMemory.briefs.push(fingerprintPrompt(brief));
+    const before = lifecycle.checkpoints.latest();
     diag.repairDispatched({ prompt: brief, round: nextRound });
-    const { job } = await createJob({
+    lifecycle.budget.noteRepair();
+    recordOutcome(lifecycle, {
+      action, attempt, trigger: "verification_repair", signals, progress,
+      checkpointBefore: before?.id || null,
+      extra: {
+        briefFingerprint: briefFp, strategy: "verification repair brief",
+        verificationBefore: previous?.verificationPassed ?? null, verificationAfter: verdict.pass,
+      },
+    });
+    const { job: next } = await deps.createJob({
       owner: { id: ctx.owner }, projectId, mode: "iterate",
       prompt: brief,
       trigger: "verification_repair",
       diag: diag.recorderForJob({ round: nextRound }),
+      budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
+      byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+      providerOverride: lifecycle.providerOverride,
     });
-    relayBuildJob(ctx, { job, projectId, verificationAttempt: nextRound, diag, repairMemory });
+    lifecycle.budget.noteJob();
+    relayBuildJob(ctx, { job: next, projectId, attempt: nextRound, lifecycle, deps });
     return;
   }
 
-  diag.finish("failed");
-  const text = `I ran the full repair loop and verification still fails:\n${verdict.failures.map((f) => `- ${f}`).join("\n")}\nThis is beyond routine repair — I need a decision from you on how to proceed.\n\n${diag.failureEvidence()}`;
-  await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId, buildId: diag.id } });
-  await ctx.emit("message", { role: "lead", text, projectId });
+  // Terminal: exhausted, blocked, or waiting on the user. Same single stop path as the
+  // build-failure gate, so owner notification and checkpoint restore are never skipped.
+  await stopWithMessage(ctx, lifecycle, {
+    action, attempt, jobId, projectId, signals, progress,
+    text: action.message || terminalMessageFor(lifecycle, action, check),
+  });
 }
 
 // Late preview recovery: the container often finishes warming up shortly after the build
@@ -368,12 +962,19 @@ export async function repairApp(ctx, { issue, productName = null }) {
     owner: ctx.owner, projectId: project.id, conversationId: ctx.conversation.id,
     kind: "repair", prompt: String(issue),
   });
-  const { job } = await createJob({
-    owner: { id: ctx.owner }, projectId: project.id, mode: "iterate", prompt,
-    taskHint: String(issue), // classify from the user's words, not the REPAIR MODE wrapper
-    diag: diag.recorderForJob({ round: 1 }),
+  const originalInput = { mode: "iterate", prompt, taskHint: String(issue) };
+  const lifecycle = await createLifecycle({
+    owner: ctx.owner, projectId: project.id, diag, originalInput, mode: "iterate", client,
   });
-  relayBuildJob(ctx, { job, projectId: project.id, diag });
+  const { job } = await createJob({
+    owner: { id: ctx.owner }, projectId: project.id,
+    ...originalInput, // taskHint classifies from the user's words, not the REPAIR MODE wrapper
+    diag: diag.recorderForJob({ round: 1 }),
+    budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
+    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+  });
+  lifecycle.budget.noteJob();
+  relayBuildJob(ctx, { job, projectId: project.id, lifecycle });
   await ctx.emit("build_started", { jobId: job.id, projectId: project.id, buildId: diag.id, message: "Repairing — design untouched." });
   return { jobId: job.id, projectId: project.id, buildId: diag.id, note: "Repair dispatched; the fix will be verified before completion is announced." };
 }

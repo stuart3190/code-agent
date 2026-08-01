@@ -19,14 +19,33 @@ function managedModelForIntent(intent) {
     : optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"));
 }
 
+// `preferProvider` is set only by an automatic provider fallback: the build continues on a
+// different connected provider without the owner changing their active connection. Falls
+// back to the active credential whenever that provider is not usable.
 export async function resolveBuildContext(ownerId, {
   credentialResolver = activeAiCredential,
+  preferProvider = null,
 } = {}) {
   let credential;
   try {
     credential = await credentialResolver(ownerId);
   } catch {
     credential = { provider: "managed", secret: null };
+  }
+
+  if (preferProvider && preferProvider !== credential.provider) {
+    if (preferProvider === "managed") {
+      credential = { provider: "managed", secret: null };
+    } else {
+      try {
+        const { aiCredentialStore } = await import("../aiCredentialStore.mjs");
+        const { decryptSecret } = await import("../secretCrypto.mjs");
+        const row = await aiCredentialStore().getCredential(ownerId, preferProvider);
+        if (row?.status === "connected" && row.secret_encrypted) {
+          credential = { provider: preferProvider, secret: decryptSecret(row.secret_encrypted) };
+        }
+      } catch { /* unusable alternative — keep the active credential */ }
+    }
   }
 
   if (credential.provider === "anthropic" && credential.secret) {
