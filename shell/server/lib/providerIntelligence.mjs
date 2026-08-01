@@ -158,9 +158,14 @@ export function buildScorecards(rows) {
 // ── Deterministic ranking ───────────────────────────────────────────────────────────────
 // Lower score wins. Weights are explicit so a ranking can be re-derived by hand from the
 // numbers shown in the dashboard — that is what makes Auto auditable.
+// Technical weights, used when no outcome evidence exists yet.
 export const WEIGHTS = { costPerVerified: 0.5, duration: 0.25, verification: 0.25 };
+// With real-world outcome evidence, USER SUCCESS carries the largest share: a model that
+// costs slightly more but produces projects people export, deploy and finish outranks a
+// cheaper one that needs many retries.
+export const WEIGHTS_WITH_OUTCOMES = { userSuccess: 0.45, costPerVerified: 0.25, duration: 0.15, verification: 0.15 };
 
-export function rankCandidates(scorecards, { task = null } = {}) {
+export function rankCandidates(scorecards, { task = null, outcomes = null } = {}) {
   const source = task
     ? scorecards.byModelTask
       .filter((s) => s.key.endsWith(`|${task}`))
@@ -178,17 +183,29 @@ export function rankCandidates(scorecards, { task = null } = {}) {
   const durations = eligible.map((s) => s.avgBuildMs ?? 0);
   const rates = eligible.map((s) => s.verificationRate ?? 0);
 
+  // Outcome evidence is used only when EVERY eligible model has a measured success score
+  // — a partial picture would rank on an uneven basis.
+  const successOf = (key) => {
+    const entry = outcomes?.[key];
+    return entry && !entry.collecting && entry.userSuccessScore != null ? entry.userSuccessScore : null;
+  };
+  const useOutcomes = Boolean(outcomes) && eligible.every((s) => successOf(s.key) != null);
+  const weights = useOutcomes ? WEIGHTS_WITH_OUTCOMES : WEIGHTS;
+  const successes = useOutcomes ? eligible.map((s) => successOf(s.key)) : [];
+
   const ranked = eligible
     .map((s) => ({
       ...s,
+      userSuccessScore: successOf(s.key),
       score: Number((
-        WEIGHTS.costPerVerified * norm(costs, s.costPerVerifiedBuild)
-        + WEIGHTS.duration * norm(durations, s.avgBuildMs ?? 0)
-        + WEIGHTS.verification * (1 - norm(rates, s.verificationRate ?? 0))
+        (useOutcomes ? weights.userSuccess * (1 - norm(successes, successOf(s.key))) : 0)
+        + weights.costPerVerified * norm(costs, s.costPerVerifiedBuild)
+        + weights.duration * norm(durations, s.avgBuildMs ?? 0)
+        + weights.verification * (1 - norm(rates, s.verificationRate ?? 0))
       ).toFixed(6)),
     }))
     .sort((a, b) => (a.score - b.score) || a.key.localeCompare(b.key)); // stable tie-break
-  return { ranked, evidence: "measured", eligible };
+  return { ranked, evidence: "measured", eligible, weights, usedOutcomes: useOutcomes };
 }
 
 // ── Explanations (quote the measured difference; never invent one) ─────────────────────
@@ -209,7 +226,13 @@ export function explainChoice(ranked, { task = null } = {}) {
   const sameQuality = Math.abs((winner.verificationRate ?? 0) - (runnerUp.verificationRate ?? 0)) <= 2;
 
   let reason;
-  if (cheaper >= 5 && sameQuality) {
+  // Real-world outcomes lead the explanation when they drove the decision.
+  const successGap = (winner.userSuccessScore != null && runnerUp.userSuccessScore != null)
+    ? Number((winner.userSuccessScore - runnerUp.userSuccessScore).toFixed(1))
+    : null;
+  if (successGap != null && successGap >= 3) {
+    reason = `users completed and kept its builds more often (user success ${winner.userSuccessScore} vs ${runnerUp.userSuccessScore})`;
+  } else if (cheaper >= 5 && sameQuality) {
     reason = `it achieved equivalent verified results at approximately ${cheaper}% lower average cost`;
   } else if (faster >= 5 && sameQuality) {
     reason = `${scope} completed ${faster}% faster with the same verification success`;
@@ -226,11 +249,17 @@ export function explainChoice(ranked, { task = null } = {}) {
 // ── The routing recommendation ─────────────────────────────────────────────────────────
 
 // Returns null when evidence is insufficient — callers keep their configured behaviour.
-export async function recommendModel({ task = null, client = null, scorecards = null, windowDays = 60 } = {}) {
+export async function recommendModel({ task = null, client = null, scorecards = null, windowDays = 60, outcomes = undefined } = {}) {
   const cards = scorecards || buildScorecards(await collectEvidence({ client, windowDays }));
+  let outcomeMetrics = outcomes;
+  if (outcomeMetrics === undefined) {
+    outcomeMetrics = await import("./buildOutcomes.mjs")
+      .then(async (m) => m.outcomesByModel(await m.collectOutcomes({ client, windowDays }), { minSamples: MIN_SAMPLES }))
+      .catch(() => null);
+  }
   // Try the task-specific ranking first; fall back to the overall one.
   for (const scope of [task, null]) {
-    const { ranked, evidence } = rankCandidates(cards, { task: scope });
+    const { ranked, evidence } = rankCandidates(cards, { task: scope, outcomes: outcomeMetrics });
     if (evidence === "measured" && ranked.length) {
       const winner = ranked[0];
       return {
@@ -245,6 +274,7 @@ export async function recommendModel({ task = null, client = null, scorecards = 
           avgBuildMs: winner.avgBuildMs,
           avgRepairRounds: winner.avgRepairRounds,
           cacheEfficiency: winner.cacheEfficiency,
+          userSuccessScore: winner.userSuccessScore ?? null,
         },
         ranked: ranked.map((r) => ({ model: r.key, score: r.score, samples: r.samples, confidence: r.confidence })),
       };
@@ -267,16 +297,16 @@ const METRICS = [
   { key: "cancellationRate", lower: true, strong: "fewest cancellations", weak: "most cancellations" },
 ];
 
-export function modelProfiles(scorecards, { previous = null } = {}) {
+export function modelProfiles(scorecards, { previous = null, outcomes = null } = {}) {
   const eligible = scorecards.byModel.filter((m) => m.samples >= MIN_SAMPLES);
-  const overall = rankCandidates(scorecards);
+  const overall = rankCandidates(scorecards, { outcomes });
   const scoreByModel = new Map((overall.ranked || []).map((r) => [r.key, r.score]));
 
   // Task win rate: the share of task families (with evidence) where this model ranks #1.
   const wins = new Map();
   const contests = new Map();
   for (const task of TASK_FAMILIES) {
-    const ranking = rankCandidates(scorecards, { task });
+    const ranking = rankCandidates(scorecards, { task, outcomes });
     if (ranking.evidence !== "measured" || !ranking.ranked.length) continue;
     for (const entry of ranking.ranked) contests.set(entry.key, (contests.get(entry.key) || 0) + 1);
     wins.set(ranking.ranked[0].key, (wins.get(ranking.ranked[0].key) || 0) + 1);
@@ -315,6 +345,7 @@ export function modelProfiles(scorecards, { previous = null } = {}) {
       taskWins: wins.get(card.key) || 0,
       taskContests: contested,
       taskWinRate: contested ? Number((((wins.get(card.key) || 0) / contested) * 100).toFixed(1)) : null,
+      outcomes: outcomes?.[card.key] || null,
       trend,
       collecting: card.samples < MIN_SAMPLES,
     };
@@ -352,17 +383,22 @@ export function providerTree(scorecards, profiles) {
 export async function providerIntelligenceSnapshot({ client = null, windowDays = 60, now = new Date() } = {}) {
   const rows = await collectEvidence({ client, windowDays, now });
   const scorecards = buildScorecards(rows);
-  const overall = rankCandidates(scorecards);
+  // Real-world outcomes (anonymous, derived): what users actually did with the builds.
+  const outcomeModule = await import("./buildOutcomes.mjs");
+  const outcomeRows = await outcomeModule.collectOutcomes({ client, windowDays, now }).catch(() => []);
+  const outcomes = outcomeModule.outcomesByModel(outcomeRows, { minSamples: MIN_SAMPLES });
+  const overall = rankCandidates(scorecards, { outcomes });
   // Trend: the most recent half of the window against the earlier half, measured only.
   const midpoint = now.getTime() - (windowDays / 2) * 86_400_000;
   const priorRows = rows.filter((r) => r.createdAt && new Date(r.createdAt).getTime() < midpoint);
   const profiles = modelProfiles(scorecards, {
     previous: priorRows.length ? buildScorecards(priorRows) : null,
+    outcomes,
   });
   const providers = providerTree(scorecards, profiles);
   const perTask = {};
   for (const task of TASK_FAMILIES) {
-    const ranking = rankCandidates(scorecards, { task });
+    const ranking = rankCandidates(scorecards, { task, outcomes });
     perTask[task] = ranking.evidence === "measured"
       ? { ranked: ranking.ranked.map((r) => ({ model: r.key, score: r.score, samples: r.samples, confidence: r.confidence, costPerVerifiedBuild: r.costPerVerifiedBuild, avgBuildMs: r.avgBuildMs, verificationRate: r.verificationRate })), explanation: explainChoice(ranking.ranked, { task }) }
       : { ranked: [], explanation: "Collecting benchmark data." };
@@ -371,7 +407,10 @@ export async function providerIntelligenceSnapshot({ client = null, windowDays =
     windowDays,
     generatedAt: scorecards.generatedAt,
     minSamples: MIN_SAMPLES,
-    weights: WEIGHTS,
+    weights: overall.weights || WEIGHTS,
+    usedOutcomes: Boolean(overall.usedOutcomes),
+    successWeights: outcomeModule.SUCCESS_WEIGHTS,
+    outcomes,
     taskTypes: TASK_FAMILIES,
     providers,          // expandable: each provider carries its models with full profiles
     models: profiles,   // flat per-model profiles (score, strengths, weaknesses, trend)

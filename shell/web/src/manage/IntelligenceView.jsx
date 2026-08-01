@@ -41,6 +41,25 @@ function ModelRow({ model }) {
           <Confidence level={model.confidence} samples={model.samples} />
         </span>
       </div>
+      {model.outcomes && !model.outcomes.collecting && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span className="mg-pill"><span className="dot" style={{ background: "var(--accent)" }} />User success {model.outcomes.userSuccessScore}</span>
+            <span className="ct-hint">
+              {fmtPct(model.outcomes.firstPassAcceptanceRate)} first-pass · {fmtPct(model.outcomes.acceptanceRate)} accepted ·
+              {" "}{fmtPct(model.outcomes.completionRate)} completed
+            </span>
+          </div>
+          <div className="ct-hint" style={{ marginTop: 4 }}>
+            {model.outcomes.avgFollowUps} follow-ups · {model.outcomes.avgRepairCycles} repair cycles ·
+            {" "}{fmtPct(model.outcomes.exportRate)} exported · {fmtPct(model.outcomes.deploymentRate)} deployed ·
+            {" "}{fmtPct(model.outcomes.rollbackRate)} rolled back · {fmtPct(model.outcomes.abandonmentRate)} abandoned
+          </div>
+        </div>
+      )}
+      {model.outcomes?.collecting && (
+        <div className="ct-hint" style={{ marginTop: 6 }}>User outcomes: collecting benchmark data ({model.outcomes.builds}).</div>
+      )}
       {(model.strengths.length > 0 || model.weaknesses.length > 0) && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
           {model.strengths.map((s) => (
@@ -127,9 +146,14 @@ export default function IntelligenceView() {
           </div>
         )}
         <div className="ct-hint" style={{ marginTop: 8 }}>
-          Score = {data.weights.costPerVerified} × cost per verified build + {data.weights.duration} × duration
-          + {data.weights.verification} × (1 − verification rate), each normalised across eligible models. Lower wins;
-          ties break alphabetically, so the same evidence always produces the same ranking.
+          {data.usedOutcomes
+            ? `Score = ${data.weights.userSuccess} × (1 − user success) + ${data.weights.costPerVerified} × cost per verified build + ${data.weights.duration} × duration + ${data.weights.verification} × (1 − verification rate)`
+            : `Score = ${data.weights.costPerVerified} × cost per verified build + ${data.weights.duration} × duration + ${data.weights.verification} × (1 − verification rate)`}
+          , each normalised across eligible models. Lower wins; ties break alphabetically, so the same
+          evidence always produces the same ranking.
+          {data.usedOutcomes
+            ? " Real-world outcomes are leading this ranking."
+            : " Ranking on technical benchmarks only — user-outcome evidence is still collecting."}
         </div>
       </div>
 
