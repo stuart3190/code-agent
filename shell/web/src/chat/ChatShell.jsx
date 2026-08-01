@@ -307,6 +307,11 @@ function Workspace({ user }) {
           <aside className={`ct-rail ${rail === "empty" ? "" : rail}`}>
             <div className={`ct-teamcard ${rail === "preview" ? "strip" : ""}`}>
               <div className="ct-rail-label">Your team</div>
+              {view.badge && (
+                <div className={`ct-provider-badge ${view.badge.switched ? "switched" : ""}`} title="The model doing this work">
+                  <span aria-hidden="true">{view.badge.icon}</span>{view.badge.text}
+                </div>
+              )}
               <div className="ct-rows">
                 {view.roster.map((r) => <AgentRow key={r.agent} row={r} compact={rail === "preview"} />)}
               </div>

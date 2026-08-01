@@ -38,8 +38,10 @@ export function sanitizeUserFacingText(text, fallback = "Something needed attent
   out = out.replace(/\s{2,}/g, " ").replace(/\s+([.,;])/g, "$1").trim();
   if (!out || out.length < 3) return fallback;
   if (TECHNICAL_MARKERS.test(out)) return fallback;
-  // A long single-line blob is almost certainly machine output, not a sentence.
-  if (out.length > 320) return fallback;
+  // A long UNPUNCTUATED blob is machine output; long prose (a helpful explanation with
+  // sentences) is exactly what we want to keep, so length alone must never disqualify it.
+  const looksLikeProse = /[.!?]\s/.test(out) || out.includes("\n");
+  if (out.length > 320 && !looksLikeProse) return fallback;
   return out;
 }
 
