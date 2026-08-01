@@ -63,6 +63,29 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+ERROR SHIELD (2026-08-02, PRs #99/#100, deployed): users NEVER see raw technical failure
+detail. `lib/errorShield.mjs`: captureIncident() writes the full private record to
+`diag_incidents` (migration; RLS deny-all, owner-scoped reads) — message, stack, DB/
+provider code, service, conversation/build/run ids, agent, model, logs, retryCount,
+timestamp — behind reference THR-XXXXXX; returns {friendly, unresolvedMessage,
+privateBriefing, classification, fingerprint}. sanitizeUserFacingText scrubs constraint/
+table names, SQL phrases, stack frames, fs paths, internal URLs, keys, JWTs, uuids, status
+codes + TECHNICAL_MARKERS wholesale fallback. **ORDERING GOTCHA (test-caught): whole-phrase
+SQL rules MUST precede the constraint-name rule, else "duplicate key … violates" survives
+as a fragment.** Lead recovery: processConversation takes `recovery` state; on error →
+capture → if retryable && new fingerprint && attempt<MAX_RECOVERY_ATTEMPTS(2): friendly
+line + recovery event + RE-ENTER the original task with privateBriefing appended to input
+(never-repeat contract); success emits FRIENDLY.recovered; exhaustion → lead_error carrying
+ONLY sanitised message + reference. finishWithMessage sanitises every closing message
+(defence in depth). Event-sequence collisions: SupabaseConversationStore.appendEvent
+retries EVENT_WRITE_ATTEMPTS(5) on isSequenceCollision (23505) with fresh sequence +
+jittered backoff. UI: recovery states (Recovering/Repairing/Verifying/Continuing),
+FailureCard (Retry / Contact support / owner-only View technical details via
+/api/v1/diagnostics/incidents[/:ref]). **PR #100: blocked-build messages used to paste raw
+compiler output into chat — split into failureEvidence() (names the failing check + points
+at Diagnostics) vs rawFailureEvidence() (Diagnostics/explain/operator only).** 284 node
+(10 new) + 28 PW.
+
 SELECTOR UX PASS (2026-08-01, PR #97, deployed): closed pill = "🤖 Model: Auto ▾" /
 "🤖 provider · model • Mode ▾" (purpose obvious without opening); menu = document.body
 PORTAL (fixed, anchored below pill, z-60 above everything, on-screen clamp, flips above
