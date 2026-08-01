@@ -8,6 +8,7 @@ import UsageView from "./UsageView.jsx";
 import OpsView from "./OpsView.jsx";
 import DiagnosticsView from "./DiagnosticsView.jsx";
 import AdminAnalyticsView from "./AdminAnalyticsView.jsx";
+import IntelligenceView from "./IntelligenceView.jsx";
 
 const VIEWS = {
   repos: RepositoriesView,
@@ -15,6 +16,7 @@ const VIEWS = {
   ops: OpsView,
   diagnostics: DiagnosticsView,
   analytics: AdminAnalyticsView,
+  intelligence: IntelligenceView,
 };
 
 export const MANAGE_VIEW_IDS = Object.keys(VIEWS);

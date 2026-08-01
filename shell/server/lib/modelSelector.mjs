@@ -84,18 +84,25 @@ export async function modelStats({ client = null } = {}) {
 }
 
 // ── Auto strategy explanation: exactly what Auto would pick right now, and why ─────────
-export function autoStrategy({ credential = { provider: "managed" }, routing = {}, stats = {} }) {
-  const candidates = routeCandidates({ credential, requested: "auto", policy: routing });
+export function autoStrategy({ credential = { provider: "managed" }, routing = {}, stats = {}, intelligence = null }) {
+  const candidates = routeCandidates({ credential, requested: "auto", policy: { ...routing, intelligence } });
   const first = candidates[0] || null;
   if (!first) return null;
   const s = stats[first.model];
+  // Provider Intelligence explains itself when it has measured evidence; otherwise Auto
+  // says plainly that it is still collecting — never a fabricated justification.
+  const reason = first.intelligence?.explanation
+    || (s && !s.collecting
+      ? `Highest measured success rate for your routing profile (${s.successRate}% verified across ${s.samples} builds).`
+      : "Collecting benchmark data — Auto is using your configured balanced routing until there is enough evidence to rank models.");
   return {
     provider: first.provider,
     model: first.model,
     mode: "balanced",
-    reason: s && !s.collecting
-      ? `Highest measured success rate for your routing profile (${s.successRate}% verified across ${s.samples} builds).`
-      : "Default balanced routing — telemetry is still collecting for a measured ranking.",
+    reason,
+    confidence: first.intelligence?.confidence || null,
+    samples: first.intelligence?.samples ?? (s && !s.collecting ? s.samples : null),
+    learned: Boolean(first.intelligence),
     stats: s || null,
   };
 }
@@ -217,10 +224,14 @@ export async function modelSelectorPayload(owner, { store = aiCredentialStore(),
   // Codex maps to managed in the conversation loop — the Auto explanation mirrors the
   // TRUE routing decision, not the raw credential label.
   const effectiveProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
+  const intelligence = await import("./providerIntelligence.mjs")
+    .then((m) => m.recommendModel({ client: statsClient }))
+    .catch(() => null);
   catalog.autoStrategy = autoStrategy({
     credential: { provider: effectiveProvider, secret: null },
     routing: credential.routing || {},
     stats,
+    intelligence,
   });
   return catalog;
 }

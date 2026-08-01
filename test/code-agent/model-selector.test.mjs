@@ -169,7 +169,9 @@ test("Auto explanation reflects the real routing decision and measured stats", (
   const strategy = autoStrategy({ credential: { provider: "managed" }, routing: { routingMode: "balanced" }, stats: {} });
   assert.ok(strategy.provider && strategy.model, "explains a concrete provider+model");
   assert.equal(strategy.mode, "balanced");
-  assert.match(strategy.reason, /telemetry is still collecting/i, "honest before data exists");
+  // Provider Intelligence uses the mandated wording when there isn't enough evidence.
+  assert.match(strategy.reason, /Collecting benchmark data/i, "honest before data exists");
+  assert.equal(strategy.learned, false);
   const measured = autoStrategy({ credential: { provider: "managed" }, routing: { routingMode: "quality" }, stats });
   if (measured.model === "gpt-5.6-sol") {
     assert.match(measured.reason, /98\.9% verified/, "measured reason quotes real telemetry");

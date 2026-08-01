@@ -46,9 +46,19 @@ export async function createRoutedCodingModel({
   policy = {},
   store = aiRoutingStore(),
   providerFactory = createProviderForCandidate,
+  intelligence = undefined, // injectable; undefined = look it up, null = skip
 } = {}) {
   const health = owner ? await store.listRecentAttempts(owner, 200) : [];
-  const candidates = routeCandidates({ credential, requested, policy, prompt: run?.prompt, health });
+  let evidence = intelligence;
+  if (evidence === undefined && requested === "auto" && credential?.provider === "managed") {
+    evidence = await import("./providerIntelligence.mjs")
+      .then((m) => m.recommendModel({ task: policy.taskType || null }))
+      .catch(() => null);
+  }
+  const candidates = routeCandidates({
+    credential, requested, prompt: run?.prompt, health,
+    policy: { ...policy, intelligence: evidence || null },
+  });
   if (!candidates.length) {
     const error = new Error("No configured AI model is available for this routing policy.");
     error.code = "model_provider_unavailable";
@@ -61,6 +71,8 @@ export async function createRoutedCodingModel({
     id: candidates[0].provider,
     model: candidates[0].model,
     candidates,
+    // Why Auto chose this — measured, quotable, and null when evidence is insufficient.
+    intelligence: candidates[0].intelligence || null,
     async turn(args) {
       const firstIndex = activeIndex;
       let lastError;
@@ -144,7 +156,11 @@ export function routeCandidates({ credential = { provider: "managed" }, requeste
   const balancedFallback = tier === "balanced" ? [] : configured.filter((entry) => entry.tier === "balanced");
   const deduped = uniqueModels([...primary, ...balancedFallback])
     .sort((a, b) => providerOrder.indexOf(a.provider) - providerOrder.indexOf(b.provider));
-  return prioritizeByHealth(deduped, health);
+  const byHealth = prioritizeByHealth(deduped, health);
+  // Provider Intelligence: when measured production evidence names a winner that is in
+  // this candidate set, promote it to the front. Absent evidence the configured order
+  // stands — Auto never guesses (see providerIntelligence.mjs).
+  return applyIntelligence(byHealth, policy.intelligence);
 }
 
 export function isRetryableProviderError(error) {
@@ -247,6 +263,23 @@ function prioritizeByHealth(candidates, attempts) {
     })
     .sort((a, b) => a.score - b.score)
     .map(({ candidate }) => candidate);
+}
+
+// Deterministic: the recommendation is a stable promotion of one existing candidate, so
+// the same evidence always yields the same order and the decision stays auditable.
+export function applyIntelligence(candidates, recommendation) {
+  if (!recommendation?.model || !candidates?.length) return candidates;
+  const index = candidates.findIndex((c) => c.model === recommendation.model);
+  if (index < 0) return candidates; // recommended model isn't configured here — ignore it
+  const evidence = {
+    explanation: recommendation.explanation,
+    confidence: recommendation.confidence,
+    samples: recommendation.samples,
+  };
+  // Attach the evidence even when the model is ALREADY first — Auto must be able to
+  // explain a choice it would have made anyway, not only one it changed.
+  const chosen = { ...candidates[index], intelligence: evidence };
+  return [chosen, ...candidates.filter((_, i) => i !== index)];
 }
 
 function preferredProviderOrder() {
