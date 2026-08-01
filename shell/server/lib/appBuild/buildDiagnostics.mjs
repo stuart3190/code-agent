@@ -131,7 +131,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     started_at: now(),
   }));
 
-  session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round }) => {
+  session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round, contextMeta = null }) => {
     session.seq += 1;
     if (agent) session.agents.add(agent);
     const norm = normalizeTelemetry(usage);
@@ -166,6 +166,9 @@ export async function createDiagSession({ owner, projectId = null, conversationI
         agent, input_tokens: norm.input, output_tokens: norm.output,
         cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,
         duration_ms: durationMs, cost, build_id: session.id, project_id: projectId,
+        trigger: contextMeta?.trigger || null,
+        run_id: contextMeta?.runId || null,
+        context: contextMeta ? { ...contextMeta, trigger: undefined, runId: undefined } : null,
         created_at: now(),
       }));
     }

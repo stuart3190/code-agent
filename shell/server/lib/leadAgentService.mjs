@@ -243,22 +243,46 @@ async function leadInstructions(store, conversation) {
   return sections.join("\n\n");
 }
 
-async function assembleInput(store, conversation) {
-  const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS });
-  return (turns || [])
-    .filter((turn) => ["user", "lead"].includes(turn.role) && turn.content)
-    .map((turn) => {
-      // Workspace context rides the model turn only — the visible thread stays the user's
-      // own words, marked with a transparent context chip by the shell.
-      const context = turn.payload?.workspace_context;
-      const suffix = context
-        ? `\n\n[Shared automatically from the user's editor — visible to them as a context chip]\n${describeWorkspaceContext(context)}`
-        : "";
-      return {
-        role: turn.role === "user" ? "user" : "assistant",
-        content: `${turn.content}${suffix}`,
-      };
+// Scoped conversation context (audit 2026-08-01): only the most recent turns ride in
+// full; older turns are collapsed into one compact summary block instead of being
+// replayed verbatim, and no single turn may exceed TURN_CHAR_CAP (long evidence dumps
+// arrive once, not on every subsequent message). Exported for the context tests.
+const RECENT_FULL_TURNS = 16;
+const TURN_CHAR_CAP = 6_000;
+const SUMMARY_LINE_CAP = 200;
+
+export async function assembleInput(store, conversation) {
+  const turns = (await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS }) || [])
+    .filter((turn) => ["user", "lead"].includes(turn.role) && turn.content);
+  const older = turns.slice(0, Math.max(turns.length - RECENT_FULL_TURNS, 0));
+  const recent = turns.slice(-RECENT_FULL_TURNS);
+
+  const input = [];
+  if (older.length) {
+    const summary = older.map((turn) =>
+      `- ${turn.role === "user" ? "User" : "You"}: ${String(turn.content).replace(/\s+/g, " ").slice(0, SUMMARY_LINE_CAP)}`).join("\n");
+    input.push({
+      role: "user",
+      content: `[Conversation summary — ${older.length} earlier message(s), condensed. Rely on your product memory for standing facts.]\n${summary}`,
     });
+  }
+  for (const turn of recent) {
+    // Workspace context rides the model turn only — the visible thread stays the user's
+    // own words, marked with a transparent context chip by the shell.
+    const context = turn.payload?.workspace_context;
+    const suffix = context
+      ? `\n\n[Shared automatically from the user's editor — visible to them as a context chip]\n${describeWorkspaceContext(context)}`
+      : "";
+    const content = String(turn.content);
+    const capped = content.length > TURN_CHAR_CAP
+      ? `${content.slice(0, TURN_CHAR_CAP)}\n[… truncated for context economy — full text is in the conversation record]`
+      : content;
+    input.push({
+      role: turn.role === "user" ? "user" : "assistant",
+      content: `${capped}${suffix}`,
+    });
+  }
+  return input;
 }
 
 // ── run relay: specialist progress from dispatched runs flows into the conversation ───────

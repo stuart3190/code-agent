@@ -9,6 +9,7 @@ import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
 import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { startDiagSessionSafe, nullDiagSession } from "./buildDiagnostics.mjs";
+import { fingerprintFailure, fingerprintPrompt } from "./contextScope.mjs";
 
 // The end-of-build message NEVER claims a live preview unless a URL actually exists
 // (Stuart, 2026-07-31: "a build should never claim success unless the preview is actually
@@ -26,13 +27,22 @@ export function buildEndSummary(result) {
 // Routine failures (build checks, runtime config, tests, verification) NEVER ask permission.
 export const MAX_AUTO_ROUNDS = 3;
 
-export function planEndAction(data, { attempt = 1, maxAttempts = MAX_AUTO_ROUNDS } = {}) {
+export function planEndAction(data, { attempt = 1, maxAttempts = MAX_AUTO_ROUNDS, previousFingerprints = [] } = {}) {
   if (data.status === "complete" && data.result?.buildOk !== false) {
     return { kind: data.result?.previewUrl ? "verify" : "warmup" };
   }
   const reasons = data.status === "complete"
     ? (data.result?.qualityWarnings?.length ? data.result.qualityWarnings : ["the build's quality checks failed"])
     : [`the build ${data.status}${data.error ? `: ${String(data.error).slice(0, 200)}` : ""}`];
+  // Controlled repair loop: an identical failure after a repair round means the repair made
+  // no meaningful progress — stop immediately instead of burning the remaining rounds.
+  const fingerprint = fingerprintFailure(reasons);
+  if (previousFingerprints.includes(fingerprint)) {
+    return {
+      kind: "blocked", fingerprint,
+      message: `The same failure came back unchanged after an autonomous repair — repeating the loop would spend your budget without progress:\n${reasons.map((r) => `- ${r}`).join("\n")}\nI need a decision from you on how to proceed.`,
+    };
+  }
   if (attempt < maxAttempts) {
     const brief = [
       "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
@@ -43,12 +53,12 @@ export function planEndAction(data, { attempt = 1, maxAttempts = MAX_AUTO_ROUNDS
     ].join("\n");
     return {
       kind: data.status === "complete" ? "repair" : "retry",
-      brief,
+      brief, fingerprint,
       announcement: `The build check found a problem (${String(reasons[0]).slice(0, 140)}). I'm repairing it now and will re-run verification.`,
     };
   }
   return {
-    kind: "blocked",
+    kind: "blocked", fingerprint,
     message: `I attempted ${maxAttempts} autonomous repair rounds and this still fails:\n${reasons.map((r) => `- ${r}`).join("\n")}\nThis looks like a genuine blocker beyond routine repair — I need a decision from you on how to proceed.`,
   };
 }
@@ -120,7 +130,7 @@ const PHASE_MILESTONES = {
 const MILESTONE_MIN_PHASE_MS = 2 * 60_000;   // fast builds stay quiet; the roster covers them
 const REASSURE_AFTER_MS = 4 * 60_000;        // never silent for long, never noisy either
 
-function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nullDiagSession() }) {
+function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nullDiagSession(), repairMemory = { fingerprints: [], briefs: [] } }) {
   const jobId = job.id;
   let lastSpecialist = null;
   let phaseStartedAt = Date.now();
@@ -171,14 +181,14 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
       if (name === "end") {
         clearInterval(heartbeat);
         unsubscribe();
-        const action = planEndAction(data, { attempt: verificationAttempt });
+        const action = planEndAction(data, { attempt: verificationAttempt, previousFingerprints: repairMemory.fingerprints });
         await finishSpecialist(action.kind === "verify" || action.kind === "warmup");
         if (data.status === "complete") await persistBuildResult(ctx.owner, projectId, data.result);
 
         if (action.kind === "verify") {
           await ctx.emit("preview_ready", { url: data.result.previewUrl, projectId, message: "Preview ready — take a look." });
           // The Verification Agent gate: completion is only announced after PASS.
-          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt, diag })
+          runVerificationGate(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt: verificationAttempt, diag, repairMemory })
             .catch((error) => console.error("[app-build] verification:", error.message));
           return;
         }
@@ -191,17 +201,30 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
           return;
         }
         if (action.kind === "repair" || action.kind === "retry") {
-          // Autonomous: announce briefly, fix, re-verify. Never ask permission for routine failures.
+          // Autonomous: announce briefly, fix, re-verify. Never ask permission for routine
+          // failures — but never send the identical repair brief twice either.
+          const nextBrief = action.kind === "repair" ? action.brief : job.prompt;
+          const briefFp = fingerprintPrompt(nextBrief);
+          if (repairMemory.briefs.includes(briefFp)) {
+            diag.finish("failed");
+            const text = `I stopped the repair loop: it was about to send the exact same repair instructions again, which means the previous attempt didn't change the outcome.\n\n${diag.failureEvidence()}`;
+            await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId, buildId: diag.id } });
+            await ctx.emit("message", { role: "lead", text, projectId });
+            return;
+          }
+          if (action.fingerprint) repairMemory.fingerprints.push(action.fingerprint);
+          repairMemory.briefs.push(briefFp);
           await sayProgress(action.announcement);
           const nextRound = verificationAttempt + 1;
-          diag.repairDispatched({ prompt: action.kind === "repair" ? action.brief : job.prompt, round: nextRound });
+          diag.repairDispatched({ prompt: nextBrief, round: nextRound });
           const { job: next } = await createJob({
             owner: { id: ctx.owner }, projectId,
             mode: action.kind === "repair" ? "iterate" : (job.mode || "build"),
-            prompt: action.kind === "repair" ? action.brief : job.prompt,
+            prompt: nextBrief,
+            trigger: "autonomous_repair",
             diag: diag.recorderForJob({ round: nextRound }),
           });
-          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: nextRound, diag });
+          relayBuildJob(ctx, { job: next, projectId, verificationAttempt: nextRound, diag, repairMemory });
           return;
         }
         // Genuine exhaustion — the only point control returns to the user. The message
@@ -227,7 +250,7 @@ function relayBuildJob(ctx, { job, projectId, verificationAttempt = 1, diag = nu
 // FAIL → the build is rejected, the failures go back to the Builder in surgical repair
 // mode (design/layout/branding preserved), and the repaired build is re-verified — up to
 // two automatic repair rounds before reporting honestly.
-async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1, diag = nullDiagSession() }) {
+async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, attempt = 1, diag = nullDiagSession(), repairMemory = { fingerprints: [], briefs: [] } }) {
   const { verifyApp, repairPrompt } = await import("./verificationAgent.mjs");
   const { treeUsesBackendSdk } = await import("../appRuntimeStatus.mjs");
   await ctx.emit("agent_spawned", { agent: "Verifier", status: "Verifying the app like a real user…" });
@@ -261,19 +284,23 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   await ctx.emit("agent_done", { agent: "Verifier", ok: false });
   await ctx.emit("verification", { pass: false, failures: verdict.failures, projectId });
 
-  if (attempt <= 2) {
+  const failureFp = fingerprintFailure(verdict.failures);
+  if (attempt <= 2 && !repairMemory.fingerprints.includes(failureFp)) {
+    repairMemory.fingerprints.push(failureFp);
     const text = `Verification found real problems (${verdict.failures.slice(0, 3).join("; ")}). I'm sending it back to the Builder to repair — design untouched, minimum change.`;
     await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });
     await ctx.emit("message", { role: "lead", text, projectId });
     const nextRound = attempt + 1;
     const brief = repairPrompt(verdict.failures);
+    repairMemory.briefs.push(fingerprintPrompt(brief));
     diag.repairDispatched({ prompt: brief, round: nextRound });
     const { job } = await createJob({
       owner: { id: ctx.owner }, projectId, mode: "iterate",
       prompt: brief,
+      trigger: "verification_repair",
       diag: diag.recorderForJob({ round: nextRound }),
     });
-    relayBuildJob(ctx, { job, projectId, verificationAttempt: nextRound, diag });
+    relayBuildJob(ctx, { job, projectId, verificationAttempt: nextRound, diag, repairMemory });
     return;
   }
 
