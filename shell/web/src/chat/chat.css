@@ -277,6 +277,11 @@ button.ct-wordmark:hover { background: var(--surface-2); }
 .ct-recent-btn { font-size: 12.5px; padding: 5px 10px; flex-shrink: 0; }
 .ct-recent-danger:hover { color: var(--bad); }
 
+/* provider badge — which model is doing the work right now */
+.ct-provider-badge { display: inline-flex; align-items: center; gap: 7px; margin: 0 4px 8px; padding: 5px 10px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.ct-provider-badge.switched { background: var(--accent-soft); color: var(--accent); }
+.ct-rail.preview .ct-teamcard.strip .ct-provider-badge { display: none; }
+
 /* ── recovery + failure surfaces ────────────────────────────────────────────────────────
  * Calm, never alarming. Technical detail lives behind an advanced disclosure. */
 .ct-recovery { display: inline-flex; align-items: center; gap: 9px; font-size: var(--text-small); color: var(--ink-2); padding: 2px 0; }

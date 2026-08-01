@@ -26,6 +26,7 @@ export function emptyConversationView() {
     thinking: false,    // Lead Agent mid-turn
     waiting: false,     // paused on a business question
     recovery: null,     // {state: recovering|repairing|verifying|continuing, message}
+    badge: null,        // {icon, text} — which model is building right now
     lastSeq: 0,
   };
 }
@@ -68,6 +69,13 @@ export function applyEvent(view, event) {
     case "plan.created":
       push({ kind: "plan", title: payload.title || "Plan", steps: payload.steps || [] });
       break;
+    // Provider badge: which model is doing the work right now (and switches).
+    case "provider_badge":
+      next.badge = { icon: payload.icon || "🤖", text: payload.text || "", switched: !!payload.switched };
+      if (payload.switched) push({ kind: "receipt", text: `${payload.icon || "⚡"} ${payload.text}` });
+      break;
+    case "quota_warning":
+      break; // the accompanying plain-language message carries the meaning
     case "model_changed":
       push({
         kind: "receipt",

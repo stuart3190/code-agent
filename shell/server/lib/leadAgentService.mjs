@@ -126,6 +126,7 @@ export async function processConversation(conversation, {
   credentialResolver = activeAiCredential,
   modelFactory = null,
   overviewResolver = budgetOverview,
+  credentialStoreFactory = null,
   // Private recovery state — carried across automatic retries, never user-visible.
   recovery = { attempt: 0, fingerprints: [], briefings: [] },
 } = {}) {
@@ -135,13 +136,48 @@ export async function processConversation(conversation, {
     let credential = await credentialResolver(conversation.owner)
       .catch(() => ({ provider: "managed", secret: null, routing: {} }));
     if (credential.provider === "codex") credential = { provider: "managed", secret: null, routing: {} };
-    const billingSource = credential.provider === "managed" ? "managed" : "byok";
+    let billingSource = credential.provider === "managed" ? "managed" : "byok";
     if (billingSource === "managed") {
       const overview = await overviewResolver(conversation.owner, { store: runStore });
-      if (overview.budgets.managedTokens.remaining <= 0) {
-        await finishWithMessage(store, conversation,
-          "Your monthly managed-model allowance is used up, so I can't think right now. Connect your own provider key in Settings, or wait for the reset.");
-        return;
+      if (overview.budgets.managedTokens.remaining <= 0 && !overview.unlimited) {
+        // Exhausted — but a hard stop is the LAST resort. If the owner has another
+        // provider connected, move the work there and carry on from this step.
+        const quota = await import("./providerQuota.mjs");
+        const credStore = credentialStoreFactory
+          ? credentialStoreFactory()
+          : (await import("./aiCredentialStore.mjs")).aiCredentialStore();
+        const credentials = await credStore.listCredentials(conversation.owner).catch(() => []);
+        const alternatives = quota.alternativeProviders({
+          current: "managed", credentials: credentials || [], managedAvailable: false,
+        });
+        const allowFallback = credential.routing?.allowFallback !== false;
+        if (alternatives.length && allowFallback) {
+          const target = alternatives[0];
+          const targetCredential = (credentials || []).find((c) => c.provider === target);
+          if (targetCredential) {
+            await quota.recordProviderSwitch({
+              owner: conversation.owner, conversationId: conversation.id,
+              from: "managed", to: target, reason: "quota",
+              detail: "managed monthly allowance exhausted",
+            });
+            const text = quota.switchedMessage({ from: "managed", to: target, reason: "quota" });
+            await store.appendTurn(conversation, { role: "lead", content: text, payload: { providerSwitch: true } }).catch(() => {});
+            await emit("message", { role: "lead", text });
+            credential = await credStore.credentialFor?.(conversation.owner, target)
+              ?? { provider: target, secret: null, routing: credential.routing };
+            billingSource = "byok";
+          }
+        } else if (alternatives.length) {
+          // Fallback disabled — ask rather than switch silently.
+          await finishWithMessage(store, conversation, quota.lowQuotaMessage({
+            provider: "managed", percent: 0, alternatives,
+          }));
+          return;
+        } else {
+          await finishWithMessage(store, conversation,
+            quota.exhaustedNoAlternativeMessage({ provider: "managed", kind: "quota" }));
+          return;
+        }
       }
     }
 
@@ -177,6 +213,21 @@ export async function processConversation(conversation, {
         policy: { ...(credential.routing || {}), mode: resolution.mode || null },
       });
 
+    // Provider fuel gauge: warn early and in plain language, offer the alternatives this
+    // owner can actually reach, and show which model is doing the work.
+    const quota = await import("./providerQuota.mjs");
+    const activeProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
+    await announceQuotaState({
+      store, conversation, emit, quota, owner: conversation.owner, provider: activeProvider,
+      overviewResolver, runStore,
+      credentialStore: credentialStoreFactory ? credentialStoreFactory() : null,
+    })
+      .catch((error) => console.error("[lead-agent] quota check:", error.message));
+    await emit("provider_badge", {
+      ...quota.providerBadge({ provider: model.id || activeProvider, model: model.model, mode: resolution.mode }),
+      provider: model.id || activeProvider, model: model.model, mode: resolution.mode,
+    });
+
     const tools = await capabilityToolDefs(ctx);
     const input = await assembleInput(store, conversation);
     // Recovery pass: the Lead Agent privately receives the full failure report so it can
@@ -203,6 +254,29 @@ export async function processConversation(conversation, {
         safetyIdentifier: conversation.owner,
       });
       await meterUsage(runStore, conversation.owner, response.usage, billingSource);
+
+      // The router falls back between providers on its own; surface that as a calm
+      // sentence, record WHY privately, and carry on from this exact step — the loop
+      // state (input) is untouched, so nothing restarts.
+      if (response.routing?.fallbackFrom) {
+        const from = response.routing.fallbackFrom.provider;
+        const to = response.routing.selected?.provider || model.id;
+        const reason = /rate|429/i.test(String(response.routing.reason || "")) ? "rate_limit"
+          : /quota|limit|budget/i.test(String(response.routing.reason || "")) ? "quota" : "outage";
+        await quota.recordProviderSwitch({
+          owner: conversation.owner, conversationId: conversation.id,
+          from, to, model: response.routing.selected?.model, reason,
+          detail: String(response.routing.reason || "").slice(0, 200),
+        });
+        const text = quota.switchedMessage({ from, to, toModel: response.routing.selected?.model, reason });
+        await store.appendTurn(conversation, { role: "lead", content: text, payload: { providerSwitch: true } }).catch(() => {});
+        await emit("message", { role: "lead", text });
+        await emit("provider_badge", {
+          ...quota.providerBadge({ provider: to, model: response.routing.selected?.model, switched: true }),
+          provider: to, model: response.routing.selected?.model, switched: true,
+        });
+      }
+
       input.push(...response.output);
       const calls = response.output.filter((item) => item.type === "function_call");
 
@@ -320,6 +394,50 @@ export async function processConversation(conversation, {
     await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() })
       .catch(() => {});
   }
+}
+
+// Warn once per threshold per conversation (20/10/5%), in plain language, offering only
+// providers this owner can actually switch to. The thresholds already announced are read
+// back from the durable event stream, so a restart never repeats itself.
+export async function announceQuotaState({
+  store, conversation, emit, quota, owner, provider,
+  overviewResolver = budgetOverview, runStore = codeAgentStore(),
+  credentialStore = null, headroomFn = null,
+}) {
+  const events = (await store.listEvents(owner, conversation.id, 0)) || [];
+  const warned = events
+    .filter((event) => event.type === "quota_warning" && event.payload?.provider === provider)
+    .map((event) => Number(event.payload.threshold));
+
+  const overview = ["managed", "codex"].includes(provider)
+    ? await overviewResolver(owner, { store: runStore }).catch(() => null)
+    : null;
+  const headroom = headroomFn
+    ? await headroomFn({ owner, provider, overview })
+    : await quota.providerHeadroom(owner, { provider, overview });
+  if (headroom.unknown || headroom.percentRemaining == null) return null;
+
+  const threshold = quota.thresholdCrossed(headroom.percentRemaining, warned);
+  if (threshold == null) return null;
+
+  const store_ = credentialStore || (await import("./aiCredentialStore.mjs")).aiCredentialStore();
+  const credentials = await store_.listCredentials(owner).catch(() => []);
+  const alternatives = quota.alternativeProviders({
+    current: provider,
+    credentials: credentials || [],
+    managedAvailable: provider !== "managed",
+  });
+  const text = quota.lowQuotaMessage({
+    provider,
+    percent: headroom.percentRemaining,
+    estimated: headroom.estimated,
+    alternatives,
+  });
+  await store.appendTurn(conversation, { role: "lead", content: text, payload: { quotaWarning: true, threshold } })
+    .catch(() => {});
+  await emit("quota_warning", { provider, threshold, percentRemaining: headroom.percentRemaining, alternatives });
+  await emit("message", { role: "lead", text });
+  return { threshold, alternatives, headroom };
 }
 
 // ── context assembly (Memory System injection) ────────────────────────────────────────────
