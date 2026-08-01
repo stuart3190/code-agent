@@ -36,7 +36,9 @@ export function sanitizeUserFacingText(text, fallback = "Something needed attent
   let out = String(text || "");
   for (const [pattern, replacement] of SCRUB) out = out.replace(pattern, replacement);
   out = out.replace(/\s{2,}/g, " ").replace(/\s+([.,;])/g, "$1").trim();
-  if (!out || out.length < 3) return fallback;
+  // Only genuinely empty output falls back — short real replies ("OK", "Yes", "Done")
+  // are legitimate answers and must survive untouched.
+  if (!out) return fallback;
   if (TECHNICAL_MARKERS.test(out)) return fallback;
   // A long UNPUNCTUATED blob is machine output; long prose (a helpful explanation with
   // sentences) is exactly what we want to keep, so length alone must never disqualify it.
