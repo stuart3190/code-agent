@@ -21,8 +21,8 @@ function evidenceRows({ grokCost = 0.6, grokVerified = true } = {}) {
   add(20, { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", task: "full_build", owner: "o1", cost: 1.0, inputTokens: 10_000, cachedTokens: 2_000, requestMs: 8_000, verified: true, cancelled: false, buildMs: 60_000, repairRounds: 0, retries: 0 });
   add(20, { provider: "xai", model: "grok-4.5", mode: "balanced", task: "full_build", owner: "o2", cost: grokCost, inputTokens: 10_000, cachedTokens: 4_000, requestMs: 7_000, verified: grokVerified, cancelled: false, buildMs: 62_000, repairRounds: 0, retries: 0 });
   // Edits: OpenAI markedly faster, same verification.
-  add(12, { provider: "openai", model: "gpt-5.6-terra", mode: "fast", task: "simple_edit", owner: "o1", cost: 0.3, inputTokens: 3_000, cachedTokens: 1_000, requestMs: 2_000, verified: true, cancelled: false, buildMs: 20_000, repairRounds: 0, retries: 0 });
-  add(12, { provider: "xai", model: "grok-4.5", mode: "fast", task: "simple_edit", owner: "o2", cost: 0.3, inputTokens: 3_000, cachedTokens: 1_000, requestMs: 3_000, verified: true, cancelled: false, buildMs: 40_000, repairRounds: 0, retries: 0 });
+  add(12, { provider: "openai", model: "gpt-5.6-terra", mode: "fast", task: "quick_edit", owner: "o1", cost: 0.3, inputTokens: 3_000, cachedTokens: 1_000, requestMs: 2_000, verified: true, cancelled: false, buildMs: 20_000, repairRounds: 0, retries: 0 });
+  add(12, { provider: "xai", model: "grok-4.5", mode: "fast", task: "quick_edit", owner: "o2", cost: 0.3, inputTokens: 3_000, cachedTokens: 1_000, requestMs: 3_000, verified: true, cancelled: false, buildMs: 40_000, repairRounds: 0, retries: 0 });
   return rows;
 }
 
@@ -31,7 +31,7 @@ test("confidence bands follow sample size and the floor is honoured", () => {
   assert.equal(confidenceFor(MIN_SAMPLES), "Low");
   assert.equal(confidenceFor(20), "Medium");
   assert.equal(confidenceFor(60), "High");
-  assert.equal(taskFamilyFor("simple_edit"), "simple_edit");
+  assert.equal(taskFamilyFor("quick_edit"), "quick_edit");
   assert.equal(taskFamilyFor("something-new"), "other");
 });
 
@@ -79,9 +79,9 @@ test("cheaper-at-equal-quality wins and the explanation quotes the real percenta
 
 test("per-task learning: OpenAI wins edits on speed while Grok wins builds on cost", () => {
   const cards = buildScorecards(evidenceRows());
-  const edits = rankCandidates(cards, { task: "simple_edit" });
+  const edits = rankCandidates(cards, { task: "quick_edit" });
   assert.equal(edits.ranked[0].key, "gpt-5.6-terra", "faster on edits at equal verification");
-  assert.match(explainChoice(edits.ranked, { task: "simple_edit" }), /simple edit builds completed \d+% faster with the same verification success/);
+  assert.match(explainChoice(edits.ranked, { task: "quick_edit" }), /quick edit builds completed \d+% faster with the same verification success/);
   const builds = rankCandidates(cards, { task: "full_build" });
   assert.equal(builds.ranked[0].key, "grok-4.5", "cheaper on full builds");
 });
@@ -136,9 +136,9 @@ test("Auto explains itself from evidence, and says it is collecting when there i
 
 test("recommendModel falls back from task scope to overall, or returns null", async () => {
   const cards = buildScorecards(evidenceRows());
-  const forEdits = await recommendModel({ task: "simple_edit", scorecards: cards });
+  const forEdits = await recommendModel({ task: "quick_edit", scorecards: cards });
   assert.equal(forEdits.model, "gpt-5.6-terra");
-  assert.equal(forEdits.task, "simple_edit");
+  assert.equal(forEdits.task, "quick_edit");
   // An unseen task family falls back to the overall ranking rather than guessing.
   const unseen = await recommendModel({ task: "verification_repair", scorecards: cards });
   assert.equal(unseen.task, null, "fell back to the overall evidence");
@@ -177,6 +177,94 @@ test("evidence collection is anonymised and the snapshot never fabricates", asyn
   // Task families with no evidence report honestly instead of showing an empty ranking.
   assert.equal(snapshot.perTask.verification_repair.explanation, "Collecting benchmark data.");
   assert.deepEqual(snapshot.perTask.verification_repair.ranked, []);
+});
+
+test("per-model profiles derive strengths, weaknesses, win rate and score from evidence", async () => {
+  const { modelProfiles, providerTree } = await import("../../shell/server/lib/providerIntelligence.mjs");
+  const cards = buildScorecards(evidenceRows());
+  const profiles = modelProfiles(cards);
+  const grok = profiles.find((p) => p.model === "grok-4.5");
+  const openai = profiles.find((p) => p.model === "gpt-5.6-terra");
+
+  assert.ok(grok.strengths.includes("lowest cost per verified build"), "strengths are measured, not assigned");
+  assert.ok(openai.strengths.includes("fastest completion"));
+  assert.ok(openai.weaknesses.includes("highest cost per verified build"));
+  assert.ok(grok.weaknesses.includes("slowest completion"));
+  // Task win rate: each wins one of the two contested families.
+  assert.equal(grok.taskContests, 2);
+  assert.equal(grok.taskWins, 1);
+  assert.equal(grok.taskWinRate, 50);
+  assert.equal(openai.taskWinRate, 50);
+  assert.ok(typeof grok.recommendationScore === "number", "carries the auditable score");
+  assert.equal(grok.collecting, false);
+
+  // Providers nest their models; the provider for a model is learned from the evidence.
+  const tree = providerTree(cards, profiles);
+  const xai = tree.find((p) => p.provider === "xai");
+  assert.equal(xai.models.length, 1);
+  assert.equal(xai.models[0].model, "grok-4.5");
+  assert.ok(tree.find((p) => p.provider === "openai").models.some((m) => m.model === "gpt-5.6-terra"));
+});
+
+test("models below the floor report collecting, with no invented strengths", async () => {
+  const { modelProfiles } = await import("../../shell/server/lib/providerIntelligence.mjs");
+  const thin = buildScorecards([
+    { provider: "xai", model: "grok-new", mode: "balanced", task: "ui", owner: "o", cost: 0.1, inputTokens: 10, cachedTokens: 0, requestMs: 10, verified: true, cancelled: false, buildMs: 100, repairRounds: 0, retries: 0, buildId: "b1", createdAt: new Date().toISOString() },
+  ]);
+  const profile = modelProfiles(thin)[0];
+  assert.equal(profile.collecting, true);
+  assert.deepEqual(profile.strengths, [], "no claims without enough evidence");
+  assert.deepEqual(profile.weaknesses, []);
+  assert.equal(profile.recommendationScore, null);
+  assert.equal(profile.confidence, null);
+});
+
+test("the richer task taxonomy classifies real request wording", async () => {
+  const { classifyTask } = await import("../../shell/server/lib/appBuild/contextScope.mjs");
+  const cases = [
+    ["Plan the approach for adding multi-tenant support", "planning"],
+    ["Design the database schema for orders and invoices", "architecture"],
+    ["The signup button throws an error when clicked", "debugging"],
+    ["Change the header colour to navy and tighten the spacing", "ui"],
+    ["Add a settings page component with a form", "frontend"],
+    ["Create an API endpoint that persists bookings", "backend"],
+    ["Refactor the checkout code to remove duplication", "refactoring"],
+    ["Write a README documenting the setup steps", "documentation"],
+    ["Rename the Save button to Submit", "quick_edit"],
+  ];
+  for (const [prompt, expected] of cases) {
+    assert.equal(classifyTask({ mode: "iterate", prompt }), expected, `"${prompt.slice(0, 40)}…"`);
+  }
+  assert.equal(classifyTask({ mode: "build", prompt: "anything" }), "full_build");
+  assert.equal(classifyTask({ mode: "iterate", prompt: "x", trigger: "verification_repair" }), "verification_repair");
+});
+
+test("snapshot exposes the expandable provider tree and per-task learning", async () => {
+  const rows = evidenceRows().map((r) => ({ ...r, createdAt: new Date().toISOString() }));
+  const client = {
+    from: (table) => ({
+      select: () => ({
+        gte: () => ({
+          limit: async () => ({
+            data: table === "ai_requests"
+              ? rows.map((r) => ({ owner: r.owner, provider: r.provider, model: r.model, input_tokens: r.inputTokens, output_tokens: 100, cached_tokens: r.cachedTokens, duration_ms: r.requestMs, cost: r.cost, build_id: r.buildId, trigger: "user", context: { taskType: r.task, mode: r.mode }, created_at: r.createdAt }))
+              : [...new Set(rows.map((r) => r.buildId))].map((id) => {
+                const row = rows.find((r) => r.buildId === id);
+                return { id, kind: "app_build", status: row.verified ? "passed" : "failed", duration_ms: row.buildMs, repair_rounds: row.repairRounds, totals: { cost: row.cost }, model: row.model, started_at: row.createdAt };
+              }),
+          }),
+        }),
+      }),
+    }),
+  };
+  const snap = await providerIntelligenceSnapshot({ client });
+  assert.ok(snap.providers.length >= 2, "providers listed from evidence");
+  const xai = snap.providers.find((p) => p.provider === "xai");
+  assert.ok(xai.models[0].strengths.length > 0, "each model carries its measured profile");
+  assert.ok(snap.taskTypes.includes("planning") && snap.taskTypes.includes("quick_edit"));
+  // Task families with no evidence stay honest.
+  assert.equal(snap.perTask.documentation.explanation, "Collecting benchmark data.");
+  assert.ok(snap.perTask.full_build.ranked.length >= 2);
 });
 
 test("routing keeps its configured order when Auto has no evidence", () => {

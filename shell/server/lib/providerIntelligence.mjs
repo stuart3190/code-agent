@@ -25,9 +25,15 @@ export function confidenceFor(samples) {
   return band ? band.level : null;
 }
 
-// Task families Auto reasons about separately — an edit and a full build have different
-// winners, which is the entire point of segmenting.
-export const TASK_FAMILIES = ["simple_edit", "component_edit", "feature", "bug_repair", "verification_repair", "full_build"];
+// Task families Auto reasons about separately — planning and a quick edit have different
+// winners, which is the entire point of segmenting. Sourced from the shared classifier so
+// a new task type appears here without touching this file.
+export { TASK_TYPES } from "./appBuild/contextScope.mjs";
+export const TASK_FAMILIES = [
+  "planning", "architecture", "frontend", "backend", "debugging",
+  "ui", "refactoring", "documentation", "full_build", "quick_edit",
+  "verification_repair", "feature",
+];
 
 export function taskFamilyFor(taskType) {
   return TASK_FAMILIES.includes(taskType) ? taskType : "other";
@@ -71,6 +77,7 @@ export async function collectEvidence({ client = null, windowDays = 60, now = ne
       repairRounds: run ? Number(run.repair_rounds || 0) : null,
       retries: Number(context.retries || 0),
       buildId: request.build_id || null,
+      createdAt: request.created_at || null,
     });
   }
   return rows;
@@ -134,11 +141,15 @@ export function buildScorecards(rows) {
       .map(([key, list]) => ({ key, ...summarise(list) }))
       .sort((a, b) => a.key.localeCompare(b.key)); // deterministic base order
   };
+  // provider for each model, learned from the evidence — never a hardcoded mapping.
+  const modelProviders = new Map();
+  for (const row of rows) if (row.model && !modelProviders.has(row.model)) modelProviders.set(row.model, row.provider);
   return {
     byProvider: group((r) => r.provider),
     byModel: group((r) => r.model),
     byModelTask: group((r) => `${r.model}|${r.task}`),
     byMode: group((r) => r.mode),
+    modelProviders,
     generatedAt: new Date().toISOString(),
     totalRequests: rows.length,
   };
@@ -242,12 +253,113 @@ export async function recommendModel({ task = null, client = null, scorecards = 
   return null;
 }
 
+// ── Per-model profiles: strengths, weaknesses, task win rate, trend ────────────────────
+
+// Strengths/weaknesses are RELATIVE to the other models with comparable evidence, derived
+// from the same measured numbers the dashboard shows — never adjectives we assigned.
+const METRICS = [
+  { key: "costPerVerifiedBuild", lower: true, strong: "lowest cost per verified build", weak: "highest cost per verified build" },
+  { key: "avgBuildMs", lower: true, strong: "fastest completion", weak: "slowest completion" },
+  { key: "verificationRate", lower: false, strong: "highest verification rate", weak: "lowest verification rate" },
+  { key: "avgRepairRounds", lower: true, strong: "fewest repair rounds", weak: "most repair rounds" },
+  { key: "avgRetries", lower: true, strong: "fewest retries", weak: "most retries" },
+  { key: "cacheEfficiency", lower: false, strong: "best cache efficiency", weak: "weakest cache efficiency" },
+  { key: "cancellationRate", lower: true, strong: "fewest cancellations", weak: "most cancellations" },
+];
+
+export function modelProfiles(scorecards, { previous = null } = {}) {
+  const eligible = scorecards.byModel.filter((m) => m.samples >= MIN_SAMPLES);
+  const overall = rankCandidates(scorecards);
+  const scoreByModel = new Map((overall.ranked || []).map((r) => [r.key, r.score]));
+
+  // Task win rate: the share of task families (with evidence) where this model ranks #1.
+  const wins = new Map();
+  const contests = new Map();
+  for (const task of TASK_FAMILIES) {
+    const ranking = rankCandidates(scorecards, { task });
+    if (ranking.evidence !== "measured" || !ranking.ranked.length) continue;
+    for (const entry of ranking.ranked) contests.set(entry.key, (contests.get(entry.key) || 0) + 1);
+    wins.set(ranking.ranked[0].key, (wins.get(ranking.ranked[0].key) || 0) + 1);
+  }
+
+  return scorecards.byModel.map((card) => {
+    const strengths = [];
+    const weaknesses = [];
+    if (eligible.length >= 2 && card.samples >= MIN_SAMPLES) {
+      for (const metric of METRICS) {
+        const values = eligible.map((m) => m[metric.key]).filter((v) => v != null);
+        const mine = card[metric.key];
+        if (mine == null || values.length < 2) continue;
+        const best = metric.lower ? Math.min(...values) : Math.max(...values);
+        const worst = metric.lower ? Math.max(...values) : Math.min(...values);
+        if (mine === best && best !== worst) strengths.push(metric.strong);
+        else if (mine === worst && best !== worst) weaknesses.push(metric.weak);
+      }
+    }
+    const previousCard = previous?.byModel?.find((m) => m.key === card.key) || null;
+    const trend = previousCard && previousCard.costPerVerifiedBuild != null && card.costPerVerifiedBuild != null
+      ? {
+        costChangePercent: Number((((card.costPerVerifiedBuild - previousCard.costPerVerifiedBuild) / previousCard.costPerVerifiedBuild) * 100).toFixed(1)),
+        verificationChange: card.verificationRate != null && previousCard.verificationRate != null
+          ? Number((card.verificationRate - previousCard.verificationRate).toFixed(1)) : null,
+        priorSamples: previousCard.samples,
+      }
+      : null;
+    const contested = contests.get(card.key) || 0;
+    return {
+      ...card,
+      model: card.key,
+      recommendationScore: scoreByModel.has(card.key) ? scoreByModel.get(card.key) : null,
+      strengths,
+      weaknesses,
+      taskWins: wins.get(card.key) || 0,
+      taskContests: contested,
+      taskWinRate: contested ? Number((((wins.get(card.key) || 0) / contested) * 100).toFixed(1)) : null,
+      trend,
+      collecting: card.samples < MIN_SAMPLES,
+    };
+  }).sort((a, b) => {
+    if (a.recommendationScore == null && b.recommendationScore == null) return a.key.localeCompare(b.key);
+    if (a.recommendationScore == null) return 1;
+    if (b.recommendationScore == null) return -1;
+    return (a.recommendationScore - b.recommendationScore) || a.key.localeCompare(b.key);
+  });
+}
+
+// Providers with their models nested — what the expandable dashboard renders. Providers
+// and models both come from the evidence, so new ones appear with no code change.
+export function providerTree(scorecards, profiles) {
+  const byProvider = new Map();
+  for (const profile of profiles) {
+    const provider = scorecards.modelProviders?.get(profile.key) || "unknown";
+    if (!byProvider.has(provider)) byProvider.set(provider, []);
+    byProvider.get(provider).push(profile);
+  }
+  return scorecards.byProvider.map((card) => ({
+    ...card,
+    provider: card.key,
+    models: (byProvider.get(card.key) || []).sort((a, b) => {
+      if (a.recommendationScore == null && b.recommendationScore == null) return a.key.localeCompare(b.key);
+      if (a.recommendationScore == null) return 1;
+      if (b.recommendationScore == null) return -1;
+      return a.recommendationScore - b.recommendationScore;
+    }),
+  })).sort((a, b) => a.key.localeCompare(b.key));
+}
+
 // ── Admin dashboard payload ────────────────────────────────────────────────────────────
 
-export async function providerIntelligenceSnapshot({ client = null, windowDays = 60 } = {}) {
-  const rows = await collectEvidence({ client, windowDays });
+export async function providerIntelligenceSnapshot({ client = null, windowDays = 60, now = new Date() } = {}) {
+  const rows = await collectEvidence({ client, windowDays, now });
   const scorecards = buildScorecards(rows);
   const overall = rankCandidates(scorecards);
+  // Trend: the most recent half of the window against the earlier half, measured only.
+  const midpoint = now.getTime() - (windowDays / 2) * 86_400_000;
+  const priorRows = rows.filter((r) => r.createdAt && new Date(r.createdAt).getTime() < midpoint);
+  const profiles = modelProfiles(scorecards, {
+    previous: priorRows.length ? buildScorecards(priorRows) : null,
+  });
+  const providers = providerTree(scorecards, profiles);
   const perTask = {};
   for (const task of TASK_FAMILIES) {
     const ranking = rankCandidates(scorecards, { task });
@@ -255,23 +367,23 @@ export async function providerIntelligenceSnapshot({ client = null, windowDays =
       ? { ranked: ranking.ranked.map((r) => ({ model: r.key, score: r.score, samples: r.samples, confidence: r.confidence, costPerVerifiedBuild: r.costPerVerifiedBuild, avgBuildMs: r.avgBuildMs, verificationRate: r.verificationRate })), explanation: explainChoice(ranking.ranked, { task }) }
       : { ranked: [], explanation: "Collecting benchmark data." };
   }
-  // Recent trend: this week versus the previous one, per model (measured, never smoothed).
-  const now = Date.now();
-  const week = 7 * 86_400_000;
-  const recent = buildScorecards(rows.filter((r) => r.buildId));
   return {
     windowDays,
     generatedAt: scorecards.generatedAt,
     minSamples: MIN_SAMPLES,
     weights: WEIGHTS,
-    providers: scorecards.byProvider,
-    models: scorecards.byModel,
+    taskTypes: TASK_FAMILIES,
+    providers,          // expandable: each provider carries its models with full profiles
+    models: profiles,   // flat per-model profiles (score, strengths, weaknesses, trend)
     modes: scorecards.byMode,
     perTask,
     overall: overall.evidence === "measured"
       ? { ranked: overall.ranked.map((r) => ({ model: r.key, score: r.score, samples: r.samples, confidence: r.confidence })), explanation: explainChoice(overall.ranked) }
       : { ranked: [], explanation: "Collecting benchmark data." },
-    trend: recent.byModel.map((m) => ({ model: m.key, samples: m.samples, costPerVerifiedBuild: m.costPerVerifiedBuild, verificationRate: m.verificationRate })),
-    sampleWindow: { from: new Date(now - windowDays * 86_400_000).toISOString(), to: new Date(now).toISOString(), week },
+    sampleWindow: {
+      from: new Date(now.getTime() - windowDays * 86_400_000).toISOString(),
+      to: now.toISOString(),
+      trendSplitAt: new Date(midpoint).toISOString(),
+    },
   };
 }

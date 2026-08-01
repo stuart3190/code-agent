@@ -17,18 +17,30 @@ export const estTokens = (text) => Math.round(String(text || "").length / 4);
 // ── Task classification + budgets ───────────────────────────────────────────────────────
 
 const BUDGET_ENV = {
-  simple_edit: "THRALLO_CTX_BUDGET_SIMPLE",
-  component_edit: "THRALLO_CTX_BUDGET_COMPONENT",
+  quick_edit: "THRALLO_CTX_BUDGET_SIMPLE",
+  ui: "THRALLO_CTX_BUDGET_COMPONENT",
+  frontend: "THRALLO_CTX_BUDGET_COMPONENT",
+  backend: "THRALLO_CTX_BUDGET_FEATURE",
   feature: "THRALLO_CTX_BUDGET_FEATURE",
-  bug_repair: "THRALLO_CTX_BUDGET_REPAIR",
+  debugging: "THRALLO_CTX_BUDGET_REPAIR",
+  refactoring: "THRALLO_CTX_BUDGET_FEATURE",
+  documentation: "THRALLO_CTX_BUDGET_SIMPLE",
+  planning: "THRALLO_CTX_BUDGET_COMPONENT",
+  architecture: "THRALLO_CTX_BUDGET_FEATURE",
   verification_repair: "THRALLO_CTX_BUDGET_VERIFY_REPAIR",
   full_build: "THRALLO_CTX_BUDGET_BUILD",
 };
 const BUDGET_DEFAULT = {
-  simple_edit: 8_000,
-  component_edit: 16_000,
+  quick_edit: 8_000,
+  documentation: 8_000,
+  ui: 16_000,
+  frontend: 16_000,
+  planning: 16_000,
+  backend: 40_000,
   feature: 40_000,
-  bug_repair: 24_000,
+  refactoring: 40_000,
+  architecture: 40_000,
+  debugging: 24_000,
   verification_repair: 24_000,
   full_build: 200_000,
 };
@@ -38,18 +50,44 @@ export function taskBudget(taskType) {
   return env > 0 ? env : (BUDGET_DEFAULT[taskType] || BUDGET_DEFAULT.feature);
 }
 
+// The task taxonomy Provider Intelligence learns against. Ordered most-specific first;
+// every classification is derived from the request itself, never hardcoded per provider.
+export const TASK_TYPES = [
+  "planning", "architecture", "frontend", "backend", "debugging",
+  "ui", "refactoring", "documentation", "full_build", "quick_edit",
+  "verification_repair", "feature",
+];
+
+const TASK_PATTERNS = [
+  ["verification_repair", null],  // trigger-driven only
+  ["debugging", /\b(bug|error|crash|broken|fails?|failing|doesn'?t work|does not work|exception|stack ?trace|debug|repair mode|fix only|not working|regression)\b/],
+  ["architecture", /\b(architect|architecture|schema|data model|database design|infrastructure|scal(e|ing|ability)|migration strategy|system design|restructure the (app|system))\b/],
+  ["planning", /\b(plan|roadmap|approach|strategy|outline|break (this )?down|steps? to|how (should|would) (we|i)|design a plan|spec)\b/],
+  ["refactoring", /\b(refactor|clean up|tidy|simplify|reorganis|reorganiz|extract|deduplicate|rename .* (across|everywhere)|restructure)\b/],
+  ["documentation", /\b(document|documentation|readme|comment|docstring|explain (the )?code|write (docs|a guide))\b/],
+  ["backend", /\b(api|endpoint|server|database|query|auth(entication|orisation|orization)?|webhook|migration|backend|persist|storage|schema)\b/],
+  ["ui", /\b(colou?r|styl(e|ing)|css|spacing|padding|margin|font|theme|dark mode|layout|responsive|animation|icon|look and feel|design(?! a plan))\b/],
+  // A SHORT request that only changes wording is a quick edit whatever it names — this
+  // must be tested before "frontend", or "rename the Save button" reads as component work.
+  ["quick_edit", /^(?=.{0,220}$)(?=.*\b(rename|wording|label|title|copy|text|says?|reads?)\b).*/s],
+  // An explicit "add a feature / whole flow" request is feature work even though it also
+  // names frontend nouns, so it is tested before the frontend pattern.
+  ["feature", /\b(add|create|implement|build)\b[^.]{0,60}\b(feature|flow|system|integration|end-to-end)\b/],
+  ["frontend", /\b(component|page|screen|form|button|modal|route|view|render|react|state|hook|client)\b/],
+];
+
 export function classifyTask({ mode, prompt = "", redesign = false, trigger = "user" }) {
   if (mode === "build" || redesign) return "full_build";
   if (trigger === "verification_repair") return "verification_repair";
-  if (trigger === "autonomous_repair") return "bug_repair";
   const text = String(prompt).toLowerCase();
-  if (/repair mode|fix only|bug|error|crash|broken|doesn't work|does not work/.test(text)) return "bug_repair";
-  if (/\b(add|create|implement|build)\b.*\b(feature|page|screen|flow|system|integration)\b/.test(text)) return "feature";
-  // Small wording/style/content tweaks are the most common follow-up.
-  if (text.length < 220 && /\b(rename|change|text|label|colour|color|wording|title|copy|button|spacing|font|say|reads?)\b/.test(text)) {
-    return "simple_edit";
+  if (trigger === "autonomous_repair") return "debugging";
+  for (const [task, pattern] of TASK_PATTERNS) {
+    if (pattern && pattern.test(text)) return task;
   }
-  return "component_edit";
+  if (/\b(add|create|implement|build)\b.*\b(feature|flow|system|integration)\b/.test(text)) return "feature";
+  // Anything else short and tweak-shaped is still a quick edit.
+  if (text.length < 220 && /\b(change|update|move|swap|tweak|adjust)\b/.test(text)) return "quick_edit";
+  return "frontend";
 }
 
 // ── Entry-file inference (local scoring — repository search without a model) ────────────
