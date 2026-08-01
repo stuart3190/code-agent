@@ -43,6 +43,11 @@ import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/rep
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
 import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
 import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownloads.mjs";
+import {
+  handleDiagnosticsList, handleDiagnosticsRun, handleDiagnosticsStep,
+  handleDiagnosticsDownload, handleDiagnosticsExplain, handleDiagnosticsPrefs,
+} from "./routes/diagnostics.mjs";
+import { startDiagnosticsSweeper, stopDiagnosticsSweeper } from "./lib/appBuild/buildDiagnostics.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -591,6 +596,36 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
     }
+    if (p === "/api/v1/diagnostics" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsList(req, res, { owner, url });
+    }
+    if (p === "/api/v1/diagnostics/prefs" && ["GET", "POST"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsPrefs(req, res, {
+        owner, method, body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
+      });
+    }
+    const diagMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)$/i);
+    if (diagMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsRun(req, res, { owner, runId: diagMatch[1] });
+    }
+    const diagStepMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)\/step\/(\d+)$/i);
+    if (diagStepMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsStep(req, res, { owner, runId: diagStepMatch[1], seq: diagStepMatch[2] });
+    }
+    const diagDownloadMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)\/download$/i);
+    if (diagDownloadMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsDownload(req, res, { owner, runId: diagDownloadMatch[1] });
+    }
+    const diagExplainMatch = p.match(/^\/api\/v1\/diagnostics\/([0-9a-f-]+)\/explain$/i);
+    if (diagExplainMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDiagnosticsExplain(req, res, { owner, runId: diagExplainMatch[1] });
+    }
     if (p === "/api/v1/automations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleAutomations(req, res, {
@@ -678,6 +713,7 @@ server.listen(PORT, HOST, () => {
   startRepositoryIndexWorker();
   startRetentionSweeper();
   startDeletedProjectSweeper();
+  startDiagnosticsSweeper();
   startAutomationSweeper();
   startLeadAgentRecovery();
 });
@@ -694,6 +730,7 @@ async function shutdown(signal) {
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
   stopDeletedProjectSweeper();
+  stopDiagnosticsSweeper();
   stopAutomationSweeper();
   stopLeadAgentRecovery();
   await stopCodexLoginSessions();

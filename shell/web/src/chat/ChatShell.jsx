@@ -798,6 +798,13 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
           </div>
         </div>
         <div className="ct-set-group">
+          <div className="ct-set-label">Build diagnostics</div>
+          <div className="ct-set-row">
+            <div>Complete build audit trail<div className="ct-hint">Every prompt, log, repair and cost — kept even when builds fail</div></div>
+            <button className="ct-btn-quiet" onClick={() => onOpenView("diagnostics")}>Open</button>
+          </div>
+        </div>
+        <div className="ct-set-group">
           <div className="ct-set-label">Repositories</div>
           <div className="ct-set-row">
             <div>Connected code<div className="ct-hint">GitHub App, indexing, policies, pull requests</div></div>
@@ -887,6 +894,7 @@ function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
     { key: "settings", label: "⚙ Settings", run: onSettings },
     { key: "repos", label: "⌘ Repositories", hint: "connect · index · policies · PRs", run: () => onOpenView("repos") },
     { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: () => onOpenView("usage") },
+    { key: "diagnostics", label: "◔ Build diagnostics", hint: "logs · repairs · costs", run: () => onOpenView("diagnostics") },
     { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
   ], [onNew, onSettings, onOpenView]);
   const q = query.trim().toLowerCase();

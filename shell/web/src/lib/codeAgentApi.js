@@ -80,6 +80,15 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
+export const listDiagnostics = (projectId = null) =>
+  request(`/api/v1/diagnostics${projectId ? `?project=${projectId}` : ""}`);
+export const getDiagnostics = (runId) => request(`/api/v1/diagnostics/${runId}`);
+export const getDiagnosticsStep = (runId, seq) => request(`/api/v1/diagnostics/${runId}/step/${seq}`);
+export const explainDiagnostics = (runId) => request(`/api/v1/diagnostics/${runId}/explain`, { method: "POST" });
+export const diagnosticsPrefs = () => request("/api/v1/diagnostics/prefs");
+export const setDiagnosticsPrefs = (retentionDays) => request("/api/v1/diagnostics/prefs", {
+  method: "POST", body: JSON.stringify({ retentionDays }),
+});
 export const listConversations = () => request("/api/v1/conversations");
 export const startConversation = (text, workspaceContext = null) => request("/api/v1/conversations", {
   method: "POST", body: JSON.stringify({ text, workspaceContext }),
