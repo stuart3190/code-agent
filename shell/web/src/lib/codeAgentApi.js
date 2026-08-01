@@ -189,6 +189,14 @@ export const updateAiRouting = (body) => request("/api/v1/ai/routing", {
 export const saveByokSafety = (body) => request("/api/v1/ai/byok-safety", {
   method: "POST", body: JSON.stringify(body),
 });
+
+// Stop a running build. The server flags the job; the runner aborts between engine turns and
+// the relay classifies it as `cancelled`, so nothing further is dispatched or charged.
+// A build that finished first answers "already finished" — that is a normal outcome, not an
+// error, and the caller treats it as success.
+export const cancelBuild = (jobId) => request(`/api/builds/${encodeURIComponent(jobId)}/cancel`, {
+  method: "POST",
+});
 export const aiEvaluations = () => request("/api/v1/ai/evaluations");
 export const runAiEvaluation = (body) => request("/api/v1/ai/evaluations", {
   method: "POST", body: JSON.stringify(body),

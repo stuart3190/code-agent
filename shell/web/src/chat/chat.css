@@ -415,3 +415,17 @@ div.ct-model-row { cursor: pointer; }
   .ct-thinking, .ct-agent.working .ct-astatus { color: var(--ink-2); background: none; -webkit-background-clip: initial; background-clip: initial; }
   .ct-skel-dot, .ct-skel-lines i, .mg-skel-line, .ct-skel-bubble { animation: none; }
 }
+
+/* Stop-build control: contextual, quiet, and only present while the team is working. */
+.ct-cancel-build {
+  margin-top: 10px;
+  width: 100%;
+  font-size: 12px;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 10px;
+  min-height: 34px;
+}
+.ct-cancel-build:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.ct-cancel-build:disabled { opacity: 0.6; cursor: default; }

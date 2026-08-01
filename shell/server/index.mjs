@@ -24,6 +24,7 @@ import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/su
 import { haveStripeEnv } from "./lib/services.mjs";
 import { interruptLiveJobs, sweepInterrupted, sweepStaleJobs } from "./lib/buildJobs.mjs";
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
+import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
 import { sweepQaRuns } from "./lib/qaRuns.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import {
@@ -767,8 +768,26 @@ const server = http.createServer(async (req, res) => {
     }
     // Background build jobs: /api/builds/:jobId/events · /api/builds/:jobId/cancel ·
     // /api/projects/:id/active-build. Ids come from the path; ownership is checked in buildJobs.
+    //
+    // Restored 2026-08-01: PR #53's Buildr101 legacy unmount swept these away with the genuine
+    // legacy routes, leaving an empty `{ let m; }` block. These are Thrallo's OWN Phase-19
+    // routes, not legacy — without them a user cannot cancel a running build at all. Nothing
+    // imported the handlers and no test referenced the paths, so CI never noticed.
+    // test/code-agent/route-manifest.test.mjs now closes that class.
     {
       let m;
+      if ((m = p.match(/^\/api\/builds\/([^/]+)\/events$/)) && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return await handleBuildEvents(req, res, decodeURIComponent(m[1]), owner);
+      }
+      if ((m = p.match(/^\/api\/builds\/([^/]+)\/cancel$/)) && method === "POST") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return await handleBuildCancel(req, res, decodeURIComponent(m[1]), owner);
+      }
+      if ((m = p.match(/^\/api\/projects\/([^/]+)\/active-build$/)) && method === "GET") {
+        const owner = await requireOwner(req, res); if (!owner) return;
+        return await handleActiveBuild(req, res, decodeURIComponent(m[1]), owner);
+      }
     }
 
     if (p.startsWith("/api/")) return sendJson(res, 404, { error: `no route ${method} ${p}` });

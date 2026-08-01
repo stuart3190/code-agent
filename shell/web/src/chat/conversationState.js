@@ -27,6 +27,7 @@ export function emptyConversationView() {
     waiting: false,     // paused on a business question
     recovery: null,     // {state: recovering|repairing|verifying|continuing, message}
     badge: null,        // {icon, text} — which model is building right now
+    activeBuild: null,  // {jobId, projectId} while a build runs — what Cancel addresses
     lastSeq: 0,
   };
 }
@@ -88,7 +89,9 @@ export function applyEvent(view, event) {
       push({ kind: "receipt", text: payload.message || `Run started on ${payload.repository || "the repository"}` });
       break;
     case "build_started":
-      // The roster carries the progress; the thread stays sparse.
+      // The roster carries the progress; the thread stays sparse. The job id is retained so the
+      // user can stop the work — without it the Cancel control has nothing to address.
+      next.activeBuild = { jobId: payload.jobId || null, projectId: payload.projectId || null };
       break;
     case "preview_ready":
       next.previewUrl = payload.url || next.previewUrl;

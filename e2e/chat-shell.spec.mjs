@@ -604,3 +604,67 @@ test("Provider Intelligence dashboard expands providers to per-model profiles", 
   // Task families with no evidence stay honest.
   await expect(page.getByText("Collecting benchmark data.").first()).toBeVisible();
 });
+
+test("Stop build: contextual control, reaches the mounted cancel route, dispatches nothing further", async ({ page }) => {
+  // The user-facing half of the cancellation pipeline. The classification that makes a cancelled
+  // build stop cleanly shipped in #119, but its HTTP route had been unmounted since #53 — so this
+  // asserts the whole path, not just the planner.
+  await stubApi(page);
+  const events = [
+    [1, "message", { role: "user", text: "Build me a booking system" }],
+    [2, "build_started", { jobId: "job-77", projectId: "p-77", message: "The team is assembling to build this." }],
+    [3, "agent_spawned", { agent: "Builder", status: "Writing the code…" }],
+  ];
+  const cancelCalls = [];
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => route.fulfill({
+    json: { conversations: [{ id: "c9", title: "Booking", activity: { agent: "Builder", status: "Writing the code…" } }] },
+  }));
+  await page.route("**/api/v1/conversations/c9/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
+  });
+  await page.route("**/api/builds/*/cancel", (route) => {
+    cancelCalls.push(route.request().url());
+    return route.fulfill({ json: { ok: true } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Booking/ }).click();
+  await expect(page.getByText("Build me a booking system")).toBeVisible();
+
+  // Present while the team is working — and addressed to the running job.
+  const stop = page.getByTestId("cancel-build");
+  await expect(stop).toBeVisible();
+  await stop.click();
+
+  await expect.poll(() => cancelCalls.length).toBe(1);
+  expect(cancelCalls[0]).toContain("/api/builds/job-77/cancel");
+
+  // Retires itself once pressed: no further work to stop, and nothing new is dispatched.
+  await expect(stop).toHaveCount(0);
+  await expect.poll(() => cancelCalls.length).toBe(1);
+});
+
+test("Stop build is absent when no build is running, and a completion race is not an error", async ({ page }) => {
+  await stubApi(page);
+  const events = [
+    [1, "message", { role: "user", text: "Just chatting" }],
+    [2, "build_started", { jobId: "job-88", projectId: "p-88" }],
+    [3, "agent_spawned", { agent: "Builder", status: "Writing the code…" }],
+    [4, "agent_done", { agent: "Builder", ok: true }],
+  ];
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => route.fulfill({
+    json: { conversations: [{ id: "c9", title: "Chat" }] },
+  }));
+  await page.route("**/api/v1/conversations/c9/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Chat/ }).click();
+  await expect(page.getByText("Just chatting")).toBeVisible();
+  // The team finished: nothing to stop, so the control is gone.
+  await expect(page.getByTestId("cancel-build")).toHaveCount(0);
+});
