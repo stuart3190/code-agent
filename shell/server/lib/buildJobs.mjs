@@ -502,7 +502,20 @@ async function runJob(job) {
       photography = await preparePhotography(designProfile, log);
     }
 
-    const tree = mode === "iterate" ? { ...inputTree } : clone(fromScaffold(REACT_VITE));
+    // Iterate/repair jobs dispatched server-side (relay repairs, verification repairs,
+    // repair_app) carry no client tree — hydrate the stored project tree. Building an
+    // "edit" from an empty tree produced ENOENT repair rounds (diagnostics 17e00fd2).
+    let iterateBase = inputTree;
+    if (mode === "iterate" && (!iterateBase || !Object.keys(iterateBase).length)) {
+      const { data: stored } = await serviceClient().from("projects")
+        .select("tree").eq("id", projectId).eq("owner", owner.id).maybeSingle();
+      iterateBase = stored?.tree || null;
+      if (!iterateBase || !Object.keys(iterateBase).length) {
+        throw new Error("iterate: no tree was provided and the project has no stored tree to edit");
+      }
+      serverLog(job, `iterate: hydrated stored project tree (${Object.keys(iterateBase).length} files)`);
+    }
+    const tree = mode === "iterate" ? { ...iterateBase } : clone(fromScaffold(REACT_VITE));
     const diagBaseline = { ...tree }; // snapshot for created/modified/deleted + diffs
     if (mode === "iterate") {
       // The backend SDK is a protected platform seam, not user-authored app code. Persist the
