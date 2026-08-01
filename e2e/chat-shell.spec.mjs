@@ -560,3 +560,47 @@ test("soft delete → Recently Deleted → restore → Delete Now workflow", asy
   await expect(page.locator(".ct-recent")).toHaveCount(0);
   expect(purged).toBe(true);
 });
+
+test("Provider Intelligence dashboard expands providers to per-model profiles", async ({ page }) => {
+  await stubApi(page);
+  await page.route("**/api/v1/admin/intelligence", (r) => r.fulfill({ json: {
+    windowDays: 60, generatedAt: new Date().toISOString(), minSamples: 5,
+    weights: { costPerVerified: 0.5, duration: 0.25, verification: 0.25 },
+    taskTypes: ["planning", "ui", "quick_edit", "full_build"],
+    totalRequests: 420,
+    providers: [
+      { provider: "openai", key: "openai", requests: 300, builds: 40, verificationRate: 96.2, costPerVerifiedBuild: 1.9, samples: 40, confidence: "Medium",
+        models: [
+          { model: "gpt-5.6-terra", key: "gpt-5.6-terra", builds: 30, samples: 30, verificationRate: 97.1, costPerVerifiedBuild: 1.7, avgBuildMs: 34000, avgRepairRounds: 0.2, avgRetries: 0, cacheEfficiency: 41.2, cancellationRate: 0, recommendationScore: 0.12, confidence: "Medium", collecting: false, strengths: ["fastest completion"], weaknesses: [], taskWins: 2, taskContests: 3, taskWinRate: 66.7, trend: { costChangePercent: -8.4, verificationChange: 1.2, priorSamples: 12 } },
+          { model: "gpt-5.6-sol", key: "gpt-5.6-sol", builds: 10, samples: 10, verificationRate: 92, costPerVerifiedBuild: 3.1, avgBuildMs: 51000, avgRepairRounds: 0.6, avgRetries: 0.1, cacheEfficiency: 22, cancellationRate: 2, recommendationScore: 0.71, confidence: "Low", collecting: false, strengths: [], weaknesses: ["highest cost per verified build"], taskWins: 0, taskContests: 3, taskWinRate: 0, trend: null },
+        ] },
+      { provider: "xai", key: "xai", requests: 120, builds: 3, verificationRate: null, costPerVerifiedBuild: null, samples: 3, confidence: null,
+        models: [{ model: "grok-4.5", key: "grok-4.5", builds: 3, samples: 3, verificationRate: null, costPerVerifiedBuild: null, avgBuildMs: null, avgRepairRounds: null, avgRetries: null, cacheEfficiency: null, cancellationRate: null, recommendationScore: null, confidence: null, collecting: true, strengths: [], weaknesses: [], taskWins: 0, taskContests: 0, taskWinRate: null, trend: null }] },
+    ],
+    models: [], modes: [],
+    perTask: { planning: { ranked: [], explanation: "Collecting benchmark data." }, ui: { ranked: [{ model: "gpt-5.6-terra", samples: 12, confidence: "Low" }], explanation: "Selected gpt-5.6-terra because ui builds completed 24% faster with the same verification success (12 verified ui builds, Low confidence)." } },
+    overall: { ranked: [{ model: "gpt-5.6-terra", score: 0.12, samples: 30, confidence: "Medium" }], explanation: "Selected gpt-5.6-terra because it achieved equivalent verified results at approximately 45% lower average cost (30 verified recent builds, Medium confidence)." },
+    sampleWindow: {},
+  } }));
+  await page.goto("/");
+  await expect(page.getByText("What are we building today?")).toBeVisible();
+  await page.keyboard.press("Control+k");
+  const pal = page.getByPlaceholder(/Type a command/);
+  await pal.fill("provider intelligence");
+  await pal.press("Enter");
+
+  await expect(page.getByRole("heading", { name: "Provider intelligence" })).toBeVisible();
+  await expect(page.getByText(/45% lower average cost/)).toBeVisible();
+  // Providers listed from evidence; expanding reveals per-model profiles.
+  await expect(page.getByText("2 models", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: /openai/ }).click();
+  await expect(page.getByText("gpt-5.6-terra").first()).toBeVisible();
+  await expect(page.getByText(/wins 66.7% of task types/)).toBeVisible();
+  await expect(page.getByText("fastest completion")).toBeVisible();
+  await expect(page.getByText(/trend: cost -8.4%/)).toBeVisible();
+  // A model below the floor says so instead of showing a ranking.
+  await page.getByRole("button", { name: /xai/ }).click();
+  await expect(page.getByText("Collecting benchmark data (3)").first()).toBeVisible();
+  // Task families with no evidence stay honest.
+  await expect(page.getByText("Collecting benchmark data.").first()).toBeVisible();
+});
