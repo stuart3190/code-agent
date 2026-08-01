@@ -118,6 +118,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     agents: new Set(),
     totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 },
     repairRounds: 0,
+    byok: false,   // set by setByok(): whether usage bills the USER's own provider account
     failures: [],   // [{label, excerpt}] — feeds evidence-grounded failure messages
     _chain: Promise.resolve(),
   };
@@ -167,6 +168,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
         agent, input_tokens: norm.input, output_tokens: norm.output,
         cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,
         duration_ms: durationMs, cost, build_id: session.id, project_id: projectId,
+        byok: session.byok,
         trigger: contextMeta?.trigger || null,
         run_id: contextMeta?.runId || null,
         context: contextMeta ? { ...contextMeta, trigger: undefined, runId: undefined } : null,
@@ -184,6 +186,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
   };
 
   session.setPlan = (plan) => write(() => db.from("diag_runs").update({ plan: String(plan || "").slice(0, 100_000) }).eq("id", session.id));
+  session.setByok = (value) => { session.byok = Boolean(value); };
   session.setModel = (m) => { if (m && !model) { model = m; write(() => db.from("diag_runs").update({ model: m }).eq("id", session.id)); } };
 
   session.finish = (status) => write(() => db.from("diag_runs").update({
@@ -230,6 +233,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     return {
       sessionId: session.id,
       setModel: (m) => session.setModel(m),
+      setByok: (value) => session.setByok(value),
       terminal: (line) => { terminalLines.push(`${now()} ${String(line)}`); },
       step: (spec) => session.step({ ...spec, round }),
       files: (baseline, tree, { label = "File changes" } = {}) => {
@@ -263,7 +267,7 @@ export function nullDiagSession() {
     id: null, step: noop, repairDispatched: noop, setPlan: noop, setModel: noop, finish: noop,
     failureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     rawFailureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
-    recorderForJob: () => ({ sessionId: null, setModel: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),
+    recorderForJob: () => ({ sessionId: null, setModel: noop, setByok: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),
   };
 }
 

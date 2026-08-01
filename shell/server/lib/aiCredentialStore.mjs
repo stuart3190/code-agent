@@ -16,12 +16,31 @@ export async function aiConnectionSummary(owner, { store = aiCredentialStore() }
     store.listCredentials(owner),
     store.getPreference(owner),
   ]);
+  const { normalizeByokSafetyDocument } = await import("./appBuild/byokSafety.mjs");
+  const byokProviders = credentials
+    .filter((c) => c.auth_mode === "api_key" && c.status === "connected")
+    .map((c) => c.provider);
   return {
     configured: aiCredentialStorageConfigured(),
     activeProvider: preference?.active_provider || "managed",
     routing: publicRoutingPreference(preference),
     connections: credentials.map(publicCredential),
+    // Optional BYOK safeguards. Every value is a NUMBER or null — no key material of any
+    // kind passes through this document (publicCredential already strips secrets).
+    byokSafety: normalizeByokSafetyDocument(preference?.byok_safety, { providers: byokProviders }),
+    byokProviders,
   };
+}
+
+// Save path for the optional BYOK safeguards. Validation happens here so an invalid value
+// never reaches storage, and the whole document is normalised to numbers-or-null.
+export async function updateByokSafety(owner, input, { store = aiCredentialStore() } = {}) {
+  const { normalizeByokSafetyDocument, validateByokSafetyInput } = await import("./appBuild/byokSafety.mjs");
+  const validation = validateByokSafetyInput(input);
+  if (!validation.ok) throw inputError(validation.errors[0]);
+  const document = normalizeByokSafetyDocument(input);
+  await store.setPreference(owner, { byok_safety: document });
+  return document;
 }
 
 export async function connectApiKey(owner, provider, rawKey, {

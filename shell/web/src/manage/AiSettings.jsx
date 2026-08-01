@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   aiConnections, aiEvaluations, cancelCodexLogin, codexLoginStatus, connectAiKey,
   disconnectAiProvider, runAiEvaluation, selectAiProvider, startCodexLogin, updateAiRouting,
+  saveByokSafety,
 } from "../lib/codeAgentApi.js";
 import { SkeletonRows, useCopy } from "./shared.jsx";
 
@@ -184,6 +185,14 @@ export default function AiSettings() {
               ) : null}
           </div>
         ))}
+        {["openai", "anthropic", "gemini", "xai"].filter((p) => connections[p]).map((provider) => (
+          <Safeguards key={`safe-${provider}`} provider={provider} label={PROVIDERS[provider].name}
+            document={data?.byokSafety} busy={!!busy}
+            onSave={(next) => run(`safeguards-${provider}`, async () => {
+              setData(await saveByokSafety(next));
+              setNotice("Spending safeguards saved.");
+            })} />
+        ))}
       </div>
 
       <div className="mg-label">Smart routing</div>
@@ -264,6 +273,108 @@ export default function AiSettings() {
         )}
       </div>
       <p className="ct-hint">Keys and Codex login state are encrypted server-side, decrypted only inside an isolated run, and never returned to this page.</p>
+    </div>
+  );
+}
+
+// Optional spending safeguards for a BYOK connection.
+//
+// Thrallo does NOT cap usage on a key the user owns — their provider bills them directly.
+// Every control here is off until they switch it on, and the copy says so plainly rather
+// than implying a limit exists. Values are per-provider and fall back to the user's global
+// default, so capping one connection leaves the others untouched.
+const CONTROLS = [
+  { key: "maxCostPerBuild", label: "Maximum cost per build", hint: "Pause a build once one lifecycle passes this much.", step: "0.5" },
+  { key: "maxDailySpend", label: "Maximum daily API spend", hint: "Pause once today's total on this provider passes this much.", step: "1" },
+  { key: "warnThreshold", label: "Warning threshold", hint: "Tell me once spending passes this — but keep going.", step: "0.5" },
+  { key: "approvalThreshold", label: "Approval threshold", hint: "Ask before an automatic repair projected above this.", step: "0.5" },
+  { key: "maxRepairJobs", label: "Maximum automatic repair jobs", hint: "Cap automatic repairs per build.", step: "1", integer: true },
+];
+
+export function Safeguards({ provider, label, document: doc, busy, onSave }) {
+  const stored = useMemo(() => {
+    const global = doc?.global || {};
+    const scoped = doc?.providers?.[provider] || {};
+    return Object.fromEntries(CONTROLS.map(({ key }) => [
+      key,
+      Object.prototype.hasOwnProperty.call(scoped, key) ? scoped[key] : (global[key] ?? null),
+    ]));
+  }, [doc, provider]);
+
+  const [draft, setDraft] = useState(stored);
+  const [open, setOpen] = useState(false);
+  const [invalid, setInvalid] = useState("");
+  useEffect(() => { setDraft(stored); }, [stored]);
+
+  const enabledCount = CONTROLS.filter(({ key }) => draft[key] != null && draft[key] !== "").length;
+  const dirty = CONTROLS.some(({ key }) => String(draft[key] ?? "") !== String(stored[key] ?? ""));
+
+  const setValue = (key, raw, integer) => {
+    setInvalid("");
+    if (raw === "") { setDraft((d) => ({ ...d, [key]: null })); return; }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) { setInvalid(`${key}: enter a number above zero, or leave it empty to turn it off.`); }
+    else if (integer && value !== Math.floor(value)) { setInvalid(`${key}: whole numbers only.`); }
+    setDraft((d) => ({ ...d, [key]: raw }));
+  };
+
+  const save = () => {
+    const providers = { ...(doc?.providers || {}) };
+    providers[provider] = Object.fromEntries(CONTROLS.map(({ key }) => [
+      key, draft[key] === "" || draft[key] == null ? null : Number(draft[key]),
+    ]));
+    onSave({ global: doc?.global || {}, providers, timezone: doc?.timezone || null });
+  };
+
+  const clearAll = () => {
+    const providers = { ...(doc?.providers || {}) };
+    providers[provider] = Object.fromEntries(CONTROLS.map(({ key }) => [key, null]));
+    onSave({ global: doc?.global || {}, providers, timezone: doc?.timezone || null });
+  };
+
+  return (
+    <div className="mg-safeguards" style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 8, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
+      <button className="ct-btn-quiet" style={{ textAlign: "left" }} aria-expanded={open}
+        data-testid={`safeguards-toggle-${provider}`} onClick={() => setOpen((v) => !v)}>
+        {open ? "▾" : "▸"} Optional spending safeguards — {label}
+        {enabledCount > 0 && <span className="mg-pill" style={{ marginLeft: 8 }} data-testid={`safeguards-count-${provider}`}>{enabledCount} on</span>}
+      </button>
+      {open && (
+        <div style={{ display: "grid", gap: 10 }}>
+          <p className="ct-hint" data-testid={`safeguards-explainer-${provider}`}>
+            Thrallo does not cap usage on your own {label} key — your provider bills you directly and normal
+            use stays unrestricted. These safeguards are optional and off unless you set one.
+          </p>
+          {CONTROLS.map(({ key, label: name, hint, step, integer }) => (
+            <label key={key} style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {name}
+                <div className="ct-hint">{hint}</div>
+              </span>
+              <input className="mg-input" type="number" min="0" step={step}
+                style={{ width: 120, flexShrink: 0 }}
+                data-testid={`safeguard-${provider}-${key}`}
+                placeholder="Off"
+                value={draft[key] ?? ""}
+                onChange={(e) => setValue(key, e.target.value, integer)} />
+            </label>
+          ))}
+          <p className="ct-hint" data-testid={`safeguards-currency-${provider}`}>
+            Amounts are in Thrallo credits. Costs are estimated from the tokens each request actually
+            used at your provider's published per-token prices, and the daily total covers the current
+            UTC day{doc?.timezone ? ` in ${doc.timezone}` : ""}.
+          </p>
+          {invalid && <div className="mg-error" data-testid={`safeguards-error-${provider}`}>{invalid}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="ct-btn" disabled={busy || !dirty || !!invalid}
+              data-testid={`safeguards-save-${provider}`} onClick={save}>Save safeguards</button>
+            {enabledCount > 0 && (
+              <button className="ct-btn-quiet" disabled={busy}
+                data-testid={`safeguards-clear-${provider}`} onClick={clearAll}>Remove all limits</button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

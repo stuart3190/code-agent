@@ -49,6 +49,13 @@ export async function handleAiRoutingUpdate(_req, res, owner, body = {}) {
   });
 }
 
+export async function handleAiByokSafety(_req, res, owner, body = {}) {
+  return wrap(async () => {
+    await updateByokSafety(owner.id, body);
+    sendJson(res, 200, await connectionResponse(owner.id));
+  });
+}
+
 export async function handleAiEvaluations(_req, res, owner) {
   return wrap(async () => {
     sendJson(res, 200, await modelEvaluationSummary(owner.id));

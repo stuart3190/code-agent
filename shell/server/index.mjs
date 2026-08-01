@@ -41,6 +41,7 @@ import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentServic
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
+import { startCheckpointSweeper, stopCheckpointSweeper, recoverInterruptedLifecycles } from "./lib/appBuild/checkpointRecovery.mjs";
 import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
 import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownloads.mjs";
 import {
@@ -58,7 +59,7 @@ import {
 } from "./routes/githubApp.mjs";
 import {
   handleAiByokConnect, handleAiConnections, handleAiProviderDisconnect, handleAiProviderSelect,
-  handleAiEvaluationRun, handleAiEvaluations, handleAiRoutingUpdate,
+  handleAiEvaluationRun, handleAiEvaluations, handleAiRoutingUpdate, handleAiByokSafety,
   handleCodexLoginCancel, handleCodexLoginStart, handleCodexLoginStatus,
 } from "./routes/aiConnections.mjs";
 import { byokConfigured } from "./lib/byokStore.mjs";
@@ -369,6 +370,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/ai/routing" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleAiRoutingUpdate(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/ai/byok-safety" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleAiByokSafety(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ai/evaluations" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -791,6 +796,10 @@ server.listen(PORT, HOST, () => {
     sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
     sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
     sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
+    // Repair checkpoints that outlived their retention window, plus the last-known-good
+    // restore for lifecycles this server killed mid-build (see recoverInterruptedLifecycles).
+    startCheckpointSweeper();
+    recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
     if (haveSupabaseEnv()) startActionWorker();
   }
   startCodeAgentWorker();
@@ -814,6 +823,7 @@ async function shutdown(signal) {
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
+  stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();
   stopAutomationSweeper();
