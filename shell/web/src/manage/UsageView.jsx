@@ -1,22 +1,51 @@
-// Usage & plan — the visual answer to "show my monthly usage". Conversation answers the
-// quick question; this view holds the graphs, plan switching, and spend guards.
+// Usage & plan — a clean dashboard by default (plan, meters with warnings, builds, AI
+// cost, recent activity) with an expandable Advanced Usage section for per-request and
+// per-record detail. All data is owner-scoped server-side; nothing here filters.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { usageSummary, billingOverview, selectPlan, billingPortal, updateBudgets } from "../lib/codeAgentApi.js";
-import { BudgetMeter, Metric, SkeletonRows, formatNumber, formatCompact } from "./shared.jsx";
+import {
+  usageSummary, billingOverview, selectPlan, billingPortal, updateBudgets,
+  usageInsights, buildCostSummary,
+} from "../lib/codeAgentApi.js";
+import { Metric, SkeletonRows, formatNumber, formatCompact } from "./shared.jsx";
+import { meterWarning } from "./usageWarnings.js";
+
+const fmtDuration = (ms) => (ms == null ? "—" : ms >= 60_000 ? `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : `${Math.round(ms / 1000)}s`);
+const fmtCr = (v) => `${Number(v || 0).toFixed(2)} cr`;
+
+function Meter({ label, used, limit, format }) {
+  const ratio = limit ? Math.min(used / limit, 1) : 0;
+  const warning = meterWarning(used, limit);
+  const tone = warning?.level >= 100 ? "var(--bad)" : warning ? "var(--warn)" : null;
+  return (
+    <div style={{ flex: 1, minWidth: 170 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span className="ct-hint">{label}</span>
+        <span className="ct-hint">{format(used)} / {format(limit)}</span>
+      </div>
+      <div className="mg-meter">
+        <i style={{ width: `${Math.max(ratio * 100, used ? 2 : 0)}%`, ...(tone ? { background: tone } : {}) }} />
+      </div>
+      {warning && <div className="ct-hint" style={{ color: warning.tone, fontWeight: 600 }}>{warning.text}</div>}
+    </div>
+  );
+}
 
 export default function UsageView() {
   const [data, setData] = useState(null);
   const [billing, setBilling] = useState(null);
+  const [insights, setInsights] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busyPlan, setBusyPlan] = useState("");
+  const [advanced, setAdvanced] = useState(false);
 
   const refreshBilling = useCallback(() => {
     billingOverview().then(setBilling).catch((err) => setError(err.message));
   }, []);
   useEffect(() => {
     usageSummary().then(setData).catch((err) => setError(err.message));
+    usageInsights().then(setInsights).catch(() => setInsights({ unavailable: true }));
     refreshBilling();
   }, [refreshBilling]);
 
@@ -30,30 +59,79 @@ export default function UsageView() {
     } catch (err) { setError(err.message); } finally { setBusyPlan(""); }
   }
 
-  const totals = data?.totals || {};
+  const budgets = billing?.budgets;
+  const anyCritical = budgets && ["runs", "managedTokens", "computeSeconds"]
+    .some((k) => meterWarning(budgets[k]?.used || 0, budgets[k]?.limit || 0)?.level >= 90);
+
   return (
     <div>
       <h3>Usage &amp; plan</h3>
-      <p className="mg-sub">Ask “how much budget is left?” any time — this is the full picture.</p>
+      <p className="mg-sub">Ask “how much budget is left?” any time — this is the full picture, and it only ever shows your own account.</p>
       {error && <div className="mg-error">{error}</div>}
       {notice && <div className="mg-ok">{notice}</div>}
+      {anyCritical && (
+        <div className="mg-card" style={{ borderColor: "rgba(199,126,26,0.5)" }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>You're close to a plan limit</div>
+          <div className="ct-hint">Upgrade below or tighten spend guards — the meters show exactly where you stand.</div>
+        </div>
+      )}
 
       {!billing && !error && <div className="mg-card"><SkeletonRows rows={3} /></div>}
       {billing && (
-        <>
-          <div className="mg-card">
-            <div className="mg-row">
-              <span>This period's budgets</span>
-              <span className="ct-hint">resets {new Date(billing.period.end).toLocaleDateString()}</span>
+        <div className="mg-card">
+          <div className="mg-row">
+            <div>
+              {billing.plans.find((p) => p.id === billing.subscription.plan)?.name || billing.subscription.plan} plan
+              <div className="ct-hint">Resets {new Date(billing.period.end).toLocaleDateString()}</div>
             </div>
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 10 }}>
-              <BudgetMeter label="Agent runs" meter={billing.budgets.runs} format={formatNumber} />
-              <BudgetMeter label="Managed tokens" meter={billing.budgets.managedTokens} format={formatCompact} />
-              <BudgetMeter label="Sandbox compute" meter={billing.budgets.computeSeconds} format={(v) => `${Math.round(v / 60)}m`} />
-            </div>
-            <SpendGuards billing={billing} onSaved={setBilling} onError={setError} />
+            <span className="mg-pill"><span className="dot" style={{ background: "var(--good)" }} />current</span>
           </div>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 10 }}>
+            <Meter label="Runs" used={budgets.runs.used} limit={budgets.runs.limit} format={formatNumber} />
+            <Meter label="Managed tokens" used={budgets.managedTokens.used} limit={budgets.managedTokens.limit} format={formatCompact} />
+            <Meter label="Sandbox compute" used={budgets.computeSeconds.used} limit={budgets.computeSeconds.limit} format={(v) => `${Math.round(v / 60)}m`} />
+          </div>
+          <SpendGuards billing={billing} onSaved={setBilling} onError={setError} />
+        </div>
+      )}
 
+      <div className="mg-label">This month</div>
+      {!insights && <div className="mg-card"><SkeletonRows rows={2} /></div>}
+      {insights && !insights.unavailable && (
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+          <Metric label="Builds" value={formatNumber(insights.buildsThisMonth)} />
+          <Metric label="AI requests" value={formatNumber(insights.requests)} />
+          <Metric label="AI tokens" value={formatCompact(insights.tokens)} />
+          <Metric label="Estimated AI cost" value={`${fmtCr(insights.aiCost)} · ~£${Number(insights.aiCostGbp || 0).toFixed(2)}`} />
+        </div>
+      )}
+      {insights?.unavailable && <div className="mg-card"><div className="ct-hint">AI usage insights are warming up — they appear after your next build.</div></div>}
+
+      {insights?.byProvider?.length > 0 && (
+        <div className="mg-card" style={{ marginTop: 10 }}>
+          <div className="mg-label" style={{ marginTop: 0 }}>AI usage summary</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {insights.byProvider.map((p) => (
+              <span key={p.key} className="mg-pill">{p.key} · {formatCompact(p.tokens)} tok · {fmtCr(p.cost)}</span>
+            ))}
+            {insights.byAgent.slice(0, 4).map((a) => (
+              <span key={a.key} className="mg-pill"><span className="dot" style={{ background: "var(--accent)" }} />{a.key} · {fmtCr(a.cost)}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {insights?.recentBuilds?.length > 0 && (
+        <>
+          <div className="mg-label">Recent activity</div>
+          <div className="mg-card">
+            {insights.recentBuilds.map((b) => <BuildRow key={b.id} build={b} />)}
+          </div>
+        </>
+      )}
+
+      {billing && (
+        <>
           <div className="mg-label">Plan</div>
           <div className="mg-card">
             {billing.plans.map((plan) => {
@@ -84,29 +162,89 @@ export default function UsageView() {
         </>
       )}
 
-      <div className="mg-label">This period's totals</div>
-      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-        <Metric label="Input tokens" value={formatNumber(totals.inputTokens)} />
-        <Metric label="Output tokens" value={formatNumber(totals.outputTokens)} />
-        <Metric label="Cached tokens" value={formatNumber(totals.cachedTokens)} />
-        <Metric label="Sandbox time" value={`${Math.round(totals.computeSeconds || 0)}s`} />
+      <div className="mg-card" style={{ marginTop: 14 }}>
+        <button className="mg-row" style={{ width: "100%", textAlign: "left", borderBottom: 0 }}
+          onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
+          <div>Advanced usage<div className="ct-hint">Per-request AI accounting and raw usage records</div></div>
+          <span className="ct-hint">{advanced ? "Hide" : "Show"}</span>
+        </button>
+        {advanced && (
+          <>
+            {insights?.recentRequests?.length > 0 && (
+              <>
+                <div className="mg-label">AI requests (this month, latest 50)</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="mg-table">
+                    <thead><tr><th>When</th><th>Agent</th><th>Provider / model</th><th>In</th><th>Out</th><th>Cached</th><th>Reasoning</th><th>Time</th><th>Cost</th></tr></thead>
+                    <tbody>
+                      {insights.recentRequests.map((r, i) => (
+                        <tr key={i}>
+                          <td>{new Date(r.createdAt).toLocaleTimeString()}</td>
+                          <td>{r.agent || "—"}</td>
+                          <td>{r.provider} / {r.model}</td>
+                          <td>{formatCompact(r.inputTokens)}</td>
+                          <td>{formatCompact(r.outputTokens)}</td>
+                          <td>{formatCompact(r.cachedTokens)}</td>
+                          <td>{formatCompact(r.reasoningTokens)}</td>
+                          <td>{fmtDuration(r.durationMs)}</td>
+                          <td>{r.cost == null ? "—" : fmtCr(r.cost)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            <div className="mg-label">Run usage records</div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="mg-table">
+                <thead><tr><th>Provider</th><th>Model</th><th>Input</th><th>Output</th></tr></thead>
+                <tbody>
+                  {(data?.records || []).slice(0, 20).map((record) => (
+                    <tr key={record.id}>
+                      <td>{record.provider}</td><td>{record.model}</td>
+                      <td>{formatNumber(record.input_tokens)}</td><td>{formatNumber(record.output_tokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {data && !data.records.length && <div className="ct-hint" style={{ padding: 10 }}>No completed run usage yet.</div>}
+            </div>
+          </>
+        )}
       </div>
+    </div>
+  );
+}
 
-      <div className="mg-label">Recent records</div>
-      <div className="mg-card" style={{ overflowX: "auto" }}>
-        <table className="mg-table">
-          <thead><tr><th>Provider</th><th>Model</th><th>Input</th><th>Output</th></tr></thead>
-          <tbody>
-            {(data?.records || []).slice(0, 20).map((record) => (
-              <tr key={record.id}>
-                <td>{record.provider}</td><td>{record.model}</td>
-                <td>{formatNumber(record.input_tokens)}</td><td>{formatNumber(record.output_tokens)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {data && !data.records.length && <div className="ct-hint" style={{ padding: 10 }}>No completed run usage yet.</div>}
-      </div>
+const BUILD_TONE = { passed: "var(--good)", complete_unverified: "var(--good)", failed: "var(--bad)", running: "var(--accent)", interrupted: "var(--warn)" };
+
+function BuildRow({ build }) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const toggle = () => {
+    setOpen((v) => !v);
+    if (!detail) buildCostSummary(build.id).then(setDetail).catch(() => setDetail({ unavailable: true }));
+  };
+  return (
+    <div style={{ borderBottom: "1px solid var(--line)" }}>
+      <button className="mg-row" style={{ width: "100%", textAlign: "left", borderBottom: 0 }} onClick={toggle} aria-expanded={open}>
+        <div style={{ minWidth: 0 }}>
+          <span className="mg-pill" style={{ marginRight: 8 }}><span className="dot" style={{ background: BUILD_TONE[build.status] || "var(--ink-3)" }} />{build.status}</span>
+          {build.prompt || build.kind}
+          <div className="ct-hint">{new Date(build.startedAt).toLocaleString()} · {fmtDuration(build.durationMs)} · {build.repairRounds} repair{build.repairRounds === 1 ? "" : "s"} · {formatCompact(build.tokens)} tok</div>
+        </div>
+        <span className="ct-hint" style={{ flexShrink: 0 }}>{fmtCr(build.cost)}</span>
+      </button>
+      {open && detail && !detail.unavailable && (
+        <div style={{ padding: "0 4px 10px" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {detail.costByAgent.map((a) => <span key={a.key} className="mg-pill">{a.key} · {fmtCr(a.cost)}</span>)}
+            {detail.costByModel.map((m) => <span key={m.key} className="mg-pill"><span className="dot" style={{ background: "var(--accent)" }} />{m.key} · {fmtCr(m.cost)}</span>)}
+          </div>
+        </div>
+      )}
+      {open && detail?.unavailable && <div className="ct-hint" style={{ padding: "0 4px 10px" }}>No cost breakdown recorded for this build.</div>}
     </div>
   );
 }
