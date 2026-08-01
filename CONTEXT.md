@@ -90,6 +90,39 @@ a timezone because it read document-level keys as controls.
 388 node + 46 Playwright green (43 new in test/code-agent/checkpoint-persistence.test.mjs +
 e2e/provider-settings.spec.mjs).
 
+AUDIT REMEDIATION COMPLETE (2026-08-01, PRs #123-#131, all merged + deployed + prod-verified).
+Seven planned PRs plus two follow-ups. Every confirmed defect from the 2026-08-01 audit is fixed
+and proven in production; 454 node + 100 Playwright; smoke 18/18.
+ROOT CAUSE of the biggest cluster: **PR #53's Buildr101 legacy unmount OVER-SWEPT**, deleting
+Thrallo's OWN Phase-19 route bodies (/api/builds/*, /api/projects/:id/active-build, /api/export,
+/api/test-runs) and leaving empty `{ let m; }` blocks. Nothing imports a handler until it is
+mounted, so no lint/type/test error fired — users could not cancel a build at all, and export and
+QA were dead. (The audit blamed PR #73; git proved that was only reformatting.)
+PERMANENT GUARDS now in place: route-manifest (every route module mounted OR retired with a
+written reason, both directions fail; references COUNTED so an imported-but-undispatched handler
+fails on its own); scripts/smoke-production.mjs (the DEPLOYED origin answers every critical path —
+run after every deploy); backup coverage (EVERY create table, not a name allowlist); provider
+registry vs EVERY AI constraint; desktop build (8 tests); scripts/feature-health.mjs (which
+features have NEVER executed in production).
+DESKTOP WAS UNBUILDABLE, not merely stale: `compile` died on the removed copilot extension, and
+`package` died from any normal shell because upstream's hasAuthenticodeSignature REJECTS on spawn
+error when the Windows SDK is not on PATH. Both fixed and discovered automatically, plus an
+`installer` command (ISCC installs per-user, never on PATH). Windows release 0.4.0 published and
+proven end to end: install -> launch -> token auth against production -> real projects render.
+FOUND BY TESTING, NOT REASONING (each shipped): app_notifications RLS took THREE attempts — a
+`for all` policy let a client FORGE source=password_changed and phish its own users (proved by
+doing it), then pinning `source is null` in WITH CHECK blocked marking platform notifications
+read; COLUMN GRANTS are the answer. `export { x } from` creates no local binding and threw at the
+first checkpoint. Stop build was invisible on mobile. apply_patch was strictly exact (a trailing
+space or one space of indent defeated it — now graduated, and a tolerant match preserves the
+FILE's lines). The outcome `exported` signal missed /api/export because export has TWO entry
+points.
+28 tables in supabase/migrations were NEVER APPLIED to production (Buildr101-era) — qa_runs and
+app_notifications among them; both created properly with Thrallo's isolation posture.
+DELIBERATELY NOT DONE: `preview_opened` (needs client-side tracking plus a product decision);
+`regenerated` (repairs are already run.repair_rounds, re-builds already `superseded`; emitting it
+would double-count AND suppress `accepted`).
+
 REPAIR-PIPELINE HARDENING (2026-08-01, PR #119, merged + deployed + prod-verified):
 **ROOT CAUSE of four confirmed defects: `planEndAction` inferred retry eligibility from job
 `status` alone, so EVERY non-complete job became a blind paid retry.** (1) `cancelJob`
