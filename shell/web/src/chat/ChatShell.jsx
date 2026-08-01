@@ -20,7 +20,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
-import { setConversationModel } from "../lib/codeAgentApi.js";
+import { setConversationModel, cancelBuild } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
 import AiSettings from "../manage/AiSettings.jsx";
 import TokensSettings from "../manage/TokensSettings.jsx";
@@ -316,6 +316,7 @@ function Workspace({ user }) {
               <div className="ct-rows">
                 {view.roster.map((r) => <AgentRow key={r.agent} row={r} compact={rail === "preview"} />)}
               </div>
+              <CancelBuild build={view.activeBuild} working={view.roster.some((r) => r.state === "working")} />
             </div>
             {rail === "preview" && <PreviewPane url={view.previewUrl} onPublish={() => send("Publish this, please.")} />}
           </aside>
@@ -713,6 +714,38 @@ function FailureCard({ item, onRetry }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Stop a running build. Contextual by design (Principle 3): it exists only while the team is
+// actually working, and disappears the moment they finish — never permanent chrome.
+//
+// This is the user-facing half of the cancellation pipeline. The classification work that makes
+// a cancelled build stop cleanly (no repair, no retry, no further spend) shipped in #119, but
+// its HTTP route had been unmounted since #53, so until now there was no way to trigger it.
+function CancelBuild({ build, working }) {
+  const [state, setState] = useState("idle"); // idle | cancelling | done
+  useEffect(() => { setState("idle"); }, [build?.jobId]);
+  if (!build?.jobId || !working || state === "done") return null;
+
+  const stop = async () => {
+    setState("cancelling");
+    try {
+      await cancelBuild(build.jobId);
+    } catch {
+      // A build that completed a moment before the click reports "already finished". That is a
+      // normal race, not a failure: the work the user wanted stopped is already stopped, so we
+      // simply retire the control rather than showing them an error.
+    }
+    setState("done");
+  };
+
+  return (
+    <button className="ct-btn-quiet ct-cancel-build" data-testid="cancel-build"
+      disabled={state === "cancelling"} onClick={stop}
+      title="Stop this build. Your current progress is saved.">
+      {state === "cancelling" ? "Stopping…" : "Stop build"}
+    </button>
   );
 }
 
