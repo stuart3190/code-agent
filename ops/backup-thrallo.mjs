@@ -75,6 +75,7 @@ export const CA_TABLES = [
   "build_signals",
   "build_checkpoints",
   "qa_runs",
+  "app_notifications",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";

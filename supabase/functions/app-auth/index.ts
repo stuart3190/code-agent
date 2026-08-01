@@ -82,6 +82,19 @@ async function logEvent(kind: string, key: string, appId: string) {
   await svc.from("app_auth_events").insert({ kind, key, app_id: appId }).then(() => {}, () => {});
 }
 
+// Trusted notification writer. Runs with the service role, so it can create notifications the
+// end user must NOT be able to forge for themselves — a welcome, and the security alert that
+// tells them their password changed when it was not them who changed it. Client-side writes
+// go through RLS (owner = auth.uid()) and can only ever notify the signed-in user.
+// Never allowed to fail the event that produced it.
+async function notifyAppUser(appId: string, owner: string, source: string, title: string, body: string, data: Record<string, unknown> = {}) {
+  try {
+    await svc.from("app_notifications").insert({ owner, app_id: appId, title, body, data, source });
+  } catch (error) {
+    console.error("[app-auth] notification failed:", (error as Error)?.message);
+  }
+}
+
 async function sendResetEmail(to: string, code: string, appId: string): Promise<boolean> {
   // Friendlier subject line when the app has a name (appId is the project id).
   const { data: proj } = await svc.from("projects").select("name").eq("id", appId).maybeSingle();
@@ -181,6 +194,11 @@ Deno.serve(async (req: Request) => {
     const { error: updErr } = await svc.auth.admin.updateUserById(target.auth_user_id, { password: newPassword });
     if (updErr) return json(500, { error: `reset failed: ${updErr.message}` });
     await svc.from("app_password_resets").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+    // Real event integration 2: the notification a user must not be able to write for
+    // themselves — it is how they find out about a change they did not make.
+    await notifyAppUser(appId, target.auth_user_id, "password_changed", "Your password was changed",
+      "If this wasn't you, reset your password again immediately and contact the app owner.",
+      { kind: "security", at: new Date().toISOString() });
 
     const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
     const { data: signed, error: signErr } = await anon.auth.signInWithPassword({
@@ -230,6 +248,10 @@ Deno.serve(async (req: Request) => {
       return json(500, { error: `signup failed: ${mapErr.message}` });
     }
     await logEvent("signup", ip, appId);
+    // Real event integration 1: the first thing a new end user sees in the app's notification
+    // surface, and proof the surface works from the moment they arrive.
+    await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
+      "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
   } else if (!existing) {
     return json(401, { error: "Invalid email or password." });
   } else if (existing.status !== "active") {

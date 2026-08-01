@@ -71,6 +71,7 @@ export const RESTORE_ORDER = [
   "build_signals",
   "build_checkpoints",
   "qa_runs",   // references projects -> restore after it
+  "app_notifications",   // owner references auth.users -> after app_users
 ];
 
 const BATCH = 500;
