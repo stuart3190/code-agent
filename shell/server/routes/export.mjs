@@ -3,7 +3,7 @@ import { assertNoPlatformSecrets, buildProjectZip } from "../lib/exportProject.m
 import { auditEvent } from "../lib/projectState.mjs";
 
 function safeContentDisposition(filename) {
-  const fallback = "buildr101-app.zip";
+  const fallback = "thrallo-app.zip";
   const safe = String(filename || fallback).replace(/[^a-zA-Z0-9._-]/g, "-") || fallback;
   return `attachment; filename="${safe}"`;
 }

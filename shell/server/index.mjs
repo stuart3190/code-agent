@@ -25,6 +25,7 @@ import { haveStripeEnv } from "./lib/services.mjs";
 import { interruptLiveJobs, sweepInterrupted, sweepStaleJobs } from "./lib/buildJobs.mjs";
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
+import { handleExport } from "./routes/export.mjs";
 import { sweepQaRuns } from "./lib/qaRuns.mjs";
 import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import {
@@ -788,6 +789,13 @@ const server = http.createServer(async (req, res) => {
         const owner = await requireOwner(req, res); if (!owner) return;
         return await handleActiveBuild(req, res, decodeURIComponent(m[1]), owner);
       }
+    }
+
+    // Source export. Unmounted by PR #53 in the same sweep that removed the build-job routes;
+    // restored 2026-08-01 as a first-class capability (export_project) plus this direct route.
+    if (p === "/api/export" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleExport(req, res, await readJson(req), owner);
     }
 
     if (p.startsWith("/api/")) return sendJson(res, 404, { error: `no route ${method} ${p}` });

@@ -256,9 +256,13 @@ button.ct-wordmark:hover { background: var(--surface-2); }
   .ct-question { font-size: 26px; padding: 0 16px; }
   .ct-context { display: none; }
   /* team strip under the top bar */
-  .ct-strip { display: flex; align-items: center; gap: 8px; margin: 0 14px 4px; background: var(--surface-2); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--ink-2); }
+  /* position/z-index: the scrolling thread overlaps this strip. That was harmless while the
+     strip was decorative, but it swallowed pointer events once it gained a real control. */
+  .ct-strip { position: relative; z-index: 2; display: flex; align-items: center; gap: 8px; margin: 0 14px 4px; background: var(--surface-2); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--ink-2); }
   .ct-strip .ct-adot { width: 20px; height: 20px; font-size: 8.5px; }
-  .ct-strip .ct-strip-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The status must SHRINK so the stop control keeps its width — a nowrap sibling with no
+     min-width:0 squeezes a flex neighbour to zero and it becomes unclickable. */
+  .ct-strip .ct-strip-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
   /* preview becomes a full-screen sheet with a grab handle */
   .ct-mobile-sheet { display: flex; position: fixed; inset: 78px 0 0; z-index: 15; background: var(--surface); border-radius: 26px 26px 0 0; box-shadow: var(--shadow-3); flex-direction: column; transform: translateY(calc(100% + 30px)); transition: transform var(--dur-3) var(--ease-out); }
   .ct-mobile-sheet.show { transform: none; }
@@ -429,3 +433,12 @@ div.ct-model-row { cursor: pointer; }
 }
 .ct-cancel-build:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
 .ct-cancel-build:disabled { opacity: 0.6; cursor: default; }
+/* Compact form for the mobile roster strip, where vertical space is scarce. */
+.ct-cancel-build.compact {
+  margin-top: 0;
+  width: auto;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  min-height: 32px;
+  white-space: nowrap;
+}

@@ -1060,6 +1060,58 @@ export async function showPreview(ctx, { productName = null } = {}) {
   }
 }
 
+// export_project capability backing: package the user's source as a downloadable ZIP.
+//
+// The artifact is theirs, not the platform's: dependencies, build output and every secret are
+// stripped before the ZIP is assembled, and assertNoPlatformSecrets refuses to produce it at all
+// if anything slipped through. Both filters read the same rule set (lib/secretScrub.mjs).
+export async function exportProject(ctx, { productName = null } = {}) {
+  const client = serviceClient();
+  let query = client.from("projects").select("id, name, tree, history, product_id, updated_at")
+    .eq("owner", ctx.owner).not("tree", "is", null)
+    .order("updated_at", { ascending: false }).limit(1);
+  if (productName) {
+    const { data: product } = await client.from("ca_products")
+      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
+    if (product) query = query.eq("product_id", product.id);
+  }
+  const { data } = await query;
+  const project = data?.[0];
+  if (!project) {
+    const error = new Error("There's no built app to export yet — ask me to build something first.");
+    error.code = "nothing_to_export";
+    throw error;
+  }
+
+  const { buildProjectZip } = await import("../exportProject.mjs");
+  const { assertNoPlatformSecrets, stripExportNoise } = await import("../secretScrub.mjs");
+
+  await ctx.emit("agent_spawned", { agent: "Publisher", status: "Packaging the source…" });
+  try {
+    const cleaned = stripExportNoise(project.tree);
+    const built = buildProjectZip({ ...project, tree: cleaned.files });
+    assertNoPlatformSecrets(built.files);
+    await ctx.emit("agent_done", { agent: "Publisher", ok: true });
+    await ctx.emit("download_ready", {
+      projectId: project.id,
+      filename: built.filename,
+      url: `/api/export?projectId=${encodeURIComponent(project.id)}`,
+      sizeBytes: built.zip.length,
+      fileCount: Object.keys(built.files).length,
+      message: "Your source package is ready.",
+    });
+    return {
+      projectId: project.id,
+      filename: built.filename,
+      fileCount: Object.keys(built.files).length,
+      note: "The download card is in the conversation — do not repeat the link.",
+    };
+  } catch (error) {
+    await ctx.emit("agent_done", { agent: "Publisher", ok: false });
+    throw error;
+  }
+}
+
 async function persistBuildResult(owner, projectId, result) {
   if (!result?.tree) return;
   const client = serviceClient();

@@ -1,6 +1,7 @@
+import { assertNoPlatformSecrets as sharedAssertNoPlatformSecrets, PLATFORM_SECRET_MARKERS } from "./secretScrub.mjs";
 import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
 
-export const SAFE_ENV_EXAMPLE = `# Supabase project settings for exported Buildr101 apps.
+export const SAFE_ENV_EXAMPLE = `# Supabase project settings for exported Thrallo apps.
 # Fill these in only if your app uses auth, persistence, or uploads.
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
@@ -18,13 +19,9 @@ dist/
 !.env.example
 `;
 
-const REQUIRED_SECRET_MARKERS = [
-  "SUPABASE_SERVICE_ROLE",
-  "STRIPE_SECRET_KEY",
-  "BYOK_ENC_KEY",
-  "CLOUDFLARE_API_TOKEN",
-  "sk_"
-];
+// Kept as a re-export so `_internal.REQUIRED_SECRET_MARKERS` stays a stable name for the
+// existing harness assertions; the values now come from the single shared rule set.
+const REQUIRED_SECRET_MARKERS = PLATFORM_SECRET_MARKERS;
 
 function parseJsonObject(raw, fallback = {}) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
@@ -38,12 +35,12 @@ function parseJsonObject(raw, fallback = {}) {
 }
 
 function packageNameFromProject(name) {
-  const stem = String(name || "buildr101-app")
+  const stem = String(name || "thrallo-app")
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[._-]+|[._-]+$/g, "")
     .slice(0, 64);
-  return stem || "buildr101-app";
+  return stem || "thrallo-app";
 }
 
 export function safeZipFilename(name) {
@@ -112,7 +109,7 @@ function usesBackendSdk(files) {
 }
 
 export function renderReadme(project, files) {
-  const name = String(project?.name || "Buildr101 App").trim() || "Buildr101 App";
+  const name = String(project?.name || "Thrallo App").trim() || "Thrallo App";
   const firstPrompt = sentence(historyPrompt(project?.history, false));
   const lastPrompt = sentence(historyPrompt(project?.history, true));
   const backendLine = usesBackendSdk(files)
@@ -132,10 +129,10 @@ export function renderReadme(project, files) {
   return `${name}
 ${"=".repeat(Math.max(name.length, 3))}
 
-This is a web app you exported from Buildr101. It is built with Vite, React,
+This is a web app you exported from Thrallo. It is built with Vite, React,
 and Tailwind CSS.
 
-You do NOT need Buildr101 to run it. Everything you need is inside this folder.
+You do NOT need Thrallo to run it. Everything you need is inside this folder.
 This guide walks you through it one step at a time. Take it slowly -- you do not
 need to understand every word, just follow the steps in order.
 ${promptBlock}${lastPromptBlock}
@@ -542,17 +539,12 @@ export function buildProjectZip(project) {
   };
 }
 
+// Delegates to the shared rule set in lib/secretScrub.mjs. Thrallo had two independent secret
+// filters with different rules (this one, and scrubTree for repair checkpoints); a marker added
+// to one silently did not protect the other. The behaviour here is unchanged — export still
+// THROWS rather than redacting — only the rules are now shared.
 export function assertNoPlatformSecrets(files) {
-  const joined = Object.entries(files)
-    .map(([path, contents]) => `${path}\n${contents}`)
-    .join("\n");
-  const upperJoined = joined.toUpperCase();
-  const leaked = REQUIRED_SECRET_MARKERS.filter((marker) =>
-    marker === "sk_" ? joined.includes(marker) : upperJoined.includes(marker)
-  );
-  if (leaked.length) {
-    throw new Error(`Export contains forbidden secret markers: ${leaked.join(", ")}`);
-  }
+  return sharedAssertNoPlatformSecrets(files);
 }
 
 export const _internal = {

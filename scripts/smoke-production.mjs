@@ -34,6 +34,9 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/admin/analytics", expect: [401], why: "admin analytics stays gated" },
   { method: "GET", path: "/api/v1/downloads", expect: [200], why: "desktop release manifest" },
 
+  // Source export — unmounted by the same #53 sweep, restored in PR 4.
+  { method: "POST", path: "/api/export", expect: [401], why: "source export (regression: unmounted by PR #53)" },
+
   // The three routes PR #53 silently deleted. These are why this script exists.
   {
     method: "GET", path: "/api/builds/00000000-0000-4000-8000-000000000001/events",
