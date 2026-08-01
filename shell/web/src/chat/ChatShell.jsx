@@ -896,6 +896,7 @@ function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
     { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: () => onOpenView("usage") },
     { key: "diagnostics", label: "◔ Build diagnostics", hint: "logs · repairs · costs", run: () => onOpenView("diagnostics") },
     { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
+    { key: "analytics", label: "◈ Admin analytics", hint: "admin · spend · revenue", run: () => onOpenView("analytics") },
   ], [onNew, onSettings, onOpenView]);
   const q = query.trim().toLowerCase();
   const shownActions = useMemo(

@@ -80,6 +80,29 @@ export function treeChanges(baseline = {}, tree = {}) {
 const tail = (text, lines = 20, chars = 1600) =>
   String(text || "").split("\n").slice(-lines).join("\n").slice(-chars);
 
+// The engine reports {input, output, cached, reasoning, total}; providers report
+// {inputTokens, outputTokens, cachedTokens, reasoningTokens}. Normalize both.
+export function normalizeTelemetry(usage) {
+  if (!usage) return null;
+  const input = Number(usage.input ?? usage.inputTokens ?? 0);
+  const output = Number(usage.output ?? usage.outputTokens ?? 0);
+  return {
+    input,
+    output,
+    cached: Number(usage.cached ?? usage.cachedTokens ?? 0),
+    reasoning: Number(usage.reasoning ?? usage.reasoningTokens ?? 0),
+    total: Number(usage.total ?? usage.totalTokens ?? input + output),
+  };
+}
+
+export function providerForModel(model = "") {
+  const m = String(model).toLowerCase();
+  if (m.startsWith("claude")) return "anthropic";
+  if (m.startsWith("gemini")) return "google";
+  if (m.startsWith("gpt") || m.startsWith("o")) return "openai";
+  return m ? "openai" : null;
+}
+
 // ── The session ─────────────────────────────────────────────────────────────────────────
 
 export async function createDiagSession({ owner, projectId = null, conversationId = null, kind, prompt, model = null, client = null }) {
@@ -111,12 +134,12 @@ export async function createDiagSession({ owner, projectId = null, conversationI
   session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round }) => {
     session.seq += 1;
     if (agent) session.agents.add(agent);
+    const norm = normalizeTelemetry(usage);
     let cost = null;
-    if (usage) {
-      session.totals.inputTokens += usage.inputTokens || 0;
-      session.totals.outputTokens += usage.outputTokens || 0;
-      session.totals.totalTokens += usage.total || usage.totalTokens
-        || (usage.inputTokens || 0) + (usage.outputTokens || 0);
+    if (norm) {
+      session.totals.inputTokens += norm.input;
+      session.totals.outputTokens += norm.output;
+      session.totals.totalTokens += norm.total;
       try {
         cost = creditsForUsage({ usage, model: stepModel || model || "" });
         session.totals.cost += cost || 0;
@@ -131,9 +154,21 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       agent, kind: stepKind, label: label || stepKind, status,
       prompt: stepPrompt == null ? null : String(stepPrompt),
       ...packOutput(output),
-      usage: usage || null, cost,
+      usage: norm || null, cost,
       started_at: now(), duration_ms: durationMs,
     }));
+    // Per-AI-request accounting: every usage-bearing step becomes an ai_requests row —
+    // the source of truth for customer AI-cost summaries and admin analytics.
+    if (norm) {
+      const usedModel = stepModel || model || null;
+      write(() => db.from("ai_requests").insert({
+        id: randomUUID(), owner, provider: providerForModel(usedModel), model: usedModel,
+        agent, input_tokens: norm.input, output_tokens: norm.output,
+        cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,
+        duration_ms: durationMs, cost, build_id: session.id, project_id: projectId,
+        created_at: now(),
+      }));
+    }
     return seq;
   };
 

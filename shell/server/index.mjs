@@ -48,6 +48,8 @@ import {
   handleDiagnosticsDownload, handleDiagnosticsExplain, handleDiagnosticsPrefs,
 } from "./routes/diagnostics.mjs";
 import { startDiagnosticsSweeper, stopDiagnosticsSweeper } from "./lib/appBuild/buildDiagnostics.mjs";
+import { usageInsights, buildCostSummary, adminAnalytics } from "./lib/usageInsights.mjs";
+import { isAdmin } from "./lib/admin.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -595,6 +597,22 @@ const server = http.createServer(async (req, res) => {
     if (conversationEventsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleConversationEvents(req, res, { owner, conversationId: conversationEventsMatch[1], url });
+    }
+    if (p === "/api/v1/usage/insights" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return sendJson(res, 200, await usageInsights(owner.id));
+    }
+    const buildSummaryMatch = p.match(/^\/api\/v1\/usage\/builds\/([0-9a-f-]+)$/i);
+    if (buildSummaryMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const summary = await buildCostSummary(owner.id, buildSummaryMatch[1]);
+      if (!summary) return sendJson(res, 404, { error: "No build summary for that Build ID." });
+      return sendJson(res, 200, summary);
+    }
+    if (p === "/api/v1/admin/analytics" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
+      return sendJson(res, 200, await adminAnalytics());
     }
     if (p === "/api/v1/diagnostics" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
