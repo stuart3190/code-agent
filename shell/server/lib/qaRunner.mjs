@@ -43,7 +43,7 @@ function fixPrompt(issues) {
   return `Automated browser testing found the following user-facing issues. Fix their root causes while preserving working behavior and design. Re-run the build and ensure desktop and mobile still work.\n\n${lines.join("\n")}`;
 }
 
-export async function runQaBrowser({ previewUrl, runId, artifactRoot = process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "buildr-qa") }) {
+export async function runQaBrowser({ previewUrl, runId, artifactRoot = process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") }) {
   const preview = new URL(previewUrl);
   if (!['http:', 'https:'].includes(preview.protocol)) throw new Error("Unsupported preview URL.");
   const artifactDir = path.join(artifactRoot, runId);

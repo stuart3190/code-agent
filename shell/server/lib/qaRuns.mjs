@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { previewProvider } from "../preview/index.mjs";
-import { requireFeature } from "./features.mjs";
 import { runQaBrowser } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
 import { auditEvent } from "./projectState.mjs";
@@ -31,7 +30,9 @@ async function execute(run, tree, client) {
 }
 
 export async function createQaRun(owner, projectId, client = serviceClient()) {
-  await requireFeature(owner, "test_fix");
+  // Gating lives in the capability registry (requirements()), not the retired Buildr101
+  // feature-flag matrix: that read a `feature_flags` table Thrallo never created and an
+  // entitlement from the retired credit ledger, so it denied every caller unconditionally.
   const project = await ownedProject(owner.id, projectId, "id,tree", client);
   if (!project) return null;
   if (!project.tree || typeof project.tree !== "object") throw Object.assign(new Error("Build the app before testing it."), { code: "no_app" });

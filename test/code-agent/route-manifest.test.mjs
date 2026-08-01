@@ -31,6 +31,7 @@ const MUST_BE_MOUNTED = new Set([
   "export.mjs",           // restored 2026-08-01 (PR 4) — unmounted by the same #53 sweep
   "githubApp.mjs",
   "previewDomainCheck.mjs",
+  "qa.mjs",              // restored 2026-08-01 (PR 3) — needed a qa_runs table that never existed
   "subscription.mjs",
 ]);
 
@@ -55,7 +56,6 @@ const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
   "preview.mjs": "legacy synchronous preview endpoint; superseded by the show_preview capability, which calls previewProvider() directly",
   "projects.mjs": "handler is legacy; deleteProjectCascade is imported directly by the soft-delete service",
   "publish.mjs": "handler is legacy; materializeAndPublish is invoked by the publish capability",
-  "qa.mjs": "PENDING PR 3 — QA/responsive verification shape is an open decision (standalone vs folded into the Verification Agent)",
   "runtimeCheckout.mjs": "Buildr101 generated-app checkout runtime",
   "runtimeConnectors.mjs": "Buildr101 generated-app connector runtime",
   "runtimeWebhook.mjs": "Buildr101 generated-app webhook runtime",
