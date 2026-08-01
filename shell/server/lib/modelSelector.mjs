@@ -214,8 +214,11 @@ export async function modelSelectorPayload(owner, { store = aiCredentialStore(),
   for (const provider of catalog.providers) {
     for (const model of provider.models) model.stats = stats[model.id] || null;
   }
+  // Codex maps to managed in the conversation loop — the Auto explanation mirrors the
+  // TRUE routing decision, not the raw credential label.
+  const effectiveProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
   catalog.autoStrategy = autoStrategy({
-    credential: { provider: credential.provider || "managed", secret: null },
+    credential: { provider: effectiveProvider, secret: null },
     routing: credential.routing || {},
     stats,
   });
