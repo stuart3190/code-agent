@@ -2,7 +2,7 @@ import { optionalEnv } from "./env.mjs";
 import { decryptSecret, encryptedStorageConfigured, encryptSecret, secretHint } from "./secretCrypto.mjs";
 import { serviceClient } from "./supabase.mjs";
 
-const API_KEY_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
+const API_KEY_PROVIDERS = new Set(["openai", "anthropic", "gemini", "xai"]);
 const ACTIVE_PROVIDERS = new Set(["managed", "codex", ...API_KEY_PROVIDERS]);
 const ROUTING_MODES = new Set(["balanced", "quality", "fast", "economy", "manual"]);
 const now = () => new Date().toISOString();
@@ -266,6 +266,10 @@ async function verifyApiKey(provider, key, fetchImpl) {
       url: "https://api.openai.com/v1/models",
       headers: { Authorization: `Bearer ${key}` },
     }
+    : provider === "xai" ? {
+      url: "https://api.x.ai/v1/models",
+      headers: { Authorization: `Bearer ${key}` },
+    }
     : provider === "anthropic" ? {
       url: "https://api.anthropic.com/v1/models?limit=1",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
@@ -298,6 +302,9 @@ function validateApiKey(provider, key) {
   if (provider === "gemini" && !key.startsWith("AIza")) {
     throw inputError("Gemini API keys should start with AIza.");
   }
+  if (provider === "xai" && !key.startsWith("xai-")) {
+    throw inputError("xAI API keys should start with xai-.");
+  }
 }
 
 function normalizedAuthJson(value) {
@@ -328,7 +335,7 @@ function publicCredential(row) {
 }
 
 function providerLabel(provider) {
-  return ({ codex: "Codex", openai: "OpenAI", anthropic: "Anthropic", gemini: "Gemini" })[provider] || "provider";
+  return ({ codex: "Codex", openai: "OpenAI", anthropic: "Anthropic", gemini: "Gemini", xai: "xAI" })[provider] || "provider";
 }
 
 function publicRoutingPreference(preference) {

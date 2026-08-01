@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-08-01T09:00:27.163Z",
+  "stub": false,
+  "results": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "task": "simple text edit",
+      "success": true,
+      "compileOk": true,
+      "error": null,
+      "latencyMs": 5813,
+      "steps": 8,
+      "inputTokens": 1634,
+      "outputTokens": 158,
+      "cachedTokens": 0,
+      "totalTokens": 1792,
+      "credits": 0.1792
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "task": "bug fix",
+      "success": true,
+      "compileOk": true,
+      "error": null,
+      "latencyMs": 4434,
+      "steps": 5,
+      "inputTokens": 1059,
+      "outputTokens": 121,
+      "cachedTokens": 0,
+      "totalTokens": 1180,
+      "credits": 0.118
+    }
+  ]
+}

@@ -117,3 +117,12 @@ Desktop packaging is also gated on this phase completing (your instruction).
   API key from Google AI Studio. Thrallo already works with managed OpenAI, so this is not required.
 - [ ] If you want Claude runs or comparisons, connect an Anthropic API key on the same page. This is
   also optional.
+- [ ] **xAI / Grok (added 2026-08-01):** create an API key at console.x.ai, then either connect it
+  in **Settings → AI connection → xAI Grok API** (BYOK — your own balance) or set `XAI_API_KEY` in
+  the VPS `shell/.env` to make Grok a managed smart-routing candidate platform-wide. Once a key
+  exists, run the provider benchmark so measured results decide where Grok is used:
+  `node scripts/benchmark-providers.mjs --providers openai,xai --tasks edit,component,bugfix,feature`
+  Admin controls (env): `THRALLO_XAI_ENABLED`, `THRALLO_XAI_AGENTS` (build,edit,repair,plan,review,verify),
+  `THRALLO_XAI_MODELS`, `THRALLO_XAI_DEFAULT_REASONING`, `THRALLO_XAI_MAX_CONTEXT_TOKENS`,
+  `THRALLO_XAI_LONG_CONTEXT_APPROVAL`, `THRALLO_XAI_PER_REQUEST_LIMIT_CREDITS`,
+  `THRALLO_XAI_DAILY_BUDGET_CREDITS`, `THRALLO_XAI_PER_USER_BUDGET_CREDITS`, `THRALLO_XAI_MAX_RETRIES`.

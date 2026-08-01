@@ -2,6 +2,7 @@ import { optionalEnv } from "./env.mjs";
 import { anthropicConfigured, createAnthropicCodingProvider } from "./anthropicCodingProvider.mjs";
 import { createGeminiCodingProvider, geminiConfigured } from "./geminiCodingProvider.mjs";
 import { createOpenAIProvider, openAIConfigured } from "./openAIProvider.mjs";
+import { createXaiProvider } from "./xaiProvider.mjs";
 
 export function createCodingModel(requested = "auto") {
   const selection = resolveModelSelection(requested);
@@ -12,6 +13,9 @@ export function createCodingModel(requested = "auto") {
   if (selection.provider === "gemini") {
     if (!geminiConfigured()) return createGeminiCodingProvider();
     return createGeminiCodingProvider({ model: selection.model });
+  }
+  if (selection.provider === "xai") {
+    return createXaiProvider({ model: selection.model });
   }
   if (!openAIConfigured()) return createOpenAIProvider();
   return createOpenAIProvider({ model: selection.model });
@@ -56,7 +60,9 @@ export function resolveModelSelection(requested = "auto") {
   if (value.startsWith("anthropic:")) return { provider: "anthropic", model: value.slice("anthropic:".length) };
   if (value.startsWith("gemini:")) return { provider: "gemini", model: value.slice("gemini:".length) };
   if (value.startsWith("openai:")) return { provider: "openai", model: value.slice("openai:".length) };
+  if (value.startsWith("xai:")) return { provider: "xai", model: value.slice("xai:".length) };
   if (value.startsWith("claude-")) return { provider: "anthropic", model: value };
   if (value.startsWith("gemini-")) return { provider: "gemini", model: value };
+  if (value.startsWith("grok")) return { provider: "xai", model: value };
   return { provider: "openai", model: value };
 }

@@ -15,11 +15,12 @@ const PROVIDERS = {
   openai: { name: "OpenAI API", hint: "Your own OpenAI balance.", placeholder: "sk-…" },
   anthropic: { name: "Anthropic API", hint: "Your own Anthropic balance.", placeholder: "sk-ant-…" },
   gemini: { name: "Gemini API", hint: "Your Google AI Studio balance.", placeholder: "AIza…" },
+  xai: { name: "xAI Grok API", hint: "Your own xAI balance — Grok 4.5 and coding models.", placeholder: "xai-…" },
 };
 
 export default function AiSettings() {
   const [data, setData] = useState(null);
-  const [keys, setKeys] = useState({ openai: "", anthropic: "", gemini: "" });
+  const [keys, setKeys] = useState({ openai: "", anthropic: "", gemini: "", xai: "" });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -158,7 +159,7 @@ export default function AiSettings() {
           </div>
         )}
 
-        {["openai", "anthropic", "gemini"].map((provider) => (
+        {["openai", "anthropic", "gemini", "xai"].map((provider) => (
           <div className="mg-row" key={provider}>
             <div style={{ flex: 1, minWidth: 0 }}>
               {PROVIDERS[provider].name}
