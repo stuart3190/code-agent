@@ -9,6 +9,15 @@ import { serviceClient } from "./supabase.mjs";
 import { encryptSecret, decryptSecret } from "./secretCrypto.mjs";
 
 const now = () => new Date().toISOString();
+
+const EVENT_WRITE_ATTEMPTS = 5;
+
+// Postgres 23505 / PostgREST duplicate-key on the (conversation_id, sequence) unique index.
+export function isSequenceCollision(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "23505" || /duplicate key value violates unique constraint/i.test(message);
+}
 const newId = () => crypto.randomUUID();
 
 export class MemoryConversationStore {
@@ -299,14 +308,31 @@ export class SupabaseConversationStore {
     return rows.reverse();
   }
 
+  // Concurrency-safe append: read-max-then-insert races when two writers (relay + lead
+  // loop) append at once, which surfaced as a raw unique-constraint error. The write now
+  // retries on that specific collision with a freshly read sequence — the event lands, the
+  // build continues, and nothing technical ever reaches the conversation.
   async appendEvent(conversation, type, payload = {}) {
-    const sequence = await this.nextSequence("ca_conversation_events", conversation.id);
-    const { data, error } = await this.client.from("ca_conversation_events").insert({
-      owner: conversation.owner, conversation_id: conversation.id, sequence, type, payload,
-    }).select("*").single();
-    const event = one(data, error);
-    this.bus.emit(`conversation:${conversation.id}`, event);
-    return event;
+    let lastError = null;
+    for (let attempt = 0; attempt < EVENT_WRITE_ATTEMPTS; attempt += 1) {
+      const sequence = await this.nextSequence("ca_conversation_events", conversation.id);
+      const { data, error } = await this.client.from("ca_conversation_events").insert({
+        owner: conversation.owner, conversation_id: conversation.id, sequence, type, payload,
+      }).select("*").single();
+      if (!error) {
+        const event = one(data, error);
+        this.bus.emit(`conversation:${conversation.id}`, event);
+        return event;
+      }
+      lastError = error;
+      if (!isSequenceCollision(error)) break;
+      // Jittered backoff so simultaneous writers don't re-collide on the same retry tick.
+      await new Promise((resolve) => setTimeout(resolve, 25 + Math.floor(attempt * 40)));
+    }
+    const failure = new Error(lastError?.message || "conversation event write failed");
+    failure.code = lastError?.code || "event_write_failed";
+    failure.service = "conversation_events";
+    throw failure;
   }
 
   async listEvents(owner, conversationId, after = 0) {

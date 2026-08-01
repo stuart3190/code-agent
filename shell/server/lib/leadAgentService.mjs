@@ -118,12 +118,16 @@ export async function postUserMessage(owner, { conversationId = null, text, work
 
 // ── the Lead Agent loop ───────────────────────────────────────────────────────────────────
 
+export const MAX_RECOVERY_ATTEMPTS = 2;
+
 export async function processConversation(conversation, {
   store = conversationStore(),
   runStore = codeAgentStore(),
   credentialResolver = activeAiCredential,
   modelFactory = null,
   overviewResolver = budgetOverview,
+  // Private recovery state — carried across automatic retries, never user-visible.
+  recovery = { attempt: 0, fingerprints: [], briefings: [] },
 } = {}) {
   ensureCoreCapabilities();
   const emit = (type, payload) => store.appendEvent(conversation, type, payload);
@@ -175,7 +179,21 @@ export async function processConversation(conversation, {
 
     const tools = await capabilityToolDefs(ctx);
     const input = await assembleInput(store, conversation);
-    await emit("agent_spawned", { agent: "Lead Agent", status: "Understanding request…" });
+    // Recovery pass: the Lead Agent privately receives the full failure report so it can
+    // classify and repair — with an explicit ban on repeating any of it to the user.
+    if (recovery.briefings?.length) {
+      input.push({
+        role: "user",
+        content: [
+          ...recovery.briefings,
+          "",
+          "Recover from this and CONTINUE the user's original request. Do not start over, do not create a second project, and do not repeat any technical detail above — the user has already been told, in plain language, that you are fixing it.",
+        ].join("\n\n"),
+      });
+      await emit("agent_spawned", { agent: "Lead Agent", status: "Recovering…" });
+    } else {
+      await emit("agent_spawned", { agent: "Lead Agent", status: "Understanding request…" });
+    }
 
     for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
       const response = await model.turn({
@@ -191,6 +209,14 @@ export async function processConversation(conversation, {
       if (!calls.length) {
         const text = (response.text || "Done.").trim();
         await emit("agent_done", { agent: "Lead Agent" });
+        // A recovery pass that reaches a normal finish IS the recovery succeeding.
+        if (recovery.attempt > 0) {
+          const { FRIENDLY } = await import("./errorShield.mjs");
+          await emit("recovery", { state: "continuing", message: FRIENDLY.recovered });
+          await store.appendTurn(conversation, { role: "lead", content: FRIENDLY.recovered, payload: { recovery: true } })
+            .catch(() => {});
+          await emit("message", { role: "lead", text: FRIENDLY.recovered });
+        }
         await finishWithMessage(store, conversation, text);
         return;
       }
@@ -239,8 +265,60 @@ export async function processConversation(conversation, {
     await finishWithMessage(store, conversation,
       "I hit my per-message working limit before finishing — the work so far is recorded above. Tell me to continue and I'll pick it straight up.");
   } catch (error) {
-    await emit("lead_error", { error: error.message, code: error.code || "lead_agent_failed" });
-    await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() });
+    // The shield: nothing technical reaches the conversation. The full failure is captured
+    // privately, the Lead Agent gets the complete briefing, and the user gets a calm line.
+    const { captureIncident, markIncidentResolved } = await import("./errorShield.mjs");
+    const incident = await captureIncident({
+      error,
+      owner: conversation.owner,
+      conversationId: conversation.id,
+      service: error?.service || "conversation",
+      agent: "Lead Agent",
+      retryCount: recovery.attempt,
+    });
+
+    const seenBefore = recovery.fingerprints.includes(incident.fingerprint);
+    const canRecover = incident.classification.retryable
+      && !seenBefore
+      && recovery.attempt < MAX_RECOVERY_ATTEMPTS;
+
+    if (canRecover) {
+      // Tell the user plainly that it's being handled — no jargon, no action needed.
+      await emit("recovery", { state: "recovering", message: incident.friendly });
+      await store.appendTurn(conversation, {
+        role: "lead", content: incident.friendly, payload: { recovery: true, reference: incident.reference },
+      }).catch(() => {});
+      await emit("message", { role: "lead", text: incident.friendly });
+
+      // Re-enter the ORIGINAL task with the private briefing available to the Lead Agent.
+      const next = {
+        attempt: recovery.attempt + 1,
+        fingerprints: [...recovery.fingerprints, incident.fingerprint],
+        briefings: [...recovery.briefings, incident.privateBriefing],
+        resolvingIncidentId: incident.id,
+      };
+      const claimed = await store.claimConversationThinking(conversation).catch(() => conversation);
+      await new Promise((resolve) => setTimeout(resolve, 400 * next.attempt));
+      await processConversation(claimed || conversation, {
+        store, runStore, credentialResolver, modelFactory, overviewResolver, recovery: next,
+      });
+      await markIncidentResolved(incident.id, "recovered automatically");
+      return;
+    }
+
+    // Bounded: recovery exhausted, unsafe to retry, or the identical failure returned.
+    await emit("recovery", { state: "failed", reference: incident.reference });
+    await emit("lead_error", {
+      reference: incident.reference,
+      message: incident.unresolvedMessage,
+      code: "recovery_exhausted",
+    });
+    await store.appendTurn(conversation, {
+      role: "lead", content: incident.unresolvedMessage,
+      payload: { failure: true, reference: incident.reference },
+    }).catch(() => {});
+    await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() })
+      .catch(() => {});
   }
 }
 
@@ -352,9 +430,13 @@ function relayRunEvents({ store, runStore, conversation, runId }) {
 
 // ── helpers, recovery ─────────────────────────────────────────────────────────────────────
 
+// Last line of defence: EVERY closing message the user sees is sanitised, including text
+// the model wrote — a technical leak would need two independent failures.
 async function finishWithMessage(store, conversation, text) {
-  await store.appendTurn(conversation, { role: "lead", content: text });
-  await store.appendEvent(conversation, "message", { role: "lead", text });
+  const { sanitizeUserFacingText } = await import("./errorShield.mjs");
+  const safe = sanitizeUserFacingText(text, "That's done — tell me what you'd like next.");
+  await store.appendTurn(conversation, { role: "lead", content: safe });
+  await store.appendEvent(conversation, "message", { role: "lead", text: safe });
   await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() });
 }
 
