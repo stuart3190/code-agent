@@ -64,6 +64,16 @@ test("sanitiser strips every class of internal detail from user-facing text", ()
   // Ordinary product sentences survive untouched.
   assert.equal(sanitizeUserFacingText("Your app is built and the preview is live."),
     "Your app is built and the preview is live.");
+  // Short real answers survive too — a two-letter reply is an answer, not an empty one
+  // (caught in production: "OK" was being replaced by the fallback).
+  assert.equal(sanitizeUserFacingText("OK"), "OK");
+  assert.equal(sanitizeUserFacingText("Yes"), "Yes");
+  // Long helpful prose survives; only unpunctuated machine blobs are replaced.
+  const help = "I've paused here because your allowance is used up and there's no other provider connected. Everything so far is saved. Connect another provider in Settings, raise the limit, or wait for the reset and tell me when to continue.";
+  assert.equal(sanitizeUserFacingText(help), help);
+  assert.equal(sanitizeUserFacingText("x".repeat(400)), "Something needed attention on our side.");
+  // Genuinely empty input still yields the calm fallback.
+  assert.equal(sanitizeUserFacingText("   "), "Something needed attention on our side.");
 });
 
 test("classification separates safe retries from user-actionable and unexpected failures", () => {
