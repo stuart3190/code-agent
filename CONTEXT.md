@@ -63,6 +63,31 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PROVIDER INTELLIGENCE (2026-08-02, PR #105, deployed + VALIDATED ON REAL PROD DATA):
+Auto learns routing from measured builds. `lib/providerIntelligence.mjs`: collectEvidence
+joins ai_requests × diag_runs by build_id (anonymised — owners counted not identified, NO
+prompt text) → buildScorecards byProvider/byModel/byModelTask/byMode with cost per
+VERIFIED build, verification + cancellation rates, avg build duration, repair/retry
+frequency, cache efficiency, samples. rankCandidates = DETERMINISTIC: published WEIGHTS
+{costPerVerified .5, duration .25, verification .25}, min-max normalised, alphabetical
+tie-break → same evidence always same order (dashboard publishes the weights so any
+ranking is re-derivable by hand). explainChoice quotes the REAL measured delta
+("approximately 38% lower average cost", "24% faster with the same verification success").
+MIN_SAMPLES=5 verified builds; below it everything says "Collecting benchmark data." and
+Auto keeps its configured order — statistics are never invented. Confidence Low/Medium/
+High at 5/15/50. recommendModel tries task-family scope then overall then null.
+modelRouting.applyIntelligence promotes a recommended model WITHIN the existing candidate
+set (fallbacks preserved; never invents a candidate) and attaches evidence even when it
+was already first, so Auto explains choices it would have made anyway; createRoutedCodingModel
+looks it up for managed+auto only (injectable `intelligence` for tests). autoStrategy
+surfaces {reason, confidence, samples, learned}. Admin → Provider Intelligence
+(`intelligence` manage view, /api/v1/admin/intelligence, ADMIN_EMAILS-gated): provider +
+model rankings, per-task winners, mode comparison, trend, sample sizes, confidence,
+weights. VALIDATION on live prod (10 evidence rows, 1 owner): gpt-5.6-terra 3 builds /
+66.7% verified / 5.64 cr per verified / 17% cache; gpt-5.6-sol 2 builds / 0% verified /
+75.9% cache; both below the floor → "Collecting benchmark data." + recommendation null.
+That is the system working correctly, NOT a gap. 305 node (11 new) + 28 PW.
+
 PROVIDER QUOTA MANAGEMENT (2026-08-02, PRs #102/#103, deployed + live-proven):
 `lib/providerQuota.mjs` — providerHeadroom (EXACT for managed via plan budget; ESTIMATE
 for BYOK from this month's ai_requests spend vs THRALLO_BYOK_SOFT_CEILING_CREDITS, labelled
