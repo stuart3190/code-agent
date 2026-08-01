@@ -178,7 +178,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user" }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null }) {
   const existing = activeJobFor(owner.id, projectId);
   if (existing) return { job: existing, existing: true };
 
@@ -190,6 +190,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     result: null, buildStderr: null,
     diag,                                  // diagnostics recorder (nullable, never throws)
     trigger,                               // user | autonomous_repair | verification_repair | external | scheduled
+    taskHint,                              // the USER's own words, for task classification
     cancelled: false,
     subscribers: new Set(),
     createdAt: Date.now(), finishedAt: null,
@@ -526,6 +527,10 @@ async function runJob(job) {
     const { scopeForJob, costGuard } = await import("./appBuild/contextScope.mjs");
     const scope = scopeForJob({
       mode, prompt, redesign, trigger: job.trigger || "user",
+      // Classify from the USER's request when we have it: capability wrappers like
+      // "REPAIR MODE — fix ONLY this reported problem" would otherwise make every
+      // conversational edit look like debugging and poison the per-task learning.
+      classifyPrompt: job.taskHint || prompt,
       tree: mode === "iterate" ? tree : null,
     });
     for (const warning of scope.warnings) serverLog(job, `context: WARN ${warning}`);

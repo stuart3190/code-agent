@@ -370,6 +370,7 @@ export async function repairApp(ctx, { issue, productName = null }) {
   });
   const { job } = await createJob({
     owner: { id: ctx.owner }, projectId: project.id, mode: "iterate", prompt,
+    taskHint: String(issue), // classify from the user's words, not the REPAIR MODE wrapper
     diag: diag.recorderForJob({ round: 1 }),
   });
   relayBuildJob(ctx, { job, projectId: project.id, diag });
