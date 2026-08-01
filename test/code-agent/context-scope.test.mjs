@@ -123,9 +123,16 @@ test("identical repair failures stop the loop instead of burning rounds", () => 
   assert.equal(second.kind, "blocked", "same failure twice -> stop, even under the round limit");
   assert.match(second.message, /same failure/i);
   assert.ok(2 < MAX_AUTO_ROUNDS + 1, "stopped before exhausting rounds");
-  // Different failure still repairs.
-  const other = planEndAction({ status: "failed", error: "npm ENOENT" }, { attempt: 2, previousFingerprints: [first.fingerprint] });
-  assert.equal(other.kind, "retry");
+  // Different failure still repairs — the fingerprint guard is specific, not a blanket stop.
+  const other = planEndAction(
+    { status: "complete", result: { buildOk: false, qualityWarnings: ["a completely different check failed"] } },
+    { attempt: 2, previousFingerprints: [first.fingerprint] },
+  );
+  assert.equal(other.kind, "repair");
+  // A crash whose cause would reproduce identically is NOT retried any more: "npm ENOENT"
+  // means a file is genuinely missing, so a second identical run wastes the user's budget.
+  const enoent = planEndAction({ status: "failed", error: "npm ENOENT" }, { attempt: 2, previousFingerprints: [] });
+  assert.equal(enoent.kind, "blocked");
   // Fingerprints normalize ids/numbers so cosmetic differences don't defeat the stop.
   assert.equal(fingerprintFailure(["error at line 14 in build 17e00fd2"]), fingerprintFailure(["error at line 99 in build 5442ed76"]));
   assert.notEqual(fingerprintPrompt("fix A"), fingerprintPrompt("fix B"));
