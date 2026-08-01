@@ -740,6 +740,16 @@ async function stopWithMessage(ctx, lifecycle, { action, attempt, jobId, project
       restored = await restoreCheckpoint(better, {
         client: lifecycle.client, owner: ctx.owner, projectId,
       });
+      if (restored?.restored) {
+        // Outcome evidence, and the one negative signal produced server-side: this build was
+        // bad enough that a previous version had to be put back. The build id is known
+        // directly from the lifecycle, so no lookup is needed.
+        const { signalBuildOutcome } = await import("../buildOutcomes.mjs");
+        signalBuildOutcome({
+          owner: ctx.owner, buildId: lifecycle.diag.id, signal: "rolled_back",
+          client: lifecycle.client,
+        }).catch(() => {});
+      }
     }
   }
 
@@ -1132,6 +1142,12 @@ export async function exportProject(ctx, { productName = null } = {}) {
     const cleaned = stripExportNoise(project.tree);
     const built = buildProjectZip({ ...project, tree: cleaned.files });
     assertNoPlatformSecrets(built.files);
+
+    // Outcome evidence: a user who exports their source has kept the build. Recorded only
+    // after the artifact is proven safe, and never allowed to fail the export.
+    const { signalBuildOutcome } = await import("../buildOutcomes.mjs");
+    signalBuildOutcome({ owner: ctx.owner, projectId: project.id, signal: "exported" }).catch(() => {});
+
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
     await ctx.emit("download_ready", {
       projectId: project.id,
