@@ -80,18 +80,18 @@ test("a single-file compile error retrieves only that file's dependency scope", 
   const entry = inferEntryFile(tree(), stderr);
   assert.equal(entry, "src/components/Header.jsx");
   const scope = scopeForJob({ mode: "iterate", prompt: stderr, trigger: "autonomous_repair", tree: tree() });
-  assert.equal(scope.taskType, "bug_repair");
+  assert.equal(scope.taskType, "debugging");
   assert.ok(scope.files.every((f) => !f.path.includes("Unrelated")), "no unrelated files seeded");
 });
 
 test("task classification and budgets behave and are configurable", () => {
-  assert.equal(classifyTask({ mode: "iterate", prompt: "Change the title text to Hello" }), "simple_edit");
+  assert.equal(classifyTask({ mode: "iterate", prompt: "Change the title text to Hello" }), "quick_edit");
   assert.equal(classifyTask({ mode: "iterate", prompt: "Add a feature: a booking page with a calendar flow" }), "feature");
   assert.equal(classifyTask({ mode: "build", prompt: "anything" }), "full_build");
   assert.equal(classifyTask({ mode: "iterate", prompt: "x", trigger: "verification_repair" }), "verification_repair");
-  assert.ok(taskBudget("simple_edit") < taskBudget("feature"));
+  assert.ok(taskBudget("quick_edit") < taskBudget("feature"));
   process.env.THRALLO_CTX_BUDGET_SIMPLE = "1234";
-  assert.equal(taskBudget("simple_edit"), 1234);
+  assert.equal(taskBudget("quick_edit"), 1234);
   delete process.env.THRALLO_CTX_BUDGET_SIMPLE;
   // Over-budget scope carries an explicit warning instead of silently sending.
   const bigTree = { "src/components/Titlebar.jsx": `titlebar ${"x".repeat(200_000)}` };

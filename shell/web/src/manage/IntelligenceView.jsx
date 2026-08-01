@@ -21,31 +21,73 @@ function Confidence({ level, samples }) {
   );
 }
 
-function ScoreTable({ title, rows }) {
+// One model's measured profile. Everything shown is derived from real builds; a model
+// below the evidence floor says so instead of showing a ranking.
+function ModelRow({ model }) {
+  const t = model.trend;
   return (
-    <>
-      <div className="mg-label">{title}</div>
-      <div className="mg-card" style={{ overflowX: "auto" }}>
-        <table className="mg-table">
-          <thead><tr><th>Model</th><th>Cost / verified build</th><th>Verification</th><th>Avg duration</th><th>Repairs</th><th>Retries</th><th>Cache</th><th>Confidence</th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.key}>
-                <td className="mg-mono">{r.key}</td>
-                <td>{fmtCr(r.costPerVerifiedBuild)}</td>
-                <td>{fmtPct(r.verificationRate)}</td>
-                <td>{fmtMs(r.avgBuildMs)}</td>
-                <td>{r.avgRepairRounds ?? "—"}</td>
-                <td>{r.avgRetries ?? "—"}</td>
-                <td>{fmtPct(r.cacheEfficiency)}</td>
-                <td><Confidence level={r.confidence} samples={r.samples} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && <div className="ct-hint" style={{ padding: 10 }}>Collecting benchmark data.</div>}
+    <div className="mg-card" style={{ background: "var(--surface)", marginBottom: 8 }}>
+      <div className="mg-row" style={{ borderBottom: 0, paddingBottom: 4 }}>
+        <div style={{ minWidth: 0 }}>
+          <span className="mg-mono">{model.model}</span>
+          <div className="ct-hint">
+            {model.builds} verified build{model.builds === 1 ? "" : "s"} · {fmtPct(model.verificationRate)} success ·
+            {" "}{fmtCr(model.costPerVerifiedBuild)} avg · {fmtMs(model.avgBuildMs)} avg
+            {model.taskWinRate != null ? ` · wins ${model.taskWinRate}% of task types (${model.taskWins}/${model.taskContests})` : ""}
+          </div>
+        </div>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+          {model.recommendationScore != null && <span className="ct-model-cost">score {model.recommendationScore}</span>}
+          <Confidence level={model.confidence} samples={model.samples} />
+        </span>
       </div>
-    </>
+      {(model.strengths.length > 0 || model.weaknesses.length > 0) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+          {model.strengths.map((s) => (
+            <span key={s} className="mg-pill"><span className="dot" style={{ background: "var(--good)" }} />{s}</span>
+          ))}
+          {model.weaknesses.map((w) => (
+            <span key={w} className="mg-pill"><span className="dot" style={{ background: "var(--warn)" }} />{w}</span>
+          ))}
+        </div>
+      )}
+      <div className="ct-hint" style={{ marginTop: 6 }}>
+        {model.avgRepairRounds ?? "—"} repairs · {model.avgRetries ?? "—"} retries · {fmtPct(model.cacheEfficiency)} cache ·
+        {" "}{fmtPct(model.cancellationRate)} cancelled
+        {t ? ` · trend: cost ${t.costChangePercent > 0 ? "+" : ""}${t.costChangePercent}%${t.verificationChange != null ? `, verification ${t.verificationChange > 0 ? "+" : ""}${t.verificationChange}pt` : ""} vs earlier window` : " · trend: collecting"}
+      </div>
+    </div>
+  );
+}
+
+// Providers expand to reveal every model they have evidence for. No provider-specific
+// logic lives here — the tree comes from the evidence.
+function ProviderCard({ provider }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mg-card">
+      <button className="mg-row" style={{ width: "100%", textAlign: "left", borderBottom: 0 }}
+        onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <div style={{ minWidth: 0 }}>
+          {provider.provider}
+          <div className="ct-hint">
+            {provider.models.length} model{provider.models.length === 1 ? "" : "s"} ·
+            {" "}{formatNumber(provider.requests)} requests · {provider.builds} verified builds ·
+            {" "}{fmtPct(provider.verificationRate)} success · {fmtCr(provider.costPerVerifiedBuild)} avg
+          </div>
+        </div>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+          <Confidence level={provider.confidence} samples={provider.samples} />
+          <span className="ct-model-chev" aria-hidden="true">{open ? "▾" : "›"}</span>
+        </span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {provider.models.map((m) => <ModelRow key={m.model} model={m} />)}
+          {!provider.models.length && <div className="ct-hint">Collecting benchmark data.</div>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -91,8 +133,9 @@ export default function IntelligenceView() {
         </div>
       </div>
 
-      <ScoreTable title="Model rankings" rows={data.models} />
-      <ScoreTable title="Provider rankings" rows={data.providers} />
+      <div className="mg-label">Providers &amp; models</div>
+      {data.providers.map((p) => <ProviderCard key={p.provider} provider={p} />)}
+      {!data.providers.length && <div className="mg-card"><div className="ct-hint">Collecting benchmark data.</div></div>}
 
       <div className="mg-label">By task type</div>
       <div className="mg-card">
