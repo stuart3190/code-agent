@@ -140,9 +140,16 @@ test("failureEvidence quotes the exact stored output; empty sessions admit the c
   const db = fakeDb();
   const session = await createDiagSession({ owner: OWNER, kind: "app_build", prompt: "x", client: db });
   session.step({ kind: "compiler", label: "npm run build", status: "failed", output: "TS2304: Cannot find name 'Stripe'." });
-  const evidence = session.failureEvidence();
+  // RAW form (Diagnostics/explain/operator only) quotes the exact stored line…
+  const evidence = session.rawFailureEvidence();
   assert.match(evidence, /> TS2304: Cannot find name 'Stripe'\./, "exact line quoted");
   assert.match(evidence, /stored diagnostics/i);
+  // …while the CONVERSATION form names the failing check and points at Diagnostics,
+  // never pasting compiler output (which carries server paths) into the chat.
+  const chat = session.failureEvidence();
+  assert.match(chat, /npm run build/, "names which check failed");
+  assert.doesNotMatch(chat, /TS2304|Cannot find name/, "no raw compiler output in the conversation");
+  assert.match(chat, /Build Diagnostics/i, "points the owner at the advanced surface");
 
   const empty = nullDiagSession();
   assert.match(empty.failureEvidence(), /platform bug/i, "no evidence -> explicit capture-gap statement");
