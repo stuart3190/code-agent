@@ -63,6 +63,30 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+OUTCOME LEARNING (2026-08-02, PRs #111/#112, deployed + VALIDATED ON REAL PROD DATA):
+Auto learns from what users DO, not opinions. `lib/buildOutcomes.mjs` — signal vocabulary
+is a CLOSED validated list (preview_opened/exported/deployed/rolled_back/regenerated); no
+likes/ratings exist or can be added. Most signals DERIVED at read time from durable
+records (follow-up counts from ca_conversation_turns selected as `role, created_at` ONLY —
+content never read; repair cycles from diag_runs; deployment from published_sites;
+acceptance/first-pass/abandonment/editing time). Explicit client events post to
+idempotent owner-scoped POST /api/v1/builds/:id/signal (unique index). userSuccessScore
+0-100 w/ published SUCCESS_WEIGHTS {acceptance .35, completion .25, firstPass .20,
+lowFriction .20}. rankCandidates gains WEIGHTS_WITH_OUTCOMES {userSuccess .45, cost .25,
+duration .15, verification .15} used ONLY when EVERY eligible model has outcome evidence
+(partial → technical weights, never an uneven basis); explainChoice leads with "users
+completed and kept its builds more often" when outcomes drove it. Dashboard shows success
+score, first-pass, follow-ups, repair cycles, export/deploy/rollback/completion/
+abandonment + which weighting ranked. **PR #112 BUG FOUND BY VALIDATING ON REAL DATA:
+follow-ups + last-activity were counted to the END of the conversation, so an early build
+in a long session showed 7.5 follow-ups / 0% acceptance / never settled — every model
+penalised for later unrelated work. A build's window now ends when the NEXT build starts;
+superseded builds settle immediately.** After the fix, real prod: 12 outcome rows, 9
+accepted, 4 first-pass, 2 abandoned, avg 1.08 follow-ups; gpt-5.6-terra user success 79.6
+(44.4% first-pass, 88.9% accept/complete, 11.1% abandon, 1.22 follow-ups, 0.11 repairs);
+gpt-5.6-sol collecting (3). Privacy verified: serialised analytics contain no owner/email/
+prompt. 319 node + 30 PW.
+
 PER-MODEL INTELLIGENCE (2026-08-02, PRs #107/#108/#109, deployed + REAL BUILDS RUN):
 every MODEL is benchmarked, learned per task type. Taxonomy (contextScope.TASK_TYPES,
 ordered pattern list, tested): planning, architecture, frontend, backend, debugging, ui,
