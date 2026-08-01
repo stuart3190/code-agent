@@ -63,6 +63,25 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+USAGE & PLAN PRODUCTION (2026-08-01, PR #86, deployed): customer UsageView redesigned —
+plan+reset, meters w/ 75/90/100% warnings (shared usageWarnings.js, threshold-tested) +
+90% banner, builds-this-month/AI cost (credits + measured £ via
+RECORDED_COST_PER_CREDIT.sonnetUncached), by-provider/agent summary, recent activity w/
+per-build expandable cost-by-agent/model, detailed tables in collapsed Advanced Usage.
+Per-request accounting: `ai_requests` (RLS deny-all; provider/model/agent/token classes/
+duration/exact cost/build+project/timestamp) written by buildDiagnostics session.step —
+which also FIXED a telemetry-shape bug (engine reports input/output, code read
+inputTokens/outputTokens → per-class totals were 0; normalizeTelemetry handles both).
+Admin analytics (`usageInsights.mjs` adminAnalytics, /api/v1/admin/analytics,
+ADMIN_EMAILS-gated 403): AI spend cr+£, monthly revenue from active paid subs
+(THRALLO_*_PRICE_GBP-gated), gross profit, avg per user/build, top builds/users, cost by
+model/agent, daily/weekly/monthly CSS-bar charts; AdminAnalyticsView = manage view
+`analytics`. Security posture: browser can NEVER read these tables (RLS enabled, zero
+policies — advisors confirm), every API path owner-eq'd; usage-security.test.mjs proves
+cross-owner null/404, export purity, admin gate incl. email-less PAT owners, route
+source-guard. Live-proven: own insights 200, cross-id 404, non-admin PAT 403, ai_requests
+recorded from the first post-deploy build.
+
 BUILD DIAGNOSTICS (2026-07-31, PR #83, deployed + live-proven): permanent audit trail for
 every build session under one Build ID — `appBuild/buildDiagnostics.mjs` (diag_runs/
 diag_steps/diag_prefs, migration `build_diagnostics`, service-role only). One diag SESSION
