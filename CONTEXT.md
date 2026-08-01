@@ -63,6 +63,25 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+FIRST REAL GROK BENCHMARK (2026-08-02, PR #117): Grok connected (BYOK, active provider).
+Benchmark now resolves BYOK keys SERVER-SIDE via --owner (decrypts in-process; key never
+printed/logged/written to results) — run on the VPS, never locally. **LIVE PROBING KILLED
+THREE ASSUMPTIONS I had written without a key: grok-build-0.1 REJECTS `reasoning` (400
+invalid-argument — every call failed); `grok-4.5-fast` DOES NOT EXIST ("Model not found",
+an invented name → replaced with grok-4.3 which the account lists); grok-4.5 does accept
+reasoning. The account also exposes grok-4.3 / grok-4.20-* / imagine-* that the catalog
+never had.** Adapter now self-corrects: "does not support parameter X" → strip, retry
+immediately (not against the retry budget), remember per-model; UNKNOWN models attempt
+reasoning optimistically so a new Grok costs one corrected call, not a code change.
+HEAD-TO-HEAD (identical tasks, real engine loop, real local compile verification, all 6
+PASS): edit openai 1792tok/0.179cr/8s vs grok 4217tok/0.088cr/7s; bugfix openai
+1180/0.118/3s vs grok 2584/0.063/5s; component openai 2881/0.288/5s vs grok
+9126/0.171/13s. **Grok 41-51% CHEAPER on every task at equal verified success; OpenAI
+faster on the two harder tasks (component 5s vs 13s). Grok uses 2.4-3.2x more tokens at a
+much lower per-token price.** Real product build on Grok recorded into Provider
+Intelligence: grok-build-0.1 cost/verified 0.2266 cr vs gpt-5.6-terra 1.8817 cr. Ranking
+still "Collecting benchmark data." — Grok has 1 of the 5 builds the floor requires.
+
 XAI CONNECT INCIDENTS (2026-08-02, PRs #114/#115, deployed + prod-verified): TWO separate
 user-reported failures, both real, neither what they looked like.
 (1) "won't accept my Grok API key / something went wrong" → NOT the key. PR #90 shipped the
