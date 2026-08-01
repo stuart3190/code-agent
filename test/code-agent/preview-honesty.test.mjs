@@ -38,8 +38,15 @@ test("show_preview is a registered capability", () => {
 // Runtime honesty gate pieces (per-app backend, 2026-07-31).
 import { backendRuntimeReady, treeUsesBackendSdk, resetBackendRuntimeCacheForTests } from "../../shell/server/lib/appRuntimeStatus.mjs";
 
-test("treeUsesBackendSdk detects the shipped SDK", () => {
-  assert.equal(treeUsesBackendSdk({ "src/lib/backend/index.js": "x" }), true);
+test("treeUsesBackendSdk detects actual SDK USAGE, not the scaffold's shipped files", () => {
+  // The scaffold always includes the SDK files — presence alone must NOT count as usage
+  // (diagnostics 17e00fd2: the Verifier demanded signup from a backend-less app).
+  assert.equal(treeUsesBackendSdk({ "src/lib/backend/index.js": "x", "src/App.jsx": "no backend here" }), false);
+  assert.equal(treeUsesBackendSdk({
+    "src/lib/backend/index.js": "x",
+    "src/App.jsx": 'import { backend } from "./lib/backend/index.js";',
+  }), true);
+  assert.equal(treeUsesBackendSdk({ "src/store.js": 'const b = require("../lib/backend");' }), true);
   assert.equal(treeUsesBackendSdk({ "src/App.jsx": "x" }), false);
 });
 

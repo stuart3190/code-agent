@@ -42,8 +42,15 @@ export async function backendRuntimeReady({ fetchImpl = fetch, force = false } =
   return value;
 }
 
+// True only when APP CODE actually imports the backend SDK. The scaffold always ships the
+// SDK files themselves, so file presence is meaningless — gating on it made the Verifier
+// demand signup flows from explicitly backend-less apps (caught by build diagnostics
+// 17e00fd2 on 2026-07-31: "Signup: no email/password fields found" on a no-account app).
 export function treeUsesBackendSdk(tree) {
-  return !!tree?.["src/lib/backend/index.js"] || !!tree?.["src/lib/backend/supabaseBackend.js"];
+  if (!tree) return false;
+  return Object.entries(tree).some(([path, content]) =>
+    !String(path).startsWith("src/lib/backend/")
+    && /(?:from\s+|require\()\s*["'][^"']*lib\/backend/.test(String(content)));
 }
 
 export function resetBackendRuntimeCacheForTests() {
