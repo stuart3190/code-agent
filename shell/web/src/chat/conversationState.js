@@ -25,6 +25,7 @@ export function emptyConversationView() {
     previewUrl: null,
     thinking: false,    // Lead Agent mid-turn
     waiting: false,     // paused on a business question
+    recovery: null,     // {state: recovering|repairing|verifying|continuing, message}
     lastSeq: 0,
   };
 }
@@ -97,9 +98,24 @@ export function applyEvent(view, event) {
       next.waiting = true;
       next.thinking = false;
       break;
+    // Recovery states: subtle, honest, never technical. "failed" is handled by lead_error.
+    case "recovery":
+      if (payload.state && payload.state !== "failed") {
+        next.recovery = { state: payload.state, message: payload.message || "" };
+      } else {
+        next.recovery = null;
+      }
+      break;
     case "lead_error":
     case "lead_agent_failed":
-      push({ kind: "error", text: payload.error || "Something went wrong." });
+      // The server sends only sanitised copy plus a support reference — never raw errors.
+      push({
+        kind: "failure",
+        text: payload.message
+          || "I couldn't resolve this automatically. Your work is safe and the technical details have been saved for support.",
+        reference: payload.reference || null,
+      });
+      next.recovery = null;
       next.thinking = false;
       break;
     default:

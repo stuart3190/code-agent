@@ -638,6 +638,23 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
       return sendJson(res, 200, await adminAnalytics());
     }
+    // Advanced Diagnostics: the private technical detail behind a support reference.
+    // Owner-scoped by query; admins additionally pass isAdmin for cross-account support.
+    if (p === "/api/v1/diagnostics/incidents" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const { listIncidents } = await import("./lib/errorShield.mjs");
+      return sendJson(res, 200, {
+        incidents: await listIncidents(owner.id, { conversationId: url.searchParams.get("conversation") || null }),
+      });
+    }
+    const incidentMatch = p.match(/^\/api\/v1\/diagnostics\/incidents\/(THR-[0-9A-F]{6})$/i);
+    if (incidentMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const { incidentByReference } = await import("./lib/errorShield.mjs");
+      const incident = await incidentByReference(owner.id, incidentMatch[1]);
+      if (!incident) return sendJson(res, 404, { error: "No technical details found for that reference." });
+      return sendJson(res, 200, { incident });
+    }
     if (p === "/api/v1/diagnostics" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleDiagnosticsList(req, res, { owner, url });

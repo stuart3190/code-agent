@@ -11,7 +11,7 @@ import { client } from "../lib/backend.js";
 import {
   listConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications, deleteConversation,
-  listDeletedConversations, restoreConversation, setPreviewPlan,
+  listDeletedConversations, restoreConversation, setPreviewPlan, incidentDetails,
 } from "../lib/codeAgentApi.js";
 import {
   applyEvent, emptyConversationView, replayEvents, railState,
@@ -295,7 +295,7 @@ function Workspace({ user }) {
         <div className="ct-room">
           <div className="ct-thread-wrap">
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
-              scrollKey={active.id} scrollMemory={scrollMemory} />
+              onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
               <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
                 onChange={changeConversationModel}
@@ -503,7 +503,15 @@ function DeleteConfirm({ project, busy, error, permanent = false, onCancel, onCo
   );
 }
 
-function Thread({ view, pending, onOpenPreview, scrollKey = null, scrollMemory = null }) {
+// Subtle, honest recovery states — informative without alarming or exposing internals.
+const RECOVERY_LABEL = {
+  recovering: "Recovering…",
+  repairing: "Repairing…",
+  verifying: "Verifying…",
+  continuing: "Continuing…",
+};
+
+function Thread({ view, pending, onOpenPreview, onRetry = null, scrollKey = null, scrollMemory = null }) {
   const ref = useRef(null);
   const atBottom = useRef(true);   // follow the stream only while the user is at the bottom
   const restored = useRef(false);
@@ -550,18 +558,26 @@ function Thread({ view, pending, onOpenPreview, scrollKey = null, scrollMemory =
       {view.items.map((item) => {
         const showWho = item.kind !== "message" ? false : item.role === "lead" && lastRole !== "lead";
         if (item.kind === "message") lastRole = item.role; else lastRole = null;
-        return <ThreadItem key={item.seq} item={item} showWho={showWho} onOpenPreview={onOpenPreview}
+        return <ThreadItem key={item.seq} item={item} showWho={showWho} onOpenPreview={onOpenPreview} onRetry={onRetry}
           live={view.thinking || view.roster.some((r) => r.state === "working")} waiting={view.waiting} />;
       })}
       {pending && <div className="ct-msg user"><div className="ct-bubble">{pending}</div></div>}
-      {view.thinking && (
+      {view.recovery && (
+        <div className="ct-msg lead">
+          <div className="ct-recovery" role="status">
+            <span className="ct-recovery-dot" />
+            <span className="ct-thinking">{RECOVERY_LABEL[view.recovery.state] || "Recovering…"}</span>
+          </div>
+        </div>
+      )}
+      {view.thinking && !view.recovery && (
         <div className="ct-msg lead"><div className="ct-bubble pending"><span className="ct-thinking">Thinking…</span></div></div>
       )}
     </div>
   );
 }
 
-function ThreadItem({ item, showWho, onOpenPreview, live = false, waiting = false }) {
+function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false, waiting = false }) {
   if (item.kind === "message") {
     if (item.role === "user") {
       return (
@@ -641,7 +657,57 @@ function ThreadItem({ item, showWho, onOpenPreview, live = false, waiting = fals
   if (item.kind === "error") {
     return <div className="ct-error">Something went wrong: {item.text} — say “try again” and I will.</div>;
   }
+  if (item.kind === "failure") {
+    return <FailureCard item={item} onRetry={onRetry} />;
+  }
   return null;
+}
+
+// Failed recovery: calm sentence, support reference, and actions. Technical detail lives
+// behind an advanced disclosure and is fetched owner-scoped from the server.
+function FailureCard({ item, onRetry }) {
+  const [details, setDetails] = useState(null);
+  const [open, setOpen] = useState(false);
+  const reveal = () => {
+    setOpen((v) => !v);
+    if (!details && item.reference) {
+      incidentDetails(item.reference)
+        .then((r) => setDetails(r.incident))
+        .catch(() => setDetails({ unavailable: true }));
+    }
+  };
+  return (
+    <div className="ct-msg lead">
+      <div className="ct-card ct-failure">
+        <div className="ct-kicker"><span className="ct-kdot" style={{ background: "var(--warn)" }} />Needs a hand</div>
+        <div style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>
+        <div className="ct-actions">
+          {onRetry && <button className="ct-btn" onClick={() => onRetry("Please try that again.")}>Retry</button>}
+          <a className="ct-btn-quiet" style={{ textDecoration: "none", border: "1px solid var(--line)" }}
+            href={`mailto:support@thrallo.com?subject=${encodeURIComponent(`Thrallo support ${item.reference || ""}`)}`}>
+            Contact support
+          </a>
+          {item.reference && (
+            <button className="ct-btn-quiet" onClick={reveal} aria-expanded={open}>
+              {open ? "Hide technical details" : "View technical details"}
+            </button>
+          )}
+        </div>
+        {open && (
+          <div className="ct-failure-tech">
+            {!details && <div className="ct-hint">Loading…</div>}
+            {details?.unavailable && <div className="ct-hint">Those details are no longer available.</div>}
+            {details && !details.unavailable && (
+              <>
+                <div className="ct-hint">{details.service} · {details.code} · {new Date(details.createdAt).toLocaleString()} · {details.retryCount} automatic {details.retryCount === 1 ? "retry" : "retries"}</div>
+                <pre className="mg-mono">{details.message}{details.stack ? `\n\n${details.stack}` : ""}</pre>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function AgentRow({ row, compact }) {

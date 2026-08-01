@@ -277,6 +277,14 @@ button.ct-wordmark:hover { background: var(--surface-2); }
 .ct-recent-btn { font-size: 12.5px; padding: 5px 10px; flex-shrink: 0; }
 .ct-recent-danger:hover { color: var(--bad); }
 
+/* ── recovery + failure surfaces ────────────────────────────────────────────────────────
+ * Calm, never alarming. Technical detail lives behind an advanced disclosure. */
+.ct-recovery { display: inline-flex; align-items: center; gap: 9px; font-size: var(--text-small); color: var(--ink-2); padding: 2px 0; }
+.ct-recovery-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: ct-pulse-anim 1.6s var(--ease-out) infinite; flex-shrink: 0; }
+.ct-failure { border-color: rgba(199, 126, 26, 0.45); }
+.ct-failure-tech { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.ct-failure-tech pre { white-space: pre-wrap; max-height: 34vh; overflow: auto; margin: 8px 0 0; padding: 10px 12px; font-size: 12px; }
+
 /* ── model selector ─────────────────────────────────────────────────────────────────────
  * A quiet pill on Begin and above the composer in conversations. Menu lists only what the
  * user can actually use; switching affects future requests only. */

@@ -87,12 +87,15 @@ test("a business question pauses the conversation on a card", () => {
 });
 
 test("errors surface softly and unknown event types never crash the shell", () => {
+  // Failures now render as a sanitised failure card carrying a support reference — the
+  // raw payload text is never shown (see error-shield.test.mjs for the full contract).
   const view = replayEvents([
-    ev(1, "lead_error", { error: "model unavailable" }),
+    ev(1, "lead_error", { message: "I couldn't resolve this automatically. Your work is safe and the technical details have been saved for support.", reference: "THR-ABC123" }),
     ev(2, "some_future_event", { anything: true }),
   ]);
   assert.equal(view.items.length, 1);
-  assert.equal(view.items[0].kind, "error");
+  assert.equal(view.items[0].kind, "failure");
+  assert.equal(view.items[0].reference, "THR-ABC123");
   assert.equal(view.lastSeq, 2);
 });
 
