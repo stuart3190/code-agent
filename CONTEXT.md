@@ -63,6 +63,28 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PER-MODEL INTELLIGENCE (2026-08-02, PRs #107/#108/#109, deployed + REAL BUILDS RUN):
+every MODEL is benchmarked, learned per task type. Taxonomy (contextScope.TASK_TYPES,
+ordered pattern list, tested): planning, architecture, frontend, backend, debugging, ui,
+refactoring, documentation, full_build, quick_edit (+feature, verification_repair).
+ORDERING MATTERS: quick_edit is tested BEFORE frontend (else "rename the Save button"
+reads as component work) and feature before frontend; ui beats quick_edit for colour/
+spacing. modelProfiles() adds per model: recommendationScore, relative strengths/
+weaknesses derived from METRICS ranking vs peers (never assigned), taskWinRate (share of
+task families ranked #1), trend (recent half of window vs earlier half), collecting flag.
+providerTree() nests models under providers using a provider map LEARNED from evidence →
+new providers/models appear with zero code change. Dashboard: providers expand to
+per-model profiles. **PR #108 BUG FOUND BY RUNNING REAL BUILDS: repair_app wraps the user
+prompt in "REPAIR MODE — fix ONLY this reported problem", so EVERY conversational edit
+classified as debugging and poisoned per-task learning → createJob accepts `taskHint`
+(user's own words) used by scopeForJob for classification while the model still gets the
+full wrapper.** LIVE STATE after ~8 real builds: 17 evidence rows, gpt-5.6-terra 9 builds/
+88.9% verified/1.88cr-per-verified/14s/Low confidence, gpt-5.6-sol 3 builds/0% verified/
+still collecting; task split now includes a distinct `ui` family (classification fix
+proven). Overall ranking still "Collecting benchmark data." because ranking needs ≥2
+models past the floor and ONLY OpenAI is configured — a genuine blocker needing a second
+provider key (Stuart), not a code gap. 310 node + 30 PW.
+
 PROVIDER INTELLIGENCE (2026-08-02, PR #105, deployed + VALIDATED ON REAL PROD DATA):
 Auto learns routing from measured builds. `lib/providerIntelligence.mjs`: collectEvidence
 joins ai_requests × diag_runs by build_id (anonymised — owners counted not identified, NO
