@@ -63,6 +63,19 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+SELECTOR UX PASS (2026-08-01, PR #97, deployed): closed pill = "🤖 Model: Auto ▾" /
+"🤖 provider · model • Mode ▾" (purpose obvious without opening); menu = document.body
+PORTAL (fixed, anchored below pill, z-60 above everything, on-screen clamp, flips above
+near viewport bottom, repositions on scroll/resize, outside-click + Escape close w/ focus
+return); GOTCHA FIXED: portals escape .chat-root and inherit LEGACY BODY tailwind styles
+(text-slate-200 → washed-out names; caught by screenshot review) — any portalled surface
+must restate base text + button reset. Hierarchy: MODEL header, Auto row w/ Recommended
+pill + plain-language explanation + "Why?" expansion (current choice/reason/cost/
+duration/benchmark confidence), provider monogram badges, "Configure X" rows → Settings,
+mode icons/badges, ArrowUp/Down/Left/Enter/Escape keyboard nav. e2e proves portal
+layering (elementFromPoint), anchoring, clamping, outside-click, keyboard;
+selector-shots.spec.mjs (SHOTS=1) for visual review. 275 node + 28 PW.
+
 THREE-LEVEL SELECTOR (2026-08-01, PRs #94/#95, deployed + live-proven): Provider → Model
 → Mode. Adapters self-describe via *ProviderMeta() exports (openAI/anthropic/gemini/xai:
 name, env-synced model list, supportedModes, modeMap) — adding a provider = registering
