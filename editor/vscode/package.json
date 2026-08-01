@@ -2,7 +2,7 @@
   "name": "thrallo",
   "displayName": "Thrallo — Cloud Coding Agents",
   "description": "Launch Thrallo cloud coding agents on your repositories: stream live run timelines, review diffs, approve pull requests, and resume preserved workspaces — without leaving VS Code.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "thrallo",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -37,7 +37,9 @@
     "workspace"
   ],
   "main": "./extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -57,12 +59,31 @@
       ]
     },
     "commands": [
-      { "command": "thrallo.connect", "title": "Thrallo: Connect" },
-      { "command": "thrallo.disconnect", "title": "Thrallo: Disconnect" },
-      { "command": "thrallo.refresh", "title": "Thrallo: Refresh Agents", "icon": "$(refresh)" },
-      { "command": "thrallo.runTask", "title": "Thrallo: Run Agent Task" },
-      { "command": "thrallo.showLatestRun", "title": "Thrallo: Show Latest Run" },
-      { "command": "thrallo.openConversation", "title": "Thrallo: Open Conversation" }
+      {
+        "command": "thrallo.connect",
+        "title": "Thrallo: Connect"
+      },
+      {
+        "command": "thrallo.disconnect",
+        "title": "Thrallo: Disconnect"
+      },
+      {
+        "command": "thrallo.refresh",
+        "title": "Thrallo: Refresh Agents",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "thrallo.runTask",
+        "title": "Thrallo: Run Agent Task"
+      },
+      {
+        "command": "thrallo.showLatestRun",
+        "title": "Thrallo: Show Latest Run"
+      },
+      {
+        "command": "thrallo.openConversation",
+        "title": "Thrallo: Open Conversation"
+      }
     ],
     "walkthroughs": [
       {
@@ -74,33 +95,55 @@
             "id": "thrallo.welcome.connect",
             "title": "Connect to Thrallo",
             "description": "Create an API token in the Thrallo web workspace (Settings → API tokens), then connect.\n[Connect](command:thrallo.connect)",
-            "media": { "markdown": "media/walkthrough/connect.md" },
-            "completionEvents": ["onCommand:thrallo.connect"]
+            "media": {
+              "markdown": "media/walkthrough/connect.md"
+            },
+            "completionEvents": [
+              "onCommand:thrallo.connect"
+            ]
           },
           {
             "id": "thrallo.welcome.run",
             "title": "Run your first agent task",
             "description": "Pick an agent in the Thrallo view and describe a change. The run streams live into the Thrallo output channel.\n[Run a task](command:thrallo.runTask)",
-            "media": { "markdown": "media/walkthrough/run.md" },
-            "completionEvents": ["onCommand:thrallo.runTask"]
+            "media": {
+              "markdown": "media/walkthrough/run.md"
+            },
+            "completionEvents": [
+              "onCommand:thrallo.runTask"
+            ]
           },
           {
             "id": "thrallo.welcome.completions",
             "title": "Enable inline completions",
             "description": "Completions use your Thrallo allowance, so they are opt-in.\n[Open settings](command:workbench.action.openSettings?%22thrallo.completions%22)",
-            "media": { "markdown": "media/walkthrough/completions.md" },
-            "completionEvents": ["onSettingChanged:thrallo.completions.enabled"]
+            "media": {
+              "markdown": "media/walkthrough/completions.md"
+            },
+            "completionEvents": [
+              "onSettingChanged:thrallo.completions.enabled"
+            ]
           }
         ]
       }
     ],
     "menus": {
       "view/title": [
-        { "command": "thrallo.refresh", "when": "view == thralloAgents", "group": "navigation" }
+        {
+          "command": "thrallo.refresh",
+          "when": "view == thralloAgents",
+          "group": "navigation"
+        }
       ],
       "view/item/context": [
-        { "command": "thrallo.runTask", "when": "view == thralloAgents && viewItem == agent" },
-        { "command": "thrallo.showLatestRun", "when": "view == thralloAgents && viewItem == agent" }
+        {
+          "command": "thrallo.runTask",
+          "when": "view == thralloAgents && viewItem == agent"
+        },
+        {
+          "command": "thrallo.showLatestRun",
+          "when": "view == thralloAgents && viewItem == agent"
+        }
       ]
     },
     "configuration": {

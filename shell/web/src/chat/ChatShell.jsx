@@ -267,6 +267,7 @@ function Workspace({ user }) {
         <button className="ct-avatar" title="Settings" onClick={() => setSheetOpen(true)}>{initial}</button>
       </header>
 
+      <DesktopUpdateNotice />
       {active && view.roster.length > 0 && (
         <MobileStrip roster={view.roster} working={workingAgent} build={view.activeBuild} onPreview={() => view.previewUrl && setMobilePreview(true)} />
       )}
@@ -713,6 +714,43 @@ function FailureCard({ item, onRetry }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Desktop staleness notice. The desktop app BUNDLES its own copy of this web bundle, so every
+// web deploy leaves an installed copy behind — the 2026-08-01 audit found the shipped installer
+// five merged PRs out of date with no way for a user to know. There is no auto-updater (the
+// binaries are unsigned, so a silent update would be untrustworthy), so the honest alternative
+// is to say so once, quietly, and link to the download.
+//
+// Web users never see this: it renders only when the desktop host injected a version.
+function DesktopUpdateNotice() {
+  const host = typeof window !== "undefined" ? window.__THRALLO_DESKTOP__ : null;
+  const packaged = host?.version || null;
+  const [latest, setLatest] = useState(null);
+  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem("thrallo-update-dismissed") === "1");
+
+  useEffect(() => {
+    if (!packaged) return;
+    // Fails silent: an offline desktop should say nothing, not show an error.
+    fetch(`${host.server || ""}/api/v1/downloads`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => setLatest(m?.version || null))
+      .catch(() => {});
+  }, [packaged]);
+
+  if (!packaged || !latest || dismissed) return null;
+  // Numeric-aware compare so 0.10.0 is newer than 0.9.0.
+  const newer = String(latest).localeCompare(String(packaged), undefined, { numeric: true }) > 0;
+  if (!newer) return null;
+
+  return (
+    <div className="ct-update-notice" role="status" data-testid="desktop-update-notice">
+      <span>A newer Thrallo Desktop is available ({latest}).</span>
+      <a href={`${host.server || ""}/api/v1/downloads`} target="_blank" rel="noreferrer">Get it</a>
+      <button className="ct-btn-quiet" aria-label="Dismiss"
+        onClick={() => { sessionStorage.setItem("thrallo-update-dismissed", "1"); setDismissed(true); }}>Later</button>
     </div>
   );
 }

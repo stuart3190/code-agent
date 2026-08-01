@@ -110,6 +110,46 @@ export function mergedProduct() {
   return { ...stock, ...productOverrides() };
 }
 
+// The copilot builtin is removed from the checkout (see prepare()), but upstream's ROOT
+// `compile` script still fans out to `compile-copilot`, which npm-runs inside the directory
+// that no longer exists. That made `build.mjs compile` and `dev` fail with ENOENT while
+// `package` kept working, because gulp does not use that script — so the breakage stayed
+// invisible until someone tried a dev build.
+//
+// Idempotent and applied on every build, not just bootstrap: `prepare()` is marker-guarded, so
+// a checkout prepared before this fix existed would otherwise never receive it.
+export function ensureCopilotFreeScripts({ log = () => {} } = {}) {
+  const pkgPath = path.join(CHECKOUT_DIR, "package.json");
+  if (!existsSync(pkgPath)) return false;
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const scripts = pkg.scripts || {};
+  let changed = false;
+
+  for (const [name, value] of Object.entries(scripts)) {
+    if (typeof value !== "string" || !value.includes("compile-copilot")) continue;
+    // Drop just the copilot task from the fan-out, leaving the rest of the script intact.
+    const next = value
+      .split(/\s+/)
+      .filter((token) => token !== "compile-copilot")
+      .join(" ")
+      .trim();
+    scripts[name] = next;
+    changed = true;
+    log(`removed compile-copilot from the "${name}" script`);
+  }
+  if (scripts["compile-copilot"]) {
+    delete scripts["compile-copilot"];
+    changed = true;
+    log("removed the compile-copilot script itself");
+  }
+
+  if (changed) {
+    pkg.scripts = scripts;
+    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, "\t")}\n`);
+  }
+  return changed;
+}
+
 export async function prepare({ log = console.log } = {}) {
   const markerPath = path.join(CHECKOUT_DIR, ".thrallo-prepared");
   const expected = overlayHash();
@@ -150,6 +190,8 @@ export async function prepare({ log = console.log } = {}) {
     writeFileSync(copilotLibPath, copilotLib.replace(shimSignature, shimSignature + guard));
     log("patched build/lib/copilot.ts to tolerate the removed builtin");
   }
+
+  ensureCopilotFreeScripts({ log });
 
   syncBuiltin({ log });
 
