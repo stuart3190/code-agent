@@ -63,6 +63,30 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+SCOPED CONTEXT PIPELINE (2026-08-01, PR #88, deployed): audit-first (scripts/
+measure-context.mjs — offline scripted-provider harness, zero API cost). AUDIT FINDINGS:
+engine NEVER sent whole-project contents (tool-based access; only paths via list_files),
+previews/verification already AI-free, job contexts already fresh; real waste = blind
+discovery turns on edits + unpruned in-job history + 30-turn conversation replay + no
+repair fingerprinting. FIXES: `appBuild/contextScope.mjs` (task classification w/
+env-configurable budgets THRALLO_CTX_BUDGET_*, local entry-file inference from
+prompt/stderr, seeded entry+direct-imports scope w/ budget trim + warnings,
+failure/prompt fingerprints, autonomous cost guard THRALLO_COST_APPROVAL_CREDITS —
+user jobs never blocked); runJob iterate/repair now uses the engine's PROVEN Buildr101
+contextSelection mode (seeded + history pruning). MEASURED: simple edit 3208→1855 tok
+(-42%, 4→2 turns), repair 4215→1855 (-56%), feature 9427→8481 (-10%); builds unchanged.
+Controlled repair loop: planEndAction stops on repeated failure fingerprint (normalized —
+ids/numbers → #), relay refuses identical repair briefs, repairMemory threaded through
+relay+verification; job.trigger recorded (user/autonomous_repair/verification_repair).
+Lead Agent: assembleInput collapses older turns into a deterministic summary block
+(recent 16 full, 6KB/turn cap). Context diagnostics: ai_requests +trigger/run_id/context
+(migration ai_requests_context), /api/v1/diagnostics/:id/requests + Context Inspector in
+DiagnosticsView (token split, seeded files WITH inclusion reasons, warnings). 9 new tests
+(context-scope.test.mjs). REMAINING oversized-risk spots (documented, acceptable): build
+mode's in-job history still append-only (provider prefix caching covers it, ~50% observed),
+lead capability outputs ride within the 12-turn loop, repo-runs use their own indexed
+retrieval.
+
 USAGE & PLAN PRODUCTION (2026-08-01, PR #86, deployed): customer UsageView redesigned —
 plan+reset, meters w/ 75/90/100% warnings (shared usageWarnings.js, threshold-tested) +
 90% banner, builds-this-month/AI cost (credits + measured £ via
