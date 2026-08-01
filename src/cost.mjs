@@ -41,7 +41,7 @@ export function anthropicRatesFor(model) {
 // adapter's exact-cost calculator; these blended rates feed the credit WEIGHT system).
 export const XAI_RATES = {
   "grok-4.5": { label: "grok-4.5 (xAI published rates)", usdPerMInput: 3.0, usdPerMOutput: 15.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
-  "grok-4.5-fast": { label: "grok-4.5-fast (xAI published rates)", usdPerMInput: 0.6, usdPerMOutput: 2.4, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
+  "grok-4.3": { label: "grok-4.3 (xAI published rates)", usdPerMInput: 0.6, usdPerMOutput: 2.4, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
   "grok-build-0.1": { label: "grok-build-0.1 (xAI published rates)", usdPerMInput: 1.2, usdPerMOutput: 6.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
 };
 

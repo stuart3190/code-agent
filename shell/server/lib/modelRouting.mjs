@@ -32,7 +32,7 @@ function xaiCatalogEntries() {
   const entries = [
     model("xai", "quality", optionalEnv("XAI_QUALITY_MODEL", "grok-4.5"), configured),
     model("xai", "balanced", optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1"), configured),
-    model("xai", "fast", optionalEnv("XAI_FAST_MODEL", "grok-4.5-fast"), configured),
+    model("xai", "fast", optionalEnv("XAI_FAST_MODEL", "grok-4.3"), configured),
   ];
   // Admin model allowlist applies to known catalog models; custom env overrides pass through.
   return entries.filter((entry) => !(entry.model in XAI_MODELS) || policy.permittedModels.has(entry.model));
