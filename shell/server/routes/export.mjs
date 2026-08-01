@@ -44,6 +44,13 @@ export async function handleExport(req, res, body, owner) {
     return;
   }
 
+  // Outcome evidence. Export has TWO entry points — this HTTP route and the export_project
+  // capability — and a signal recorded on only one of them would silently under-count. Both
+  // record; the unique (build_id, signal) index makes that safe.
+  import("../lib/buildOutcomes.mjs")
+    .then(({ signalBuildOutcome }) => signalBuildOutcome({ owner: owner.id, projectId, signal: "exported" }))
+    .catch(() => {});
+
   res.writeHead(200, {
     "Content-Type": "application/zip",
     "Content-Disposition": safeContentDisposition(filename),
