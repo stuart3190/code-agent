@@ -33,7 +33,7 @@ const EXPECTED_PROVIDERS = [
   { id: "xai", label: "xAI Grok API" },
 ];
 
-async function openAiSettings(page, { connections = [] } = {}) {
+async function openAiSettings(page, { connections = [], byokSafety = { global: {}, providers: {}, timezone: null } } = {}) {
   await page.addInitScript(([key, session]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
   }, [`sb-${REF}-auth-token`, SESSION]);
@@ -45,6 +45,7 @@ async function openAiSettings(page, { connections = [] } = {}) {
   await page.route("**/api/v1/ai/connections", (r) => r.fulfill({ json: {
     configured: true, activeProvider: "managed", connections,
     models: [], routing: { routingMode: "balanced", allowFallback: true },
+    byokSafety, byokProviders: connections.filter((c) => c.authMode === "api_key").map((c) => c.provider),
   } }));
   await page.route("**/api/v1/ai/evaluations", (r) => r.fulfill({ json: { health: [], evaluations: [] } }));
 
@@ -125,4 +126,105 @@ test("'Configure provider' in the model selector lands on the AI connection scre
   const xaiRow = page.locator(".mg-row", { hasText: "xAI Grok API" });
   await expect(xaiRow).toBeVisible();
   await expect(xaiRow.getByPlaceholder("xai-…")).toBeVisible();
+});
+
+// ── Optional BYOK spending safeguards ───────────────────────────────────────────────────
+// The controls exist server-side and default to disabled; these prove the UI exposes them
+// honestly, saves, edits and removes them, and never surfaces key material.
+
+const CONNECTED_XAI = [{ provider: "xai", authMode: "api_key", hint: "xai-…abcd", status: "connected", metadata: {} }];
+
+test("safeguards are offered per connected BYOK provider and default to Off", async ({ page }) => {
+  await openAiSettings(page, { connections: CONNECTED_XAI });
+  const toggle = page.getByTestId("safeguards-toggle-xai");
+  await expect(toggle).toBeVisible();
+  // Nothing enabled -> no "N on" badge.
+  await expect(page.getByTestId("safeguards-count-xai")).toHaveCount(0);
+  await toggle.click();
+
+  // The explainer must say plainly that Thrallo does not cap BYOK usage.
+  await expect(page.getByTestId("safeguards-explainer-xai")).toContainText(/does not cap usage on your own/i);
+  await expect(page.getByTestId("safeguards-currency-xai")).toContainText(/Thrallo credits/);
+
+  for (const key of ["maxCostPerBuild", "maxDailySpend", "warnThreshold", "approvalThreshold", "maxRepairJobs"]) {
+    const input = page.getByTestId(`safeguard-xai-${key}`);
+    await expect(input, `${key} control is present`).toBeVisible();
+    await expect(input, `${key} defaults to disabled`).toHaveValue("");
+    await expect(input).toHaveAttribute("placeholder", "Off");
+  }
+  // Nothing to save or remove until the user sets something.
+  await expect(page.getByTestId("safeguards-save-xai")).toBeDisabled();
+  await expect(page.getByTestId("safeguards-clear-xai")).toHaveCount(0);
+});
+
+test("safeguards save, and the saved value comes back scoped to that provider", async ({ page }) => {
+  let saved = null;
+  await page.route("**/api/v1/ai/byok-safety", async (route) => {
+    saved = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({ json: {
+      configured: true, activeProvider: "managed", connections: CONNECTED_XAI, models: [],
+      routing: { routingMode: "balanced", allowFallback: true },
+      byokSafety: { global: {}, providers: { xai: { maxDailySpend: 25, maxRepairJobs: 1 } }, timezone: null },
+      byokProviders: ["xai"],
+    } });
+  });
+  await openAiSettings(page, { connections: CONNECTED_XAI });
+  await page.getByTestId("safeguards-toggle-xai").click();
+  await page.getByTestId("safeguard-xai-maxDailySpend").fill("25");
+  await page.getByTestId("safeguard-xai-maxRepairJobs").fill("1");
+  await page.getByTestId("safeguards-save-xai").click();
+
+  await expect.poll(() => saved?.providers?.xai?.maxDailySpend).toBe(25);
+  expect(saved.providers.xai.maxRepairJobs).toBe(1);
+  expect(saved.providers.xai.maxCostPerBuild).toBeNull();
+  // The request carries numbers and nulls only — no key material of any kind.
+  expect(JSON.stringify(saved)).not.toMatch(/xai-|sk-|secret|key/i);
+
+  await expect(page.getByTestId("safeguards-count-xai")).toHaveText("2 on");
+  await expect(page.getByTestId("safeguard-xai-maxDailySpend")).toHaveValue("25");
+});
+
+test("invalid safeguard values are refused before saving, and limits can be removed", async ({ page }) => {
+  let cleared = null;
+  await page.route("**/api/v1/ai/byok-safety", async (route) => {
+    cleared = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({ json: {
+      configured: true, activeProvider: "managed", connections: CONNECTED_XAI, models: [],
+      routing: { routingMode: "balanced", allowFallback: true },
+      byokSafety: { global: {}, providers: {}, timezone: null }, byokProviders: ["xai"],
+    } });
+  });
+  await openAiSettings(page, {
+    connections: CONNECTED_XAI,
+    byokSafety: { global: {}, providers: { xai: { maxDailySpend: 25 } }, timezone: null },
+  });
+  await page.getByTestId("safeguards-toggle-xai").click();
+
+  // A negative value is rejected inline and blocks the save.
+  await page.getByTestId("safeguard-xai-maxCostPerBuild").fill("-5");
+  await expect(page.getByTestId("safeguards-error-xai")).toBeVisible();
+  await expect(page.getByTestId("safeguards-save-xai")).toBeDisabled();
+
+  // Removing every limit is always available once something is set.
+  await page.getByTestId("safeguards-clear-xai").click();
+  await expect.poll(() => cleared?.providers?.xai?.maxDailySpend).toBeNull();
+  await expect(page.getByTestId("safeguards-count-xai")).toHaveCount(0);
+});
+
+test("no key material appears anywhere in the settings responses", async ({ page }) => {
+  const bodies = [];
+  page.on("response", async (response) => {
+    if (!response.url().includes("/api/v1/ai/")) return;
+    bodies.push(await response.text().catch(() => ""));
+  });
+  await openAiSettings(page, {
+    connections: CONNECTED_XAI,
+    byokSafety: { global: { maxCostPerBuild: 5 }, providers: {}, timezone: null },
+  });
+  await page.getByTestId("safeguards-toggle-xai").click();
+  await expect(page.getByTestId("safeguard-xai-maxCostPerBuild")).toHaveValue("5");
+  for (const body of bodies) {
+    // The masked hint (xai-…abcd) is expected; a usable key never is.
+    expect(body).not.toMatch(/xai-[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{8,}|secret_encrypted/);
+  }
 });

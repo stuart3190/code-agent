@@ -15,7 +15,11 @@ import {
   isAutomaticallyRetryable, isProviderBlocked,
 } from "./endState.mjs";
 import { createLifecycleBudget, budgetBlockedMessage } from "./lifecycleBudget.mjs";
-import { createCheckpointStore, restoreCheckpoint } from "./buildCheckpoints.mjs";
+import {
+  createCheckpointStore, restoreCheckpoint, checkpointWriter,
+  loadCheckpointRows, releaseLifecycleCheckpoints,
+} from "./buildCheckpoints.mjs";
+import { dailyByokSpend, dailyVerdict, dailyWarningMessage } from "./byokSpend.mjs";
 import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
 import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
 import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
@@ -265,7 +269,9 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     ]);
     activeProvider = active?.provider || "managed";
     managed = activeProvider === "managed" || activeProvider === "codex" || !active?.secret;
-    byokSafety = normalizeByokSafety(preference?.byok_safety);
+    // Per-provider safeguards override the user's global defaults for the connection this
+    // lifecycle actually runs on.
+    byokSafety = normalizeByokSafety(preference?.byok_safety, { provider: activeProvider });
     allowFallback = preference?.allow_fallback ?? true;
     credentials = list || [];
   } catch { /* an unreadable connection means managed defaults — never a crash */ }
@@ -275,12 +281,21 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     plan = (await ownerSubscription(owner))?.plan || "free";
   } catch { /* free-plan limits are the safe default */ }
 
+  const db = client || serviceClient();
+  // Checkpoints are written through to build_checkpoints so a server restart mid-build no
+  // longer loses the safety net. A lifecycle resuming on an existing project seeds itself
+  // from that project's surviving rows.
+  const seed = await loadCheckpointRows({ client: db, owner, projectId }).catch(() => []);
+
   return {
-    owner, projectId, diag, client: client || serviceClient(),
+    owner, projectId, diag, client: db,
     originalInput,                                   // the COMPLETE original job input
     repairMemory: { fingerprints: [], briefs: [] },  // unchanged semantics, now lifecycle-scoped
     budget: createLifecycleBudget({ plan, mode, redesign, managed }),
-    checkpoints: createCheckpointStore(),
+    checkpoints: createCheckpointStore({
+      seed,
+      persist: checkpointWriter({ client: db, owner, projectId, buildId: diag.id }),
+    }),
     rounds: [],                                      // measured signals, one per round
     plan, managed, byokSafety, allowFallback,
     activeProvider, credentials,
@@ -355,17 +370,43 @@ async function notifyTerminal(ctx, lifecycle, { title, body, url = null }) {
 
 // The gate every follow-up dispatch must pass — aggregate managed budget for managed users,
 // the user's own optional controls for BYOK users (off unless enabled).
-function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
+async function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
   const budgetCheck = lifecycle.budget.canDispatch({ estimatedCredits });
   if (!budgetCheck.ok) return { ok: false, kind: "budget", budgetCheck };
   if (!lifecycle.managed) {
     const totals = lifecycle.budget.totals;
+    // Real rolling daily spend, but ONLY when the user enabled a daily limit — no query,
+    // and no possibility of blocking, when the control is off.
+    let dailySpend = 0;
+    let daily = { enforced: false, blocked: false, warn: false };
+    if (lifecycle.byokSafety.maxDailySpend !== null) {
+      const spend = await dailyByokSpend({
+        client: lifecycle.client, owner: lifecycle.owner,
+        provider: lifecycle.providerOverride || lifecycle.activeProvider,
+        timezone: lifecycle.byokSafety.timezone,
+      });
+      lifecycle.dailySpend = spend;
+      daily = dailyVerdict({
+        spend, limit: lifecycle.byokSafety.maxDailySpend,
+        warnAt: lifecycle.byokSafety.warnThreshold,
+      });
+      // Fail open: unavailable accounting must never cost the user their own paid capacity.
+      dailySpend = daily.enforced ? daily.total : 0;
+      if (!daily.enforced && daily.reason) {
+        lifecycle.diag?.step?.({
+          agent: "Lead Agent", kind: "log", label: "BYOK daily spend unavailable",
+          status: "ok", output: `Daily limit not enforced this round: ${daily.reason}. Continuing rather than blocking the user's own provider account.`,
+        });
+      }
+    }
     const byok = byokDispatchCheck(lifecycle.byokSafety, {
       lifecycleCost: totals.credits,
+      dailySpend,
       repairJobs: totals.repairRounds,
       projectedCost: estimatedCredits,
     });
-    if (!byok.ok) return { ok: false, kind: "byok", byok };
+    if (!byok.ok) return { ok: false, kind: "byok", byok, daily };
+    return { ok: true, budgetCheck, daily };
   }
   return { ok: true, budgetCheck };
 }
@@ -542,7 +583,7 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
         lifecycle.rounds.push(signals);
 
-        const check = dispatchCheck(lifecycle);
+        const check = await dispatchCheck(lifecycle);
         const action = planEndAction(data, {
           attempt,
           previousFingerprints: lifecycle.repairMemory.fingerprints,
@@ -714,6 +755,11 @@ async function stopWithMessage(ctx, lifecycle, { action, attempt, jobId, project
   });
   await ctx.emit("message", { role: "lead", text: body, projectId });
 
+  // Lifecycle over: keep the best checkpoint as the safety net and release the rest now
+  // rather than waiting for the retention sweep.
+  releaseLifecycleCheckpoints({ client: lifecycle.client, owner: ctx.owner, buildId: lifecycle.diag.id })
+    .catch(() => {});
+
   const notified = await notifyTerminal(ctx, lifecycle, {
     title: needsUser ? "Build needs your input" : "Build needs a decision",
     body: needsUser
@@ -751,7 +797,7 @@ async function handleProviderSwitch(ctx, { action, lifecycle, attempt, jobId, pr
 
   // Automatic fallback: switch and continue from the SAME step, keeping the lifecycle
   // budget, repair memory and fingerprints intact — this is not a new build.
-  const check = dispatchCheck(lifecycle);
+  const check = await dispatchCheck(lifecycle);
   if (!check.ok) {
     await stopWithMessage(ctx, lifecycle, {
       action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
@@ -841,7 +887,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   const previous = lifecycle.rounds[previousIndex - 1] || null;
   const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
 
-  const check = dispatchCheck(lifecycle);
+  const check = await dispatchCheck(lifecycle);
   const action = planVerificationAction(verdict, {
     attempt,
     previousFingerprints: lifecycle.repairMemory.fingerprints,

@@ -36,15 +36,82 @@ function positiveOrNull(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function normalizeByokSafety(raw) {
+// Stored shape (ca_ai_preferences.byok_safety), both accepted:
+//   flat   { maxCostPerBuild: 5, ... }                     — global defaults
+//   nested { global: {...}, providers: { openai: {...} }, timezone: "Europe/London" }
+// A provider entry overrides the global default control-by-control, so a user can cap one
+// connection without touching the others.
+export function normalizeByokSafety(raw, { provider = null } = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const global = source.global && typeof source.global === "object" ? source.global : source;
+  const perProvider = provider && source.providers && typeof source.providers === "object"
+    ? source.providers[provider] || {}
+    : {};
   const out = { ...BYOK_SAFETY_DEFAULTS };
-  for (const key of BYOK_CONTROLS) out[key] = positiveOrNull(source[key]);
+  for (const key of BYOK_CONTROLS) {
+    // An explicit provider value wins; `null` there means "off for this provider".
+    out[key] = Object.prototype.hasOwnProperty.call(perProvider, key)
+      ? positiveOrNull(perProvider[key])
+      : positiveOrNull(global[key]);
+  }
+  out.timezone = typeof source.timezone === "string" && source.timezone.trim() ? source.timezone.trim() : null;
   return out;
 }
 
-export function byokControlsEnabled(settings) {
-  const s = normalizeByokSafety(settings);
+// The full settings document, for the Settings UI and its save path.
+export function normalizeByokSafetyDocument(raw, { providers = [] } = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const global = source.global && typeof source.global === "object" ? source.global : source;
+  const document = { global: {}, providers: {}, timezone: null };
+  for (const key of BYOK_CONTROLS) document.global[key] = positiveOrNull(global[key]);
+  const stored = source.providers && typeof source.providers === "object" ? source.providers : {};
+  for (const provider of new Set([...providers, ...Object.keys(stored)])) {
+    const entry = stored[provider];
+    if (!entry || typeof entry !== "object") continue;
+    const normalized = {};
+    let any = false;
+    for (const key of BYOK_CONTROLS) {
+      if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+      normalized[key] = positiveOrNull(entry[key]);
+      any = true;
+    }
+    if (any) document.providers[provider] = normalized;
+  }
+  if (typeof source.timezone === "string" && source.timezone.trim()) document.timezone = source.timezone.trim();
+  return document;
+}
+
+// Validation for the save path: numbers must be positive and finite, or null to disable.
+export function validateByokSafetyInput(input) {
+  const errors = [];
+  const check = (scope, entry) => {
+    if (!entry || typeof entry !== "object") return;
+    for (const [key, value] of Object.entries(entry)) {
+      if (!BYOK_CONTROLS.includes(key)) { errors.push(`${scope}: unknown control "${key}"`); continue; }
+      if (value === null || value === "" || value === undefined) continue; // disabling is always valid
+      const n = Number(value);
+      if (!Number.isFinite(n)) { errors.push(`${scope}: ${key} must be a number`); continue; }
+      if (n <= 0) errors.push(`${scope}: ${key} must be greater than zero (leave it empty to turn it off)`);
+      if (key === "maxRepairJobs" && n !== Math.floor(n)) errors.push(`${scope}: ${key} must be a whole number`);
+    }
+  };
+  const source = input && typeof input === "object" ? input : {};
+  // A flat document is treated as the global defaults, but the document-level keys are not
+  // controls — reading them as controls rejected every valid `{ timezone }`-only save.
+  const flat = Object.fromEntries(
+    Object.entries(source).filter(([key]) => !["global", "providers", "timezone"].includes(key)),
+  );
+  check("global", source.global && typeof source.global === "object" ? source.global : flat);
+  for (const [provider, entry] of Object.entries(source.providers || {})) check(provider, entry);
+  if (source.timezone != null && source.timezone !== "") {
+    try { new Intl.DateTimeFormat("en-US", { timeZone: String(source.timezone) }); }
+    catch { errors.push("timezone: not a recognised time zone"); }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+export function byokControlsEnabled(settings, { provider = null } = {}) {
+  const s = normalizeByokSafety(settings, { provider });
   return BYOK_CONTROLS.some((key) => s[key] !== null);
 }
 

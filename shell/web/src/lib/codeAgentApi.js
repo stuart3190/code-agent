@@ -184,6 +184,11 @@ export const disconnectAiProvider = (provider) => request("/api/v1/ai/disconnect
 export const updateAiRouting = (body) => request("/api/v1/ai/routing", {
   method: "POST", body: JSON.stringify(body),
 });
+// Optional BYOK spending safeguards. Numbers and nulls only — no key material is ever sent
+// or returned by this endpoint.
+export const saveByokSafety = (body) => request("/api/v1/ai/byok-safety", {
+  method: "POST", body: JSON.stringify(body),
+});
 export const aiEvaluations = () => request("/api/v1/ai/evaluations");
 export const runAiEvaluation = (body) => request("/api/v1/ai/evaluations", {
   method: "POST", body: JSON.stringify(body),

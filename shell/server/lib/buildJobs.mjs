@@ -452,6 +452,7 @@ async function runJob(job) {
     // stays server-side (never in any frame, never logged). Otherwise: Thrallo managed OpenAI.
     const buildContext = await resolveBuildContext(owner.id, { preferProvider: job.providerOverride });
     const byok = buildContext.byok;
+    job.diag?.setByok?.(byok); // stamps ai_requests so BYOK spend is separable from managed
     const providerConfig = { provider: buildContext.providerLabel, strong: buildContext.strongModel };
     const buildProvider = buildContext.buildProvider;
 
