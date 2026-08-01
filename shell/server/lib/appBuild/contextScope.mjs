@@ -118,8 +118,8 @@ export function inferEntryFile(tree, text) {
 
 // ── The scope decision for a job ────────────────────────────────────────────────────────
 
-export function scopeForJob({ mode, prompt = "", redesign = false, trigger = "user", tree = null, systemPromptChars = 0 }) {
-  const taskType = classifyTask({ mode, prompt, redesign, trigger });
+export function scopeForJob({ mode, prompt = "", redesign = false, trigger = "user", tree = null, systemPromptChars = 0, classifyPrompt = null }) {
+  const taskType = classifyTask({ mode, prompt: classifyPrompt || prompt, redesign, trigger });
   const budgetTokens = taskBudget(taskType);
   const scope = {
     taskType, budgetTokens, trigger,

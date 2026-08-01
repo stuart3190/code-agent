@@ -170,3 +170,20 @@ test("cost guard blocks pathological autonomous requests but never user ones", (
   const small = costGuard({ estContextTokens: 2_000, model: "gpt-5.6-sol", trigger: "autonomous_repair" });
   assert.equal(small.blocked, false);
 });
+
+test("task classification uses the user's words, not a capability wrapper", () => {
+  const wrapper = [
+    'REPAIR MODE — fix ONLY this reported problem in the existing app "DiagProof":',
+    "rename the New quote button label to Next",
+    "Hard rules: preserve the existing design, layout, colours, branding, UX...",
+  ].join("\n");
+  // The wrapper alone reads as debugging…
+  assert.equal(classifyTask({ mode: "iterate", prompt: wrapper }), "debugging");
+  // …but the scope classifies from the user's own request when it is supplied.
+  const scope = scopeForJob({
+    mode: "iterate", prompt: wrapper,
+    classifyPrompt: "rename the New quote button label to Next",
+    tree: { "src/Header.jsx": "export default function Header(){return <button>New quote</button>}" },
+  });
+  assert.equal(scope.taskType, "quick_edit", "per-task learning sees the real task");
+});
