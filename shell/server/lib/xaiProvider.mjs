@@ -28,8 +28,11 @@ export const XAI_MODELS = {
     reasoning: true, tools: true, structuredOutputs: true,
     rateLimit: { rpm: 480, tpm: 2_000_000 },
   },
-  "grok-4.5-fast": {
-    label: "Grok 4.5 Fast", tier: "fast",
+  // Verified against a live account 2026-08-02: grok-4.3 exists, grok-4.5-fast does NOT
+  // (it was an assumed name and is gone). Capability flags below are probed truths, not
+  // guesses — and the adapter self-corrects anyway if an API disagrees.
+  "grok-4.3": {
+    label: "Grok 4.3", tier: "fast",
     contextLimit: 131_072, longContextThreshold: 128_000,
     usdPerMInput: 0.6, usdPerMCachedInput: 0.15, usdPerMOutput: 2.4,
     usdPerMInputLong: 1.2, usdPerMOutputLong: 4.8,
@@ -41,11 +44,25 @@ export const XAI_MODELS = {
     contextLimit: 262_144, longContextThreshold: 128_000,
     usdPerMInput: 1.2, usdPerMCachedInput: 0.3, usdPerMOutput: 6.0,
     usdPerMInputLong: 2.4, usdPerMOutputLong: 12.0,
-    reasoning: true, tools: true, structuredOutputs: true,
+    // Probed: this model REJECTS the reasoning parameter (400 invalid-argument).
+    reasoning: false, tools: true, structuredOutputs: true,
     rateLimit: { rpm: 300, tpm: 1_000_000 },
     preview: true, // may not be enabled on every account — discovery filters it
   },
 };
+
+// Models proven at runtime to reject `reasoning`, so a wrong catalog entry (or a brand
+// new model) costs one failed call once, not every call forever.
+const NO_REASONING = new Set();
+
+// Known models honour their probed capability flag. Unknown ones (a brand-new Grok)
+// attempt reasoning optimistically — the transport strips it permanently if rejected,
+// so a model we've never seen costs at most one corrected call.
+function supportsReasoning(model) {
+  if (NO_REASONING.has(model)) return false;
+  const meta = xaiModelMeta(model);
+  return meta ? meta.reasoning !== false : true;
+}
 
 export function xaiModelMeta(model) {
   return XAI_MODELS[model] || null;
@@ -157,9 +174,16 @@ const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 // ── Shared transport: one POST to /responses with retries, timeout, cancellation ────────
 
+// A 400 telling us a parameter is unsupported is a CAPABILITY fact, not a failure: drop
+// the parameter, remember it for this model, and retry immediately.
+function unsupportedParameter(error) {
+  return /does not support parameter\s+(\w+)/i.exec(String(error?.message || ""))?.[1] || null;
+}
+
 async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, maxRetries }) {
   let lastError;
   let retries = 0;
+  if (body?.model && NO_REASONING.has(body.model)) delete body.reasoning;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     if (signal?.aborted) {
       const error = new Error("xAI request cancelled.");
@@ -177,6 +201,15 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
       });
       if (!response.ok) {
         const error = normalizeXaiError(await safeJson(response), response.status);
+        // Self-correcting capability discovery: strip the rejected parameter and retry
+        // immediately (this attempt doesn't count against the retry budget).
+        const unsupported = unsupportedParameter(error);
+        if (unsupported && unsupported in body) {
+          if (unsupported === "reasoning" && body.model) NO_REASONING.add(body.model);
+          delete body[unsupported];
+          attempt -= 1;
+          continue;
+        }
         if (RETRYABLE_STATUS.has(response.status) && attempt < maxRetries) {
           lastError = error;
           retries += 1;
@@ -254,7 +287,7 @@ export function createXaiProvider({
         apiKey: key, fetchImpl, signal, timeoutMs, maxRetries,
         body: {
           model, instructions, input, tools,
-          ...(xaiModelMeta(model)?.reasoning ? { reasoning: { effort } } : {}),
+          ...(supportsReasoning(model) ? { reasoning: { effort } } : {}),
           parallel_tool_calls: false,
           store: false,
         },
@@ -309,7 +342,7 @@ export function createXaiEngineProvider({
         tools: tools?.length ? tools.map((t) => ({
           type: "function", name: t.name, description: t.description, parameters: t.parameters, strict: false,
         })) : undefined,
-        ...(xaiModelMeta(model)?.reasoning ? { reasoning: { effort } } : {}),
+        ...(supportsReasoning(model) ? { reasoning: { effort } } : {}),
         parallel_tool_calls: false,
         store: false,
       },

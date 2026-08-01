@@ -36,7 +36,7 @@ test("model catalog carries full metadata and provider inference maps grok -> xa
   assert.equal(providerForModel("grok-4.5"), "xai");
   assert.equal(resolveModelSelection("xai:grok-4.5").provider, "xai");
   assert.equal(resolveModelSelection("grok-build-0.1").provider, "xai");
-  assert.ok(modelWeight("grok-4.5") > modelWeight("grok-4.5-fast"), "weights follow pricing");
+  assert.ok(modelWeight("grok-4.5") > modelWeight("grok-4.3"), "weights follow pricing");
   assert.ok(creditsForUsage({ usage: { input: 10_000, output: 1_000, cached: 0, total: 11_000 }, model: "grok-4.5" }) > 0);
 });
 
@@ -62,7 +62,7 @@ test("exact cost: cached tokens use the cached rate; long-context pricing kicks 
 test("admin policy: enable/disable, per-agent gating, model allowlist, reasoning by task", () => {
   const env = { THRALLO_XAI_ENABLED: "0" };
   assert.equal(xaiPolicy(env).enabled, false);
-  const scoped = xaiPolicy({ THRALLO_XAI_AGENTS: "edit,repair", THRALLO_XAI_MODELS: "grok-4.5-fast" });
+  const scoped = xaiPolicy({ THRALLO_XAI_AGENTS: "edit,repair", THRALLO_XAI_MODELS: "grok-4.3" });
   assert.equal(xaiEligibleForAgent("edit", scoped), true);
   assert.equal(xaiEligibleForAgent("build", scoped), false, "admin disabled Grok for builds");
   assert.equal(scoped.permittedModels.has("grok-4.5"), false);
@@ -162,13 +162,13 @@ test("engine seam: tool calls round-trip and reasoning effort is attached for ca
       }),
     };
   };
-  const engine = createXaiEngineProvider({ apiKey: "xai-k-000000000000000000", model: "grok-build-0.1", reasoningEffort: "low", fetchImpl: capture });
+  const engine = createXaiEngineProvider({ apiKey: "xai-k-000000000000000000", model: "grok-4.5", reasoningEffort: "low", fetchImpl: capture });
   const turn = await engine.runTurn({ systemPrompt: "s", messages: [{ role: "user", content: "hi" }], tools: [{ name: "write_file", description: "d", parameters: {} }] });
   assert.equal(turn.toolCalls[0].name, "write_file");
   assert.equal(turn.toolCalls[0].arguments.path, "a.js");
   assert.equal(sentBody.reasoning.effort, "low");
   assert.equal(sentBody.store, false, "never stored provider-side");
-  assert.equal(sentBody.model, "grok-build-0.1");
+  assert.equal(sentBody.model, "grok-4.5");
 });
 
 test("xAI keys never reach the browser, logs, or generated apps (source guards)", async () => {
@@ -217,4 +217,37 @@ test("every application provider is permitted by the database constraints", asyn
     assert.match(credentialConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_credentials constraint`);
     assert.match(preferenceConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_preferences constraint`);
   }
+});
+
+test("the adapter self-corrects when a model rejects a parameter it was told to send", async () => {
+  // grok-build-0.1 rejects `reasoning` (probed live 2026-08-02). A wrong catalog flag —
+  // or a brand new model — must cost one failed call, not every call forever.
+  const seen = [];
+  let calls = 0;
+  const fetchImpl = async (_url, options) => {
+    calls += 1;
+    const body = JSON.parse(options.body);
+    seen.push(Object.keys(body).includes("reasoning"));
+    if (body.reasoning) {
+      return { ok: false, status: 400, json: async () => ({ code: "invalid-argument", error: { message: "Model probe-model does not support parameter reasoning." } }) };
+    }
+    return { ok: true, json: async () => ({ output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }], usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 } }) };
+  };
+  const provider = createXaiProvider({ apiKey: "xai-k-000000000000000000", model: "probe-model", reasoningEffort: "high", fetchImpl });
+  const first = await provider.turn({ instructions: "i", input: [], tools: [] });
+  assert.equal(first.text, "ok", "recovered on the same call");
+  assert.deepEqual(seen, [true, false], "sent reasoning, then retried without it");
+
+  // The lesson is remembered: the next call skips the doomed attempt entirely.
+  const before = calls;
+  await provider.turn({ instructions: "i", input: [], tools: [] });
+  assert.equal(calls - before, 1, "no wasted request second time around");
+});
+
+test("the catalog only lists models proven to exist on a live account", () => {
+  // grok-4.5-fast was an assumed name and does not exist (probed live: "Model not found").
+  assert.equal("grok-4.5-fast" in XAI_MODELS, false);
+  assert.ok("grok-4.5" in XAI_MODELS && "grok-build-0.1" in XAI_MODELS && "grok-4.3" in XAI_MODELS);
+  assert.equal(XAI_MODELS["grok-build-0.1"].reasoning, false, "probed: rejects reasoning");
+  assert.equal(XAI_MODELS["grok-4.5"].reasoning, true, "probed: accepts reasoning");
 });
