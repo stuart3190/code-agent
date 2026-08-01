@@ -104,6 +104,7 @@ function Workspace({ user }) {
   const [manageView, setManageView] = useState(null); // null | repos | usage | ops
   const [deleting, setDeleting] = useState(null);     // { project, busy, error, permanent } | null
   const [deletedItems, setDeletedItems] = useState([]); // Recently Deleted (7-day recovery)
+  const [sheetSection, setSheetSection] = useState(null); // deep-link target inside Settings
   const [modelPref, setModelPref] = useState(() => localStorage.getItem(MODEL_PREF_KEY) || "auto");
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
@@ -274,7 +275,7 @@ function Workspace({ user }) {
         <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
-          onOpenSettings={() => setSheetOpen(true)}
+          onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
           onContinue={(id) => {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
@@ -299,7 +300,7 @@ function Workspace({ user }) {
             <div className="ct-model-dock">
               <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
                 onChange={changeConversationModel}
-                onOpenSettings={() => setSheetOpen(true)} />
+                onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }} />
             </div>
             <Composer onSend={send} waiting={view.waiting} thinking={view.thinking}
               context={wsContextOn ? wsContext : null} onDismissContext={() => setWsContextOn(false)} />
@@ -330,7 +331,7 @@ function Workspace({ user }) {
 
       <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`} aria-hidden="true"
         onClick={() => { setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null); }} />
-      <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} onClose={() => setSheetOpen(false)}
+      <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} initialSection={sheetSection} onClose={() => { setSheetOpen(false); setSheetSection(null); }}
         onOpenView={(v) => { setSheetOpen(false); setManageView(v); }} />
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
@@ -815,11 +816,14 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your teamâ
 
 // The ONE settings experience: quick rows, with drill-in sections for the plumbing that
 // is technically required to live here (secrets never enter the conversation).
-function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView }) {
+function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView, initialSection = null }) {
   const [usage, setUsage] = useState(null);
   const [section, setSection] = useState(null); // null | ai | tokens | downloads
   useEffect(() => { if (open) usageSummary().then(setUsage).catch(() => setUsage(null)); }, [open]);
-  useEffect(() => { if (!open) setSection(null); }, [open]);
+  // Opening with a section (e.g. "Configure xAI" in the model selector) lands the user
+  // directly on that screen â€” arriving at the settings root with no mention of the
+  // provider they asked to configure reads as "the provider disappeared".
+  useEffect(() => { setSection(open ? initialSection : null); }, [open, initialSection]);
 
   if (section) {
     const Section = section === "ai" ? AiSettings : section === "tokens" ? TokensSettings : DownloadsSettings;
