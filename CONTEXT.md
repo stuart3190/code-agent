@@ -63,6 +63,33 @@ presentation only, enforcement stays off; ignored for non-owners. /api/v1/usage 
 returns plan/budgets too (pre-existing gap fixed). Live-proven: staff PAT shows
 ownerAccount:true/unlimited:true, preview round-trips, non-listed accounts get 403.
 
+PERSISTENT CHECKPOINTS + BYOK CONTROLS + DAILY SPEND (2026-08-01, PR #121, merged +
+deployed + prod-verified): closes the three limitations left open by #119/#120.
+(1) build_checkpoints table — the ring was in-memory and died with the process. Checkpoints
+write through (expires_at stamped at write, default 48h via THRALLO_CHECKPOINT_RETENTION_HOURS),
+a resuming lifecycle SEEDS from surviving rows, and boot-time recoverInterruptedLifecycles()
+restores last-known-good when an interrupted build left the project worse. Hourly sweep +
+releaseLifecycleCheckpoints() keeps only the BEST row when a lifecycle ends. scrubTree() drops
+.env/.pem/key files and redacts inline secret assignments BEFORE anything is stored.
+**RLS on + ZERO policies + revoke from anon/authenticated — verified in prod:
+rls_enabled=true, policy_count=0, authenticated/anon SELECT=false, service_role=true.**
+Deliberately NOT ca_checkpoints (repo-agent pipeline); a test enforces the separation.
+(2) BYOK "Optional spending safeguards" UI under each connected BYOK provider in Settings →
+AI connection. Schema now supports {global, providers:{<id>:{...}}, timezone}; a provider
+value overrides the global default control-by-control, an explicit null turns one off for
+that provider only. ALL still default to disabled and the copy states plainly that Thrallo
+does not cap a key the user owns. Saves via POST /api/v1/ai/byok-safety (numbers + nulls
+ONLY — no key material in or out).
+(3) ai_requests.byok flag (set from buildContext) makes rolling daily BYOK spend real:
+dailyByokSpend() sums CHARGED byok rows in a UTC day (or the user's IANA zone), excluding
+managed usage, other tenants, other days and null/zero-cost rows; a provider switch keeps
+per-provider totals separate so nothing is double-counted. **Fails OPEN** when accounting is
+unavailable — never block a user's own paid capacity over a telemetry hiccup.
+Bug found + fixed en route: validateByokSafetyInput rejected a flat document containing only
+a timezone because it read document-level keys as controls.
+388 node + 46 Playwright green (43 new in test/code-agent/checkpoint-persistence.test.mjs +
+e2e/provider-settings.spec.mjs).
+
 REPAIR-PIPELINE HARDENING (2026-08-01, PR #119, merged + deployed + prod-verified):
 **ROOT CAUSE of four confirmed defects: `planEndAction` inferred retry eligibility from job
 `status` alone, so EVERY non-complete job became a blind paid retry.** (1) `cancelJob`
