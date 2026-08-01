@@ -128,6 +128,11 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     }, { onConflict: "project_id" });
     if (upsertError) console.error(`[publish] record failed: ${upsertError.message}`);
 
+    // Outcome evidence: a site that went live is the strongest signal a build was kept.
+    // Recorded after the site is actually serving, and never allowed to fail the publish.
+    const { signalBuildOutcome } = await import("../buildOutcomes.mjs");
+    signalBuildOutcome({ owner: ctx.owner, projectId: project.id, signal: "deployed" }).catch(() => {});
+
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
     await ctx.emit("published", { url: out.url, slug: out.id, projectId: project.id });
     notifyOwner(ctx.owner, {

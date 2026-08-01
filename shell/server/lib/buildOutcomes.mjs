@@ -31,6 +31,54 @@ export async function recordBuildSignal({ buildId, owner, signal, client = null 
   return { signal, buildId };
 }
 
+// ── Trusted server-side producers ───────────────────────────────────────────────────────
+//
+// The signals above existed with NO producer: the endpoint and writer worked, but nothing ever
+// posted one, so outcome learning and the User Success Score were permanently inert — surfaced
+// by scripts/feature-health.mjs on 2026-08-01 ("outcome learning signals: NEVER").
+//
+// These emit only from events that ALREADY happen server-side, where the outcome is a fact
+// rather than an inference: a project was exported, a site went live, a checkpoint was restored.
+// Nothing observes user behaviour, so there is no telemetry beacon and no new privacy surface.
+//
+// `preview_opened` is deliberately NOT produced — it would require client-side behaviour
+// tracking and a separate product decision.
+
+// A signal belongs to a BUILD (a diag run). Producers know the project, so this resolves the
+// most recent build for it — owner-scoped, so one owner can never attribute a signal to
+// another's build.
+export async function latestBuildIdForProject(owner, projectId, client = null) {
+  if (!owner || !projectId) return null;
+  const db = client || serviceClient();
+  const { data, error } = await db.from("diag_runs")
+    .select("id")
+    .eq("owner", owner)
+    .eq("project_id", String(projectId))
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[outcomes] build lookup:", error.message);
+    return null;
+  }
+  return data?.id || null;
+}
+
+// Fire-and-forget by contract. An outcome signal is bookkeeping: it must never fail an export,
+// a deploy or a restore, and it must never delay the user's result. Deduplication is enforced
+// by the unique index on (build_id, signal), so repeating an action records one signal.
+export async function signalBuildOutcome({ owner, projectId = null, buildId = null, signal, client = null }) {
+  try {
+    const id = buildId || await latestBuildIdForProject(owner, projectId, client);
+    if (!id) return { recorded: false, reason: "no_build" };
+    await recordBuildSignal({ buildId: id, owner, signal, client });
+    return { recorded: true, buildId: id, signal };
+  } catch (error) {
+    console.error(`[outcomes] ${signal} signal skipped:`, error.message);
+    return { recorded: false, reason: "error" };
+  }
+}
+
 // ── Derivation ──────────────────────────────────────────────────────────────────────────
 
 const ABANDON_AFTER_MS = 30 * 60_000; // no further activity for 30 min after a build ends
