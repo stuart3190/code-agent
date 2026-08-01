@@ -196,7 +196,8 @@ export async function createDiagSession({ owner, projectId = null, conversationI
   }).eq("id", session.id));
 
   // The exact stored output behind the most recent failures — quoted, never paraphrased.
-  session.failureEvidence = () => {
+  // RAW form (for Diagnostics / the explain endpoint / operator logs only).
+  session.rawFailureEvidence = () => {
     if (!session.failures.length) {
       return "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.";
     }
@@ -206,6 +207,20 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       ...latest.map((f) => `${f.label}:\n${f.excerpt.split("\n").map((l) => `> ${l}`).join("\n")}`),
       "The complete raw logs are in the Diagnostics view.",
     ].join("\n\n");
+  };
+
+  // CONVERSATION form: names which check failed and points at Diagnostics for the exact
+  // output. Compiler/test text is never pasted into the chat (it carries server paths and
+  // internals) — it stays in the owner-only Advanced Diagnostics surface.
+  session.failureEvidence = () => {
+    if (!session.failures.length) {
+      return "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.";
+    }
+    const labels = [...new Set(session.failures.slice(-3).map((f) => f.label))];
+    return [
+      `What failed: ${labels.join(", ")}.`,
+      `The exact output is saved with this build — open Build Diagnostics (${session.id.slice(0, 8)}) to read it or ask me to explain it.`,
+    ].join(" ");
   };
 
   // Per-job recorder handed to buildJobs.runJob (job.diag). Buffers this job's terminal
@@ -247,6 +262,7 @@ export function nullDiagSession() {
   return {
     id: null, step: noop, repairDispatched: noop, setPlan: noop, setModel: noop, finish: noop,
     failureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
+    rawFailureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     recorderForJob: () => ({ sessionId: null, setModel: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),
   };
 }
