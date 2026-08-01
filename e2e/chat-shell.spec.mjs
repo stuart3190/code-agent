@@ -634,7 +634,9 @@ test("Stop build: contextual control, reaches the mounted cancel route, dispatch
   await expect(page.getByText("Build me a booking system")).toBeVisible();
 
   // Present while the team is working — and addressed to the running job.
-  const stop = page.getByTestId("cancel-build");
+  // Both layouts render the control (rail on desktop, roster strip on mobile) and CSS shows
+  // exactly one; target the visible instance so the test is layout-agnostic.
+  const stop = page.getByTestId("cancel-build").locator("visible=true");
   await expect(stop).toBeVisible();
   await stop.click();
 

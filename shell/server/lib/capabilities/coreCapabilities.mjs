@@ -7,7 +7,7 @@ import { codeAgentStore } from "../codeAgentStore.mjs";
 import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild, showPreview, repairApp } from "../appBuild/appBuildService.mjs";
+import { startAppBuild, showPreview, repairApp, exportProject } from "../appBuild/appBuildService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
@@ -104,6 +104,20 @@ export function registerCoreCapabilities() {
     requirements: () => (publishConfigured() ? { ok: true } : { ok: false, reason: "Preview infrastructure is not configured." }),
     async invoke(ctx, input) {
       return showPreview(ctx, { productName: input.productName || null });
+    },
+  });
+
+  registerCapability({
+    id: "export_project",
+    specialist: "Publisher",
+    statusText: "Packaging the source…",
+    description: "Give the user a downloadable ZIP of their app's complete source code, ready to run anywhere without Thrallo. Use when they ask to export, download, or 'get the code'. The package excludes dependencies, build output and every secret — it is their code, not the platform's configuration.",
+    costProfile: "free",
+    inputSchema: strings({
+      productName: optionalStr("Which product to export, when the conversation has several"),
+    }),
+    async invoke(ctx, input) {
+      return exportProject(ctx, { productName: input.productName || null });
     },
   });
 

@@ -33,27 +33,15 @@ export function checkpointRetentionHours() {
 // Nothing secret may enter a checkpoint payload. The SAVED tree is already env-free by
 // construction (withRuntimeEnv only decorates the RUNTIME copy), but a checkpoint is a new
 // durable copy of user code, so it is scrubbed explicitly rather than by assumption.
-const SECRET_PATH = /(^|\/)\.env(\.|$)|(^|\/)\.npmrc$|(^|\/)(secrets?|credentials?)\.(json|ya?ml|txt)$|\.pem$|\.key$/i;
-const SECRET_LINE = /\b(api[_-]?key|secret[_-]?key|access[_-]?token|service[_-]?role|password|client[_-]?secret|private[_-]?key|bearer)\b\s*[:=]/i;
+//
+// The rules are shared with the export artifact (lib/secretScrub.mjs). They used to be two
+// independent filters, which meant a marker added for one path silently did not protect the
+// other. Imported rather than bare re-exported because this module CALLS scrubTree itself:
+// `export { x } from "..."` creates no local binding, so a bare re-export compiles cleanly and
+// then throws "scrubTree is not defined" at the first checkpoint.
+import { scrubTree } from "../secretScrub.mjs";
 
-export function scrubTree(tree) {
-  if (!tree) return null;
-  const out = {};
-  let removed = 0;
-  for (const [path, contents] of Object.entries(tree)) {
-    if (SECRET_PATH.test(path)) { removed += 1; continue; }
-    if (typeof contents === "string" && SECRET_LINE.test(contents)) {
-      // Redact the offending assignments rather than dropping the user's file.
-      out[path] = contents.split("\n")
-        .map((line) => (SECRET_LINE.test(line) ? line.replace(/([:=]\s*).*$/, "$1[redacted]") : line))
-        .join("\n");
-      removed += 1;
-      continue;
-    }
-    out[path] = contents;
-  }
-  return { tree: out, redacted: removed };
-}
+export { scrubTree };
 
 export function markForState({ compileOk = null, previewOk = null, verificationPassed = null } = {}) {
   if (verificationPassed === true) return "verification-passed";

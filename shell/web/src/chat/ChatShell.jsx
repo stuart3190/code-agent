@@ -268,7 +268,7 @@ function Workspace({ user }) {
       </header>
 
       {active && view.roster.length > 0 && (
-        <MobileStrip roster={view.roster} working={workingAgent} onPreview={() => view.previewUrl && setMobilePreview(true)} />
+        <MobileStrip roster={view.roster} working={workingAgent} build={view.activeBuild} onPreview={() => view.previewUrl && setMobilePreview(true)} />
       )}
 
       {!active ? (
@@ -723,7 +723,7 @@ function FailureCard({ item, onRetry }) {
 // This is the user-facing half of the cancellation pipeline. The classification work that makes
 // a cancelled build stop cleanly (no repair, no retry, no further spend) shipped in #119, but
 // its HTTP route had been unmounted since #53, so until now there was no way to trigger it.
-function CancelBuild({ build, working }) {
+function CancelBuild({ build, working, compact = false }) {
   const [state, setState] = useState("idle"); // idle | cancelling | done
   useEffect(() => { setState("idle"); }, [build?.jobId]);
   if (!build?.jobId || !working || state === "done") return null;
@@ -741,7 +741,7 @@ function CancelBuild({ build, working }) {
   };
 
   return (
-    <button className="ct-btn-quiet ct-cancel-build" data-testid="cancel-build"
+    <button className={`ct-btn-quiet ct-cancel-build${compact ? " compact" : ""}`} data-testid="cancel-build"
       disabled={state === "cancelling"} onClick={stop}
       title="Stop this build. Your current progress is saved.">
       {state === "cancelling" ? "Stopping…" : "Stop build"}
@@ -783,7 +783,7 @@ function PreviewPane({ url, onPublish, bare = false }) {
   );
 }
 
-function MobileStrip({ roster, working, onPreview }) {
+function MobileStrip({ roster, working, onPreview, build }) {
   return (
     <div className="ct-strip" style={{ marginTop: 62 }} onClick={onPreview}>
       {roster.slice(0, 5).map((r) => {
@@ -796,6 +796,11 @@ function MobileStrip({ roster, working, onPreview }) {
       })}
       <span className="ct-strip-status">
         {working ? `${working.agent} — ${working.status}` : "The team is with you."}
+      </span>
+      {/* The team rail is desktop-only, so without this a phone user cannot stop a build at all.
+          Mobile is first-class; the control belongs wherever the roster is shown. */}
+      <span onClick={(e) => e.stopPropagation()}>
+        <CancelBuild build={build} working={Boolean(working)} compact />
       </span>
     </div>
   );

@@ -28,6 +28,7 @@ const MUST_BE_MOUNTED = new Set([
   "codeAgent.mjs",
   "conversations.mjs",
   "diagnostics.mjs",
+  "export.mjs",           // restored 2026-08-01 (PR 4) — unmounted by the same #53 sweep
   "githubApp.mjs",
   "previewDomainCheck.mjs",
   "subscription.mjs",
@@ -45,7 +46,6 @@ const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
   "connectors.mjs": "Buildr101 connector hub; superseded by the Capability Registry",
   "domains.mjs": "legacy custom-domain management; Thrallo serves its own ask-gate via previewDomainCheck.mjs",
   "environments.mjs": "Buildr101 environments/releases; not part of the Thrallo product surface",
-  "export.mjs": "PENDING PR 4 — export is being restored as a capability; unmounted only until then",
   "features.mjs": "Buildr101 feature-flag matrix; Thrallo gates on plan + capability requirements",
   "foundation.mjs": "Buildr101 project secrets/releases/environments",
   "generate.mjs": "legacy synchronous generate endpoint; superseded by the app_build capability",
