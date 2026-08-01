@@ -187,3 +187,34 @@ test("xAI keys never reach the browser, logs, or generated apps (source guards)"
   assert.ok(reads.length > 0);
   for (const q of reads) assert.match(q, /eq\("owner"/, "credential queries are owner-scoped");
 });
+
+test("every application provider is permitted by the database constraints", async () => {
+  // A provider added in code but missing from the schema's CHECK constraints fails at
+  // INSERT with an opaque 500 — exactly what happened to xai (PR #90 shipped the adapter,
+  // the constraints still listed only the original providers). This guard keeps the
+  // migrations in step with the application's provider list.
+  const { readFile, readdir } = await import("node:fs/promises");
+  const dir = fileURLToPath(new URL("../../supabase/migrations", import.meta.url));
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
+  let credentialConstraint = null;
+  let preferenceConstraint = null;
+  for (const file of files) {
+    const sql = await readFile(`${dir}/${file}`, "utf8");
+    for (const match of sql.matchAll(/ca_ai_credentials_provider_check[\s\S]*?check \(([^;]*?)\);/gi)) {
+      credentialConstraint = match[1];
+    }
+    for (const match of sql.matchAll(/ca_ai_preferences_active_provider_check[\s\S]*?check \(([^;]*?)\);/gi)) {
+      preferenceConstraint = match[1];
+    }
+  }
+  assert.ok(credentialConstraint, "credential provider constraint found in migrations");
+  assert.ok(preferenceConstraint, "preference provider constraint found in migrations");
+  const { default: credStoreSource } = { default: await readFile(fileURLToPath(new URL("../../shell/server/lib/aiCredentialStore.mjs", import.meta.url)), "utf8") };
+  const appProviders = /const API_KEY_PROVIDERS = new Set\(\[([^\]]+)\]\)/.exec(credStoreSource)[1]
+    .split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean);
+  assert.ok(appProviders.includes("xai"), "xai is an application provider");
+  for (const provider of appProviders) {
+    assert.match(credentialConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_credentials constraint`);
+    assert.match(preferenceConstraint, new RegExp(`'${provider}'`), `${provider} allowed by ca_ai_preferences constraint`);
+  }
+});
