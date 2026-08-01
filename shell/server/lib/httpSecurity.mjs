@@ -90,11 +90,15 @@ export function applySecurityHeaders(res) {
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
-    "script-src 'self' 'unsafe-inline' https://connect.facebook.net",
+    // No third-party script or connect origins: the Meta pixel was a Buildr101 marketing
+    // dependency that Thrallo never carried over — the landing page contains zero Facebook
+    // references, so allowing connect.facebook.net / www.facebook.com only widened the policy.
+    "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob: https:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.facebook.com",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    // buildr101 preview/app origins stay until Phase 24 confirms nothing embeds them.
     "frame-src https://*.preview.thrallo.com https://*.app.thrallo.com https://*.preview.buildr101.com https://*.app.buildr101.com http://localhost:* http://127.0.0.1:*",
     "form-action 'self' https://checkout.stripe.com",
   ].join("; "));

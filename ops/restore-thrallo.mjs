@@ -60,6 +60,16 @@ export const RESTORE_ORDER = [
   "app_users",
   "app_auth_events",
   "app_password_resets",
+  // Diagnostics + telemetry, restored last: diag_steps references diag_runs, and both
+  // build_checkpoints and ai_requests carry project/build ids, so they follow projects
+  // and build_jobs above.
+  "diag_runs",
+  "diag_steps",
+  "diag_incidents",
+  "diag_prefs",
+  "ai_requests",
+  "build_signals",
+  "build_checkpoints",
 ];
 
 const BATCH = 500;
