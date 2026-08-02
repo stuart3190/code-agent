@@ -164,7 +164,7 @@ test("the current plan cannot be repurchased from the pricing page", async ({ pa
   await stub(page, PRO);
   await page.goto("/pricing");
   const proCard = page.locator(".ct-pricecard").filter({ hasText: "Pro" });
-  await expect(proCard.getByRole("button", { name: "Your plan" })).toBeDisabled();
+  await expect(proCard.getByRole("button", { name: "Current Plan" })).toBeDisabled();
   // Moving down is offered, and named honestly.
   await expect(page.locator(".ct-pricecard").filter({ hasText: "Starter" })
     .getByRole("button", { name: "Downgrade" })).toBeEnabled();
@@ -235,4 +235,120 @@ test("an overdue payment says so plainly and points at the fix", async ({ page }
   const billing = page.locator(".ct-set-group").filter({ hasText: "Billing" });
   await expect(billing).toContainText("Payment overdue");
   await expect(billing).toContainText("Update your card");
+});
+
+// ── Pricing page polish ─────────────────────────────────────────────────────────────────
+
+const STARTER_SUB = { plan: "starter", planName: "Starter", status: "active", stripeManaged: true, currentPeriodEnd: "2026-09-01T00:00:00Z", pendingPlan: null, pendingPlanName: null, pendingPlanAt: null, overrides: {} };
+
+test("the pricing page states the current plan up front", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/pricing");
+  await expect(page.locator(".ct-pricing-current")).toContainText("Current Plan: Free");
+});
+
+test("Pro is marked Most Popular and visually accented", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/pricing");
+  const pro = page.locator(".ct-pricecard").filter({ hasText: "Pro" });
+  await expect(pro.locator(".ct-pricecard-badge")).toHaveText("Most Popular");
+  await expect(pro).toHaveClass(/featured/);
+  // Only one plan is highlighted, or the accent means nothing.
+  await expect(page.locator(".ct-pricecard.featured")).toHaveCount(1);
+});
+
+test("a Starter subscriber is offered Upgrade on Pro and cannot rebuy Starter", async ({ page }) => {
+  await stub(page, STARTER_SUB);
+  await page.goto("/pricing");
+  await expect(page.locator(".ct-pricing-current")).toContainText("Current Plan: Starter");
+
+  const starter = page.locator(".ct-pricecard").filter({ hasText: "Starter" });
+  const pro = page.locator(".ct-pricecard").filter({ hasText: "Pro" });
+  await expect(starter.getByRole("button", { name: "Current Plan" })).toBeDisabled();
+  await expect(pro.getByRole("button", { name: "Upgrade" })).toBeEnabled();
+});
+
+test("a Pro subscriber is offered Downgrade on Starter and cannot rebuy Pro", async ({ page }) => {
+  await stub(page, PRO);
+  await page.goto("/pricing");
+  const starter = page.locator(".ct-pricecard").filter({ hasText: "Starter" });
+  const pro = page.locator(".ct-pricecard").filter({ hasText: "Pro" });
+  await expect(pro.getByRole("button", { name: "Current Plan" })).toBeDisabled();
+  await expect(starter.getByRole("button", { name: "Downgrade" })).toBeEnabled();
+});
+
+test("the comparison table lists all three limits for both plans", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/pricing");
+  const table = page.locator(".ct-compare-table");
+  await expect(table.locator("thead th")).toHaveCount(3);           // label + 2 plans
+  for (const row of ["Builds per month", "Managed AI tokens", "Sandbox compute"]) {
+    await expect(table.locator("tbody tr").filter({ hasText: row })).toHaveCount(1);
+  }
+  const builds = table.locator("tbody tr").filter({ hasText: "Builds per month" });
+  await expect(builds.locator("td").nth(0)).toHaveText("200");
+  await expect(builds.locator("td").nth(1)).toHaveText("1,000");
+});
+
+test("a scheduled downgrade is explained on the pricing page, without a redundant upgrade prompt", async ({ page }) => {
+  await stub(page, PRO_DOWNGRADING);
+  await page.goto("/pricing");
+  const banner = page.locator(".ct-planbar.info");
+  await expect(banner).toContainText("Starter");
+  await expect(banner).toContainText("1 September");
+  await expect(banner.getByRole("button", { name: "Keep Current Plan" })).toBeVisible();
+});
+
+test("the Free upgrade prompt does not appear on the pricing page itself", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/pricing");
+  await expect(page.locator(".ct-pricecard")).toHaveCount(2);
+  // Pointing "Upgrade Now" at the page you are already on is noise.
+  await expect(page.locator(".ct-planbar")).toHaveCount(0);
+});
+
+// ── Post-payment success screen ─────────────────────────────────────────────────────────
+
+test("returning from Stripe confirms activation, the plan and the new limits", async ({ page }) => {
+  await stub(page, STARTER_SUB);
+  await page.goto("/?billing=success");
+
+  await expect(page.getByText("Subscription activated")).toBeVisible();
+  await expect(page.locator(".ct-success")).toContainText("Starter");
+  await expect(page.locator(".ct-success")).toContainText("£19 a month");
+  const limits = page.locator(".ct-success-limits");
+  await expect(limits).toContainText("200");
+  await expect(limits).toContainText("20M");
+  await expect(limits).toContainText("30h");
+
+  await page.getByRole("button", { name: "Return to dashboard" }).click();
+  await expect(page.locator(".ct-begin")).toBeVisible();
+  // The query string is cleared, so a refresh does not replay the confirmation.
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("the success screen waits for the webhook rather than reporting Free", async ({ page }) => {
+  // Stripe redirects the instant the card clears; the webhook lands a beat later. The first reads
+  // still say Free — showing that to someone who has just paid is the worst possible moment.
+  let reads = 0;
+  await stub(page, FREE);
+  // Registered AFTER stub(), because Playwright matches the LAST-registered route first.
+  await page.route("**/api/v1/billing", (r) => {
+    reads += 1;
+    return r.fulfill({ json: billingPayload(reads < 3 ? FREE : STARTER_SUB) });
+  });
+  await page.goto("/?billing=success");
+
+  await expect(page.getByText("Confirming your payment…")).toBeVisible();
+  await expect(page.getByText("Subscription activated")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".ct-success")).toContainText("Starter");
+});
+
+test("an abandoned checkout lands on the dashboard with the URL cleaned up", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/?billing=cancelled");
+  await expect(page.locator(".ct-begin")).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  // The Free banner is still the right thing to show — they did not buy anything.
+  await expect(page.locator(".ct-planbar")).toBeVisible();
 });

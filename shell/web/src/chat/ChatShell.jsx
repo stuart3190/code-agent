@@ -21,6 +21,7 @@ import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
 import BillingSettings from "../billing/BillingSettings.jsx";
+import SuccessView from "../billing/SuccessView.jsx";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
@@ -116,6 +117,11 @@ function Workspace({ user }) {
   // Thrallo has one screen, so routing is one path rather than a router dependency. /pricing is a
   // real URL because it is shareable and gets linked to; everything else stays at "/".
   const [path, setPath] = useState(() => window.location.pathname);
+  // Stripe returns the customer to /?billing=success or /?billing=cancelled. Held in state rather
+  // than read from the URL on every render, so returning to the dashboard clears it for good.
+  const [billingReturn, setBillingReturn] = useState(
+    () => new URLSearchParams(window.location.search).get("billing") || null,
+  );
   const planState = usePlanState();
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
@@ -249,14 +255,28 @@ function Workspace({ user }) {
 
   // Back/forward must work on a real URL, so the browser stays the source of truth.
   const navigate = useCallback((next) => {
-    if (window.location.pathname !== next) window.history.pushState({}, "", next);
-    setPath(next);
+    // Compared against pathname AND search: Stripe returns to "/?billing=success", whose pathname
+    // is already "/", so comparing the path alone would leave the query in place and replay the
+    // success screen on the next refresh.
+    if (window.location.pathname + window.location.search !== next) {
+      window.history.pushState({}, "", next);
+    }
+    setPath(window.location.pathname);
   }, []);
   useEffect(() => {
     const onPop = () => setPath(window.location.pathname);
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  // An abandoned checkout needs no screen of its own — the dashboard is the right place to land.
+  // The parameter is cleared so a refresh does not look like a second abandonment.
+  useEffect(() => {
+    if (billingReturn === "cancelled") {
+      window.history.replaceState({}, "", "/");
+      setBillingReturn(null);
+    }
+  }, [billingReturn]);
 
   // Home never interrupts anything — builds run entirely server-side; the stream is simply
   // closed here and resumed (with `after`) when the conversation reopens.
@@ -293,7 +313,9 @@ function Workspace({ user }) {
         <MobileStrip roster={view.roster} working={workingAgent} build={view.activeBuild} onPreview={() => view.previewUrl && setMobilePreview(true)} />
       )}
 
-      {path === "/pricing" ? (
+      {billingReturn === "success" ? (
+        <SuccessView onDone={() => { setBillingReturn(null); planState.refresh(); goHome(); }} />
+      ) : path === "/pricing" ? (
         <PricingView planState={planState} onBack={goHome} />
       ) : !active ? (
         <div className="ct-dash">
