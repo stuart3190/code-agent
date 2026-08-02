@@ -25,6 +25,7 @@ import SuccessView from "../billing/SuccessView.jsx";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
 import ProjectSettings from "../publish/ProjectSettings.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
+import AnalyticsView from "../publish/AnalyticsView.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
 import {
@@ -137,6 +138,7 @@ function Workspace({ user }) {
   const [justPublished, setJustPublished] = useState(null);
   const [projectSettings, setProjectSettings] = useState(null);
   const [unpublishing, setUnpublishing] = useState(null); // { conversation, site, busy, error }
+  const [analyticsFor, setAnalyticsFor] = useState(null);
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -372,6 +374,7 @@ function Workspace({ user }) {
             onPublishUpdate={publishUpdateFor}
             onUnpublish={(c) => setUnpublishing({ conversation: c, site: c.site, busy: false, error: "" })}
             onProjectSettings={(c) => setProjectSettings(c.site)}
+            onAnalytics={(c) => setAnalyticsFor(c.site)}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -466,6 +469,10 @@ function Workspace({ user }) {
             }
           }} />
       )}
+      {analyticsFor && (
+        <AnalyticsView site={analyticsFor} onClose={() => setAnalyticsFor(null)}
+          onUpgrade={() => { setAnalyticsFor(null); navigate("/pricing"); }} />
+      )}
       {projectSettings && (
         <ProjectSettings site={projectSettings} onClose={() => setProjectSettings(null)}
           onSentence={(text) => { setProjectSettings(null); send(text); }} />
@@ -524,7 +531,7 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {} }) {
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {} }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -546,7 +553,7 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   // In-progress projects are always shown; the rest are capped so the dashboard stays scannable.
   const shown = [...active, ...rest].filter((c) => inTab.matches(statusOf(c)));
   const groups = groupProjects(shown);
-  const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings };
+  const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics };
   // Selecting a tab that empties out (the last published project is unpublished, say) would leave
   // the user staring at nothing they asked for. Fall back to All rather than an empty screen.
   useEffect(() => {
@@ -628,7 +635,7 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   );
 }
 
-function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings }) {
+function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics }) {
   const s = projectState(c);
   const status = statusOf(c);
   const site = c.site || null;
@@ -651,7 +658,8 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
           <ProjectPublishRow site={site} status={status}
             onPublishUpdate={() => onPublishUpdate(c)}
             onUnpublish={() => onUnpublish(c)}
-            onSettings={() => onProjectSettings(c)} />
+            onSettings={() => onProjectSettings(c)}
+            onAnalytics={() => onAnalytics(c)} />
         )}
       </span>
       <span className="ct-popen">Open</span>

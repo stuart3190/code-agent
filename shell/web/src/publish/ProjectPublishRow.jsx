@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { STATUS, displayUrl, relativeTime } from "./publishLifecycle.js";
 
-export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings }) {
+export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings, onAnalytics }) {
   const [copied, setCopied] = useState(false);
   if (!site) return null;
 
@@ -59,6 +59,7 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
           {offline ? "Publish Again" : "Publish Update"}
         </button>
         {!offline && <button className="ct-pubrow-btn" onClick={act(onUnpublish)}>Unpublish</button>}
+        <button className="ct-pubrow-btn" onClick={act(onAnalytics)}>Analytics</button>
         <button className="ct-pubrow-btn" onClick={act(onSettings)}>Project Settings</button>
       </div>
     </div>
