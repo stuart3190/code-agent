@@ -728,3 +728,39 @@ div.ct-model-row { cursor: pointer; }
   font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--ink-3);
 }
+
+/* ── Analytics ───────────────────────────────────────────────────────────────────────────
+   Charts are inline SVG; a charting dependency would cost more than a trend line is worth. */
+.ct-analytics { width: min(720px, 96vw); }
+.ct-metrics { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin: 12px 0; }
+.ct-metrics > div { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 14px; }
+.ct-metrics .v { display: block; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+.ct-metrics .k { display: block; font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+
+.ct-chart { width: 100%; }
+.ct-chart svg { width: 100%; height: 96px; display: block; overflow: visible; }
+.ct-chart-line { fill: none; stroke: var(--accent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.ct-chart-fill { fill: var(--accent-soft); stroke: none; }
+.ct-chart-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); margin-top: 4px; }
+
+.ct-rank-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.ct-rank { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 14px; margin-bottom: 12px; }
+.ct-rank-row { position: relative; display: flex; justify-content: space-between; gap: 10px; padding: 5px 6px; font-size: 12.5px; border-radius: 6px; }
+.ct-rank-bar { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); border-radius: 6px; }
+.ct-rank-key { position: relative; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-rank-n { position: relative; font-variant-numeric: tabular-nums; color: var(--ink-2); flex-shrink: 0; }
+
+.ct-vitals { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+.ct-vital { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; text-align: center; }
+.ct-vital .v { display: block; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ct-vital .k { display: block; font-size: 11px; color: var(--ink-3); margin-top: 2px; letter-spacing: 0.04em; }
+.ct-vital.band-good { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.ct-vital.band-good .v { color: var(--good); }
+.ct-vital.band-warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.ct-vital.band-warn .v { color: var(--warn); }
+.ct-vital.band-bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.ct-vital.band-bad .v { color: var(--bad); }
+
+.ct-livedot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--good); margin-left: auto; }
+.ct-livedot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); animation: ct-pulse-anim 1.6s var(--ease-out) infinite; }
+.ct-linkish { color: var(--accent); font-weight: 600; text-decoration: underline; background: none; padding: 0; font-size: inherit; }

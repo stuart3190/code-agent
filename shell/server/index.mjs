@@ -75,6 +75,11 @@ import {
   handleDomainAdd, handleCustomDomainRemove, handleDomainRetry, handleDomainVerify, handleDomainsList,
 } from "./routes/customDomains.mjs";
 import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
+import {
+  handleAnalyticsCollect, handleAnalyticsPreflight, handleAnalyticsOverview,
+  handleAnalyticsLive, handleDeploymentHistory,
+} from "./routes/thralloAnalytics.mjs";
+import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
@@ -751,6 +756,28 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
       return await handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
     }
+    // The analytics beacon: public by necessity — it is called by every visitor to every published
+    // site, on hostnames Thrallo does not control. The project is resolved from the app id
+    // server-side, so a forged body cannot write into someone else's project.
+    if (p === "/api/analytics/collect") {
+      if (method === "OPTIONS") return await handleAnalyticsPreflight(req, res);
+      if (method === "POST") {
+        const raw = await readBody(req, BODY_LIMITS.standard);
+        return await handleAnalyticsCollect(req, res, raw, clientIp(req));
+      }
+    }
+    const analyticsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/analytics(\/live)?$/i);
+    if (analyticsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return analyticsMatch[2]
+        ? await handleAnalyticsLive(req, res, owner, analyticsMatch[1])
+        : await handleAnalyticsOverview(req, res, owner, analyticsMatch[1], url);
+    }
+    const deploymentsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/deployments$/i);
+    if (deploymentsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDeploymentHistory(req, res, owner, deploymentsMatch[1]);
+    }
     const domainsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/domains(\/verify|\/retry|\/remove)?$/i);
     if (domainsMatch) {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -884,6 +911,9 @@ server.listen(PORT, HOST, () => {
   startRetentionSweeper();
   // DNS propagates on its own schedule; without this a user would have to sit pressing Retry.
   startDomainVerifier();
+  // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
+  // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.
+  startAnalyticsRollup();
   startDeletedProjectSweeper();
   startDiagnosticsSweeper();
   startAutomationSweeper();
@@ -902,6 +932,7 @@ async function shutdown(signal) {
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
   stopDomainVerifier();
+  stopAnalyticsRollup();
   stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();

@@ -272,3 +272,11 @@ export const retryDomain = (projectId, domain) =>
   request(`/api/v1/projects/${projectId}/domains/retry`, { method: "POST", body: JSON.stringify({ domain }) });
 export const removeDomain = (projectId, domain) =>
   request(`/api/v1/projects/${projectId}/domains/remove`, { method: "POST", body: JSON.stringify({ domain }) });
+
+// Thrallo Analytics (owner-scoped reads; the public beacon is posted by published sites).
+export const projectAnalytics = (projectId, days = 30) =>
+  request(`/api/v1/projects/${projectId}/analytics?days=${days}`);
+export const projectAnalyticsLive = (projectId) =>
+  request(`/api/v1/projects/${projectId}/analytics/live`);
+export const projectDeployments = (projectId) =>
+  request(`/api/v1/projects/${projectId}/deployments`);

@@ -47,6 +47,30 @@ async function readDistAsBase64(dir, base = "") {
   return files;
 }
 
+// Analytics is added to the artifact at publish time rather than built into the app, so it stays
+// current without the user rebuilding, and so an exported project carries none of it.
+//
+// The script is written into the site itself rather than loaded from Thrallo: same-origin means no
+// third-party request on someone else's site, no dependency on our CDN being up for their page to
+// render, and nothing for a tracker blocker to recognise as third-party.
+async function withAnalytics(files, appId) {
+  const { analyticsScript, injectAnalytics, ANALYTICS_SCRIPT_PATH } = await import("../analytics/clientScript.mjs");
+  const origin = optionalEnv("THRALLO_APP_ORIGIN", "https://app.thrallo.com").replace(/\/$/, "");
+  const out = { ...files };
+
+  out[ANALYTICS_SCRIPT_PATH.replace(/^\//, "")] = Buffer.from(
+    analyticsScript({ endpoint: `${origin}/api/analytics/collect`, appId }), "utf8",
+  ).toString("base64");
+
+  for (const [name, encoded] of Object.entries(files)) {
+    if (!name.endsWith(".html")) continue;
+    const html = Buffer.from(encoded, "base64").toString("utf8");
+    const injected = injectAnalytics(html);
+    if (injected !== html) out[name] = Buffer.from(injected, "utf8").toString("base64");
+  }
+  return out;
+}
+
 // Friendly, unique slug: the requested/site name first, else the project name. Collisions —
 // including labels the shared publish root already holds for the frozen Buildr sites — get
 // a numeric suffix rather than an error the user has to solve.
@@ -118,7 +142,9 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     }
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Uploading to the edge…" });
-    const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    const built = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    // The slug is the app id analytics reports under, and it is already claimed by this point.
+    const files = slug ? await withAnalytics(built, slug) : built;
     const out = await provisiond("/publish", { body: { projectId: project.id, files, slug: slug || undefined } });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Going live…" });
