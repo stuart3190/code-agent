@@ -502,3 +502,48 @@ div.ct-model-row { cursor: pointer; }
 }
 .ct-pricecard-cta { margin-top: auto; width: 100%; }
 .ct-pricing-foot { color: var(--ink-2); font-size: 12.5px; line-height: 1.6; margin-top: 22px; }
+
+/* Current plan, stated before the cards so the visitor never has to infer it. */
+.ct-pricing-current { font-size: var(--text-small); color: var(--ink-2); margin: 0 0 10px; }
+.ct-pricing-current strong { color: var(--ink); }
+
+/* The highlighted plan. A border and a faint tint — enough to draw the eye, not an advert. */
+.ct-pricecard.featured { border-color: var(--accent); background: var(--accent-soft); position: relative; }
+.ct-pricecard-badge {
+  position: absolute; top: -10px; right: 16px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 3px 10px; border-radius: 999px;
+}
+.ct-pricecard.featured.current { border-width: 2px; }
+
+.ct-compare { margin-top: 26px; }
+.ct-compare-table { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
+.ct-compare-table th, .ct-compare-table td {
+  text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+.ct-compare-table thead th { font-weight: 700; }
+.ct-compare-table tbody th { font-weight: 500; color: var(--ink-2); }
+.ct-compare-table td { font-variant-numeric: tabular-nums; }
+.ct-compare-table tr > *:not(:first-child) { text-align: right; }
+
+/* Post-payment confirmation. */
+.ct-success { max-width: 560px; text-align: center; padding-top: 24px; }
+.ct-success .ct-pricing-sub { margin-left: auto; margin-right: auto; }
+.ct-success-mark {
+  width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--good); color: #fff; font-size: 26px; font-weight: 700;
+}
+.ct-success-mark.pending { background: var(--surface-2); border: 2px solid var(--line); animation: ct-pulse 1.4s ease-in-out infinite; }
+@keyframes ct-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.ct-success-limits {
+  display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin: 22px 0 8px; text-align: left;
+}
+.ct-success-limits > div {
+  border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 14px;
+}
+.ct-success-limits .v { display: block; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.ct-success-limits .k { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.ct-success-cta { margin-top: 22px; }

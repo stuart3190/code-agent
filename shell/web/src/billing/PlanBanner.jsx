@@ -15,7 +15,10 @@ import { formatBillingDate } from "./planState.js";
 const FREE_MESSAGE = "You're currently on the Free plan. Upgrade to Starter or Pro to unlock "
   + "higher limits, faster builds and more AI usage.";
 
-export default function PlanBanner({ planState, onOpenPricing }) {
+// showFreeUpgrade is off on the pricing page: the visitor is already looking at the plans, so an
+// "Upgrade Now" banner there would point at the page it is on. The scheduled-change notice still
+// belongs on both, because it is the one thing the plan cards cannot express.
+export default function PlanBanner({ planState, onOpenPricing, showFreeUpgrade = true }) {
   const { subscription, isFree, pendingPlan, busy, choose, billing } = planState;
   const [notice, setNotice] = useState("");
 
@@ -55,7 +58,7 @@ export default function PlanBanner({ planState, onOpenPricing }) {
     );
   }
 
-  if (!isFree) return null;
+  if (!isFree || !showFreeUpgrade) return null;
 
   return (
     <div className="ct-planbar" role="status">
