@@ -70,7 +70,7 @@ import {
   handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
   handleOpsTelemetry, handlePlanSelect,
 } from "./routes/subscription.mjs";
-import { handlePublishState } from "./routes/publishState.mjs";
+import { handlePublishState, handleProjectUnpublish } from "./routes/publishState.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
@@ -746,6 +746,11 @@ const server = http.createServer(async (req, res) => {
     if (tokenRevokeMatch && method === "DELETE") {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
       return await handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
+    }
+    const unpublishMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/unpublish$/i);
+    if (unpublishMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleProjectUnpublish(req, res, owner, unpublishMatch[1]);
     }
     if (p === "/api/v1/publish-state" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

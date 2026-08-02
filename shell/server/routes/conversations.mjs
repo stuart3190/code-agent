@@ -6,10 +6,26 @@ export async function handleConversations(req, res, { owner, method, body }) {
   const store = conversationStore();
   if (method === "GET") {
     const rows = await store.listConversations(owner.id);
+    // Publish state travels WITH the card rather than being joined client-side. The dashboard and
+    // the conversation both read the same derivation, so a project cannot appear live in one place
+    // and draft in the other — which is exactly what happened when the badge was UI-only.
+    let publishByProduct = new Map();
+    try {
+      const { publishStates } = await import("../lib/publishState.mjs");
+      publishByProduct = new Map(
+        (await publishStates(owner.id)).filter((s) => s.productId).map((s) => [s.productId, s]),
+      );
+    } catch (error) {
+      console.error(`[conversations] publish state unavailable: ${error?.message || error}`);
+    }
     // Workspace home: each conversation carries its live activity (who's working + on
     // what), derived from the durable event stream — the same truth the thread shows.
     const conversations = await Promise.all(rows.slice(0, 20).map(async (row) => {
       const summary = publicConversation(row);
+      // Never published → draft. That is a status, not an absence, and the dashboard filters on it.
+      const site = row.product_id ? publishByProduct.get(String(row.product_id)) || null : null;
+      summary.publishStatus = site?.status || "draft";
+      summary.site = site;
       try {
         const events = await store.listEvents(owner.id, row.id, 0);
         const working = new Map();

@@ -29,6 +29,7 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/conversations", expect: [401], why: "conversation list" },
   { method: "GET", path: "/api/v1/usage", expect: [401], why: "usage + budgets" },
   { method: "GET", path: "/api/v1/publish-state", expect: [401], why: "published state powers the live badges" },
+  { method: "POST", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/unpublish", expect: [401], why: "taking a site offline" },
   { method: "GET", path: "/api/v1/ai/connections", expect: [401], why: "AI connections" },
   { method: "GET", path: "/api/v1/diagnostics", expect: [401], why: "build diagnostics" },
   { method: "GET", path: "/api/v1/tokens", expect: [401], why: "API tokens" },

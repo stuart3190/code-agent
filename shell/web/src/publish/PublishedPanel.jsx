@@ -6,12 +6,15 @@
 
 import React, { useState } from "react";
 import { relativeTime, displayUrl } from "./publishState.js";
+import { STATUS, STATUS_LABEL } from "./publishLifecycle.js";
 
-export default function PublishedPanel({ site, celebrate = false, onPublishUpdate, onOpenSettings }) {
+export default function PublishedPanel({ site, celebrate = false, onPublishUpdate, onUnpublish, onOpenSettings }) {
   const [copied, setCopied] = useState(false);
   if (!site) return null;
 
-  const stale = site.updateAvailable;
+  const status = site.status || (site.updateAvailable ? STATUS.updateAvailable : STATUS.published);
+  const stale = status === STATUS.updateAvailable;
+  const offline = status === STATUS.unpublished;
 
   async function copy() {
     try {
@@ -28,28 +31,41 @@ export default function PublishedPanel({ site, celebrate = false, onPublishUpdat
       {celebrate && <div className="ct-published-cheer">🎉 Your app is live.</div>}
 
       <div className="ct-published-head">
-        <span className={`ct-published-badge ${stale ? "stale" : ""}`}>
+        <span className={`ct-published-badge st-${status}`}>
           <span className="dot" aria-hidden="true" />
-          {stale ? "Update Available" : "Published"}
+          {STATUS_LABEL[status]}
         </span>
         <span className="ct-published-env">Production</span>
       </div>
 
-      <a className="ct-published-url" href={site.url} target="_blank" rel="noopener noreferrer">
-        {displayUrl(site.url)}
-      </a>
+      {offline ? (
+        <span className="ct-published-url offline">{displayUrl(site.url)}</span>
+      ) : (
+        <a className="ct-published-url" href={site.url} target="_blank" rel="noopener noreferrer">
+          {displayUrl(site.url)}
+        </a>
+      )}
 
       <div className="ct-published-meta">
-        Last published {relativeTime(site.publishedAt)}
+        {offline
+          ? `Taken offline ${relativeTime(site.unpublishedAt)} — publishing again restores this address.`
+          : `Last published ${relativeTime(site.publishedAt)}`}
         {stale && " · this project has changed since then"}
       </div>
 
       <div className="ct-published-actions">
-        <a className="ct-btn" href={site.url} target="_blank" rel="noopener noreferrer">Open Live Site</a>
-        <button className="ct-btn-quiet" onClick={copy}>{copied ? "Copied" : "Copy URL"}</button>
+        {!offline && (
+          <>
+            <a className="ct-btn" href={site.url} target="_blank" rel="noopener noreferrer">Open Live Site</a>
+            <button className="ct-btn-quiet" onClick={copy}>{copied ? "Copied" : "Copy URL"}</button>
+          </>
+        )}
         {/* Publishing is a sentence in Thrallo, so this says the sentence rather than inventing a
             second, silent code path that could drift from the conversational one. */}
-        <button className={stale ? "ct-btn" : "ct-btn-quiet"} onClick={onPublishUpdate}>Publish Update</button>
+        <button className={stale || offline ? "ct-btn" : "ct-btn-quiet"} onClick={onPublishUpdate}>
+          {offline ? "Publish Again" : "Publish Update"}
+        </button>
+        {!offline && <button className="ct-btn-quiet" onClick={onUnpublish}>Unpublish</button>}
         <button className="ct-btn-quiet" onClick={onOpenSettings}>Project Settings</button>
       </div>
     </section>
