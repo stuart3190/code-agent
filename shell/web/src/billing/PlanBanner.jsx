@@ -5,6 +5,7 @@
 // them before the day it lands, and make undoing it a single button.
 
 import React, { useState } from "react";
+import { formatBillingDate } from "./planState.js";
 
 // Product copy, kept in one place so it can be changed without hunting through markup.
 //
@@ -36,7 +37,7 @@ export default function PlanBanner({ planState, onOpenPricing }) {
   if (pendingPlan) {
     const currentName = billing?.plans?.find((p) => p.id === subscription.plan)?.name || subscription.plan;
     const when = subscription.pendingPlanAt
-      ? new Date(subscription.pendingPlanAt).toLocaleDateString(undefined, { day: "numeric", month: "long" })
+      ? formatBillingDate(subscription.pendingPlanAt, { year: false })
       : "your next billing date";
     return (
       <div className="ct-planbar info" role="status">
