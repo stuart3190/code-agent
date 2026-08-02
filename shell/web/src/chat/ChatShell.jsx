@@ -19,6 +19,9 @@ import {
 } from "./conversationState.js";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
+import PlanBanner from "../billing/PlanBanner.jsx";
+import PricingView from "../billing/PricingView.jsx";
+import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
 import { setConversationModel, cancelBuild } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
@@ -109,6 +112,10 @@ function Workspace({ user }) {
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
+  // Thrallo has one screen, so routing is one path rather than a router dependency. /pricing is a
+  // real URL because it is shareable and gets linked to; everything else stays at "/".
+  const [path, setPath] = useState(() => window.location.pathname);
+  const planState = usePlanState();
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -239,12 +246,25 @@ function Workspace({ user }) {
   const initial = (user.email || "?")[0].toUpperCase();
   const workingAgent = [...view.roster].reverse().find((r) => r.state === "working");
 
+  // Back/forward must work on a real URL, so the browser stays the source of truth.
+  const navigate = useCallback((next) => {
+    if (window.location.pathname !== next) window.history.pushState({}, "", next);
+    setPath(next);
+  }, []);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Home never interrupts anything — builds run entirely server-side; the stream is simply
   // closed here and resumed (with `after`) when the conversation reopens.
   const goHome = useCallback(() => {
     streamAbort.current?.abort();
     setActive(null); setView(emptyConversationView()); setMobilePreview(false);
+    navigate("/");
     listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -272,8 +292,12 @@ function Workspace({ user }) {
         <MobileStrip roster={view.roster} working={workingAgent} build={view.activeBuild} onPreview={() => view.previewUrl && setMobilePreview(true)} />
       )}
 
-      {!active ? (
-        <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
+      {path === "/pricing" ? (
+        <PricingView planState={planState} onBack={goHome} />
+      ) : !active ? (
+        <div className="ct-dash">
+          <PlanBanner planState={planState} onOpenPricing={() => navigate("/pricing")} />
+          <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -293,6 +317,7 @@ function Workspace({ user }) {
           onDeleteNow={(item) => setDeleting({
             project: { id: item.id, title: item.title }, busy: false, error: "", permanent: true,
           })} />
+        </div>
       ) : (
         <div className="ct-room">
           <div className="ct-thread-wrap">

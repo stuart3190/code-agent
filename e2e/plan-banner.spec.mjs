@@ -1,0 +1,166 @@
+// The Free-plan upgrade banner and the /pricing page.
+//
+// The point of the banner is that a Free user cannot miss it and a paying user never sees it.
+// Both halves are asserted here, along with the scheduled-downgrade variant, because "shows for
+// everyone" and "shows for nobody" are the two ways this feature fails silently.
+//
+// Same harness as chat-shell.spec.mjs: a fake Supabase session in localStorage and stubbed APIs,
+// so no live account or Stripe call is involved. Skips in CI where the auth config is absent.
+
+import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+function supabaseRef() {
+  try {
+    const env = readFileSync(fileURLToPath(new URL("../shell/web/.env", import.meta.url)), "utf8");
+    const url = env.match(/VITE_SUPABASE_URL\s*=\s*(\S+)/)?.[1] || "";
+    return new URL(url).hostname.split(".")[0] || null;
+  } catch {
+    return null;
+  }
+}
+const REF = supabaseRef();
+
+const SESSION = {
+  access_token: "e2e-fake-token", refresh_token: "e2e-fake-refresh", token_type: "bearer",
+  expires_in: 86_400, expires_at: Math.floor(Date.now() / 1000) + 86_400,
+  user: {
+    id: "00000000-0000-4000-8000-000000000001", aud: "authenticated", role: "authenticated",
+    email: "e2e@thrallo.com", user_metadata: { full_name: "Enid Tester" },
+    app_metadata: { provider: "email" }, created_at: "2026-01-01T00:00:00Z",
+  },
+};
+
+const PLANS = [
+  { id: "free", name: "Free", description: "Evaluate Thrallo.", priceGbp: 0, priceApproved: true,
+    monthly: { runs: 20, managedTokens: 1_500_000, computeSeconds: 10_800 } },
+  { id: "starter", name: "Starter", description: "Daily agent work for an individual engineer.", priceGbp: 19, priceApproved: true,
+    monthly: { runs: 200, managedTokens: 20_000_000, computeSeconds: 108_000 } },
+  { id: "pro", name: "Pro", description: "Heavy multi-repository automation.", priceGbp: 49, priceApproved: true,
+    monthly: { runs: 1_000, managedTokens: 100_000_000, computeSeconds: 432_000 } },
+];
+
+const budgets = {
+  runs: { used: 3, limit: 20 },
+  managedTokens: { used: 100, limit: 1_500_000 },
+  computeSeconds: { used: 60, limit: 10_800 },
+};
+
+function billingPayload(subscription) {
+  return {
+    subscription, plans: PLANS, stripeConfigured: true, budgets,
+    period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z" },
+  };
+}
+
+const FREE = { plan: "free", planName: "Free", status: "active", stripeManaged: false, currentPeriodEnd: null, pendingPlan: null, pendingPlanName: null, pendingPlanAt: null, overrides: {} };
+const PRO = { plan: "pro", planName: "Pro", status: "active", stripeManaged: true, currentPeriodEnd: "2026-09-01T00:00:00Z", pendingPlan: null, pendingPlanName: null, pendingPlanAt: null, overrides: {} };
+const PRO_DOWNGRADING = { ...PRO, pendingPlan: "starter", pendingPlanName: "Starter", pendingPlanAt: "2026-09-01T00:00:00Z" };
+
+async function stub(page, subscription, { onPlanSelect = null } = {}) {
+  await page.addInitScript(([key, session]) => {
+    window.localStorage.setItem(key, JSON.stringify(session));
+  }, [`sb-${REF}-auth-token`, SESSION]);
+  await page.route("**/api/v1/conversations", (r) => r.fulfill({ json: { conversations: [] } }));
+  await page.route("**/api/v1/conversations/deleted", (r) => r.fulfill({ json: { items: [], recoveryDays: 7 } }));
+  await page.route("**/api/v1/billing/plan", (r) => {
+    const body = JSON.parse(r.request().postData() || "{}");
+    return onPlanSelect ? onPlanSelect(r, body) : r.fulfill({ json: { url: "https://checkout.stripe.com/c/pay/stub" } });
+  });
+  await page.route("**/api/v1/billing", (r) => r.fulfill({ json: billingPayload(subscription) }));
+  await page.route(`https://${REF}.supabase.co/**`, (r) => r.fulfill({ json: {} }));
+  await page.route(`https://${REF}.supabase.co/auth/v1/user**`, (r) => r.fulfill({ json: SESSION.user }));
+}
+
+test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
+
+test("a Free account sees the upgrade banner", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/");
+  const banner = page.locator(".ct-planbar");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("You're currently on the Free plan");
+  await expect(banner.getByRole("button", { name: "Upgrade Now" })).toBeVisible();
+});
+
+test("a paying account sees no banner at all", async ({ page }) => {
+  await stub(page, PRO);
+  await page.goto("/");
+  // Wait for billing to have loaded, so this is "absent", not "not yet rendered".
+  await expect(page.locator(".ct-begin")).toBeVisible();
+  await page.waitForResponse((r) => r.url().includes("/api/v1/billing"));
+  await expect(page.locator(".ct-planbar")).toHaveCount(0);
+});
+
+test("a scheduled downgrade shows an information banner with Keep Current Plan", async ({ page }) => {
+  await stub(page, PRO_DOWNGRADING, {
+    onPlanSelect: (route, body) => {
+      expect(body.plan).toBe("pro");     // keeping the CURRENT plan cancels the change
+      return route.fulfill({ json: { ...billingPayload(PRO), planChange: { applied: "pending_change_cancelled", message: "Your scheduled change was cancelled. You stay on Pro." } } });
+    },
+  });
+  await page.goto("/");
+  const banner = page.locator(".ct-planbar.info");
+  await expect(banner).toContainText("Your plan changes to");
+  await expect(banner).toContainText("Starter");
+  await banner.getByRole("button", { name: "Keep Current Plan" }).click();
+  await expect(banner).toContainText("scheduled change was cancelled");
+});
+
+test("Upgrade Now opens /pricing, which offers Starter and Pro only", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/");
+  await page.locator(".ct-planbar").getByRole("button", { name: "Upgrade Now" }).click();
+
+  await expect(page).toHaveURL(/\/pricing$/);
+  const cards = page.locator(".ct-pricecard");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("Starter");
+  await expect(cards.nth(0)).toContainText("£19");
+  await expect(cards.nth(1)).toContainText("Pro");
+  await expect(cards.nth(1)).toContainText("£49");
+  // Free is never offered for purchase, and no unsold tier appears.
+  await expect(page.locator(".ct-pricing")).not.toContainText("Business");
+  await expect(cards.nth(0)).toContainText("200 builds a month");
+  await expect(cards.nth(0)).toContainText("30 hours of sandbox compute");
+  await expect(cards.nth(1)).toContainText("1,000 builds a month");
+  await expect(cards.nth(1)).toContainText("120 hours of sandbox compute");
+});
+
+test("Choose Plan starts Stripe Checkout for the plan that was clicked", async ({ page }) => {
+  let requested = null;
+  await stub(page, FREE, {
+    onPlanSelect: (route, body) => {
+      requested = body.plan;
+      return route.fulfill({ json: { url: "https://checkout.stripe.com/c/pay/stub" } });
+    },
+  });
+  // Stop the browser actually leaving for Stripe.
+  await page.route("https://checkout.stripe.com/**", (r) =>
+    r.fulfill({ contentType: "text/html", body: "<!doctype html><title>stub checkout</title>" }));
+
+  await page.goto("/pricing");
+  await page.locator(".ct-pricecard").filter({ hasText: "Pro" }).getByRole("button", { name: "Choose Plan" }).click();
+  await page.waitForURL(/checkout\.stripe\.com/);
+  expect(requested).toBe("pro");
+});
+
+test("the pricing page is reachable directly and back returns to the dashboard", async ({ page }) => {
+  await stub(page, FREE);
+  await page.goto("/pricing");
+  await expect(page.locator(".ct-pricecard")).toHaveCount(2);
+  await page.getByRole("button", { name: "Back to your projects" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(".ct-begin")).toBeVisible();
+});
+
+test("the current plan cannot be repurchased from the pricing page", async ({ page }) => {
+  await stub(page, PRO);
+  await page.goto("/pricing");
+  const proCard = page.locator(".ct-pricecard").filter({ hasText: "Pro" });
+  await expect(proCard.getByRole("button", { name: "Your plan" })).toBeDisabled();
+  // Moving down is offered, and named honestly.
+  await expect(page.locator(".ct-pricecard").filter({ hasText: "Starter" })
+    .getByRole("button", { name: "Downgrade" })).toBeEnabled();
+});
