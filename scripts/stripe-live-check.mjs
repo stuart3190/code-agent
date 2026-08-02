@@ -15,6 +15,11 @@
 // not sell cannot be referenced by construction.
 
 import Stripe from "stripe";
+import { loadEnv } from "../shell/server/lib/env.mjs";
+
+// Read shell/.env exactly as the server does, so this checks the configuration the running
+// service actually sees rather than requiring the file to be sourced first.
+loadEnv();
 
 const JSON_OUT = process.argv.includes("--json");
 const PLANS = [
