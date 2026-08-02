@@ -230,9 +230,15 @@ Production keys currently set in `shell/.env` (values never leave the server):
 
 **Edge Function secrets** (Supabase, not `.env`): `RESEND_API_KEY`, `RESEND_FROM`
 
-**Not yet set — required for paid plans** (§9): `THRALLO_STRIPE_SECRET_KEY`,
-`THRALLO_STRIPE_PRICE_STARTER`, `THRALLO_STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET`,
-`THRALLO_STARTER_PRICE_GBP`, `THRALLO_PRO_PRICE_GBP`
+**Required for paid plans** (§9): `THRALLO_STRIPE_SECRET_KEY`, `THRALLO_STRIPE_WEBHOOK_SECRET`,
+`THRALLO_STRIPE_PRICE_STARTER`, `THRALLO_STRIPE_PRICE_PRO`, `THRALLO_STARTER_PRICE_GBP`,
+`THRALLO_PRO_PRICE_GBP`
+
+⚠️ Every one of these is **`THRALLO_`-prefixed**. The un-prefixed `STRIPE_SECRET_KEY` and
+`STRIPE_WEBHOOK_SECRET` belong to the retired Buildr101 billing code and are deliberately ignored,
+so that a Buildr101 credential can never be inherited on the shared host. Setting only those leaves
+billing dormant; the server logs the mistake explicitly rather than appearing unconfigured.
+The price-ID variables also accept the aliases `THRALLO_STARTER_PRICE_ID` / `THRALLO_PRO_PRICE_ID`.
 
 **Optional tuning** `THRALLO_LIFECYCLE_CREDITS_<PLAN>_<MODE>`, `THRALLO_CHECKPOINT_RETENTION_HOURS`
 (48), `THRALLO_COST_APPROVAL_CREDITS` (150), `THRALLO_BACKUP_KEEP_DAYS` (14),
@@ -245,22 +251,35 @@ Production keys currently set in `shell/.env` (values never leave the server):
 The billing path is **complete and tested**; plans are gated purely by absent configuration.
 `planCatalog()` returns `priceGbp: null, priceApproved: false`, which disables upgrades everywhere.
 
-- [ ] Decide Starter and Pro monthly prices (GBP)
-- [ ] Stripe dashboard: create **2 products** with public descriptions
-- [ ] Create **2 recurring GBP prices**; note the `price_…` IDs
-- [ ] Create a webhook endpoint → `https://app.thrallo.com/api/v1/billing/webhook`; note the
-      signing secret
-- [ ] Configure tax/VAT and the customer portal
-- [ ] Set on the VPS: `THRALLO_STRIPE_SECRET_KEY`, `THRALLO_STRIPE_PRICE_STARTER`,
-      `THRALLO_STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET`, `THRALLO_STARTER_PRICE_GBP`,
-      `THRALLO_PRO_PRICE_GBP`
+**Thrallo sells exactly two paid plans: Starter and Pro** (Stuart, 2026-08-02). `PLAN_IDS` is
+`["free","starter","pro"]`. Any other price arriving on a webhook is **never granted a plan** —
+`applySubscription` refuses to guess an entitlement nobody bought, and logs `ACTION REQUIRED` with
+the subscription, customer and price IDs so it can be cancelled and refunded.
+
+- [x] Starter and Pro monthly prices decided, products and recurring GBP prices created
+- [ ] Create a webhook endpoint → `https://app.thrallo.com/api/v1/billing/webhook`, subscribing to
+      `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`;
+      note the signing secret. **Without all three, payments succeed but plans never activate.**
+- [ ] Configure tax/VAT and the Customer Portal, with cancellation enabled (the only self-service
+      cancellation path)
+- [ ] Set on the VPS (all `THRALLO_`-prefixed — see §8): `THRALLO_STRIPE_SECRET_KEY`,
+      `THRALLO_STRIPE_WEBHOOK_SECRET`, `THRALLO_STRIPE_PRICE_STARTER`, `THRALLO_STRIPE_PRICE_PRO`,
+      `THRALLO_STARTER_PRICE_GBP`, `THRALLO_PRO_PRICE_GBP`
 - [ ] `sudo systemctl restart thrallo-shell` (env is read at boot)
+- [ ] **`node scripts/stripe-live-check.mjs`** — validates every item above against Stripe itself:
+      prices exist, are **active** (an archived price retrieves fine but fails at the moment a real
+      customer pays), are recurring GBP monthly, the **displayed price equals the charged price**,
+      the webhook exists with all required events, and the portal allows cancellation. It also
+      reports any active price in the account that Thrallo does not sell. Read-only; re-run it
+      after any billing change.
 - [ ] **Live test with real money**: checkout → webhook → plan applied → budget raised → portal
       cancel → downgrade
 - [ ] Confirm `/pricing` switches from "coming soon" to purchasable automatically
 
-⚠️ Never reuse Buildr101 Stripe credentials. Test-mode `stripe_customer_id`s must be nulled before
-a live flip — they break live checkouts.
+⚠️ Never reuse Buildr101 Stripe credentials — Thrallo ignores the un-prefixed variable names for
+exactly this reason. Test-mode `stripe_customer_id`s must be nulled before a live flip; they break
+live checkouts. Price IDs live only in the environment: a guard test fails the build if a literal
+`price_…` identifier appears anywhere in the shipped source.
 
 ---
 
