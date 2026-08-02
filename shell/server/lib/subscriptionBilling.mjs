@@ -284,7 +284,11 @@ function planName(planId) {
 }
 
 function formatDate(iso) {
-  return iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "your next billing date";
+  // UTC, to match Stripe's period boundaries and the client. Without it this renders in the
+  // SERVER's timezone, so the date a user is told could differ from the date they are shown.
+  return iso
+    ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+    : "your next billing date";
 }
 
 export async function startBillingPortal(owner, { store = codeAgentStore(), stripe = null } = {}) {

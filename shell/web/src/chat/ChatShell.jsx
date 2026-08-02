@@ -20,6 +20,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
+import BillingSettings from "../billing/BillingSettings.jsx";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
@@ -359,6 +360,8 @@ function Workspace({ user }) {
       <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`} aria-hidden="true"
         onClick={() => { setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null); }} />
       <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} initialSection={sheetSection} onClose={() => { setSheetOpen(false); setSheetSection(null); }}
+        planState={planState}
+        onUpgrade={() => { setSheetOpen(false); setSheetSection(null); navigate("/pricing"); }}
         onOpenView={(v) => { setSheetOpen(false); setManageView(v); }} />
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
@@ -917,7 +920,7 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your teamâ
 
 // The ONE settings experience: quick rows, with drill-in sections for the plumbing that
 // is technically required to live here (secrets never enter the conversation).
-function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView, initialSection = null }) {
+function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView, initialSection = null, planState, onUpgrade }) {
   const [usage, setUsage] = useState(null);
   const [section, setSection] = useState(null); // null | ai | tokens | downloads
   useEffect(() => { if (open) usageSummary().then(setUsage).catch(() => setUsage(null)); }, [open]);
@@ -982,6 +985,7 @@ function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView, initi
             <button className="ct-btn-quiet" onClick={() => setSection("ai")}>Manage</button>
           </div>
         </div>
+        <BillingSettings planState={planState} onUpgrade={onUpgrade} />
         <div className="ct-set-group">
           <div className="ct-set-label">Plan &amp; budgets</div>
           <div className="ct-set-row">

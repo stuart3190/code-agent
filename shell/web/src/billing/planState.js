@@ -9,6 +9,17 @@ import { billingOverview, selectPlan } from "../lib/codeAgentApi.js";
 
 export const PAID_PLANS = ["starter", "pro"];
 
+// Billing dates render in UTC, deliberately. Stripe defines period boundaries in UTC and they land
+// on midnight, so rendering in local time shows the PREVIOUS day to anyone west of Greenwich — a
+// renewal date that disagrees with the Stripe invoice is a support ticket. The locale is pinned for
+// the same reason the amounts are: everyone must see the same billing fact.
+export function formatBillingDate(iso, { year = true } = {}) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric", month: "long", ...(year ? { year: "numeric" } : {}), timeZone: "UTC",
+  });
+}
+
 export function usePlanState() {
   const [billing, setBilling] = useState(null);
   const [busy, setBusy] = useState("");

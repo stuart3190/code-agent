@@ -58,7 +58,7 @@ const FREE = { plan: "free", planName: "Free", status: "active", stripeManaged: 
 const PRO = { plan: "pro", planName: "Pro", status: "active", stripeManaged: true, currentPeriodEnd: "2026-09-01T00:00:00Z", pendingPlan: null, pendingPlanName: null, pendingPlanAt: null, overrides: {} };
 const PRO_DOWNGRADING = { ...PRO, pendingPlan: "starter", pendingPlanName: "Starter", pendingPlanAt: "2026-09-01T00:00:00Z" };
 
-async function stub(page, subscription, { onPlanSelect = null } = {}) {
+async function stub(page, subscription, { onPlanSelect = null, onPortal = null } = {}) {
   await page.addInitScript(([key, session]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
   }, [`sb-${REF}-auth-token`, SESSION]);
@@ -68,6 +68,11 @@ async function stub(page, subscription, { onPlanSelect = null } = {}) {
     const body = JSON.parse(r.request().postData() || "{}");
     return onPlanSelect ? onPlanSelect(r, body) : r.fulfill({ json: { url: "https://checkout.stripe.com/c/pay/stub" } });
   });
+  await page.route("**/api/v1/billing/portal", (r) => (onPortal ? onPortal(r) : r.fulfill({ json: { url: "https://billing.stripe.com/p/session/stub" } })));
+  await page.route("**/api/v1/usage", (r) => r.fulfill({ json: {
+    plan: { id: subscription.plan, name: subscription.planName },
+    budgets: { managedTokens: { limit: 1_500_000, remaining: 1_400_000 } },
+  } }));
   await page.route("**/api/v1/billing", (r) => r.fulfill({ json: billingPayload(subscription) }));
   await page.route(`https://${REF}.supabase.co/**`, (r) => r.fulfill({ json: {} }));
   await page.route(`https://${REF}.supabase.co/auth/v1/user**`, (r) => r.fulfill({ json: SESSION.user }));
@@ -163,4 +168,71 @@ test("the current plan cannot be repurchased from the pricing page", async ({ pa
   // Moving down is offered, and named honestly.
   await expect(page.locator(".ct-pricecard").filter({ hasText: "Starter" })
     .getByRole("button", { name: "Downgrade" })).toBeEnabled();
+});
+
+// ── Settings → Billing ──────────────────────────────────────────────────────────────────
+
+const openSettings = async (page) => {
+  await page.goto("/");
+  await page.locator(".ct-avatar").click();
+  await expect(page.locator(".ct-sheet.show")).toBeVisible();
+};
+
+test("Settings → Billing offers a Free account an upgrade", async ({ page }) => {
+  await stub(page, FREE);
+  await openSettings(page);
+
+  const billing = page.locator(".ct-set-group").filter({ hasText: "Billing" });
+  await expect(billing).toContainText("Free plan");
+  await expect(billing).toContainText("No payment details held");
+  // A Free account has no subscription to manage, so the portal must not be offered.
+  await expect(billing.getByRole("button", { name: "Manage Subscription" })).toHaveCount(0);
+
+  await billing.getByRole("button", { name: "Upgrade" }).click();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(page.locator(".ct-sheet.show")).toHaveCount(0);   // the sheet gets out of the way
+  await expect(page.locator(".ct-pricecard")).toHaveCount(2);
+});
+
+test("Settings → Billing shows a paid account its plan, renewal and status", async ({ page }) => {
+  await stub(page, PRO);
+  await openSettings(page);
+
+  const billing = page.locator(".ct-set-group").filter({ hasText: "Billing" });
+  await expect(billing).toContainText("Pro plan");
+  await expect(billing).toContainText("Renews 1 September 2026");
+  await expect(billing).toContainText("Active");
+  await expect(billing.getByRole("button", { name: "Upgrade" })).toHaveCount(0);
+});
+
+test("Manage Subscription opens the Stripe Customer Portal", async ({ page }) => {
+  let called = false;
+  await stub(page, PRO, { onPortal: (route) => {
+    called = true;
+    return route.fulfill({ json: { url: "https://billing.stripe.com/p/session/stub" } });
+  } });
+  await page.route("https://billing.stripe.com/**", (r) =>
+    r.fulfill({ contentType: "text/html", body: "<!doctype html><title>stub portal</title>" }));
+
+  await openSettings(page);
+  await page.locator(".ct-set-group").filter({ hasText: "Billing" })
+    .getByRole("button", { name: "Manage Subscription" }).click();
+
+  await page.waitForURL(/billing\.stripe\.com/);
+  expect(called).toBe(true);
+});
+
+test("a scheduled downgrade is stated in Settings, not just on the dashboard", async ({ page }) => {
+  await stub(page, PRO_DOWNGRADING);
+  await openSettings(page);
+  const billing = page.locator(".ct-set-group").filter({ hasText: "Billing" });
+  await expect(billing).toContainText("Changes to Starter on 1 September 2026");
+});
+
+test("an overdue payment says so plainly and points at the fix", async ({ page }) => {
+  await stub(page, { ...PRO, status: "past_due" });
+  await openSettings(page);
+  const billing = page.locator(".ct-set-group").filter({ hasText: "Billing" });
+  await expect(billing).toContainText("Payment overdue");
+  await expect(billing).toContainText("Update your card");
 });
