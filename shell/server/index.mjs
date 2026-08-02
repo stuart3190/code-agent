@@ -80,6 +80,8 @@ import {
   handleAnalyticsLive, handleDeploymentHistory,
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
+import { handleProjectHealth } from "./routes/health.mjs";
+import { startHealthMonitor, stopHealthMonitor } from "./lib/health/monitor.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
@@ -773,6 +775,11 @@ const server = http.createServer(async (req, res) => {
         ? await handleAnalyticsLive(req, res, owner, analyticsMatch[1])
         : await handleAnalyticsOverview(req, res, owner, analyticsMatch[1], url);
     }
+    const healthMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/health$/i);
+    if (healthMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleProjectHealth(req, res, owner, healthMatch[1]);
+    }
     const deploymentsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/deployments$/i);
     if (deploymentsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -914,6 +921,8 @@ server.listen(PORT, HOST, () => {
   // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
   // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.
   startAnalyticsRollup();
+  // Probes every live site: uptime, response time, certificate expiry and DNS drift.
+  startHealthMonitor();
   startDeletedProjectSweeper();
   startDiagnosticsSweeper();
   startAutomationSweeper();
@@ -933,6 +942,7 @@ async function shutdown(signal) {
   stopRetentionSweeper();
   stopDomainVerifier();
   stopAnalyticsRollup();
+  stopHealthMonitor();
   stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();

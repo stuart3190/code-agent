@@ -764,3 +764,15 @@ div.ct-model-row { cursor: pointer; }
 .ct-livedot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--good); margin-left: auto; }
 .ct-livedot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); animation: ct-pulse-anim 1.6s var(--ease-out) infinite; }
 .ct-linkish { color: var(--accent); font-weight: 600; text-decoration: underline; background: none; padding: 0; font-size: inherit; }
+
+/* ── Health ──────────────────────────────────────────────────────────────────────────── */
+.ct-health-hero { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; margin-bottom: 12px; }
+.ct-health-hero.st-healthy { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.ct-health-hero.st-warning { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.ct-health-hero.st-offline { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.ct-health-state { font-family: var(--font-display); font-size: 20px; font-weight: 700; }
+.ct-uptime { display: flex; gap: 2px; align-items: flex-end; height: 34px; }
+.ct-uptime-bar { flex: 1; min-width: 3px; height: 100%; border-radius: 2px; background: var(--ink-3); }
+.ct-uptime-bar.good { background: var(--good); }
+.ct-uptime-bar.warn { background: var(--warn); }
+.ct-uptime-bar.bad { background: var(--bad); }

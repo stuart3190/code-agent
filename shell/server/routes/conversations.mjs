@@ -10,11 +10,14 @@ export async function handleConversations(req, res, { owner, method, body }) {
     // the conversation both read the same derivation, so a project cannot appear live in one place
     // and draft in the other — which is exactly what happened when the badge was UI-only.
     let publishByProduct = new Map();
+    let healthByProject = new Map();
     try {
       const { publishStates } = await import("../lib/publishState.mjs");
       publishByProduct = new Map(
         (await publishStates(owner.id)).filter((s) => s.productId).map((s) => [s.productId, s]),
       );
+      const { healthForOwner } = await import("../lib/health/report.mjs");
+      healthByProject = await healthForOwner(owner.id);
     } catch (error) {
       console.error(`[conversations] publish state unavailable: ${error?.message || error}`);
     }
@@ -26,6 +29,9 @@ export async function handleConversations(req, res, { owner, method, body }) {
       const site = row.product_id ? publishByProduct.get(String(row.product_id)) || null : null;
       summary.publishStatus = site?.status || "draft";
       summary.site = site;
+      // Health rides with the card too, so the dashboard renders in one request rather than one
+      // per project. A site with no check yet has no health — not a green badge it has not earned.
+      summary.health = site ? healthByProject.get(site.projectId) || null : null;
       try {
         const events = await store.listEvents(owner.id, row.id, 0);
         const working = new Map();
