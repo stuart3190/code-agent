@@ -79,6 +79,9 @@ export function normalizeSubscription(owner, row) {
     managed_token_limit_override: row?.managed_token_limit_override || null,
     compute_seconds_limit_override: row?.compute_seconds_limit_override || null,
     preview_plan: PLAN_IDS.includes(row?.preview_plan) ? row.preview_plan : null,
+    // A downgrade that has been chosen but does not take effect until the paid period ends.
+    pending_plan: PLAN_IDS.includes(row?.pending_plan) ? row.pending_plan : null,
+    pending_plan_at: row?.pending_plan_at || null,
   };
 }
 
@@ -109,12 +112,17 @@ export function currentPeriod(subscription, now = new Date()) {
 
 export function publicSubscription(subscription) {
   const plan = getPlan(subscription.plan) || getPlan("free");
+  const pending = subscription.pending_plan ? getPlan(subscription.pending_plan) : null;
   return {
     plan: subscription.plan,
     planName: plan.name,
     status: subscription.status,
     stripeManaged: !!subscription.stripe_subscription_id,
     currentPeriodEnd: subscription.current_period_end,
+    // Shown so a scheduled downgrade is never a surprise on the day it lands.
+    pendingPlan: subscription.pending_plan || null,
+    pendingPlanName: pending?.name || null,
+    pendingPlanAt: subscription.pending_plan_at || null,
     overrides: {
       runs: subscription.run_limit_override,
       managedTokens: subscription.managed_token_limit_override,

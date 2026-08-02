@@ -35,8 +35,17 @@ export async function handlePlanSelect(_req, res, owner, body = {}) {
         stripeConfigured: thralloStripeConfigured(),
       });
     }
-    const checkout = await startPlanCheckout(owner.id, plan);
-    return sendJson(res, 200, checkout);
+    const result = await startPlanCheckout(owner.id, plan);
+    // A first-time subscriber goes to Stripe Checkout. An existing subscriber's plan was changed
+    // in place, so return the refreshed billing state with it — there is nowhere to redirect to,
+    // and the screen must show the new plan immediately rather than the plan they just left.
+    if (result.url) return sendJson(res, 200, result);
+    return sendJson(res, 200, {
+      ...(await budgetOverview(owner.id)),
+      plans: planCatalogPublic(),
+      stripeConfigured: thralloStripeConfigured(),
+      planChange: result.planChange,
+    });
   });
 }
 

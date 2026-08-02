@@ -27,7 +27,8 @@ function clearStripeEnv() {
 function fakeStripe(event, subscription) {
   return {
     webhooks: { constructEvent: () => event },
-    subscriptions: { retrieve: async () => subscription },
+    // No live subscription by default, so plan selection takes the first-time Checkout path.
+    subscriptions: { retrieve: async () => subscription, list: async () => ({ data: [] }) },
     customers: { create: async () => ({ id: "cus_new" }) },
     checkout: { sessions: { create: async (params) => ({ url: `https://checkout/${params.customer}` }) } },
   };

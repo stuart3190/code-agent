@@ -182,6 +182,10 @@ export async function selectFreePlan(owner, { store = codeAgentStore() } = {}) {
     stripe_subscription_id: null,
     current_period_start: null,
     current_period_end: null,
+    // Nothing is on its way to another paid plan once the paid relationship is gone.
+    pending_plan: null,
+    pending_plan_at: null,
+    stripe_schedule_id: null,
   });
   return budgetOverview(owner, { store });
 }

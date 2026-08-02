@@ -55,7 +55,11 @@ export default function UsageView() {
       const result = await selectPlan(planId);
       if (result.url) { window.location.href = result.url; return; }
       setBilling(result);
-      setNotice(`You are on the ${planId === "free" ? "Free" : planId} plan.`);
+      // A plan change carries its own precise wording — an upgrade took effect now, a downgrade
+      // takes effect on a stated date. Saying "you are on Starter" for a scheduled downgrade would
+      // be untrue for the rest of the period they have already paid for.
+      setNotice(result.planChange?.message
+        || `You are on the ${planId === "free" ? "Free" : planId} plan.`);
     } catch (err) { setError(err.message); } finally { setBusyPlan(""); }
   }
 
@@ -134,20 +138,42 @@ export default function UsageView() {
         <>
           <div className="mg-label">Plan</div>
           <div className="mg-card">
+            {billing.subscription.pendingPlan && (
+              <div className="mg-row">
+                <div className="ct-hint">
+                  Moving to <strong>{billing.subscription.pendingPlanName}</strong> on{" "}
+                  {new Date(billing.subscription.pendingPlanAt).toLocaleDateString()}. You keep{" "}
+                  {billing.plans.find((p) => p.id === billing.subscription.plan)?.name} until then.
+                  {" "}Choosing your current plan again cancels the change.
+                </div>
+              </div>
+            )}
             {billing.plans.map((plan) => {
               const current = billing.subscription.plan === plan.id;
+              const scheduled = billing.subscription.pendingPlan === plan.id;
+              // A paid subscriber can move in either direction, so the button must say which.
+              const rank = { free: 0, starter: 1, pro: 2 };
+              const action = plan.id === "free" ? "Switch"
+                : !billing.stripeConfigured ? "Not yet"
+                  : rank[plan.id] > rank[billing.subscription.plan] ? "Upgrade" : "Downgrade";
               return (
                 <div className="mg-row" key={plan.id}>
                   <div>
                     {plan.name} {current && <span className="mg-pill" style={{ marginLeft: 6 }}><span className="dot" style={{ background: "var(--good)" }} />current</span>}
+                    {scheduled && <span className="mg-pill" style={{ marginLeft: 6 }}><span className="dot" style={{ background: "var(--warn)" }} />scheduled</span>}
                     <div className="ct-hint">
                       {plan.priceGbp === 0 ? "£0" : plan.priceApproved ? `£${plan.priceGbp}/mo` : "pricing coming soon"} · {formatNumber(plan.monthly.runs)} runs · {formatCompact(plan.monthly.managedTokens)} tokens · {Math.round(plan.monthly.computeSeconds / 3600)}h compute
                     </div>
                   </div>
                   {!current ? (
-                    <button className="ct-btn-quiet" disabled={busyPlan === plan.id || (plan.id !== "free" && !billing.stripeConfigured)}
+                    <button className="ct-btn-quiet" disabled={busyPlan === plan.id || scheduled || (plan.id !== "free" && !billing.stripeConfigured)}
                       onClick={() => choosePlan(plan.id)}>
-                      {plan.id === "free" ? "Switch" : billing.stripeConfigured ? "Upgrade" : "Not yet"}
+                      {scheduled ? "Scheduled" : action}
+                    </button>
+                  ) : billing.subscription.pendingPlan ? (
+                    <button className="ct-btn-quiet" disabled={busyPlan === plan.id}
+                      onClick={() => choosePlan(plan.id)}>
+                      Keep {plan.name}
                     </button>
                   ) : billing.subscription.stripeManaged ? (
                     <button className="ct-btn-quiet"

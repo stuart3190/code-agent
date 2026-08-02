@@ -256,6 +256,30 @@ The billing path is **complete and tested**; plans are gated purely by absent co
 `applySubscription` refuses to guess an entitlement nobody bought, and logs `ACTION REQUIRED` with
 the subscription, customer and price IDs so it can be cancelled and refunded.
 
+### Plan change semantics
+
+| From → to | When it takes effect | Money |
+|---|---|---|
+| Free → Starter/Pro | Immediately on payment | Stripe Checkout, full price |
+| Starter → Pro (**upgrade**) | **Immediately** | Prorated difference invoiced at once (`always_invoice`) |
+| Pro → Starter (**downgrade**) | **At the end of the current billing period** | Nothing extra; no credit balance is created |
+| Starter/Pro → Free | Cancellation via the Customer Portal, `at_period_end` | Nothing extra |
+
+Downgrades are deliberately deferred: the customer has already paid for the period, so they keep
+what they bought and no confusing credit accumulates. Stripe holds the change in a **subscription
+schedule**; `ca_subscriptions.pending_plan` mirrors it so the UI can show the date, and the webhook
+clears it when the phase actually starts. A pending change is cancelled by choosing the current
+plan again ("Keep Pro").
+
+An existing subscriber is **never** sent back to Checkout — their subscription item is updated in
+place. Sending them to Checkout is what produced two live subscriptions and two monthly charges.
+Stripe idempotency keys make repeated clicks a single operation, and a duplicate subscription
+acquired outside Thrallo is detected and cancelled, keeping the newest.
+
+**Portal plan switching is deliberately disabled.** A portal configuration is account-wide, and
+this Stripe account also serves Buildr101 — enabling it would list Thrallo's products to a
+Buildr101 customer. Plan changes stay under Thrallo's own billing routes.
+
 - [x] Starter and Pro monthly prices decided, products and recurring GBP prices created
 - [ ] Create a webhook endpoint → `https://app.thrallo.com/api/v1/billing/webhook`, subscribing to
       `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`;
