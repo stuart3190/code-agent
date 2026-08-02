@@ -280,3 +280,4 @@ export const projectAnalyticsLive = (projectId) =>
   request(`/api/v1/projects/${projectId}/analytics/live`);
 export const projectDeployments = (projectId) =>
   request(`/api/v1/projects/${projectId}/deployments`);
+export const projectHealth = (projectId) => request(`/api/v1/projects/${projectId}/health`);

@@ -58,6 +58,14 @@ export function badgesFor(conversation) {
     badges.push({ id: "draft", label: "DRAFT", tone: "muted" });
   }
 
+  // Health outranks activity on a live site: "is it up" beats "what is it doing".
+  const health = conversation?.health;
+  if (health && health.status !== "healthy") {
+    badges.push(health.status === "offline"
+      ? { id: "offline", label: "OFFLINE", tone: "failed" }
+      : { id: "degraded", label: "DEGRADED", tone: "update" });
+  }
+
   if (conversation?.activity) {
     badges.push({ id: "building", label: "BUILDING", tone: "building" });
   } else if (conversation?.state === "waiting_user") {
