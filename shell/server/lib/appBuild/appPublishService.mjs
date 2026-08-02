@@ -225,3 +225,14 @@ export async function unpublishApp(owner, projectId) {
 
   return { url: site.url, alreadyOffline: false };
 }
+
+// Caddy learns about a custom hostname through provisiond. Exported so the domain verifier can
+// attach ONLY at the moment a domain becomes verified — attaching earlier is what would let an
+// unverified hostname reach certificate issuance.
+export async function attachDomain(domain, slug) {
+  return provisiond("/domain-attach", { body: { domain, label: slug } });
+}
+
+export async function detachDomain(domain) {
+  return provisiond("/domain-detach", { body: { domain } });
+}

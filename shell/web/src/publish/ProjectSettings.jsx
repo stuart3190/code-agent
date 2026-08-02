@@ -8,6 +8,7 @@
 import React, { useState } from "react";
 import { exportProjectZip } from "../lib/codeAgentApi.js";
 import { displayUrl, relativeTime } from "./publishState.js";
+import DomainsSection from "./DomainsSection.jsx";
 
 export default function ProjectSettings({ site, onClose, onSentence }) {
   const [busy, setBusy] = useState(false);
@@ -54,16 +55,7 @@ export default function ProjectSettings({ site, onClose, onSentence }) {
           </div>
         </div>
 
-        <div className="ct-set-group">
-          <div className="ct-set-label">Custom domain</div>
-          <div className="ct-set-row">
-            <div>Use your own address<div className="ct-hint">Point a domain you own at this app.</div></div>
-            <button className="ct-btn-quiet"
-              onClick={() => { onClose(); onSentence("I'd like to connect a custom domain to this app."); }}>
-              Connect
-            </button>
-          </div>
-        </div>
+        <DomainsSection site={site} />
 
         <div className="ct-set-group">
           <div className="ct-set-label">Source code</div>

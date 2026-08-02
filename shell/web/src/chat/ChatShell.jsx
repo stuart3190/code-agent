@@ -27,7 +27,7 @@ import ProjectSettings from "../publish/ProjectSettings.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
-import { TABS, STATUS_LABEL, statusOf, countByTab } from "../publish/publishLifecycle.js";
+import { TABS, STATUS_LABEL, statusOf, countByTab, isLive } from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
@@ -626,7 +626,7 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
   const status = statusOf(c);
   const site = c.site || null;
   return (
-    <div className={`ct-project ${site ? "has-pub" : ""}`} role="button" tabIndex={0} onClick={() => onOpen(c.id)}
+    <div className={`ct-project ${site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""}`} role="button" tabIndex={0} onClick={() => onOpen(c.id)}
       aria-label={`Open ${c.title || "untitled project"} — ${STATUS_LABEL[status]}, ${s.label}`}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
       <span className={`ct-pstate ct-pstate-${s.tone}`} />
@@ -638,6 +638,11 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
           <span className={`ct-live-badge st-${status}`}>
             <span className="dot" aria-hidden="true" />{STATUS_LABEL[status]}
           </span>
+          {/* A project with an update pending is still serving, so it says LIVE too — the amber
+              badge is about the newest build not being out yet, not about being offline. */}
+          {status === "update_available" && (
+            <span className="ct-live-badge st-published"><span className="dot" aria-hidden="true" />LIVE</span>
+          )}
         </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
         {site && (

@@ -10,9 +10,12 @@ export const STATUS = Object.freeze({
   unpublished: "unpublished",
 });
 
+// LIVE, not "Published", for a site that is currently serving. It is the fact people scan for, and
+// it reads at a glance in a way a past-tense word does not. Update Available still says LIVE
+// alongside it, because the site IS live — it is simply not the newest build.
 export const STATUS_LABEL = Object.freeze({
   draft: "Draft",
-  published: "Published",
+  published: "LIVE",
   update_available: "Update Available",
   unpublished: "Unpublished",
 });
