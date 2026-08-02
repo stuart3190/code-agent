@@ -221,7 +221,7 @@ test("a live project is marked LIVE and stands out from a draft", async ({ page 
   await stub(page, [PUBLISHED, DRAFT]);
   await page.goto("/");
   const live = card(page, "FocusFlow");
-  await expect(live.locator(".ct-live-badge.st-published")).toHaveText(/LIVE/);
+  await expect(live.locator(".ct-badge.tone-live")).toHaveText("LIVE");
   await expect(live).toHaveClass(/is-live/);
   await expect(card(page, "Draft idea")).not.toHaveClass(/is-live/);
   // The public URL, its link target and the publish time are all on the card itself.
@@ -233,7 +233,78 @@ test("a project with an update pending still says LIVE, because it is", async ({
   await stub(page, [UPDATE_AVAILABLE]);
   await page.goto("/");
   const c = card(page, "FocusFlow");
-  await expect(c.locator(".ct-live-badge.st-update_available")).toHaveText(/Update Available/);
-  await expect(c.locator(".ct-live-badge.st-published")).toHaveText(/LIVE/);
+  await expect(c.locator(".ct-badge.tone-update")).toHaveText("UPDATE AVAILABLE");
+  await expect(c.locator(".ct-badge.tone-live")).toHaveText("LIVE");
   await expect(c).toHaveClass(/is-live/);
+});
+
+test("an active custom domain becomes the address on the card", async ({ page, context, browserName }) => {
+  test.skip(browserName !== "chromium", "clipboard permissions are chromium-specific here");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const withDomain = {
+    ...PUBLISHED,
+    site: { ...SITE, customDomain: "shop.example.com", primaryUrl: "https://shop.example.com" },
+  };
+  await stub(page, [withDomain]);
+  await page.goto("/");
+  const c = card(page, "FocusFlow");
+  await expect(c.locator(".ct-pubrow-url")).toHaveText("shop.example.com");
+  await expect(c.locator(".ct-pubrow-url")).toHaveAttribute("href", "https://shop.example.com");
+  await expect(c.getByRole("link", { name: "Open Live Site" })).toHaveAttribute("href", "https://shop.example.com");
+  await c.getByRole("button", { name: "Copy URL" }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://shop.example.com");
+  // The Thrallo address is still reachable where it belongs.
+  await c.getByRole("button", { name: "Project Settings" }).click();
+  await expect(sheetOf(page)).toContainText("focusflow.app.thrallo.com");
+});
+
+test("the dashboard groups Live apps, In progress and Drafts", async ({ page }) => {
+  await stub(page, [
+    PUBLISHED,
+    { id: "c3", title: "Building now", state: "idle", productId: "prod-3", publishStatus: "draft", site: null,
+      activity: { agent: "Builder", status: "Writing code…" } },
+    DRAFT,
+  ]);
+  await page.goto("/");
+  const labels = page.locator(".ct-ws-label");
+  await expect(labels).toHaveText(["Live apps", "In progress", "Drafts"]);
+  await expect(card(page, "Building now").locator(".ct-badge.tone-building")).toHaveText("BUILDING");
+});
+
+test("a live project that is building appears once, under Live apps", async ({ page }) => {
+  await stub(page, [{ ...PUBLISHED, activity: { agent: "Builder", status: "Writing code…" } }]);
+  await page.goto("/");
+  await expect(page.locator(".ct-ws-label")).toHaveText(["Live apps"]);
+  await expect(card(page, "FocusFlow")).toHaveCount(1);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-building")).toHaveText("BUILDING");
+});
+
+test("publishing ends with a success panel offering Connect Domain", async ({ page }) => {
+  await stub(page, [PUBLISHED]);
+  await page.route("**/domains", (r) => r.fulfill({ json: { domains: [], allowance: UNLIMITED } }));
+  await page.goto("/");
+  await card(page, "FocusFlow").locator(".ct-pname").click();
+
+  const panel = page.locator(".ct-published");
+  await expect(panel.locator(".ct-badge.tone-live")).toHaveText("LIVE");
+  await expect(panel.locator(".ct-published-env")).toHaveText("Production");
+  await expect(panel.getByRole("link", { name: "Open Site" })).toHaveAttribute("href", SITE.url);
+  await expect(panel.getByRole("button", { name: "Copy URL" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Connect Domain" })).toBeVisible();
+
+  await panel.getByRole("button", { name: "Connect Domain" }).click();
+  await expect(sheetOf(page)).toContainText("Domains");
+});
+
+test("Connect Domain is not offered once a domain is already connected", async ({ page }) => {
+  await stub(page, [{
+    ...PUBLISHED,
+    site: { ...SITE, customDomain: "shop.example.com", primaryUrl: "https://shop.example.com" },
+  }]);
+  await page.goto("/");
+  await card(page, "FocusFlow").locator(".ct-pname").click();
+  const panel = page.locator(".ct-published");
+  await expect(panel.getByRole("button", { name: "Connect Domain" })).toHaveCount(0);
+  await expect(panel.locator(".ct-published-url")).toHaveText("shop.example.com");
 });

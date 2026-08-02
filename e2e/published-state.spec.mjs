@@ -76,13 +76,13 @@ test("the conversation shows the live URL, status, environment and publish time"
   await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
 
   const panel = page.locator(".ct-published");
-  await expect(panel.locator(".ct-published-badge")).toHaveText(/Published/);
+  await expect(panel.locator(".ct-badge.tone-live")).toHaveText("LIVE");
   await expect(panel.locator(".ct-published-env")).toHaveText("Production");
   await expect(panel.locator(".ct-published-url")).toHaveText("focusflow.app.thrallo.com");
   await expect(panel.locator(".ct-published-meta")).toContainText("7 minutes ago");
 
   // It opens the real site in a new tab rather than navigating the app away.
-  const open = panel.getByRole("link", { name: "Open Live Site" });
+  const open = panel.getByRole("link", { name: "Open Site" });
   await expect(open).toHaveAttribute("href", LIVE.url);
   await expect(open).toHaveAttribute("target", "_blank");
 });
@@ -152,7 +152,7 @@ test("Project Settings offers only actions that exist, and can download the sour
 
   const sheet = page.locator(".ct-sheet").filter({ hasText: "Project settings" });
   await expect(sheet).toContainText("focusflow.app.thrallo.com");
-  await expect(sheet).toContainText("Custom domain");
+  await expect(sheet).toContainText("Domains");
 
   const download = page.waitForEvent("download");
   await sheet.getByRole("button", { name: "Download" }).click();

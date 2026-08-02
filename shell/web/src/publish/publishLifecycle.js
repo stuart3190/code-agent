@@ -34,6 +34,64 @@ export function statusOf(conversation) {
   return conversation?.publishStatus || STATUS.draft;
 }
 
+/**
+ * The badges for a project card. A set, not one value — a project can be LIVE and BUILDING at the
+ * same time, and a site serving an older build is genuinely both LIVE and UPDATE AVAILABLE. A
+ * coloured dot could only ever say one of those things, which is why it is gone.
+ *
+ * Order matters: what is true of the deployment comes first, then what is happening right now.
+ */
+export function badgesFor(conversation) {
+  const badges = [];
+  const status = statusOf(conversation);
+
+  if (status === STATUS.published || status === STATUS.updateAvailable) {
+    badges.push({ id: "live", label: "LIVE", tone: "live" });
+  }
+  if (status === STATUS.updateAvailable) {
+    badges.push({ id: "update", label: "UPDATE AVAILABLE", tone: "update" });
+  }
+  if (status === STATUS.unpublished) {
+    badges.push({ id: "unpublished", label: "UNPUBLISHED", tone: "muted" });
+  }
+  if (status === STATUS.draft) {
+    badges.push({ id: "draft", label: "DRAFT", tone: "muted" });
+  }
+
+  if (conversation?.activity) {
+    badges.push({ id: "building", label: "BUILDING", tone: "building" });
+  } else if (conversation?.state === "waiting_user") {
+    badges.push({ id: "waiting", label: "NEEDS INPUT", tone: "update" });
+  } else if (conversation?.failed && !conversation?.verified && !conversation?.hasPreview) {
+    // Only a build that produced nothing usable is a failure worth flagging on the card; a failed
+    // attempt on a project that is still live would be alarming and untrue.
+    badges.push({ id: "failed", label: "FAILED", tone: "failed" });
+  }
+
+  return badges;
+}
+
+// Which section of the dashboard a project belongs in.
+export const GROUPS = Object.freeze([
+  { id: "live", label: "Live apps", matches: (c) => isLive(statusOf(c)) },
+  { id: "progress", label: "In progress", matches: (c) => !!c.activity || c.state === "waiting_user" },
+  { id: "drafts", label: "Drafts", matches: () => true },
+]);
+
+// Each project appears exactly once, in the first group that claims it — a project that is live
+// AND building belongs under Live apps, because that is what it IS rather than what it is doing.
+export function groupProjects(conversations) {
+  const seen = new Set();
+  return GROUPS.map((group) => ({
+    ...group,
+    items: conversations.filter((c) => {
+      if (seen.has(c.id) || !group.matches(c)) return false;
+      seen.add(c.id);
+      return true;
+    }),
+  })).filter((group) => group.items.length > 0);
+}
+
 export function isLive(status) {
   return status === STATUS.published || status === STATUS.updateAvailable;
 }

@@ -27,7 +27,9 @@ import ProjectSettings from "../publish/ProjectSettings.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
-import { TABS, STATUS_LABEL, statusOf, countByTab, isLive } from "../publish/publishLifecycle.js";
+import {
+  TABS, statusOf, countByTab, isLive, badgesFor, groupProjects,
+} from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
@@ -541,8 +543,9 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
 
   const counts = countByTab(conversations);
   const inTab = TABS.find((t) => t.id === tab) || TABS[0];
-  const activeShown = active.filter((c) => inTab.matches(statusOf(c)));
-  const restShown = rest.filter((c) => inTab.matches(statusOf(c)));
+  // In-progress projects are always shown; the rest are capped so the dashboard stays scannable.
+  const shown = [...active, ...rest].filter((c) => inTab.matches(statusOf(c)));
+  const groups = groupProjects(shown);
   const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings };
   // Selecting a tab that empties out (the last published project is unpublished, say) would leave
   // the user staring at nothing they asked for. Fall back to All rather than an empty screen.
@@ -579,11 +582,15 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
               </button>
             ))}
           </div>
-          {activeShown.length > 0 && <div className="ct-ws-label">In progress</div>}
-          {activeShown.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
-          {restShown.length > 0 && <div className="ct-ws-label">Projects</div>}
-          {restShown.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
-          {activeShown.length === 0 && restShown.length === 0 && (
+          {/* Grouped by what a project IS, so live apps are never buried among drafts. The tabs
+              still filter; this is what the dashboard does before anyone touches them. */}
+          {groups.map((group) => (
+            <React.Fragment key={group.id}>
+              <div className="ct-ws-label">{group.label}</div>
+              {group.items.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
+            </React.Fragment>
+          ))}
+          {groups.length === 0 && (
             <div className="ct-ws-empty ct-hint">
               {tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
                 : tab === "updates" ? "Every published project is up to date."
@@ -625,24 +632,19 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
   const s = projectState(c);
   const status = statusOf(c);
   const site = c.site || null;
+  const badges = badgesFor(c);
   return (
     <div className={`ct-project ${site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""}`} role="button" tabIndex={0} onClick={() => onOpen(c.id)}
-      aria-label={`Open ${c.title || "untitled project"} — ${STATUS_LABEL[status]}, ${s.label}`}
+      aria-label={`Open ${c.title || "untitled project"} — ${badges.map((b) => b.label).join(", ")}, ${s.label}`}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
-      <span className={`ct-pstate ct-pstate-${s.tone}`} />
       <span className="ct-pmeta">
         <span className="ct-pname">
           {c.title || "Untitled project"}
-          {/* Every project states its lifecycle position, including drafts — an absent badge
-              would read as "unknown" rather than "not published yet". */}
-          <span className={`ct-live-badge st-${status}`}>
-            <span className="dot" aria-hidden="true" />{STATUS_LABEL[status]}
-          </span>
-          {/* A project with an update pending is still serving, so it says LIVE too — the amber
-              badge is about the newest build not being out yet, not about being offline. */}
-          {status === "update_available" && (
-            <span className="ct-live-badge st-published"><span className="dot" aria-hidden="true" />LIVE</span>
-          )}
+          {/* Badges, not a dot. A dot could only ever say one thing, and a project is often two
+              things at once — live AND building, or live AND a newer build waiting. */}
+          {badges.map((b) => (
+            <span className={`ct-badge tone-${b.tone}`} key={b.id}>{b.label}</span>
+          ))}
         </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
         {site && (
