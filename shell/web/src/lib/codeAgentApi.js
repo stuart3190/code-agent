@@ -237,3 +237,23 @@ export async function streamRunEvents(runId, onEvent, { signal, after = 0 } = {}
   }
   return after;
 }
+
+export const publishState = () => request("/api/v1/publish-state");
+
+// The export route answers with a ZIP, not JSON, so it cannot go through request(). Returns a
+// blob for the caller to save; errors still arrive as JSON and are surfaced normally.
+export async function exportProjectZip(projectId) {
+  const token = await accessToken();
+  const response = await fetch(`${apiBase()}/api/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectId }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Export failed (${response.status})`);
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] || "thrallo-app.zip";
+  return { blob: await response.blob(), filename: name };
+}

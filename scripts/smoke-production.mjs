@@ -28,6 +28,7 @@ const CHECKS = [
   // Owner-scoped: 401 proves mounted + gated.
   { method: "GET", path: "/api/v1/conversations", expect: [401], why: "conversation list" },
   { method: "GET", path: "/api/v1/usage", expect: [401], why: "usage + budgets" },
+  { method: "GET", path: "/api/v1/publish-state", expect: [401], why: "published state powers the live badges" },
   { method: "GET", path: "/api/v1/ai/connections", expect: [401], why: "AI connections" },
   { method: "GET", path: "/api/v1/diagnostics", expect: [401], why: "build diagnostics" },
   { method: "GET", path: "/api/v1/tokens", expect: [401], why: "API tokens" },

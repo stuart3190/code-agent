@@ -22,6 +22,9 @@ import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
 import BillingSettings from "../billing/BillingSettings.jsx";
 import SuccessView from "../billing/SuccessView.jsx";
+import PublishedPanel from "../publish/PublishedPanel.jsx";
+import ProjectSettings from "../publish/ProjectSettings.jsx";
+import { usePublishState } from "../publish/publishState.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
@@ -123,6 +126,11 @@ function Workspace({ user }) {
     () => new URLSearchParams(window.location.search).get("billing") || null,
   );
   const planState = usePlanState();
+  const publish = usePublishState();
+  // Set only when a publish completes in THIS session, so the celebration belongs to the moment
+  // while the panel itself stays permanently.
+  const [justPublished, setJustPublished] = useState(null);
+  const [projectSettings, setProjectSettings] = useState(null);
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -180,6 +188,13 @@ function Workspace({ user }) {
             // responds instantly; the reducer ignores this event type.
             if (event.type === "open_view" && MANAGE_VIEW_IDS.includes(event.payload?.view)) {
               setManageView(event.payload.view);
+            }
+            // A publish has just succeeded. The panel's facts (URL, time, whether what is live is
+            // current) live server-side, so re-read them rather than assembling them from the
+            // event — that keeps one source of truth and makes updateAvailable correct.
+            if (event.type === "published") {
+              setJustPublished(event.payload?.projectId || true);
+              publish.refresh();
             }
             if (event.type === "open_view" && event.payload?.view === "run" && event.payload?.runId) {
               setRunOverlayId(event.payload.runId);
@@ -321,6 +336,7 @@ function Workspace({ user }) {
         <div className="ct-dash">
           <PlanBanner planState={planState} onOpenPricing={() => navigate("/pricing")} />
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
+            publishedFor={(c) => publish.byProduct(c.productId)}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -344,6 +360,12 @@ function Workspace({ user }) {
       ) : (
         <div className="ct-room">
           <div className="ct-thread-wrap">
+            {/* Above the thread, so it stays put while the conversation scrolls — the answer to
+                "is my app live?" must not scroll away the way the old publish message did. */}
+            <PublishedPanel site={publish.byProduct(active.productId)}
+              celebrate={!!justPublished}
+              onPublishUpdate={() => { setJustPublished(null); send("Publish the latest version of this app."); }}
+              onOpenSettings={() => setProjectSettings(publish.byProduct(active.productId))} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
@@ -388,6 +410,10 @@ function Workspace({ user }) {
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
         onOpenRun={(id) => setRunOverlayId(id)} />
+      {projectSettings && (
+        <ProjectSettings site={projectSettings} onClose={() => setProjectSettings(null)}
+          onSentence={(text) => { setProjectSettings(null); send(text); }} />
+      )}
       {runOverlayId && <RunOverlay runId={runOverlayId} onClose={() => setRunOverlayId(null)} />}
       {paletteOpen && (
         <Palette conversations={conversations}
@@ -442,7 +468,7 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null }) {
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, publishedFor = () => null }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -478,9 +504,9 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
       {loaded && conversations.length > 0 && (
         <div className="ct-workspace">
           {active.length > 0 && <div className="ct-ws-label">In progress</div>}
-          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
+          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} site={publishedFor(c)} />)}
           {rest.length > 0 && <div className="ct-ws-label">Projects</div>}
-          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} />)}
+          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} site={publishedFor(c)} />)}
         </div>
       )}
       {deletedItems.length > 0 && (
@@ -512,7 +538,7 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   );
 }
 
-function ProjectCard({ c, onOpen, onDelete }) {
+function ProjectCard({ c, onOpen, onDelete, site = null }) {
   const s = projectState(c);
   return (
     <div className="ct-project" role="button" tabIndex={0} onClick={() => onOpen(c.id)}
@@ -520,7 +546,16 @@ function ProjectCard({ c, onOpen, onDelete }) {
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
       <span className={`ct-pstate ct-pstate-${s.tone}`} />
       <span className="ct-pmeta">
-        <span className="ct-pname">{c.title || "Untitled project"}</span>
+        <span className="ct-pname">
+          {c.title || "Untitled project"}
+          {/* A live project is distinguishable from a draft at a glance, which is the whole
+              point: nobody should have to open a project to find out whether it is published. */}
+          {site && (
+            <span className={`ct-live-badge ${site.updateAvailable ? "stale" : ""}`}>
+              <span className="dot" aria-hidden="true" />{site.updateAvailable ? "Update Available" : "Published"}
+            </span>
+          )}
+        </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
       </span>
       <span className="ct-popen">Open</span>
