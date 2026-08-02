@@ -30,23 +30,31 @@ const SESSION = {
 };
 
 const LIVE = {
+  status: "published", live: true,
   projectId: "p1", productId: "prod-1", name: "FocusFlow",
   url: "https://focusflow.app.thrallo.com", environment: "production",
   publishedAt: new Date(Date.now() - 7 * 60_000).toISOString(),
   updateAvailable: false,
 };
-const STALE = { ...LIVE, updateAvailable: true };
+const STALE = { ...LIVE, updateAvailable: true, status: "update_available" };
 
-const CONVERSATIONS = [
-  { id: "c1", title: "FocusFlow", state: "idle", productId: "prod-1" },
-  { id: "c2", title: "Draft idea", state: "idle", productId: "prod-2" },
+// Publish state travels WITH the conversation rows (see routes/conversations.mjs), so the stub
+// supplies it the way the server now does. The dashboard badges and tabs are covered in
+// publish-lifecycle.spec.mjs; this file covers the in-conversation panel and Project Settings.
+const conversationsFor = (sites) => [
+  {
+    id: "c1", title: "FocusFlow", state: "idle", productId: "prod-1",
+    publishStatus: sites[0]?.status || (sites[0] ? "published" : "draft"),
+    site: sites[0] || null,
+  },
+  { id: "c2", title: "Draft idea", state: "idle", productId: "prod-2", publishStatus: "draft", site: null },
 ];
 
 async function stub(page, { sites = [], onExport = null } = {}) {
   await page.addInitScript(([key, session]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
   }, [`sb-${REF}-auth-token`, SESSION]);
-  await page.route("**/api/v1/conversations", (r) => r.fulfill({ json: { conversations: CONVERSATIONS } }));
+  await page.route("**/api/v1/conversations", (r) => r.fulfill({ json: { conversations: conversationsFor(sites) } }));
   await page.route("**/api/v1/conversations/deleted", (r) => r.fulfill({ json: { items: [], recoveryDays: 7 } }));
   await page.route("**/api/v1/conversations/*/events**", (r) =>
     r.fulfill({ contentType: "text/event-stream", body: "" }));
@@ -62,27 +70,10 @@ async function stub(page, { sites = [], onExport = null } = {}) {
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 
-test("a published project is marked on the dashboard; a draft is not", async ({ page }) => {
-  await stub(page, { sites: [LIVE] });
-  await page.goto("/");
-  const published = page.locator(".ct-project").filter({ hasText: "FocusFlow" });
-  const draft = page.locator(".ct-project").filter({ hasText: "Draft idea" });
-  await expect(published.locator(".ct-live-badge")).toHaveText(/Published/);
-  await expect(draft.locator(".ct-live-badge")).toHaveCount(0);
-});
-
-test("a project changed since publishing says Update Available instead", async ({ page }) => {
-  await stub(page, { sites: [STALE] });
-  await page.goto("/");
-  const card = page.locator(".ct-project").filter({ hasText: "FocusFlow" });
-  await expect(card.locator(".ct-live-badge")).toHaveText(/Update Available/);
-  await expect(card.locator(".ct-live-badge")).toHaveClass(/stale/);
-});
-
 test("the conversation shows the live URL, status, environment and publish time", async ({ page }) => {
   await stub(page, { sites: [LIVE] });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
 
   const panel = page.locator(".ct-published");
   await expect(panel.locator(".ct-published-badge")).toHaveText(/Published/);
@@ -99,12 +90,12 @@ test("the conversation shows the live URL, status, environment and publish time"
 test("the panel persists — it is not a one-time success message", async ({ page }) => {
   await stub(page, { sites: [LIVE] });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
   await expect(page.locator(".ct-published")).toBeVisible();
 
   // Leave, come back, reload: still there, and never celebrating a publish that happened earlier.
   await page.getByRole("button", { name: /Home/ }).first().click();
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
   await expect(page.locator(".ct-published")).toBeVisible();
   await expect(page.locator(".ct-published-cheer")).toHaveCount(0);
 });
@@ -112,7 +103,7 @@ test("the panel persists — it is not a one-time success message", async ({ pag
 test("an unpublished project shows no panel at all", async ({ page }) => {
   await stub(page, { sites: [LIVE] });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "Draft idea" }).click();
+  await page.locator(".ct-project").filter({ hasText: "Draft idea" }).locator(".ct-pname").click();
   await expect(page.locator(".ct-published")).toHaveCount(0);
 });
 
@@ -121,7 +112,7 @@ test("Copy URL copies the live address", async ({ page, context, browserName }) 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await stub(page, { sites: [LIVE] });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
 
   await page.locator(".ct-published").getByRole("button", { name: "Copy URL" }).click();
   await expect(page.locator(".ct-published").getByRole("button", { name: "Copied" })).toBeVisible();
@@ -136,7 +127,7 @@ test("Publish Update asks for a republish through the normal conversational path
     return r.fulfill({ json: { ok: true } });
   });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
   await page.locator(".ct-published").getByRole("button", { name: "Publish Update" }).click();
 
   await expect.poll(() => sent).toMatch(/publish/i);
@@ -156,7 +147,7 @@ test("Project Settings offers only actions that exist, and can download the sour
     },
   });
   await page.goto("/");
-  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).click();
+  await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
   await page.locator(".ct-published").getByRole("button", { name: "Project Settings" }).click();
 
   const sheet = page.locator(".ct-sheet").filter({ hasText: "Project settings" });

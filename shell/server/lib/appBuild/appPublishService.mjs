@@ -125,6 +125,9 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     const { error: upsertError } = await serviceClient().from("published_sites").upsert({
       owner: ctx.owner, project_id: String(project.id), slug: out.id, url: out.url,
       updated_at: new Date().toISOString(),
+      // Republishing after an unpublish returns the site to live. Without clearing this the
+      // project would show as unpublished while its URL was serving again.
+      unpublished_at: null,
     }, { onConflict: "project_id" });
     if (upsertError) console.error(`[publish] record failed: ${upsertError.message}`);
 
@@ -187,4 +190,38 @@ export async function connectDomain(ctx, { domain, productName = null }) {
     domain: cleaned, ip,
     instructions: `Point an A record for ${cleaned} to ${ip}. The certificate is issued automatically on the first visit once DNS resolves.`,
   };
+}
+
+// Take a published site offline.
+//
+// The published_sites row is stamped, never deleted: the slug stays claimed so republishing
+// returns to the same address, and the publish history remains answerable. provisiond removes the
+// files, which is what actually makes the URL stop serving.
+export async function unpublishApp(owner, projectId) {
+  if (!publishConfigured()) {
+    const error = new Error("Publishing infrastructure is not configured.");
+    error.code = "not_configured";
+    throw error;
+  }
+  const client = serviceClient();
+  const { data: site } = await client.from("published_sites")
+    .select("project_id,slug,url,unpublished_at")
+    .eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
+  if (!site) {
+    const error = new Error("That project isn't published.");
+    error.code = "not_published";
+    throw error;
+  }
+  if (site.unpublished_at) return { url: site.url, alreadyOffline: true };
+
+  await provisiond("/unpublish", { body: { projectId: String(projectId), slug: site.slug } });
+
+  const { error: updateError } = await client.from("published_sites")
+    .update({ unpublished_at: new Date().toISOString() })
+    .eq("project_id", String(projectId)).eq("owner", owner);
+  // The files are already gone, so the site IS offline. Failing the request here would tell the
+  // user it did not work while their site was down — the worst of both.
+  if (updateError) console.error(`[unpublish] record failed: ${updateError.message}`);
+
+  return { url: site.url, alreadyOffline: false };
 }

@@ -24,11 +24,14 @@ import BillingSettings from "../billing/BillingSettings.jsx";
 import SuccessView from "../billing/SuccessView.jsx";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
 import ProjectSettings from "../publish/ProjectSettings.jsx";
+import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
+import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
+import { TABS, STATUS_LABEL, statusOf, countByTab } from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
 import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "./ModelSelector.jsx";
-import { setConversationModel, cancelBuild } from "../lib/codeAgentApi.js";
+import { setConversationModel, cancelBuild, unpublishProject } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
 import AiSettings from "../manage/AiSettings.jsx";
 import TokensSettings from "../manage/TokensSettings.jsx";
@@ -131,6 +134,7 @@ function Workspace({ user }) {
   // while the panel itself stays permanently.
   const [justPublished, setJustPublished] = useState(null);
   const [projectSettings, setProjectSettings] = useState(null);
+  const [unpublishing, setUnpublishing] = useState(null); // { conversation, site, busy, error }
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -194,7 +198,7 @@ function Workspace({ user }) {
             // event — that keeps one source of truth and makes updateAvailable correct.
             if (event.type === "published") {
               setJustPublished(event.payload?.projectId || true);
-              publish.refresh();
+              refreshProjects();
             }
             if (event.type === "open_view" && event.payload?.view === "run" && event.payload?.runId) {
               setRunOverlayId(event.payload.runId);
@@ -268,6 +272,33 @@ function Workspace({ user }) {
   const initial = (user.email || "?")[0].toUpperCase();
   const workingAgent = [...view.roster].reverse().find((r) => r.state === "working");
 
+  // Publish state now travels with the conversation rows, so re-reading them IS the dashboard
+  // refresh. Called after publish and unpublish so a card never shows a state the user has
+  // already changed.
+  const refreshProjects = useCallback(() => {
+    publish.refresh();
+    return listConversations()
+      .then((r) => setConversations(r.conversations || []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Publishing from a dashboard card must post to THAT conversation. `send` reads `active` from
+  // its closure, which is still null in the same tick as openConversation — using it here would
+  // silently start a brand new conversation instead.
+  const publishUpdateFor = useCallback(async (conversation) => {
+    const text = "Publish the latest version of this app.";
+    openConversation(conversation);
+    setPending(text);
+    try {
+      await sendConversationMessage(conversation.id, text, null);
+    } catch (error) {
+      setPending(null);
+      showToast(error.message || "That didn't send — try again from the project.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openConversation, showToast]);
+
   // Back/forward must work on a real URL, so the browser stays the source of truth.
   const navigate = useCallback((next) => {
     // Compared against pathname AND search: Stripe returns to "/?billing=success", whose pathname
@@ -336,7 +367,9 @@ function Workspace({ user }) {
         <div className="ct-dash">
           <PlanBanner planState={planState} onOpenPricing={() => navigate("/pricing")} />
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
-            publishedFor={(c) => publish.byProduct(c.productId)}
+            onPublishUpdate={publishUpdateFor}
+            onUnpublish={(c) => setUnpublishing({ conversation: c, site: c.site, busy: false, error: "" })}
+            onProjectSettings={(c) => setProjectSettings(c.site)}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -365,6 +398,9 @@ function Workspace({ user }) {
             <PublishedPanel site={publish.byProduct(active.productId)}
               celebrate={!!justPublished}
               onPublishUpdate={() => { setJustPublished(null); send("Publish the latest version of this app."); }}
+              onUnpublish={() => setUnpublishing({
+                conversation: active, site: publish.byProduct(active.productId), busy: false, error: "",
+              })}
               onOpenSettings={() => setProjectSettings(publish.byProduct(active.productId))} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
@@ -410,6 +446,24 @@ function Workspace({ user }) {
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
         onOpenRun={(id) => setRunOverlayId(id)} />
+      {unpublishing && (
+        <UnpublishConfirm site={unpublishing.site} busy={unpublishing.busy} error={unpublishing.error}
+          onCancel={() => setUnpublishing(null)}
+          onConfirm={async () => {
+            setUnpublishing((u) => ({ ...u, busy: true, error: "" }));
+            try {
+              const result = await unpublishProject(unpublishing.site.projectId);
+              setUnpublishing(null);
+              await refreshProjects();
+              showToast(result.message || "Your site has been unpublished.");
+            } catch (error) {
+              setUnpublishing((u) => ({
+                ...u, busy: false,
+                error: error.message || "The site could not be taken offline. Please try again.",
+              }));
+            }
+          }} />
+      )}
       {projectSettings && (
         <ProjectSettings site={projectSettings} onClose={() => setProjectSettings(null)}
           onSentence={(text) => { setProjectSettings(null); send(text); }} />
@@ -468,10 +522,11 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, publishedFor = () => null }) {
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {} }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [tab, setTab] = useState("all");
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
   // Remember whether this account had projects so the greeting doesn't flash from
   // "Let's build something." to "Welcome back" while the list loads.
@@ -483,6 +538,17 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
   const rest = conversations.filter((c) => !active.includes(c)).slice(0, 6);
   const act = (id, run) => { setBusyId(id); Promise.resolve(run()).finally(() => setBusyId(null)); };
+
+  const counts = countByTab(conversations);
+  const inTab = TABS.find((t) => t.id === tab) || TABS[0];
+  const activeShown = active.filter((c) => inTab.matches(statusOf(c)));
+  const restShown = rest.filter((c) => inTab.matches(statusOf(c)));
+  const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings };
+  // Selecting a tab that empties out (the last published project is unpublished, say) would leave
+  // the user staring at nothing they asked for. Fall back to All rather than an empty screen.
+  useEffect(() => {
+    if (tab !== "all" && counts[tab] === 0) setTab("all");
+  }, [tab, counts]);
   return (
     <div className="ct-begin" style={{ justifyContent: fresh ? "center" : "flex-start", overflowY: "auto" }}>
       <div className="ct-halo" />
@@ -503,10 +569,27 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
       )}
       {loaded && conversations.length > 0 && (
         <div className="ct-workspace">
-          {active.length > 0 && <div className="ct-ws-label">In progress</div>}
-          {active.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} site={publishedFor(c)} />)}
-          {rest.length > 0 && <div className="ct-ws-label">Projects</div>}
-          {rest.map((c) => <ProjectCard key={c.id} c={c} onOpen={onContinue} onDelete={onDelete} site={publishedFor(c)} />)}
+          {/* Tabs are views over one field, so a project can never be missing from every tab.
+              A tab with nothing in it is hidden rather than shown empty — except All. */}
+          <div className="ct-ws-tabs" role="tablist" aria-label="Project status">
+            {TABS.filter((t) => t.id === "all" || counts[t.id] > 0).map((t) => (
+              <button key={t.id} role="tab" aria-selected={tab === t.id}
+                className={`ct-ws-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>
+                {t.label}<span className="n">{counts[t.id]}</span>
+              </button>
+            ))}
+          </div>
+          {activeShown.length > 0 && <div className="ct-ws-label">In progress</div>}
+          {activeShown.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
+          {restShown.length > 0 && <div className="ct-ws-label">Projects</div>}
+          {restShown.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
+          {activeShown.length === 0 && restShown.length === 0 && (
+            <div className="ct-ws-empty ct-hint">
+              {tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
+                : tab === "updates" ? "Every published project is up to date."
+                  : "No projects here yet."}
+            </div>
+          )}
         </div>
       )}
       {deletedItems.length > 0 && (
@@ -538,25 +621,31 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   );
 }
 
-function ProjectCard({ c, onOpen, onDelete, site = null }) {
+function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings }) {
   const s = projectState(c);
+  const status = statusOf(c);
+  const site = c.site || null;
   return (
-    <div className="ct-project" role="button" tabIndex={0} onClick={() => onOpen(c.id)}
-      aria-label={`Open ${c.title || "untitled project"} — ${s.label}`}
+    <div className={`ct-project ${site ? "has-pub" : ""}`} role="button" tabIndex={0} onClick={() => onOpen(c.id)}
+      aria-label={`Open ${c.title || "untitled project"} — ${STATUS_LABEL[status]}, ${s.label}`}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
       <span className={`ct-pstate ct-pstate-${s.tone}`} />
       <span className="ct-pmeta">
         <span className="ct-pname">
           {c.title || "Untitled project"}
-          {/* A live project is distinguishable from a draft at a glance, which is the whole
-              point: nobody should have to open a project to find out whether it is published. */}
-          {site && (
-            <span className={`ct-live-badge ${site.updateAvailable ? "stale" : ""}`}>
-              <span className="dot" aria-hidden="true" />{site.updateAvailable ? "Update Available" : "Published"}
-            </span>
-          )}
+          {/* Every project states its lifecycle position, including drafts — an absent badge
+              would read as "unknown" rather than "not published yet". */}
+          <span className={`ct-live-badge st-${status}`}>
+            <span className="dot" aria-hidden="true" />{STATUS_LABEL[status]}
+          </span>
         </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
+        {site && (
+          <ProjectPublishRow site={site} status={status}
+            onPublishUpdate={() => onPublishUpdate(c)}
+            onUnpublish={() => onUnpublish(c)}
+            onSettings={() => onProjectSettings(c)} />
+        )}
       </span>
       <span className="ct-popen">Open</span>
       <button className="ct-pdelete" title="Delete project" aria-label={`Delete ${c.title || "project"}`}

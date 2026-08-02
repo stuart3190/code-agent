@@ -257,3 +257,6 @@ export async function exportProjectZip(projectId) {
   const name = /filename="([^"]+)"/.exec(disposition)?.[1] || "thrallo-app.zip";
   return { blob: await response.blob(), filename: name };
 }
+
+export const unpublishProject = (projectId) =>
+  request(`/api/v1/projects/${projectId}/unpublish`, { method: "POST" });
