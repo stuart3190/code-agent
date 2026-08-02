@@ -19,7 +19,7 @@ const OWNER = "44444444-4444-4444-8444-444444444444";
 const PUBLISHED_AT = "2026-08-02T12:00:00.000Z";
 const PRODUCT = "prod-1";
 
-function fakeDb({ sites = [], projects = [], siteError = null } = {}) {
+function fakeDb({ sites = [], projects = [], domains = [], siteError = null } = {}) {
   const seen = [];
   return {
     seen,
@@ -29,11 +29,18 @@ function fakeDb({ sites = [], projects = [], siteError = null } = {}) {
         select() { return api; },
         eq(column, value) { filters[column] = value; return api; },
         in(column, values) { filters[column] = values; return api; },
+        order() { return api; },
         then(resolve) {
           seen.push({ table, filters });
           if (table === "published_sites") {
             if (siteError) return resolve({ data: null, error: siteError });
             return resolve({ data: sites.filter((s) => s.owner === filters.owner), error: null });
+          }
+          if (table === "custom_domains") {
+            return resolve({
+              data: domains.filter((d) => d.owner === filters.owner && (!filters.status || d.status === filters.status)),
+              error: null,
+            });
           }
           return resolve({ data: projects.filter((p) => p.owner === filters.owner), error: null });
         },
@@ -142,7 +149,7 @@ test("republishing clears the offline stamp", async () => {
 test("both queries are owner-scoped", async () => {
   const db = fakeDb({ sites: [site()], projects: [project()] });
   await publishStates(OWNER, db);
-  assert.equal(db.seen.length, 2);
+  assert.equal(db.seen.length, 3, "published_sites, projects and custom_domains");
   for (const query of db.seen) assert.equal(query.filters.owner, OWNER, `${query.table} must filter by owner`);
 });
 
@@ -172,4 +179,55 @@ test("neither the dashboard nor the conversation list dies if publish state fail
     /storage unavailable/,
     "the library still reports the failure so callers can log it",
   );
+});
+
+// ── The address a project is known by ────────────────────────────────────────────────────
+
+test("a verified custom domain becomes the displayed address, without losing the Thrallo one", async () => {
+  const db = fakeDb({
+    sites: [site()],
+    projects: [project()],
+    domains: [{ owner: OWNER, project_id: "p1", domain: "shop.example.com", status: "active", created_at: "2026-08-01T00:00:00.000Z" }],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.customDomain, "shop.example.com");
+  assert.equal(state.primaryUrl, "https://shop.example.com", "this is what people are told");
+  assert.equal(state.url, "https://app.thrallo.com/x", "and the Thrallo address is never discarded");
+});
+
+test("a domain still proving itself is NOT shown as the address", async () => {
+  // Sending people to a hostname that does not resolve yet would be worse than showing the
+  // Thrallo URL, which definitely works.
+  for (const status of ["pending_dns", "verifying", "failed"]) {
+    const db = fakeDb({
+      sites: [site()], projects: [project()],
+      domains: [{ owner: OWNER, project_id: "p1", domain: "shop.example.com", status, created_at: "2026-08-01T00:00:00.000Z" }],
+    });
+    const [state] = await publishStates(OWNER, db);
+    assert.equal(state.customDomain, null, `${status} must not take over the address`);
+    assert.equal(state.primaryUrl, "https://app.thrallo.com/x");
+  }
+});
+
+test("the oldest domain stays primary when several are active", async () => {
+  // Otherwise the address a project is known by would change every time another domain was added.
+  const db = fakeDb({
+    sites: [site()], projects: [project()],
+    domains: [
+      { owner: OWNER, project_id: "p1", domain: "second.example.com", status: "active", created_at: "2026-08-02T00:00:00.000Z" },
+      { owner: OWNER, project_id: "p1", domain: "first.example.com", status: "active", created_at: "2026-08-01T00:00:00.000Z" },
+    ],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.customDomain, "first.example.com");
+});
+
+test("an unpublished project shows its Thrallo address even with an active domain", async () => {
+  const db = fakeDb({
+    sites: [site({ unpublished_at: "2026-08-03T00:00:00.000Z" })], projects: [project()],
+    domains: [{ owner: OWNER, project_id: "p1", domain: "shop.example.com", status: "active", created_at: "2026-08-01T00:00:00.000Z" }],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.primaryUrl, "https://app.thrallo.com/x",
+    "nothing is serving, so pointing at the custom domain would be a lie");
 });

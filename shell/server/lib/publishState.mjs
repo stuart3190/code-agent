@@ -42,6 +42,26 @@ export async function publishStates(owner, client = serviceClient()) {
     .select("id,product_id,name,updated_at")
     .eq("owner", owner);
   const all = projects || [];
+
+  // A verified custom domain is what the owner actually tells people, so once one is active it
+  // becomes the address shown everywhere. Only `active` counts — a domain still proving itself
+  // would send people to a hostname that does not resolve yet. The Thrallo URL is always kept
+  // alongside it, never replaced, so it stays copyable from Project Settings.
+  const { data: domainRows } = await client
+    .from("custom_domains")
+    .select("domain,project_id,created_at")
+    .eq("owner", owner).eq("status", "active")
+    .order("created_at", { ascending: true });
+  // Sorted here rather than relying on the query's order clause: which domain is "primary" is a
+  // product decision, and it should not quietly change if that clause is ever edited away.
+  const customByProject = new Map();
+  for (const row of [...(domainRows || [])].sort(
+    (a, b) => Date.parse(a.created_at || 0) - Date.parse(b.created_at || 0),
+  )) {
+    // Oldest first, so the first domain connected stays the primary one rather than the address a
+    // project is known by changing every time another domain is added.
+    if (!customByProject.has(String(row.project_id))) customByProject.set(String(row.project_id), row.domain);
+  }
   const byId = new Map(all.map((p) => [String(p.id), p]));
 
   const newestByProduct = new Map();
@@ -66,8 +86,12 @@ export async function publishStates(owner, client = serviceClient()) {
     const stale = !!(live && latest?.updated_at && publishedAt
       && Date.parse(latest.updated_at) > Date.parse(publishedAt) + STALE_TOLERANCE_MS);
 
+    const customDomain = customByProject.get(String(site.project_id)) || null;
     return {
       projectId: String(site.project_id),
+      customDomain,
+      // What to show and link to. The Thrallo address remains in `url` regardless.
+      primaryUrl: customDomain && live ? `https://${customDomain}` : site.url,
       // The project to act on now. Publishing an update must target the CURRENT project of the
       // product, not the one that happened to be live months ago.
       currentProjectId: latest ? String(latest.id) : String(site.project_id),

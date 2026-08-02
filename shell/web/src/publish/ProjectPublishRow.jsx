@@ -11,11 +11,14 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
   if (!site) return null;
 
   const offline = status === STATUS.unpublished;
+  // Once a custom domain is verified it IS the address — it is what the owner gives people. The
+  // Thrallo URL is never lost; it stays copyable from Project Settings.
+  const address = site.primaryUrl || site.url;
 
   async function copy(event) {
     event.stopPropagation();
     try {
-      await navigator.clipboard.writeText(site.url);
+      await navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 2_000);
     } catch { setCopied(false); }
@@ -28,23 +31,25 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
     <div className="ct-pubrow" onClick={(e) => e.stopPropagation()}>
       <div className="ct-pubrow-facts">
         {offline ? (
-          <span className="ct-pubrow-url offline">{displayUrl(site.url)} · offline</span>
+          <span className="ct-pubrow-url offline">{displayUrl(address)} · offline</span>
         ) : (
-          <a className="ct-pubrow-url" href={site.url} target="_blank" rel="noopener noreferrer"
+          <a className="ct-pubrow-url" href={address} target="_blank" rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}>
-            {displayUrl(site.url)}
+            {displayUrl(address)}
           </a>
         )}
         <span className="ct-pubrow-meta">
-          Production · {offline
-            ? `unpublished ${relativeTime(site.unpublishedAt)}`
-            : `published ${relativeTime(site.publishedAt)}`}
+          <span className="ct-env">Production</span>
+          {offline
+            ? ` · unpublished ${relativeTime(site.unpublishedAt)}`
+            : ` · published ${relativeTime(site.publishedAt)}`}
+          {site.customDomain && !offline && " · custom domain"}
         </span>
       </div>
       <div className="ct-pubrow-actions">
         {!offline && (
           <>
-            <a className="ct-pubrow-btn" href={site.url} target="_blank" rel="noopener noreferrer"
+            <a className="ct-pubrow-btn" href={address} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}>Open Live Site</a>
             <button className="ct-pubrow-btn" onClick={copy}>{copied ? "Copied" : "Copy URL"}</button>
           </>

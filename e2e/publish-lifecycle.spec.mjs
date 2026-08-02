@@ -83,15 +83,15 @@ test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 test("every project states its lifecycle position, drafts included", async ({ page }) => {
   await stub(page, [PUBLISHED, DRAFT]);
   await page.goto("/");
-  await expect(card(page, "FocusFlow").locator(".ct-live-badge")).toHaveText(/Published/);
-  await expect(card(page, "Draft idea").locator(".ct-live-badge")).toHaveText(/Draft/);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
+  await expect(card(page, "Draft idea").locator(".ct-badge.tone-muted")).toHaveText("DRAFT");
 });
 
 test("a changed project keeps its live URL and says Update Available", async ({ page }) => {
   await stub(page, [UPDATE_AVAILABLE]);
   await page.goto("/");
   const c = card(page, "FocusFlow");
-  await expect(c.locator(".ct-live-badge")).toHaveText(/Update Available/);
+  await expect(c.locator(".ct-badge.tone-update")).toHaveText("UPDATE AVAILABLE");
   // The site is still online, so the URL must still be shown and still be a link.
   await expect(c.locator(".ct-pubrow-url")).toHaveText("focusflow.app.thrallo.com");
   await expect(c.locator(".ct-pubrow-url")).toHaveAttribute("href", SITE.url);
@@ -101,7 +101,7 @@ test("an unpublished project shows Unpublished and no live link", async ({ page 
   await stub(page, [UNPUBLISHED]);
   await page.goto("/");
   const c = card(page, "FocusFlow");
-  await expect(c.locator(".ct-live-badge")).toHaveText(/Unpublished/);
+  await expect(c.locator(".ct-badge.tone-muted")).toHaveText("UNPUBLISHED");
   await expect(c.locator(".ct-pubrow-url.offline")).toBeVisible();
   await expect(c.getByRole("link", { name: "Open Live Site" })).toHaveCount(0);
   await expect(c.getByRole("button", { name: "Publish Again" })).toBeVisible();
@@ -152,7 +152,7 @@ test("Published → Unpublished settles on the dashboard with no reload", async 
     },
   });
   await page.goto("/");
-  await expect(card(page, "FocusFlow").locator(".ct-live-badge")).toHaveText(/Published/);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
 
   await card(page, "FocusFlow").getByRole("button", { name: "Unpublish" }).click();
   const dialog = page.getByRole("dialog", { name: /offline/i });
@@ -162,7 +162,7 @@ test("Published → Unpublished settles on the dashboard with no reload", async 
 
   await expect(page.getByText("Your site has been unpublished.")).toBeVisible();
   // No reload happened, yet the card has moved on.
-  await expect(card(page, "FocusFlow").locator(".ct-live-badge")).toHaveText(/Unpublished/);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-muted")).toHaveText("UNPUBLISHED");
   expect(called).toMatch(new RegExp(`/api/v1/projects/${SITE.projectId}/unpublish$`));
   expect(state.conversations[0].publishStatus).toBe("unpublished");
 });
@@ -174,7 +174,7 @@ test("cancelling the dialog leaves the site alone", async ({ page }) => {
   await card(page, "FocusFlow").getByRole("button", { name: "Unpublish" }).click();
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("dialog", { name: /offline/i })).toHaveCount(0);
-  await expect(card(page, "FocusFlow").locator(".ct-live-badge")).toHaveText(/Published/);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
   expect(called).toBe(false);
 });
 
@@ -187,7 +187,7 @@ test("a failed unpublish says so and keeps the site listed as live", async ({ pa
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Unpublish" }).click();
   await expect(page.getByRole("dialog", { name: /offline/i })).toContainText("could not be taken offline");
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Cancel" }).click();
-  await expect(card(page, "FocusFlow").locator(".ct-live-badge")).toHaveText(/Published/);
+  await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
 });
 
 test("Unpublished → Published again posts to the right conversation", async ({ page }) => {

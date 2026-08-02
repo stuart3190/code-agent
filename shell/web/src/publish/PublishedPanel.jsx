@@ -6,7 +6,7 @@
 
 import React, { useState } from "react";
 import { relativeTime, displayUrl } from "./publishState.js";
-import { STATUS, STATUS_LABEL } from "./publishLifecycle.js";
+import { STATUS } from "./publishLifecycle.js";
 
 export default function PublishedPanel({ site, celebrate = false, onPublishUpdate, onUnpublish, onOpenSettings }) {
   const [copied, setCopied] = useState(false);
@@ -15,10 +15,12 @@ export default function PublishedPanel({ site, celebrate = false, onPublishUpdat
   const status = site.status || (site.updateAvailable ? STATUS.updateAvailable : STATUS.published);
   const stale = status === STATUS.updateAvailable;
   const offline = status === STATUS.unpublished;
+  // A verified custom domain becomes the address shown; the Thrallo URL stays in Project Settings.
+  const address = site.primaryUrl || site.url;
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(site.url);
+      await navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 2_000);
     } catch {
@@ -28,21 +30,21 @@ export default function PublishedPanel({ site, celebrate = false, onPublishUpdat
 
   return (
     <section className={`ct-published ${celebrate ? "celebrate" : ""}`} aria-label="Published site">
-      {celebrate && <div className="ct-published-cheer">🎉 Your app is live.</div>}
+      {celebrate && <div className="ct-published-cheer">✅ Your app is live</div>}
 
       <div className="ct-published-head">
-        <span className={`ct-published-badge st-${status}`}>
-          <span className="dot" aria-hidden="true" />
-          {STATUS_LABEL[status]}
+        <span className={`ct-badge tone-${status === "published" ? "live" : status === "update_available" ? "update" : "muted"}`}>
+          {status === "published" ? "LIVE" : status === "update_available" ? "UPDATE AVAILABLE" : "UNPUBLISHED"}
         </span>
+        {stale && <span className="ct-badge tone-live">LIVE</span>}
         <span className="ct-published-env">Production</span>
       </div>
 
       {offline ? (
-        <span className="ct-published-url offline">{displayUrl(site.url)}</span>
+        <span className="ct-published-url offline">{displayUrl(address)}</span>
       ) : (
-        <a className="ct-published-url" href={site.url} target="_blank" rel="noopener noreferrer">
-          {displayUrl(site.url)}
+        <a className="ct-published-url" href={address} target="_blank" rel="noopener noreferrer">
+          {displayUrl(address)}
         </a>
       )}
 
@@ -56,8 +58,13 @@ export default function PublishedPanel({ site, celebrate = false, onPublishUpdat
       <div className="ct-published-actions">
         {!offline && (
           <>
-            <a className="ct-btn" href={site.url} target="_blank" rel="noopener noreferrer">Open Live Site</a>
+            <a className="ct-btn" href={address} target="_blank" rel="noopener noreferrer">Open Site</a>
             <button className="ct-btn-quiet" onClick={copy}>{copied ? "Copied" : "Copy URL"}</button>
+            {/* The natural next step the moment an app goes live, and the point at which someone
+                is most likely to want their own address on it. */}
+            {!site.customDomain && (
+              <button className="ct-btn-quiet" onClick={onOpenSettings}>Connect Domain</button>
+            )}
           </>
         )}
         {/* Publishing is a sentence in Thrallo, so this says the sentence rather than inventing a

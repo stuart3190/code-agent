@@ -698,3 +698,33 @@ div.ct-model-row { cursor: pointer; }
   background: var(--bg); color: var(--ink); font-size: var(--text-small);
 }
 .ct-domain-input:disabled { opacity: 0.55; }
+
+/* ── Project badges ──────────────────────────────────────────────────────────────────────
+   Replaces the state dot. A dot could carry one meaning; a project is regularly two things at
+   once (live AND building, live AND a newer build waiting), so badges are a set. */
+.ct-badge {
+  display: inline-flex; align-items: center; margin-left: 7px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 2px 7px; border-radius: 5px; vertical-align: middle; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.ct-badge.tone-live { background: var(--good); color: #fff; }
+.ct-badge.tone-update {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 42%, transparent);
+}
+.ct-badge.tone-building {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  animation: ct-pulse-anim 1.8s var(--ease-out) infinite;
+}
+.ct-badge.tone-failed {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad); border-color: color-mix(in srgb, var(--bad) 42%, transparent);
+}
+.ct-badge.tone-muted { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
+
+.ct-env {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
