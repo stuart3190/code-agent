@@ -36,12 +36,17 @@ async function labelExists(label, fetchImpl) {
   }
 }
 
-// Thrallo custom domains (Phase 22): approved once the custom_domains row exists.
+// Thrallo custom domains: approved ONLY once ownership has been verified.
+//
+// This previously returned true for any row that existed, which meant adding a domain was enough
+// to make Thrallo ask the CA for a certificate covering a hostname the requester might not own.
+// Verification now gates issuance: a domain reaches `active` only after a TXT token it could not
+// have published without control of the zone, AND the domain resolving here.
 async function thralloCustomDomain(domain) {
   try {
     const { serviceClient } = await import("../lib/supabase.mjs");
     const { data } = await serviceClient().from("custom_domains")
-      .select("domain").eq("domain", domain).maybeSingle();
+      .select("domain,status").eq("domain", domain).eq("status", "active").maybeSingle();
     return !!data;
   } catch {
     return false;

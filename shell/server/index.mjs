@@ -71,6 +71,10 @@ import {
   handleOpsTelemetry, handlePlanSelect,
 } from "./routes/subscription.mjs";
 import { handlePublishState, handleProjectUnpublish } from "./routes/publishState.mjs";
+import {
+  handleDomainAdd, handleCustomDomainRemove, handleDomainRetry, handleDomainVerify, handleDomainsList,
+} from "./routes/customDomains.mjs";
+import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
@@ -747,6 +751,19 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireSessionOwner(req, res); if (!owner) return;
       return await handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
     }
+    const domainsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/domains(\/verify|\/retry|\/remove)?$/i);
+    if (domainsMatch) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const projectId = domainsMatch[1];
+      if (method === "GET" && !domainsMatch[2]) return await handleDomainsList(req, res, owner, projectId);
+      if (method === "POST") {
+        const body = await readJson(req);
+        if (domainsMatch[2] === "/verify") return await handleDomainVerify(req, res, owner, projectId, body);
+        if (domainsMatch[2] === "/retry") return await handleDomainRetry(req, res, owner, projectId, body);
+        if (domainsMatch[2] === "/remove") return await handleCustomDomainRemove(req, res, owner, projectId, body);
+        return await handleDomainAdd(req, res, owner, projectId, body);
+      }
+    }
     const unpublishMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/unpublish$/i);
     if (unpublishMatch && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -865,6 +882,8 @@ server.listen(PORT, HOST, () => {
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
   startRetentionSweeper();
+  // DNS propagates on its own schedule; without this a user would have to sit pressing Retry.
+  startDomainVerifier();
   startDeletedProjectSweeper();
   startDiagnosticsSweeper();
   startAutomationSweeper();
@@ -882,6 +901,7 @@ async function shutdown(signal) {
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
+  stopDomainVerifier();
   stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();

@@ -260,3 +260,15 @@ export async function exportProjectZip(projectId) {
 
 export const unpublishProject = (projectId) =>
   request(`/api/v1/projects/${projectId}/unpublish`, { method: "POST" });
+
+// Custom domains. Every call answers with the full list plus the plan allowance, so the panel
+// settles from one response instead of re-reading after each change.
+export const listDomains = (projectId) => request(`/api/v1/projects/${projectId}/domains`);
+export const addDomain = (projectId, domain) =>
+  request(`/api/v1/projects/${projectId}/domains`, { method: "POST", body: JSON.stringify({ domain }) });
+export const verifyDomain = (projectId, domain) =>
+  request(`/api/v1/projects/${projectId}/domains/verify`, { method: "POST", body: JSON.stringify({ domain }) });
+export const retryDomain = (projectId, domain) =>
+  request(`/api/v1/projects/${projectId}/domains/retry`, { method: "POST", body: JSON.stringify({ domain }) });
+export const removeDomain = (projectId, domain) =>
+  request(`/api/v1/projects/${projectId}/domains/remove`, { method: "POST", body: JSON.stringify({ domain }) });

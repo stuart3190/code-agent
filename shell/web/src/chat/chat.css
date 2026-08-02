@@ -657,3 +657,44 @@ div.ct-model-row { cursor: pointer; }
 }
 .ct-published-badge.st-unpublished .dot { background: var(--ink-3); }
 .ct-published-url.offline { color: var(--ink-3); text-decoration: line-through; font-weight: 500; }
+
+/* A live project should be recognisable before the title is read. */
+.ct-live-badge.st-published {
+  background: var(--good); color: #fff; border-color: var(--good);
+  letter-spacing: 0.04em; font-weight: 800;
+}
+.ct-live-badge.st-published .dot { background: #fff; }
+.ct-project.is-live { border-color: color-mix(in srgb, var(--good) 42%, var(--line)); }
+.ct-project.is-live .ct-pstate { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 16%, transparent); }
+
+/* Domains */
+.ct-domain { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+.ct-domain-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ct-live-badge.dn-active { background: var(--good); color: #fff; border-color: var(--good); }
+.ct-live-badge.dn-active .dot { background: #fff; }
+.ct-live-badge.dn-verifying,
+.ct-live-badge.dn-pending_dns {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+}
+.ct-live-badge.dn-failed {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad); border-color: color-mix(in srgb, var(--bad) 38%, transparent);
+}
+.ct-dns { display: grid; gap: 8px; margin: 10px 0; }
+.ct-dns-row { display: flex; gap: 10px; align-items: flex-start; }
+.ct-dns-type {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em; padding: 3px 7px;
+  border-radius: 6px; background: var(--surface-2); color: var(--ink-2); flex-shrink: 0; min-width: 46px; text-align: center;
+}
+.ct-dns-pair { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.ct-dns-value { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ct-dns-value code {
+  font-size: 12px; background: var(--surface-2); padding: 3px 7px; border-radius: 6px;
+  word-break: break-all; min-width: 0;
+}
+.ct-domain-input {
+  width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font-size: var(--text-small);
+}
+.ct-domain-input:disabled { opacity: 0.55; }
