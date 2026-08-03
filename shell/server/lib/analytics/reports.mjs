@@ -7,6 +7,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 import { ownerSubscription } from "../usageBudgets.mjs";
+import { buildRunsFor } from "../logs/buildRuns.mjs";
 
 // Free sees a week, Starter a quarter, Pro everything. Null means unlimited.
 export const RETENTION_DAYS = Object.freeze({ free: 7, starter: 90, pro: null });
@@ -146,10 +147,10 @@ export async function deployments(owner, projectId, { client = serviceClient(), 
     .select("created_at,updated_at,unpublished_at,slug,url")
     .eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
 
-  const { data: runs } = await client.from("diag_runs")
-    .select("id,status,started_at,finished_at,repair_rounds")
-    .eq("owner", owner).eq("project_id", String(projectId))
-    .order("started_at", { ascending: false }).limit(cap);
+  // The SAME resolver the Logs view uses, so a deployment and its logs cannot disagree about which
+  // builds exist or what they are called. It also throws on a read failure rather than reporting
+  // an empty build history, which is indistinguishable from a project that has never been built.
+  const runs = await buildRunsFor(owner, projectId, { client, limit: cap });
 
   const builds = (runs || []).map((run) => ({
     id: run.id,

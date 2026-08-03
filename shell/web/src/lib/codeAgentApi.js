@@ -288,6 +288,7 @@ export const projectLogs = (projectId, params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
   return request(`/api/v1/projects/${projectId}/logs?${query}`);
 };
+export const projectBuildRuns = (projectId) => request(`/api/v1/projects/${projectId}/logs/runs`);
 export const logStreamUrl = (projectId, params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
   return `${apiBase()}/api/v1/projects/${projectId}/logs/stream?${query}`;

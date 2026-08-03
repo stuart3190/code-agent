@@ -4,7 +4,7 @@
 // overlays reached from six separate buttons. The conversation stays where the work happens; this
 // is where the deployment lives.
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import AnalyticsView from "./AnalyticsView.jsx";
 import HealthView from "./HealthView.jsx";
 import LogsView from "./LogsView.jsx";
@@ -23,8 +23,26 @@ const TABS = [
   { id: "settings", label: "Settings" },
 ];
 
-export default function ProjectDashboard({ site, initialTab = "overview", onClose, onUpgrade, onSentence, onPublishUpdate, onUnpublish }) {
-  const [tab, setTab] = useState(initialTab);
+export default function ProjectDashboard({
+  site, initialTab = "overview", initialRef = null, onClose, onUpgrade, onSentence,
+  onPublishUpdate, onUnpublish, onTabChange = null,
+}) {
+  const [tab, setTabState] = useState(initialTab);
+  // The selected build travels with the tab, so a link to one deployment's logs reopens that
+  // deployment's logs rather than the project's whole log stream.
+  const [buildRef, setBuildRef] = useState(initialRef);
+
+  // The URL is the source of truth, so back/forward and refresh land on the same tab and build
+  // that were open. Following props rather than owning state outright is what makes that work.
+  useEffect(() => { setTabState(initialTab); }, [initialTab]);
+  useEffect(() => { setBuildRef(initialRef); }, [initialRef]);
+
+  const setTab = (next, ref = null) => {
+    setTabState(next);
+    setBuildRef(ref);
+    onTabChange?.(next, ref);
+  };
+
   if (!site) return null;
 
   return (
@@ -45,15 +63,15 @@ export default function ProjectDashboard({ site, initialTab = "overview", onClos
 
       <div className="ct-sheet-body">
         {tab === "overview" && (
-          <OverviewTab site={site} onOpenTab={setTab}
+          <OverviewTab site={site} onOpenTab={(next) => setTab(next)}
             onPublishUpdate={onPublishUpdate} onUnpublish={onUnpublish} />
         )}
         {/* Mounted only when selected: each of these polls, and four background pollers for tabs
             nobody is looking at is exactly the kind of thing that makes a dashboard feel heavy. */}
         {tab === "analytics" && <AnalyticsView site={site} embedded onUpgrade={onUpgrade} />}
         {tab === "health" && <HealthView site={site} embedded />}
-        {tab === "logs" && <LogsView site={site} />}
-        {tab === "deployments" && <DeploymentsView site={site} onOpenLogs={() => setTab("logs")} onUpgrade={onUpgrade} />}
+        {tab === "logs" && <LogsView site={site} buildRef={buildRef} onSelectBuild={(id) => setTab("logs", id)} />}
+        {tab === "deployments" && <DeploymentsView site={site} onOpenLogs={(runId = null) => setTab("logs", runId)} onUpgrade={onUpgrade} />}
         {tab === "domains" && <DomainsSection site={site} />}
         {tab === "settings" && <ProjectSettingsBody site={site} onSentence={onSentence} />}
       </div>

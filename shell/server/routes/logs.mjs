@@ -8,7 +8,7 @@
 // sources, so there is no single table to listen to, and a five-second poll is indistinguishable
 // from live for a human reading a log.
 
-import { readLogs, readSince, toCsv } from "../lib/logs/logReader.mjs";
+import { readLogs, readSince, toCsv, buildRunsFor } from "../lib/logs/logReader.mjs";
 
 const STREAM_TICK_MS = 5_000;
 
@@ -29,6 +29,9 @@ function filtersFrom(url) {
     since: url?.searchParams?.get("since") || null,
     before: url?.searchParams?.get("before") || null,
     limit: Number(url?.searchParams?.get("limit") || 100),
+    // The build/run identifier. Narrows every source to one run, which is what makes a deployment's
+    // "View logs" a real link rather than a tab switch that shows everything.
+    ref: url?.searchParams?.get("ref") || null,
   };
 }
 
@@ -38,6 +41,31 @@ export async function handleLogsList(_req, res, owner, projectId, url) {
   } catch (error) {
     console.error(`[logs] ${error?.message || error}`);
     sendJson(res, 500, { error: "Logs are unavailable right now. Please try again." });
+  }
+}
+
+/**
+ * The project's builds, so a log view can be narrowed to one of them.
+ *
+ * This is the same identity Deployments and Overview use — the diag_runs id — so "View logs" from
+ * a deployment and picking a build here land on exactly the same run.
+ */
+export async function handleLogRuns(_req, res, owner, projectId) {
+  try {
+    const runs = await buildRunsFor(owner.id, projectId);
+    sendJson(res, 200, {
+      runs: runs.map((run) => ({
+        id: String(run.id),
+        status: run.status,
+        kind: run.kind,
+        startedAt: run.started_at,
+        finishedAt: run.finished_at,
+        durationMs: run.duration_ms,
+      })),
+    });
+  } catch (error) {
+    console.error(`[logs-runs] ${error?.message || error}`);
+    sendJson(res, 500, { error: "Builds could not be listed right now. Please try again." });
   }
 }
 

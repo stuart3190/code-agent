@@ -11,12 +11,20 @@
 import { serviceClient } from "../supabase.mjs";
 import { ownerSubscription } from "../usageBudgets.mjs";
 import { retentionFor } from "../analytics/reports.mjs";
+// Build outputs over 16KB are stored gzipped, and the diagnostics sweeper compresses every
+// output on runs older than seven days. Reading `output` alone therefore showed an empty detail
+// for exactly the builds someone is most likely to be digging through.
+import { unpackOutput } from "../appBuild/buildDiagnostics.mjs";
+import { buildRunsFor } from "./buildRuns.mjs";
 
 export const SOURCES = Object.freeze(["publish", "deploy", "build", "domain", "system", "runtime", "visitor"]);
 export const LEVELS = Object.freeze(["info", "warning", "error", "critical"]);
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
+// One run, read whole. A long build can run to hundreds of steps and a deep link into it must show
+// the build, not the first page of it — this is a sanity bound, not a display limit.
+const MAX_STEPS_PER_RUN = 2_000;
 
 // A failed request is an error; a 404 is a warning, because a missing page is usually a bad link
 // rather than a broken site. Distinguishing them is the difference between a useful filter and
@@ -64,20 +72,34 @@ function fromLifecycle(row) {
   };
 }
 
+/**
+ * A build step, as the log stream sees it.
+ *
+ * The columns here are the ones diag_steps actually has. The previous version read `row.name`,
+ * `row.step`, `row.summary` and `row.ok` — none of which exist on that table — so even had the
+ * query worked, every line would have read "Build — step" with no detail.
+ *
+ * `seq` is carried through because it, not the timestamp, is the true order within a run: steps
+ * are written in a chained batch and several can share a millisecond.
+ */
 function fromBuildStep(row) {
-  const failed = row.status === "failed" || row.ok === false;
+  const failed = row.status === "failed";
+  const output = unpackOutput(row);
   return {
     id: `b:${row.id}`,
     at: row.started_at || row.created_at,
+    seq: Number.isFinite(row.seq) ? row.seq : null,
     level: failed ? "error" : "info",
     source: "build",
-    message: `${row.agent || "Build"} — ${row.name || row.step || "step"}`,
-    detail: [row.summary, row.output].filter(Boolean).join("\n").slice(0, 8_000) || null,
+    message: `${row.agent || "Build"} — ${row.label || row.kind || "step"}`,
+    detail: output ? String(output).slice(0, 8_000) : null,
     refType: "build",
     refId: row.run_id ? String(row.run_id) : null,
     durationMs: row.duration_ms || null,
   };
 }
+
+export { buildRunsFor } from "./buildRuns.mjs";
 
 /**
  * One page of merged logs, newest first.
@@ -87,7 +109,7 @@ function fromBuildStep(row) {
  */
 export async function readLogs(owner, projectId, {
   client = serviceClient(), store = null, limit = DEFAULT_LIMIT, before = null,
-  sources = null, levels = null, search = "", since = null, now = new Date(),
+  sources = null, levels = null, search = "", since = null, now = new Date(), ref = null,
 } = {}) {
   const size = Math.min(MAX_LIMIT, Math.max(1, Number(limit) || DEFAULT_LIMIT));
   const subscription = await ownerSubscription(owner, store ? { store } : {});
@@ -100,37 +122,66 @@ export async function readLogs(owner, projectId, {
   const cursor = before || null;
 
   const wanted = (source) => !sources?.length || sources.includes(source);
+  // A build reference narrows the whole view to ONE run — the deep link from Deployments, and what
+  // "view the logs for this deployment" has to mean if it is to be a link at all.
+  const onlyRun = ref ? String(ref) : null;
+
+  // Reading a page must never invent an empty log out of a database failure. `readOrThrow` names
+  // the source in the message so an operator knows which one broke; the route turns that into a
+  // 500 the UI shows as an error, rather than a log that reads "nothing has happened here".
+  const readOrThrow = async (label, query) => {
+    const { data, error } = await query;
+    if (error) throw new Error(`logs: could not read ${label}: ${error.message}`);
+    return data || [];
+  };
 
   const queries = [];
 
-  if (wanted("publish") || wanted("deploy") || wanted("build") || wanted("domain") || wanted("system")) {
+  // Lifecycle rows are not per-run, so a build reference excludes them unless they point at it.
+  if (!onlyRun && (wanted("publish") || wanted("deploy") || wanted("build") || wanted("domain") || wanted("system"))) {
     let q = client.from("project_logs").select("*")
       .eq("owner", owner).eq("project_id", String(projectId))
       .order("logged_at", { ascending: false }).limit(size);
     if (from) q = q.gte("logged_at", from);
     if (cursor) q = q.lt("logged_at", cursor);
     if (sources?.length) q = q.in("source", sources.filter((s) => s !== "runtime" && s !== "visitor"));
-    queries.push(q.then(({ data }) => (data || []).map(fromLifecycle)));
+    queries.push(readOrThrow("lifecycle logs", q).then((rows) => rows.map(fromLifecycle)));
+  } else if (onlyRun) {
+    let q = client.from("project_logs").select("*")
+      .eq("owner", owner).eq("project_id", String(projectId)).eq("ref_id", onlyRun)
+      .order("logged_at", { ascending: false }).limit(size);
+    queries.push(readOrThrow("lifecycle logs", q).then((rows) => rows.map(fromLifecycle)));
   }
 
-  if (wanted("runtime") || wanted("visitor")) {
+  if (!onlyRun && (wanted("runtime") || wanted("visitor"))) {
     let q = client.from("analytics_events").select("*")
       .eq("owner", owner).eq("project_id", String(projectId)).eq("kind", "error")
       .order("occurred_at", { ascending: false }).limit(size);
     if (from) q = q.gte("occurred_at", from);
     if (cursor) q = q.lt("occurred_at", cursor);
-    queries.push(q.then(({ data }) => (data || []).map(fromAnalytics)));
+    queries.push(readOrThrow("runtime errors", q).then((rows) => rows.map(fromAnalytics)));
   }
 
   if (wanted("build")) {
-    let q = client.from("diag_steps").select("*")
-      .eq("owner", owner).eq("project_id", String(projectId))
-      .order("started_at", { ascending: false }).limit(size);
-    if (from) q = q.gte("started_at", from);
-    if (cursor) q = q.lt("started_at", cursor);
-    // diag_steps is the richest source and the most likely to be absent on a young project;
-    // a failure here must not empty the whole log view.
-    queries.push(q.then(({ data }) => (data || []).map(fromBuildStep)).catch(() => []));
+    queries.push((async () => {
+      // Runs first — that is where `owner` lives. A reference is honoured only if it belongs to
+      // this owner and project, so a deep link cannot be edited into someone else's build.
+      const runs = await buildRunsFor(owner, projectId, { client });
+      const ids = runs.map((r) => String(r.id)).filter((id) => !onlyRun || id === onlyRun);
+      if (!ids.length) return [];
+
+      // A single run is read whole: a long build's steps must not be truncated at the page size
+      // and then re-sorted into a partial, misleading sequence.
+      let q = client.from("diag_steps")
+        .select("id,run_id,seq,agent,kind,label,status,output,output_gz,started_at,created_at,duration_ms")
+        .in("run_id", ids)
+        .order("started_at", { ascending: false })
+        .order("seq", { ascending: false })
+        .limit(onlyRun ? MAX_STEPS_PER_RUN : size);
+      if (from) q = q.gte("started_at", from);
+      if (cursor && !onlyRun) q = q.lt("started_at", cursor);
+      return (await readOrThrow("build steps", q)).map(fromBuildStep);
+    })());
   }
 
   const merged = (await Promise.all(queries)).flat().filter((row) => row.at);
@@ -142,17 +193,36 @@ export async function readLogs(owner, projectId, {
       || row.message.toLowerCase().includes(needle)
       || String(row.detail || "").toLowerCase().includes(needle));
 
-  const page = filtered
-    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-    .slice(0, size);
+  // A single run is returned WHOLE. Capping it at the page size and then re-sorting would show a
+  // partial sequence, which for a build log reads as a build that stopped early — the page limit
+  // exists to keep a busy project's stream manageable, not to truncate one build someone asked to
+  // see in full.
+  const page = onlyRun
+    ? filtered.sort(newestFirst)
+    : filtered.sort(newestFirst).slice(0, size);
 
   return {
     entries: page,
-    // The cursor is the oldest row returned, so the next page continues from exactly here.
-    nextCursor: page.length === size ? page[page.length - 1].at : null,
+    // The cursor is the oldest row returned, so the next page continues from exactly here. A
+    // single run is returned whole, so there is nothing after it to page to.
+    nextCursor: !onlyRun && page.length === size ? page[page.length - 1].at : null,
     retentionDays: retention,
     plan: subscription.plan,
+    ref: onlyRun,
   };
+}
+
+/**
+ * Newest first, with `seq` breaking ties.
+ *
+ * Timestamps alone are not enough. Build steps are written in a chained batch and several
+ * routinely share the same millisecond, so sorting on time only let a long build's steps come back
+ * in an order it never ran in — the one thing a build log must never do.
+ */
+function newestFirst(a, b) {
+  if (a.at !== b.at) return a.at < b.at ? 1 : -1;
+  if (a.seq != null && b.seq != null && a.seq !== b.seq) return b.seq - a.seq;
+  return 0;
 }
 
 // Anything newer than `after`, oldest first — the shape a live stream wants.

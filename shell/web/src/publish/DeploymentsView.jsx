@@ -49,7 +49,9 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade }) {
                     {b.repairRounds > 0 && ` · ${b.repairRounds} repair${b.repairRounds === 1 ? "" : "s"}`}
                   </div>
                 </div>
-                <button className="ct-pubrow-btn" onClick={onOpenLogs}>View logs</button>
+                {/* The run id, not the click event. Passing the handler directly sent React's event object
+                    as the build identifier, so "View logs" opened the whole log stream. */}
+                <button className="ct-pubrow-btn" onClick={() => onOpenLogs(b.id)}>View logs</button>
               </div>
             ))}
             {data.truncated && (
