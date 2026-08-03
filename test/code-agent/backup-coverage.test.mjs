@@ -103,6 +103,8 @@ test("a backup directory round-trips through validation and rejects tampering", 
 test("systemd units and the runbook ship with the repository", async () => {
   const service = await readFile(new URL("../../ops/thrallo-backup.service", import.meta.url), "utf8");
   assert.match(service, /ExecStart=\/usr\/bin\/node ops\/backup-thrallo\.mjs/);
+  // Drift runs AFTER the backup, so a drift failure can never stop a backup being taken.
+  assert.match(service, /ExecStartPost=\/usr\/bin\/node ops\/migration-drift\.mjs/);
   assert.match(service, /WorkingDirectory=\/home\/ubuntu\/code-agent/);
   const timer = await readFile(new URL("../../ops/thrallo-backup.timer", import.meta.url), "utf8");
   assert.match(timer, /OnCalendar=/);
@@ -110,4 +112,58 @@ test("systemd units and the runbook ship with the repository", async () => {
   const runbook = await readFile(new URL("../../docs/DISASTER-RECOVERY.md", import.meta.url), "utf8");
   assert.match(runbook, /PLATFORM_ENC_KEY/);
   assert.match(runbook, /restore-thrallo\.mjs/);
+});
+
+// ── Migration drift: the half CI structurally cannot do ─────────────────────────────────
+//
+// The guard above reads `supabase/migrations/`, so it is blind by construction to a table applied
+// straight to production and never written to a migration. Six tables reached production that way
+// — analytics, logs and health — and were absent from every backup. The comment above delegated
+// this to "the scheduled migration-drift ops check", which did not exist until now.
+
+test("drift detection catches a live table with no migration and no backup", async () => {
+  const { findDrift } = await import("../../ops/migration-drift.mjs");
+
+  // Exactly the situation that shipped: the table exists, works, and is invisible to the repo.
+  const problems = findDrift({
+    live: new Set(["ca_runs", "analytics_events"]),
+    migrated: new Set(["ca_runs"]),
+    backedUp: new Set(["ca_runs"]),
+  });
+  assert.equal(problems.length, 2, "it is two separate failures, not one");
+  assert.ok(problems.some((p) => /NO migration/.test(p)), "the database cannot be rebuilt");
+  assert.ok(problems.some((p) => /NOT backed up/.test(p)), "and its data is lost on restore");
+});
+
+test("a migrated-but-unbacked table is caught on its own", () => {
+  // Different consequence from the above: restoring succeeds and silently loses the data.
+  return import("../../ops/migration-drift.mjs").then(({ findDrift }) => {
+    const problems = findDrift({
+      live: new Set(["diag_runs"]),
+      migrated: new Set(["diag_runs"]),
+      backedUp: new Set(),
+    });
+    assert.deepEqual(problems.map((p) => p.includes("NOT backed up")), [true]);
+  });
+});
+
+test("a fully reconciled database reports nothing, and Supabase's own tables are ignored", async () => {
+  const { findDrift } = await import("../../ops/migration-drift.mjs");
+  assert.deepEqual(findDrift({
+    live: new Set(["ca_runs", "schema_migrations"]),
+    migrated: new Set(["ca_runs"]),
+    backedUp: new Set(["ca_runs"]),
+  }), [], "schema_migrations is Supabase's, not ours to migrate or back up");
+});
+
+test("every table this session added to production is now migrated AND backed up", async () => {
+  const migrated = await tablesFromMigrations();
+  for (const table of [
+    "analytics_events", "analytics_daily", "analytics_salts",
+    "project_logs", "health_checks", "health_status",
+  ]) {
+    assert.ok(migrated.has(table), `${table} has no migration — the DB cannot be rebuilt from the repo`);
+    assert.ok(CA_TABLES.includes(table), `${table} is not backed up`);
+    assert.ok(RESTORE_ORDER.includes(table), `${table} cannot be restored`);
+  }
 });

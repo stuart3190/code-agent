@@ -72,6 +72,14 @@ export const RESTORE_ORDER = [
   "build_checkpoints",
   "qa_runs",   // references projects -> restore after it
   "app_notifications",   // owner references auth.users -> after app_users
+  // Analytics, logs and health. All reference auth.users only, so ordering among them is free;
+  // salts before events so a restored day's hashes stay explicable.
+  "analytics_salts",
+  "analytics_events",
+  "analytics_daily",
+  "project_logs",
+  "health_checks",
+  "health_status",
 ];
 
 const BATCH = 500;
