@@ -5,7 +5,7 @@
 // service of those.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { projectLogs, logStreamUrl, logExportUrl } from "../lib/codeAgentApi.js";
+import { projectLogs, logStreamUrl, logExportUrl, projectBuildRuns } from "../lib/codeAgentApi.js";
 
 const LEVELS = [
   { id: "info", label: "Info" },
@@ -57,7 +57,15 @@ function Row({ entry }) {
   );
 }
 
-export default function LogsView({ site }) {
+const RUN_STATUS = {
+  passed: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  running: "Running",
+};
+
+export default function LogsView({ site, buildRef = null, onSelectBuild = null }) {
   const [entries, setEntries] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [levels, setLevels] = useState([]);
@@ -67,12 +75,31 @@ export default function LogsView({ site }) {
   const [loading, setLoading] = useState(false);
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState("");
+  const [runs, setRuns] = useState([]);
+  const [runsLoaded, setRunsLoaded] = useState(false);
   const seen = useRef(new Set());
   const projectId = site?.projectId;
 
   const params = useCallback(() => ({
     levels: levels.join(","), sources: sources.join(","), q: search,
-  }), [levels, sources, search]);
+    // The build identifier goes to the server, so paging, streaming and export all stay narrowed
+    // to the same run rather than the filter applying to the view alone.
+    ref: buildRef || "",
+  }), [levels, sources, search, buildRef]);
+
+  // The project's builds, so a specific one can be opened and linked to. Same identity as
+  // Deployments and Overview: the run id.
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    projectBuildRuns(projectId)
+      .then((result) => { if (!cancelled) setRuns(result.runs || []); })
+      .catch(() => { if (!cancelled) setRuns([]); })
+      .finally(() => { if (!cancelled) setRunsLoaded(true); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const selectedRun = runs.find((r) => r.id === buildRef) || null;
 
   const load = useCallback(async (before = null) => {
     if (!projectId) return;
@@ -131,6 +158,31 @@ export default function LogsView({ site }) {
         <a className="ct-pubrow-btn" href={logExportUrl(projectId, { ...params(), format: "csv" })} download>CSV</a>
       </div>
 
+      {/* Builds. Selecting one narrows every source to that run and puts it in the URL, so the
+          view can be linked to, refreshed and navigated back out of. */}
+      {runs.length > 0 && (
+        <div className="ct-logs-builds">
+          <button className={`ct-chipfilter ${buildRef ? "" : "on"}`} aria-pressed={!buildRef}
+            onClick={() => onSelectBuild?.(null)}>All activity</button>
+          {runs.slice(0, 12).map((run) => (
+            <button key={run.id} className={`ct-chipfilter bd-${run.status} ${buildRef === run.id ? "on" : ""}`}
+              aria-pressed={buildRef === run.id} title={`${RUN_STATUS[run.status] || run.status} · ${stamp(run.startedAt)}`}
+              onClick={() => onSelectBuild?.(run.id)}>
+              {RUN_STATUS[run.status] || run.status} · {stamp(run.startedAt)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selectedRun && (
+        <div className="ct-hint ct-logs-scope">
+          Showing one build — {RUN_STATUS[selectedRun.status] || selectedRun.status}
+          {selectedRun.durationMs != null && `, ${Math.round(selectedRun.durationMs / 1000)}s`}
+          {" · "}
+          <button className="ct-linkish" onClick={() => onSelectBuild?.(null)}>show all activity</button>
+        </div>
+      )}
+
       <div className="ct-logs-filters">
         {LEVELS.map((l) => (
           <button key={l.id} className={`ct-chipfilter lvl-${l.id} ${levels.includes(l.id) ? "on" : ""}`}
@@ -151,10 +203,79 @@ export default function LogsView({ site }) {
 
       <div className="ct-logs-list">
         {entries.map((entry) => <Row entry={entry} key={entry.id} />)}
-        {!entries.length && !loading && (
-          <div className="ct-hint" style={{ padding: 16 }}>
-            No log entries match. Publishing, deployments, build steps and errors from real visitors
-            all appear here.
+        {/* An empty log has several distinct causes and they need different sentences. "No entries"
+            for a project that has never been built reads as a fault; saying which case this is
+            tells the user whether to act or wait. */}
+        {!entries.length && !loading && !error && (
+          <div className="ct-logs-empty">
+            {(() => {
+              const filtering = !!(search || levels.length || sources.length);
+              if (filtering) {
+                return (
+                  <>
+                    <strong>Nothing matches those filters.</strong>
+                    <span className="ct-hint">Clear the search or the level and source chips to see everything again.</span>
+                  </>
+                );
+              }
+              // Checked before the per-build cases: with no builds at all, "this build recorded no
+              // steps" would be answering a question about a build that never existed.
+              if (runsLoaded && !runs.length) {
+                return (
+                  <>
+                    <strong>Nothing has happened here yet.</strong>
+                    <span className="ct-hint">
+                      This project has not been built or published. Build steps, publishes,
+                      deployments, domain changes and errors from real visitors all appear here as
+                      soon as there are any.
+                    </span>
+                  </>
+                );
+              }
+              // A link to a build that no longer exists. Logs age out on the plan's retention, so
+              // an old bookmark is expected rather than broken — saying which it is prevents a
+              // purged build from reading as a fault.
+              if (buildRef && runsLoaded && !selectedRun) {
+                return (
+                  <>
+                    <strong>That build is no longer available.</strong>
+                    <span className="ct-hint">
+                      {meta?.retentionDays != null
+                        ? `Builds are kept for ${meta.retentionDays} days on your plan, and this one is older than that.`
+                        : "It may have been removed with its project."}
+                      {" "}
+                      <button className="ct-linkish" onClick={() => onSelectBuild?.(null)}>See all activity</button>
+                    </span>
+                  </>
+                );
+              }
+              if (buildRef) {
+                return (
+                  <>
+                    <strong>This build recorded no steps.</strong>
+                    <span className="ct-hint">
+                      {selectedRun?.status === "interrupted"
+                        ? "It was interrupted before it could log anything — usually a restart mid-build."
+                        : selectedRun?.status === "cancelled"
+                          ? "It was cancelled before any step was written."
+                          : "It ended before any step was written."}
+                      {" "}
+                      <button className="ct-linkish" onClick={() => onSelectBuild?.(null)}>See all activity</button>
+                    </span>
+                  </>
+                );
+              }
+              return (
+                <>
+                  <strong>No entries in this window.</strong>
+                  <span className="ct-hint">
+                    {meta?.retentionDays != null
+                      ? `Your plan keeps ${meta.retentionDays} days of logs, and nothing was recorded in that period.`
+                      : "Nothing was recorded in this period."}
+                  </span>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

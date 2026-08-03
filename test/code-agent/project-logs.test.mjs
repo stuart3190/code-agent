@@ -7,6 +7,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { readLogs, readSince, toCsv, LEVELS, SOURCES } from "../../shell/server/lib/logs/logReader.mjs";
 import { MemoryCodeAgentStore } from "../../shell/server/lib/codeAgentStore.mjs";
@@ -25,18 +27,44 @@ async function storeOn(plan = "pro") {
 
 const at = (minutesAgo) => new Date(NOW.getTime() - minutesAgo * 60_000).toISOString();
 
-function fakeDb({ lifecycle = [], errors = [], steps = [] } = {}) {
+/**
+ * Stands in for project_logs, analytics_events, diag_runs and diag_steps.
+ *
+ * The critical detail, and the reason the old fake let a broken reader pass: **diag_steps has no
+ * `owner` and no `project_id`**. It links to its run through `run_id` alone. The previous fake
+ * modelled steps as owner-scoped rows, which is the schema the broken code assumed rather than the
+ * one production has — so the tests agreed with the bug.
+ *
+ * This version refuses a filter on a column the table does not have, exactly as PostgREST does.
+ */
+const COLUMNS = {
+  project_logs: new Set(["id", "owner", "project_id", "logged_at", "level", "source", "message", "detail", "ref_type", "ref_id", "duration_ms"]),
+  analytics_events: new Set(["id", "owner", "project_id", "occurred_at", "kind", "error_message", "error_source", "error_stack", "path", "browser", "os", "status_code", "request_url", "request_method", "visitor_hash"]),
+  diag_runs: new Set(["id", "owner", "project_id", "conversation_id", "kind", "status", "started_at", "finished_at", "duration_ms", "repair_rounds"]),
+  diag_steps: new Set(["id", "run_id", "seq", "round", "agent", "kind", "label", "status", "output", "output_gz", "started_at", "created_at", "duration_ms"]),
+};
+
+function fakeDb({ lifecycle = [], errors = [], steps = [], runs = [], fail = null } = {}) {
   const applied = [];
   return {
     applied,
     from(table) {
       const filters = { table };
+      const known = COLUMNS[table];
+      const guard = (column) => {
+        if (known && !known.has(column)) {
+          // What PostgREST actually does, and what the old code walked into on every call.
+          const error = new Error(`column ${table}.${column} does not exist`);
+          error.code = "42703";
+          filters.badColumn = error;
+        }
+      };
       const api = {
         select() { return api; },
-        eq(c, v) { filters[c] = v; return api; },
-        in(c, v) { filters[`in_${c}`] = v; return api; },
-        gte(c, v) { filters[`gte_${c}`] = v; return api; },
-        lt(c, v) { filters[`lt_${c}`] = v; return api; },
+        eq(c, v) { guard(c); filters[c] = v; return api; },
+        in(c, v) { guard(c); filters[`in_${c}`] = v; return api; },
+        gte(c, v) { guard(c); filters[`gte_${c}`] = v; return api; },
+        lt(c, v) { guard(c); filters[`lt_${c}`] = v; return api; },
         order() { return api; },
         limit(n) { filters.limit = n; return api; },
         // A real PostgREST builder is a thenable whose `then` returns a PROMISE, so callers can
@@ -44,15 +72,24 @@ function fakeDb({ lifecycle = [], errors = [], steps = [] } = {}) {
         // pass every assertion here while the library crashed in production.
         then(onFulfilled, onRejected) {
           applied.push(filters);
+          if (filters.badColumn) {
+            return Promise.resolve({ data: null, error: filters.badColumn }).then(onFulfilled, onRejected);
+          }
+          if (fail && fail === table) {
+            return Promise.resolve({ data: null, error: { message: "connection reset" } }).then(onFulfilled, onRejected);
+          }
           const source = table === "project_logs" ? lifecycle
             : table === "analytics_events" ? errors
-              : steps;
+              : table === "diag_runs" ? runs : steps;
           const timeKey = table === "project_logs" ? "logged_at"
             : table === "analytics_events" ? "occurred_at" : "started_at";
-          let rows = source.filter((r) => r.owner === filters.owner);
+          let rows = table === "diag_steps"
+            ? source.filter((r) => (filters.in_run_id || []).includes(String(r.run_id)))
+            : source.filter((r) => r.owner === filters.owner);
           if (filters[`gte_${timeKey}`]) rows = rows.filter((r) => r[timeKey] >= filters[`gte_${timeKey}`]);
           if (filters[`lt_${timeKey}`]) rows = rows.filter((r) => r[timeKey] < filters[`lt_${timeKey}`]);
           if (filters.in_source) rows = rows.filter((r) => filters.in_source.includes(r.source));
+          if (filters.ref_id) rows = rows.filter((r) => String(r.ref_id) === String(filters.ref_id));
           rows = [...rows].sort((a, b) => (a[timeKey] < b[timeKey] ? 1 : -1)).slice(0, filters.limit || 100);
           return Promise.resolve({ data: rows, error: null }).then(onFulfilled, onRejected);
         },
@@ -61,6 +98,17 @@ function fakeDb({ lifecycle = [], errors = [], steps = [] } = {}) {
     },
   };
 }
+
+const RUN = "run-1";
+const runRow = (over = {}) => ({
+  id: RUN, owner: OWNER, project_id: PROJECT, kind: "app_build", status: "passed",
+  started_at: at(6), finished_at: at(4), duration_ms: 120_000, repair_rounds: 0, ...over,
+});
+const stepRow = (over = {}) => ({
+  id: 9, run_id: RUN, seq: 1, agent: "Builder", kind: "log", label: "compile",
+  status: "ok", output: null, output_gz: null, started_at: at(3), created_at: at(3),
+  duration_ms: null, ...over,
+});
 
 const lifecycleRow = (over = {}) => ({
   id: 1, owner: OWNER, project_id: PROJECT, logged_at: at(5), level: "info",
@@ -81,11 +129,14 @@ test("lifecycle, runtime and build entries arrive in one stream, newest first", 
   const db = fakeDb({
     lifecycle: [lifecycleRow({ logged_at: at(1) })],
     errors: [errorRow({ occurred_at: at(2) })],
-    steps: [{ id: 9, owner: OWNER, project_id: PROJECT, started_at: at(3), agent: "Builder", name: "compile", status: "passed" }],
+    runs: [runRow()],
+    steps: [stepRow()],
   });
   const { entries } = await readLogs(OWNER, PROJECT, { client: db, store, now: NOW });
   assert.deepEqual(entries.map((e) => e.source), ["publish", "runtime", "build"]);
   assert.ok(entries[0].at > entries[1].at, "newest first");
+  assert.equal(entries[2].message, "Builder — compile", "the step's real label, not a placeholder");
+  assert.equal(entries[2].refId, RUN, "and it carries the build identity");
 });
 
 test("ids are namespaced so two sources cannot collide", async () => {
@@ -231,4 +282,146 @@ test("the vocabulary the UI filters on matches the reader", () => {
   for (const source of ["publish", "deploy", "build", "domain", "system", "runtime", "visitor"]) {
     assert.ok(SOURCES.includes(source), `${source} must be filterable`);
   }
+});
+
+// ── The build source ────────────────────────────────────────────────────────────────────
+//
+// The defect this section exists for: diag_steps was queried by `owner` and `project_id`, columns
+// that table does not have. Every call errored, a `.catch(() => [])` swallowed it, and the Build
+// source rendered as a project that had simply never been built. Two years of build history was
+// one unreachable query away the whole time.
+
+test("build steps are resolved through their RUN, never by columns diag_steps lacks", async () => {
+  const store = await storeOn();
+  const db = fakeDb({ runs: [runRow()], steps: [stepRow()] });
+  const { entries } = await readLogs(OWNER, PROJECT, { client: db, store, sources: ["build"], now: NOW });
+
+  assert.equal(entries.length, 1, "the build source returns its steps");
+  const stepQuery = db.applied.find((q) => q.table === "diag_steps");
+  assert.ok(stepQuery, "diag_steps was queried");
+  assert.equal(stepQuery.owner, undefined, "diag_steps has no owner column");
+  assert.equal(stepQuery.project_id, undefined, "nor a project_id column");
+  assert.deepEqual(stepQuery.in_run_id, [RUN], "it is scoped by the runs that passed the owner check");
+
+  const runQuery = db.applied.find((q) => q.table === "diag_runs");
+  assert.equal(runQuery.owner, OWNER, "ownership is proved on the table that carries it");
+  assert.equal(runQuery.project_id, PROJECT);
+});
+
+test("another owner's run cannot supply steps", async () => {
+  const store = await storeOn();
+  const db = fakeDb({
+    runs: [runRow({ owner: "someone-else" })],
+    steps: [stepRow()],
+  });
+  const { entries } = await readLogs(OWNER, PROJECT, { client: db, store, sources: ["build"], now: NOW });
+  assert.deepEqual(entries, [], "no run passes the owner check, so no steps are fetched");
+});
+
+test("a compressed build output is readable, not blank", async () => {
+  // The sweeper compresses every output on runs older than seven days, and anything over 16KB is
+  // stored compressed from the start. Reading `output` alone showed an empty detail for exactly
+  // the builds someone is most likely to be digging through.
+  const { gzipSync } = await import("node:zlib");
+  const store = await storeOn();
+  const db = fakeDb({
+    runs: [runRow()],
+    steps: [stepRow({ output: null, output_gz: gzipSync(Buffer.from("ENOSPC: no space left on device")).toString("base64") })],
+  });
+  const { entries } = await readLogs(OWNER, PROJECT, { client: db, store, sources: ["build"], now: NOW });
+  assert.match(entries[0].detail, /ENOSPC/, "the stored output must survive compression");
+});
+
+test("steps sharing a timestamp keep the order they ran in", async () => {
+  // Steps are written in a chained batch and several routinely share a millisecond. Sorting on
+  // time alone let a long build come back in an order it never ran in.
+  const store = await storeOn();
+  const sameMoment = at(3);
+  const db = fakeDb({
+    runs: [runRow()],
+    steps: [
+      stepRow({ id: 1, seq: 1, label: "plan", started_at: sameMoment }),
+      stepRow({ id: 2, seq: 2, label: "build", started_at: sameMoment }),
+      stepRow({ id: 3, seq: 3, label: "verify", started_at: sameMoment }),
+    ],
+  });
+  const { entries } = await readLogs(OWNER, PROJECT, { client: db, store, sources: ["build"], now: NOW });
+  assert.deepEqual(entries.map((e) => e.message), [
+    "Builder — verify", "Builder — build", "Builder — plan",
+  ], "newest first means highest seq first when the clock cannot separate them");
+});
+
+// ── Deep links ──────────────────────────────────────────────────────────────────────────
+
+test("a build reference narrows every source to that one run", async () => {
+  const store = await storeOn();
+  const db = fakeDb({
+    lifecycle: [lifecycleRow({ id: 1, ref_id: RUN }), lifecycleRow({ id: 2, ref_id: null })],
+    errors: [errorRow()],
+    runs: [runRow(), runRow({ id: "run-2", started_at: at(20) })],
+    steps: [stepRow({ id: 1, run_id: RUN }), stepRow({ id: 2, run_id: "run-2", label: "other" })],
+  });
+  const { entries, ref } = await readLogs(OWNER, PROJECT, { client: db, store, ref: RUN, now: NOW });
+
+  assert.equal(ref, RUN, "the response says which build it is showing");
+  assert.ok(entries.every((e) => e.source !== "runtime" && e.source !== "visitor"),
+    "visitor errors are not part of a build");
+  assert.ok(!entries.some((e) => e.message.includes("other")), "another run's steps are excluded");
+  assert.ok(entries.some((e) => e.refId === RUN), "and this run's are included");
+});
+
+test("a reference to a run belonging to someone else resolves to nothing", async () => {
+  const store = await storeOn();
+  const db = fakeDb({
+    runs: [runRow()],                                 // the only run this owner has
+    steps: [stepRow({ run_id: "someone-elses-run" })],
+  });
+  const { entries } = await readLogs(OWNER, PROJECT, {
+    client: db, store, ref: "someone-elses-run", sources: ["build"], now: NOW,
+  });
+  assert.deepEqual(entries, [], "a deep link cannot be edited into another owner's build");
+});
+
+test("one run is returned whole, not cut off at the page size", async () => {
+  // A long build runs to hundreds of steps. Truncating at the page size and then re-sorting would
+  // show a partial sequence that reads as a build that stopped early.
+  const store = await storeOn();
+  const steps = Array.from({ length: 240 }, (_, i) =>
+    stepRow({ id: i + 1, seq: i + 1, label: `step ${i + 1}`, started_at: at(3) }));
+  const db = fakeDb({ runs: [runRow()], steps });
+  const { entries, nextCursor } = await readLogs(OWNER, PROJECT, {
+    client: db, store, ref: RUN, sources: ["build"], limit: 100, now: NOW,
+  });
+  assert.equal(entries.length, 240, "every step of the build is present");
+  assert.equal(nextCursor, null, "and there is no page after a whole run");
+});
+
+// ── Failures are operational, never an empty log ────────────────────────────────────────
+
+test("a database failure is raised, never rendered as 'nothing has happened here'", async () => {
+  const store = await storeOn();
+  for (const table of ["project_logs", "analytics_events", "diag_runs", "diag_steps"]) {
+    const db = fakeDb({ runs: [runRow()], steps: [stepRow()], fail: table });
+    await assert.rejects(
+      () => readLogs(OWNER, PROJECT, { client: db, store, now: NOW }),
+      /connection reset/,
+      `a failure reading ${table} must surface`,
+    );
+  }
+});
+
+test("no source swallows its own errors", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/logs/logReader.mjs", import.meta.url)), "utf8");
+  assert.doesNotMatch(source, /catch\(\s*\(\)\s*=>\s*\[\]\s*\)/,
+    "a catch returning [] is how the build source went missing for months");
+  assert.doesNotMatch(source, /\.then\(\(\{ data \}\)/,
+    "destructuring only `data` discards the error alongside it");
+});
+
+test("Deployments and Logs resolve builds through the same function", async () => {
+  const reports = await readFile(fileURLToPath(new URL("../../shell/server/lib/analytics/reports.mjs", import.meta.url)), "utf8");
+  assert.match(reports, /buildRunsFor/,
+    "two callers reading diag_runs their own way is how a deployment and its logs disagree");
+  assert.doesNotMatch(reports, /from\("diag_runs"\)/,
+    "the direct query must be gone, not merely duplicated");
 });

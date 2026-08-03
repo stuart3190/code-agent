@@ -126,6 +126,7 @@ function Workspace({ user }) {
   // Thrallo has one screen, so routing is one path rather than a router dependency. /pricing is a
   // real URL because it is shareable and gets linked to; everything else stays at "/".
   const [path, setPath] = useState(() => window.location.pathname);
+  const [query, setQuery] = useState(() => window.location.search);
   // Stripe returns the customer to /?billing=success or /?billing=cancelled. Held in state rather
   // than read from the URL on every render, so returning to the dashboard clears it for good.
   const [billingReturn, setBillingReturn] = useState(
@@ -302,7 +303,7 @@ function Workspace({ user }) {
     if (!openDomainsFor) return;
     const site = publish.sites.find((s) => String(s.projectId) === String(openDomainsFor));
     if (!site) return;
-    setDashboard({ site, tab: "domains", conversation: active });
+    openDashboard(site, "domains");
     setOpenDomainsFor(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openDomainsFor, publish.sites]);
@@ -332,12 +333,52 @@ function Workspace({ user }) {
       window.history.pushState({}, "", next);
     }
     setPath(window.location.pathname);
+    setQuery(window.location.search);
   }, []);
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
+    // The query string is tracked too, because ?ref=<build> is what makes a link to one
+    // deployment's logs a different destination from the project's whole log stream. Without it,
+    // Back from a build's logs to the log list would change nothing on screen.
+    const onPop = () => { setPath(window.location.pathname); setQuery(window.location.search); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  // /projects/:projectId/:tab?ref=<buildId> — the dashboard as a real address.
+  //
+  // The URL drives the dashboard rather than the other way round, so a refresh, a bookmark, a
+  // pasted link and the Back button all arrive at the same tab and the same build.
+  const route = useMemo(() => {
+    // Deliberately not a UUID shape check. The real validation is below — the dashboard opens only
+    // if THIS owner has a published site with that id — and an id that matches nothing simply does
+    // nothing. A shape check here would add no safety and would reject ids the server accepts.
+    const match = path.match(/^\/projects\/([^/]+)\/([a-z]+)$/i);
+    if (!match) return null;
+    return { projectId: match[1], tab: match[2], ref: new URLSearchParams(query).get("ref") || null };
+  }, [path, query]);
+
+  useEffect(() => {
+    if (!route) {
+      // Navigating away from a project address closes the dashboard, so Back actually goes back.
+      if (dashboard && !dashboard.transient) setDashboard(null);
+      return;
+    }
+    const site = publish.sites.find((s) => String(s.projectId) === route.projectId);
+    if (!site) return;   // publish state has not arrived yet; this re-runs when it does
+    const conversation = conversations.find((c) => String(c.productId) === String(site.productId)) || null;
+    setDashboard((current) => (
+      current?.site?.projectId === site.projectId && current?.tab === route.tab && current?.buildRef === route.ref
+        ? current
+        : { site, tab: route.tab, buildRef: route.ref, conversation }
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, publish.sites, conversations]);
+
+  // Opening the dashboard is a navigation, not a state change — that is what gives it a URL.
+  const openDashboard = useCallback((site, tab = "overview", _conversation = null, ref = null) => {
+    if (!site?.projectId) return;
+    navigate(`/projects/${site.projectId}/${tab}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`);
+  }, [navigate]);
 
   // An abandoned checkout needs no screen of its own — the dashboard is the right place to land.
   // The parameter is cleared so a refresh does not look like a second abandonment.
@@ -393,9 +434,9 @@ function Workspace({ user }) {
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
             onPublishUpdate={publishUpdateFor}
             onUnpublish={(c) => setUnpublishing({ conversation: c, site: c.site, busy: false, error: "" })}
-            onProjectSettings={(c) => setDashboard({ site: c.site, tab: "settings", conversation: c })}
-            onAnalytics={(c) => setDashboard({ site: c.site, tab: "analytics", conversation: c })}
-            onHealth={(c) => setDashboard({ site: c.site, tab: "health", conversation: c })}
+            onProjectSettings={(c) => openDashboard(c.site, "settings")}
+            onAnalytics={(c) => openDashboard(c.site, "analytics")}
+            onHealth={(c) => openDashboard(c.site, "health")}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -427,14 +468,10 @@ function Workspace({ user }) {
               onUnpublish={() => setUnpublishing({
                 conversation: active, site: publish.byProduct(active.productId), busy: false, error: "",
               })}
-              onOpenSettings={() => setDashboard({
-                site: publish.byProduct(active.productId), tab: "settings", conversation: active,
-              })}
+              onOpenSettings={() => openDashboard(publish.byProduct(active.productId), "settings")}
               // "Connect Domain" opens the Domains panel — the one workflow that actually connects
               // domains. It used to open Project Settings, which contains no domain UI at all.
-              onConnectDomain={() => setDashboard({
-                site: publish.byProduct(active.productId), tab: "domains", conversation: active,
-              })} />
+              onConnectDomain={() => openDashboard(publish.byProduct(active.productId), "domains")} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
@@ -498,11 +535,14 @@ function Workspace({ user }) {
           }} />
       )}
       {dashboard && (
-        <ProjectDashboard site={dashboard.site} initialTab={dashboard.tab}
-          onClose={() => setDashboard(null)}
-          onUpgrade={() => { setDashboard(null); navigate("/pricing"); }}
-          onSentence={(text) => { setDashboard(null); send(text); }}
-          onPublishUpdate={() => { setDashboard(null); publishUpdateFor(dashboard.conversation); }}
+        <ProjectDashboard site={dashboard.site} initialTab={dashboard.tab} initialRef={dashboard.buildRef || null}
+          // Switching tab is a navigation, so Back returns to the previous tab instead of leaving
+          // the dashboard entirely, and a build's logs can be linked to directly.
+          onTabChange={(tab, ref) => openDashboard(dashboard.site, tab, null, ref)}
+          onClose={() => navigate("/")}
+          onUpgrade={() => navigate("/pricing")}
+          onSentence={(text) => { navigate("/"); send(text); }}
+          onPublishUpdate={() => { navigate("/"); publishUpdateFor(dashboard.conversation); }}
           onUnpublish={() => setUnpublishing({ conversation: dashboard.conversation, site: dashboard.site, busy: false, error: "" })} />
       )}
       {runOverlayId && <RunOverlay runId={runOverlayId} onClose={() => setRunOverlayId(null)} />}

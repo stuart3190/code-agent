@@ -81,7 +81,7 @@ import {
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
 import { handleProjectHealth } from "./routes/health.mjs";
-import { handleLogsList, handleLogsStream, handleLogsExport } from "./routes/logs.mjs";
+import { handleLogsList, handleLogsStream, handleLogsExport, handleLogRuns } from "./routes/logs.mjs";
 import { startHealthMonitor, stopHealthMonitor } from "./lib/health/monitor.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
@@ -785,11 +785,12 @@ const server = http.createServer(async (req, res) => {
         ? await handleAnalyticsLive(req, res, owner, analyticsMatch[1])
         : await handleAnalyticsOverview(req, res, owner, analyticsMatch[1], url);
     }
-    const logsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/logs(\/stream|\/export)?$/i);
+    const logsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/logs(\/stream|\/export|\/runs)?$/i);
     if (logsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       if (logsMatch[2] === "/stream") return await handleLogsStream(req, res, owner, logsMatch[1], url);
       if (logsMatch[2] === "/export") return await handleLogsExport(req, res, owner, logsMatch[1], url);
+      if (logsMatch[2] === "/runs") return await handleLogRuns(req, res, owner, logsMatch[1]);
       return await handleLogsList(req, res, owner, logsMatch[1], url);
     }
     const healthMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/health$/i);
