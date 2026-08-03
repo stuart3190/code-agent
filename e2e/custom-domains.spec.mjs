@@ -73,7 +73,8 @@ async function stub(page, conversations) {
 }
 
 const card = (page, title) => page.locator(".ct-project").filter({ hasText: title });
-const sheetOf = (page) => page.locator(".ct-sheet").filter({ hasText: "Project settings" });
+// Settings, analytics, health, logs, deployments and domains now live in one tabbed dashboard.
+const sheetOf = (page) => page.locator(".ct-projdash");
 
 async function openSettings(page, { domains = [], allowance = UNLIMITED, onDomains = null } = {}) {
   const state = { domains, allowance };
@@ -82,6 +83,7 @@ async function openSettings(page, { domains = [], allowance = UNLIMITED, onDomai
   await page.goto("/");
   await card(page, "FocusFlow").getByRole("button", { name: "Project Settings" }).click();
   await expect(sheetOf(page)).toBeVisible();
+  await sheetOf(page).getByRole("tab", { name: "Domains" }).click();
   return state;
 }
 
@@ -255,6 +257,8 @@ test("an active custom domain becomes the address on the card", async ({ page, c
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://shop.example.com");
   // The Thrallo address is still reachable where it belongs.
   await c.getByRole("button", { name: "Project Settings" }).click();
+  await expect(sheetOf(page)).toBeVisible();
+  await sheetOf(page).getByRole("tab", { name: "Settings" }).click();
   await expect(sheetOf(page)).toContainText("focusflow.app.thrallo.com");
 });
 
@@ -294,7 +298,8 @@ test("publishing ends with a success panel offering Connect Domain", async ({ pa
   await expect(panel.getByRole("button", { name: "Connect Domain" })).toBeVisible();
 
   await panel.getByRole("button", { name: "Connect Domain" }).click();
-  await expect(sheetOf(page)).toContainText("Domains");
+  await expect(sheetOf(page)).toBeVisible();
+  await expect(sheetOf(page).getByRole("tab", { name: "Domains" })).toBeVisible();
 });
 
 test("Connect Domain is not offered once a domain is already connected", async ({ page }) => {

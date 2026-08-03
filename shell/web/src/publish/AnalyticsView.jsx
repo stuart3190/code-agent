@@ -72,7 +72,7 @@ function Ranked({ title, rows, empty }) {
   );
 }
 
-export default function AnalyticsView({ site, onClose, onUpgrade }) {
+export default function AnalyticsView({ site, onClose, onUpgrade , embedded = false }) {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [live, setLive] = useState(null);
@@ -108,13 +108,10 @@ export default function AnalyticsView({ site, onClose, onUpgrade }) {
   const caps = data?.capabilities;
   const totals = data?.totals;
 
-  return (
-    <aside className="ct-sheet show ct-analytics" aria-label="Analytics">
-      <div className="ct-sheet-head">
-        <h2>Analytics</h2>
-        <button className="ct-btn-quiet" onClick={onClose}>Done</button>
-      </div>
-      <div className="ct-sheet-body">
+    // Rendered bare when embedded: the project dashboard supplies the sheet, heading and Done
+  // button, and nesting a second one inside it would mean two scroll areas and two close buttons.
+  const body = (
+    <>
         {error && <div className="mg-error">{error}</div>}
 
         <div className="ct-ws-tabs" role="group" aria-label="Date range">
@@ -247,7 +244,15 @@ export default function AnalyticsView({ site, onClose, onUpgrade }) {
           Thrallo Analytics is cookieless. Visitors are counted with a hash that is regenerated
           daily and cannot be linked across days or across sites, so no consent banner is required.
         </div>
-      </div>
+      </>
+  );
+
+  if (embedded) return body;
+  return (
+    <aside className="ct-sheet show ct-analytics" aria-label="Analytics">
+      <div className="ct-sheet-head"><h2>Analytics</h2>
+        <button className="ct-btn-quiet" onClick={onClose}>Done</button></div>
+      <div className="ct-sheet-body">{body}</div>
     </aside>
   );
 }

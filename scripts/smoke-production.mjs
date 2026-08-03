@@ -34,6 +34,7 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/analytics", expect: [401], why: "analytics is owner-scoped" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments", expect: [401], why: "deployment history" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/health", expect: [401], why: "health monitoring" },
+  { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/logs", expect: [401], why: "project logs" },
   { method: "POST", path: "/api/analytics/collect", expect: [204], why: "the public beacon must always answer 204" },
   { method: "GET", path: "/api/v1/ai/connections", expect: [401], why: "AI connections" },
   { method: "GET", path: "/api/v1/diagnostics", expect: [401], why: "build diagnostics" },

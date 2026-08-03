@@ -57,6 +57,21 @@ send({kind:"error",message:"Failed to load resource",source:String(e.target.src|
 send({kind:"error",message:(e.message||"Error"),source:(e.filename||"")+":"+(e.lineno||0),stack:e.error&&e.error.stack?String(e.error.stack):null});}catch(x){}},true);
 addEventListener("unhandledrejection",function(e){try{
 var r=e.reason;send({kind:"error",message:(r&&r.message?r.message:String(r)).slice(0,500),stack:r&&r.stack?String(r.stack):null});}catch(x){}});
+
+// Failed API requests. Wrapped rather than replaced: the original is always called and its result
+// always returned unchanged, so a site behaves identically whether or not this is present. Only
+// the app's own requests are reported — beaconing about third-party calls would leak where the
+// site talks to, and would report failures its owner cannot fix.
+try{var of=window.fetch;if(of){window.fetch=function(){var a=arguments,u="";
+try{u=String(a[0]&&a[0].url?a[0].url:a[0]||"");}catch(e){}
+var m="GET";try{m=(a[1]&&a[1].method)||(a[0]&&a[0].method)||"GET";}catch(e){}
+return of.apply(this,a).then(function(r){try{
+if(r&&r.status>=400&&u&&new URL(u,location.href).origin===location.origin)
+send({kind:"error",message:"Request failed",requestUrl:new URL(u,location.href).pathname,requestMethod:String(m).toUpperCase(),status:r.status});}catch(e){}
+return r;},function(err){try{
+if(u&&new URL(u,location.href).origin===location.origin)
+send({kind:"error",message:"Request failed",requestUrl:new URL(u,location.href).pathname,requestMethod:String(m).toUpperCase()});}catch(e){}
+throw err;});};}}catch(e){}
 })();`;
 }
 

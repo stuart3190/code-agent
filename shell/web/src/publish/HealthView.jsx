@@ -26,7 +26,7 @@ function UptimeBars({ daily }) {
   );
 }
 
-export default function HealthView({ site, onClose }) {
+export default function HealthView({ site, onClose , embedded = false }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const projectId = site?.projectId;
@@ -47,13 +47,10 @@ export default function HealthView({ site, onClose }) {
   const status = data?.status;
   const state = status?.status || "healthy";
 
-  return (
-    <aside className="ct-sheet show ct-analytics" aria-label="Health">
-      <div className="ct-sheet-head">
-        <h2>Health</h2>
-        <button className="ct-btn-quiet" onClick={onClose}>Done</button>
-      </div>
-      <div className="ct-sheet-body">
+    // Rendered bare when embedded: the project dashboard supplies the sheet, heading and Done
+  // button, and nesting a second one inside it would mean two scroll areas and two close buttons.
+  const body = (
+    <>
         {error && <div className="mg-error">{error}</div>}
         {!data && !error && <div className="mg-card"><div className="ct-hint">Loading…</div></div>}
 
@@ -180,7 +177,15 @@ export default function HealthView({ site, onClose }) {
             </div>
           </>
         )}
-      </div>
+      </>
+  );
+
+  if (embedded) return body;
+  return (
+    <aside className="ct-sheet show ct-analytics" aria-label="Health">
+      <div className="ct-sheet-head"><h2>Health</h2>
+        <button className="ct-btn-quiet" onClick={onClose}>Done</button></div>
+      <div className="ct-sheet-body">{body}</div>
     </aside>
   );
 }

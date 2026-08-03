@@ -150,9 +150,11 @@ test("Project Settings offers only actions that exist, and can download the sour
   await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
   await page.locator(".ct-published").getByRole("button", { name: "Project Settings" }).click();
 
-  const sheet = page.locator(".ct-sheet").filter({ hasText: "Project settings" });
+  const sheet = page.locator(".ct-projdash");
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("tab", { name: "Settings" }).click();
   await expect(sheet).toContainText("focusflow.app.thrallo.com");
-  await expect(sheet).toContainText("Domains");
+  await expect(sheet.getByRole("tab", { name: "Domains" })).toBeVisible();
 
   const download = page.waitForEvent("download");
   await sheet.getByRole("button", { name: "Download" }).click();

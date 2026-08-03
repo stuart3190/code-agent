@@ -281,3 +281,18 @@ export const projectAnalyticsLive = (projectId) =>
 export const projectDeployments = (projectId) =>
   request(`/api/v1/projects/${projectId}/deployments`);
 export const projectHealth = (projectId) => request(`/api/v1/projects/${projectId}/health`);
+
+// Project logs. The stream and export are plain URLs because EventSource and <a download> take
+// URLs, not fetch options — both still go through the same owner-scoped routes.
+export const projectLogs = (projectId, params = {}) => {
+  const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+  return request(`/api/v1/projects/${projectId}/logs?${query}`);
+};
+export const logStreamUrl = (projectId, params = {}) => {
+  const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+  return `${apiBase()}/api/v1/projects/${projectId}/logs/stream?${query}`;
+};
+export const logExportUrl = (projectId, params = {}) => {
+  const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+  return `${apiBase()}/api/v1/projects/${projectId}/logs/export?${query}`;
+};

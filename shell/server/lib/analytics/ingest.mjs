@@ -98,6 +98,10 @@ export async function recordBeacon({
     row.error_source = String(body.source || "").slice(0, 300) || null;
     row.error_stack = body.stack ? String(body.stack).slice(0, MAX_STACK) : null;
     row.status_code = clampInt(body.status, 599);
+    // Only the path is kept from a request URL, for the same reason query strings are stripped
+    // from page paths: they carry tokens and identifiers belonging to the site's own users.
+    row.request_url = body.requestUrl ? normalizePath(body.requestUrl) : null;
+    row.request_method = body.requestMethod ? String(body.requestMethod).toUpperCase().slice(0, 10) : null;
   }
 
   const { error } = await client.from("analytics_events").insert(row);
