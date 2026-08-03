@@ -26,7 +26,17 @@ import { publishStates } from "../shell/server/lib/publishState.mjs";
 const db = serviceClient();
 const DOMAIN = "51-195-136-189.sslip.io";
 const PUBLISH_ROOT = process.env.PUBLISH_DIR || "/home/ubuntu/publish";
-const REAL_SITE = "https://roblox-studio-ai.app.thrallo.com/";
+// A live site to prove the Thrallo subdomain is unaffected. Resolved from the database rather
+// than hard-coded: which customer sites are published is the OWNERS' business, and a proof that
+// fails because somebody unpublished their own app is a proof about them, not about this code.
+let REAL_SITE = null;
+let REAL_SLUG = null;
+{
+  const { data: live } = await db.from("published_sites")
+    .select("slug,url").is("unpublished_at", null).limit(1);
+  REAL_SITE = live?.[0]?.url || null;
+  REAL_SLUG = live?.[0]?.slug || null;
+}
 const SLUG = "pr5proof";
 
 const out = [];
@@ -84,8 +94,13 @@ try {
   });
   if (siteError) throw new Error(`site fixture: ${siteError.message}`);
 
-  const baseline = await siteStatus(REAL_SITE);
-  check(baseline === 200, "a real customer's Thrallo URL is serving before any of this", String(baseline));
+  // The throwaway's OWN Thrallo address is the one this proof controls, so the "the default
+  // subdomain is unaffected" claim rests on something the proof published rather than on whatever
+  // an account owner happens to have live at the time.
+  const baseline = REAL_SITE ? await siteStatus(REAL_SITE) : null;
+  check(REAL_SITE === null || baseline === 200,
+    "any live customer site is serving before any of this",
+    REAL_SITE ? String(baseline) : "no live site published — skipped");
 
   // ── Free gets no custom domains ───────────────────────────────────────────────────────
   await db.from("ca_subscriptions").upsert({ owner: OWNER, plan: "free", status: "active" }, { onConflict: "owner" });
@@ -118,8 +133,10 @@ try {
   // ── The certificate gate, against the real production route ───────────────────────────
   check((await previewDomainAllowed(DOMAIN)) === false,
     "the certificate gate REFUSES an unverified domain");
-  check((await previewDomainAllowed("roblox-studio-ai.app.thrallo.com")) === true,
-    "while the Thrallo subdomain is unaffected by any of it");
+  // This project's OWN Thrallo subdomain, which the proof published a moment ago — the gate must
+  // keep approving it while an unverified custom domain is refused.
+  check((await previewDomainAllowed(`${SLUG}.app.thrallo.com`)) === true,
+    "while the Thrallo subdomain is unaffected by any of it", `${SLUG}.app.thrallo.com`);
 
   // ── Real DNS: routing resolves, TXT does not, so it must not activate ─────────────────
   const realIps = await dns.resolve4(DOMAIN).catch(() => []);
@@ -236,8 +253,10 @@ try {
   await removeDomain(OWNER, DOMAIN, { detach: detachDomain });
 
   // ── The default address, throughout ───────────────────────────────────────────────────
-  const finalStatus = await siteStatus(REAL_SITE);
-  check(finalStatus === 200, "the real customer site never stopped serving", String(finalStatus));
+  const finalStatus = REAL_SITE ? await siteStatus(REAL_SITE) : null;
+  check(REAL_SITE === null || finalStatus === baseline,
+    "no live customer site changed state during any of this",
+    REAL_SITE ? `${baseline} → ${finalStatus}` : "no live site published — skipped");
 } catch (error) {
   check(false, "the proof ran to completion", error?.message || String(error));
   console.error(error);

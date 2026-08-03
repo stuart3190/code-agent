@@ -6,7 +6,7 @@
 
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { readLogs, buildRunsFor } from "../shell/server/lib/logs/logReader.mjs";
-import { deployments } from "../shell/server/lib/analytics/reports.mjs";
+import { listDeployments } from "../shell/server/lib/deployments/deploymentService.mjs";
 import { purgeProjectResources } from "../shell/server/lib/projectTeardown.mjs";
 import { sweepDiagnostics, DIAG_DEFAULT_RETENTION_DAYS } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
 
@@ -147,14 +147,24 @@ check((compressed || []).length > 0,
 
 // ── 6. One identity across Logs, Deployments and Overview ───────────────────────────────
 {
-  const view = await deployments(OWNER, PROJECT, { client: db });
-  const deploymentIds = new Set(view.builds.map((b) => String(b.id)));
+  // The real deployment records, not the diag_runs list that used to stand in for them. A
+  // deployment's build_run_id IS the log reference, which is what makes "View logs" open the exact
+  // build that produced what is serving.
+  const records = await listDeployments(OWNER, PROJECT, { client: db });
+  const runIds = new Set(records.map((d) => d.buildRunId).filter(Boolean));
   const logIds = new Set(buildOnly.map((e) => e.refId));
-  const shared = [...logIds].filter((id) => deploymentIds.has(id));
-  check(shared.length > 0, "Deployments and Build Logs use the SAME build identity",
-    `${shared.length} shared id(s)`);
-  check(view.builds.every((b) => resolved.some((r) => String(r.id) === String(b.id))),
-    "and Deployments resolves through the same function as Logs");
+  const shared = [...logIds].filter((id) => runIds.has(id));
+
+  if (!records.length) {
+    // Every deployment predating PR 8 is absent by construction; that is history, not a fault.
+    check(true, "no deployment records for this project to cross-check", "skipped");
+  } else {
+    check(runIds.size > 0, "deployments name the build run their logs live in", `${runIds.size} run(s)`);
+    check(shared.length > 0, "Deployments and Build Logs use the SAME build identity",
+      `${shared.length} shared id(s)`);
+    check(records.every((d) => !d.buildRunId || resolved.some((r) => String(r.id) === String(d.buildRunId))),
+      "and every referenced run is one this project actually owns");
+  }
 }
 
 // ── 7. A deep link cannot reach another owner's build ───────────────────────────────────

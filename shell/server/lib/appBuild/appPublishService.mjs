@@ -204,6 +204,20 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     // first-published date.
     if (claim.supersedes) await transferSite(ctx.owner, claim.supersedes, project.id);
 
+    // A tree with no package.json cannot be built, and npm's answer to that is a wall of ENOENT
+    // naming a path inside Thrallo's own work directory. Observed in production: a project whose
+    // tree held two stray files failed twice with that dump as its failure reason, which is now
+    // shown to the customer on the publish panel. Refusing early costs nothing and says something
+    // a person can act on.
+    if (!project.tree || !project.tree["package.json"]) {
+      const error = new Error(
+        "There's no complete app here to publish yet — the project is missing its package.json. "
+        + "Ask me to build or repair it and I'll take it live.",
+      );
+      error.code = "incomplete_project";
+      throw error;
+    }
+
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
     await ensureDeps(() => {});
     const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");

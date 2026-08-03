@@ -15,6 +15,26 @@ const check = (ok, label, detail = "") => {
   if (!ok) failed += 1;
 };
 
+// A monitored site this proof OWNS, so it never depends on what an account owner happens to have
+// published. Pointed at Thrallo's own front door, which genuinely resolves, serves 200 and has a
+// real certificate — so DNS, SSL and response time are measured rather than stubbed. Removed at
+// the end.
+const SEED_OWNER = "00000000-0000-4000-8000-0000c0ffee00";
+const SEED_PROJECT = "00000000-0000-4000-8000-0000c0ffee01";
+const SEED_SLUG = "health-proof-target";
+await db.from("published_sites").delete().eq("owner", SEED_OWNER);
+const { error: seedError } = await db.from("published_sites").insert({
+  owner: SEED_OWNER, project_id: SEED_PROJECT, slug: SEED_SLUG,
+  url: process.env.THRALLO_BASE_URL || "https://app.thrallo.com/",
+});
+if (seedError) console.error(`[proof] could not seed a monitored site: ${seedError.message}`);
+
+async function removeSeed() {
+  await db.from("health_checks").delete().eq("owner", SEED_OWNER);
+  await db.from("health_status").delete().eq("owner", SEED_OWNER);
+  await db.from("published_sites").delete().eq("owner", SEED_OWNER);
+}
+
 // ── 1. A real sweep over the real estate ────────────────────────────────────────────────
 const sites = await liveSites(db);
 console.log(`[proof] ${sites.length} live site(s), ${sites.reduce((n, s) => n + s.targets.length, 0)} address(es)`);
@@ -124,6 +144,11 @@ if (sample) {
   check(tables.includes("health_status") && tables.includes("health_checks"),
     "delete purges both health tables");
 }
+
+await removeSeed();
+const { count: seedLeft } = await db.from("published_sites")
+  .select("project_id", { count: "exact", head: true }).eq("owner", SEED_OWNER);
+check(!seedLeft, "the seeded monitoring target is cleaned up", `${seedLeft || 0} row(s) left`);
 
 console.log(`\n${out.join("\n")}\n`);
 console.log(failed ? `${failed} FAILED` : `${out.length}/${out.length} checks passed`);

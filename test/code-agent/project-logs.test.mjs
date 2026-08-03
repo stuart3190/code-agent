@@ -418,10 +418,17 @@ test("no source swallows its own errors", async () => {
     "destructuring only `data` discards the error alongside it");
 });
 
-test("Deployments and Logs resolve builds through the same function", async () => {
+test("analytics no longer reads build runs as though they were deployments", async () => {
+  // This used to assert that reports.mjs shared the Logs resolver. The stronger outcome arrived
+  // with PR 8: deployment history comes from real deployment records, so reports.mjs has no
+  // business reading diag_runs at all. Its deployments() lingered afterwards with no caller and
+  // was deleted — an unused reader of the wrong table is one import away from coming back.
   const reports = await readFile(fileURLToPath(new URL("../../shell/server/lib/analytics/reports.mjs", import.meta.url)), "utf8");
-  assert.match(reports, /buildRunsFor/,
-    "two callers reading diag_runs their own way is how a deployment and its logs disagree");
-  assert.doesNotMatch(reports, /from\("diag_runs"\)/,
-    "the direct query must be gone, not merely duplicated");
+  assert.doesNotMatch(reports, /export async function deployments/);
+  assert.doesNotMatch(reports, /from\("diag_runs"\)/, "no direct query either");
+  assert.doesNotMatch(reports, /buildRunsFor/, "and nothing left importing the resolver");
+
+  // Deployment history now comes from the deployment records themselves.
+  const route = await readFile(fileURLToPath(new URL("../../shell/server/routes/deployments.mjs", import.meta.url)), "utf8");
+  assert.match(route, /listDeployments/);
 });
