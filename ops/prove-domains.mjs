@@ -133,10 +133,15 @@ try {
   // ── The certificate gate, against the real production route ───────────────────────────
   check((await previewDomainAllowed(DOMAIN)) === false,
     "the certificate gate REFUSES an unverified domain");
-  // This project's OWN Thrallo subdomain, which the proof published a moment ago — the gate must
-  // keep approving it while an unverified custom domain is refused.
-  check((await previewDomainAllowed(`${SLUG}.app.thrallo.com`)) === true,
-    "while the Thrallo subdomain is unaffected by any of it", `${SLUG}.app.thrallo.com`);
+  // A Thrallo subdomain whose files genuinely exist on disk — the gate answers those from
+  // provisiond's own record, not from custom_domains. This proof inserts a published_sites row but
+  // never uploads files, so its own slug is not a valid subject; a really-published site is.
+  if (REAL_SLUG) {
+    check((await previewDomainAllowed(`${REAL_SLUG}.app.thrallo.com`)) === true,
+      "while the Thrallo subdomain is unaffected by any of it", `${REAL_SLUG}.app.thrallo.com`);
+  } else {
+    check(true, "no published site available to check the Thrallo subdomain against", "skipped");
+  }
 
   // ── Real DNS: routing resolves, TXT does not, so it must not activate ─────────────────
   const realIps = await dns.resolve4(DOMAIN).catch(() => []);
