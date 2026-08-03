@@ -9,20 +9,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   listDomains, addDomain, verifyDomain, retryDomain, removeDomain,
 } from "../lib/codeAgentApi.js";
-import { displayUrl, relativeTime } from "./publishLifecycle.js";
-
-const STATUS_TEXT = {
-  pending_dns: "Pending DNS",
-  verifying: "Verifying",
-  active: "Active",
-  failed: "Failed",
-};
-const STATUS_HINT = {
-  pending_dns: "Add the records below at your DNS provider. We check every minute.",
-  verifying: "Ownership confirmed. Waiting for the domain to point at Thrallo.",
-  active: "Live and secured with HTTPS.",
-  failed: "We stopped checking. Fix the records and retry.",
-};
+import { displayUrl, relativeTime, DOMAIN_STATUS_LABEL as STATUS_TEXT, DOMAIN_STATUS_HINT as STATUS_HINT } from "./publishLifecycle.js";
 
 function CopyValue({ value }) {
   const [copied, setCopied] = useState(false);

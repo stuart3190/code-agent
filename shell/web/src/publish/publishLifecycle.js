@@ -34,6 +34,26 @@ export function statusOf(conversation) {
   return conversation?.publishStatus || STATUS.draft;
 }
 
+// Custom domain states, in one place so the conversation, the Domains panel, the Overview tile and
+// the project card cannot describe the same domain differently. Only `active` may ever be said to
+// be live or secured — a domain still proving itself has no certificate, and claiming otherwise
+// would send people to a hostname that does not answer.
+export const DOMAIN_STATUS_LABEL = Object.freeze({
+  pending_dns: "Pending DNS",
+  verifying: "Verifying",
+  active: "Active",
+  failed: "Failed",
+});
+
+export const DOMAIN_STATUS_HINT = Object.freeze({
+  pending_dns: "Add the records below at your DNS provider. We check every minute.",
+  verifying: "Ownership confirmed. Waiting for the domain to point at Thrallo.",
+  active: "Live and secured with HTTPS.",
+  failed: "We stopped checking. Fix the records and retry.",
+});
+
+export const isDomainLive = (status) => status === "active";
+
 /**
  * The badges for a project card. A set, not one value — a project can be LIVE and BUILDING at the
  * same time, and a site serving an older build is genuinely both LIVE and UPDATE AVAILABLE. A

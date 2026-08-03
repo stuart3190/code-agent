@@ -106,7 +106,16 @@ function billingError(message, status, code) {
   return error;
 }
 
-export async function addDomain(owner, projectId, input, { client = serviceClient(), store = null } = {}) {
+/**
+ * Connect a domain to a project. THE way domains are created — there is no other.
+ *
+ * `attach` is passed through to the verification that follows, because someone who set their DNS
+ * up in advance verifies on this very call. Without it that domain reached `active` and was never
+ * attached to Caddy: verified, routed, displayed as live, and serving nothing.
+ */
+export async function addDomain(owner, projectId, input, {
+  client = serviceClient(), store = null, attach = null, resolver = dns, fetchImpl = fetch,
+} = {}) {
   const domain = normalizeDomain(input);
   if (!domain) {
     throw billingError("That doesn't look like a domain you can connect (e.g. yourbusiness.com).", 400, "bad_domain");
@@ -117,6 +126,18 @@ export async function addDomain(owner, projectId, input, { client = serviceClien
   const { data: site } = await client.from("published_sites")
     .select("slug,unpublished_at").eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
   if (!site) throw billingError("Publish this project first, then connect a domain to it.", 409, "not_published");
+
+  // Idempotent BEFORE the allowance check: asking again for a domain you already have must not be
+  // refused for exceeding a limit it is already counted against. Retrying a request that timed out,
+  // or saying "connect example.com" twice in conversation, re-checks the domain and returns where
+  // it actually stands rather than erroring at someone who wants exactly what they already asked
+  // for.
+  const { data: existing } = await client.from("custom_domains")
+    .select("*").eq("domain", domain).eq("owner", owner).eq("project_id", String(projectId)).maybeSingle();
+  if (existing) {
+    const current = await verifyDomain(owner, domain, { client, attach, resolver, fetchImpl });
+    return { ...(current || publicDomain(existing)), alreadyConnected: true };
+  }
 
   const allowance = await domainAllowance(owner, { store, client });
   if (allowance.limit === 0) {
@@ -138,7 +159,7 @@ export async function addDomain(owner, projectId, input, { client = serviceClien
   if (holder) {
     // Never reveal WHO holds it — that would leak one customer's domain to another.
     if (holder.owner !== owner) throw billingError("That domain is already connected to another app.", 409, "domain_taken");
-    if (String(holder.project_id) === String(projectId)) throw billingError("That domain is already connected to this project.", 409, "already_connected");
+    // Same owner, different project. Handled above when it is THIS project.
     throw billingError("That domain is connected to another of your projects. Remove it there first.", 409, "domain_in_use");
   }
 
@@ -156,8 +177,10 @@ export async function addDomain(owner, projectId, input, { client = serviceClien
   const { error } = await client.from("custom_domains").insert(row);
   if (error) throw new Error(`custom_domains insert failed: ${error.message || error}`);
 
-  // Check straight away: someone who set DNS up in advance should not wait for a sweep.
-  return (await verifyDomain(owner, domain, { client })) || publicDomain(row);
+  // Check straight away: someone who set DNS up in advance should not wait for a sweep. `attach`
+  // travels with it, so if that check DOES reach active the hostname is attached in the same
+  // breath rather than being active-but-unreachable until something else happens to re-verify it.
+  return (await verifyDomain(owner, domain, { client, attach, resolver, fetchImpl })) || publicDomain(row);
 }
 
 export async function removeDomain(owner, domain, { client = serviceClient(), detach = null } = {}) {

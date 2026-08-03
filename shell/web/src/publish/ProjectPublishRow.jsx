@@ -4,7 +4,7 @@
 // Every control here does something real: there are no placeholders.
 
 import React, { useState } from "react";
-import { STATUS, displayUrl, relativeTime } from "./publishLifecycle.js";
+import { STATUS, DOMAIN_STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
 
 export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings, onAnalytics, onHealth, health = null }) {
   const [copied, setCopied] = useState(false);
@@ -14,6 +14,8 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
   // Once a custom domain is verified it IS the address — it is what the owner gives people. The
   // Thrallo URL is never lost; it stays copyable from Project Settings.
   const address = site.primaryUrl || site.url;
+  // Furthest along, so the card reflects work already in progress rather than showing nothing.
+  const pendingDomain = (site.domains || []).find((d) => d.status !== "active") || null;
 
   async function copy(event) {
     event.stopPropagation();
@@ -43,7 +45,11 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
           {offline
             ? ` · unpublished ${relativeTime(site.unpublishedAt)}`
             : ` · published ${relativeTime(site.publishedAt)}`}
-          {site.customDomain && !offline && " · custom domain"}
+          {/* A domain still verifying is said to be verifying. Silence here read as "no domain",
+              which is the same wrong answer the Overview tile used to give. */}
+          {!offline && site.customDomain && " · custom domain"}
+          {!offline && !site.customDomain && pendingDomain
+            && ` · ${pendingDomain.domain} ${DOMAIN_STATUS_LABEL[pendingDomain.status]?.toLowerCase() || "pending"}`}
         </span>
       </div>
       <div className="ct-pubrow-actions">

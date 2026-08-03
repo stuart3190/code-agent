@@ -29,7 +29,7 @@ import ProjectDashboard from "../publish/ProjectDashboard.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
 import {
-  TABS, statusOf, countByTab, isLive, badgesFor, groupProjects,
+  TABS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
 } from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
@@ -138,6 +138,9 @@ function Workspace({ user }) {
   const [justPublished, setJustPublished] = useState(null);
   const [unpublishing, setUnpublishing] = useState(null); // { conversation, site, busy, error }
   const [dashboard, setDashboard] = useState(null); // { site, tab }
+  // A projectId waiting for its publish state to arrive before the Domains panel can be opened on
+  // it. The event beats the refresh, so the intent is held rather than dropped.
+  const [openDomainsFor, setOpenDomainsFor] = useState(null);
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -205,6 +208,13 @@ function Workspace({ user }) {
             }
             if (event.type === "open_view" && event.payload?.view === "run" && event.payload?.runId) {
               setRunOverlayId(event.payload.runId);
+            }
+            // Connecting a domain from conversation lands on the SAME Domains panel the button
+            // opens — one workflow, whichever way it was asked for. The panel polls until the
+            // domain settles, so the records stay live rather than freezing at what the chat said.
+            if (event.type === "domain") {
+              refreshProjects();
+              setOpenDomainsFor(event.payload?.projectId || null);
             }
             setView((v) => applyEvent(v, event));
           }, { signal: controller.signal, after });
@@ -285,6 +295,17 @@ function Workspace({ user }) {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Open the Domains panel once the newly connected project's publish state has actually arrived.
+  // Doing it inline on the event would open a dashboard with no site to render.
+  useEffect(() => {
+    if (!openDomainsFor) return;
+    const site = publish.sites.find((s) => String(s.projectId) === String(openDomainsFor));
+    if (!site) return;
+    setDashboard({ site, tab: "domains", conversation: active });
+    setOpenDomainsFor(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDomainsFor, publish.sites]);
 
   // Publishing from a dashboard card must post to THAT conversation. `send` reads `active` from
   // its closure, which is still null in the same tick as openConversation — using it here would
@@ -408,6 +429,11 @@ function Workspace({ user }) {
               })}
               onOpenSettings={() => setDashboard({
                 site: publish.byProduct(active.productId), tab: "settings", conversation: active,
+              })}
+              // "Connect Domain" opens the Domains panel — the one workflow that actually connects
+              // domains. It used to open Project Settings, which contains no domain UI at all.
+              onConnectDomain={() => setDashboard({
+                site: publish.byProduct(active.productId), tab: "domains", conversation: active,
               })} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
@@ -855,6 +881,9 @@ function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false
       </div>
     );
   }
+  if (item.kind === "domain") {
+    return <DomainRecords item={item} />;
+  }
   if (item.kind === "error") {
     return <div className="ct-error">Something went wrong: {item.text} — say “try again” and I will.</div>;
   }
@@ -862,6 +891,44 @@ function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false
     return <FailureCard item={item} onRetry={onRetry} />;
   }
   return null;
+}
+
+// The two DNS records a newly connected domain needs, copyable rather than described.
+//
+// Both are shown from the start. The verification TXT is what proves ownership, and no certificate
+// is requested until it is found — so hiding it until later would leave someone waiting on a step
+// they had not been told about.
+function DomainRecords({ item }) {
+  const [copied, setCopied] = useState(null);
+  const copy = async (value, key) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2_000);
+    } catch { setCopied(null); }
+  };
+  return (
+    <div className="ct-domain-card">
+      <div className="ct-domain-head">
+        <strong>{item.domain}</strong>
+        <span className="ct-badge tone-muted">{DOMAIN_STATUS_LABEL[item.status] || "Pending DNS"}</span>
+      </div>
+      <div className="ct-hint">
+        Add these at your DNS provider. Thrallo checks automatically, and the HTTPS certificate is
+        issued only once ownership is verified. Your Thrallo address keeps working throughout.
+      </div>
+      {item.records.map((record) => (
+        <div className="ct-domain-record" key={record.name + record.type}>
+          <span className="ct-domain-type">{record.type}</span>
+          <span className="ct-domain-name" title={record.name}>{record.name}</span>
+          <code className="ct-domain-value" title={record.value}>{record.value}</code>
+          <button className="ct-btn-quiet" onClick={() => copy(record.value, record.type)}>
+            {copied === record.type ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // Failed recovery: calm sentence, support reference, and actions. Technical detail lives
