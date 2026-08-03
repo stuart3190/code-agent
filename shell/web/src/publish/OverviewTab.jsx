@@ -2,13 +2,16 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { projectHealth } from "../lib/codeAgentApi.js";
-import { STATUS, STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
+import { STATUS, STATUS_LABEL, DOMAIN_STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
 import { HEALTH_LABEL, HEALTH_DOT } from "./HealthView.jsx";
 
 export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpublish }) {
   const [copied, setCopied] = useState(false);
   const address = site.primaryUrl || site.url;
   const status = site.status || STATUS.published;
+  // The active one if there is one, otherwise whichever is furthest along — the tile should show
+  // the domain the owner is currently working on, not nothing at all.
+  const domain = (site.domains || []).find((d) => d.status === "active") || (site.domains || [])[0] || null;
   const offline = status === STATUS.unpublished;
   // The SAME endpoint the Health tab reads. Overview used to read `site.health`, which is never
   // populated — health rides with the conversation, not the site — so this tile said
@@ -76,9 +79,16 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
         <button className="ct-metric-link" onClick={() => onOpenTab("logs")}>
           <span className="v">📋</span><span className="k">Logs</span>
         </button>
+        {/* A domain part-way through verification is shown with the state it is actually in.
+            This tile used to say "Add a domain" for a domain that had already been added and was
+            waiting on DNS — offering to start something the user was in the middle of. */}
         <button className="ct-metric-link" onClick={() => onOpenTab("domains")}>
           <span className="v">🌐</span>
-          <span className="k">{site.customDomain ? site.customDomain : "Add a domain"}</span>
+          <span className="k">
+            {domain
+              ? `${domain.domain}${domain.status === "active" ? "" : ` · ${DOMAIN_STATUS_LABEL[domain.status] || "Pending"}`}`
+              : "Add a domain"}
+          </span>
         </button>
       </div>
 

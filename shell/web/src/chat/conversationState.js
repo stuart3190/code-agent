@@ -104,6 +104,18 @@ export function applyEvent(view, event) {
         text: payload.note || `Live at ${String(payload.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
       });
       break;
+    // A connected domain is a DNS task, not a sentence. The records are shown as copyable rows
+    // because that is what the person has to do next, and prose they must retype is a worse
+    // version of the panel that already exists.
+    case "domain":
+      push({
+        kind: "domain",
+        domain: payload.domain || "",
+        status: payload.status || "pending_dns",
+        records: payload.records || [],
+        projectId: payload.projectId || null,
+      });
+      break;
     case "question_asked":
       push({ kind: "question", question: payload.question || "", consequence: payload.businessConsequence || "" });
       next.waiting = true;

@@ -13,6 +13,9 @@ import { ensureDeps, buildTree, workDirFor } from "../../../../harness/workspace
 import { slugify } from "../../routes/publish.mjs";
 import { notifyOwner } from "../notifications/notificationService.mjs";
 import { logProject } from "../logs/projectLog.mjs";
+// The ONE domain implementation. Conversation and the Domains panel now call the same function,
+// so there is no second path that could skip verification.
+import { addDomain, normalizeDomain } from "../customDomains.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
 const PROVISIOND_TOKEN = () => optionalEnv("PROVISIOND_TOKEN");
@@ -233,49 +236,64 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   }
 }
 
-// Custom domains: record + attach. The ask gate (previewDomainCheck) starts approving the
-// domain the moment the row exists; certs are issued at first handshake once DNS points here.
-export async function connectDomain(ctx, { domain, productName = null }) {
-  const cleaned = String(domain || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  if (!/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(cleaned) || cleaned.endsWith(".thrallo.com")) {
+/**
+ * Connect a custom domain from conversation.
+ *
+ * This used to be a SECOND implementation of domain creation, and a worse one: it upserted a row
+ * with no verification token — so the panel offered an empty TXT record to copy and the domain
+ * could never verify, sitting stuck until it was stamped failed at 48 hours — attached the
+ * hostname to Caddy immediately, before any ownership proof, and told the user to add an A record
+ * when the UI required a TXT record too. It also read PUBLISH_IP while verification read
+ * THRALLO_PUBLIC_IP, so the address it dictated could differ from the one actually checked.
+ *
+ * There is now one path. This resolves scope, then calls `addDomain` — the same function the
+ * Domains panel calls, with the same token, the same Pending DNS start, the same plan allowance,
+ * and the same rule that nothing is attached to Caddy until both proofs pass.
+ */
+export async function connectDomain(ctx, { domain, productName = null, projectId = null }) {
+  const cleaned = normalizeDomain(domain);
+  if (!cleaned) {
     const error = new Error("That doesn't look like a domain I can connect (e.g. yourbusiness.com).");
     error.code = "bad_domain";
     throw error;
   }
-  // Same scoping as publish. Attaching a customer's domain to whichever project was touched most
-  // recently is the worst version of this bug — it points their address at the wrong app.
+
+  // No owner-newest fallback. Pointing a customer's own hostname at whichever app was touched most
+  // recently is not a mild mistake — it publishes the wrong product at their address. If the
+  // conversation cannot say which project it means, the honest answer is to ask.
   const { resolveConversationProject } = await import("./projectScope.mjs");
-  const { project } = await resolveConversationProject(ctx, { productName });
-  const client = serviceClient();
-  const { data: site } = project
-    ? await client.from("published_sites")
-      .select("slug").eq("project_id", String(project.id)).eq("owner", ctx.owner).maybeSingle()
-    : { data: null };
-  if (!site) {
-    const error = new Error("Publish the app first, then I'll connect the domain to it.");
-    error.code = "not_published";
-    throw error;
-  }
-  const { data: holder } = await client.from("custom_domains").select("owner").eq("domain", cleaned).maybeSingle();
-  if (holder && holder.owner !== ctx.owner) {
-    const error = new Error("That domain is already connected to another app.");
-    error.code = "domain_taken";
-    throw error;
-  }
-  const { error: upsertError } = await client.from("custom_domains").upsert({
-    domain: cleaned, owner: ctx.owner, project_id: String(project.id), slug: site.slug,
-  }, { onConflict: "domain" });
-  if (upsertError) throw new Error(upsertError.message);
-  await provisiond("/domain-attach", { body: { domain: cleaned, label: site.slug } });
-  const ip = optionalEnv("PUBLISH_IP", "51.195.136.189");
-  await ctx.emit("published", {
-    url: `https://${cleaned}`, slug: site.slug, projectId: project.id,
-    note: `Domain connected — point an A record for ${cleaned} to ${ip} and it goes live with its own certificate.`,
+  const { project, scope } = await resolveConversationProject(ctx, {
+    projectId, productName, allowOwnerFallback: false,
   });
-  return {
-    domain: cleaned, ip,
-    instructions: `Point an A record for ${cleaned} to ${ip}. The certificate is issued automatically on the first visit once DNS resolves.`,
-  };
+  if (!project) {
+    const error = new Error(scope === "ambiguous"
+      ? "Tell me which app this domain is for and I'll connect it."
+      : "Publish the app first, then I'll connect the domain to it.");
+    error.code = scope === "ambiguous" ? "ambiguous_project" : "not_published";
+    throw error;
+  }
+
+  // addDomain does the rest: allowance, ownership conflicts, token, Pending DNS, and an immediate
+  // check for anyone who set their DNS up in advance.
+  const result = await addDomain(ctx.owner, project.id, cleaned, { attach: attachDomain });
+
+  const records = result.records || [];
+  const verification = records.find((r) => r.purpose === "verification");
+  const routing = records.find((r) => r.purpose === "routing");
+  const instructions = [
+    `Add these two DNS records for ${cleaned}:`,
+    verification && `  ${verification.type}  ${verification.name}  →  ${verification.value}`,
+    routing && `  ${routing.type}  ${routing.name}  →  ${routing.value}`,
+    "I'll check for them automatically. The certificate is issued once ownership is verified —"
+    + " never before. Your Thrallo address keeps working the whole time.",
+  ].filter(Boolean).join("\n");
+
+  await ctx.emit("domain", {
+    domain: cleaned, projectId: String(project.id), status: result.status,
+    records, note: instructions,
+  });
+
+  return { domain: cleaned, status: result.status, records, instructions, alreadyConnected: !!result.alreadyConnected };
 }
 
 // Take a published site offline.

@@ -322,3 +322,132 @@ test("the Thrallo subdomain is never affected by custom domains", async () => {
     "Thrallo suffixes must be answered before custom domains are consulted");
   assert.match(fn, /return labelExists/);
 });
+
+// ── One creation path ───────────────────────────────────────────────────────────────────
+//
+// There used to be two. The Domains panel called addDomain, which issues a token, starts in
+// Pending DNS and attaches nothing until both proofs pass. Conversation called connectDomain,
+// which upserted a row directly with NO token — so the panel offered an empty TXT record to copy,
+// ownershipProven could never be true, and the domain sat stuck until it was stamped failed at 48
+// hours — then attached the hostname to Caddy immediately, before any proof at all.
+
+test("a new domain always receives a real verification token and a non-empty TXT record", async () => {
+  const db = fakeDb();
+  const added = await addDomain(OWNER, PROJECT, "example.com", {
+    client: db, store: await storeOn("pro"),
+    resolver: resolverThat({}), fetchImpl: noCert,
+  });
+
+  const row = db.rows[0];
+  assert.match(row.verification_token, /^thrallo-verify=[0-9a-f]{32}$/, "a real token, not null");
+  assert.equal(row.status, DOMAIN_STATUS.pendingDns, "and it starts in Pending DNS");
+
+  const txt = added.records.find((r) => r.purpose === "verification");
+  assert.ok(txt.value && txt.value.length > 10,
+    "an empty TXT value is a record the user cannot possibly publish");
+  assert.equal(txt.value, row.verification_token, "and it is the token actually checked for");
+});
+
+test("adding a domain attaches NOTHING to Caddy until both proofs pass", async () => {
+  const attached = [];
+  const db = fakeDb();
+  await addDomain(OWNER, PROJECT, "example.com", {
+    client: db, store: await storeOn("pro"),
+    attach: async (d) => attached.push(d),
+    resolver: resolverThat({}), fetchImpl: noCert,
+  });
+  assert.deepEqual(attached, [], "attaching before verification is what the whole gate exists to prevent");
+  assert.equal(db.rows[0].ssl_status, "pending");
+});
+
+test("a domain whose DNS was set up in ADVANCE is attached the moment it verifies", async () => {
+  // The bug this covers: addDomain called verifyDomain without passing `attach`, so a domain that
+  // verified on the very first check reached `active` — displayed as live and secured — while
+  // Caddy had never been told the hostname existed. Verified, routed, and serving nothing.
+  const attached = [];
+  const db = fakeDb();
+  // The token is minted inside addDomain, so the zone can only be "already correct" if it answers
+  // with whatever was just issued — exactly like a real zone the user set up from the panel
+  // earlier and is now re-adding.
+  const preparedZone = {
+    resolveTxt: async () => [[db.rows[0]?.verification_token || "none"]],
+    resolve4: async () => [IP],
+    resolveCname: async () => { throw new Error("ENOTFOUND"); },
+  };
+
+  const added = await addDomain(OWNER, PROJECT, "example.com", {
+    client: db, store: await storeOn("pro"),
+    attach: async (domain, slug) => attached.push(`${domain}:${slug}`),
+    resolver: preparedZone, fetchImpl: noCert,
+  });
+
+  assert.equal(added.status, DOMAIN_STATUS.active, "it verifies on the very first check");
+  assert.deepEqual(attached, ["example.com:focusflow"],
+    "and Caddy is told about it in the same breath — otherwise it is active and unreachable");
+  assert.equal(db.rows[0].ssl_status, "pending", "the certificate itself issues on first handshake");
+});
+
+test("asking for the same domain twice is idempotent, not an error", async () => {
+  const db = fakeDb();
+  const store = await storeOn("starter");   // limit of ONE, so a naive retry would hit the cap
+  const first = await addDomain(OWNER, PROJECT, "example.com", {
+    client: db, store, resolver: resolverThat({}), fetchImpl: noCert,
+  });
+  const second = await addDomain(OWNER, PROJECT, "example.com", {
+    client: db, store, resolver: resolverThat({}), fetchImpl: noCert,
+  });
+
+  assert.equal(db.rows.length, 1, "a retry must not create a second row");
+  assert.equal(second.alreadyConnected, true, "and says so, rather than failing");
+  assert.equal(second.domain, first.domain);
+  assert.equal(second.records[0].value, first.records[0].value,
+    "the same token — reissuing it would invalidate DNS the user had already published");
+});
+
+test("the same domain on ANOTHER of your projects is still refused", async () => {
+  const db = fakeDb({ domains: [{ domain: "example.com", owner: OWNER, project_id: "other-project", status: "active" }] });
+  const store = await storeOn("pro");
+  await assert.rejects(
+    () => addDomain(OWNER, PROJECT, "example.com", { client: db, store }),
+    (e) => e.code === "domain_in_use",
+    "idempotency is per project — it must not silently move a live domain",
+  );
+});
+
+test("conversation and the Domains panel share ONE implementation", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
+  const fn = source.slice(source.indexOf("export async function connectDomain"), source.indexOf("\nexport async function unpublishApp"));
+
+  assert.match(fn, /addDomain\(/, "it must go through the authoritative path");
+  assert.doesNotMatch(fn, /from\("custom_domains"\)/,
+    "a direct write here is exactly the bypass that produced tokenless domains");
+  assert.doesNotMatch(fn, /domain-attach/,
+    "attaching from the conversational path skipped verification entirely");
+  assert.doesNotMatch(fn, /PUBLISH_IP/,
+    "it read a different env var than verification did, so it could dictate the wrong IP");
+});
+
+test("connecting a domain never falls back to another project", async () => {
+  const { resolveConversationProject } = await import("../../shell/server/lib/appBuild/projectScope.mjs");
+  const projects = [{ id: "newest", name: "Something Else", product_id: "other", tree: {}, updated_at: "2026-08-03T00:00:00Z" }];
+  const client = {
+    from: () => {
+      const api = {
+        select: () => api, eq: () => api, not: () => api, order: () => api,
+        limit: () => Promise.resolve({ data: projects }),
+        maybeSingle: async () => ({ data: null }),
+      };
+      return api;
+    },
+  };
+
+  // A conversation with no product: publishing may fall back to the newest project, but pointing
+  // a customer's own hostname at it would put the wrong product at their address.
+  const ctx = { owner: OWNER, conversation: {} };
+  const guessed = await resolveConversationProject(ctx, { client });
+  assert.equal(guessed.project?.id, "newest", "publish keeps its fallback");
+
+  const refused = await resolveConversationProject(ctx, { client, allowOwnerFallback: false });
+  assert.equal(refused.project, null);
+  assert.equal(refused.scope, "ambiguous", "so the capability can ask which app rather than guess");
+});

@@ -25,11 +25,17 @@ export const DEFAULT_COLUMNS = "id, name, tree, product_id, updated_at";
  *   4. The owner's newest project — ONLY for conversations that have no product at all
  *      (older conversations predate product ids). Never reached when a product is known.
  *
+ * `allowOwnerFallback: false` removes step 4 entirely, for capabilities where guessing is worse
+ * than refusing. Connecting a custom domain is the clearest case: pointing a customer's own
+ * hostname at whichever app was touched most recently is not a mild inconvenience, it publishes
+ * the wrong product at their address.
+ *
  * Returns `{ project, scope, productId }`. `project` is null when nothing matches; `scope` says
  * how it was resolved so callers can explain themselves accurately.
  */
 export async function resolveConversationProject(ctx, {
   projectId = null, productName = null, columns = DEFAULT_COLUMNS, client = serviceClient(),
+  allowOwnerFallback = true,
 } = {}) {
   const owner = ctx?.owner;
   if (!owner) return { project: null, scope: "no_owner", productId: null };
@@ -68,6 +74,7 @@ export async function resolveConversationProject(ctx, {
   }
 
   // Only conversations with no product at all get here.
+  if (!allowOwnerFallback) return { project: null, scope: "ambiguous", productId: null };
   const { data } = await select();
   return { project: data?.[0] || null, scope: "owner_latest", productId: data?.[0]?.product_id || null };
 }

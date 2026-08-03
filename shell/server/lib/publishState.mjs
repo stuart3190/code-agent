@@ -47,11 +47,27 @@ export async function publishStates(owner, client = serviceClient()) {
   // becomes the address shown everywhere. Only `active` counts — a domain still proving itself
   // would send people to a hostname that does not resolve yet. The Thrallo URL is always kept
   // alongside it, never replaced, so it stays copyable from Project Settings.
-  const { data: domainRows } = await client
+  // Every domain, not only the active ones. `customDomain` below still means "active", because
+  // that is the address people are sent to — but a domain part-way through verification is real
+  // and must be visible. Reading only active rows is why a domain stuck in pending_dns rendered as
+  // "Add a domain" on the Overview tile: the surface offered to start something already underway.
+  const { data: allDomains } = await client
     .from("custom_domains")
-    .select("domain,project_id,created_at")
-    .eq("owner", owner).eq("status", "active")
+    .select("domain,project_id,created_at,status,ssl_status,failure_reason")
+    .eq("owner", owner)
     .order("created_at", { ascending: true });
+  const domainsByProject = new Map();
+  for (const row of allDomains || []) {
+    const key = String(row.project_id);
+    if (!domainsByProject.has(key)) domainsByProject.set(key, []);
+    domainsByProject.get(key).push({
+      domain: row.domain,
+      status: row.status,
+      sslStatus: row.ssl_status,
+      failureReason: row.failure_reason,
+    });
+  }
+  const domainRows = (allDomains || []).filter((r) => r.status === "active");
   // Sorted here rather than relying on the query's order clause: which domain is "primary" is a
   // product decision, and it should not quietly change if that clause is ever edited away.
   const customByProject = new Map();
@@ -87,9 +103,12 @@ export async function publishStates(owner, client = serviceClient()) {
       && Date.parse(latest.updated_at) > Date.parse(publishedAt) + STALE_TOLERANCE_MS);
 
     const customDomain = customByProject.get(String(site.project_id)) || null;
+    const domains = domainsByProject.get(String(site.project_id)) || [];
     return {
       projectId: String(site.project_id),
       customDomain,
+      // The full picture, so every surface describes the same domain the same way.
+      domains,
       // What to show and link to. The Thrallo address remains in `url` regardless.
       primaryUrl: customDomain && live ? `https://${customDomain}` : site.url,
       // The project to act on now. Publishing an update must target the CURRENT project of the

@@ -8,7 +8,7 @@ import React, { useState } from "react";
 import { relativeTime, displayUrl } from "./publishState.js";
 import { STATUS } from "./publishLifecycle.js";
 
-export default function PublishedPanel({ site, celebrate = false, onPublishUpdate, onUnpublish, onOpenSettings }) {
+export default function PublishedPanel({ site, celebrate = false, onPublishUpdate, onUnpublish, onOpenSettings, onConnectDomain }) {
   const [copied, setCopied] = useState(false);
   if (!site) return null;
 
@@ -63,7 +63,7 @@ export default function PublishedPanel({ site, celebrate = false, onPublishUpdat
             {/* The natural next step the moment an app goes live, and the point at which someone
                 is most likely to want their own address on it. */}
             {!site.customDomain && (
-              <button className="ct-btn-quiet" onClick={onOpenSettings}>Connect Domain</button>
+              <button className="ct-btn-quiet" onClick={onConnectDomain || onOpenSettings}>Connect Domain</button>
             )}
           </>
         )}

@@ -50,7 +50,9 @@ export async function handleDomainsList(_req, res, owner, projectId) {
 
 export async function handleDomainAdd(_req, res, owner, projectId, body = {}) {
   return wrap(res, async () => {
-    const added = await addDomain(owner.id, projectId, body.domain);
+    // attachDomain travels with the add, so a domain whose DNS was already in place is attached
+    // the moment it verifies instead of sitting active and unreachable.
+    const added = await addDomain(owner.id, projectId, body.domain, { attach: attachDomain });
     return state(owner.id, projectId, { added });
   });
 }
