@@ -991,16 +991,10 @@ async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 }
 // preservation rules baked into the prompt. Build once, repair precisely, verify completely.
 export async function repairApp(ctx, { issue, productName = null }) {
   const client = serviceClient();
-  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
-    .eq("owner", ctx.owner).not("tree", "is", null)
-    .order("updated_at", { ascending: false }).limit(1);
-  if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
-    if (product) query = query.eq("product_id", product.id);
-  }
-  const { data } = await query;
-  const project = data?.[0];
+  // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
+  // could act on an app from a different conversation entirely.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, product_id, updated_at", client });
   if (!project) {
     const error = new Error("There's no existing app to repair — describe what you want built instead.");
     error.code = "nothing_to_repair";
@@ -1039,16 +1033,10 @@ export async function repairApp(ctx, { issue, productName = null }) {
 // tree — heals reaped containers, warm-up timeouts, and old conversations alike.
 export async function showPreview(ctx, { productName = null } = {}) {
   const client = serviceClient();
-  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
-    .eq("owner", ctx.owner).not("tree", "is", null)
-    .order("updated_at", { ascending: false }).limit(1);
-  if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
-    if (product) query = query.eq("product_id", product.id);
-  }
-  const { data } = await query;
-  const project = data?.[0];
+  // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
+  // could act on an app from a different conversation entirely.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, product_id, updated_at", client });
   if (!project) {
     const error = new Error("There's no built app to preview yet — ask me to build something first.");
     error.code = "nothing_to_preview";
@@ -1078,16 +1066,10 @@ export async function showPreview(ctx, { productName = null } = {}) {
 // before this — verificationAgent.mjs contains zero viewport handling.
 export async function runQaSweep(ctx, { productName = null } = {}) {
   const client = serviceClient();
-  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
-    .eq("owner", ctx.owner).not("tree", "is", null)
-    .order("updated_at", { ascending: false }).limit(1);
-  if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
-    if (product) query = query.eq("product_id", product.id);
-  }
-  const { data } = await query;
-  const project = data?.[0];
+  // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
+  // could act on an app from a different conversation entirely.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, product_id, updated_at", client });
   if (!project) {
     const error = new Error("There's no built app to test yet — ask me to build something first.");
     error.code = "nothing_to_test";
@@ -1118,16 +1100,10 @@ export async function runQaSweep(ctx, { productName = null } = {}) {
 // if anything slipped through. Both filters read the same rule set (lib/secretScrub.mjs).
 export async function exportProject(ctx, { productName = null } = {}) {
   const client = serviceClient();
-  let query = client.from("projects").select("id, name, tree, history, product_id, updated_at")
-    .eq("owner", ctx.owner).not("tree", "is", null)
-    .order("updated_at", { ascending: false }).limit(1);
-  if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", ctx.owner).ilike("name", productName).maybeSingle();
-    if (product) query = query.eq("product_id", product.id);
-  }
-  const { data } = await query;
-  const project = data?.[0];
+  // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
+  // could act on an app from a different conversation entirely.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, history, product_id, updated_at", client });
   if (!project) {
     const error = new Error("There's no built app to export yet — ask me to build something first.");
     error.code = "nothing_to_export";
