@@ -37,6 +37,10 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "health_status", column: "project_id", ownerScoped: true, label: "health" },
   { table: "custom_domains", column: "project_id", ownerScoped: true, label: "custom domains" },
   { table: "published_sites", column: "project_id", ownerScoped: true, label: "published site" },
+  // Deployment history is permanent while the project LIVES — it is the answer to "what was live
+  // last Tuesday" — but a deleted project must not leave its published source behind, and
+  // source_tree is the whole app.
+  { table: "deployments", column: "project_id", ownerScoped: true, label: "deployment history" },
   { table: "build_checkpoints", column: "project_id", ownerScoped: true, label: "build checkpoints" },
   { table: "ai_requests", column: "project_id", ownerScoped: true, label: "usage records" },
   { table: "build_jobs", column: "project_id", ownerScoped: true, label: "build history" },

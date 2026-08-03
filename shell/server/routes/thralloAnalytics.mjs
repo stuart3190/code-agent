@@ -3,13 +3,14 @@
 //   POST /api/analytics/collect                  PUBLIC — the beacon from published sites
 //   GET  /api/v1/projects/:id/analytics          owner-scoped overview
 //   GET  /api/v1/projects/:id/analytics/live     near-real-time visitors
-//   GET  /api/v1/projects/:id/deployments        build + deployment history
+// Deployment history moved to routes/deployments.mjs, which reads real deployment records rather
+// than diagnostic build runs.
 //
 // This is NOT the retired routes/analytics.mjs, which is the Buildr101 connector reading a table
 // Thrallo has never had. Nothing was carried over from it.
 
 import { recordBeacon } from "../lib/analytics/ingest.mjs";
-import { overview, liveVisitors, deployments } from "../lib/analytics/reports.mjs";
+import { overview, liveVisitors } from "../lib/analytics/reports.mjs";
 
 function sendJson(res, code, value) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -69,6 +70,7 @@ export async function handleAnalyticsLive(_req, res, owner, projectId) {
   return wrap(res, () => liveVisitors(owner.id, projectId));
 }
 
-export async function handleDeploymentHistory(_req, res, owner, projectId) {
-  return wrap(res, () => deployments(owner.id, projectId));
-}
+// handleDeploymentHistory lived here and listed diag_runs as though diagnostic build runs were
+// deployments. Real deployment records replace it in routes/deployments.mjs; it is deleted rather
+// than left unused, because an unused reader of the wrong table is one route change away from
+// coming back.

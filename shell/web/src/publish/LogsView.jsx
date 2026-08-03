@@ -5,7 +5,7 @@
 // service of those.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { projectLogs, logStreamUrl, logExportUrl, projectBuildRuns } from "../lib/codeAgentApi.js";
+import { projectLogs, logStreamUrl, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
 
 const LEVELS = [
   { id: "info", label: "Info" },
@@ -154,8 +154,10 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
         <button className={`ct-pubrow-btn ${live ? "accent" : ""}`} onClick={() => setLive((v) => !v)}>
           {live ? "⏸ Pause" : "▶ Live"}
         </button>
-        <a className="ct-pubrow-btn" href={logExportUrl(projectId, { ...params(), format: "json" })} download>JSON</a>
-        <a className="ct-pubrow-btn" href={logExportUrl(projectId, { ...params(), format: "csv" })} download>CSV</a>
+        {/* Buttons, not links: a link carries no Authorization header, so these were saving a
+            401 JSON body under a .csv name. */}
+        <button className="ct-pubrow-btn" onClick={() => exportLogs(projectId, { ...params(), format: "json" }).catch((e) => setError(e.message))}>JSON</button>
+        <button className="ct-pubrow-btn" onClick={() => exportLogs(projectId, { ...params(), format: "csv" }).catch((e) => setError(e.message))}>CSV</button>
       </div>
 
       {/* Builds. Selecting one narrows every source to that run and puts it in the URL, so the

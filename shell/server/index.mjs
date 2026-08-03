@@ -77,11 +77,14 @@ import {
 import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
 import {
   handleAnalyticsCollect, handleAnalyticsPreflight, handleAnalyticsOverview,
-  handleAnalyticsLive, handleDeploymentHistory,
+  handleAnalyticsLive,
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
 import { handleProjectHealth } from "./routes/health.mjs";
 import { handleLogsList, handleLogsStream, handleLogsExport, handleLogRuns } from "./routes/logs.mjs";
+import {
+  handleDeploymentsList, handleDeploymentRollback, handleDeploymentDownload,
+} from "./routes/deployments.mjs";
 import { startHealthMonitor, stopHealthMonitor } from "./lib/health/monitor.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
@@ -794,16 +797,31 @@ const server = http.createServer(async (req, res) => {
       if (logsMatch[2] === "/runs") return await handleLogRuns(req, res, owner, logsMatch[1]);
       return await handleLogsList(req, res, owner, logsMatch[1], url);
     }
+    const deploymentsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/deployments$/i);
+    if (deploymentsMatch && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleDeploymentsList(req, res, owner, deploymentsMatch[1]);
+    }
+    const deploymentActionMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/deployments\/([0-9a-f-]{36})\/(rollback|download)$/i);
+    if (deploymentActionMatch) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const [, projectId, deploymentId, action] = deploymentActionMatch;
+      if (action === "rollback" && method === "POST") {
+        return await handleDeploymentRollback(req, res, owner, projectId, deploymentId);
+      }
+      if (action === "download" && method === "GET") {
+        return await handleDeploymentDownload(req, res, owner, projectId, deploymentId);
+      }
+    }
     const healthMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/health$/i);
     if (healthMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleProjectHealth(req, res, owner, healthMatch[1]);
     }
-    const deploymentsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/deployments$/i);
-    if (deploymentsMatch && method === "GET") {
-      const owner = await requireOwner(req, res); if (!owner) return;
-      return await handleDeploymentHistory(req, res, owner, deploymentsMatch[1]);
-    }
+    // The old /deployments handler (handleDeploymentHistory) listed diag_runs — diagnostic BUILD
+    // runs, not publishes — and is gone. Its route now serves the real deployment records, mounted
+    // earlier in this chain; leaving a second handler on the same path would mean the answer
+    // depended on which `if` came first.
     const domainsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/domains(\/verify|\/retry|\/remove)?$/i);
     if (domainsMatch) {
       const owner = await requireOwner(req, res); if (!owner) return;

@@ -16,6 +16,9 @@ import { logProject } from "../logs/projectLog.mjs";
 // The ONE domain implementation. Conversation and the Domains panel now call the same function,
 // so there is no second path that could skip verification.
 import { addDomain, normalizeDomain } from "../customDomains.mjs";
+import {
+  openDeployment, markBuilt, markLive, markFailed, getDeployment, assertBelongsTo, DEPLOY_STATUS,
+} from "../deployments/deploymentService.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
 const PROVISIOND_TOKEN = () => optionalEnv("PROVISIOND_TOKEN");
@@ -177,6 +180,22 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   await ctx.emit("agent_spawned", { agent: "Publisher", status: `Publishing ${project.name || "your app"}…` });
   const startedAt = Date.now();
   logProject({ owner: ctx.owner, projectId: project.id, source: "publish", message: "Publish started" });
+
+  // The deployment record opens BEFORE any work, so a publish that fails during the build is still
+  // in the history — an honest record includes the times it did not go out. A second click while
+  // this one is in flight joins it rather than opening a rival row.
+  const { deployment, joined } = await openDeployment({
+    owner: ctx.owner, projectId: project.id, productId,
+    triggeredBy: ctx.owner, triggeredByKind: "user",
+    buildRunId: await latestBuildRunId(ctx.owner, project.id),
+  });
+  if (joined) {
+    return {
+      deploymentNumber: deployment.number,
+      note: `Deployment #${deployment.number} is already going out — I'll let you know when it's live.`,
+    };
+  }
+
   try {
     const claim = await claimSlug(ctx.owner, project.id, siteName || project.name, { productId });
     const slug = claim.slug;
@@ -196,6 +215,10 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
       error.stderr = (build.stderr || "").slice(-2000);
       throw error;
     }
+    // The build is done and the deploy begins here, so the two durations are measured rather than
+    // one total split by guesswork. The tree is stored as it was built: the project moves on, and
+    // an older deployment must never hand back today's source.
+    await markBuilt(deployment.id, { sourceTree: project.tree });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Uploading to the edge…" });
     const built = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
@@ -216,6 +239,10 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     }, { onConflict: "project_id" });
     if (upsertError) console.error(`[publish] record failed: ${upsertError.message}`);
 
+    // Live, and everything that was live for this app before it becomes history rather than being
+    // overwritten. This is the step that gives "what was live last Tuesday" an answer.
+    await markLive(deployment.id, { url: out.url, slug: out.id });
+
     // Outcome evidence: a site that went live is the strongest signal a build was kept.
     // Recorded after the site is actually serving, and never allowed to fail the publish.
     const { signalBuildOutcome } = await import("../buildOutcomes.mjs");
@@ -234,8 +261,14 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
       url: out.url,
       tag: `publish-${project.id}`,
     }).catch(() => {});
-    return { url: out.url, slug: out.id, files: out.files, note: "Published. The live URL is in the conversation." };
+    return {
+      url: out.url, slug: out.id, files: out.files, deploymentNumber: deployment.number,
+      note: `Published as deployment #${deployment.number}. The live URL is in the conversation.`,
+    };
   } catch (error) {
+    // Recorded as failed, and left in the history. It never becomes live and it never disturbs
+    // whatever is currently serving.
+    await markFailed(deployment.id, error?.stderr || error?.message || String(error));
     await ctx.emit("agent_done", { agent: "Publisher", ok: false });
     // The stderr of a failed production build is exactly what someone needs in the log, and it is
     // otherwise only visible in the conversation that produced it.
@@ -306,6 +339,125 @@ export async function connectDomain(ctx, { domain, productName = null, projectId
   });
 
   return { domain: cleaned, status: result.status, records, instructions, alreadyConnected: !!result.alreadyConnected };
+}
+
+// The newest build run for a project, so a deployment can link to the exact log that produced it.
+// Null when there is none — the UI then hides View Logs rather than opening the whole stream.
+async function latestBuildRunId(owner, projectId) {
+  const { data } = await serviceClient().from("diag_runs")
+    .select("id").eq("owner", owner).eq("project_id", String(projectId))
+    .order("started_at", { ascending: false }).limit(1);
+  return data?.[0]?.id || null;
+}
+
+/**
+ * Put an earlier deployment back.
+ *
+ * `rollbackLiveRelease` in lib/environments.mjs was the obvious thing to route through, and it
+ * cannot be: it reads `project_releases` and `project_environments`, Buildr101-era tables that do
+ * not exist in Thrallo's database, behind a `requireFeature(owner, "environments")` gate for a
+ * tier Thrallo does not sell. It would throw on the first line of real work. So rollback is built
+ * on the deployment record and Thrallo's own publish primitives instead — the same build and the
+ * same provisiond call the normal publish uses, not a third publish path.
+ *
+ * What makes this a rollback rather than an edit: the stored source of the target deployment is
+ * rebuilt and shipped to the SAME slug. The URL, the custom domains and the analytics app id are
+ * all keyed to that slug, so none of them move.
+ */
+export async function rollbackToDeployment(owner, projectId, deploymentId, { emit = null } = {}) {
+  if (!publishConfigured()) {
+    throw Object.assign(new Error("Publishing infrastructure is not configured."), { code: "not_configured", status: 503 });
+  }
+  const client = serviceClient();
+  const target = await getDeployment(owner, deploymentId, { client });
+  // Owner scoping alone would still let someone roll one of their apps back onto another's
+  // address by pasting an id.
+  const project = await assertBelongsTo(owner, target, projectId, { client });
+
+  if (!target.source_tree) {
+    throw Object.assign(new Error("That deployment's source is no longer stored, so it cannot be restored."),
+      { code: "source_unavailable", status: 409 });
+  }
+  if (target.status === DEPLOY_STATUS.live) {
+    throw Object.assign(new Error("That deployment is already live."), { code: "already_live", status: 409 });
+  }
+
+  const { data: site } = await client.from("published_sites")
+    .select("slug,url").eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
+  if (!site?.slug) {
+    throw Object.assign(new Error("This project isn't published, so there is nothing to roll back."),
+      { code: "not_published", status: 409 });
+  }
+
+  // A NEW record. The history of what shipped and when is never rewritten — rolling back is itself
+  // a deployment, and the list should say so.
+  const { deployment, joined } = await openDeployment({
+    owner, projectId, productId: project.product_id || null,
+    triggeredBy: owner, triggeredByKind: "rollback",
+    buildRunId: target.build_run_id, sourceProjectId: target.source_project_id,
+    rolledBackFrom: target.id, client,
+  });
+  if (joined) {
+    return { deploymentNumber: deployment.number, alreadyRunning: true, url: site.url };
+  }
+
+  try {
+    await emit?.("agent_status", { agent: "Publisher", status: `Restoring deployment #${target.number}…` });
+    await ensureDeps(() => {});
+    const caseName = `rb-${deployment.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
+    const build = await buildTree(withRuntimeEnv(target.source_tree, projectId), caseName, () => {});
+    if (!build.ok) {
+      throw Object.assign(new Error("That deployment's source no longer builds, so it was not restored."), {
+        code: "build_failed", stderr: (build.stderr || "").slice(-2000),
+      });
+    }
+    await markBuilt(deployment.id, { client, sourceTree: target.source_tree });
+
+    const built = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    // The same slug, so the address, the custom domains and the analytics app id all stay put.
+    const files = await withAnalytics(built, site.slug);
+    const out = await provisiond("/publish", { body: { projectId: String(projectId), files, slug: site.slug } });
+
+    // published_sites is stamped so publish state, health and the dashboard follow. The slug and
+    // the first-published date are untouched.
+    await client.from("published_sites")
+      .update({ updated_at: new Date().toISOString(), unpublished_at: null })
+      .eq("project_id", String(projectId)).eq("owner", owner);
+
+    // The deployment being rolled back AWAY from is marked rolled_back rather than superseded:
+    // they are different things and the list should not pretend otherwise.
+    await markLive(deployment.id, {
+      url: out.url || site.url, slug: site.slug, client,
+      supersededStatus: DEPLOY_STATUS.rolledBack,
+    });
+
+    logProject({
+      owner, projectId, source: "deploy", level: "warning",
+      message: `Rolled back to deployment #${target.number}`,
+      detail: `Deployment #${deployment.number} restored the source published as #${target.number}. `
+        + `${site.url} and any custom domains are unchanged.`,
+      refType: "deployment", refId: deployment.id,
+    });
+    notifyOwner(owner, {
+      title: "Rolled back",
+      body: `Your site is serving deployment #${target.number} again.`,
+      url: site.url, tag: `rollback-${projectId}`,
+    }).catch(() => {});
+
+    return {
+      deploymentNumber: deployment.number, restoredFrom: target.number,
+      url: out.url || site.url, slug: site.slug,
+    };
+  } catch (error) {
+    await markFailed(deployment.id, error?.stderr || error?.message || String(error), { client });
+    logProject({
+      owner, projectId, source: "deploy", level: "error",
+      message: `Rollback to deployment #${target.number} failed`,
+      detail: error?.stderr || error?.message || String(error),
+    });
+    throw error;
+  }
 }
 
 // Take a published site offline.
