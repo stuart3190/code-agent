@@ -187,9 +187,26 @@ test("a certificate problem still alerts while the site is already down", async 
   // Tracked per kind, so one ongoing problem cannot mask a new one.
   const both = { status: HEALTH.offline, detail: "down", dnsOk: false, sslDaysLeft: 2 };
   const result = decideAlerts({
-    previous: { consecutive_failures: 1, alerted: { offline: NOW.toISOString() } }, result: both, now: NOW,
+    previous: { consecutive_failures: 1, dns_ok: false, alerted: { offline: NOW.toISOString() } },
+    result: both, now: NOW,
   });
   assert.deepEqual(result.alerts.map((a) => a.kind).sort(), ["dns", "ssl"]);
+});
+
+test("a single DNS failure is not enough to claim a domain is misconfigured", () => {
+  // Found by running the real thing against production: a resolver hiccup fired "Custom domain is
+  // misconfigured" on the FIRST probe, while an outage — a less alarming claim — needed two. The
+  // previous row already records the last DNS result, so this needs no extra counter.
+  const broken = { status: HEALTH.healthy, detail: null, dnsOk: false, sslDaysLeft: 60 };
+
+  const once = decideAlerts({ previous: { dns_ok: true, alerted: {} }, result: broken, now: NOW });
+  assert.deepEqual(once.alerts, [], "one failed lookup says nothing");
+
+  const twice = decideAlerts({ previous: { dns_ok: false, alerted: {} }, result: broken, now: NOW });
+  assert.deepEqual(twice.alerts.map((a) => a.kind), ["dns"], "two in a row is real");
+
+  const never = decideAlerts({ previous: null, result: broken, now: NOW });
+  assert.deepEqual(never.alerts, [], "and a site with no history cannot have failed twice");
 });
 
 // ── Reporting ───────────────────────────────────────────────────────────────────────────

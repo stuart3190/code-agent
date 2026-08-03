@@ -85,7 +85,11 @@ export function decideAlerts({ previous, result, now = new Date() }) {
     delete alerted.ssl;                        // renewed; a future problem should alert again
   }
 
-  if (result.dnsOk === false && !wasAlerted.dns) {
+  // Damped the same way an outage is, and for the same reason: a single resolver hiccup would
+  // otherwise tell a customer their domain is misconfigured when nothing had changed. The previous
+  // row already records the last DNS result, so "twice in a row" needs no extra counter.
+  const dnsFailedTwice = result.dnsOk === false && previous?.dns_ok === false;
+  if (dnsFailedTwice && !wasAlerted.dns) {
     alerts.push({
       kind: "dns",
       title: "Custom domain is misconfigured",
