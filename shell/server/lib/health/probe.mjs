@@ -7,6 +7,12 @@
 
 import tls from "node:tls";
 import { promises as dns } from "node:dns";
+import { optionalEnv } from "../env.mjs";
+
+// One source for the address a custom domain must resolve to. customDomains.mjs reads the same
+// variable; a hardcoded copy here meant health reported every custom domain MISCONFIGURED the
+// moment the env var was set, while verification said Active.
+export const publicIp = () => optionalEnv("THRALLO_PUBLIC_IP", "51.195.136.189");
 
 // Slow enough to matter to a visitor, not so slow that a cold start looks like an outage.
 export const SLOW_MS = 2_500;
@@ -58,7 +64,7 @@ export async function inspectCertificate(hostname, { connect = tls.connect, now 
 
 // Does the hostname still resolve to us? A custom domain whose DNS is edited later would keep
 // serving from cache for a while and then simply stop, with nothing in Thrallo explaining why.
-export async function checkDns(hostname, expectedIp, { resolver = dns, appSuffix = "app.thrallo.com" } = {}) {
+export async function checkDns(hostname, expectedIp = publicIp(), { resolver = dns, appSuffix = optionalEnv("APP_DOMAIN_SUFFIX", "app.thrallo.com") } = {}) {
   if (!hostname || hostname.endsWith(appSuffix)) return { ok: true, checked: false };
   try {
     const addresses = await resolver.resolve4(hostname);
@@ -78,7 +84,7 @@ export async function checkDns(hostname, expectedIp, { resolver = dns, appSuffix
  */
 export async function probeSite(url, {
   fetchImpl = fetch, certificate = inspectCertificate, dnsCheck = checkDns,
-  expectedIp = "51.195.136.189", now = new Date(),
+  expectedIp = publicIp(), now = new Date(),
 } = {}) {
   let hostname = "";
   try { hostname = new URL(url).hostname; } catch { /* handled below */ }

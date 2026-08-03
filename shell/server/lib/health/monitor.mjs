@@ -18,22 +18,38 @@ const FAILURES_BEFORE_ALERT = 2;
 
 let timer = null;
 
-async function liveSites(client) {
-  const { data } = await client.from("published_sites")
+export async function liveSites(client) {
+  const { data, error } = await client.from("published_sites")
     .select("owner,project_id,url,slug").is("unpublished_at", null);
+  // Surfaced, not swallowed. A read failure here means NOTHING gets monitored, and the previous
+  // version reported that as "0 sites" — indistinguishable from having no sites at all.
+  if (error) throw new Error(`health: could not list published sites: ${error.message}`);
   const sites = data || [];
   if (!sites.length) return [];
 
-  // A verified custom domain is the address visitors actually use, so it is the address monitored.
-  const { data: domains } = await client.from("custom_domains")
+  const { data: domains, error: domainError } = await client.from("custom_domains")
     .select("domain,project_id,created_at").eq("status", "active");
+  if (domainError) throw new Error(`health: could not list custom domains: ${domainError.message}`);
+
   const byProject = new Map();
   for (const row of [...(domains || [])].sort((a, b) => Date.parse(a.created_at || 0) - Date.parse(b.created_at || 0))) {
-    if (!byProject.has(String(row.project_id))) byProject.set(String(row.project_id), row.domain);
+    const key = String(row.project_id);
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key).push(row.domain);
   }
+
   return sites.map((site) => {
-    const custom = byProject.get(String(site.project_id));
-    return { ...site, monitorUrl: custom ? `https://${custom}` : site.url, customDomain: custom || null };
+    const custom = byProject.get(String(site.project_id)) || [];
+    // EVERY address a visitor might use, not just the primary one. A custom domain can break while
+    // the Thrallo address is fine, and vice versa — monitoring one of them hides the other.
+    return {
+      ...site,
+      customDomain: custom[0] || null,
+      targets: [
+        { url: site.url, kind: "thrallo" },
+        ...custom.map((domain) => ({ url: `https://${domain}`, kind: "custom", domain })),
+      ],
+    };
   });
 }
 
@@ -83,35 +99,74 @@ export function decideAlerts({ previous, result, now = new Date() }) {
   return { alerts, alerted, failures };
 }
 
-export async function checkProject(site, { client = serviceClient(), probe = probeSite, notify = notifyOwner, now = new Date() } = {}) {
-  const result = await probe(site.monitorUrl || site.url, { now });
+const RANK = { [HEALTH.healthy]: 0, [HEALTH.warning]: 1, [HEALTH.offline]: 2 };
 
-  const { data: previous } = await client.from("health_status")
+/**
+ * A project's health is the WORST of its addresses.
+ *
+ * Reporting only the primary address hid the case that matters most: a custom domain broken while
+ * the Thrallo URL is fine. The owner gave people the custom domain.
+ */
+export function worstOf(results) {
+  return results.reduce((worst, r) => (RANK[r.status] > RANK[worst.status] ? r : worst), results[0]);
+}
+
+/**
+ * One failed probe is usually the internet, not an outage.
+ *
+ * A single failure reports DEGRADED, not offline — honest about something being wrong without
+ * claiming the site is down. Only a second consecutive failure transitions to offline. Without
+ * this, one dropped packet showed a customer that their site was down.
+ */
+export function dampen(observed, consecutiveFailures) {
+  if (observed !== HEALTH.offline) return observed;
+  return consecutiveFailures >= FAILURES_BEFORE_ALERT ? HEALTH.offline : HEALTH.warning;
+}
+
+export async function checkProject(site, { client = serviceClient(), probe = probeSite, notify = notifyOwner, now = new Date() } = {}) {
+  const targets = site.targets?.length ? site.targets : [{ url: site.url, kind: "thrallo" }];
+  const expectedIp = optionalEnv("THRALLO_PUBLIC_IP", "51.195.136.189");
+
+  // Every address, not just the primary one.
+  const observations = [];
+  for (const target of targets) {
+    const result = await probe(target.url, { now, expectedIp });
+    observations.push({ ...result, kind: target.kind, domain: target.domain || null });
+  }
+  const result = worstOf(observations);
+
+  const { data: previous, error: readError } = await client.from("health_status")
     .select("*").eq("project_id", String(site.project_id)).maybeSingle();
+  if (readError) throw new Error(`health: could not read status for ${site.project_id}: ${readError.message}`);
 
   const { alerts, alerted, failures } = decideAlerts({ previous, result, now });
-  const changed = previous?.status !== result.status;
+  // Damped: a single failure is degraded, not down.
+  const status = dampen(result.status, failures);
+  const changed = previous?.status !== status;
 
-  await client.from("health_checks").insert({
+  // One row per address, so the history can show which one broke.
+  const { error: insertError } = await client.from("health_checks").insert(observations.map((o) => ({
     owner: site.owner, project_id: String(site.project_id), checked_at: now.toISOString(),
-    url: result.url, status: result.status, http_status: result.httpStatus,
-    response_ms: result.responseMs, ssl_valid_to: result.sslValidTo,
-    ssl_days_left: result.sslDaysLeft, dns_ok: result.dnsOk, detail: result.detail,
-  });
+    url: o.url, status: o.status, http_status: o.httpStatus,
+    response_ms: o.responseMs, ssl_valid_to: o.sslValidTo,
+    ssl_days_left: o.sslDaysLeft, dns_ok: o.dnsOk, detail: o.detail,
+  })));
+  if (insertError) throw new Error(`health: could not record checks for ${site.project_id}: ${insertError.message}`);
 
-  await client.from("health_status").upsert({
+  const { error: upsertError } = await client.from("health_status").upsert({
     project_id: String(site.project_id), owner: site.owner,
-    status: result.status,
+    status,
     // `since` marks when the CURRENT state began, which is what "down for 20 minutes" needs.
     since: changed || !previous ? now.toISOString() : previous.since,
     last_checked_at: now.toISOString(),
-    last_healthy_at: result.status === HEALTH.healthy ? now.toISOString() : previous?.last_healthy_at || null,
+    last_healthy_at: status === HEALTH.healthy ? now.toISOString() : previous?.last_healthy_at || null,
     url: result.url, http_status: result.httpStatus, response_ms: result.responseMs,
     ssl_valid_to: result.sslValidTo, ssl_days_left: result.sslDaysLeft,
     dns_ok: result.dnsOk, detail: result.detail,
     consecutive_failures: failures, alerted,
     updated_at: now.toISOString(),
   }, { onConflict: "project_id" });
+  if (upsertError) throw new Error(`health: could not update status for ${site.project_id}: ${upsertError.message}`);
 
   for (const alert of alerts) {
     // An alert that fails to send must not stop the ones after it, or lose the check itself.
@@ -120,24 +175,36 @@ export async function checkProject(site, { client = serviceClient(), probe = pro
     }).catch((error) => console.error(`[health] alert ${alert.kind}: ${error?.message}`));
   }
 
-  return { ...result, alerts: alerts.map((a) => a.kind), changed };
+  return { ...result, status, observations, alerts: alerts.map((a) => a.kind), changed };
 }
 
 export async function sweepHealth({ client = serviceClient(), now = new Date(), ...options } = {}) {
   const sites = await liveSites(client);
+  const failures = [];
   let checked = 0;
   for (const site of sites) {
     try {
       await checkProject(site, { client, now, ...options });
       checked += 1;
     } catch (error) {
-      // One unreachable site must not stop the sweep for everyone else.
+      // One unreachable site must not stop the sweep for everyone else — but it must not vanish
+      // either. A sweep that silently checks nothing looks identical to a healthy estate.
+      failures.push({ projectId: String(site.project_id), error: error?.message || String(error) });
       console.error(`[health] ${site.project_id}: ${error?.message || error}`);
     }
   }
+
   const cutoff = new Date(now.getTime() - CHECK_RETENTION_DAYS * 86_400_000).toISOString();
-  await client.from("health_checks").delete().lt("checked_at", cutoff);
-  return { sites: sites.length, checked };
+  const { error: pruneError } = await client.from("health_checks").delete().lt("checked_at", cutoff);
+  if (pruneError) {
+    failures.push({ projectId: null, error: `prune failed: ${pruneError.message}` });
+    console.error(`[health] prune: ${pruneError.message}`);
+  }
+
+  if (failures.length) {
+    console.error(`[health] sweep finished with ${failures.length} failure(s) of ${sites.length} site(s)`);
+  }
+  return { sites: sites.length, checked, failures };
 }
 
 export function startHealthMonitor() {

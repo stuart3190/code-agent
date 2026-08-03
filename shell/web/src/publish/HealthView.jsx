@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { projectHealth } from "../lib/codeAgentApi.js";
 import { relativeTime, displayUrl } from "./publishLifecycle.js";
 
-export const HEALTH_LABEL = { healthy: "Healthy", warning: "Warning", offline: "Offline" };
+export const HEALTH_LABEL = { healthy: "Healthy", warning: "Degraded", offline: "Offline" };
 export const HEALTH_DOT = { healthy: "🟢", warning: "🟡", offline: "🔴" };
 
 const ms = (value) => (value == null ? "—" : value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${value}ms`);

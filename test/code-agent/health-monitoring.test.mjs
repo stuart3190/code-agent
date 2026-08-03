@@ -7,6 +7,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { probeSite, checkDns, HEALTH, SLOW_MS, SSL_WARN_DAYS } from "../../shell/server/lib/health/probe.mjs";
 import { decideAlerts } from "../../shell/server/lib/health/monitor.mjs";
@@ -234,4 +236,121 @@ test("consecutive failures collapse into one incident", async () => {
   assert.equal(report.incidents.length, 1, "one outage, not one entry per failed check");
   assert.equal(report.incidents[0].startedAt, "2026-08-03T11:10:00Z");
   assert.ok(report.incidents[0].endedAt, "and it is marked resolved once it recovered");
+});
+
+// ── PR 4: reliability, not just a populated UI ──────────────────────────────────────────
+
+import { worstOf, dampen, liveSites, sweepHealth } from "../../shell/server/lib/health/monitor.mjs";
+
+const observation = (status, over = {}) => ({ status, url: "https://x", httpStatus: 200, responseMs: 100, dnsOk: true, sslDaysLeft: 60, detail: null, ...over });
+
+test("a project's health is the WORST of all its addresses", () => {
+  // A custom domain can break while the Thrallo URL is fine. The owner gave people the custom one.
+  const worst = worstOf([
+    observation(HEALTH.healthy, { url: "https://app.thrallo.com" }),
+    observation(HEALTH.offline, { url: "https://shop.example.com" }),
+  ]);
+  assert.equal(worst.status, HEALTH.offline);
+  assert.equal(worst.url, "https://shop.example.com", "and it names the address that is broken");
+
+  assert.equal(worstOf([observation(HEALTH.healthy), observation(HEALTH.warning)]).status, HEALTH.warning);
+  assert.equal(worstOf([observation(HEALTH.healthy)]).status, HEALTH.healthy);
+});
+
+test("one failed probe is DEGRADED, not an outage; the second is offline", () => {
+  // A single dropped packet must never tell a customer their site is down.
+  assert.equal(dampen(HEALTH.offline, 1), HEALTH.warning, "first failure");
+  assert.equal(dampen(HEALTH.offline, 2), HEALTH.offline, "second consecutive failure");
+  assert.equal(dampen(HEALTH.offline, 5), HEALTH.offline);
+  // Damping only applies to outages — a genuine warning is reported as itself immediately.
+  assert.equal(dampen(HEALTH.warning, 1), HEALTH.warning);
+  assert.equal(dampen(HEALTH.healthy, 0), HEALTH.healthy);
+});
+
+test("every address is monitored, not just the primary one", async () => {
+  const client = {
+    from(table) {
+      const api = {
+        select() { return api; }, is() { return api; }, eq() { return api; },
+        then(resolve) {
+          const data = table === "published_sites"
+            ? [{ owner: "o", project_id: "p1", url: "https://thrallo-url/", slug: "s" }]
+            : [{ domain: "shop.example.com", project_id: "p1", created_at: "2026-08-01T00:00:00Z" },
+              { domain: "www.example.com", project_id: "p1", created_at: "2026-08-02T00:00:00Z" }];
+          return Promise.resolve({ data, error: null }).then(resolve);
+        },
+      };
+      return api;
+    },
+  };
+  const [site] = await liveSites(client);
+  assert.deepEqual(site.targets.map((t) => t.url), [
+    "https://thrallo-url/", "https://shop.example.com", "https://www.example.com",
+  ]);
+  assert.equal(site.customDomain, "shop.example.com", "the oldest stays primary for display");
+});
+
+test("a read failure is raised, never reported as 'no sites'", async () => {
+  // Swallowing this made a database outage look identical to an account with nothing published.
+  const broken = { from: () => ({ select: () => ({ is: () => ({ then: (r) => Promise.resolve({ data: null, error: { message: "connection reset" } }).then(r) }) }) }) };
+  await assert.rejects(() => liveSites(broken), /could not list published sites/);
+});
+
+test("the sweep reports failures rather than counting them as success", async () => {
+  const client = {
+    from(table) {
+      const api = {
+        select() { return api; }, is() { return api; }, eq() { return api; },
+        delete() { return api; }, lt() { return api; },
+        then(resolve) {
+          const data = table === "published_sites"
+            ? [{ owner: "o", project_id: "p1", url: "https://x/", slug: "s" }] : [];
+          return Promise.resolve({ data, error: null }).then(resolve);
+        },
+      };
+      return api;
+    },
+  };
+  const result = await sweepHealth({
+    client,
+    probe: async () => { throw new Error("probe exploded"); },
+    notify: async () => {},
+    now: NOW,
+  });
+  assert.equal(result.sites, 1);
+  assert.equal(result.checked, 0);
+  assert.equal(result.failures.length, 1, "a sweep that checked nothing must say so");
+  assert.match(result.failures[0].error, /probe exploded/);
+});
+
+test("the expected IP comes from THRALLO_PUBLIC_IP, not a hardcoded copy", async () => {
+  const probeSource = await readFile(fileURLToPath(new URL("../../shell/server/lib/health/probe.mjs", import.meta.url)), "utf8");
+  const domainSource = await readFile(fileURLToPath(new URL("../../shell/server/lib/customDomains.mjs", import.meta.url)), "utf8");
+  // Both sides must read the same variable, or health reports MISCONFIGURED while verification
+  // reports Active the moment it is set.
+  assert.match(probeSource, /optionalEnv\("THRALLO_PUBLIC_IP"/);
+  assert.match(domainSource, /optionalEnv\("THRALLO_PUBLIC_IP"/);
+  const hardcoded = probeSource.split("\n")
+    .filter((line) => /51\.195\.136\.189/.test(line) && !/optionalEnv/.test(line));
+  assert.deepEqual(hardcoded, [], "the only mention may be the env default");
+});
+
+test("health and report failures are surfaced, not discarded", async () => {
+  const monitor = await readFile(fileURLToPath(new URL("../../shell/server/lib/health/monitor.mjs", import.meta.url)), "utf8");
+  const report = await readFile(fileURLToPath(new URL("../../shell/server/lib/health/report.mjs", import.meta.url)), "utf8");
+  // Every write and read used to destructure only `data`. A silent failure here means the whole
+  // feature stops with nothing to show for it.
+  assert.match(monitor, /insertError/);
+  assert.match(monitor, /upsertError/);
+  assert.match(monitor, /readError/);
+  assert.equal((report.match(/throw new Error\(`health/g) || []).length, 3);
+});
+
+test("an active domain that stops resolving loses Active", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/customDomains.mjs", import.meta.url)), "utf8");
+  // It stayed Active forever regardless of DNS, so a zone edit silently broke a live address.
+  assert.match(source, /ACTIVE_RECHECK_MS/);
+  const unsettled = source.slice(source.indexOf("export async function unsettledDomains"));
+  assert.match(unsettled, /DOMAIN_STATUS\.active/, "active domains must be re-checked");
+  assert.match(source, /ssl_status: "pending"/, "and stop claiming a certificate is in place");
 });

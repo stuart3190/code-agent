@@ -1,6 +1,7 @@
 // The project overview: what someone wants within two seconds of opening a live project.
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { projectHealth } from "../lib/codeAgentApi.js";
 import { STATUS, STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
 import { HEALTH_LABEL, HEALTH_DOT } from "./HealthView.jsx";
 
@@ -9,7 +10,20 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
   const address = site.primaryUrl || site.url;
   const status = site.status || STATUS.published;
   const offline = status === STATUS.unpublished;
-  const health = site.health;
+  // The SAME endpoint the Health tab reads. Overview used to read `site.health`, which is never
+  // populated — health rides with the conversation, not the site — so this tile said
+  // "Not checked yet" forever while the Health page showed real data.
+  const [health, setHealth] = useState(null);
+  const [healthLoaded, setHealthLoaded] = useState(false);
+  const loadHealth = useCallback(async () => {
+    if (!site?.projectId) return;
+    try {
+      const detail = await projectHealth(site.projectId);
+      setHealth(detail?.status || null);
+    } catch { /* the tile falls back to "checking"; the Health tab reports the error properly */ }
+    setHealthLoaded(true);
+  }, [site?.projectId]);
+  useEffect(() => { loadHealth(); }, [loadHealth]);
 
   return (
     <>
@@ -52,7 +66,9 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
       <div className="ct-metrics">
         <button className="ct-metric-link" onClick={() => onOpenTab("health")}>
           <span className="v">{health ? `${HEALTH_DOT[health.status]}` : "—"}</span>
-          <span className="k">{health ? HEALTH_LABEL[health.status] : "Not checked yet"}</span>
+          <span className="k">
+            {health ? HEALTH_LABEL[health.status] : healthLoaded ? "Not checked yet" : "Checking…"}
+          </span>
         </button>
         <button className="ct-metric-link" onClick={() => onOpenTab("analytics")}>
           <span className="v">📊</span><span className="k">Analytics</span>
