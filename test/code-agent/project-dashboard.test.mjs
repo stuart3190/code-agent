@@ -177,7 +177,9 @@ test("the dashboard dims the page and closes on click-away, like every other ove
   const shell = await readCode("../../shell/web/src/chat/ChatShell.jsx");
   assert.match(shell, /runOverlayId \|\| dashboard \? "show"/,
     "it was the one overlay that opened over a fully lit, still-interactive page");
-  assert.match(shell, /if \(dashboard\) navigate\("\/"\)/, "and clicking away must close it");
+  // Settings joined this in Phase 6: both are addresses, so both close by navigating rather than
+  // by clearing a flag, and one click-away handler covers them.
+  assert.match(shell, /if \(dashboard \|\| settingsTab\) navigate\("\/"\)/, "and clicking away must close it");
 });
 
 test("focus moves into the dashboard and back out again", async () => {

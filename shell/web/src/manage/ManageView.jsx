@@ -4,15 +4,16 @@
 
 import React from "react";
 import RepositoriesView from "./RepositoriesView.jsx";
-import UsageView from "./UsageView.jsx";
 import OpsView from "./OpsView.jsx";
 import DiagnosticsView from "./DiagnosticsView.jsx";
 import AdminAnalyticsView from "./AdminAnalyticsView.jsx";
 import IntelligenceView from "./IntelligenceView.jsx";
 
+// "usage" is deliberately absent: it is Settings → Usage now, at /settings/usage. There were two
+// usage dashboards reading the same budgets and drawing different meters from them; the Lead
+// Agent's open_view("usage") and the palette both navigate to the one that remains.
 const VIEWS = {
   repos: RepositoriesView,
-  usage: UsageView,
   ops: OpsView,
   diagnostics: DiagnosticsView,
   analytics: AdminAnalyticsView,

@@ -174,9 +174,13 @@ button.ct-wordmark:hover { background: var(--surface-2); }
 .ct-scrim.show { opacity: 1; pointer-events: auto; }
 .ct-sheet { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(430px, 94vw); z-index: 21; background: var(--surface); border-radius: var(--radius-pane); box-shadow: var(--shadow-3); transform: translateX(calc(100% + 24px)); transition: transform var(--dur-3) var(--ease-out); display: flex; flex-direction: column; overflow: hidden; }
 .ct-sheet.show { transform: none; }
-.ct-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 10px; }
+/* flex-shrink: 0 is load-bearing. Without it the header is squeezed below its own content when the
+   body is tall, and its facts row spills over the top of the panel — intercepting clicks on
+   whatever is underneath. The body takes the remaining height instead, with min-height: 0 so it
+   actually scrolls rather than growing the sheet. */
+.ct-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 10px; flex-shrink: 0; }
 .ct-sheet-head h2 { font-family: var(--font-display); font-size: var(--text-title); font-weight: 600; margin: 0; }
-.ct-sheet-body { overflow-y: auto; padding: 6px 22px 22px; }
+.ct-sheet-body { overflow-y: auto; padding: 6px 22px 22px; flex: 1; min-height: 0; }
 .ct-set-group { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .ct-set-group:last-child { border-bottom: 0; }
 .ct-set-label { font-size: var(--text-micro); letter-spacing: 0.09em; text-transform: uppercase; font-weight: 700; color: var(--ink-3); margin-bottom: 10px; }
@@ -1076,4 +1080,156 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 @media (prefers-reduced-motion: reduce) {
   .ct-bulkbar { animation: none; }
   .ct-pfav:hover { transform: none; }
+}
+
+/* ── Settings ────────────────────────────────────────────────────────────────────────── */
+/*
+ * Settings uses the project dashboard's shell (.ct-sheet + .ct-projtabs), so only what is
+ * genuinely new lives here. The width matches the dashboard: this is a place people read
+ * tables and compare plans, not a narrow column of rows.
+ */
+.ct-settings { width: min(880px, 96vw); }
+
+.st-tab { display: grid; gap: 22px; padding-top: 4px; }
+.st-section { display: grid; gap: 12px; }
+.st-section h3 {
+  font-family: var(--font-display); font-size: 15px; font-weight: 600; margin: 0;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.st-section h4 { font-size: 13px; font-weight: 700; margin: 14px 0 6px; color: var(--ink-2); }
+.st-note { margin: 0; }
+
+.st-headline { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.st-headline-plan {
+  font-family: var(--font-display); font-size: 19px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+
+/* Notices sit above the thing they are about, never below it — a warning under a fold is a
+   warning nobody read. */
+.st-notice {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 11px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-1);
+}
+.st-notice.tone-warn { background: color-mix(in srgb, var(--warn) 10%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.st-notice.tone-bad { background: color-mix(in srgb, var(--bad) 10%, transparent); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+
+/* Meters */
+.st-meters { display: grid; gap: 16px; }
+.st-meter { display: grid; gap: 5px; }
+.st-meter-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.st-meter-label { font-size: 13.5px; font-weight: 600; }
+.st-meter-figure { font-size: 13px; font-weight: 700; color: var(--ink-1); white-space: nowrap; }
+.st-meter-of { font-weight: 400; color: var(--ink-3); }
+.st-meter-track { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.st-meter-track i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--dur-2) var(--ease-out); }
+.st-meter-foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.st-meter-warn { font-size: 12px; font-weight: 600; }
+
+/* Facts and included-with lists */
+.st-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.st-fact {
+  border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 14px;
+  display: grid; gap: 2px;
+}
+.st-fact b { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.st-fact span { font-size: 12px; color: var(--ink-2); }
+
+.st-includes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.st-includes li {
+  display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px;
+}
+.st-includes li:last-child { border-bottom: 0; }
+.st-includes b { font-weight: 700; white-space: nowrap; }
+
+/* Plans */
+.st-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.st-plan {
+  border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px;
+  display: grid; gap: 8px; align-content: start;
+}
+.st-plan.is-current { border-color: var(--accent); background: var(--accent-soft); }
+.st-plan-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-plan-head b { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
+.st-plan-price { font-size: 18px; font-weight: 700; }
+.st-plan-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--ink-2); }
+.st-plan-note { font-size: 11.5px; }
+
+/* Rows */
+.st-rows { display: grid; gap: 0; }
+.st-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13.5px;
+}
+.st-row:last-child { border-bottom: 0; }
+.st-row > div:first-child { min-width: 0; }
+
+.st-empty {
+  padding: 16px; border: 1px dashed var(--line); border-radius: var(--radius-card);
+  font-size: 13px; color: var(--ink-2); line-height: 1.55;
+}
+
+/* Tokens */
+.st-newtoken { display: grid; gap: 5px; }
+.st-newtoken-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.st-newtoken-row .mg-input { flex: 1; min-width: 160px; }
+.st-token-meta { min-width: 0; display: grid; gap: 3px; }
+.st-token-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.st-token.is-revoked { opacity: 0.6; }
+.st-fresh { display: grid; gap: 10px; }
+/* The one time a secret is on screen. Wrapping rather than truncating: a key the customer cannot
+   see all of is a key they cannot check they copied. */
+.st-secret {
+  display: block; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px;
+  padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line);
+  word-break: break-all; user-select: all;
+}
+
+/* Notifications */
+.st-unread-pill, .st-tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; padding: 0 6px; height: 18px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+}
+.st-tab-count { margin-left: 6px; }
+.st-notif { align-items: flex-start; }
+.st-notif-meta { min-width: 0; display: grid; gap: 4px; }
+.st-notif-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-notif-head b { font-weight: 600; }
+.st-notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.st-notif.is-unread .st-notif-head b { font-weight: 700; }
+
+/* Detail */
+.st-disclosure {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card);
+  font-size: 13.5px; font-weight: 600;
+}
+.st-disclosure:hover { background: var(--surface-2); }
+.st-disclosure span span { display: block; font-weight: 400; }
+.st-detail { display: grid; gap: 10px; padding: 4px 2px 0; }
+.st-guards { display: grid; gap: 8px; }
+.st-guards-current { font-weight: 600; }
+.st-guards-form { display: grid; gap: 10px; }
+.st-guards-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--ink-2); }
+/* Tables scroll inside their own box, so the sheet itself never scrolls sideways. */
+.st-tablewrap { overflow-x: auto; }
+
+.st-confirm { padding: 22px 22px 18px; max-width: min(460px, 92vw); }
+.st-confirm h3 { font-family: var(--font-display); font-size: 18px; margin: 0 0 8px; }
+.st-confirm p { line-height: 1.55; margin: 0 0 14px; }
+
+.ct-btn-quiet.ct-danger { color: var(--bad); }
+.ct-btn-quiet.ct-danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.ct-btn.ct-danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+@media (max-width: 700px) {
+  /* Full width on a phone: a 96vw sheet with a 12px inset either side is the whole screen
+     anyway, and the rounded corners cost readable width. */
+  .ct-settings { top: 0; right: 0; bottom: 0; left: 0; width: 100%; border-radius: 0; }
+  .st-row { flex-wrap: wrap; }
+  .st-token-actions { width: 100%; }
+  .st-headline { gap: 8px; }
 }

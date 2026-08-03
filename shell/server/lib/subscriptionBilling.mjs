@@ -291,6 +291,45 @@ function formatDate(iso) {
     : "your next billing date";
 }
 
+/**
+ * Cancel a paid subscription at the end of the paid period, or undo a scheduled cancellation.
+ *
+ * At period end rather than immediately: the customer has already paid for the rest of the month
+ * and cutting them off the moment they click would be taking money for nothing. It is reversible
+ * for exactly that window, which is what Reactivate does.
+ *
+ * This is NOT a re-implementation of the Stripe portal. Cancellation there would need portal
+ * settings enabled account-wide, and this Stripe account is shared with another product — those
+ * settings would leak. Invoices, receipts and payment methods still go to the portal, which is
+ * where they belong.
+ */
+export async function setCancellation(owner, cancel, { store = codeAgentStore(), stripe = null } = {}) {
+  if (!optionalEnv("THRALLO_STRIPE_SECRET_KEY")) throw notConfigured();
+  const record = await ownerSubscription(owner, { store });
+  if (!record.stripe_subscription_id) {
+    throw billingError("There is no paid subscription to change", 409, "no_subscription");
+  }
+  const client = stripe || stripeClient();
+  return withOwnerLock(owner, async () => {
+    const updated = await client.subscriptions.update(record.stripe_subscription_id, {
+      cancel_at_period_end: !!cancel,
+    }, { idempotencyKey: `thrallo:cancel:${owner}:${record.stripe_subscription_id}:${cancel ? 1 : 0}` });
+    // Written through immediately as well as by the webhook. The webhook is authoritative, but it
+    // arrives whenever it arrives — and a customer who has just cancelled must not be shown
+    // "renews on the 12th" while they wait for it.
+    const endsAt = unixIso(updated.current_period_end) || record.current_period_end;
+    await store.upsertSubscription(owner, { cancel_at_period_end: !!cancel });
+    return {
+      cancelAtPeriodEnd: !!cancel,
+      endsAt,
+      message: cancel
+        ? `Your ${planName(record.plan)} plan ends on ${formatDate(endsAt)}. `
+          + "Until then nothing changes, and you can restart it at any time."
+        : `Your ${planName(record.plan)} plan will continue. It renews on ${formatDate(endsAt)}.`,
+    };
+  });
+}
+
 export async function startBillingPortal(owner, { store = codeAgentStore(), stripe = null } = {}) {
   if (!optionalEnv("THRALLO_STRIPE_SECRET_KEY")) throw notConfigured();
   const subscription = await ownerSubscription(owner, { store });
@@ -337,6 +376,8 @@ export async function handleSubscriptionEvent(rawBody, signature, {
         stripe_subscription_id: null,
         current_period_start: null,
         current_period_end: null,
+        // It has now ended, so there is nothing left to cancel or to reactivate.
+        cancel_at_period_end: false,
         // A cancelled subscription cannot still be on its way to another plan.
         pending_plan: null,
         pending_plan_at: null,
@@ -385,6 +426,9 @@ async function applySubscription(store, owner, subscription) {
     stripe_subscription_id: status === "cancelled" ? null : subscription.id,
     current_period_start: unixIso(subscription.current_period_start),
     current_period_end: unixIso(subscription.current_period_end),
+    // Stripe is the authority here too. Without it the billing panel told a customer who had
+    // cancelled that their plan "renews" on the very date it was going to end.
+    cancel_at_period_end: status === "cancelled" ? false : !!subscription.cancel_at_period_end,
     ...(clearPending
       ? { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null }
       : { stripe_schedule_id: scheduleId }),

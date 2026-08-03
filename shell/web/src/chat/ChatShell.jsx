@@ -10,8 +10,8 @@ import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
   listConversations, bulkConversations, startConversation, sendConversationMessage,
-  streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications, deleteConversation,
-  listDeletedConversations, restoreConversation, setPreviewPlan, incidentDetails,
+  streamConversationEvents, deleteConversation,
+  listDeletedConversations, restoreConversation, incidentDetails,
 } from "../lib/codeAgentApi.js";
 import {
   applyEvent, emptyConversationView, replayEvents, railState,
@@ -20,7 +20,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
-import BillingSettings from "../billing/BillingSettings.jsx";
+import SettingsView, { SETTINGS_TABS } from "../settings/SettingsView.jsx";
 import SuccessView from "../billing/SuccessView.jsx";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
@@ -53,7 +53,6 @@ import ModelSelector, { MODEL_PREF_KEY, displayName as modelDisplayName } from "
 import { setConversationModel, cancelBuild, unpublishProject } from "../lib/codeAgentApi.js";
 import RunOverlay from "../manage/RunOverlay.jsx";
 import AiSettings from "../manage/AiSettings.jsx";
-import TokensSettings from "../manage/TokensSettings.jsx";
 import DownloadsSettings from "../manage/DownloadsSettings.jsx";
 import "./chat.css";
 
@@ -133,7 +132,6 @@ function Workspace({ user }) {
   const [pending, setPending] = useState(null);      // optimistic user text awaiting its event
   const [wsContext, setWsContext] = useState(null);  // editor context from the desktop bridge
   const [wsContextOn, setWsContextOn] = useState(true);
-  const [sheetOpen, setSheetOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [manageView, setManageView] = useState(null); // null | repos | usage | ops
   const [deleting, setDeleting] = useState(null);     // { project, busy, error, permanent } | null
@@ -263,6 +261,12 @@ function Workspace({ user }) {
             if (event.type === "open_view" && MANAGE_VIEW_IDS.includes(event.payload?.view)) {
               setManageView(event.payload.view);
             }
+            // Usage is a Settings tab now, not an overlay of its own. The capability keeps its
+            // name — the Lead Agent's contract is unchanged — and lands on the one usage surface
+            // that exists rather than a second copy of it.
+            if (event.type === "open_view" && event.payload?.view === "usage") {
+              navigate("/settings/usage");
+            }
             // A publish has just succeeded. The panel's facts (URL, time, whether what is live is
             // current) live server-side, so re-read them rather than assembling them from the
             // event — that keeps one source of truth and makes updateAvailable correct.
@@ -339,7 +343,9 @@ function Workspace({ user }) {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
       if (e.key === "Escape") {
-        setPaletteOpen(false); setSheetOpen(false); setMobilePreview(false); setManageView(null); setRunOverlayId(null);
+        // Settings closes itself on Escape, because closing it is a navigation rather than a
+        // state change — doing it from here too would push a second history entry.
+        setPaletteOpen(false); setMobilePreview(false); setManageView(null); setRunOverlayId(null);
         setDeleting((d) => (d?.busy ? d : null));
       }
     };
@@ -472,6 +478,15 @@ function Workspace({ user }) {
     return { projectId: match[1], tab: match[2], ref: new URLSearchParams(query).get("ref") || null };
   }, [path, query]);
 
+  // /settings/:tab — a real address, for the same reasons the dashboard has one: Back works,
+  // a refresh returns to the same tab, and "your billing is here" is a link someone can send.
+  const settingsTab = useMemo(() => {
+    const match = path.match(/^\/settings(?:\/([a-z]+))?$/i);
+    if (!match) return null;
+    return SETTINGS_TABS.some((t) => t.id === match[1]) ? match[1] : "usage";
+  }, [path]);
+  const closeSettings = useCallback(() => { setSheetSection(null); navigate("/"); }, [navigate]);
+
   useEffect(() => {
     if (!route) {
       // Navigating away from a project address closes the dashboard, so Back actually goes back.
@@ -531,7 +546,7 @@ function Workspace({ user }) {
         <div className={`ct-context ${active?.title ? "show" : ""}`}>
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
-        <button className="ct-avatar" title="Settings" onClick={() => setSheetOpen(true)}>{initial}</button>
+        <button className="ct-avatar" title="Settings" onClick={() => navigate("/settings/usage")}>{initial}</button>
       </header>
 
       <DesktopUpdateNotice />
@@ -565,7 +580,7 @@ function Workspace({ user }) {
             onHealth={(c) => openDashboard(c.site, "health")}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
-          onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
+          onOpenSettings={() => { setSheetSection("ai"); navigate("/settings/preferences"); }}
           onContinue={(id) => {
             const row = conversations.find((c) => c.id === id);
             if (row) openConversation(row);
@@ -611,7 +626,7 @@ function Workspace({ user }) {
             <div className="ct-model-dock">
               <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
                 onChange={changeConversationModel}
-                onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }} />
+                onOpenSettings={() => { setSheetSection("ai"); navigate("/settings/preferences"); }} />
             </div>
             <Composer onSend={send} waiting={view.waiting} thinking={view.thinking}
               context={wsContextOn ? wsContext : null} onDismissContext={() => setWsContextOn(false)} />
@@ -643,15 +658,33 @@ function Workspace({ user }) {
 
       {/* The dashboard was the one overlay in the product with no backdrop: it opened over a fully
           lit page that still looked interactive, and clicking away did nothing. */}
-      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId || dashboard ? "show" : ""}`} aria-hidden="true"
+      <div className={`ct-scrim ${settingsTab || paletteOpen || manageView || runOverlayId || dashboard ? "show" : ""}`} aria-hidden="true"
         onClick={() => {
-          setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null);
-          if (dashboard) navigate("/");
+          setPaletteOpen(false); setManageView(null); setRunOverlayId(null);
+          if (dashboard || settingsTab) navigate("/");
         }} />
-      <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} initialSection={sheetSection} onClose={() => { setSheetOpen(false); setSheetSection(null); }}
-        planState={planState}
-        onUpgrade={() => { setSheetOpen(false); setSheetSection(null); navigate("/pricing"); }}
-        onOpenView={(v) => { setSheetOpen(false); setManageView(v); }} />
+      {/* Mounted only while its address is open, so the five tab chunks are not fetched — and its
+          data is not read — by visitors who never open Settings. */}
+      {settingsTab && (
+        sheetSection
+          ? <SettingsSection section={sheetSection} onBack={() => setSheetSection(null)} onClose={closeSettings} />
+          : (
+            <SettingsView user={user} theme={theme} setTheme={setTheme} initialTab={settingsTab}
+              onClose={closeSettings} showToast={showToast}
+              onTabChange={(next) => navigate(`/settings/${next}`)}
+              onSection={setSheetSection}
+              onUpgrade={() => { setSheetSection(null); navigate("/pricing"); }}
+              onOpenUrl={(url) => {
+                // A notification can point at a customer's live site or back into Thrallo. An
+                // external address opens in its own tab so the workspace is never lost.
+                if (/^https?:\/\//i.test(url) && !url.startsWith(window.location.origin)) {
+                  window.open(url, "_blank", "noopener,noreferrer");
+                } else {
+                  navigate(url.replace(window.location.origin, "") || "/");
+                }
+              }} />
+          )
+      )}
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
         onOpenRun={(id) => setRunOverlayId(id)} />
@@ -689,7 +722,8 @@ function Workspace({ user }) {
         <Palette conversations={conversations}
           onNew={() => { setActive(null); setView(emptyConversationView()); setPaletteOpen(false); }}
           onOpen={(c) => { openConversation(c); setPaletteOpen(false); }}
-          onSettings={() => { setPaletteOpen(false); setSheetOpen(true); }}
+          onSettings={() => { setPaletteOpen(false); navigate("/settings/usage"); }}
+          onUsage={() => { setPaletteOpen(false); navigate("/settings/usage"); }}
           onOpenView={(v) => { setPaletteOpen(false); setManageView(v); }} />
       )}
       {deleting && (
@@ -1476,198 +1510,35 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
   );
 }
 
-// The ONE settings experience: quick rows, with drill-in sections for the plumbing that
-// is technically required to live here (secrets never enter the conversation).
-function SettingsSheet({ open, user, theme, setTheme, onClose, onOpenView, initialSection = null, planState, onUpgrade }) {
-  const [usage, setUsage] = useState(null);
-  const [section, setSection] = useState(null); // null | ai | tokens | downloads
-  useEffect(() => { if (open) usageSummary().then(setUsage).catch(() => setUsage(null)); }, [open]);
-  // Opening with a section (e.g. "Configure xAI" in the model selector) lands the user
-  // directly on that screen — arriving at the settings root with no mention of the
-  // provider they asked to configure reads as "the provider disappeared".
-  useEffect(() => { setSection(open ? initialSection : null); }, [open, initialSection]);
-
-  if (section) {
-    const Section = section === "ai" ? AiSettings : section === "tokens" ? TokensSettings : DownloadsSettings;
-    return (
-      <aside className={`ct-sheet ${open ? "show" : ""}`}>
-        <div className="ct-sheet-head">
-          <button className="ct-btn-quiet" onClick={() => setSection(null)}>← Settings</button>
-          <button className="ct-btn-quiet" onClick={onClose}>Done</button>
-        </div>
-        <div className="ct-sheet-body"><Section /></div>
-      </aside>
-    );
-  }
-  const tokens = usage?.budgets?.managedTokens;
-  const used = tokens ? Math.max(0, (tokens.limit ?? 0) - (tokens.remaining ?? 0)) : 0;
-  const pct = tokens?.limit ? Math.min(100, Math.round((used / tokens.limit) * 100)) : 0;
-  const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n ?? 0));
+// The two drill-ins that are not tabs: connecting an AI provider, and the download links. Both
+// are reached from Preferences, both are long, and neither is something most visits need — so
+// they stay separate screens rather than becoming a sixth and seventh tab nobody asked for.
+function SettingsSection({ section, onBack, onClose }) {
+  const Body = section === "ai" ? AiSettings : DownloadsSettings;
   return (
-    <aside className={`ct-sheet ${open ? "show" : ""}`}>
-      <div className="ct-sheet-head"><h2>Settings</h2><button className="ct-btn-quiet" onClick={onClose}>Done</button></div>
-      <div className="ct-sheet-body">
-        <div className="ct-set-group">
-          <div className="ct-set-label">Account</div>
-          <div className="ct-set-row">
-            <div>
-              {user.email}
-              <div className="ct-hint">
-                {usage?.ownerAccount ? "Owner — limits are never enforced" : `${usage?.plan?.name || usage?.plan?.id || "Free"} plan`}
-              </div>
-            </div>
-            {!user.desktop && <button className="ct-btn-quiet" onClick={() => client().auth.signOut()}>Sign out</button>}
-          </div>
-          {usage?.ownerAccount && (
-            <div className="ct-set-row">
-              <div>View as<div className="ct-hint">Experience the product on a customer plan — usage still records, nothing blocks you.</div></div>
-              <div className="ct-toggle" role="group" aria-label="View as plan">
-                {[["actual", "Owner"], ["free", "Free"], ["starter", "Starter"], ["pro", "Pro"]].map(([id, label]) => (
-                  <button key={id}
-                    className={(usage.previewPlan || "actual") === id ? "on" : ""}
-                    aria-pressed={(usage.previewPlan || "actual") === id}
-                    onClick={() => setPreviewPlan(id === "actual" ? null : id)
-                      .then(() => usageSummary().then(setUsage))
-                      .catch(() => {})}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="ct-set-group">
-          <div className="ct-set-label">AI connection</div>
-          <div className="ct-set-row">
-            <div>Model access<div className="ct-hint">Managed, your own key, or ChatGPT Codex</div></div>
-            <button className="ct-btn-quiet" onClick={() => setSection("ai")}>Manage</button>
-          </div>
-        </div>
-        <BillingSettings planState={planState} onUpgrade={onUpgrade} />
-        <div className="ct-set-group">
-          <div className="ct-set-label">Plan &amp; budgets</div>
-          <div className="ct-set-row">
-            <div style={{ flex: 1 }}>
-              Monthly budget
-              {tokens ? (
-                <>
-                  <div className="ct-meter"><i style={{ width: `${pct}%` }} /></div>
-                  <div className="ct-hint">{fmt(used)} of {fmt(tokens.limit)} tokens used</div>
-                </>
-              ) : <div className="ct-hint">Ask me “how much budget is left?” any time.</div>}
-            </div>
-            <button className="ct-btn-quiet" onClick={() => onOpenView("usage")}>Details</button>
-          </div>
-        </div>
-        <div className="ct-set-group">
-          <div className="ct-set-label">API tokens</div>
-          <div className="ct-set-row">
-            <div>CLI, editor &amp; desktop access<div className="ct-hint">Personal access tokens</div></div>
-            <button className="ct-btn-quiet" onClick={() => setSection("tokens")}>Manage</button>
-          </div>
-        </div>
-        <div className="ct-set-group">
-          <div className="ct-set-label">Build diagnostics</div>
-          <div className="ct-set-row">
-            <div>Complete build audit trail<div className="ct-hint">Every prompt, log, repair and cost — kept even when builds fail</div></div>
-            <button className="ct-btn-quiet" onClick={() => onOpenView("diagnostics")}>Open</button>
-          </div>
-        </div>
-        <div className="ct-set-group">
-          <div className="ct-set-label">Repositories</div>
-          <div className="ct-set-row">
-            <div>Connected code<div className="ct-hint">GitHub App, indexing, policies, pull requests</div></div>
-            <button className="ct-btn-quiet" onClick={() => onOpenView("repos")}>Open</button>
-          </div>
-        </div>
-        <div className="ct-set-group">
-          <div className="ct-set-label">Downloads</div>
-          <div className="ct-set-row">
-            <div>Editor, CLI &amp; desktop<div className="ct-hint">Bring Thrallo where you work</div></div>
-            <button className="ct-btn-quiet" onClick={() => setSection("downloads")}>Open</button>
-          </div>
-        </div>
-        <NotificationSettings />
-        <div className="ct-set-group">
-          <div className="ct-set-label">Appearance</div>
-          <div className="ct-set-row">
-            <div>Theme</div>
-            <div className="ct-toggle" role="group" aria-label="Theme">
-              <button className={theme === "light" ? "on" : ""} aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
-              <button className={theme === "dark" ? "on" : ""} aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
-              <button className={theme === "system" ? "on" : ""} aria-pressed={theme === "system"} onClick={() => setTheme("system")}>System</button>
-            </div>
-          </div>
-        </div>
+    <aside className="ct-sheet show ct-settings" aria-label={section === "ai" ? "Model access" : "Downloads"}>
+      <div className="ct-sheet-head">
+        <button className="ct-btn-quiet" onClick={onBack}>← Settings</button>
+        <button className="ct-btn-quiet" onClick={onClose}>Done</button>
       </div>
+      <div className="ct-sheet-body"><Body /></div>
     </aside>
   );
 }
 
-// Browser notifications need a user gesture + permission prompt, so this one row lives in
-// the sheet (like credentials). Everything about WHEN to notify stays conversational —
-// Thrallo only speaks up when the user is away and something needs them.
-function NotificationSettings() {
-  const supported = "serviceWorker" in navigator && "PushManager" in window;
-  const [state, setState] = useState("idle"); // idle | on | busy | unavailable
-  useEffect(() => {
-    if (!supported) { setState("unavailable"); return; }
-    navigator.serviceWorker.getRegistration().then(async (reg) => {
-      const sub = await reg?.pushManager?.getSubscription();
-      if (sub) setState("on");
-    }).catch(() => {});
-  }, [supported]);
-
-  const enable = async () => {
-    setState("busy");
-    try {
-      const config = await notificationsConfig();
-      if (!config.vapidPublicKey) { setState("unavailable"); return; }
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") { setState("idle"); return; }
-      const raw = atob(config.vapidPublicKey.replace(/-/g, "+").replace(/_/g, "/"));
-      const key = Uint8Array.from(raw, (c) => c.charCodeAt(0));
-      const subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-      await subscribeNotifications(subscription.toJSON());
-      setState("on");
-    } catch {
-      setState("idle");
-    }
-  };
-
-  return (
-    <div className="ct-set-group">
-      <div className="ct-set-label">Notifications</div>
-      <div className="ct-set-row">
-        <div>When you're away<div className="ct-hint">
-          {state === "on" ? "I'll let you know when something needs you." :
-            state === "unavailable" ? "Not available in this browser yet." :
-            "Previews ready, questions, and finished work."}
-        </div></div>
-        {state === "on"
-          ? <span className="ct-hint" style={{ color: "var(--good)", fontWeight: 700 }}>On</span>
-          : <button className="ct-btn-quiet" disabled={state !== "idle"} onClick={enable}>
-              {state === "busy" ? "Enabling…" : "Enable"}
-            </button>}
-      </div>
-    </div>
-  );
-}
-
-function Palette({ conversations, onNew, onOpen, onSettings, onOpenView }) {
+function Palette({ conversations, onNew, onOpen, onSettings, onOpenView, onUsage }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const actions = useMemo(() => [
     { key: "new", label: "＋ New conversation", hint: "start fresh", run: onNew },
     { key: "settings", label: "⚙ Settings", run: onSettings },
     { key: "repos", label: "⌘ Repositories", hint: "connect · index · policies · PRs", run: () => onOpenView("repos") },
-    { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: () => onOpenView("usage") },
+    { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: onUsage },
     { key: "diagnostics", label: "◔ Build diagnostics", hint: "logs · repairs · costs", run: () => onOpenView("diagnostics") },
     { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
     { key: "analytics", label: "◈ Admin analytics", hint: "admin · spend · revenue", run: () => onOpenView("analytics") },
     { key: "intelligence", label: "◎ Provider intelligence", hint: "admin · learned routing", run: () => onOpenView("intelligence") },
-  ], [onNew, onSettings, onOpenView]);
+  ], [onNew, onSettings, onOpenView, onUsage]);
   const q = query.trim().toLowerCase();
   const shownActions = useMemo(
     () => actions.filter((a) => !q || a.label.toLowerCase().includes(q) || (a.hint || "").includes(q)),

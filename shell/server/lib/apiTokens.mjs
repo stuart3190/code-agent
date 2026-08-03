@@ -41,6 +41,13 @@ export class MemoryApiTokenStore {
     return row;
   }
 
+  async rename(owner, id, name) {
+    const row = this.tokens.get(id);
+    if (!row || row.owner !== owner || row.revoked_at) return null;
+    row.name = name;
+    return row;
+  }
+
   async touch(id) {
     const row = this.tokens.get(id);
     if (row) row.last_used_at = now();
@@ -75,6 +82,16 @@ export class SupabaseApiTokenStore {
   async revoke(owner, id) {
     const { data, error } = await this.client.from("ca_api_tokens")
       .update({ revoked_at: now() }).eq("owner", owner).eq("id", id).is("revoked_at", null)
+      .select("*").maybeSingle();
+    if (error) throw new Error(error.message);
+    return data || null;
+  }
+
+  // Owner and not-revoked are both in the statement: renaming a revoked token would suggest it
+  // still does something, and an id belonging to someone else must simply match nothing.
+  async rename(owner, id, name) {
+    const { data, error } = await this.client.from("ca_api_tokens")
+      .update({ name }).eq("owner", owner).eq("id", id).is("revoked_at", null)
       .select("*").maybeSingle();
     if (error) throw new Error(error.message);
     return data || null;
@@ -125,6 +142,16 @@ export async function listApiTokens(owner, { store = apiTokenStore() } = {}) {
   return (await store.listByOwner(owner)).map(publicToken);
 }
 
+export async function renameApiToken(owner, id, name, { store = apiTokenStore() } = {}) {
+  const trimmed = String(name || "").trim();
+  // The same rule creation uses, from the same place — a name the database would reject must be
+  // rejected here too, or a rename fails with a constraint error instead of a sentence.
+  if (!trimmed || trimmed.length > 120) throw inputError("Token name must be 1-120 characters");
+  const row = await store.rename(owner, id, trimmed);
+  if (!row) throw inputError("Token not found", 404, "token_not_found");
+  return publicToken(row);
+}
+
 export async function revokeApiToken(owner, id, { store = apiTokenStore() } = {}) {
   const row = await store.revoke(owner, id);
   if (!row) throw inputError("Token not found", 404, "token_not_found");
@@ -150,6 +177,10 @@ function publicToken(row) {
     id: row.id,
     name: row.name,
     prefix: row.token_prefix,
+    // What the token can do. Every token today is created with ["runs"] and there is no way to
+    // ask for more — surfaced so the screen states the real scope rather than implying a token is
+    // unlimited by saying nothing about it.
+    scopes: Array.isArray(row.scopes) ? row.scopes : ["runs"],
     lastUsedAt: row.last_used_at,
     revokedAt: row.revoked_at,
     createdAt: row.created_at,

@@ -88,6 +88,10 @@ import {
 import { startHealthMonitor, stopHealthMonitor } from "./lib/health/monitor.mjs";
 import { isApiTokenBearer, ownerFromApiToken } from "./lib/apiTokens.mjs";
 import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/apiTokens.mjs";
+import {
+  handleCancellation, handleNotificationList, handleNotificationRead, handleSettings,
+  handleTokenRename,
+} from "./routes/settings.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
 import {
   handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
@@ -775,10 +779,13 @@ const server = http.createServer(async (req, res) => {
       if (method === "GET") return await handleTokenList(req, res, owner);
       return await handleTokenCreate(req, res, owner, await readJson(req));
     }
-    const tokenRevokeMatch = p.match(/^\/api\/v1\/tokens\/([0-9a-f-]+)$/i);
-    if (tokenRevokeMatch && method === "DELETE") {
+    const tokenMatch = p.match(/^\/api\/v1\/tokens\/([0-9a-f-]+)$/i);
+    if (tokenMatch && ["DELETE", "PATCH"].includes(method)) {
+      // A real session, like every other token operation: renaming through a leaked PAT would let
+      // an attacker disguise the token they are using as something innocent.
       const owner = await requireSessionOwner(req, res); if (!owner) return;
-      return await handleTokenRevoke(req, res, owner, tokenRevokeMatch[1]);
+      if (method === "DELETE") return await handleTokenRevoke(req, res, owner, tokenMatch[1]);
+      return await handleTokenRename(req, res, owner, tokenMatch[1], await readJson(req));
     }
     // The analytics beacon: public by necessity — it is called by every visitor to every published
     // site, on hostnames Thrallo does not control. The project is resolved from the app id
@@ -867,6 +874,26 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/billing/portal" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleBillingPortal(req, res, owner);
+    }
+    // Cancel at period end, or undo a scheduled cancellation. Not a portal re-implementation:
+    // portal cancellation is an account-wide Stripe setting and this account is shared with
+    // another product, so enabling it there would change that product too.
+    if (p === "/api/v1/billing/cancel" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleCancellation(req, res, owner, await readJson(req));
+    }
+    // Everything the Settings screen needs, in one read.
+    if (p === "/api/v1/settings" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleSettings(req, res, owner);
+    }
+    if (p === "/api/v1/notifications" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleNotificationList(req, res, owner, url);
+    }
+    if (p === "/api/v1/notifications/read" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleNotificationRead(req, res, owner, await readJson(req));
     }
     if (p === "/api/v1/ops/telemetry" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
