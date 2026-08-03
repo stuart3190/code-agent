@@ -16,9 +16,11 @@ import { retentionFor } from "../analytics/reports.mjs";
 // for exactly the builds someone is most likely to be digging through.
 import { unpackOutput } from "../appBuild/buildDiagnostics.mjs";
 import { buildRunsFor } from "./buildRuns.mjs";
+import { VISITOR_SOURCES } from "../../../shared/logSources.mjs";
 
-export const SOURCES = Object.freeze(["publish", "deploy", "build", "domain", "system", "runtime", "visitor"]);
-export const LEVELS = Object.freeze(["info", "warning", "error", "critical"]);
+// One list, shared with the web app so a filter chip and the server cannot disagree about what
+// a source is called.
+export { LOG_SOURCE_IDS as SOURCES, LOG_LEVEL_IDS as LEVELS } from "../../../shared/logSources.mjs";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -144,7 +146,7 @@ export async function readLogs(owner, projectId, {
       .order("logged_at", { ascending: false }).limit(size);
     if (from) q = q.gte("logged_at", from);
     if (cursor) q = q.lt("logged_at", cursor);
-    if (sources?.length) q = q.in("source", sources.filter((s) => s !== "runtime" && s !== "visitor"));
+    if (sources?.length) q = q.in("source", sources.filter((s) => !VISITOR_SOURCES.includes(s)));
     queries.push(readOrThrow("lifecycle logs", q).then((rows) => rows.map(fromLifecycle)));
   } else if (onlyRun) {
     let q = client.from("project_logs").select("*")

@@ -6,7 +6,8 @@
 import { serviceClient } from "../supabase.mjs";
 
 export const LOG_LEVELS = Object.freeze(["info", "warning", "error", "critical"]);
-export const LOG_SOURCES = Object.freeze(["publish", "deploy", "build", "domain", "system", "runtime", "visitor"]);
+// LOG_SOURCES was a third copy of this list that nothing imported. The shared one lives in
+// shell/shared/logSources.mjs.
 
 const MAX_DETAIL = 8_000;
 

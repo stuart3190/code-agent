@@ -28,6 +28,7 @@ import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 import ProjectDashboard from "../publish/ProjectDashboard.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
+import { useDebounced } from "../lib/useDebounced.js";
 import {
   TABS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
   PUBLISH_SUCCESS_DURATION_MS,
@@ -575,8 +576,13 @@ function Workspace({ user }) {
         </div>
       )}
 
-      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId ? "show" : ""}`} aria-hidden="true"
-        onClick={() => { setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null); }} />
+      {/* The dashboard was the one overlay in the product with no backdrop: it opened over a fully
+          lit page that still looked interactive, and clicking away did nothing. */}
+      <div className={`ct-scrim ${sheetOpen || paletteOpen || manageView || runOverlayId || dashboard ? "show" : ""}`} aria-hidden="true"
+        onClick={() => {
+          setSheetOpen(false); setPaletteOpen(false); setManageView(null); setRunOverlayId(null);
+          if (dashboard) navigate("/");
+        }} />
       <SettingsSheet open={sheetOpen} user={user} theme={theme} setTheme={setTheme} initialSection={sheetSection} onClose={() => { setSheetOpen(false); setSheetSection(null); }}
         planState={planState}
         onUpgrade={() => { setSheetOpen(false); setSheetSection(null); navigate("/pricing"); }}
@@ -676,12 +682,11 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   // The box types freely; the fetch waits until typing stops, so every keystroke is not a request.
   const [searchDraft, setSearchDraft] = useState(search);
   useEffect(() => { setSearchDraft(search); }, [search]);
+  const settledDraft = useDebounced(searchDraft, 300);
   useEffect(() => {
-    if (searchDraft === search) return undefined;
-    const timer = setTimeout(() => onSearch(searchDraft.trim()), 300);
-    return () => clearTimeout(timer);
+    if (settledDraft.trim() !== search) onSearch(settledDraft.trim());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchDraft]);
+  }, [settledDraft]);
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
   // Remember whether this account had projects so the greeting doesn't flash from
   // "Let's build something." to "Welcome back" while the list loads.

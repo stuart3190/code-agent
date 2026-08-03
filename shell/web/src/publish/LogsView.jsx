@@ -7,22 +7,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { projectLogs, logStreamUrl, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
 import { TabSkeleton, TabError } from "./TabStates.jsx";
+import { useDebounced } from "../lib/useDebounced.js";
+import { LOG_LEVELS as LEVELS, LOG_SOURCES as SOURCES } from "../../../shared/logSources.mjs";
 
-const LEVELS = [
-  { id: "info", label: "Info" },
-  { id: "warning", label: "Warning" },
-  { id: "error", label: "Error" },
-  { id: "critical", label: "Critical" },
-];
-const SOURCES = [
-  { id: "publish", label: "Publish" },
-  { id: "deploy", label: "Deploy" },
-  { id: "build", label: "Build" },
-  { id: "runtime", label: "Runtime" },
-  { id: "visitor", label: "Visitor" },
-  { id: "domain", label: "Domain" },
-  { id: "system", label: "System" },
-];
 
 const stamp = (iso) => new Date(iso).toLocaleString("en-GB", {
   day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
@@ -72,6 +59,8 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
   const [levels, setLevels] = useState([]);
   const [sources, setSources] = useState([]);
   const [search, setSearch] = useState("");
+  // Undebounced, every keystroke refetched the page AND reopened the live stream.
+  const settledSearch = useDebounced(search, 300);
   const [live, setLive] = useState(true);
   const [loading, setLoading] = useState(false);
   const [meta, setMeta] = useState(null);
@@ -83,11 +72,11 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
   const projectId = site?.projectId;
 
   const params = useCallback(() => ({
-    levels: levels.join(","), sources: sources.join(","), q: search,
+    levels: levels.join(","), sources: sources.join(","), q: settledSearch,
     // The build identifier goes to the server, so paging, streaming and export all stay narrowed
     // to the same run rather than the filter applying to the view alone.
     ref: buildRef || "",
-  }), [levels, sources, search, buildRef]);
+  }), [levels, sources, settledSearch, buildRef]);
 
   // The project's builds, so a specific one can be opened and linked to. Same identity as
   // Deployments and Overview: the run id.
@@ -226,7 +215,7 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
         {!entries.length && !loading && !error && (
           <div className="ct-logs-empty">
             {(() => {
-              const filtering = !!(search || levels.length || sources.length);
+              const filtering = !!(settledSearch || levels.length || sources.length);
               if (filtering) {
                 return (
                   <>
@@ -299,7 +288,7 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
 
       <div className="ct-logs-foot">
         {cursor && (
-          <button className="ct-btn-quiet" disabled={loading} onClick={() => load(cursor)}>
+          <button className="ct-pubrow-btn" disabled={loading} onClick={() => load(cursor)}>
             {loading ? "Loading…" : "Load older"}
           </button>
         )}

@@ -241,3 +241,48 @@ test("the dashboard fits a phone without the body scrolling sideways", async ({ 
   expect(scrollable).toBe(true);
   await expect(dash(page).getByRole("tab", { name: "Overview" })).toBeVisible();
 });
+
+// ── Refinement ──────────────────────────────────────────────────────────────────────────
+
+test("the page is dimmed behind the dashboard, and clicking away closes it", async ({ page }) => {
+  await stub(page);
+  await open(page);
+  await expect(page.locator(".ct-scrim.show")).toBeVisible();
+
+  await page.locator(".ct-scrim.show").click({ position: { x: 5, y: 5 } });
+  await expect(dash(page)).toHaveCount(0);
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/");
+});
+
+test("focus moves into the dashboard on open and returns to the opener on close", async ({ page }) => {
+  await stub(page);
+  await page.goto("/");
+  const card = page.locator(".ct-project").filter({ hasText: "FocusFlow" });
+  await card.getByRole("button", { name: "Health" }).click();
+  await expect(dash(page)).toBeVisible();
+
+  // The heading, so a screen reader announces what opened before offering its controls.
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("H2");
+
+  await dash(page).getByRole("button", { name: "Done" }).click();
+  await expect(dash(page)).toHaveCount(0);
+  // Back to the button that opened it, not the top of the document.
+  await expect.poll(() => page.evaluate(() => document.activeElement?.textContent)).toBe("Health");
+});
+
+test("typing in the log search does not refetch on every keystroke", async ({ page }) => {
+  await stub(page);
+  let requests = 0;
+  await page.route("**/api/v1/projects/*/logs?**", async (r) => {
+    requests += 1;
+    await r.fulfill({ json: { entries: [], nextCursor: null, retentionDays: null, plan: "pro" } });
+  });
+  await open(page, "logs");
+  await expect(dash(page).getByLabel("Search logs")).toBeVisible();
+
+  const before = requests;
+  await dash(page).getByLabel("Search logs").pressSequentially("timeout", { delay: 40 });
+  // Seven characters used to be seven requests and seven live-stream reconnections.
+  await page.waitForTimeout(600);
+  expect(requests - before).toBeLessThanOrEqual(2);
+});

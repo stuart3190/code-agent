@@ -237,18 +237,3 @@ export function AgentPolicy({ agent, onChange }) {
   );
 }
 
-export function BudgetMeter({ label, meter, format }) {
-  const ratio = meter.limit ? Math.min(meter.used / meter.limit, 1) : 0;
-  const tone = ratio >= 1 ? "var(--bad)" : ratio >= 0.8 ? "var(--warn)" : null;
-  return (
-    <div style={{ flex: 1, minWidth: 160 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <span className="ct-hint">{label}</span>
-        <span className="ct-hint">{format(meter.used)} / {format(meter.limit)}</span>
-      </div>
-      <div className="mg-meter">
-        <i style={{ width: `${Math.max(ratio * 100, meter.used ? 2 : 0)}%`, ...(tone ? { background: tone } : {}) }} />
-      </div>
-    </div>
-  );
-}
