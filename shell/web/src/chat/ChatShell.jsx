@@ -9,7 +9,7 @@ import Landing from "../landing/Landing.jsx";
 import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
-  listConversations, startConversation, sendConversationMessage,
+  listConversations, bulkConversations, startConversation, sendConversationMessage,
   streamConversationEvents, usageSummary, notificationsConfig, subscribeNotifications, deleteConversation,
   listDeletedConversations, restoreConversation, setPreviewPlan, incidentDetails,
 } from "../lib/codeAgentApi.js";
@@ -28,6 +28,20 @@ import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 import ProjectDashboard from "../publish/ProjectDashboard.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
+
+// What a completed bulk action says. Named counts rather than "Done": acting on twelve projects
+// and being told "Done" leaves the customer counting cards to check.
+const bulkMessage = (action, n) => {
+  const projects = `${n} project${n === 1 ? "" : "s"}`;
+  switch (action) {
+    case "favourite": return `${projects} added to favourites`;
+    case "unfavourite": return `${projects} removed from favourites`;
+    case "archive": return `${projects} archived`;
+    case "restore": return `${projects} restored`;
+    case "delete": return `${projects} moved to Recently Deleted`;
+    default: return `${projects} updated`;
+  }
+};
 import { useDebounced } from "../lib/useDebounced.js";
 import {
   TABS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
@@ -167,20 +181,27 @@ function Workspace({ user }) {
   // rather than the account.
   const [listTab, setListTab] = useState("all");
   const [listSearch, setListSearch] = useState("");
-  const [listing, setListing] = useState({ counts: {}, page: null });
+  const [listSort, setListSort] = useState("activity");
+  const [listFavourites, setListFavourites] = useState(false);
+  const [listArchived, setListArchived] = useState(false);
+  const [listing, setListing] = useState({ counts: {}, page: null, sorts: [] });
   const [listError, setListError] = useState("");
   const [listBusy, setListBusy] = useState(false);
+  // Which projects a bulk action would act on. Cleared whenever the list they were chosen from
+  // changes, so an action can never apply to something no longer on screen.
+  const [selected, setSelected] = useState([]);
 
   const loadConversations = useCallback(async ({
-    tab = listTab, q = listSearch, offset = 0, append = false, limit = 0,
+    tab = listTab, q = listSearch, sort = listSort, favourites = listFavourites,
+    archived = listArchived, offset = 0, append = false, limit = 0,
   } = {}) => {
     setListBusy(true);
     try {
-      const result = await listConversations({ tab, q, offset, limit });
+      const result = await listConversations({ tab, q, sort, favourites, archived, offset, limit });
       setConversations((current) => (append
         ? [...current, ...(result.conversations || [])]
         : (result.conversations || [])));
-      setListing({ counts: result.counts || {}, page: result.page || null });
+      setListing({ counts: result.counts || {}, page: result.page || null, sorts: result.sorts || [] });
       setListError("");
     } catch (error) {
       // A list that fails must say so. Rendering an empty dashboard would tell someone their
@@ -191,13 +212,16 @@ function Workspace({ user }) {
       setConvosLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listTab, listSearch]);
+  }, [listTab, listSearch, listSort, listFavourites, listArchived]);
 
   useEffect(() => {
+    // The selection belonged to the previous list; keeping it would let a bulk action apply to a
+    // project the user can no longer see.
+    setSelected([]);
     loadConversations({ offset: 0 });
     listDeletedConversations().then((r) => setDeletedItems(r.items || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listTab, listSearch]);
+  }, [listTab, listSearch, listSort, listFavourites, listArchived]);
 
   // The browser tab always names where you are.
   useEffect(() => {
@@ -330,6 +354,42 @@ function Workspace({ user }) {
   // Publish state now travels with the conversation rows, so re-reading them IS the dashboard
   // refresh. Called after publish and unpublish so a card never shows a state the user has
   // already changed.
+  /**
+   * A bulk action, then a reload of exactly what is on screen.
+   *
+   * Optimism is deliberately avoided here: archiving removes cards from the current view, and a
+   * list that reorders itself before the server has agreed is a list that can snap back. The
+   * reload is scoped to the rows already loaded so someone who paged twice keeps their place.
+   */
+  const runBulk = useCallback(async (action, ids = selected) => {
+    if (!ids.length) return;
+    setListBusy(true);
+    try {
+      const result = await bulkConversations(ids, action);
+      setSelected([]);
+      showToast(bulkMessage(action, result.changed));
+      await loadConversations({ offset: 0, limit: Math.max(20, conversationsRef.current.length) });
+      if (action === "delete") {
+        listDeletedConversations().then((r) => setDeletedItems(r.items || [])).catch(() => {});
+      }
+      publish.refresh();
+    } catch (error) {
+      // A toast, not the list-level error: that one replaces the whole workspace, and losing every
+      // card because one archive failed would be a far worse outcome than the failure itself. The
+      // selection is kept so the action can simply be tried again.
+      showToast(error?.message || "That did not work. Nothing was changed.");
+    } finally {
+      setListBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, loadConversations, showToast]);
+
+  // Favouriting is a single-project action that reuses the bulk path rather than adding a second
+  // endpoint that could drift from it.
+  const toggleFavourite = useCallback((conversation) => {
+    runBulk(conversation.favourite ? "unfavourite" : "favourite", [conversation.id]);
+  }, [runBulk]);
+
   const refreshProjects = useCallback(() => {
     publish.refresh();
     // Refreshes everything already on screen rather than snapping back to page one — someone who
@@ -490,6 +550,11 @@ function Workspace({ user }) {
             counts={listing.counts} page={listing.page} busy={listBusy} error={listError}
             tab={listTab} onTab={setListTab}
             search={listSearch} onSearch={setListSearch}
+            sorts={listing.sorts} sort={listSort} onSort={setListSort}
+            favouritesOnly={listFavourites} onFavouritesOnly={setListFavourites}
+            archived={listArchived} onArchived={setListArchived}
+            selected={selected} onSelected={setSelected} onBulk={runBulk}
+            onToggleFavourite={toggleFavourite}
             onLoadMore={() => listing.page?.nextOffset != null
               && loadConversations({ offset: listing.page.nextOffset, append: true })}
             onRetryList={() => loadConversations({ offset: 0 })}
@@ -675,7 +740,11 @@ const RETURNING_KEY = "thrallo-returning";
 
 function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {},
   counts: serverCounts = {}, page = null, busy = false, error = "", tab = "all", onTab = () => {},
-  search = "", onSearch = () => {}, onLoadMore = () => {}, onRetryList = () => {} }) {
+  search = "", onSearch = () => {}, onLoadMore = () => {}, onRetryList = () => {},
+  sorts = [], sort = "activity", onSort = () => {},
+  favouritesOnly = false, onFavouritesOnly = () => {},
+  archived = false, onArchived = () => {},
+  selected = [], onSelected = () => {}, onBulk = () => {}, onToggleFavourite = () => {} }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -690,10 +759,14 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
   // Remember whether this account had projects so the greeting doesn't flash from
   // "Let's build something." to "Welcome back" while the list loads.
-  const returning = loaded ? conversations.length > 0 : localStorage.getItem(RETURNING_KEY) === "1";
+  // A narrowed view is not an empty account. Browsing an empty archive, or favourites before
+  // anything is starred, must not greet a long-standing customer with "Let's build something."
+  const filtered = !!search || tab !== "all" || favouritesOnly || archived;
+  const remembered = localStorage.getItem(RETURNING_KEY) === "1";
+  const returning = loaded && !filtered ? conversations.length > 0 : remembered;
   useEffect(() => {
-    if (loaded) localStorage.setItem(RETURNING_KEY, conversations.length ? "1" : "0");
-  }, [loaded, conversations.length]);
+    if (loaded && !filtered) localStorage.setItem(RETURNING_KEY, conversations.length ? "1" : "0");
+  }, [loaded, filtered, conversations.length]);
   const fresh = !returning;
   const act = (id, run) => { setBusyId(id); Promise.resolve(run()).finally(() => setBusyId(null)); };
 
@@ -701,8 +774,28 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   // in-progress ones and then took SIX of the rest, so a seventh project was simply invisible with
   // nothing on screen saying so — a second, quieter ceiling underneath the server's twenty.
   const counts = Object.keys(serverCounts).length ? serverCounts : countByTab(conversations);
-  const groups = groupProjects(conversations);
-  const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics, onHealth };
+  // Archived projects are a flat list. Grouping them by "Live apps / In progress / Drafts" would be
+  // describing work nobody is doing.
+  const groups = archived
+    ? [{ id: "archived", label: "Archived", items: conversations }]
+    : groupProjects(conversations);
+
+  const selectedSet = new Set(selected);
+  const allShown = conversations.map((c) => c.id);
+  const allSelected = allShown.length > 0 && allShown.every((id) => selectedSet.has(id));
+  const toggleSelect = (id) => onSelected(
+    selectedSet.has(id) ? selected.filter((x) => x !== id) : [...selected, id],
+  );
+
+  const cardProps = {
+    onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics,
+    onHealth, onToggleFavourite,
+    // Selection only appears once something is selected: a checkbox on every card at all times is
+    // permanent chrome for an action most visits never take.
+    selecting: selected.length > 0,
+    selectedSet,
+    onSelect: toggleSelect,
+  };
   // Selecting a tab that empties out (the last published project is unpublished, say) would leave
   // the user staring at nothing they asked for. Fall back to All rather than an empty screen —
   // but not while a search is narrowing things, where an empty result is the honest answer.
@@ -735,8 +828,11 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
           </div>
         </div>
       )}
-      {loaded && !error && (conversations.length > 0 || search || tab !== "all") && (
-        <div className="ct-workspace">
+      {/* `favouritesOnly` and `archived` belong here as much as search does: without them, turning
+          on a filter that matches nothing unmounts the controls that would turn it back off, and
+          the empty state below is unreachable. */}
+      {loaded && !error && (conversations.length > 0 || search || tab !== "all" || favouritesOnly || archived) && (
+        <div className={`ct-workspace ${selected.length ? "ct-selecting" : ""}`}>
           {/* Tabs are views over one field, so a project can never be missing from every tab.
               Counts come from the SERVER and cover the whole account, not the page on screen. */}
           <div className="ct-ws-tabs" role="tablist" aria-label="Project status">
@@ -752,6 +848,58 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
                 aria-label="Search projects" onChange={(e) => setSearchDraft(e.target.value)} />
             )}
           </div>
+
+          {/* Favourites, ordering and the archive. Each is one click and each is reflected in what
+              the server returns, so nothing here filters a page and calls it a filter. */}
+          <div className="ct-ws-controls">
+            <button className={`ct-chipfilter ${favouritesOnly ? "on" : ""}`}
+              aria-pressed={favouritesOnly} disabled={archived}
+              onClick={() => onFavouritesOnly(!favouritesOnly)}>
+              ★ Favourites{counts.favourites ? ` (${counts.favourites})` : ""}
+            </button>
+            <button className={`ct-chipfilter ${archived ? "on" : ""}`} aria-pressed={archived}
+              onClick={() => { onArchived(!archived); if (!archived) onFavouritesOnly(false); }}>
+              Archived
+            </button>
+            {sorts.length > 0 && (
+              <label className="ct-ws-sort">
+                <span className="ct-hint">Sort</span>
+                <select value={sort} onChange={(e) => onSort(e.target.value)} aria-label="Sort projects">
+                  {sorts.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </label>
+            )}
+            {conversations.length > 0 && (
+              <button className="ct-linkish ct-ws-selectall"
+                onClick={() => onSelected(allSelected ? [] : allShown)}>
+                {allSelected ? "Clear selection" : "Select all"}
+              </button>
+            )}
+          </div>
+
+          {/* The bulk bar appears only when something is selected, and says exactly what it will
+              act on rather than "selected items". */}
+          {selected.length > 0 && (
+            <div className="ct-bulkbar" role="region" aria-label="Bulk actions">
+              <span className="ct-bulkbar-count">
+                {selected.length} project{selected.length === 1 ? "" : "s"} selected
+              </span>
+              <div className="ct-bulkbar-actions">
+                {archived ? (
+                  <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("restore")}>Restore</button>
+                ) : (
+                  <>
+                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("favourite")}>★ Favourite</button>
+                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("archive")}>Archive</button>
+                  </>
+                )}
+                {/* The same soft delete a single project gets — Recently Deleted, recoverable for
+                    seven days. A bulk action must never be more destructive than the individual one. */}
+                <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("delete")}>Delete</button>
+                <button className="ct-btn-quiet" onClick={() => onSelected([])}>Cancel</button>
+              </div>
+            </div>
+          )}
           {/* Grouped by what a project IS, so live apps are never buried among drafts. The tabs
               still filter; this is what the dashboard does before anyone touches them. */}
           {groups.map((group) => (
@@ -763,9 +911,11 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
           {groups.length === 0 && (
             <div className="ct-ws-empty ct-hint">
               {search ? `Nothing matches “${search}”.`
-                : tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
-                  : tab === "updates" ? "Every published project is up to date."
-                    : "No projects here yet."}
+                : archived ? "Nothing is archived. Archiving puts a project out of the way without deleting anything — a published site keeps serving."
+                  : favouritesOnly ? "No favourites yet. Star a project to keep it at the top."
+                    : tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
+                      : tab === "updates" ? "Every published project is up to date."
+                        : "No projects here yet."}
             </div>
           )}
           {/* Paging, not a silent ceiling. The old dashboard showed six and said nothing about the
@@ -809,15 +959,36 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
   );
 }
 
-function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics, onHealth }) {
+function ProjectCard({
+  c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics, onHealth,
+  onToggleFavourite = () => {}, selecting = false, selectedSet = new Set(), onSelect = () => {},
+}) {
   const s = projectState(c);
   const status = statusOf(c);
   const site = c.site || null;
   const badges = badgesFor(c);
+  const isSelected = selectedSet.has(c.id);
+  // Stops a click on a control inside the card from also opening the project.
+  const only = (run) => (event) => { event.stopPropagation(); run(); };
+  // While a selection is running a click selects rather than opens, so the label must say so.
+  const cardLabel = `${selecting ? (isSelected ? "Deselect" : "Select") : "Open"} ${c.title || "untitled project"}`
+    + ` — ${badges.map((b) => b.label).join(", ")}, ${s.label}`;
+
   return (
-    <div className={`ct-project ${site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""}`} role="button" tabIndex={0} onClick={() => onOpen(c.id)}
-      aria-label={`Open ${c.title || "untitled project"} — ${badges.map((b) => b.label).join(", ")}, ${s.label}`}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(c.id); } }}>
+    <div className={`ct-project ${site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""} ${isSelected ? "is-selected" : ""}`}
+      role="button" tabIndex={0} onClick={() => (selecting ? onSelect(c.id) : onOpen(c.id))}
+      {...(selecting ? { "aria-pressed": isSelected } : {})}
+      aria-label={cardLabel}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selecting ? onSelect(c.id) : onOpen(c.id); }
+        // A single key to start selecting, so bulk work does not begin with a hunt for a checkbox.
+        if (e.key === "x" || e.key === "X") { e.preventDefault(); onSelect(c.id); }
+      }}>
+      {/* Always rendered, faded away until the card is hovered or focused (or a selection is
+          already running). It cannot be conditional on `selecting`: that left the keyboard's `x`
+          as the only way to begin, so a mouse could never start a selection at all. */}
+      <input type="checkbox" className="ct-pselect" checked={isSelected} onClick={(e) => e.stopPropagation()}
+        onChange={() => onSelect(c.id)} aria-label={`Select ${c.title || "untitled project"}`} />
       <span className="ct-pmeta">
         <span className="ct-pname">
           {c.title || "Untitled project"}
@@ -826,6 +997,12 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
           {badges.map((b) => (
             <span className={`ct-badge tone-${b.tone}`} key={b.id}>{b.label}</span>
           ))}
+          <button className={`ct-pfav ${c.favourite ? "on" : ""}`} onClick={only(() => onToggleFavourite(c))}
+            aria-pressed={!!c.favourite}
+            aria-label={c.favourite ? "Remove from favourites" : "Add to favourites"}
+            title={c.favourite ? "Remove from favourites" : "Add to favourites"}>
+            {c.favourite ? "★" : "☆"}
+          </button>
         </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
         {site && (
@@ -835,7 +1012,7 @@ function ProjectCard({ c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProj
             onSettings={() => onProjectSettings(c)}
             onAnalytics={() => onAnalytics(c)}
             onHealth={() => onHealth(c)}
-            health={c.health} />
+            health={c.health} today={c.today} />
         )}
       </span>
       <span className="ct-popen">Open</span>

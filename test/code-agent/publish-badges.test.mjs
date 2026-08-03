@@ -84,6 +84,25 @@ test("a project appears exactly once, under what it IS rather than what it is do
   assert.deepEqual(ids, [...new Set(ids)], "no project may be listed twice");
 });
 
+test("a favourite leads, even when it is only a draft", () => {
+  // The server sorts favourites to the front. Grouping then runs on the client, and without a
+  // group of its own it put a pinned DRAFT back underneath every live app — so the star appeared
+  // to do nothing at all. Grouping may reorder within the server's order, never overturn it.
+  const groups = groupProjects([
+    project({ id: "live", publishStatus: STATUS.published }),
+    project({ id: "pinned", favourite: true }),
+  ]);
+  assert.deepEqual(groups.map((g) => g.label), ["Favourites", "Live apps"]);
+  assert.deepEqual(groups[0].items.map((i) => i.id), ["pinned"]);
+});
+
+test("a favourite is listed once, under Favourites rather than also under Live apps", () => {
+  const groups = groupProjects([project({ id: "a", publishStatus: STATUS.published, favourite: true })]);
+  assert.deepEqual(groups.map((g) => g.label), ["Favourites"]);
+  const ids = groups.flatMap((g) => g.items.map((i) => i.id));
+  assert.deepEqual(ids, [...new Set(ids)]);
+});
+
 test("empty groups are omitted, and an unpublished project sits with the drafts", () => {
   const groups = groupProjects([project({ id: "a", publishStatus: STATUS.unpublished })]);
   assert.deepEqual(groups.map((g) => g.label), ["Drafts"],

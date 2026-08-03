@@ -994,3 +994,70 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
   .ct-projdash-url { max-width: 100%; }
   .ct-tabempty, .ct-taberror { padding: 24px 12px; }
 }
+
+/* ── Projects: controls, selection, favourites ───────────────────────────────────────── */
+
+.ct-ws-controls {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0 2px;
+}
+.ct-ws-sort { display: inline-flex; align-items: center; gap: 6px; }
+.ct-ws-sort select {
+  font-size: 12px; color: var(--ink-1); background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px;
+}
+.ct-ws-selectall { margin-left: auto; font-size: 12px; }
+
+.ct-bulkbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 8px 0; padding: 10px 12px; border-radius: 12px;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  /* Stays put while a long list scrolls: selecting forty projects and then having to scroll back
+     up to find the action is the difference between bulk actions being usable and being a demo. */
+  position: sticky; top: 0; z-index: 3;
+  backdrop-filter: blur(8px);
+  /* Slides in rather than appearing, so the list below does not seem to jump on its own. */
+  animation: ct-bulkbar-in 160ms ease-out;
+}
+@keyframes ct-bulkbar-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.ct-bulkbar-count { font-size: 13px; font-weight: 700; color: var(--accent); }
+.ct-bulkbar-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+.ct-project.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ct-pselect {
+  flex-shrink: 0; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;
+  /* Faded rather than removed: a checkbox on every card at all times is permanent chrome for an
+     action most visits never take, but it must still be there for a mouse to reach. Reserving the
+     space keeps the row from shifting the moment a selection begins. */
+  opacity: 0; transition: opacity var(--dur-1);
+}
+.ct-project:hover .ct-pselect, .ct-project:focus-within .ct-pselect,
+.ct-pselect:focus, .ct-project.is-selected .ct-pselect, .ct-selecting .ct-pselect { opacity: 1; }
+
+.ct-pfav {
+  background: none; border: 0; padding: 0 2px; cursor: pointer; line-height: 1;
+  font-size: 14px; color: var(--ink-3);
+  /* Hidden until the card is hovered or the star is focused, unless it is already a favourite —
+     an empty star on every card is noise, but a keyboard user must still be able to reach it. */
+  opacity: 0; transition: opacity var(--dur-1), color var(--dur-1), transform var(--dur-1);
+}
+.ct-project:hover .ct-pfav, .ct-pfav:focus, .ct-pfav:focus-visible,
+.ct-project:focus-within .ct-pfav, .ct-pfav.on { opacity: 1; }
+.ct-pfav.on { color: #f5b301; }
+.ct-pfav:hover { color: #f5b301; transform: scale(1.15); }
+
+@media (max-width: 560px) {
+  .ct-ws-selectall { margin-left: 0; }
+  .ct-bulkbar-actions { margin-left: 0; width: 100%; }
+}
+/* Width is the wrong question — a touch tablet is wide and still has no hover. Ask about hover. */
+@media (hover: none) {
+  .ct-pfav, .ct-pselect { opacity: 1; }
+  .ct-pfav:hover { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-bulkbar { animation: none; }
+  .ct-pfav:hover { transform: none; }
+}

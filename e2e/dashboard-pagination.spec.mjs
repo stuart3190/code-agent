@@ -69,15 +69,29 @@ async function stub(page, rows = ALL) {
     const search = (params.get("q") || "").trim().toLowerCase();
     const offset = Number(params.get("offset") || 0);
     const limit = Number(params.get("limit") || 20);
+    const sort = params.get("sort") || "activity";
+    const favouritesOnly = params.get("favourites") === "1";
+    const archived = params.get("archived") === "1";
     const statuses = TAB_STATUSES[tab] || null;
 
-    const counts = { all: rows.length };
+    // The store partitions on archived_at before anything else does, so the stub must too —
+    // otherwise a spec would pass against a server that treated archive as a client-side filter.
+    const visible = rows.filter((c) => !!c.archivedAt === archived);
+    const counts = { all: visible.length, favourites: visible.filter((c) => c.favourite).length };
     for (const [id, list] of Object.entries(TAB_STATUSES)) {
-      counts[id] = rows.filter((c) => list.includes(c.publishStatus || "draft")).length;
+      counts[id] = visible.filter((c) => list.includes(c.publishStatus || "draft")).length;
     }
-    const matching = rows.filter((c) => {
+    const matching = visible.filter((c) => {
       if (statuses && !statuses.includes(c.publishStatus || "draft")) return false;
+      if (favouritesOnly && !c.favourite) return false;
       return !search || String(c.title || "").toLowerCase().includes(search);
+    });
+    // Favourites lead whatever the ordering is, with a stable id tiebreak — the server's contract.
+    matching.sort((a, b) => {
+      if (!!a.favourite !== !!b.favourite) return a.favourite ? -1 : 1;
+      const by = sort === "name" ? String(a.title || "").localeCompare(String(b.title || ""))
+        : Date.parse(b.last_activity_at || 0) - Date.parse(a.last_activity_at || 0);
+      return by || String(a.id).localeCompare(String(b.id));
     });
     const slice = matching.slice(offset, offset + limit);
     return r.fulfill({ json: {
@@ -86,8 +100,12 @@ async function stub(page, rows = ALL) {
       page: {
         offset, limit, total: matching.length,
         nextOffset: offset + slice.length < matching.length ? offset + slice.length : null,
-        tab, search: search || null,
+        tab, search: search || null, sort, favourites: favouritesOnly, archived,
       },
+      sorts: [
+        { id: "activity", label: "Last activity" }, { id: "created", label: "Newest" },
+        { id: "name", label: "Name" }, { id: "deployed", label: "Last deployed" },
+      ],
     } });
   };
   await page.route("**/api/v1/conversations", listRoute);
