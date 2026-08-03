@@ -943,3 +943,54 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 @media (max-width: 560px) {
   .ct-published-version { margin-left: 0; }
 }
+
+/* ── Project dashboard: header, tab strip, shared states ─────────────────────────────── */
+
+.ct-projdash-head { align-items: flex-start; gap: 12px; }
+.ct-projdash-title { min-width: 0; flex: 1; display: grid; gap: 6px; }
+.ct-projdash-title h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+.ct-projdash-facts {
+  display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; min-width: 0;
+}
+.ct-projdash-health { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.ct-projdash-url {
+  font-size: 12.5px; color: var(--accent); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.ct-projdash-url:hover { text-decoration: underline; }
+
+/* The strip scrolls on narrow screens. The fade says so — a row of tabs cut off at the edge with
+   no gradient reads as a rendering fault rather than as more content. */
+.ct-projtabs-wrap { position: relative; flex-shrink: 0; }
+.ct-projtabs-wrap::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 10px; width: 28px;
+  background: linear-gradient(90deg, transparent, var(--surface-1));
+  pointer-events: none;
+}
+.ct-projtab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px;
+}
+/* The panel takes focus when a tab is chosen by keyboard; it should not draw a ring for that. */
+.ct-sheet-body[role="tabpanel"]:focus { outline: none; }
+
+.ct-tabstate { display: grid; gap: 10px; }
+.ct-tabskel-row { display: grid; gap: 8px; }
+
+.ct-tabempty, .ct-taberror {
+  justify-items: center; text-align: center; padding: 32px 16px; gap: 8px;
+}
+.ct-tabempty-icon { font-size: 26px; line-height: 1; }
+.ct-tabempty strong, .ct-taberror strong { font-size: 14.5px; }
+.ct-tabempty .ct-hint, .ct-taberror .ct-hint { max-width: 46ch; }
+.ct-taberror {
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bad) 5%, transparent);
+}
+.ct-taberror strong { color: var(--ink-1); }
+
+@media (max-width: 560px) {
+  .ct-projdash-head { flex-wrap: wrap; }
+  .ct-projdash-url { max-width: 100%; }
+  .ct-tabempty, .ct-taberror { padding: 24px 12px; }
+}

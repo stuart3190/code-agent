@@ -10,6 +10,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { projectAnalytics, projectAnalyticsLive, exportAnalytics } from "../lib/codeAgentApi.js";
 import { formatNumber } from "../manage/shared.jsx";
+import { TabSkeleton, TabError } from "./TabStates.jsx";
 
 const RANGES = [
   { days: 7, label: "7 days" },
@@ -162,7 +163,7 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
   // button, and nesting a second one inside it would mean two scroll areas and two close buttons.
   const body = (
     <>
-        {error && <div className="mg-error">{error}</div>}
+        {error && <TabError message={error} onRetry={load} />}
 
         <div className="ct-ws-tabs" role="group" aria-label="Date range">
           {RANGES.map((r) => {
@@ -194,7 +195,7 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
           )}
         </div>
 
-        {!data && !error && <div className="mg-card"><div className="ct-hint">Loading…</div></div>}
+        {!data && !error && <TabSkeleton rows={3} metrics label="Loading analytics" />}
 
         {data?.unavailable === "not_published" && (
           <div className="mg-card"><div className="ct-hint">

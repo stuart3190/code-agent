@@ -10,6 +10,7 @@ import {
   listDomains, addDomain, verifyDomain, retryDomain, removeDomain,
 } from "../lib/codeAgentApi.js";
 import { displayUrl, relativeTime } from "./publishLifecycle.js";
+import { TabSkeleton, TabError } from "./TabStates.jsx";
 import {
   DOMAIN_LABEL as STATUS_TEXT, domainExplanation, sslExplanation, SSL_LABEL, isDomainLive,
 } from "../../../shared/operationalState.mjs";
@@ -37,6 +38,7 @@ export default function DomainsSection({ site }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const projectId = site?.projectId;
 
   const apply = useCallback((result) => {
@@ -46,7 +48,16 @@ export default function DomainsSection({ site }) {
 
   const load = useCallback(async () => {
     if (!projectId) return;
-    try { apply(await listDomains(projectId)); } catch { /* section simply stays empty */ }
+    try {
+      apply(await listDomains(projectId));
+      setLoadError("");
+    } catch (e) {
+      // Swallowing this rendered the section as "you have no domains", which is the most misleading
+      // possible answer: it invites someone to add a domain they may already have. The same
+      // distinction Phase 1 spent ten PRs drawing everywhere else — "nothing here" and "we could
+      // not find out" are different sentences.
+      setLoadError(e.message || "Your domains could not be loaded.");
+    }
     setLoaded(true);
   }, [projectId, apply]);
 
@@ -68,6 +79,27 @@ export default function DomainsSection({ site }) {
 
   const atLimit = allowance && allowance.limit !== null && allowance.used >= allowance.limit;
   const noPlan = allowance && allowance.limit === 0;
+
+  // The Thrallo address is a fact this component already holds, so it is shown even while the
+  // custom domains are still arriving — the panel should never look blank.
+  if (!loaded) {
+    return (
+      <div className="ct-set-group">
+        <div className="ct-set-label">Domains</div>
+        <TabSkeleton rows={2} label="Loading domains" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="ct-set-group">
+        <div className="ct-set-label">Domains</div>
+        <TabError message={loadError} onRetry={load}>
+          Your Thrallo address is unaffected — this is only the list of custom domains.
+        </TabError>
+      </div>
+    );
+  }
 
   return (
     <div className="ct-set-group">
