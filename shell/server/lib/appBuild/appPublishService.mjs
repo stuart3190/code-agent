@@ -249,7 +249,12 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     signalBuildOutcome({ owner: ctx.owner, projectId: project.id, signal: "deployed" }).catch(() => {});
 
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
-    await ctx.emit("published", { url: out.url, slug: out.id, projectId: project.id });
+    // The number rides along so the conversational receipt can name the version. Everything else
+    // the panel shows is still re-read from publish state rather than assembled from this event —
+    // one source of truth, and `updateAvailable` stays correct.
+    await ctx.emit("published", {
+      url: out.url, slug: out.id, projectId: project.id, deploymentNumber: deployment.number,
+    });
     logProject({
       owner: ctx.owner, projectId: project.id, source: "deploy", level: "info",
       message: `Deployed to ${out.url}`, refType: "deployment", refId: out.id,

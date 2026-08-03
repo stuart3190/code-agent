@@ -71,7 +71,10 @@ export default function ProjectDashboard({
         {tab === "analytics" && <AnalyticsView site={site} embedded onUpgrade={onUpgrade} />}
         {tab === "health" && <HealthView site={site} embedded onOpenTab={(next, ref = null) => setTab(next, ref)} />}
         {tab === "logs" && <LogsView site={site} buildRef={buildRef} onSelectBuild={(id) => setTab("logs", id)} />}
-        {tab === "deployments" && <DeploymentsView site={site} onOpenLogs={(runId = null) => setTab("logs", runId)} onUpgrade={onUpgrade} />}
+        {tab === "deployments" && (
+          <DeploymentsView site={site} focusId={buildRef}
+            onOpenLogs={(runId = null) => setTab("logs", runId)} onUpgrade={onUpgrade} />
+        )}
         {tab === "domains" && <DomainsSection site={site} />}
         {tab === "settings" && <ProjectSettingsBody site={site} onSentence={onSentence} />}
       </div>

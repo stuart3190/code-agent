@@ -101,7 +101,11 @@ export function applyEvent(view, event) {
       push({
         kind: "published",
         url: payload.url,
-        text: payload.note || `Live at ${String(payload.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
+        // Names the version. The address and the actions belong to the panel above the thread —
+        // this is the conversational record that it happened, not a second copy of the panel.
+        text: payload.deploymentNumber
+          ? `Deployment #${payload.deploymentNumber} is live`
+          : payload.note || `Live at ${String(payload.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "")}`,
       });
       break;
     // A connected domain is a DNS task, not a sentence. The records are shown as copyable rows

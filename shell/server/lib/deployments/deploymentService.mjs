@@ -10,15 +10,10 @@
 // Nothing is ever rewritten, which is what makes the history worth keeping.
 
 import { serviceClient } from "../supabase.mjs";
+import { DEPLOY_STATUS } from "../../../shared/deploymentState.mjs";
 
-export const DEPLOY_STATUS = Object.freeze({
-  building: "building",
-  deploying: "deploying",
-  live: "live",
-  failed: "failed",
-  rolledBack: "rolled_back",
-  superseded: "superseded",
-});
+// The vocabulary lives in shell/shared/deploymentState.mjs, which the web app imports too.
+export { DEPLOY_STATUS, TERMINAL_STATUSES, isDeploymentSettled } from "../../../shared/deploymentState.mjs";
 
 // States that mean "this publish is still happening". A second click while one of these is in
 // flight joins the existing deployment rather than opening a rival one.
@@ -192,7 +187,15 @@ export async function markFailed(deploymentId, reason, { client = serviceClient(
 
 // ── Reading ─────────────────────────────────────────────────────────────────────────────
 
-export function publicDeployment(row) {
+/**
+ * The fields that describe a deployment wherever it is mentioned.
+ *
+ * Split out from `publicDeployment` because the publish panel needs the same field NAMES without
+ * paying for `source_tree` — that column is the entire app, and selecting it for every deployment
+ * of every project just to compute one boolean would make `publishStates` enormous. One definition
+ * of the names, two callers with different appetites.
+ */
+export function deploymentSummary(row) {
   return {
     id: row.id,
     number: row.number,
@@ -200,20 +203,26 @@ export function publicDeployment(row) {
     environment: row.environment,
     triggeredByKind: row.triggered_by_kind,
     buildRunId: row.build_run_id || null,
-    sourceProjectId: row.source_project_id || null,
     buildDurationMs: row.build_duration_ms ?? null,
     deployDurationMs: row.deploy_duration_ms ?? null,
     deployedAt: row.deployed_at || null,
     createdAt: row.created_at,
     url: row.url || null,
     failureReason: row.failure_reason || null,
+    // Git fields are deliberately ABSENT rather than null: Thrallo has no repository connection
+    // for these projects, and a row of empty "commit / branch / author" would be inventing a
+    // concept the product does not have.
+  };
+}
+
+export function publicDeployment(row) {
+  return {
+    ...deploymentSummary(row),
+    sourceProjectId: row.source_project_id || null,
     rolledBackFrom: row.rolled_back_from || null,
     // Whether this deployment can still be restored or downloaded. Stating it beats a button that
     // fails when pressed.
     sourceAvailable: !!row.source_tree,
-    // Git fields are deliberately ABSENT rather than null: Thrallo has no repository connection
-    // for these projects, and a row of empty "commit / branch / author" would be inventing a
-    // concept the product does not have.
   };
 }
 

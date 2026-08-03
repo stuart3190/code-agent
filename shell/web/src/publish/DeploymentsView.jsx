@@ -8,22 +8,14 @@
 // because these projects have no repository connected; showing empty ones would be inventing a
 // concept the product does not have.
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { projectDeployments, rollbackDeployment, downloadDeployment } from "../lib/codeAgentApi.js";
 import { relativeTime } from "./publishLifecycle.js";
+// One vocabulary for deployment status, shared with the server and the publish panel.
+import {
+  DEPLOY_LABEL as STATUS_LABEL, DEPLOY_TONE as STATUS_TONE, isDeploymentSettled,
+} from "../../../shared/deploymentState.mjs";
 
-const STATUS_LABEL = {
-  building: "Building",
-  deploying: "Deploying",
-  live: "Live",
-  failed: "Failed",
-  rolled_back: "Rolled back",
-  superseded: "Superseded",
-};
-const STATUS_TONE = {
-  building: "building", deploying: "building", live: "live",
-  failed: "failed", rolled_back: "update", superseded: "muted",
-};
 
 const seconds = (ms) => (ms == null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
 
@@ -47,12 +39,13 @@ function Confirm({ deployment, busy, error, onCancel, onConfirm }) {
   );
 }
 
-export default function DeploymentsView({ site, onOpenLogs, onUpgrade }) {
+export default function DeploymentsView({ site, onOpenLogs, onUpgrade, focusId = null }) {
   const [deployments, setDeployments] = useState(null);
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const focused = useRef(null);
   const projectId = site?.projectId;
 
   const load = useCallback(async () => {
@@ -68,12 +61,24 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade }) {
   }, [projectId]);
   useEffect(() => { load(); }, [load]);
 
-  // While something is going out, the list is stale the moment it renders.
+  // While something is going out, the list is stale the moment it renders. Polling stops the
+  // instant every deployment reaches a terminal status — `isDeploymentSettled` is the shared
+  // answer to "will this change again", so this cannot drift from the publish panel's poll.
   useEffect(() => {
-    if (!deployments?.some((d) => d.status === "building" || d.status === "deploying")) return undefined;
+    if (!deployments?.some((d) => !isDeploymentSettled(d.status))) return undefined;
     const timer = setInterval(load, 5_000);
     return () => clearInterval(timer);
   }, [deployments, load]);
+
+  // Arriving from "View Deployment" — scroll the named one into view and mark it, once. Without
+  // this the link lands at the top of a list and leaves the reader to hunt.
+  useEffect(() => {
+    if (!focusId || !deployments?.length || focused.current === focusId) return;
+    const node = document.getElementById(`deployment-${focusId}`);
+    if (!node) return;
+    focused.current = focusId;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusId, deployments]);
 
   async function rollback(deployment) {
     setBusy(true); setActionError("");
@@ -117,7 +122,8 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade }) {
       {deployments.map((d) => {
         const isLive = d.status === "live";
         return (
-          <div className={`mg-card ct-deploy ${isLive ? "is-live" : ""}`} key={d.id}>
+          <div className={`mg-card ct-deploy ${isLive ? "is-live" : ""} ${focusId === d.id ? "is-focused" : ""}`}
+            id={`deployment-${d.id}`} key={d.id}>
             <div className="ct-deploy-head">
               <span className="ct-deploy-no">#{d.number}</span>
               <span className={`ct-badge tone-${STATUS_TONE[d.status] || "muted"}`}>

@@ -20,7 +20,7 @@ const OWNER = "44444444-4444-4444-8444-444444444444";
 const PUBLISHED_AT = "2026-08-02T12:00:00.000Z";
 const PRODUCT = "prod-1";
 
-function fakeDb({ sites = [], projects = [], domains = [], siteError = null } = {}) {
+function fakeDb({ sites = [], projects = [], domains = [], deployments = [], siteError = null } = {}) {
   const seen = [];
   return {
     seen,
@@ -31,6 +31,7 @@ function fakeDb({ sites = [], projects = [], domains = [], siteError = null } = 
         eq(column, value) { filters[column] = value; return api; },
         in(column, values) { filters[column] = values; return api; },
         order() { return api; },
+        limit() { return api; },
         then(resolve) {
           seen.push({ table, filters });
           if (table === "published_sites") {
@@ -43,13 +44,33 @@ function fakeDb({ sites = [], projects = [], domains = [], siteError = null } = 
               error: null,
             });
           }
-          return resolve({ data: projects.filter((p) => p.owner === filters.owner), error: null });
+          // Named explicitly. The fallback used to be "anything else is projects", so a new table
+          // silently received project rows instead of its own — the fake would have agreed with a
+          // reader of the wrong table.
+          if (table === "deployments") {
+            return resolve({
+              data: [...deployments.filter((d) => d.owner === filters.owner)]
+                .sort((a, b) => b.number - a.number),
+              error: null,
+            });
+          }
+          if (table === "projects") {
+            return resolve({ data: projects.filter((p) => p.owner === filters.owner), error: null });
+          }
+          throw new Error(`fakeDb has no model for table "${table}"`);
         },
       };
       return api;
     },
   };
 }
+
+const deployment = (over = {}) => ({
+  owner: OWNER, id: "d1", project_id: "p1", product_id: PRODUCT, number: 1, status: "live",
+  environment: "production", triggered_by_kind: "user", build_run_id: "run-1",
+  build_duration_ms: 1800, deploy_duration_ms: 300, deployed_at: PUBLISHED_AT,
+  created_at: PUBLISHED_AT, failure_reason: null, url: "https://app.thrallo.com/x", ...over,
+});
 
 const site = (over = {}) => ({
   owner: OWNER, project_id: "p1", slug: "app", url: "https://app.thrallo.com/x",
@@ -156,10 +177,11 @@ test("republishing clears the offline stamp", async () => {
 
 // ── Isolation and resilience ────────────────────────────────────────────────────────────
 
-test("both queries are owner-scoped", async () => {
+test("every query is owner-scoped", async () => {
   const db = fakeDb({ sites: [site()], projects: [project()] });
   await publishStates(OWNER, db);
-  assert.equal(db.seen.length, 3, "published_sites, projects and custom_domains");
+  assert.deepEqual(db.seen.map((q) => q.table).sort(),
+    ["custom_domains", "deployments", "projects", "published_sites"]);
   for (const query of db.seen) assert.equal(query.filters.owner, OWNER, `${query.table} must filter by owner`);
 });
 
@@ -345,4 +367,91 @@ test("the database refuses a second live record for one product", async () => {
     "repair before constrain");
   assert.doesNotMatch(migration, /delete from public\.published_sites/i,
     "a superseded record is retired, never deleted — the slug and history live on it");
+});
+
+// ── The deployment travels with the publish state ───────────────────────────────────────
+//
+// The panel's facts are read server-side rather than assembled from the publish event, so there is
+// one source of truth for "which version is live and how long did it take". Before this the panel
+// could not name a version at all — deployments existed but nothing carried them to it.
+
+test("the live deployment rides along with its version and both durations", async () => {
+  const db = fakeDb({ sites: [site()], projects: [project()], deployments: [deployment()] });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.deployment.number, 1);
+  assert.equal(state.deployment.buildDurationMs, 1800);
+  assert.equal(state.deployment.deployDurationMs, 300, "measured separately, not one total split");
+  assert.equal(state.deployment.buildRunId, "run-1", "so View Logs can open the exact build");
+});
+
+test("source_tree is never fetched — it is the entire app", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/publishState.mjs", import.meta.url)), "utf8");
+  // The selected COLUMNS, not the surrounding prose — the comment above the query explains why
+  // source_tree is omitted and would otherwise match.
+  const columns = source
+    .slice(source.indexOf('from("deployments")'))
+    .match(/\.select\("([^"]+)"\)/)?.[1] || "";
+  assert.ok(columns.includes("build_duration_ms"), "the query was found");
+  assert.ok(!columns.includes("source_tree"),
+    "selecting it for every deployment of every project would make this query enormous");
+});
+
+test("a failed publish is reported alongside what is still serving", async () => {
+  // The case the panel had no way to describe: the newest attempt is not what people are getting.
+  const db = fakeDb({
+    sites: [site()], projects: [project()],
+    deployments: [
+      deployment({ id: "d1", number: 1, status: "live" }),
+      deployment({ id: "d2", number: 2, status: "failed", failure_reason: "build failed", deployed_at: null }),
+    ],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.deployment.number, 1, "what is SERVING is still #1");
+  assert.equal(state.lastAttempt.number, 2, "and the newest attempt is named separately");
+  assert.equal(state.lastAttempt.status, "failed");
+  assert.equal(state.lastAttempt.failureReason, "build failed");
+});
+
+test("a publish in flight is visible without disturbing what is live", async () => {
+  const db = fakeDb({
+    sites: [site()], projects: [project()],
+    deployments: [
+      deployment({ id: "d1", number: 1, status: "live" }),
+      deployment({ id: "d2", number: 2, status: "building", deployed_at: null }),
+    ],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.deployment.number, 1, "nothing has changed on the live site yet");
+  assert.equal(state.lastAttempt.status, "building");
+});
+
+test("deployments resolve per APP, so a rebuild keeps its history", async () => {
+  // A rebuild creates a new project row under the same product; its deployments are the same app's.
+  const db = fakeDb({
+    sites: [site({ project_id: "p1" })],
+    projects: [project({ id: "p1" }), project({ id: "p2", updated_at: later(3_600_000) })],
+    deployments: [deployment({ id: "d2", project_id: "p2", number: 2, status: "live" })],
+  });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.deployment.number, 2,
+    "the deployment belongs to the product, not to the project row published months ago");
+});
+
+test("a project that has never deployed carries null rather than a guess", async () => {
+  const db = fakeDb({ sites: [site()], projects: [project()], deployments: [] });
+  const [state] = await publishStates(OWNER, db);
+  assert.equal(state.deployment, null);
+  assert.equal(state.lastAttempt, null);
+});
+
+test("a deployments read failure is raised, not reported as no history", async () => {
+  const db = {
+    from: (table) => ({
+      select() { return this; }, eq() { return this; }, order() { return this; }, limit() { return this; },
+      then: (resolve) => resolve(table === "deployments"
+        ? { data: null, error: { message: "connection reset" } }
+        : { data: table === "published_sites" ? [site()] : [], error: null }),
+    }),
+  };
+  await assert.rejects(() => publishStates(OWNER, db), /connection reset/);
 });

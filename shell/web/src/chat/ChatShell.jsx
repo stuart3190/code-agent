@@ -30,6 +30,7 @@ import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
 import {
   TABS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
+  PUBLISH_SUCCESS_DURATION_MS,
 } from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
 import { usePlanState } from "../billing/planState.js";
@@ -140,6 +141,10 @@ function Workspace({ user }) {
   const publish = usePublishState();
   // Set only when a publish completes in THIS session, so the celebration belongs to the moment
   // while the panel itself stays permanently.
+  // { projectId, at } — WHICH project just published, and when. It used to hold a projectId that
+  // nothing compared against (`celebrate={!!justPublished}`), so publishing project A and then
+  // opening project B made B celebrate too; and it was cleared only by pressing Publish Update, so
+  // the banner outlived the moment by hours.
   const [justPublished, setJustPublished] = useState(null);
   const [unpublishing, setUnpublishing] = useState(null); // { conversation, site, busy, error }
   const [dashboard, setDashboard] = useState(null); // { site, tab }
@@ -237,7 +242,9 @@ function Workspace({ user }) {
             // current) live server-side, so re-read them rather than assembling them from the
             // event — that keeps one source of truth and makes updateAvailable correct.
             if (event.type === "published") {
-              setJustPublished(event.payload?.projectId || true);
+              setJustPublished(event.payload?.projectId
+                ? { projectId: String(event.payload.projectId), at: Date.now() }
+                : null);
               refreshProjects();
             }
             if (event.type === "open_view" && event.payload?.view === "run" && event.payload?.runId) {
@@ -329,6 +336,20 @@ function Workspace({ user }) {
     return loadConversations({ offset: 0, limit: Math.max(20, conversationsRef.current.length) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadConversations]);
+
+  // The project currently celebrating, or null. Expires on a timer rather than lingering until the
+  // next publish, and is cleared when the conversation changes — a celebration belongs to a moment
+  // and to one project.
+  const [celebratingProjectId, setCelebratingProjectId] = useState(null);
+  useEffect(() => {
+    if (!justPublished || PUBLISH_SUCCESS_DURATION_MS === 0) { setCelebratingProjectId(null); return undefined; }
+    const remaining = PUBLISH_SUCCESS_DURATION_MS - (Date.now() - justPublished.at);
+    if (remaining <= 0) { setCelebratingProjectId(null); return undefined; }
+    setCelebratingProjectId(justPublished.projectId);
+    const timer = setTimeout(() => setCelebratingProjectId(null), remaining);
+    return () => clearTimeout(timer);
+  }, [justPublished]);
+  useEffect(() => { setJustPublished(null); }, [active?.id]);
 
   // Open the Domains panel once the newly connected project's publish state has actually arrived.
   // Doing it inline on the event would open a dashboard with no site to render.
@@ -502,7 +523,9 @@ function Workspace({ user }) {
             {/* Above the thread, so it stays put while the conversation scrolls — the answer to
                 "is my app live?" must not scroll away the way the old publish message did. */}
             <PublishedPanel site={publish.byProduct(active.productId)}
-              celebrate={!!justPublished}
+              // Scoped to THIS project, so another project's publish never celebrates here.
+              celebrate={celebratingProjectId != null
+                && String(publish.byProduct(active.productId)?.projectId) === celebratingProjectId}
               onPublishUpdate={() => { setJustPublished(null); send("Publish the latest version of this app."); }}
               onUnpublish={() => setUnpublishing({
                 conversation: active, site: publish.byProduct(active.productId), busy: false, error: "",
@@ -510,7 +533,13 @@ function Workspace({ user }) {
               onOpenSettings={() => openDashboard(publish.byProduct(active.productId), "settings")}
               // "Connect Domain" opens the Domains panel — the one workflow that actually connects
               // domains. It used to open Project Settings, which contains no domain UI at all.
-              onConnectDomain={() => openDashboard(publish.byProduct(active.productId), "domains")} />
+              onConnectDomain={() => openDashboard(publish.byProduct(active.productId), "domains")}
+              onAnalytics={() => openDashboard(publish.byProduct(active.productId), "analytics")}
+              // The exact build run, not the whole stream — the deep link PR 6 built.
+              onLogs={(runId) => openDashboard(publish.byProduct(active.productId), "logs", null, runId)}
+              // Opens Deployments focused on this deployment rather than leaving someone to find it.
+              onDeployments={(deploymentId) =>
+                openDashboard(publish.byProduct(active.productId), "deployments", null, deploymentId)} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
