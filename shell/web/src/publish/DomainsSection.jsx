@@ -9,7 +9,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   listDomains, addDomain, verifyDomain, retryDomain, removeDomain,
 } from "../lib/codeAgentApi.js";
-import { displayUrl, relativeTime, DOMAIN_STATUS_LABEL as STATUS_TEXT, DOMAIN_STATUS_HINT as STATUS_HINT } from "./publishLifecycle.js";
+import { displayUrl, relativeTime } from "./publishLifecycle.js";
+import {
+  DOMAIN_LABEL as STATUS_TEXT, domainExplanation, sslExplanation, SSL_LABEL, isDomainLive,
+} from "../../../shared/operationalState.mjs";
 
 function CopyValue({ value }) {
   const [copied, setCopied] = useState(false);
@@ -85,7 +88,7 @@ export default function DomainsSection({ site }) {
             <div>
               <strong>{d.domain}</strong>
               <div className="ct-hint">
-                {STATUS_HINT[d.status]}
+                {domainExplanation(d.status)}
                 {d.lastCheckedAt && ` · checked ${relativeTime(d.lastCheckedAt)}`}
               </div>
             </div>
@@ -96,7 +99,7 @@ export default function DomainsSection({ site }) {
 
           {d.status === "active" && (
             <div className="ct-hint">
-              HTTPS: {d.sslStatus === "active" ? "certificate issued" : "certificate is being issued — this takes a few seconds on first visit"}
+              {SSL_LABEL[d.sslStatus] || SSL_LABEL.pending} — {sslExplanation(d.sslStatus, d.status)}
             </div>
           )}
           {d.failureReason && d.status !== "active" && <div className="ct-hint">{d.failureReason}</div>}

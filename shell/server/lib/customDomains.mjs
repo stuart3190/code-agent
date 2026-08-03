@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { ownerSubscription } from "./usageBudgets.mjs";
+import { notifyOwner } from "./notifications/notificationService.mjs";
 
 export const DOMAIN_STATUS = Object.freeze({
   pendingDns: "pending_dns",
@@ -243,6 +244,7 @@ export async function verifyDomain(owner, domain, {
   resolver = dns,
   attach = null,
   fetchImpl = fetch,
+  notify = notifyOwner,
 } = {}) {
   const cleaned = normalizeDomain(domain);
   const { data: row } = await client.from("custom_domains")
@@ -292,7 +294,49 @@ export async function verifyDomain(owner, domain, {
   const { data: updated, error } = await client.from("custom_domains")
     .update(patch).eq("domain", cleaned).eq("owner", owner).select("*").single();
   if (error) throw new Error(`custom_domains update failed: ${error.message || error}`);
+
+  // Fired on the TRANSITION, never on the state. The verifier re-checks every unsettled domain
+  // every minute; notifying on state would send the same "still pending" message 1,440 times a
+  // day. Comparing the row's previous status against the new one makes this idempotent by
+  // construction — a sweep that changes nothing notifies nothing.
+  if (row.status !== updated.status) {
+    await announceDomainTransition(owner, updated, row.status, notify);
+  }
   return publicDomain(updated);
+}
+
+// The transitions worth a notification, and nothing else. Reaching `verifying` is progress the
+// owner does not need waking for; reaching active or failed is the answer they were waiting on.
+async function announceDomainTransition(owner, row, previousStatus, notify) {
+  const messages = {
+    [DOMAIN_STATUS.active]: {
+      title: "Your domain is live",
+      body: `${row.domain} is verified and serving over HTTPS.`,
+    },
+    [DOMAIN_STATUS.failed]: {
+      title: "Domain verification failed",
+      body: `We stopped checking ${row.domain} after 48 hours. Check the DNS records and retry.`,
+    },
+  };
+  // A domain that WAS active and is not any more is the other case worth knowing about: the
+  // address the owner gave people has stopped working.
+  if (previousStatus === DOMAIN_STATUS.active && row.status !== DOMAIN_STATUS.active) {
+    return notify(owner, {
+      title: "Custom domain stopped working",
+      body: `${row.domain} no longer points to Thrallo. Your Thrallo address is unaffected.`,
+      url: `https://${row.domain}`,
+      // Tagged per domain and per transition, so two sweeps cannot stack two notifications.
+      tag: `domain-lost-${row.domain}`,
+    }).catch((error) => console.error(`[domains] notify: ${error?.message}`));
+  }
+
+  const message = messages[row.status];
+  if (!message) return undefined;
+  return notify(owner, {
+    ...message,
+    url: `https://${row.domain}`,
+    tag: `domain-${row.status}-${row.domain}`,
+  }).catch((error) => console.error(`[domains] notify: ${error?.message}`));
 }
 
 // Retry clears the failure and starts the checks again with the same token, so DNS already set up

@@ -4,7 +4,8 @@
 // Every control here does something real: there are no placeholders.
 
 import React, { useState } from "react";
-import { STATUS, DOMAIN_STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
+import { STATUS, displayUrl, relativeTime } from "./publishLifecycle.js";
+import { DOMAIN_LABEL, isDomainLive, healthStateOf, isHealthProblem } from "../../../shared/operationalState.mjs";
 
 export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings, onAnalytics, onHealth, health = null }) {
   const [copied, setCopied] = useState(false);
@@ -15,7 +16,7 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
   // Thrallo URL is never lost; it stays copyable from Project Settings.
   const address = site.primaryUrl || site.url;
   // Furthest along, so the card reflects work already in progress rather than showing nothing.
-  const pendingDomain = (site.domains || []).find((d) => d.status !== "active") || null;
+  const pendingDomain = (site.domains || []).find((d) => !isDomainLive(d.status)) || null;
 
   async function copy(event) {
     event.stopPropagation();
@@ -49,7 +50,7 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
               which is the same wrong answer the Overview tile used to give. */}
           {!offline && site.customDomain && " · custom domain"}
           {!offline && !site.customDomain && pendingDomain
-            && ` · ${pendingDomain.domain} ${DOMAIN_STATUS_LABEL[pendingDomain.status]?.toLowerCase() || "pending"}`}
+            && ` · ${pendingDomain.domain} ${DOMAIN_LABEL[pendingDomain.status]?.toLowerCase() || "pending"}`}
         </span>
       </div>
       <div className="ct-pubrow-actions">
@@ -65,7 +66,7 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
           {offline ? "Publish Again" : "Publish Update"}
         </button>
         {!offline && <button className="ct-pubrow-btn" onClick={act(onUnpublish)}>Unpublish</button>}
-        <button className={`ct-pubrow-btn ${health && health.status !== "healthy" ? "accent" : ""}`} onClick={act(onHealth)}>Health</button>
+        <button className={`ct-pubrow-btn ${isHealthProblem(healthStateOf(health)) ? "accent" : ""}`} onClick={act(onHealth)}>Health</button>
         <button className="ct-pubrow-btn" onClick={act(onAnalytics)}>Analytics</button>
         <button className="ct-pubrow-btn" onClick={act(onSettings)}>Project Settings</button>
       </div>
