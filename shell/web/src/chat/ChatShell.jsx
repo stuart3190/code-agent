@@ -107,6 +107,10 @@ const FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(poin
 function Workspace({ user }) {
   const [theme, setTheme] = useTheme(user);
   const [conversations, setConversations] = useState([]);
+  // Read by refreshProjects so it can re-fetch exactly as much as is already on screen without
+  // taking `conversations` as a dependency and rebuilding the callback on every list change.
+  const conversationsRef = useRef([]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   const [convosLoaded, setConvosLoaded] = useState(false);
   const [active, setActive] = useState(null);        // conversation row
   const [view, setView] = useState(emptyConversationView);
@@ -152,13 +156,42 @@ function Workspace({ user }) {
     toastTimer.current = setTimeout(() => setToast(""), 2600);
   }, []);
 
+  // Filtering, searching and paging all happen on the server. The client holds one page, so doing
+  // any of it here would hide everything past the page and make a tab count describe 20 rows
+  // rather than the account.
+  const [listTab, setListTab] = useState("all");
+  const [listSearch, setListSearch] = useState("");
+  const [listing, setListing] = useState({ counts: {}, page: null });
+  const [listError, setListError] = useState("");
+  const [listBusy, setListBusy] = useState(false);
+
+  const loadConversations = useCallback(async ({
+    tab = listTab, q = listSearch, offset = 0, append = false, limit = 0,
+  } = {}) => {
+    setListBusy(true);
+    try {
+      const result = await listConversations({ tab, q, offset, limit });
+      setConversations((current) => (append
+        ? [...current, ...(result.conversations || [])]
+        : (result.conversations || [])));
+      setListing({ counts: result.counts || {}, page: result.page || null });
+      setListError("");
+    } catch (error) {
+      // A list that fails must say so. Rendering an empty dashboard would tell someone their
+      // projects were gone.
+      setListError(error?.message || "Your projects could not be loaded. Please try again.");
+    } finally {
+      setListBusy(false);
+      setConvosLoaded(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listTab, listSearch]);
+
   useEffect(() => {
-    listConversations()
-      .then((r) => setConversations(r.conversations || []))
-      .catch(() => {})
-      .finally(() => setConvosLoaded(true));
+    loadConversations({ offset: 0 });
     listDeletedConversations().then((r) => setDeletedItems(r.items || [])).catch(() => {});
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listTab, listSearch]);
 
   // The browser tab always names where you are.
   useEffect(() => {
@@ -291,11 +324,11 @@ function Workspace({ user }) {
   // already changed.
   const refreshProjects = useCallback(() => {
     publish.refresh();
-    return listConversations()
-      .then((r) => setConversations(r.conversations || []))
-      .catch(() => {});
+    // Refreshes everything already on screen rather than snapping back to page one — someone who
+    // loaded three pages and then published should not lose their place.
+    return loadConversations({ offset: 0, limit: Math.max(20, conversationsRef.current.length) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadConversations]);
 
   // Open the Domains panel once the newly connected project's publish state has actually arrived.
   // Doing it inline on the event would open a dashboard with no site to render.
@@ -395,7 +428,7 @@ function Workspace({ user }) {
     streamAbort.current?.abort();
     setActive(null); setView(emptyConversationView()); setMobilePreview(false);
     navigate("/");
-    listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+    loadConversations({ offset: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -432,6 +465,12 @@ function Workspace({ user }) {
         <div className="ct-dash">
           <PlanBanner planState={planState} onOpenPricing={() => navigate("/pricing")} />
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
+            counts={listing.counts} page={listing.page} busy={listBusy} error={listError}
+            tab={listTab} onTab={setListTab}
+            search={listSearch} onSearch={setListSearch}
+            onLoadMore={() => listing.page?.nextOffset != null
+              && loadConversations({ offset: listing.page.nextOffset, append: true })}
+            onRetryList={() => loadConversations({ offset: 0 })}
             onPublishUpdate={publishUpdateFor}
             onUnpublish={(c) => setUnpublishing({ conversation: c, site: c.site, busy: false, error: "" })}
             onProjectSettings={(c) => openDashboard(c.site, "settings")}
@@ -449,7 +488,7 @@ function Workspace({ user }) {
           onRestore={(item) => restoreConversation(item.id)
             .then(() => {
               setDeletedItems((list) => list.filter((d) => d.id !== item.id));
-              listConversations().then((r) => setConversations(r.conversations || [])).catch(() => {});
+              loadConversations({ offset: 0 });
               showToast("Project restored.");
             })
             .catch((error) => showToast(error.message || "Restore failed — the project is still recoverable."))}
@@ -599,11 +638,21 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {} }) {
+function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {},
+  counts: serverCounts = {}, page = null, busy = false, error = "", tab = "all", onTab = () => {},
+  search = "", onSearch = () => {}, onLoadMore = () => {}, onRetryList = () => {} }) {
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
-  const [tab, setTab] = useState("all");
+  // The box types freely; the fetch waits until typing stops, so every keystroke is not a request.
+  const [searchDraft, setSearchDraft] = useState(search);
+  useEffect(() => { setSearchDraft(search); }, [search]);
+  useEffect(() => {
+    if (searchDraft === search) return undefined;
+    const timer = setTimeout(() => onSearch(searchDraft.trim()), 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDraft]);
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
   // Remember whether this account had projects so the greeting doesn't flash from
   // "Let's build something." to "Welcome back" while the list loads.
@@ -612,21 +661,21 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
     if (loaded) localStorage.setItem(RETURNING_KEY, conversations.length ? "1" : "0");
   }, [loaded, conversations.length]);
   const fresh = !returning;
-  const active = conversations.filter((c) => projectState(c).tone === "active" || projectState(c).tone === "waiting");
-  const rest = conversations.filter((c) => !active.includes(c)).slice(0, 6);
   const act = (id, run) => { setBusyId(id); Promise.resolve(run()).finally(() => setBusyId(null)); };
 
-  const counts = countByTab(conversations);
-  const inTab = TABS.find((t) => t.id === tab) || TABS[0];
-  // In-progress projects are always shown; the rest are capped so the dashboard stays scannable.
-  const shown = [...active, ...rest].filter((c) => inTab.matches(statusOf(c)));
-  const groups = groupProjects(shown);
+  // Everything the server sent for the current tab and search is shown. The old version kept the
+  // in-progress ones and then took SIX of the rest, so a seventh project was simply invisible with
+  // nothing on screen saying so — a second, quieter ceiling underneath the server's twenty.
+  const counts = Object.keys(serverCounts).length ? serverCounts : countByTab(conversations);
+  const groups = groupProjects(conversations);
   const cardProps = { onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics, onHealth };
   // Selecting a tab that empties out (the last published project is unpublished, say) would leave
-  // the user staring at nothing they asked for. Fall back to All rather than an empty screen.
+  // the user staring at nothing they asked for. Fall back to All rather than an empty screen —
+  // but not while a search is narrowing things, where an empty result is the honest answer.
   useEffect(() => {
-    if (tab !== "all" && counts[tab] === 0) setTab("all");
-  }, [tab, counts]);
+    if (tab !== "all" && !search && counts[tab] === 0) onTab("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, counts, search]);
   return (
     <div className="ct-begin" style={{ justifyContent: fresh ? "center" : "flex-start", overflowY: "auto" }}>
       <div className="ct-halo" />
@@ -645,17 +694,29 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
           <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "55%" }} /><i style={{ width: "38%" }} /></span></div>
         </div>
       )}
-      {loaded && conversations.length > 0 && (
+      {loaded && error && (
+        <div className="ct-workspace">
+          <div className="mg-error">
+            {error} <button className="ct-linkish" onClick={onRetryList}>Try again</button>
+          </div>
+        </div>
+      )}
+      {loaded && !error && (conversations.length > 0 || search || tab !== "all") && (
         <div className="ct-workspace">
           {/* Tabs are views over one field, so a project can never be missing from every tab.
-              A tab with nothing in it is hidden rather than shown empty — except All. */}
+              Counts come from the SERVER and cover the whole account, not the page on screen. */}
           <div className="ct-ws-tabs" role="tablist" aria-label="Project status">
-            {TABS.filter((t) => t.id === "all" || counts[t.id] > 0).map((t) => (
+            {TABS.filter((t) => t.id === "all" || counts[t.id] > 0 || tab === t.id).map((t) => (
               <button key={t.id} role="tab" aria-selected={tab === t.id}
-                className={`ct-ws-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>
-                {t.label}<span className="n">{counts[t.id]}</span>
+                className={`ct-ws-tab ${tab === t.id ? "on" : ""}`} onClick={() => onTab(t.id)}>
+                {t.label}<span className="n">{counts[t.id] ?? 0}</span>
               </button>
             ))}
+            {/* Shown once there is enough to make finding one a chore. */}
+            {(counts.all > 8 || search) && (
+              <input className="ct-ws-search" value={searchDraft} placeholder="Search projects…"
+                aria-label="Search projects" onChange={(e) => setSearchDraft(e.target.value)} />
+            )}
           </div>
           {/* Grouped by what a project IS, so live apps are never buried among drafts. The tabs
               still filter; this is what the dashboard does before anyone touches them. */}
@@ -667,10 +728,21 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
           ))}
           {groups.length === 0 && (
             <div className="ct-ws-empty ct-hint">
-              {tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
-                : tab === "updates" ? "Every published project is up to date."
-                  : "No projects here yet."}
+              {search ? `Nothing matches “${search}”.`
+                : tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
+                  : tab === "updates" ? "Every published project is up to date."
+                    : "No projects here yet."}
             </div>
+          )}
+          {/* Paging, not a silent ceiling. The old dashboard showed six and said nothing about the
+              rest; the count here makes what is hidden visible before you ask for it. */}
+          {page?.nextOffset != null && (
+            <button className="ct-ws-more" disabled={busy} onClick={onLoadMore}>
+              {busy ? "Loading…" : `Load more (${page.total - conversations.length} more)`}
+            </button>
+          )}
+          {page && page.total > 0 && page.nextOffset == null && page.total > page.limit && (
+            <div className="ct-ws-empty ct-hint">All {page.total} projects shown.</div>
           )}
         </div>
       )}

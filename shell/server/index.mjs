@@ -554,7 +554,8 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/conversations" && ["GET", "POST"].includes(method)) {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleConversations(req, res, {
-        owner, method, body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
+        owner, method, url,
+        body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
       });
     }
     const conversationMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)$/i);

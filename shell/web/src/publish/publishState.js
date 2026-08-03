@@ -3,8 +3,12 @@
 // One fetch for the whole account: the list is small (one row per published project) and both
 // surfaces need the same answer, so a single source stops the card badge and the panel disagreeing.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { publishState } from "../lib/codeAgentApi.js";
+// The SAME resolver the server uses. This file used to pick with `.find()` — first wins — while
+// the conversations route built a Map — last wins. For a product with two published rows the card
+// and the panel above it could disagree, from one fetch, in the same second.
+import { resolvePublishState } from "../../../shared/publishResolution.mjs";
 
 export function usePublishState() {
   const [sites, setSites] = useState([]);
@@ -23,12 +27,14 @@ export function usePublishState() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const byProduct = useCallback(
-    (productId) => (productId ? sites.find((s) => s.productId === String(productId)) || null : null),
-    [sites],
-  );
+  const resolved = useMemo(() => resolvePublishState(sites), [sites]);
 
-  return { sites, loaded, refresh, byProduct };
+  const byProduct = useCallback((productId) => resolved.forProduct(productId), [resolved]);
+  // A published project whose product link is missing is still genuinely published, and is
+  // reachable by its own id.
+  const byProject = useCallback((projectId) => resolved.forProject(projectId), [resolved]);
+
+  return { sites, loaded, refresh, byProduct, byProject, conflicts: resolved.conflicts };
 }
 
 // "2 minutes ago" / "3 days ago". Publish recency is what people actually want to know; an
