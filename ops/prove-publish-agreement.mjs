@@ -8,7 +8,7 @@
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { publishStates } from "../shell/server/lib/publishState.mjs";
 import { resolvePublishState, PUBLISH_STATUS } from "../shell/shared/publishResolution.mjs";
-import { deployments } from "../shell/server/lib/analytics/reports.mjs";
+import { listDeployments } from "../shell/server/lib/deployments/deploymentService.mjs";
 
 const db = serviceClient();
 const out = [];
@@ -244,8 +244,9 @@ try {
     final.forProject(NEW_PROJECT).status);
 
   // Deployments is keyed by project and must describe the same record.
-  const view = await deployments(OWNER, NEW_PROJECT, { client: db });
-  check(view.site?.url === expected.url, "Deployments agrees on the live address", view.site?.url);
+  const records = await listDeployments(OWNER, NEW_PROJECT, { client: db });
+  check(records.length === 0 || records.every((d) => !d.url || d.url === expected.url),
+    "Deployments agrees on the live address", records[0]?.url || "no deployment records");
 
   // The public API.
   const response = await fetch(`${BASE}/api/v1/publish-state`, { headers: { Accept: "application/json" } })

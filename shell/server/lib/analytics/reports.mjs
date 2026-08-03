@@ -7,7 +7,6 @@
 
 import { serviceClient } from "../supabase.mjs";
 import { ownerSubscription } from "../usageBudgets.mjs";
-import { buildRunsFor } from "../logs/buildRuns.mjs";
 
 // Free sees a week, Starter a quarter, Pro everything. Null means unlimited.
 export const RETENTION_DAYS = Object.freeze({ free: 7, starter: 90, pro: null });
@@ -208,49 +207,7 @@ export async function liveVisitors(owner, projectId, { client = serviceClient(),
   };
 }
 
-// Deployment history needs no collection at all — Thrallo already recorded every one of these.
-export async function deployments(owner, projectId, { client = serviceClient(), store = null, limit = 50 } = {}) {
-  const subscription = await ownerSubscription(owner, store ? { store } : {});
-  const capabilities = analyticsCapabilities(subscription.plan);
-  // Free sees recent history rather than none: knowing the last few deploys is table stakes.
-  const cap = capabilities.buildHistory ? limit : 5;
-
-  const { data: site } = await client.from("published_sites")
-    .select("created_at,updated_at,unpublished_at,slug,url")
-    .eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
-
-  // The SAME resolver the Logs view uses, so a deployment and its logs cannot disagree about which
-  // builds exist or what they are called. It also throws on a read failure rather than reporting
-  // an empty build history, which is indistinguishable from a project that has never been built.
-  const runs = await buildRunsFor(owner, projectId, { client, limit: cap });
-
-  const builds = (runs || []).map((run) => ({
-    id: run.id,
-    status: run.status,
-    startedAt: run.started_at,
-    finishedAt: run.finished_at,
-    durationMs: run.started_at && run.finished_at
-      ? Math.max(0, Date.parse(run.finished_at) - Date.parse(run.started_at)) : null,
-    repairRounds: run.repair_rounds || 0,
-  }));
-
-  return {
-    capabilities,
-    truncated: !capabilities.buildHistory,
-    site: site ? {
-      firstPublishedAt: site.created_at,
-      lastPublishedAt: site.updated_at,
-      unpublishedAt: site.unpublished_at,
-      url: site.url,
-    } : null,
-    builds,
-    summary: {
-      total: builds.length,
-      failed: builds.filter((b) => b.status === "failed").length,
-      averageDurationMs: builds.length
-        ? Math.round(builds.filter((b) => b.durationMs).reduce((n, b) => n + b.durationMs, 0)
-          / Math.max(1, builds.filter((b) => b.durationMs).length))
-        : null,
-    },
-  };
-}
+// deployments() lived here and presented diag_runs — diagnostic BUILD runs — as deployment
+// history. PR 8 replaced its route with real deployment records and left this behind; nothing
+// imported it afterwards. Deleted rather than kept, because an unused reader of the wrong table
+// is one import away from coming back.

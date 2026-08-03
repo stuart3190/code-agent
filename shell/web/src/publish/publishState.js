@@ -9,6 +9,11 @@ import { publishState } from "../lib/codeAgentApi.js";
 // the conversations route built a Map — last wins. For a product with two published rows the card
 // and the panel above it could disagree, from one fetch, in the same second.
 import { resolvePublishState } from "../../../shared/publishResolution.mjs";
+import { isDeploymentSettled } from "../../../shared/deploymentState.mjs";
+
+// Fast enough that a publish feels live, slow enough not to hammer the API. Matches the poll
+// DeploymentsView already uses, so the two surfaces settle together.
+const PUBLISH_POLL_MS = 5_000;
 
 export function usePublishState() {
   const [sites, setSites] = useState([]);
@@ -27,6 +32,20 @@ export function usePublishState() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // While a publish is going out, publish state is stale the moment it renders. Polling stops the
+  // instant every deployment reaches a terminal status — a surface that keeps asking after one has
+  // failed would ask forever, and `isDeploymentSettled` is the shared answer to "will this change
+  // again".
+  const moving = useMemo(
+    () => sites.some((s) => s.lastAttempt && !isDeploymentSettled(s.lastAttempt.status)),
+    [sites],
+  );
+  useEffect(() => {
+    if (!moving) return undefined;
+    const timer = setInterval(refresh, PUBLISH_POLL_MS);
+    return () => clearInterval(timer);
+  }, [moving, refresh]);
+
   const resolved = useMemo(() => resolvePublishState(sites), [sites]);
 
   const byProduct = useCallback((productId) => resolved.forProduct(productId), [resolved]);
@@ -37,27 +56,7 @@ export function usePublishState() {
   return { sites, loaded, refresh, byProduct, byProject, conflicts: resolved.conflicts };
 }
 
-// "2 minutes ago" / "3 days ago". Publish recency is what people actually want to know; an
-// absolute timestamp makes them do the subtraction.
-export function relativeTime(iso) {
-  if (!iso) return null;
-  const seconds = Math.round((Date.now() - Date.parse(iso)) / 1000);
-  if (!Number.isFinite(seconds)) return null;
-  if (seconds < 60) return "just now";
-  const units = [
-    ["minute", 60], ["hour", 60], ["day", 24], ["month", 30.44], ["year", 12],
-  ];
-  let value = seconds / 60;
-  let name = "minute";
-  for (let i = 0; i < units.length - 1; i += 1) {
-    if (value < units[i + 1][1]) { name = units[i][0]; break; }
-    value /= units[i + 1][1];
-    name = units[i + 1][0];
-  }
-  const rounded = Math.floor(value);
-  return `${rounded} ${name}${rounded === 1 ? "" : "s"} ago`;
-}
-
-export function displayUrl(url) {
-  return String(url || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
-}
+// relativeTime and displayUrl used to be defined here as well as in publishLifecycle.js —
+// logically identical, cosmetically different, with components importing whichever they happened
+// to reach for. One definition now lives in publishLifecycle.js.
+export { relativeTime, displayUrl } from "./publishLifecycle.js";

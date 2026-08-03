@@ -15,6 +15,7 @@ import { serviceClient } from "./supabase.mjs";
 // The status vocabulary and the resolver both live in one shared module, imported by the web app
 // too. There is no second definition to drift from.
 import { PUBLISH_STATUS, resolvePublishState } from "../../shared/publishResolution.mjs";
+import { deploymentSummary } from "./deployments/deploymentService.mjs";
 
 export { PUBLISH_STATUS, resolvePublishState };
 
@@ -76,6 +77,30 @@ export async function publishStates(owner, client = serviceClient()) {
     // project is known by changing every time another domain is added.
     if (!customByProject.has(String(row.project_id))) customByProject.set(String(row.project_id), row.domain);
   }
+  // Deployments travel with the publish state for the same reason domains do: the panel's facts are
+  // read server-side rather than assembled from an event, so there is one source of truth for
+  // "which version is live, and how long did it take". Keyed by app — a rebuild creates a new
+  // project row under the same product, and its deployments belong to the same history (PR 8).
+  const { data: deploymentRows, error: deploymentError } = await client
+    .from("deployments")
+    // Deliberately NOT source_tree: it is the entire app, and selecting it for every deployment of
+    // every project would make this query enormous. Whether a deployment can be restored is the
+    // Deployments tab's question, not the panel's.
+    .select("id,project_id,product_id,number,status,build_run_id,build_duration_ms,deploy_duration_ms,deployed_at,created_at,failure_reason,url")
+    .eq("owner", owner)
+    .order("number", { ascending: false });
+  if (deploymentError) throw new Error(`deployments read failed: ${deploymentError.message || deploymentError}`);
+
+  // Two per app: what is SERVING, and the newest attempt of any status. They differ exactly when a
+  // publish failed or is still going out, which is the case the panel had no way to describe.
+  const liveByApp = new Map();
+  const latestByApp = new Map();
+  for (const row of deploymentRows || []) {
+    const app = String(row.product_id || row.project_id);
+    if (!latestByApp.has(app)) latestByApp.set(app, row);          // ordered by number desc
+    if (row.status === "live" && !liveByApp.has(app)) liveByApp.set(app, row);
+  }
+
   const byId = new Map(all.map((p) => [String(p.id), p]));
 
   const newestByProduct = new Map();
@@ -102,9 +127,19 @@ export async function publishStates(owner, client = serviceClient()) {
 
     const customDomain = customByProject.get(String(site.project_id)) || null;
     const domains = domainsByProject.get(String(site.project_id)) || [];
+    const app = String(productId || site.project_id);
+    const liveDeployment = liveByApp.get(app) || null;
+    const latestDeployment = latestByApp.get(app) || null;
     return {
       projectId: String(site.project_id),
       customDomain,
+      // What is SERVING — the version, and how long it took to get there.
+      deployment: liveDeployment ? deploymentSummary(liveDeployment) : null,
+      // The newest attempt of any status. Equal to `deployment` when the last publish worked;
+      // different exactly when one failed or is still going out, which is what lets the panel say
+      // "#8 failed — #7 is still serving" instead of silently showing the older one as if nothing
+      // had happened.
+      lastAttempt: latestDeployment ? deploymentSummary(latestDeployment) : null,
       // The full picture, so every surface describes the same domain the same way.
       domains,
       // What to show and link to. The Thrallo address remains in `url` regardless.

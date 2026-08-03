@@ -37,6 +37,20 @@ export function statusOf(conversation) {
   return conversation?.publishStatus || STATUS.draft;
 }
 
+/**
+ * How long the publish panel stays in its expanded, celebratory state before settling.
+ *
+ * Configurable rather than hard-coded: the right length is a product judgement that may want
+ * tuning without a code change, and a magic 30000 buried in a component is not something anyone
+ * would find. Set VITE_PUBLISH_SUCCESS_MS to override; 0 disables the expanded state entirely.
+ */
+const configuredSuccessMs = Number(
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_PUBLISH_SUCCESS_MS) ?? NaN,
+);
+export const PUBLISH_SUCCESS_DURATION_MS = Number.isFinite(configuredSuccessMs) && configuredSuccessMs >= 0
+  ? configuredSuccessMs
+  : 30_000;
+
 // Domain vocabulary lives in the shared operational module, which the SERVER imports too — a
 // notification about a domain becoming Active should use the same word the panel does.
 export {

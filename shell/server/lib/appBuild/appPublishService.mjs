@@ -204,6 +204,20 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     // first-published date.
     if (claim.supersedes) await transferSite(ctx.owner, claim.supersedes, project.id);
 
+    // A tree with no package.json cannot be built, and npm's answer to that is a wall of ENOENT
+    // naming a path inside Thrallo's own work directory. Observed in production: a project whose
+    // tree held two stray files failed twice with that dump as its failure reason, which is now
+    // shown to the customer on the publish panel. Refusing early costs nothing and says something
+    // a person can act on.
+    if (!project.tree || !project.tree["package.json"]) {
+      const error = new Error(
+        "There's no complete app here to publish yet — the project is missing its package.json. "
+        + "Ask me to build or repair it and I'll take it live.",
+      );
+      error.code = "incomplete_project";
+      throw error;
+    }
+
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
     await ensureDeps(() => {});
     const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -249,7 +263,12 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     signalBuildOutcome({ owner: ctx.owner, projectId: project.id, signal: "deployed" }).catch(() => {});
 
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
-    await ctx.emit("published", { url: out.url, slug: out.id, projectId: project.id });
+    // The number rides along so the conversational receipt can name the version. Everything else
+    // the panel shows is still re-read from publish state rather than assembled from this event —
+    // one source of truth, and `updateAvailable` stays correct.
+    await ctx.emit("published", {
+      url: out.url, slug: out.id, projectId: project.id, deploymentNumber: deployment.number,
+    });
     logProject({
       owner: ctx.owner, projectId: project.id, source: "deploy", level: "info",
       message: `Deployed to ${out.url}`, refType: "deployment", refId: out.id,

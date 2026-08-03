@@ -15,6 +15,34 @@ const check = (ok, label, detail = "") => {
   if (!ok) failed += 1;
 };
 
+// A monitored site this proof OWNS, so it never depends on what an account owner happens to have
+// published. Pointed at Thrallo's own front door, which genuinely resolves, serves 200 and has a
+// real certificate — so DNS, SSL and response time are measured rather than stubbed. Removed at
+// the end.
+// published_sites.owner is a foreign key to auth.users, so the seed needs a real throwaway
+// account rather than a made-up uuid.
+const { data: seedUser, error: seedUserError } = await db.auth.admin.createUser({
+  email: `health-proof-${Date.now()}@thrallo.invalid`,
+  password: `Hp!${Math.random().toString(36).slice(2)}Aa1`,
+  email_confirm: true,
+});
+if (seedUserError) { console.error(`[proof] could not create a seed owner: ${seedUserError.message}`); process.exit(1); }
+const SEED_OWNER = seedUser.user.id;
+const SEED_PROJECT = crypto.randomUUID();
+const SEED_SLUG = "health-proof-target";
+const { error: seedError } = await db.from("published_sites").insert({
+  owner: SEED_OWNER, project_id: SEED_PROJECT, slug: SEED_SLUG,
+  url: process.env.THRALLO_BASE_URL || "https://app.thrallo.com/",
+});
+if (seedError) console.error(`[proof] could not seed a monitored site: ${seedError.message}`);
+
+async function removeSeed() {
+  await db.from("health_checks").delete().eq("owner", SEED_OWNER);
+  await db.from("health_status").delete().eq("owner", SEED_OWNER);
+  await db.from("published_sites").delete().eq("owner", SEED_OWNER);
+  await db.auth.admin.deleteUser(SEED_OWNER).catch(() => {});
+}
+
 // ── 1. A real sweep over the real estate ────────────────────────────────────────────────
 const sites = await liveSites(db);
 console.log(`[proof] ${sites.length} live site(s), ${sites.reduce((n, s) => n + s.targets.length, 0)} address(es)`);
@@ -124,6 +152,11 @@ if (sample) {
   check(tables.includes("health_status") && tables.includes("health_checks"),
     "delete purges both health tables");
 }
+
+await removeSeed();
+const { count: seedLeft } = await db.from("published_sites")
+  .select("project_id", { count: "exact", head: true }).eq("owner", SEED_OWNER);
+check(!seedLeft, "the seeded monitoring target is cleaned up", `${seedLeft || 0} row(s) left`);
 
 console.log(`\n${out.join("\n")}\n`);
 console.log(failed ? `${failed} FAILED` : `${out.length}/${out.length} checks passed`);
