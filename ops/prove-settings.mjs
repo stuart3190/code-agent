@@ -227,6 +227,9 @@ try {
   }
 
   // ── The endpoints refuse an anonymous caller ─────────────────────────────────────────
+  // Captured here, not assumed to be zero: the notifyOwner check above legitimately leaves one
+  // unread row, and an absolute assertion would fail on the proof's own correct behaviour.
+  const unreadBefore = await unreadCount(OWNER);
   for (const [label, path, method, body] of [
     ["the settings read", "/api/v1/settings", "GET", null],
     ["notification history", "/api/v1/notifications", "GET", null],
@@ -242,7 +245,13 @@ try {
   }
 
   // And that refusal really changed nothing.
-  check(await unreadCount(OWNER) === 0, "the anonymous mark-all changed nothing");
+  {
+    const after = await unreadCount(OWNER);
+    check(after === unreadBefore, "the anonymous mark-all changed nothing",
+      `${unreadBefore} unread before, ${after} after`);
+    check(unreadBefore > 0,
+      "and there was something it could have marked, so the check is not vacuous", `${unreadBefore}`);
+  }
 
   // ── The deployed client actually carries this ────────────────────────────────────────
   {
