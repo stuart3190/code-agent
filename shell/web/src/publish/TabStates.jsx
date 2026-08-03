@@ -74,9 +74,10 @@ export function TabError({ message, onRetry = null, children = null }) {
     <div className="ct-tabstate ct-taberror" role="alert">
       <strong>{message || "That could not be loaded."}</strong>
       {children && <span className="ct-hint">{children}</span>}
-      {onRetry && (
-        <button className="ct-btn-quiet" onClick={onRetry}>Try again</button>
-      )}
+      {/* ct-pubrow-btn is the in-content secondary style, matching every other action inside a tab.
+          ct-btn-quiet is the sheet-header and dialog style — using it here made Try again the one
+          borderless button among bordered ones. */}
+      {onRetry && <button className="ct-pubrow-btn" onClick={onRetry}>Try again</button>}
     </div>
   );
 }

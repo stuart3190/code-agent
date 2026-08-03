@@ -42,6 +42,10 @@ export default function ProjectDashboard({
   // deployment's logs rather than the project's whole log stream.
   const [buildRef, setBuildRef] = useState(initialRef);
   const tablist = useRef(null);
+  const heading = useRef(null);
+  // Whatever was focused when this opened, so closing puts the caret back where the customer left
+  // it rather than at the top of the document.
+  const opener = useRef(null);
 
   // The URL is the source of truth, so back/forward and refresh land on the same tab and build
   // that were open. Following props rather than owning state outright is what makes that work.
@@ -60,6 +64,25 @@ export default function ProjectDashboard({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /**
+   * Focus moves in on open and back out on close.
+   *
+   * Every other overlay in the product does this — DeleteConfirm focuses its Cancel button — and
+   * this one did not, so a keyboard user who opened the dashboard was still tabbing through the
+   * page behind it. The heading rather than the first tab, so a screen reader announces what just
+   * opened before offering its controls.
+   */
+  useEffect(() => {
+    opener.current = document.activeElement;
+    heading.current?.focus();
+    return () => {
+      const returnTo = opener.current;
+      // Only if it is still on the page: a card that has since been re-rendered would throw focus
+      // to nowhere, which is worse than leaving it alone.
+      if (returnTo?.isConnected) returnTo.focus();
+    };
+  }, []);
 
   /**
    * Arrow keys move between tabs, Home and End jump to the ends.
@@ -112,7 +135,7 @@ export default function ProjectDashboard({
     <aside className="ct-sheet show ct-projdash" aria-label="Project dashboard">
       <div className="ct-sheet-head ct-projdash-head">
         <div className="ct-projdash-title">
-          <h2>{site.name || "Project"}</h2>
+          <h2 ref={heading} tabIndex={-1}>{site.name || "Project"}</h2>
           {/* The two facts worth carrying on every tab: is it live, and at what address. Reading
               them from the shared vocabulary rather than restating them here is what stops this
               header disagreeing with the Health page one tab away. */}
