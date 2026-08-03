@@ -76,6 +76,17 @@ export const CA_TABLES = [
   "build_checkpoints",
   "qa_runs",
   "app_notifications",
+
+  // Analytics, project logs and health monitoring. Added 2026-08-03: these six shipped straight to
+  // production without a migration, so the guard — which reads migrations — could not see them and
+  // they were absent from every snapshot. analytics_salts is included deliberately: without the
+  // salt for a day, that day's visitor counts can never be recomputed or reconciled.
+  "analytics_salts",
+  "analytics_events",
+  "analytics_daily",
+  "project_logs",
+  "health_checks",
+  "health_status",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";

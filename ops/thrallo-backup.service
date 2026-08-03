@@ -7,4 +7,8 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/code-agent
 ExecStart=/usr/bin/node ops/backup-thrallo.mjs
+# Runs AFTER the backup, deliberately: drift must never prevent a backup from being taken, but a
+# table that exists in production without a migration — or without being backed up — has to be
+# loud. A non-zero exit here marks the unit failed and is visible in `systemctl status`.
+ExecStartPost=/usr/bin/node ops/migration-drift.mjs
 Nice=10
