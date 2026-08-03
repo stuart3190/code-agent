@@ -16,6 +16,37 @@ import { processConversation, MAX_RECOVERY_ATTEMPTS } from "../../shell/server/l
 import { applyEvent, emptyConversationView } from "../../shell/web/src/chat/conversationState.js";
 
 const OWNER = "owner-1";
+
+/**
+ * Nothing a user can READ may carry provider detail.
+ *
+ * This deliberately inspects the human-visible strings rather than JSON.stringify of the whole
+ * event list. The blunt version matched "503" inside the incident reference — THR- followed by six
+ * hex characters, which contains "503" about once in a thousand — so it failed roughly one run in
+ * two hundred while nothing was wrong. A test that fails at random teaches people to re-run it,
+ * which is how a real leak would get waved through.
+ */
+function assertNoProviderDetail(events) {
+  const readable = [];
+  const collect = (value) => {
+    if (typeof value === "string") readable.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      for (const [key, inner] of Object.entries(value)) {
+        // The reference is an opaque support code, not prose — it is meant to be shown.
+        if (key === "reference") continue;
+        collect(inner);
+      }
+    }
+  };
+  collect(events.map((e) => e.payload));
+
+  for (const text of readable) {
+    assert.doesNotMatch(text, /upstream overloaded/i, "the provider's own words must never be shown");
+    assert.doesNotMatch(text, /\b\d{3}\b/, "nor an HTTP status code");
+    assert.doesNotMatch(text, /\bstack\b|at Object\.|node_modules/i, "nor anything from a stack trace");
+  }
+}
 const OTHER = "owner-2";
 
 // Everything a user must never see, in the shapes real failures arrive in.
@@ -241,7 +272,7 @@ test("identical repeated failures stop at the bound with a safe support referenc
   assert.ok(failure, "an honest failure is shown — never silently swallowed");
   assert.match(failure.payload.message, /Your work is safe/);
   assert.match(failure.payload.reference, /^THR-[0-9A-F]{6}$/);
-  assert.doesNotMatch(JSON.stringify(events), /upstream overloaded|503/, "no provider detail in the conversation");
+  assertNoProviderDetail(events);
   const row = await store.getConversation(OWNER, conversation.id);
   assert.equal(row.state, "idle", "the conversation is left usable");
 });
