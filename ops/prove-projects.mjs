@@ -13,9 +13,6 @@ import { SupabaseConversationStore } from "../shell/server/lib/conversationStore
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 
 const BASE = process.env.THRALLO_BASE_URL || "https://app.thrallo.com";
-// A synthetic owner: real enough for every owner-scoped query, owned by nobody.
-const OWNER = "00000000-0000-4000-8000-0000000050f5";
-const INTRUDER = "00000000-0000-4000-8000-0000000050f6";
 const SEED = 45;   // more than the cap that used to be invisible
 
 const out = [];
@@ -27,20 +24,34 @@ const check = (ok, label, detail = "") => {
 
 const db = serviceClient();
 const store = new SupabaseConversationStore(db);
+
+// Two throwaway accounts. `ca_conversations.owner` is a real foreign key to auth.users, so a
+// made-up uuid cannot be inserted — and seeding forty-five rows into a customer's account to prove
+// paging would be a far worse idea than creating one.
+const stamp = Date.now();
+const users = [];
+for (const tag of ["owner", "intruder"]) {
+  const { data, error } = await db.auth.admin.createUser({
+    email: `p5-projects-proof-${tag}-${stamp}@thrallo.invalid`,
+    password: `P5!${Math.random().toString(36).slice(2)}Aa1`, email_confirm: true,
+  });
+  if (error) { console.error(`could not create throwaway ${tag}:`, error.message); process.exit(1); }
+  users.push(data.user.id);
+}
+const [OWNER, INTRUDER] = users;
+console.log(`[proof] throwaway owner ${OWNER}`);
+
 const made = [];
 
 async function cleanup() {
-  if (!made.length) return;
-  await db.from("ca_conversation_events").delete().in("conversation_id", made.map((r) => r.id));
-  await db.from("ca_conversations").delete().in("id", made.map((r) => r.id));
+  if (made.length) {
+    await db.from("ca_conversation_events").delete().in("conversation_id", made.map((r) => r.id));
+    await db.from("ca_conversations").delete().in("id", made.map((r) => r.id));
+  }
+  for (const id of users) await db.auth.admin.deleteUser(id).catch(() => {});
 }
 
-process.on("exit", () => { /* best effort; the explicit cleanup below is the real one */ });
-
 try {
-  // Anything left behind by an interrupted earlier run.
-  await db.from("ca_conversations").delete().eq("owner", OWNER);
-
   for (let i = 0; i < SEED; i += 1) {
     const row = await store.createConversation(OWNER, { title: `Proof project ${String(i).padStart(2, "0")}` });
     made.push(row);
@@ -178,9 +189,11 @@ try {
     check(!error, "today's traffic is readable for the cards", error?.message || "ok");
   }
 } finally {
+  const { data: before } = await db.from("ca_conversations").select("id").eq("owner", OWNER);
   await cleanup();
   const { data } = await db.from("ca_conversations").select("id").eq("owner", OWNER);
-  check(!data?.length, "the proof cleaned up after itself", `${data?.length || 0} left`);
+  check(!data?.length, "the proof cleaned up after itself",
+    `${before?.length || 0} seeded, ${data?.length || 0} left`);
 }
 
 console.log(`\n${out.join("\n")}\n`);
