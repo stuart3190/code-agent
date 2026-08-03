@@ -127,10 +127,12 @@ test("every status is distinguishable, and an active domain hides the setup reco
   await expect(sheet.locator(".ct-live-badge.dn-pending_dns")).toHaveText(/Pending DNS/);
   await expect(sheet.locator(".ct-live-badge.dn-verifying")).toHaveText(/Verifying/);
   await expect(sheet.locator(".ct-live-badge.dn-active")).toHaveText(/Active/);
-  await expect(sheet.locator(".ct-live-badge.dn-failed")).toHaveText(/Failed/);
+  // "Verification failed", not a bare "Failed": next to a domain, "Failed" leaves the reader
+  // asking what failed — the certificate, the site, or the check.
+  await expect(sheet.locator(".ct-live-badge.dn-failed")).toHaveText(/Verification failed/);
 
   // SSL is reported separately from verification, because they settle at different moments.
-  await expect(sheet).toContainText("certificate issued");
+  await expect(sheet).toContainText("HTTPS active");
   await expect(sheet.getByRole("button", { name: "Retry verification" })).toHaveCount(1);
   await expect(sheet).toContainText("We could not verify this domain.");
   // Three unfinished domains show records; the active one does not.

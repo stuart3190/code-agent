@@ -2,8 +2,10 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { projectHealth } from "../lib/codeAgentApi.js";
-import { STATUS, STATUS_LABEL, DOMAIN_STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
-import { HEALTH_LABEL, HEALTH_DOT } from "./HealthView.jsx";
+import { STATUS, STATUS_LABEL, displayUrl, relativeTime } from "./publishLifecycle.js";
+import {
+  HEALTH_LABEL, HEALTH_DOT, healthStateOf, DOMAIN_LABEL, isDomainLive,
+} from "../../../shared/operationalState.mjs";
 
 export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpublish }) {
   const [copied, setCopied] = useState(false);
@@ -11,7 +13,7 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
   const status = site.status || STATUS.published;
   // The active one if there is one, otherwise whichever is furthest along — the tile should show
   // the domain the owner is currently working on, not nothing at all.
-  const domain = (site.domains || []).find((d) => d.status === "active") || (site.domains || [])[0] || null;
+  const domain = (site.domains || []).find((d) => isDomainLive(d.status)) || (site.domains || [])[0] || null;
   const offline = status === STATUS.unpublished;
   // The SAME endpoint the Health tab reads. Overview used to read `site.health`, which is never
   // populated — health rides with the conversation, not the site — so this tile said
@@ -68,9 +70,9 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
       <div className="mg-label">At a glance</div>
       <div className="ct-metrics">
         <button className="ct-metric-link" onClick={() => onOpenTab("health")}>
-          <span className="v">{health ? `${HEALTH_DOT[health.status]}` : "—"}</span>
+          <span className="v">{healthLoaded || health ? HEALTH_DOT[healthStateOf(health)] : "—"}</span>
           <span className="k">
-            {health ? HEALTH_LABEL[health.status] : healthLoaded ? "Not checked yet" : "Checking…"}
+            {healthLoaded || health ? HEALTH_LABEL[healthStateOf(health)] : "Checking…"}
           </span>
         </button>
         <button className="ct-metric-link" onClick={() => onOpenTab("analytics")}>
@@ -86,7 +88,7 @@ export default function OverviewTab({ site, onOpenTab, onPublishUpdate, onUnpubl
           <span className="v">🌐</span>
           <span className="k">
             {domain
-              ? `${domain.domain}${domain.status === "active" ? "" : ` · ${DOMAIN_STATUS_LABEL[domain.status] || "Pending"}`}`
+              ? `${domain.domain}${isDomainLive(domain.status) ? "" : ` · ${DOMAIN_LABEL[domain.status] || "Pending"}`}`
               : "Add a domain"}
           </span>
         </button>

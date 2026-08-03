@@ -6,6 +6,7 @@
 // Re-exported, never redefined. The vocabulary lives in one module that the server imports too,
 // so a status string cannot mean one thing on the client and another on the server.
 import { PUBLISH_STATUS, TAB_STATUSES, tabMatches, isLiveStatus } from "../../../shared/publishResolution.mjs";
+import { HEALTH_LABEL, HEALTH_TONE, healthStateOf, isHealthProblem } from "../../../shared/operationalState.mjs";
 
 export const STATUS = PUBLISH_STATUS;
 export { TAB_STATUSES };
@@ -36,25 +37,11 @@ export function statusOf(conversation) {
   return conversation?.publishStatus || STATUS.draft;
 }
 
-// Custom domain states, in one place so the conversation, the Domains panel, the Overview tile and
-// the project card cannot describe the same domain differently. Only `active` may ever be said to
-// be live or secured — a domain still proving itself has no certificate, and claiming otherwise
-// would send people to a hostname that does not answer.
-export const DOMAIN_STATUS_LABEL = Object.freeze({
-  pending_dns: "Pending DNS",
-  verifying: "Verifying",
-  active: "Active",
-  failed: "Failed",
-});
-
-export const DOMAIN_STATUS_HINT = Object.freeze({
-  pending_dns: "Add the records below at your DNS provider. We check every minute.",
-  verifying: "Ownership confirmed. Waiting for the domain to point at Thrallo.",
-  active: "Live and secured with HTTPS.",
-  failed: "We stopped checking. Fix the records and retry.",
-});
-
-export const isDomainLive = (status) => status === "active";
+// Domain vocabulary lives in the shared operational module, which the SERVER imports too — a
+// notification about a domain becoming Active should use the same word the panel does.
+export {
+  DOMAIN_LABEL as DOMAIN_STATUS_LABEL, domainExplanation as domainHint, isDomainLive,
+} from "../../../shared/operationalState.mjs";
 
 /**
  * The badges for a project card. A set, not one value — a project can be LIVE and BUILDING at the
@@ -87,8 +74,10 @@ export function badgesFor(conversation) {
   // sweep would be permanent chrome saying nothing is wrong (Principle 3).
   const health = conversation?.health;
   if (isLive(status) && health) {
-    if (health.status === "offline") badges.push({ id: "offline", label: "OFFLINE", tone: "failed" });
-    else if (health.status === "warning") badges.push({ id: "degraded", label: "DEGRADED", tone: "update" });
+    const state = healthStateOf(health);
+    if (isHealthProblem(state)) {
+      badges.push({ id: state === "offline" ? "offline" : "degraded", label: HEALTH_LABEL[state].toUpperCase(), tone: HEALTH_TONE[state] });
+    }
   }
 
   if (conversation?.activity) {
