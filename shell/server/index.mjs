@@ -77,7 +77,7 @@ import {
 import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
 import {
   handleAnalyticsCollect, handleAnalyticsPreflight, handleAnalyticsOverview,
-  handleAnalyticsLive,
+  handleAnalyticsLive, handleAnalyticsExport,
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
 import { handleProjectHealth } from "./routes/health.mjs";
@@ -782,12 +782,12 @@ const server = http.createServer(async (req, res) => {
         return await handleAnalyticsCollect(req, res, raw, clientIp(req));
       }
     }
-    const analyticsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/analytics(\/live)?$/i);
+    const analyticsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/analytics(\/live|\/export)?$/i);
     if (analyticsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
-      return analyticsMatch[2]
-        ? await handleAnalyticsLive(req, res, owner, analyticsMatch[1])
-        : await handleAnalyticsOverview(req, res, owner, analyticsMatch[1], url);
+      if (analyticsMatch[2] === "/live") return await handleAnalyticsLive(req, res, owner, analyticsMatch[1]);
+      if (analyticsMatch[2] === "/export") return await handleAnalyticsExport(req, res, owner, analyticsMatch[1], url);
+      return await handleAnalyticsOverview(req, res, owner, analyticsMatch[1], url);
     }
     const logsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/logs(\/stream|\/export|\/runs)?$/i);
     if (logsMatch && method === "GET") {

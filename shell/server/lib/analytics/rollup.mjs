@@ -7,6 +7,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 import { sweepSalts } from "./visitorIdentity.mjs";
+import { errorSignature } from "./scrub.mjs";
 
 // Raw events are held just long enough to roll up and to answer "live visitors". Everything older
 // is aggregate-only.
@@ -47,10 +48,20 @@ export async function rollupAnalytics({ client = serviceClient(), now = new Date
     return buckets.get(id);
   };
 
+  // visitor → sessions, per project-day. Used only to count how many visitors had more than one
+  // session that day; the hashes never leave this function.
+  const sessionsByVisitor = new Map();
+
   for (const row of events) {
     const totals = bucket(row, "totals", "");
     totals.visitors.add(row.visitor_hash);
     totals.sessions.add(row.session_hash);
+
+    const dayKey = `${row.project_id}|${dayOf(row.occurred_at)}`;
+    if (!sessionsByVisitor.has(dayKey)) sessionsByVisitor.set(dayKey, new Map());
+    const perVisitor = sessionsByVisitor.get(dayKey);
+    if (!perVisitor.has(row.visitor_hash)) perVisitor.set(row.visitor_hash, new Set());
+    perVisitor.get(row.visitor_hash).add(row.session_hash);
 
     if (row.kind === "pageview") {
       totals.pageviews += 1;
@@ -65,7 +76,19 @@ export async function rollupAnalytics({ client = serviceClient(), now = new Date
       }
     }
 
-    if (row.kind === "error") totals.errors += 1;
+    if (row.kind === "error") {
+      totals.errors += 1;
+      // The error DETAIL, aggregated so it survives the three-day raw prune. Without this the
+      // count outlived the messages, so "14 errors last month" could never be investigated.
+      // The key is a signature, not the raw message: already scrubbed at ingest, and further
+      // generalised so the same fault at two line numbers groups together.
+      const signature = errorSignature(row.error_message);
+      const detail = bucket(row, "error", signature);
+      detail.errors += 1;
+      detail.visitors.add(row.visitor_hash);
+      // One representative source, kept for context. Paths only — the query string went at ingest.
+      if (!detail.sample && row.error_source) detail.sample = row.error_source;
+    }
 
     if (row.kind === "vitals") {
       totals.vitals += 1;
@@ -76,6 +99,19 @@ export async function rollupAnalytics({ client = serviceClient(), now = new Date
       totals.cls += Number(row.cls || 0);
     }
     if (row.kind === "pageview" && row.load_ms) totals.load += row.load_ms;
+  }
+
+  // Same-day returning: visitors who had more than one session on that day. This is the ONLY
+  // returning figure the design can honestly produce — the visitor hash rotates daily and the
+  // salts are destroyed, so the same person is a different hash tomorrow by construction.
+  for (const [dayKey, perVisitor] of sessionsByVisitor) {
+    const [projectId, day] = dayKey.split("|");
+    const sample = events.find((e) => String(e.project_id) === projectId && dayOf(e.occurred_at) === day);
+    if (!sample) continue;
+    const returning = [...perVisitor.values()].filter((sessions) => sessions.size > 1);
+    const b = bucket(sample, "returning", "");
+    b.visitors = new Set(returning.map((_, i) => `v${i}`));   // size is the count; hashes never stored
+    b.sessions = new Set(returning.flatMap((s, i) => [...s].map((_, j) => `s${i}-${j}`)));
   }
 
   const rows = [...buckets.values()].map((b) => ({

@@ -8,9 +8,8 @@
 // cannot be linked across days, which is stated in the UI because it is a feature, not a caveat.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { projectAnalytics, projectAnalyticsLive, projectDeployments } from "../lib/codeAgentApi.js";
+import { projectAnalytics, projectAnalyticsLive, exportAnalytics } from "../lib/codeAgentApi.js";
 import { formatNumber } from "../manage/shared.jsx";
-import { relativeTime } from "./publishLifecycle.js";
 
 const RANGES = [
   { days: 7, label: "7 days" },
@@ -35,23 +34,63 @@ function band(value, good, poor) {
   return value <= good ? "good" : value <= poor ? "warn" : "bad";
 }
 
-function Trend({ series }) {
-  if (!series.length) return <div className="ct-hint">No traffic yet in this period.</div>;
-  const max = Math.max(1, ...series.map((d) => d.pageviews));
+// Every metric that was collected, not page views alone. A trend that plots one of four numbers
+// makes the other three look like they were never measured.
+const METRICS = [
+  { key: "pageviews", label: "Page views" },
+  { key: "visitors", label: "Visitors" },
+  { key: "sessions", label: "Sessions" },
+  { key: "errors", label: "Errors", requires: "errorReporting" },
+];
+
+function Trend({ series, metric, onMetric, caps }) {
+  const available = METRICS.filter((m) => !m.requires || caps?.[m.requires]);
+  if (!series.length) {
+    return (
+      <div className="ct-hint">
+        Nothing was recorded in this period. That is not the same as zero traffic on a day the site
+        was not yet published — days before the first publish are not shown at all.
+      </div>
+    );
+  }
+  const values = series.map((d) => d[metric] ?? 0);
+  const max = Math.max(1, ...values);
   const width = 100;
   const step = series.length > 1 ? width / (series.length - 1) : width;
-  const line = series.map((d, i) => `${(i * step).toFixed(2)},${(30 - (d.pageviews / max) * 28).toFixed(2)}`).join(" ");
+  const line = values.map((v, i) => `${(i * step).toFixed(2)},${(30 - (v / max) * 28).toFixed(2)}`).join(" ");
+  const label = available.find((m) => m.key === metric)?.label || metric;
   return (
-    <div className="ct-chart">
-      <svg viewBox={`0 0 ${width} 30`} preserveAspectRatio="none" role="img"
-        aria-label={`Page views over ${series.length} days, peak ${max}`}>
-        <polyline className="ct-chart-line" points={line} />
-        <polygon className="ct-chart-fill" points={`0,30 ${line} ${width},30`} />
-      </svg>
-      <div className="ct-chart-axis">
-        <span>{series[0].day}</span><span>{series[series.length - 1].day}</span>
+    <>
+      <div className="ct-trend-tabs" role="group" aria-label="Trend metric">
+        {available.map((m) => (
+          <button key={m.key} className={`ct-chipfilter ${metric === m.key ? "on" : ""}`}
+            aria-pressed={metric === m.key} onClick={() => onMetric(m.key)}>{m.label}</button>
+        ))}
       </div>
-    </div>
+      <div className="ct-chart">
+        <svg viewBox={`0 0 ${width} 30`} preserveAspectRatio="none" role="img"
+          aria-label={`${label} over ${series.length} days, peak ${max}`}>
+          <polyline className="ct-chart-line" points={line} />
+          <polygon className="ct-chart-fill" points={`0,30 ${line} ${width},30`} />
+        </svg>
+        <div className="ct-chart-axis">
+          <span>{series[0].day}</span><span>{series[series.length - 1].day}</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Change against the immediately preceding period of equal length. Silent when there is nothing to
+// compare against — "+∞%" from a period with no data is not a fact anyone can use.
+function Delta({ value }) {
+  if (value == null) return null;
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded === 0) return <span className="ct-delta flat">no change</span>;
+  return (
+    <span className={`ct-delta ${rounded > 0 ? "up" : "down"}`}>
+      {rounded > 0 ? "▲" : "▼"} {Math.abs(rounded)}%
+    </span>
   );
 }
 
@@ -76,23 +115,34 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [live, setLive] = useState(null);
-  const [deploys, setDeploys] = useState(null);
   const [error, setError] = useState("");
+  const [metric, setMetric] = useState("pageviews");
+  const [exporting, setExporting] = useState("");
   const projectId = site?.projectId;
 
   const load = useCallback(async () => {
     if (!projectId) return;
     try {
-      const [overview, deployments] = await Promise.all([
-        projectAnalytics(projectId, days),
-        projectDeployments(projectId),
-      ]);
-      setData(overview);
-      setDeploys(deployments);
+      // Deployments used to be fetched and rendered here too. That is the Deployments tab's job,
+      // and two surfaces reading the same history is how they come to disagree.
+      setData(await projectAnalytics(projectId, days));
+      setError("");
     } catch (e) {
       setError(e.message || "Analytics is unavailable right now.");
     }
   }, [projectId, days]);
+
+  async function runExport(format) {
+    setExporting(format); setError("");
+    try {
+      await exportAnalytics(projectId, { days, format });
+    } catch (e) {
+      // A real message beats a zero-byte file.
+      setError(e.message || "That export could not be prepared.");
+    } finally {
+      setExporting("");
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -132,6 +182,16 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
               <span className="dot" aria-hidden="true" />{live.live} online
             </span>
           )}
+          {/* Buttons, not links: every API route authenticates from the Authorization header, and
+              a bare link sends none. Export covers the whole selected range, not the page. */}
+          {caps?.export && (
+            <span className="ct-export-actions">
+              <button className="ct-pubrow-btn" disabled={exporting}
+                onClick={() => runExport("json")}>{exporting === "json" ? "…" : "JSON"}</button>
+              <button className="ct-pubrow-btn" disabled={exporting}
+                onClick={() => runExport("csv")}>{exporting === "csv" ? "…" : "CSV"}</button>
+            </span>
+          )}
         </div>
 
         {!data && !error && <div className="mg-card"><div className="ct-hint">Loading…</div></div>}
@@ -145,20 +205,67 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
         {totals && (
           <>
             <div className="ct-metrics">
-              <div><span className="v">{formatNumber(totals.visitors)}</span><span className="k">Unique visitors</span></div>
-              <div><span className="v">{formatNumber(totals.pageviews)}</span><span className="k">Page views</span></div>
-              <div><span className="v">{formatNumber(totals.sessions)}</span><span className="k">Sessions</span></div>
-              <div><span className="v">{formatNumber(totals.errors)}</span><span className="k">Errors</span></div>
-            </div>
-            {data.window?.clamped && (
-              <div className="ct-hint">
-                Showing {data.window.days} days — your plan keeps {caps.retentionDays}.{" "}
-                <button className="ct-linkish" onClick={onUpgrade}>See plans</button>
+              <div>
+                <span className="v">{formatNumber(totals.visitors)}</span>
+                <span className="k">Unique visitors <Delta value={data.change?.visitors} /></span>
               </div>
-            )}
+              <div>
+                <span className="v">{formatNumber(totals.pageviews)}</span>
+                <span className="k">Page views <Delta value={data.change?.pageviews} /></span>
+              </div>
+              <div>
+                <span className="v">{formatNumber(totals.sessions)}</span>
+                <span className="k">Sessions <Delta value={data.change?.sessions} /></span>
+              </div>
+              {/* Errors are a paid feature. Free sees the lock, not a number it was told it does
+                  not get — and never a zero standing in for "unavailable". */}
+              {caps?.errorReporting ? (
+                <div>
+                  <span className="v">{formatNumber(totals.errors)}</span>
+                  <span className="k">Errors <Delta value={data.change?.errors} /></span>
+                </div>
+              ) : (
+                <div>
+                  <span className="v">🔒</span>
+                  <span className="k">Errors on Starter</span>
+                </div>
+              )}
+            </div>
+
+            <div className="ct-hint">
+              {data.window?.clamped && (
+                <>
+                  Showing {data.window.days} days — your plan keeps {caps.retentionDays}.{" "}
+                  <button className="ct-linkish" onClick={onUpgrade}>See plans</button>{" · "}
+                </>
+              )}
+              {data.window?.comparable
+                ? `Compared with the ${data.window.days} days before ${data.window.from}.`
+                : "There is not enough history on your plan to compare with the previous period."}
+            </div>
 
             <div className="mg-label">Traffic</div>
-            <div className="mg-card"><Trend series={data.series} /></div>
+            <div className="mg-card">
+              <Trend series={data.series} metric={metric} onMetric={setMetric} caps={caps} />
+            </div>
+
+            <div className="ct-metrics">
+              <div>
+                <span className="v">{formatNumber(data.sameDayReturning?.visitors || 0)}</span>
+                {/* Deliberately NOT "returning visitors". The hash rotates daily and the salts are
+                    destroyed, so cross-day identity does not exist and claiming it would be a lie
+                    about the privacy model this product is sold on. */}
+                <span className="k">Same-day returning</span>
+              </div>
+              <div>
+                <span className="v">{live ? formatNumber(live.live) : "—"}</span>
+                <span className="k">Online now</span>
+              </div>
+            </div>
+            <div className="ct-hint">
+              Same-day returning counts visitors with more than one session on the same day.
+              Cross-day visitor identity is deliberately not tracked.
+            </div>
 
             <div className="ct-rank-grid">
               <Ranked title="Top pages" rows={data.topPages} empty="No page views yet." />
@@ -206,38 +313,42 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
           </>
         )}
 
-        <div className="mg-label">Deployments</div>
-        <div className="mg-card">
-          {!deploys && <div className="ct-hint">Loading…</div>}
-          {deploys?.site && (
-            <div className="ct-hint" style={{ marginBottom: 8 }}>
-              First published {relativeTime(deploys.site.firstPublishedAt)} · last{" "}
-              {relativeTime(deploys.site.lastPublishedAt)}
-              {deploys.summary.averageDurationMs
-                ? ` · average build ${Math.round(deploys.summary.averageDurationMs / 1000)}s` : ""}
-            </div>
-          )}
-          {deploys?.builds?.length === 0 && <div className="ct-hint">No builds recorded yet.</div>}
-          {deploys?.builds?.map((b) => (
-            <div className="mg-row" key={b.id}>
-              <div>
-                <span className={`ct-badge tone-${b.status === "passed" ? "live" : b.status === "failed" ? "failed" : "muted"}`}>
-                  {String(b.status || "unknown").toUpperCase()}
-                </span>
-                <div className="ct-hint">
-                  {relativeTime(b.startedAt)}
-                  {b.durationMs != null && ` · ${Math.round(b.durationMs / 1000)}s`}
-                  {b.repairRounds > 0 && ` · ${b.repairRounds} repair${b.repairRounds === 1 ? "" : "s"}`}
+        {/* Errors, kept as aggregates so they outlive the three-day raw-event prune. The count
+            alone used to survive, which meant "14 errors last month" could never be investigated. */}
+        {totals && caps?.errorReporting && (
+          <>
+            <div className="mg-label">Errors</div>
+            <div className="mg-card">
+              {!data.errors?.length && <div className="ct-hint">No errors recorded in this period.</div>}
+              {data.errors?.map((e) => (
+                <div className="mg-row" key={e.key}>
+                  <div className="ct-error-row">
+                    <span className="ct-error-msg">{e.key}</span>
+                    <span className="ct-hint">
+                      {formatNumber(e.errors)} occurrence{e.errors === 1 ? "" : "s"}
+                      {" · "}{formatNumber(e.visitors)} visitor{e.visitors === 1 ? "" : "s"} affected
+                    </span>
+                  </div>
                 </div>
-              </div>
+              ))}
+              {data.errors?.length > 0 && (
+                <div className="ct-hint">
+                  Messages are scrubbed of tokens, keys, emails and addresses before they are stored.
+                </div>
+              )}
             </div>
-          ))}
-          {deploys?.truncated && (
-            <div className="ct-hint">
-              Showing recent deployments. Full build history is included on Starter and Pro.{" "}
-              <button className="ct-linkish" onClick={onUpgrade}>See plans</button>
-            </div>
-          )}
+          </>
+        )}
+
+        {/* Countries. Unavailable is stated, never inferred: guessing a country from language or
+            timezone would present a guess as a fact. */}
+        <div className="mg-label">Countries</div>
+        <div className="mg-card">
+          <div className="ct-hint">
+            Country reporting is not available yet — it needs a MaxMind GeoLite2 licence, and
+            Thrallo will resolve country at ingest and store only the country, never the address.
+            It is deliberately not guessed from browser language or timezone.
+          </div>
         </div>
 
         <div className="ct-hint" style={{ marginTop: 14 }}>

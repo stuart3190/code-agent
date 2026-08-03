@@ -327,6 +327,9 @@ export const rollbackDeployment = (projectId, deploymentId) =>
 export const downloadDeployment = (projectId, deploymentId, number) =>
   downloadWithAuth(`/api/v1/projects/${projectId}/deployments/${deploymentId}/download`,
     `thrallo-deployment-${number}.zip`);
+export const exportAnalytics = (projectId, { days = 30, format = "json" } = {}) =>
+  downloadWithAuth(`/api/v1/projects/${projectId}/analytics/export?days=${days}&format=${format}`,
+    `thrallo-analytics.${format}`);
 export const projectHealth = (projectId) => request(`/api/v1/projects/${projectId}/health`);
 
 // Project logs. The stream and export are plain URLs because EventSource and <a download> take

@@ -17,6 +17,7 @@ import { recordBeacon, __resetIngestCacheForTests } from "../../shell/server/lib
 import { rollupAnalytics } from "../../shell/server/lib/analytics/rollup.mjs";
 import { retentionFor, resolveWindow, analyticsCapabilities } from "../../shell/server/lib/analytics/reports.mjs";
 import { injectAnalytics, analyticsScript, ANALYTICS_SCRIPT_PATH } from "../../shell/server/lib/analytics/clientScript.mjs";
+import { scrubErrorFields, scrubText, errorSignature } from "../../shell/server/lib/analytics/scrub.mjs";
 
 const OWNER = "66666666-6666-4666-8666-666666666666";
 const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -317,4 +318,114 @@ test("publishing injects analytics; exporting a project does not", async () => {
   // carry a beacon pointing at our servers.
   const exportLib = await readFile(fileURLToPath(new URL("../../shell/server/lib/exportProject.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(exportLib, /analytics\/clientScript/);
+});
+
+// ── Secrets never reach storage ─────────────────────────────────────────────────────────
+//
+// A pageview path has its query string stripped at ingest because query strings carry tokens
+// belonging to the SITE's own users. Error messages, sources and stack traces had no such
+// treatment, and a failed fetch prints the whole URL it tried.
+
+test("error text is scrubbed of tokens, keys, emails and addresses before storage", () => {
+  const clean = scrubErrorFields({
+    message: "Request failed: https://api.example.com/v1/orders?token=abc123secret&email=jo@example.com",
+    source: "https://app.example.com/checkout?session=sk_live_ABCDEFGHIJKLMNOP",
+    stack: "Error: bad\n  at fetch (https://x.example.com/a.js?key=xyz)\n  Authorization: Bearer eyJhbGciOi.eyJzdWIiOiI.SflKxwRJSM\n  from 203.0.113.9",
+  });
+
+  const all = `${clean.message}\n${clean.source}\n${clean.stack}`;
+  assert.doesNotMatch(all, /token=abc123secret/, "query strings carry tokens");
+  assert.doesNotMatch(all, /jo@example\.com/, "and the site's own users' emails");
+  assert.doesNotMatch(all, /sk_live_ABCDEFGHIJKLMNOP/, "API keys must never be stored");
+  assert.doesNotMatch(all, /eyJhbGciOi\.eyJzdWIiOiI/, "nor JWTs");
+  assert.doesNotMatch(all, /203\.0\.113\.9/, "nor IP addresses");
+  // Still useful afterwards.
+  assert.match(clean.message, /api\.example\.com\/v1\/orders/, "what failed is still legible");
+});
+
+test("scrubbing happens at ingest, so the raw value never reaches the database", async () => {
+  __resetIngestCacheForTests();
+  const db = fakeDb();
+  await recordBeacon({
+    body: { kind: "error", appId: "focusflow", path: "/checkout", message: "Failed: password=hunter2 for jo@example.com" },
+    ip: "203.0.113.5", userAgent: CHROME, client: db, now: new Date("2026-08-03T10:00:00Z"),
+  });
+  const stored = db.events.find((e) => e.kind === "error");
+  assert.ok(stored, "the error was recorded");
+  assert.doesNotMatch(stored.error_message, /hunter2/,
+    "cleaning at render time would leave the secret in the database and in every backup");
+  assert.doesNotMatch(stored.error_message, /jo@example\.com/);
+});
+
+test("errors with the same fault at different line numbers group together", () => {
+  const a = errorSignature("Cannot read properties of undefined (reading 'id') at line 42");
+  const b = errorSignature("Cannot read properties of undefined (reading 'id') at line 91");
+  assert.equal(a, b, "otherwise one bug fills the whole list");
+  assert.doesNotMatch(a, /\d\d/, "and the signature carries no identifying values");
+});
+
+// ── Error detail survives the raw prune ─────────────────────────────────────────────────
+
+test("error detail is rolled into aggregates, so it outlives the three-day raw window", async () => {
+  const day = "2026-08-03";
+  const events = [
+    { owner: OWNER, project_id: "p1", kind: "error", occurred_at: `${day}T10:00:00Z`, visitor_hash: "v1", session_hash: "s1", error_message: "Cannot read properties of undefined", error_source: "/app.js" },
+    { owner: OWNER, project_id: "p1", kind: "error", occurred_at: `${day}T11:00:00Z`, visitor_hash: "v2", session_hash: "s2", error_message: "Cannot read properties of undefined", error_source: "/app.js" },
+    { owner: OWNER, project_id: "p1", kind: "error", occurred_at: `${day}T12:00:00Z`, visitor_hash: "v1", session_hash: "s1", error_message: "Network request failed" },
+  ];
+  const db = fakeDb({ events });
+  await rollupAnalytics({ client: db, now: new Date(`${day}T23:00:00Z`) });
+
+  const detail = db.daily.filter((r) => r.dimension === "error");
+  assert.equal(detail.length, 2, "one row per distinct fault");
+  const top = detail.find((r) => /Cannot read properties/.test(r.key));
+  assert.equal(top.errors, 2, "occurrences are counted");
+  assert.equal(top.visitors, 2, "and how many visitors hit it");
+
+  const totals = db.daily.find((r) => r.dimension === "totals");
+  assert.equal(totals.errors, 3, "the headline count still agrees with the detail");
+});
+
+test("same-day returning counts visitors with more than one session that day", async () => {
+  const day = "2026-08-03";
+  const events = [
+    // v1 comes back in a second session; v2 does not.
+    { owner: OWNER, project_id: "p1", kind: "pageview", occurred_at: `${day}T09:00:00Z`, visitor_hash: "v1", session_hash: "s1", path: "/" },
+    { owner: OWNER, project_id: "p1", kind: "pageview", occurred_at: `${day}T18:00:00Z`, visitor_hash: "v1", session_hash: "s2", path: "/" },
+    { owner: OWNER, project_id: "p1", kind: "pageview", occurred_at: `${day}T10:00:00Z`, visitor_hash: "v2", session_hash: "s3", path: "/" },
+  ];
+  const db = fakeDb({ events });
+  await rollupAnalytics({ client: db, now: new Date(`${day}T23:00:00Z`) });
+
+  const returning = db.daily.find((r) => r.dimension === "returning");
+  assert.equal(returning.visitors, 1, "one visitor returned within the day");
+  // The stored row must carry no identity at all — this is an aggregate that outlives the salts.
+  assert.doesNotMatch(JSON.stringify(returning), /v1|v2|s1|s2|s3/,
+    "a returning row that stored hashes would defeat the whole privacy model");
+});
+
+// ── Entitlement ─────────────────────────────────────────────────────────────────────────
+
+test("the errorReporting entitlement is actually consulted", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/analytics/reports.mjs", import.meta.url)), "utf8");
+  assert.match(source, /capabilities\.errorReporting/,
+    "the flag existed and nothing read it, so Free saw a number its plan says it does not get");
+  // Null, not zero: "you do not have this" and "there were none" are different answers.
+  assert.match(source, /totals\.errors = null/);
+});
+
+test("Free gets no error data; Starter and Pro do", () => {
+  assert.equal(analyticsCapabilities("free").errorReporting, false);
+  assert.equal(analyticsCapabilities("starter").errorReporting, true);
+  assert.equal(analyticsCapabilities("pro").errorReporting, true);
+  assert.equal(analyticsCapabilities("pro").export, true);
+  assert.equal(analyticsCapabilities("starter").export, false, "export is what Pro adds");
+});
+
+test("retention is enforced server-side, whatever the client asks for", () => {
+  assert.equal(resolveWindow({ requestedDays: 365, plan: "free" }).days, 7);
+  assert.equal(resolveWindow({ requestedDays: 365, plan: "free" }).clamped, true);
+  assert.equal(resolveWindow({ requestedDays: 365, plan: "starter" }).days, 90);
+  assert.equal(resolveWindow({ requestedDays: 365, plan: "pro" }).days, 365, "Pro keeps everything");
+  assert.equal(resolveWindow({ requestedDays: 7, plan: "pro" }).clamped, false);
 });

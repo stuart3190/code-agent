@@ -894,3 +894,14 @@ div.ct-model-row { cursor: pointer; }
   padding: 12px; display: grid; gap: 8px; background: color-mix(in srgb, var(--warn) 6%, transparent);
 }
 @media (max-width: 560px) { .ct-deploy-env { margin-left: 0; width: 100%; } }
+
+/* Analytics: metric trend, comparisons, error list, export. */
+.ct-trend-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.ct-export-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.ct-delta { font-size: 11px; font-weight: 700; margin-left: 6px; white-space: nowrap; }
+.ct-delta.up { color: var(--good); }
+.ct-delta.down { color: var(--bad); }
+.ct-delta.flat { color: var(--ink-2); font-weight: 600; }
+.ct-error-row { display: grid; gap: 2px; min-width: 0; }
+.ct-error-msg { font-size: 13px; word-break: break-word; }
+@media (max-width: 560px) { .ct-export-actions { margin-left: 0; width: 100%; } }
