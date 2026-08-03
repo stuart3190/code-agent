@@ -12,6 +12,7 @@ import { optionalEnv } from "../env.mjs";
 import { ensureDeps, buildTree, workDirFor } from "../../../../harness/workspace.mjs";
 import { slugify } from "../../routes/publish.mjs";
 import { notifyOwner } from "../notifications/notificationService.mjs";
+import { logProject } from "../logs/projectLog.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
 const PROVISIOND_TOKEN = () => optionalEnv("PROVISIOND_TOKEN");
@@ -126,6 +127,8 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   }
 
   await ctx.emit("agent_spawned", { agent: "Publisher", status: `Publishing ${project.name || "your app"}…` });
+  const startedAt = Date.now();
+  logProject({ owner: ctx.owner, projectId: project.id, source: "publish", message: "Publish started" });
   try {
     const slug = await claimSlug(ctx.owner, project.id, siteName || project.name);
 
@@ -164,6 +167,11 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
 
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
     await ctx.emit("published", { url: out.url, slug: out.id, projectId: project.id });
+    logProject({
+      owner: ctx.owner, projectId: project.id, source: "deploy", level: "info",
+      message: `Deployed to ${out.url}`, refType: "deployment", refId: out.id,
+      durationMs: Date.now() - startedAt,
+    });
     notifyOwner(ctx.owner, {
       title: "Published",
       body: `${project.name || "Your app"} is live.`,
@@ -173,6 +181,13 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     return { url: out.url, slug: out.id, files: out.files, note: "Published. The live URL is in the conversation." };
   } catch (error) {
     await ctx.emit("agent_done", { agent: "Publisher", ok: false });
+    // The stderr of a failed production build is exactly what someone needs in the log, and it is
+    // otherwise only visible in the conversation that produced it.
+    logProject({
+      owner: ctx.owner, projectId: project.id, source: "publish", level: "error",
+      message: "Publish failed", detail: error?.stderr || error?.message || String(error),
+      durationMs: Date.now() - startedAt,
+    });
     throw error;
   }
 }
@@ -249,6 +264,10 @@ export async function unpublishApp(owner, projectId) {
   // user it did not work while their site was down — the worst of both.
   if (updateError) console.error(`[unpublish] record failed: ${updateError.message}`);
 
+  logProject({
+    owner, projectId, source: "deploy", level: "warning",
+    message: "Site unpublished", detail: `${site.url} is no longer served.`,
+  });
   return { url: site.url, alreadyOffline: false };
 }
 

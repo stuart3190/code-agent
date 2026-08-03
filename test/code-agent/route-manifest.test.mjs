@@ -34,6 +34,7 @@ const MUST_BE_MOUNTED = new Set([
   "customDomains.mjs",
   "publishState.mjs",
   "health.mjs",
+  "logs.mjs",
   "thralloAnalytics.mjs",
   "qa.mjs",              // restored 2026-08-01 (PR 3) — needed a qa_runs table that never existed
   "subscription.mjs",

@@ -776,3 +776,45 @@ div.ct-model-row { cursor: pointer; }
 .ct-uptime-bar.good { background: var(--good); }
 .ct-uptime-bar.warn { background: var(--warn); }
 .ct-uptime-bar.bad { background: var(--bad); }
+
+/* ── Project dashboard + logs ────────────────────────────────────────────────────────── */
+.ct-projdash { width: min(860px, 96vw); }
+.ct-projtabs { display: flex; gap: 4px; padding: 0 16px 10px; overflow-x: auto; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.ct-projtab { font-size: 13px; font-weight: 600; color: var(--ink-2); padding: 6px 11px; border-radius: 8px; white-space: nowrap; }
+.ct-projtab:hover { background: var(--surface-2); }
+.ct-projtab.on { background: var(--accent-soft); color: var(--accent); }
+.ct-metric-link { display: block; border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 14px; text-align: left; width: 100%; }
+.ct-metric-link:hover { background: var(--surface-2); }
+.ct-metric-link .v { display: block; font-size: 22px; font-weight: 700; }
+.ct-metric-link .k { display: block; font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+
+.ct-logs-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.ct-log-search { flex: 1; }
+.ct-logs-filters { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.ct-logs-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.ct-chipfilter { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: transparent; }
+.ct-chipfilter:hover { background: var(--surface-2); }
+.ct-chipfilter.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.ct-chipfilter.lvl-error.on, .ct-chipfilter.lvl-critical.on { background: color-mix(in srgb, var(--bad) 14%, transparent); border-color: var(--bad); color: var(--bad); }
+.ct-chipfilter.lvl-warning.on { background: color-mix(in srgb, var(--warn) 14%, transparent); border-color: var(--warn); color: var(--warn); }
+
+.ct-logs-list { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; }
+.ct-log { position: relative; border-bottom: 1px solid var(--line); }
+.ct-log:last-child { border-bottom: none; }
+.ct-log-head { display: flex; gap: 10px; align-items: baseline; width: 100%; padding: 7px 34px 7px 10px; text-align: left; font-size: 12.5px; }
+.ct-log-head:hover { background: var(--surface-2); }
+.ct-log-time { font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 11.5px; flex-shrink: 0; }
+.ct-log-level { font-size: 10px; font-weight: 800; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; background: var(--surface-2); color: var(--ink-3); }
+.ct-log-level.lvl-warning { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.ct-log-level.lvl-error { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.ct-log-level.lvl-critical { background: var(--bad); color: #fff; }
+.ct-log-source { font-size: 11px; color: var(--ink-3); flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.04em; }
+.ct-log-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-log-dur { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ct-log.lvl-critical { border-left: 3px solid var(--bad); }
+.ct-log.lvl-error { border-left: 3px solid color-mix(in srgb, var(--bad) 55%, transparent); }
+.ct-log.lvl-warning { border-left: 3px solid color-mix(in srgb, var(--warn) 55%, transparent); }
+.ct-log-detail { margin: 0; padding: 8px 12px 12px 12px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--ink-2); background: var(--surface-2); max-height: 320px; overflow: auto; }
+.ct-log-copy { position: absolute; top: 5px; right: 6px; font-size: 12px; color: var(--ink-3); padding: 2px 6px; border-radius: 5px; min-height: 22px; }
+.ct-log-copy:hover { background: var(--surface-2); color: var(--ink); }
+.ct-logs-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }

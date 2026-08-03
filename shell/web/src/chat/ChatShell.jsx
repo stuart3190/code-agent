@@ -23,10 +23,9 @@ import PlanBanner from "../billing/PlanBanner.jsx";
 import BillingSettings from "../billing/BillingSettings.jsx";
 import SuccessView from "../billing/SuccessView.jsx";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
-import ProjectSettings from "../publish/ProjectSettings.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
-import AnalyticsView from "../publish/AnalyticsView.jsx";
-import HealthView from "../publish/HealthView.jsx";
+
+import ProjectDashboard from "../publish/ProjectDashboard.jsx";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
 import {
@@ -137,10 +136,8 @@ function Workspace({ user }) {
   // Set only when a publish completes in THIS session, so the celebration belongs to the moment
   // while the panel itself stays permanently.
   const [justPublished, setJustPublished] = useState(null);
-  const [projectSettings, setProjectSettings] = useState(null);
   const [unpublishing, setUnpublishing] = useState(null); // { conversation, site, busy, error }
-  const [analyticsFor, setAnalyticsFor] = useState(null);
-  const [healthFor, setHealthFor] = useState(null);
+  const [dashboard, setDashboard] = useState(null); // { site, tab }
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
@@ -375,9 +372,9 @@ function Workspace({ user }) {
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
             onPublishUpdate={publishUpdateFor}
             onUnpublish={(c) => setUnpublishing({ conversation: c, site: c.site, busy: false, error: "" })}
-            onProjectSettings={(c) => setProjectSettings(c.site)}
-            onAnalytics={(c) => setAnalyticsFor(c.site)}
-            onHealth={(c) => setHealthFor(c.site)}
+            onProjectSettings={(c) => setDashboard({ site: c.site, tab: "settings", conversation: c })}
+            onAnalytics={(c) => setDashboard({ site: c.site, tab: "analytics", conversation: c })}
+            onHealth={(c) => setDashboard({ site: c.site, tab: "health", conversation: c })}
           modelPref={modelPref}
           onModelChange={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
           onOpenSettings={() => { setSheetSection("ai"); setSheetOpen(true); }}
@@ -409,7 +406,9 @@ function Workspace({ user }) {
               onUnpublish={() => setUnpublishing({
                 conversation: active, site: publish.byProduct(active.productId), busy: false, error: "",
               })}
-              onOpenSettings={() => setProjectSettings(publish.byProduct(active.productId))} />
+              onOpenSettings={() => setDashboard({
+                site: publish.byProduct(active.productId), tab: "settings", conversation: active,
+              })} />
             <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
@@ -472,14 +471,13 @@ function Workspace({ user }) {
             }
           }} />
       )}
-      {healthFor && <HealthView site={healthFor} onClose={() => setHealthFor(null)} />}
-      {analyticsFor && (
-        <AnalyticsView site={analyticsFor} onClose={() => setAnalyticsFor(null)}
-          onUpgrade={() => { setAnalyticsFor(null); navigate("/pricing"); }} />
-      )}
-      {projectSettings && (
-        <ProjectSettings site={projectSettings} onClose={() => setProjectSettings(null)}
-          onSentence={(text) => { setProjectSettings(null); send(text); }} />
+      {dashboard && (
+        <ProjectDashboard site={dashboard.site} initialTab={dashboard.tab}
+          onClose={() => setDashboard(null)}
+          onUpgrade={() => { setDashboard(null); navigate("/pricing"); }}
+          onSentence={(text) => { setDashboard(null); send(text); }}
+          onPublishUpdate={() => { setDashboard(null); publishUpdateFor(dashboard.conversation); }}
+          onUnpublish={() => setUnpublishing({ conversation: dashboard.conversation, site: dashboard.site, busy: false, error: "" })} />
       )}
       {runOverlayId && <RunOverlay runId={runOverlayId} onClose={() => setRunOverlayId(null)} />}
       {paletteOpen && (
