@@ -997,12 +997,6 @@ function ProjectCard({
           {badges.map((b) => (
             <span className={`ct-badge tone-${b.tone}`} key={b.id}>{b.label}</span>
           ))}
-          <button className={`ct-pfav ${c.favourite ? "on" : ""}`} onClick={only(() => onToggleFavourite(c))}
-            aria-pressed={!!c.favourite}
-            aria-label={c.favourite ? "Remove from favourites" : "Add to favourites"}
-            title={c.favourite ? "Remove from favourites" : "Add to favourites"}>
-            {c.favourite ? "★" : "☆"}
-          </button>
         </span>
         <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
         {site && (
@@ -1016,6 +1010,15 @@ function ProjectCard({
         )}
       </span>
       <span className="ct-popen">Open</span>
+      {/* A card action, grouped with the other one rather than inside the name. Inside `.ct-pname`
+          it sat close enough to the centre that clicking the name hit the star, and `only()` stops
+          the click there — so the project silently refused to open. */}
+      <button className={`ct-pfav ${c.favourite ? "on" : ""}`} onClick={only(() => onToggleFavourite(c))}
+        aria-pressed={!!c.favourite}
+        aria-label={c.favourite ? "Remove from favourites" : "Add to favourites"}
+        title={c.favourite ? "Remove from favourites" : "Add to favourites"}>
+        {c.favourite ? "★" : "☆"}
+      </button>
       <button className="ct-pdelete" title="Delete project" aria-label={`Delete ${c.title || "project"}`}
         onClick={(e) => { e.stopPropagation(); onDelete(c); }}>×</button>
     </div>

@@ -405,6 +405,8 @@ div.ct-model-row { cursor: pointer; }
 /* touch targets — 22px hover affordances grow on coarse pointers */
 @media (pointer: coarse) {
   .ct-pdelete { width: 32px; height: 32px; top: 4px; right: 4px; font-size: 17px; }
+  .ct-pfav { width: 32px; height: 32px; top: 4px; right: 38px; font-size: 17px; }
+  .ct-project { padding-right: 76px; }
   .ct-recent-btn { padding: 9px 12px; }
   .ct-toggle button { padding: 8px 13px; }
   .ct-context-chip button { padding: 6px 10px; }
@@ -1037,7 +1039,11 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 .ct-pselect:focus, .ct-project.is-selected .ct-pselect, .ct-selecting .ct-pselect { opacity: 1; }
 
 .ct-pfav {
-  background: none; border: 0; padding: 0 2px; cursor: pointer; line-height: 1;
+  /* Beside the delete control, not inside the name: the two card-level actions belong together,
+     and in the name cell it intercepted clicks meant to open the project. */
+  position: absolute; top: 6px; right: 32px; width: 22px; height: 22px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: none; border: 0; padding: 0; cursor: pointer; line-height: 1;
   font-size: 14px; color: var(--ink-3);
   /* Hidden until the card is hovered or the star is focused, unless it is already a favourite —
      an empty star on every card is noise, but a keyboard user must still be able to reach it. */
@@ -1046,7 +1052,9 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 .ct-project:hover .ct-pfav, .ct-pfav:focus, .ct-pfav:focus-visible,
 .ct-project:focus-within .ct-pfav, .ct-pfav.on { opacity: 1; }
 .ct-pfav.on { color: #f5b301; }
-.ct-pfav:hover { color: #f5b301; transform: scale(1.15); }
+.ct-pfav:hover { color: #f5b301; background: var(--surface-2); transform: scale(1.15); }
+/* Room for both actions, so neither overlaps a long project name. */
+.ct-project { padding-right: 58px; }
 
 @media (max-width: 560px) {
   .ct-ws-selectall { margin-left: 0; }
