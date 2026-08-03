@@ -18,6 +18,7 @@ import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { CA_TABLES } from "./backup-thrallo.mjs";
+import { PROJECT_SCOPED_TABLES, NOT_PURGED } from "../shell/server/lib/projectTeardown.mjs";
 
 loadEnv();
 
@@ -43,7 +44,13 @@ async function tablesFromMigrations() {
 async function liveTables(svc) {
   // information_schema is not exposed through PostgREST, so this goes through a plain SQL call.
   const { data, error } = await svc.rpc("thrallo_public_tables");
-  if (!error && Array.isArray(data)) return new Set(data.map((r) => r.table_name || r));
+  if (!error && Array.isArray(data)) {
+    return {
+      names: new Set(data.map((r) => r.table_name || r)),
+      // Which live tables actually hold rows belonging to one project.
+      projectScoped: new Set(data.filter((r) => r.project_scoped).map((r) => r.table_name)),
+    };
+  }
   // No helper function deployed: fall back to probing each table the repo knows about, plus the
   // backup list. This cannot discover a table nobody has mentioned anywhere, which is why the
   // RPC is preferred — but it still catches the case that actually bit us, because such a table
@@ -58,7 +65,7 @@ async function liveTables(svc) {
  * means the database cannot be rebuilt, and a table not backed up means its data is lost on
  * restore. A table can be either, or both — which is what happened.
  */
-export function findDrift({ live, migrated, backedUp }) {
+export function findDrift({ live, migrated, backedUp, purged = null, purgeExcluded = null, projectScoped = null }) {
   const problems = [];
   for (const table of live) {
     if (NOT_OURS.has(table)) continue;
@@ -67,6 +74,12 @@ export function findDrift({ live, migrated, backedUp }) {
     }
     if (!backedUp.has(table)) {
       problems.push(`${table}: exists in production and is NOT backed up`);
+    }
+    // Teardown coverage. CI checks this against migrations, which cannot tell whether a legacy
+    // table excluded as "never applied" has since BEEN applied — at which point it starts holding
+    // real project data that deletion would leave behind.
+    if (purged && projectScoped?.has(table) && !purged.has(table) && !purgeExcluded?.has(table)) {
+      problems.push(`${table}: exists in production, holds project data, and is NOT removed when a project is deleted`);
     }
   }
   return problems;
@@ -96,9 +109,15 @@ async function main() {
   const backedUp = new Set(CA_TABLES);
   const problems = [];
 
-  const live = await liveTables(svc);
-  if (live) {
-    problems.push(...findDrift({ live, migrated, backedUp }));
+  const catalog = await liveTables(svc);
+  const live = catalog?.names || null;
+  if (catalog) {
+    problems.push(...findDrift({
+      live: catalog.names, migrated, backedUp,
+      projectScoped: catalog.projectScoped,
+      purged: new Set(PROJECT_SCOPED_TABLES.map((t) => t.table)),
+      purgeExcluded: NOT_PURGED,
+    }));
   } else {
     problems.push("could not enumerate live tables (thrallo_public_tables RPC missing) — deploy it, or this check only verifies reachability below");
   }

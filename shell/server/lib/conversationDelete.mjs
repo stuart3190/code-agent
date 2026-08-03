@@ -4,6 +4,7 @@
 // data, other projects, and global settings are never touched.
 
 import { conversationStore } from "./conversationStore.mjs";
+import { purgeProjectResources } from "./projectTeardown.mjs";
 
 function step(name, error) {
   const e = new Error(`Deletion failed at ${name}: ${error?.message || error}`);
@@ -49,24 +50,16 @@ export async function deleteConversationCascade(ownerId, conversationId, {
       if (projErr) throw step("project lookup", projErr);
       if (!project || project.owner !== ownerId) continue;
 
-      if (provisiond) {
-        await provisiond("/stop", { projectId }).catch(() => {});      // preview container
-        await provisiond("/unpublish", { projectId }).catch(() => {}); // published files
+      // One authoritative teardown. This used to be a hand-written list here that covered seven
+      // tables and left ten, and unpublished without the slug — which removed nothing and left the
+      // site serving forever.
+      const report = await purgeProjectResources(ownerId, projectId, { client, provisiond });
+      if (report.site?.attempted && report.site.slug && !report.site.removed) {
+        // The record is about to be deleted, taking the slug with it. If the files are still
+        // there, stopping now keeps the project visible and recoverable instead of stranding a
+        // live site nobody can reach the controls for.
+        throw step("taking the site offline", new Error(`${report.site.slug} is still being served`));
       }
-      // Per-app backend data: entities + end-user pool (+ their synthetic auth users).
-      const del = async (name, q) => { const { error } = await q; if (error) throw step(name, error); };
-      await del("app data", client.from("entities").delete().eq("app_id", projectId));
-      const { data: appUsers } = await client.from("app_users").select("auth_user_id").eq("app_id", projectId);
-      for (const u of appUsers || []) {
-        await client.auth.admin.deleteUser(u.auth_user_id).catch(() => {});
-      }
-      await del("app users", client.from("app_users").delete().eq("app_id", projectId));
-      await del("auth events", client.from("app_auth_events").delete().eq("app_id", projectId));
-      await del("reset codes", client.from("app_password_resets").delete().eq("app_id", projectId));
-      await del("custom domains", client.from("custom_domains").delete().eq("project_id", projectId).eq("owner", ownerId));
-      await del("published site", client.from("published_sites").delete().eq("project_id", projectId).eq("owner", ownerId));
-      await del("build history", client.from("build_jobs").delete().eq("project_id", projectId).eq("owner", ownerId));
-      await del("project", client.from("projects").delete().eq("id", projectId).eq("owner", ownerId));
     }
 
     // Product memory: only when no OTHER conversation still uses this product.

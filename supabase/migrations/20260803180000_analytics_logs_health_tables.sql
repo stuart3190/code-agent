@@ -180,18 +180,24 @@ grant usage, select on sequence public.health_checks_id_seq to service_role;
 --
 -- security definer so it can read the catalog, but granted ONLY to service_role and returning
 -- nothing but table names: no row data, and no reachability for anon or authenticated.
-create or replace function public.thrallo_public_tables()
-returns table (table_name text)
+drop function if exists public.thrallo_public_tables();
+create function public.thrallo_public_tables()
+returns table (table_name text, project_scoped boolean)
 language sql
 security definer
 set search_path = public, pg_catalog
-as $$
-  select c.relname::text
+as $
+  select c.relname::text,
+         exists (
+           select 1 from pg_attribute a
+            where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+              and a.attname in ('project_id', 'app_id')
+         )
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
    where n.nspname = 'public' and c.relkind = 'r'
    order by c.relname;
-$$;
+$;
 
 revoke all on function public.thrallo_public_tables() from public, anon, authenticated;
 grant execute on function public.thrallo_public_tables() to service_role;

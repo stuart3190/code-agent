@@ -221,11 +221,20 @@ async function serveStatic(req, res) {
 // Preview/publish teardown bridge used by permanent deletion; null when provisiond is absent.
 function provisiondCall() {
   if (!process.env.PROVISIOND_URL || !process.env.PROVISIOND_TOKEN) return null;
-  return async (route, body) => fetch(`${process.env.PROVISIOND_URL}${route}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.PROVISIOND_TOKEN}` },
-    body: JSON.stringify(body),
-  });
+  return async (route, body = null, method = "POST") => {
+    const res = await fetch(`${process.env.PROVISIOND_URL}${route}`, {
+      method,
+      headers: {
+        ...(body !== null ? { "Content-Type": "application/json" } : {}),
+        Authorization: `Bearer ${process.env.PROVISIOND_TOKEN}`,
+      },
+      body: body !== null ? JSON.stringify(body) : undefined,
+    });
+    // Parsed, not the raw Response: teardown needs to READ the answer to verify a site is gone,
+    // and the previous contract made "it returned 200 having done nothing" indistinguishable
+    // from success.
+    return res.json().catch(() => ({}));
+  };
 }
 
 async function requireOwner(req, res) {
