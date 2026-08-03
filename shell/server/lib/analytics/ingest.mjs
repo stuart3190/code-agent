@@ -8,6 +8,7 @@
 import { serviceClient } from "../supabase.mjs";
 import { identify } from "./visitorIdentity.mjs";
 import { isBot, parseUserAgent, referrerHost, normalizePath } from "./userAgent.mjs";
+import { scrubErrorFields } from "./scrub.mjs";
 
 const KINDS = new Set(["pageview", "vitals", "error"]);
 const MAX_STACK = 4_000;
@@ -94,9 +95,13 @@ export async function recordBeacon({
   }
 
   if (kind === "error") {
-    row.error_message = String(body.message || "").slice(0, MAX_MESSAGE) || "Unknown error";
-    row.error_source = String(body.source || "").slice(0, 300) || null;
-    row.error_stack = body.stack ? String(body.stack).slice(0, MAX_STACK) : null;
+    // Scrubbed on the way IN, not on the way out. A stack trace prints the URL it tried, the token
+    // it was given and the file paths of whoever built the app; storing that raw and cleaning it at
+    // render time would leave the secret in the database and in every backup of it.
+    const clean = scrubErrorFields(body);
+    row.error_message = clean.message || "Unknown error";
+    row.error_source = clean.source;
+    row.error_stack = clean.stack;
     row.status_code = clampInt(body.status, 599);
     // Only the path is kept from a request URL, for the same reason query strings are stripped
     // from page paths: they carry tokens and identifiers belonging to the site's own users.

@@ -3,6 +3,7 @@
 //   POST /api/analytics/collect                  PUBLIC — the beacon from published sites
 //   GET  /api/v1/projects/:id/analytics          owner-scoped overview
 //   GET  /api/v1/projects/:id/analytics/live     near-real-time visitors
+//   GET  /api/v1/projects/:id/analytics/export   CSV or JSON of the selected range
 // Deployment history moved to routes/deployments.mjs, which reads real deployment records rather
 // than diagnostic build runs.
 //
@@ -11,6 +12,7 @@
 
 import { recordBeacon } from "../lib/analytics/ingest.mjs";
 import { overview, liveVisitors } from "../lib/analytics/reports.mjs";
+import { buildAnalyticsExport } from "../lib/analytics/export.mjs";
 
 function sendJson(res, code, value) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -68,6 +70,33 @@ export async function handleAnalyticsOverview(_req, res, owner, projectId, url) 
 
 export async function handleAnalyticsLive(_req, res, owner, projectId) {
   return wrap(res, () => liveVisitors(owner.id, projectId));
+}
+
+/**
+ * CSV or JSON of the whole selected range.
+ *
+ * Errors come back as JSON with a real message rather than a zero-byte file: a download that
+ * silently produces an empty spreadsheet is the least debuggable possible failure.
+ */
+export async function handleAnalyticsExport(_req, res, owner, projectId, url) {
+  const format = (url?.searchParams?.get("format") || "json").toLowerCase() === "csv" ? "csv" : "json";
+  const days = Number(url?.searchParams?.get("days") || 30);
+  try {
+    const file = await buildAnalyticsExport(owner.id, projectId, { days, format });
+    res.writeHead(200, {
+      "Content-Type": file.contentType,
+      "Content-Disposition": `attachment; filename="${file.filename.replace(/[^a-zA-Z0-9._-]/g, "-")}"`,
+      "Cache-Control": "no-store",
+    });
+    return res.end(file.body);
+  } catch (error) {
+    const status = error.status || 500;
+    console.error(`[analytics-export] ${error?.message || error}`);
+    return sendJson(res, status, {
+      error: status === 500 ? "That export could not be prepared. Please try again." : error.message,
+      code: error.code || "export_failed",
+    });
+  }
 }
 
 // handleDeploymentHistory lived here and listed diag_runs as though diagnostic build runs were

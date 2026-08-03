@@ -37,6 +37,7 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/logs", expect: [401], why: "project logs" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/logs/runs", expect: [401], why: "builds a log view can be narrowed to" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments", expect: [401], why: "publish history" },
+  { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/analytics/export?format=csv", expect: [401], why: "analytics export" },
   { method: "POST", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/rollback", expect: [401], why: "rollback" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/download", expect: [401], why: "deployment source download" },
   { method: "POST", path: "/api/analytics/collect", expect: [204], why: "the public beacon must always answer 204" },

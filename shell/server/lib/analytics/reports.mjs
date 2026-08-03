@@ -65,6 +65,25 @@ const rank = (rows, dimension) => rows
   .sort((a, b) => b.pageviews - a.pageviews)
   .slice(0, 20);
 
+const sumOf = (rows) => rows.reduce((acc, r) => ({
+  pageviews: acc.pageviews + r.pageviews,
+  visitors: acc.visitors + r.visitors,
+  sessions: acc.sessions + r.sessions,
+  errors: acc.errors + r.errors,
+}), { pageviews: 0, visitors: 0, sessions: 0, errors: 0 });
+
+// Percentage change, or null when there is nothing to compare against. Zero → anything is not
+// "infinite growth", it is a period with no previous data, and saying so is more useful than a
+// number nobody can act on.
+function changeBetween(current, previous) {
+  const out = {};
+  for (const key of Object.keys(current)) {
+    const before = previous[key];
+    out[key] = before > 0 ? Number((((current[key] - before) / before) * 100).toFixed(1)) : null;
+  }
+  return out;
+}
+
 export async function overview(owner, projectId, {
   days = 30, client = serviceClient(), store = null, now = new Date(),
 } = {}) {
@@ -75,20 +94,40 @@ export async function overview(owner, projectId, {
   const project = await ownedProject(owner, projectId, client);
   if (!project) return { capabilities, window, ...emptyOverview(), unavailable: "not_published" };
 
-  const { data: rows } = await client.from("analytics_daily")
-    .select("*").eq("project_id", String(projectId)).eq("owner", owner).gte("day", window.from);
-  const all = rows || [];
+  // The comparison window is the SAME length immediately before this one, so "up 12%" compares
+  // like with like. Clamped to retention: a 90-day comparison on a 7-day plan would silently read
+  // an empty period and report a collapse.
+  const previousFrom = new Date(Date.parse(`${window.from}T00:00:00Z`) - window.days * 86_400_000)
+    .toISOString().slice(0, 10);
+  const comparable = capabilities.retentionDays === null || window.days * 2 <= capabilities.retentionDays;
+
+  const { data: rows, error } = await client.from("analytics_daily")
+    .select("*").eq("project_id", String(projectId)).eq("owner", owner)
+    .gte("day", comparable ? previousFrom : window.from);
+  if (error) throw new Error(`analytics read failed: ${error.message || error}`);
+  const fetched = rows || [];
+  const all = fetched.filter((r) => r.day >= window.from);
+  const priorRows = comparable ? fetched.filter((r) => r.day < window.from && r.day >= previousFrom) : [];
 
   const totalsRows = all.filter((r) => r.dimension === "totals");
-  const totals = totalsRows.reduce((acc, r) => ({
-    pageviews: acc.pageviews + r.pageviews,
-    visitors: acc.visitors + r.visitors,
-    sessions: acc.sessions + r.sessions,
-    errors: acc.errors + r.errors,
-  }), { pageviews: 0, visitors: 0, sessions: 0, errors: 0 });
+  const totals = sumOf(totalsRows);
+
+  // Errors are a paid feature. The count was returned to everyone regardless, so Free saw a number
+  // its plan says it does not get — the entitlement existed and nothing consulted it. Null, not
+  // zero: "you do not have this" and "there were none" are different answers.
+  if (!capabilities.errorReporting) totals.errors = null;
+
+  const previousTotals = sumOf(priorRows.filter((r) => r.dimension === "totals"));
+  if (!capabilities.errorReporting) previousTotals.errors = null;
 
   const series = totalsRows
-    .map((r) => ({ day: r.day, pageviews: r.pageviews, visitors: r.visitors, sessions: r.sessions, errors: r.errors }))
+    .map((r) => ({
+      day: r.day,
+      pageviews: r.pageviews,
+      visitors: r.visitors,
+      sessions: r.sessions,
+      errors: capabilities.errorReporting ? r.errors : null,
+    }))
     .sort((a, b) => (a.day < b.day ? -1 : 1));
 
   // Averaged from stored sums and a count, so merging days stays accurate rather than averaging
@@ -102,18 +141,51 @@ export async function overview(owner, projectId, {
     cls: Number((totalsRows.reduce((n, r) => n + Number(r.cls_sum || 0), 0) / vitalsCount).toFixed(3)),
   } : null;
 
+  // Visitors who had more than one session ON THE SAME DAY. Never called "returning visitors":
+  // the visitor hash rotates daily and the salts are destroyed, so cross-day identity does not
+  // exist by construction and claiming it would be a lie about the privacy model.
+  const returningRows = all.filter((r) => r.dimension === "returning");
+  const sameDayReturning = returningRows.reduce((n, r) => n + r.visitors, 0);
+
   return {
     capabilities,
-    window,
+    window: {
+      ...window,
+      // What the comparison is against, so the UI can name the period rather than say "previous".
+      previousFrom: comparable ? previousFrom : null,
+      comparable,
+    },
     totals,
+    // Absent rather than fabricated when the plan cannot see back far enough to compare.
+    previous: comparable ? previousTotals : null,
+    change: comparable ? changeBetween(totals, previousTotals) : null,
     series,
     vitals,
+    sameDayReturning: {
+      visitors: sameDayReturning,
+      // Stated in the payload, not only in the UI, so an export carries the caveat too.
+      note: "Visitors with more than one session on the same day. Cross-day visitor identity is deliberately not tracked.",
+    },
     topPages: rank(all, "path"),
     referrers: rank(all, "referrer"),
     // The breakdowns are what Starter adds; Free gets the headline numbers and the trend.
     browsers: capabilities.fullAnalytics ? rank(all, "browser") : [],
     operatingSystems: capabilities.fullAnalytics ? rank(all, "os") : [],
     devices: capabilities.fullAnalytics ? rank(all, "device") : [],
+    // The error breakdown, which now survives the raw-event prune. Gated by the same entitlement
+    // as the count, so a Free account cannot read through the headline to the detail.
+    errors: capabilities.errorReporting
+      ? all.filter((r) => r.dimension === "error")
+        .reduce((acc, r) => {
+          const found = acc.find((e) => e.key === r.key);
+          if (found) { found.errors += r.errors; found.visitors += r.visitors; return acc; }
+          return acc.concat({ key: r.key, errors: r.errors, visitors: r.visitors });
+        }, [])
+        .sort((a, b) => b.errors - a.errors).slice(0, 20)
+      : null,
+    // Countries need MaxMind GeoLite2 and there is no licence key. Reported as unavailable rather
+    // than inferred from language or timezone, which would be a guess presented as a fact.
+    countries: { available: false, reason: "geoip_unconfigured" },
   };
 }
 
