@@ -59,11 +59,14 @@ export function badgesFor(conversation) {
   }
 
   // Health outranks activity on a live site: "is it up" beats "what is it doing".
+  //
+  // Only PROBLEMS are badged. "Not yet checked" is a real state and is shown on the Health page
+  // and the Overview tile, but putting it on every card for the five minutes before the first
+  // sweep would be permanent chrome saying nothing is wrong (Principle 3).
   const health = conversation?.health;
-  if (health && health.status !== "healthy") {
-    badges.push(health.status === "offline"
-      ? { id: "offline", label: "OFFLINE", tone: "failed" }
-      : { id: "degraded", label: "DEGRADED", tone: "update" });
+  if (isLive(status) && health) {
+    if (health.status === "offline") badges.push({ id: "offline", label: "OFFLINE", tone: "failed" });
+    else if (health.status === "warning") badges.push({ id: "degraded", label: "DEGRADED", tone: "update" });
   }
 
   if (conversation?.activity) {

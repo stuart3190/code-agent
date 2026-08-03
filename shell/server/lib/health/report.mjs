@@ -8,7 +8,10 @@ import { serviceClient } from "../supabase.mjs";
 const isUp = (status) => status !== "offline";
 
 export async function healthForOwner(owner, client = serviceClient()) {
-  const { data } = await client.from("health_status").select("*").eq("owner", owner);
+  const { data, error } = await client.from("health_status").select("*").eq("owner", owner);
+  // Surfaced. Swallowing this returned an empty map, which every caller renders as "not checked
+  // yet" — a database outage looked exactly like a healthy new account.
+  if (error) throw new Error(`health: could not read status: ${error.message}`);
   const byProject = new Map();
   for (const row of data || []) {
     byProject.set(String(row.project_id), {
@@ -25,15 +28,17 @@ export async function healthForOwner(owner, client = serviceClient()) {
 }
 
 export async function healthDetail(owner, projectId, { client = serviceClient(), days = 30, now = new Date() } = {}) {
-  const { data: status } = await client.from("health_status")
+  const { data: status, error: statusError } = await client.from("health_status")
     .select("*").eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
+  if (statusError) throw new Error(`health: could not read status: ${statusError.message}`);
 
   const since = new Date(now.getTime() - days * 86_400_000).toISOString();
-  const { data: rows } = await client.from("health_checks")
+  const { data: rows, error: checksError } = await client.from("health_checks")
     .select("checked_at,status,http_status,response_ms,detail")
     .eq("project_id", String(projectId)).eq("owner", owner)
     .gte("checked_at", since)
     .order("checked_at", { ascending: false });
+  if (checksError) throw new Error(`health: could not read checks: ${checksError.message}`);
   const checks = rows || [];
 
   const up = checks.filter((c) => isUp(c.status)).length;

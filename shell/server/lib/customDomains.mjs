@@ -245,7 +245,14 @@ export async function verifyDomain(owner, domain, {
     }
     patch.ssl_status = (await certificateLive(cleaned, fetchImpl)) ? "active" : "pending";
   } else {
+    // A domain that WAS active and has stopped resolving goes back to verifying rather than
+    // straight to pending: the token is still published, only the routing broke, and saying so
+    // points the owner at the right record to fix.
     patch.status = ownershipProven ? DOMAIN_STATUS.verifying : DOMAIN_STATUS.pendingDns;
+    if (row.status === DOMAIN_STATUS.active) {
+      // It is no longer serving, so it must stop claiming a certificate is in place.
+      patch.ssl_status = "pending";
+    }
     patch.failure_reason = ownershipProven
       ? "The verification record is correct, but the domain does not point to Thrallo yet."
       : "Waiting for the verification TXT record to appear in DNS.";
@@ -279,12 +286,35 @@ export async function retryDomain(owner, domain, options = {}) {
   return verifyDomain(owner, cleaned, options);
 }
 
-// Every domain still working towards active, oldest check first.
-export async function unsettledDomains(client = serviceClient(), limit = 25) {
-  const { data } = await client.from("custom_domains")
+// How often a domain that is already Active is proved still correct. Frequent enough to notice a
+// zone edit within a working day, rare enough not to hammer DNS for every domain every minute.
+export const ACTIVE_RECHECK_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Domains the verifier should look at: everything still working towards active, plus active
+ * domains that have not been confirmed recently.
+ *
+ * Re-checking active domains is the part that was missing. Once verified, a domain stayed Active
+ * regardless of what happened to its DNS afterwards — so a zone edit silently broke a customer's
+ * address while Thrallo kept reporting it as working.
+ */
+export async function unsettledDomains(client = serviceClient(), limit = 25, now = new Date()) {
+  const { data: pending, error } = await client.from("custom_domains")
     .select("domain,owner,status,last_checked_at")
     .in("status", [DOMAIN_STATUS.pendingDns, DOMAIN_STATUS.verifying])
     .order("last_checked_at", { ascending: true, nullsFirst: true })
     .limit(limit);
-  return data || [];
+  if (error) throw new Error(`custom_domains read failed: ${error.message || error}`);
+
+  const remaining = limit - (pending?.length || 0);
+  if (remaining <= 0) return pending || [];
+
+  const staleBefore = new Date(now.getTime() - ACTIVE_RECHECK_MS).toISOString();
+  const { data: active } = await client.from("custom_domains")
+    .select("domain,owner,status,last_checked_at")
+    .eq("status", DOMAIN_STATUS.active)
+    .or(`last_checked_at.is.null,last_checked_at.lt.${staleBefore}`)
+    .order("last_checked_at", { ascending: true, nullsFirst: true })
+    .limit(remaining);
+  return [...(pending || []), ...(active || [])];
 }
