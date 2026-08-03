@@ -75,13 +75,45 @@ async function withAnalytics(files, appId) {
 // Friendly, unique slug: the requested/site name first, else the project name. Collisions —
 // including labels the shared publish root already holds for the frozen Buildr sites — get
 // a numeric suffix rather than an error the user has to solve.
-export async function claimSlug(ownerId, projectId, wanted) {
-  const client = serviceClient();
-  const { data: existing } = await client.from("published_sites")
-    .select("slug").eq("project_id", String(projectId)).maybeSingle();
-  const base = slugify(wanted || "") || existing?.slug || null;
-  if (!base) return existing?.slug || null;
-  if (existing?.slug === base) return base;
+/**
+ * The address this product is published at.
+ *
+ * A slug belongs to the PRODUCT, not to one project row. Every rebuild inserts a new project, so
+ * resolving per project meant a rebuilt app claimed a fresh URL while the old one kept serving —
+ * and the new URL broke the custom domain (whose CNAME target and Caddy label are built from the
+ * slug) and orphaned analytics (whose app id IS the slug).
+ *
+ * So: once published, an address is never given up. It is only minted for a product that has
+ * never been live. Renaming a project does not change where it lives, which is what anyone would
+ * expect of a URL they have given to other people.
+ *
+ * Returns `{ slug, supersedes }` — `supersedes` is the project id currently holding the row, when
+ * the address is being inherited from an earlier build of the same product.
+ */
+export async function claimSlug(ownerId, projectId, wanted, { productId = null, client = serviceClient() } = {}) {
+
+  const { data: own } = await client.from("published_sites")
+    .select("slug").eq("project_id", String(projectId)).eq("owner", ownerId).maybeSingle();
+  // Already published: keep the address, whatever the project is called now.
+  if (own?.slug) return { slug: own.slug, supersedes: null };
+
+  if (productId) {
+    const { projectsForProduct } = await import("./projectScope.mjs");
+    const siblings = await projectsForProduct(ownerId, productId, client);
+    const ids = siblings.map((p) => String(p.id)).filter((id) => id !== String(projectId));
+    if (ids.length) {
+      const { data: inherited } = await client.from("published_sites")
+        .select("slug, project_id, updated_at").eq("owner", ownerId).in("project_id", ids)
+        .order("updated_at", { ascending: false }).limit(1);
+      const row = inherited?.[0];
+      // An earlier build of this same product is live. This build replaces it at the same address
+      // rather than starting a second site.
+      if (row?.slug) return { slug: row.slug, supersedes: String(row.project_id) };
+    }
+  }
+
+  const base = slugify(wanted || "") || null;
+  if (!base) return { slug: null, supersedes: null };
   for (let n = 0; n < 20; n += 1) {
     const candidate = n === 0 ? base : `${base}-${n + 1}`;
     const { data: holder } = await client.from("published_sites")
@@ -91,27 +123,26 @@ export async function claimSlug(ownerId, projectId, wanted) {
       const taken = await provisiond(`/exists?label=${encodeURIComponent(candidate)}`, { method: "GET" });
       if (taken.exists) continue; // a frozen Buildr site owns that label on disk
     }
-    return candidate;
+    return { slug: candidate, supersedes: null };
   }
   const error = new Error(`No available site name near "${base}" — pick another name.`);
   error.code = "slug_taken";
   throw error;
 }
 
-async function resolveProject(ownerId, { projectId = null, productName = null }) {
-  const client = serviceClient();
-  let query = client.from("projects").select("id, name, tree, product_id, updated_at")
-    .eq("owner", ownerId).not("tree", "is", null)
-    .order("updated_at", { ascending: false }).limit(1);
-  if (projectId) query = query.eq("id", projectId);
-  else if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", ownerId).ilike("name", productName).maybeSingle();
-    if (product) query = query.eq("product_id", product.id);
-  }
-  const { data } = await query;
-  return data?.[0] || null;
+// Move an existing site record onto the project that now backs it, rather than deleting and
+// re-inserting. This keeps created_at — the date the product first went live, which deployment
+// history depends on — and avoids ever having two rows claiming one slug (it is unique).
+async function transferSite(ownerId, fromProjectId, toProjectId, client = serviceClient()) {
+  const { error } = await client.from("published_sites")
+    .update({ project_id: String(toProjectId), updated_at: new Date().toISOString() })
+    .eq("project_id", String(fromProjectId)).eq("owner", ownerId);
+  if (error) throw new Error(`could not transfer the published site record: ${error.message}`);
 }
+
+// The old `resolveProject` lived here and resolved "the owner's newest project with a tree",
+// ignoring the conversation entirely. It is deleted rather than left unused: it is a one-line
+// reach away from reintroducing the bug, and lib/appBuild/projectScope.mjs replaces it everywhere.
 
 export async function publishApp(ctx, { projectId = null, siteName = null, productName = null }) {
   if (!publishConfigured()) {
@@ -119,9 +150,14 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     error.code = "not_configured";
     throw error;
   }
-  const project = await resolveProject(ctx.owner, { projectId, productName });
+  // Scoped to THIS conversation's product. Publishing whatever happened to be newest is how
+  // "publish it" could take a different app live.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project, productId, scope } = await resolveConversationProject(ctx, { projectId, productName });
   if (!project) {
-    const error = new Error("There's no built app to publish yet — build something first and I'll take it live.");
+    const error = new Error(scope === "unknown_product"
+      ? `I couldn't find an app called "${productName}". Which one did you mean?`
+      : "There's no built app to publish yet — build something first and I'll take it live.");
     error.code = "nothing_to_publish";
     throw error;
   }
@@ -130,7 +166,12 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   const startedAt = Date.now();
   logProject({ owner: ctx.owner, projectId: project.id, source: "publish", message: "Publish started" });
   try {
-    const slug = await claimSlug(ctx.owner, project.id, siteName || project.name);
+    const claim = await claimSlug(ctx.owner, project.id, siteName || project.name, { productId });
+    const slug = claim.slug;
+    // A rebuild of this product inherits the live address. Move the record onto this project
+    // BEFORE publishing, so the unique slug is never held by two rows and the site keeps its
+    // first-published date.
+    if (claim.supersedes) await transferSite(ctx.owner, claim.supersedes, project.id);
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
     await ensureDeps(() => {});
@@ -201,10 +242,14 @@ export async function connectDomain(ctx, { domain, productName = null }) {
     error.code = "bad_domain";
     throw error;
   }
-  const project = await resolveProject(ctx.owner, { productName });
+  // Same scoping as publish. Attaching a customer's domain to whichever project was touched most
+  // recently is the worst version of this bug — it points their address at the wrong app.
+  const { resolveConversationProject } = await import("./projectScope.mjs");
+  const { project } = await resolveConversationProject(ctx, { productName });
   const client = serviceClient();
   const { data: site } = project
-    ? await client.from("published_sites").select("slug").eq("project_id", String(project.id)).maybeSingle()
+    ? await client.from("published_sites")
+      .select("slug").eq("project_id", String(project.id)).eq("owner", ctx.owner).maybeSingle()
     : { data: null };
   if (!site) {
     const error = new Error("Publish the app first, then I'll connect the domain to it.");
