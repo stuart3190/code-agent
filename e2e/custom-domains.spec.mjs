@@ -289,19 +289,42 @@ test("a live project that is building appears once, under Live apps", async ({ p
 test("publishing ends with a success panel offering Connect Domain", async ({ page }) => {
   await stub(page, [PUBLISHED]);
   await page.route("**/domains", (r) => r.fulfill({ json: { domains: [], allowance: UNLIMITED } }));
+  // A real publish over the event stream, so this exercises the SUCCESS panel its name describes.
+  // Without it the panel is in its resting state, where Connect Domain lives behind More — the
+  // moment after publishing is exactly when someone wants their own address, and that is where
+  // the button is promoted to.
+  await page.route("**/api/v1/conversations/*/events**", (r) => r.fulfill({
+    contentType: "text/event-stream",
+    body: `data: ${JSON.stringify({
+      sequence: 1, type: "published",
+      payload: { url: SITE.url, slug: SITE.slug, projectId: SITE.projectId, deploymentNumber: 3 },
+    })}\n\n`,
+  }));
   await page.goto("/");
   await card(page, "FocusFlow").locator(".ct-pname").click();
 
   const panel = page.locator(".ct-published");
-  await expect(panel.locator(".ct-badge.tone-live")).toHaveText("LIVE");
+  await expect(panel).toContainText("Your app is live");
   await expect(panel.locator(".ct-published-env")).toHaveText("Production");
   await expect(panel.getByRole("link", { name: "Open Site" })).toHaveAttribute("href", SITE.url);
-  await expect(panel.getByRole("button", { name: "Copy URL" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Connect Domain" })).toBeVisible();
 
   await panel.getByRole("button", { name: "Connect Domain" }).click();
   await expect(sheetOf(page)).toBeVisible();
   await expect(sheetOf(page).getByRole("tab", { name: "Domains" })).toBeVisible();
+});
+
+test("the resting panel keeps Connect Domain one click away, not gone", async ({ page }) => {
+  await stub(page, [PUBLISHED]);
+  await page.route("**/domains", (r) => r.fulfill({ json: { domains: [], allowance: UNLIMITED } }));
+  await page.goto("/");
+  await card(page, "FocusFlow").locator(".ct-pname").click();
+
+  const panel = page.locator(".ct-published");
+  await expect(panel.locator(".ct-badge.tone-live")).toHaveText("LIVE");
+  await expect(panel.getByRole("button", { name: "Copy URL" })).toBeVisible();
+  await panel.getByRole("button", { name: /More/ }).click();
+  await expect(panel.getByRole("button", { name: "Connect Domain" })).toBeVisible();
 });
 
 test("Connect Domain is not offered once a domain is already connected", async ({ page }) => {

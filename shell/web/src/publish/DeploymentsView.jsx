@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { projectDeployments, rollbackDeployment, downloadDeployment } from "../lib/codeAgentApi.js";
 import { relativeTime } from "./publishLifecycle.js";
+import { TabSkeleton, TabEmpty, TabError } from "./TabStates.jsx";
 // One vocabulary for deployment status, shared with the server and the publish panel.
 import {
   DEPLOY_LABEL as STATUS_LABEL, DEPLOY_TONE as STATUS_TONE, isDeploymentSettled,
@@ -45,6 +46,7 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade, focusId =
   const [confirming, setConfirming] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [downloading, setDownloading] = useState("");
   const focused = useRef(null);
   const projectId = site?.projectId;
 
@@ -93,24 +95,15 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade, focusId =
     }
   }
 
-  if (error) {
-    return (
-      <div className="mg-error">
-        {error} <button className="ct-linkish" onClick={load}>Try again</button>
-      </div>
-    );
-  }
-  if (!deployments) return <div className="mg-card"><div className="ct-hint">Loading…</div></div>;
+  if (error) return <TabError message={error} onRetry={load} />;
+  if (!deployments) return <TabSkeleton rows={3} label="Loading deployments" />;
 
   if (!deployments.length) {
     return (
-      <div className="ct-logs-empty">
-        <strong>Nothing has been deployed yet.</strong>
-        <span className="ct-hint">
-          Every publish is recorded here with its build and deploy times, so you can see what went
-          out and put an earlier version back.
-        </span>
-      </div>
+      <TabEmpty title="Nothing has been deployed yet." icon="🚀">
+        Every publish is recorded here with its build and deploy times, so you can see what went
+        out and put an earlier version back.
+      </TabEmpty>
     );
   }
 
@@ -167,7 +160,17 @@ export default function DeploymentsView({ site, onOpenLogs, onUpgrade, focusId =
                 </button>
               )}
               {d.sourceAvailable
-                ? <button className="ct-pubrow-btn" onClick={() => downloadDeployment(projectId, d.id, d.number).catch((e) => setActionError(e.message))}>Download source</button>
+                ? (
+                  <button className="ct-pubrow-btn" disabled={downloading === d.id}
+                    onClick={async () => {
+                      setDownloading(d.id); setActionError("");
+                      try { await downloadDeployment(projectId, d.id, d.number); }
+                      catch (e) { setActionError(e.message || "That download could not be prepared."); }
+                      finally { setDownloading(""); }
+                    }}>
+                    {downloading === d.id ? "Preparing…" : "Download source"}
+                  </button>
+                )
                 : <span className="ct-hint">Source not stored</span>}
             </div>
 

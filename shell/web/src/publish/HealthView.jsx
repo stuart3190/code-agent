@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { projectHealth, listDomains, projectDeployments } from "../lib/codeAgentApi.js";
 import { relativeTime, displayUrl } from "./publishLifecycle.js";
+import { TabSkeleton, TabError } from "./TabStates.jsx";
 // Re-exported for the surfaces that already import them from here. The definitions live in the
 // shared operational module, which the server imports too, so a notification and a panel cannot
 // call the same state different things.
@@ -77,8 +78,8 @@ export default function HealthView({ site, onClose, onOpenTab = null, embedded =
   // button, and nesting a second one inside it would mean two scroll areas and two close buttons.
   const body = (
     <>
-        {error && <div className="mg-error">{error}</div>}
-        {!data && !error && <div className="mg-card"><div className="ct-hint">Loading…</div></div>}
+        {error && <TabError message={error} onRetry={load} />}
+        {!data && !error && <TabSkeleton rows={2} metrics label="Loading health" />}
 
         {data && !status && (
           <div className="mg-card"><div className="ct-hint">

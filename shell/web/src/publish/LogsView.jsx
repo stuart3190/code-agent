@@ -6,6 +6,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { projectLogs, logStreamUrl, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
+import { TabSkeleton, TabError } from "./TabStates.jsx";
 
 const LEVELS = [
   { id: "info", label: "Info" },
@@ -77,6 +78,7 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
   const [error, setError] = useState("");
   const [runs, setRuns] = useState([]);
   const [runsLoaded, setRunsLoaded] = useState(false);
+  const [exporting, setExporting] = useState("");
   const seen = useRef(new Set());
   const projectId = site?.projectId;
 
@@ -156,8 +158,17 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
         </button>
         {/* Buttons, not links: a link carries no Authorization header, so these were saving a
             401 JSON body under a .csv name. */}
-        <button className="ct-pubrow-btn" onClick={() => exportLogs(projectId, { ...params(), format: "json" }).catch((e) => setError(e.message))}>JSON</button>
-        <button className="ct-pubrow-btn" onClick={() => exportLogs(projectId, { ...params(), format: "csv" }).catch((e) => setError(e.message))}>CSV</button>
+        {["json", "csv"].map((format) => (
+          <button key={format} className="ct-pubrow-btn" disabled={!!exporting}
+            onClick={async () => {
+              setExporting(format); setError("");
+              try { await exportLogs(projectId, { ...params(), format }); }
+              catch (e) { setError(e.message || "That export could not be prepared."); }
+              finally { setExporting(""); }
+            }}>
+            {exporting === format ? "…" : format.toUpperCase()}
+          </button>
+        ))}
       </div>
 
       {/* Builds. Selecting one narrows every source to that run and puts it in the URL, so the
@@ -201,9 +212,13 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
         ))}
       </div>
 
-      {error && <div className="mg-error">{error}</div>}
+      {error && <TabError message={error} onRetry={() => load(null)} />}
 
       <div className="ct-logs-list">
+        {/* The first load showed nothing at all — an empty list that had not been fetched yet is
+            indistinguishable from a project with no logs, which is the distinction this whole view
+            exists to make. */}
+        {!entries.length && loading && !error && <TabSkeleton rows={4} label="Loading logs" />}
         {entries.map((entry) => <Row entry={entry} key={entry.id} />)}
         {/* An empty log has several distinct causes and they need different sentences. "No entries"
             for a project that has never been built reads as a fault; saying which case this is
