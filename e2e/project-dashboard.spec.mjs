@@ -173,6 +173,10 @@ test("the tab strip is one tab stop, and the panel is labelled by its tab", asyn
 test("Escape closes the dashboard", async ({ page }) => {
   await stub(page);
   await open(page);
+  // Focus a tab first. "Visible" only means mounted; the Escape listener is registered by a mount
+  // effect, and on a throttled mobile profile the keypress can otherwise land before it exists.
+  // Focusing also mirrors the real case — a keyboard user is already inside the dashboard.
+  await dash(page).getByRole("tab", { name: "Overview" }).focus();
   await page.keyboard.press("Escape");
   await expect(dash(page)).toHaveCount(0);
   await expect.poll(() => new URL(page.url()).pathname).toBe("/");

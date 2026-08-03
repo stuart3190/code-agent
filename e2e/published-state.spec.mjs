@@ -148,6 +148,9 @@ test("Project Settings offers only actions that exist, and can download the sour
   });
   await page.goto("/");
   await page.locator(".ct-project").filter({ hasText: "FocusFlow" }).locator(".ct-pname").click();
+  // Project Settings moved behind the resting panel's disclosure in Phase 2: the panel sits above
+  // every conversation permanently, and settings is not something anyone needs on every visit.
+  await page.locator(".ct-published").getByRole("button", { name: /More/ }).click();
   await page.locator(".ct-published").getByRole("button", { name: "Project Settings" }).click();
 
   const sheet = page.locator(".ct-projdash");
