@@ -132,7 +132,11 @@ test("unpublishing preserves the record instead of deleting it", async () => {
   const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
   const fn = source.slice(source.indexOf("export async function unpublishApp"));
   assert.match(fn, /unpublished_at: new Date\(\)/, "it stamps the row");
-  assert.doesNotMatch(fn, /\.delete\(\)/, "and never deletes it — history and the slug must survive");
+  // Specifically the SITE record. Unpublishing does now delete health_status — a dead site has
+  // nothing to report on — so a blanket "no deletes" assertion would forbid correct behaviour
+  // while still not saying what actually matters here.
+  assert.doesNotMatch(fn, /from\("published_sites"\)\s*\n?\s*\.delete\(\)/,
+    "the site record must survive — history and the claimed slug live in it");
   assert.ok(fn.indexOf('provisiond("/unpublish"') < fn.indexOf("unpublished_at: new Date()"),
     "the files come down before the record says they did");
 });

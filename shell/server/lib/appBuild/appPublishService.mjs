@@ -309,11 +309,31 @@ export async function unpublishApp(owner, projectId) {
   // user it did not work while their site was down — the worst of both.
   if (updateError) console.error(`[unpublish] record failed: ${updateError.message}`);
 
+  // A site that is offline must not leave other surfaces claiming otherwise. Without this the
+  // Domains tab kept saying "Active · Live and secured with HTTPS" while the hostname 404'd, and
+  // the health badge stayed pinned to whatever it last saw.
+  const client2 = serviceClient();
+  const { data: domains } = await client2.from("custom_domains")
+    .select("domain").eq("project_id", String(projectId)).eq("owner", owner);
+  for (const row of domains || []) {
+    await detachDomain(row.domain).catch((error) =>
+      console.error(`[unpublish] detach ${row.domain}: ${error?.message || error}`));
+  }
+  if (domains?.length) {
+    // Back to pending rather than failed: the domain is not broken, it simply has nothing to
+    // point at until the project is published again, and republishing re-verifies it.
+    await client2.from("custom_domains")
+      .update({ status: "pending_dns", ssl_status: "pending", updated_at: new Date().toISOString() })
+      .eq("project_id", String(projectId)).eq("owner", owner);
+  }
+  // Health has nothing to measure once the site is gone; a stale row would keep reporting.
+  await client2.from("health_status").delete().eq("project_id", String(projectId)).eq("owner", owner);
+
   logProject({
     owner, projectId, source: "deploy", level: "warning",
     message: "Site unpublished", detail: `${site.url} is no longer served.`,
   });
-  return { url: site.url, alreadyOffline: false };
+  return { url: site.url, alreadyOffline: false, domainsDetached: (domains || []).length };
 }
 
 // Caddy learns about a custom hostname through provisiond. Exported so the domain verifier can
