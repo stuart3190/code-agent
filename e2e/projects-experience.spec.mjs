@@ -308,3 +308,53 @@ test("the bulk bar stays reachable while a long list scrolls", async ({ page }) 
   // Sticky, so the action does not scroll away from the selection it applies to.
   await expect(bar).toBeInViewport();
 });
+
+// ── Layout and motion ───────────────────────────────────────────────────────────────────
+//
+// This file runs across the whole device matrix, so these two assertions cover desktop, both
+// tablet orientations and mobile without being written four times.
+
+test("the page never scrolls sideways, whatever is on screen", async ({ page }) => {
+  await stub(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Select all" }).click();
+  await expect(page.locator(".ct-bulkbar")).toBeVisible();
+
+  // The bulk bar, the controls row and the cards all wrap. A horizontal scrollbar on the body is
+  // the one layout failure a customer cannot work around.
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("nothing moves for someone who asked for less motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await stub(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Select all" }).click();
+  const bar = page.locator(".ct-bulkbar");
+  await expect(bar).toBeVisible();
+  expect(await bar.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+  // The star's hover grow is the other movement this phase introduced.
+  const star = cards(page).first().locator(".ct-pfav");
+  await star.hover();
+  expect(await star.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
+});
+
+test("the favourite and delete controls do not sit on top of the project name", async ({ page }) => {
+  await stub(page);
+  await page.goto("/");
+  const card = cards(page).first();
+  const name = await card.locator(".ct-pname").boundingBox();
+  const star = await card.locator(".ct-pfav").boundingBox();
+  const del = await card.locator(".ct-pdelete").boundingBox();
+  // Both are absolutely positioned in the card's right-hand gutter; the name must end before it.
+  expect(name.x + name.width).toBeLessThanOrEqual(Math.min(star.x, del.x) + 1);
+  expect(star.x + star.width).toBeLessThanOrEqual(del.x + 1);
+
+  // A finger needs a bigger target than a cursor. The coarse-pointer override for this lived
+  // EARLIER in the stylesheet than the star's own rule, and a media query carries no extra
+  // specificity — so it silently lost and the touch target stayed at its 22px desktop size.
+  const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  expect(Math.min(star.width, star.height)).toBeGreaterThanOrEqual(coarse ? 32 : 22);
+});

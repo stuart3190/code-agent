@@ -405,8 +405,9 @@ div.ct-model-row { cursor: pointer; }
 /* touch targets — 22px hover affordances grow on coarse pointers */
 @media (pointer: coarse) {
   .ct-pdelete { width: 32px; height: 32px; top: 4px; right: 4px; font-size: 17px; }
-  .ct-pfav { width: 32px; height: 32px; top: 4px; right: 38px; font-size: 17px; }
-  .ct-project { padding-right: 76px; }
+  /* .ct-pfav and .ct-project's gutter are widened at the END of the Projects section below —
+     their base rules are declared after this block, and a media query adds no specificity, so an
+     override written here would simply lose. */
   .ct-recent-btn { padding: 9px 12px; }
   .ct-toggle button { padding: 8px 13px; }
   .ct-context-chip button { padding: 6px 10px; }
@@ -1064,6 +1065,13 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 @media (hover: none) {
   .ct-pfav, .ct-pselect { opacity: 1; }
   .ct-pfav:hover { transform: none; }
+}
+/* Touch targets. This has to come after the base rules above, not with the other coarse-pointer
+   overrides earlier in the file — a media query carries no extra specificity, so whichever rule is
+   written last wins, and the earlier block was quietly losing. */
+@media (pointer: coarse) {
+  .ct-pfav { width: 32px; height: 32px; top: 4px; right: 38px; font-size: 17px; }
+  .ct-project { padding-right: 76px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ct-bulkbar { animation: none; }
