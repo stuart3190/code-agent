@@ -7,6 +7,7 @@
 import { serviceClient } from "../supabase.mjs";
 import { optionalEnv } from "../env.mjs";
 import { sendWebPush } from "./webPush.mjs";
+import { recordNotification } from "./notificationHistory.mjs";
 
 const vapidConfigured = () => !!(optionalEnv("THRALLO_VAPID_PUBLIC_KEY") && optionalEnv("THRALLO_VAPID_PRIVATE_KEY"));
 const resendConfigured = () => !!optionalEnv("THRALLO_RESEND_KEY");
@@ -44,8 +45,16 @@ export async function removeSubscription(ownerId, endpoint) {
 }
 
 // notifyOwner: fire-and-forget from event sites; failures log, never throw into the caller.
-export async function notifyOwner(ownerId, { title, body, url = null, tag = "thrallo" }, { fetchImpl = fetch } = {}) {
-  const results = { webpush: 0, email: 0 };
+export async function notifyOwner(ownerId, { title, body, url = null, tag = "thrallo" }, { fetchImpl = fetch, record = recordNotification } = {}) {
+  const results = { webpush: 0, email: 0, recorded: false };
+  // Recorded FIRST, and independently of the channels. Web push needs a subscription and email
+  // needs Resend; a customer with neither used to receive nothing at all and had no way to find
+  // out afterwards. The history is the one channel that always exists.
+  try {
+    results.recorded = !!(await record(ownerId, { title, body, url, tag }));
+  } catch (error) {
+    console.error(`[notify:history] ${error.message}`);
+  }
   try {
     if (vapidConfigured()) {
       const { data: subs } = await serviceClient().from("ca_push_subscriptions")

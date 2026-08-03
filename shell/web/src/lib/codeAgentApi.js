@@ -110,6 +110,22 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
   method: "POST", body: JSON.stringify(body),
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
+// Everything Settings needs, in one read — see shell/server/routes/settings.mjs.
+export const accountSettings = () => request("/api/v1/settings");
+// One endpoint for both directions: cancelling and un-cancelling are one field on one Stripe
+// object, and two endpoints would be two chances to drift apart.
+export const setCancellation = (cancel) => request("/api/v1/billing/cancel", {
+  method: "POST", body: JSON.stringify({ resume: !cancel }),
+});
+export const listNotifications = ({ before = null, limit = 50 } = {}) => {
+  const query = new URLSearchParams();
+  if (before) query.set("before", before);
+  if (limit) query.set("limit", String(limit));
+  const q = query.toString();
+  return request(`/api/v1/notifications${q ? `?${q}` : ""}`);
+};
+export const markNotificationsRead = ({ id = null, all = false } = {}) =>
+  request("/api/v1/notifications/read", { method: "POST", body: JSON.stringify({ id, all }) });
 export const opsTelemetry = () => request("/api/v1/ops/telemetry");
 export const usageInsights = () => request("/api/v1/usage/insights");
 export const buildCostSummary = (buildId) => request(`/api/v1/usage/builds/${buildId}`);
@@ -212,6 +228,9 @@ export const createApiToken = (name) => request("/api/v1/tokens", {
   method: "POST", body: JSON.stringify({ name }),
 });
 export const revokeApiToken = (tokenId) => request(`/api/v1/tokens/${tokenId}`, { method: "DELETE" });
+export const renameApiToken = (tokenId, name) => request(`/api/v1/tokens/${tokenId}`, {
+  method: "PATCH", body: JSON.stringify({ name }),
+});
 export const githubInstallations = () => request("/api/v1/github/installations");
 export const startGithubInstallation = () => request("/api/v1/github/installations/start", { method: "POST" });
 export const githubInstallationRepositories = (installationId) =>

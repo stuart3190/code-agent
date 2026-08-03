@@ -45,6 +45,9 @@ export const RESTORE_ORDER = [
   "ca_model_evaluation_results",
   "ca_subscriptions",
   "ca_api_tokens",
+  // The account's notification history. It is the only record that something was ever said —
+  // losing it would mean a restored account could not see what it had been told.
+  "ca_notifications",
   "ca_products",
   "ca_conversations",
   "ca_conversation_turns",

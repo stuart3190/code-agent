@@ -39,15 +39,14 @@ const MUST_BE_MOUNTED = new Set([
   "thralloAnalytics.mjs",
   "qa.mjs",              // restored 2026-08-01 (PR 3) — needed a qa_runs table that never existed
   "subscription.mjs",
+  "settings.mjs",        // Phase 6 — the Settings screen in one read
 ]);
 
 // Modules deliberately NOT mounted, each with the reason. A bare list would rot; a reason makes
 // the next legacy sweep reviewable instead of guesswork.
 const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
-  "account.mjs": "Buildr101 account deletion; Thrallo account removal lives in the conversation surface",
   "analytics.mjs": "Buildr101 per-app analytics connector; not part of the Thrallo product surface",
   "android.mjs": "Buildr101 Android/TWA packaging; gated until demanded",
-  "billing.mjs": "legacy credit-ledger billing, superseded by Thrallo subscriptions (subscription.mjs)",
   "capabilities.mjs": "Buildr101 connector capability runtime; superseded by the Capability Registry",
   "connectWebhook.mjs": "Stripe Connect webhook for generated-app payments; unmounted until payments return",
   "connectors.mjs": "Buildr101 connector hub; superseded by the Capability Registry",
@@ -66,7 +65,6 @@ const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
   "runtimeConnectors.mjs": "Buildr101 generated-app connector runtime",
   "runtimeWebhook.mjs": "Buildr101 generated-app webhook runtime",
   "saasPayments.mjs": "Buildr101 generated-app payments",
-  "settings.mjs": "legacy BYOK storage; superseded by /api/v1/ai/* (aiConnections.mjs)",
   "stripeWebhook.mjs": "legacy platform billing webhook; superseded by the Thrallo billing webhook",
   "templates.mjs": "Buildr101 templates; Principle 7 replaces templates with the outcome router",
   "visualBrand.mjs": "Buildr101 visual brand kits; superseded by the design director",

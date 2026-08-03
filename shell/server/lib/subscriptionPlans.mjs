@@ -75,6 +75,10 @@ export function normalizeSubscription(owner, row) {
     stripe_subscription_id: row?.stripe_subscription_id || null,
     current_period_start: row?.current_period_start || null,
     current_period_end: row?.current_period_end || null,
+    // Set to stop at the end of the paid period. Distinct from status 'cancelled', which means it
+    // has ALREADY stopped — telling the two apart is the difference between "renews on the 12th"
+    // and "ends on the 12th".
+    cancel_at_period_end: !!row?.cancel_at_period_end,
     run_limit_override: row?.run_limit_override || null,
     managed_token_limit_override: row?.managed_token_limit_override || null,
     compute_seconds_limit_override: row?.compute_seconds_limit_override || null,
@@ -119,6 +123,12 @@ export function publicSubscription(subscription) {
     status: subscription.status,
     stripeManaged: !!subscription.stripe_subscription_id,
     currentPeriodEnd: subscription.current_period_end,
+    // What the period end MEANS, so no surface has to work it out and none can get it wrong.
+    cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
+    periodEndMeans: !subscription.stripe_subscription_id ? "resets"
+      : subscription.cancel_at_period_end ? "ends"
+        : subscription.pending_plan ? "changes" : "renews",
+    priceGbp: plan.priceGbp,
     // Shown so a scheduled downgrade is never a surprise on the day it lands.
     pendingPlan: subscription.pending_plan || null,
     pendingPlanName: pending?.name || null,
