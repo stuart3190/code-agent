@@ -1,33 +1,89 @@
 import { CodeAgentInputError } from "../lib/codeAgentContracts.mjs";
 import { conversationStore } from "../lib/conversationStore.mjs";
 import { postUserMessage } from "../lib/leadAgentService.mjs";
+import { resolvePublishState } from "../../shared/publishResolution.mjs";
 
-export async function handleConversations(req, res, { owner, method, body }) {
+const PAGE_SIZE = 20;
+const MAX_PAGE = 100;
+
+// Which statuses each dashboard tab covers. Filtering happens HERE rather than on the client,
+// because the client only ever holds one page — filtering a page and calling it a filter would
+// silently hide everything after it.
+const TAB_STATUSES = Object.freeze({
+  all: null,
+  drafts: ["draft", "unpublished"],
+  published: ["published"],
+  updates: ["update_available"],
+});
+
+export async function handleConversations(req, res, { owner, method, body, url = null }) {
   const store = conversationStore();
   if (method === "GET") {
     const rows = await store.listConversations(owner.id);
     // Publish state travels WITH the card rather than being joined client-side. The dashboard and
     // the conversation both read the same derivation, so a project cannot appear live in one place
     // and draft in the other — which is exactly what happened when the badge was UI-only.
-    let publishByProduct = new Map();
+    let publish = resolvePublishState([]);
     let healthByProject = new Map();
     try {
       const { publishStates } = await import("../lib/publishState.mjs");
-      publishByProduct = new Map(
-        (await publishStates(owner.id)).filter((s) => s.productId).map((s) => [s.productId, s]),
-      );
+      // The SHARED resolver. This route used to build its own Map, which for a product with two
+      // published rows took the last one, while the web app's `.find()` took the first — the same
+      // project could read UNPUBLISHED on its card and LIVE in the panel above it.
+      publish = resolvePublishState(await publishStates(owner.id));
+      if (publish.conflicts.length) {
+        // Loud, and named: two live records for one product is a data fault the platform must not
+        // quietly pick a winner for forever. ops/repair-publish-state.mjs fixes it.
+        console.error(`[conversations] publish conflicts for ${owner.id}: ${JSON.stringify(publish.conflicts)}`);
+      }
       const { healthForOwner } = await import("../lib/health/report.mjs");
       healthByProject = await healthForOwner(owner.id);
     } catch (error) {
       console.error(`[conversations] publish state unavailable: ${error?.message || error}`);
     }
+
+    // Status is resolved for EVERY conversation before paging, so a tab count and a filtered page
+    // describe the same set. Counting only the current page would report "Published 3" on a list
+    // of forty.
+    const withStatus = rows.map((row) => ({
+      row,
+      status: publish.statusFor({ productId: row.product_id }),
+      site: publish.site({ productId: row.product_id }),
+    }));
+
+    const counts = { all: withStatus.length };
+    for (const [tab, statuses] of Object.entries(TAB_STATUSES)) {
+      if (statuses) counts[tab] = withStatus.filter((c) => statuses.includes(c.status)).length;
+    }
+
+    const params = url?.searchParams;
+    const tab = params?.get("tab") || "all";
+    const search = (params?.get("q") || "").trim().toLowerCase();
+    const offset = Math.max(0, Number(params?.get("offset") || 0) || 0);
+    const limit = Math.min(MAX_PAGE, Math.max(1, Number(params?.get("limit") || PAGE_SIZE) || PAGE_SIZE));
+
+    const statuses = TAB_STATUSES[tab] || null;
+    const matching = withStatus.filter((c) => {
+      if (statuses && !statuses.includes(c.status)) return false;
+      if (!search) return true;
+      return String(c.row.title || "").toLowerCase().includes(search)
+        || String(c.site?.slug || "").toLowerCase().includes(search);
+    });
+
+    // Sorted before paging, so page two continues page one rather than re-shuffling. listConversations
+    // already orders by activity; this makes the guarantee explicit rather than inherited.
+    matching.sort((a, b) =>
+      Date.parse(b.row.last_activity_at || b.row.updated_at || 0)
+      - Date.parse(a.row.last_activity_at || a.row.updated_at || 0));
+
+    const page = matching.slice(offset, offset + limit);
+
     // Workspace home: each conversation carries its live activity (who's working + on
     // what), derived from the durable event stream — the same truth the thread shows.
-    const conversations = await Promise.all(rows.slice(0, 20).map(async (row) => {
+    const conversations = await Promise.all(page.map(async ({ row, status, site }) => {
       const summary = publicConversation(row);
       // Never published → draft. That is a status, not an absence, and the dashboard filters on it.
-      const site = row.product_id ? publishByProduct.get(String(row.product_id)) || null : null;
-      summary.publishStatus = site?.status || "draft";
+      summary.publishStatus = status;
       summary.site = site;
       // Health rides with the card too, so the dashboard renders in one request rather than one
       // per project. A site with no check yet has no health — not a green badge it has not earned.
@@ -54,7 +110,21 @@ export async function handleConversations(req, res, { owner, method, body }) {
       } catch { /* activity is best-effort */ }
       return summary;
     }));
-    return sendJson(res, 200, { conversations });
+    return sendJson(res, 200, {
+      conversations,
+      // Counts are over the WHOLE list, not the page, so the tabs stay honest past the first page.
+      counts,
+      page: {
+        offset,
+        limit,
+        total: matching.length,
+        // Null rather than a boolean: the client asks for exactly this offset next, so paging
+        // cannot drift out of step with what the server considers the next page.
+        nextOffset: offset + page.length < matching.length ? offset + page.length : null,
+        tab,
+        search: search || null,
+      },
+    });
   }
   return wrap(async () => {
     const { conversation } = await postUserMessage(owner.id, {

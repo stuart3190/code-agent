@@ -12,18 +12,16 @@
 //      URL all live there, and republishing should return to the same address.
 
 import { serviceClient } from "./supabase.mjs";
+// The status vocabulary and the resolver both live in one shared module, imported by the web app
+// too. There is no second definition to drift from.
+import { PUBLISH_STATUS, resolvePublishState } from "../../shared/publishResolution.mjs";
+
+export { PUBLISH_STATUS, resolvePublishState };
 
 // A publish follows a build by a moment, so projects.updated_at can land just before
 // published_sites.updated_at is stamped. Without tolerance every publish would immediately report
 // that an update was waiting, and the badge would mean nothing.
 const STALE_TOLERANCE_MS = 5_000;
-
-export const PUBLISH_STATUS = Object.freeze({
-  draft: "draft",
-  published: "published",
-  updateAvailable: "update_available",
-  unpublished: "unpublished",
-});
 
 export async function publishStates(owner, client = serviceClient()) {
   const { data: sites, error } = await client
@@ -131,9 +129,7 @@ export async function publishStates(owner, client = serviceClient()) {
   });
 }
 
-// The status of one project as the dashboard should label it. A project with no publish record at
-// all has never been live, which is a draft.
-export function statusForProduct(states, productId) {
-  const site = productId ? states.find((s) => s.productId === String(productId)) : null;
-  return site ? site.status : PUBLISH_STATUS.draft;
-}
+// `statusForProduct` used to live here. It took the FIRST state matching a product, which for a
+// product with several published rows disagreed with the Map-based lookup the conversations route
+// used — that one took the LAST. Both are gone; `resolvePublishState().statusFor()` is the only
+// way to ask this question now.

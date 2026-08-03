@@ -137,8 +137,17 @@ export async function claimSlug(ownerId, projectId, wanted, { productId = null, 
 // re-inserting. This keeps created_at — the date the product first went live, which deployment
 // history depends on — and avoids ever having two rows claiming one slug (it is unique).
 async function transferSite(ownerId, fromProjectId, toProjectId, client = serviceClient()) {
+  // The product travels with the row. Moving the record between two projects of the same product
+  // must not leave product_id pointing at where it used to be, or the one-live-row-per-product
+  // index would be guarding the wrong group.
+  const { data: target } = await client.from("projects")
+    .select("product_id").eq("id", String(toProjectId)).eq("owner", ownerId).maybeSingle();
   const { error } = await client.from("published_sites")
-    .update({ project_id: String(toProjectId), updated_at: new Date().toISOString() })
+    .update({
+      project_id: String(toProjectId),
+      product_id: target?.product_id ? String(target.product_id) : null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("project_id", String(fromProjectId)).eq("owner", ownerId);
   if (error) throw new Error(`could not transfer the published site record: ${error.message}`);
 }
@@ -197,6 +206,9 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     await ctx.emit("agent_status", { agent: "Publisher", status: "Going live…" });
     const { error: upsertError } = await serviceClient().from("published_sites").upsert({
       owner: ctx.owner, project_id: String(project.id), slug: out.id, url: out.url,
+      // Carried onto the row so the database can hold "one live record per product" itself. A rule
+      // that lives only in application code is a rule the next writer can forget.
+      product_id: project.product_id ? String(project.product_id) : null,
       updated_at: new Date().toISOString(),
       // Republishing after an unpublish returns the site to live. Without clearing this the
       // project would show as unpublished while its URL was serving again.

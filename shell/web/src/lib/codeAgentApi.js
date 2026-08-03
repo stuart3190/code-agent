@@ -97,7 +97,18 @@ export const diagnosticsPrefs = () => request("/api/v1/diagnostics/prefs");
 export const setDiagnosticsPrefs = (retentionDays) => request("/api/v1/diagnostics/prefs", {
   method: "POST", body: JSON.stringify({ retentionDays }),
 });
-export const listConversations = () => request("/api/v1/conversations");
+// Filtering and paging are server-side: the client only ever holds one page, so filtering here
+// would silently hide everything after it and a tab count would describe the page rather than the
+// account.
+export const listConversations = ({ tab = null, q = "", offset = 0, limit = 0 } = {}) => {
+  const query = new URLSearchParams();
+  if (tab && tab !== "all") query.set("tab", tab);
+  if (q) query.set("q", q);
+  if (offset) query.set("offset", String(offset));
+  if (limit) query.set("limit", String(limit));
+  const suffix = query.toString();
+  return request(`/api/v1/conversations${suffix ? `?${suffix}` : ""}`);
+};
 export const startConversation = (text, workspaceContext = null, modelPref = null) => request("/api/v1/conversations", {
   method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref }),
 });

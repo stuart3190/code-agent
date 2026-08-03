@@ -857,3 +857,21 @@ div.ct-model-row { cursor: pointer; }
 }
 .ct-logs-empty strong { font-size: 14px; }
 .ct-logs-empty .ct-hint { max-width: 46ch; }
+
+/* Project search and paging on Home. */
+.ct-ws-search {
+  margin-left: auto; min-width: 0; width: 180px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1);
+  color: var(--ink-1); font-size: 13px;
+}
+.ct-ws-search:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
+.ct-ws-more {
+  width: 100%; margin-top: 8px; padding: 10px; border-radius: 10px;
+  border: 1px dashed var(--line); background: transparent; color: var(--ink-2);
+  font-size: 13px; cursor: pointer;
+}
+.ct-ws-more:hover:not(:disabled) { background: var(--surface-2); color: var(--ink-1); }
+.ct-ws-more:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 560px) {
+  .ct-ws-search { width: 100%; margin: 6px 0 0; }
+}

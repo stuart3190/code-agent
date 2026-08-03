@@ -3,12 +3,12 @@
 // draft → published → update_available → unpublished → published again. Every project sits in
 // exactly one of these, and the tabs are views over the same field rather than separate queries.
 
-export const STATUS = Object.freeze({
-  draft: "draft",
-  published: "published",
-  updateAvailable: "update_available",
-  unpublished: "unpublished",
-});
+// Re-exported, never redefined. The vocabulary lives in one module that the server imports too,
+// so a status string cannot mean one thing on the client and another on the server.
+import { PUBLISH_STATUS, TAB_STATUSES, tabMatches, isLiveStatus } from "../../../shared/publishResolution.mjs";
+
+export const STATUS = PUBLISH_STATUS;
+export { TAB_STATUSES };
 
 // LIVE, not "Published", for a site that is currently serving. It is the fact people scan for, and
 // it reads at a glance in a way a past-tense word does not. Update Available still says LIVE
@@ -24,11 +24,13 @@ export const STATUS_LABEL = Object.freeze({
 // the question the tab answers. The badge still distinguishes them, because "never published" and
 // "taken offline" are different facts about the same project.
 export const TABS = Object.freeze([
-  { id: "all", label: "All", matches: () => true },
-  { id: "drafts", label: "Drafts", matches: (s) => s === STATUS.draft || s === STATUS.unpublished },
-  { id: "published", label: "Published", matches: (s) => s === STATUS.published },
-  { id: "updates", label: "Update Available", matches: (s) => s === STATUS.updateAvailable },
-]);
+  { id: "all", label: "All" },
+  { id: "drafts", label: "Drafts" },
+  { id: "published", label: "Published" },
+  { id: "updates", label: "Update Available" },
+  // The membership test comes from the shared map the SERVER filters pages by, so a tab cannot
+  // show a count its page could not produce.
+].map((tab) => ({ ...tab, matches: (status) => tabMatches(tab.id, status) })));
 
 export function statusOf(conversation) {
   return conversation?.publishStatus || STATUS.draft;
@@ -123,9 +125,9 @@ export function groupProjects(conversations) {
   })).filter((group) => group.items.length > 0);
 }
 
-export function isLive(status) {
-  return status === STATUS.published || status === STATUS.updateAvailable;
-}
+// A const, not a bare re-export: `export { x as y }` creates no local binding, and `badgesFor`
+// and GROUPS above both call this by name.
+export const isLive = isLiveStatus;
 
 export function countByTab(conversations) {
   const counts = {};

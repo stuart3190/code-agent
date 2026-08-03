@@ -13,7 +13,8 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { publishStates, statusForProduct, PUBLISH_STATUS } from "../../shell/server/lib/publishState.mjs";
+import { publishStates, PUBLISH_STATUS } from "../../shell/server/lib/publishState.mjs";
+import { resolvePublishState, pickActiveSite } from "../../shell/shared/publishResolution.mjs";
 
 const OWNER = "44444444-4444-4444-8444-444444444444";
 const PUBLISHED_AT = "2026-08-02T12:00:00.000Z";
@@ -72,8 +73,13 @@ test("a live project reports its URL, product, time, environment and status", as
 });
 
 test("a project with no publish record is a draft", () => {
-  assert.equal(statusForProduct([], PRODUCT), PUBLISH_STATUS.draft);
-  assert.equal(statusForProduct([{ productId: "other", status: "published" }], PRODUCT), PUBLISH_STATUS.draft);
+  assert.equal(resolvePublishState([]).statusFor({ productId: PRODUCT }), PUBLISH_STATUS.draft);
+  assert.equal(
+    resolvePublishState([{ projectId: "px", productId: "other", status: "published", live: true }])
+      .statusFor({ productId: PRODUCT }),
+    PUBLISH_STATUS.draft,
+    "another product's live site must never label this one",
+  );
 });
 
 // ── Update available ────────────────────────────────────────────────────────────────────
@@ -234,4 +240,109 @@ test("an unpublished project shows its Thrallo address even with an active domai
   const [state] = await publishStates(OWNER, db);
   assert.equal(state.primaryUrl, "https://app.thrallo.com/x",
     "nothing is serving, so pointing at the custom domain would be a lie");
+});
+
+// ── One resolver, no disagreement ───────────────────────────────────────────────────────
+//
+// There were two. routes/conversations.mjs built a Map from the states — LAST wins. The web app's
+// publishState.js used .find() — FIRST wins. For a product with two published rows the same
+// project could read UNPUBLISHED on its card and LIVE in the panel directly above it, from one
+// fetch, in the same second.
+
+test("the resolver picks the same record however the rows are ordered", () => {
+  const older = { projectId: "p1", productId: PRODUCT, live: false, status: PUBLISH_STATUS.unpublished, publishedAt: "2026-07-01T00:00:00Z" };
+  const newer = { projectId: "p2", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: "2026-08-01T00:00:00Z" };
+
+  // The exact condition the old code disagreed on: order the array either way and the answer must
+  // not move.
+  assert.equal(resolvePublishState([older, newer]).forProduct(PRODUCT).projectId, "p2");
+  assert.equal(resolvePublishState([newer, older]).forProduct(PRODUCT).projectId, "p2");
+});
+
+test("a live record always beats a historical one, whatever the dates say", () => {
+  // A newer unpublished record must not retire a site that is still serving.
+  const live = { projectId: "p1", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: "2026-06-01T00:00:00Z" };
+  const retired = { projectId: "p2", productId: PRODUCT, live: false, status: PUBLISH_STATUS.unpublished, publishedAt: "2026-08-02T00:00:00Z" };
+  assert.equal(pickActiveSite([retired, live]).projectId, "p1");
+  assert.equal(resolvePublishState([retired, live]).statusFor({ productId: PRODUCT }), PUBLISH_STATUS.published);
+});
+
+test("historical records never make a product look live again", () => {
+  const states = [
+    { projectId: "p1", productId: PRODUCT, live: false, status: PUBLISH_STATUS.unpublished, publishedAt: "2026-07-01T00:00:00Z" },
+    { projectId: "p2", productId: PRODUCT, live: false, status: PUBLISH_STATUS.unpublished, publishedAt: "2026-08-01T00:00:00Z" },
+  ];
+  assert.equal(resolvePublishState(states).statusFor({ productId: PRODUCT }), PUBLISH_STATUS.unpublished);
+});
+
+test("two live records for one product are REPORTED, not silently resolved", () => {
+  // Picking a winner is necessary so the UI can render, but doing it quietly would leave the fault
+  // in the database forever. ops/repair-publish-state.mjs acts on exactly this.
+  const states = [
+    { projectId: "p1", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: "2026-07-01T00:00:00Z" },
+    { projectId: "p2", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: "2026-08-01T00:00:00Z" },
+  ];
+  const resolved = resolvePublishState(states);
+  assert.equal(resolved.forProduct(PRODUCT).projectId, "p2", "the newest is still shown");
+  assert.deepEqual(resolved.conflicts, [
+    { productId: PRODUCT, kind: "multiple_live", active: "p2", superseded: ["p1"] },
+  ]);
+});
+
+test("a published project with no product is still resolvable by its own id", () => {
+  // Filtering these out is what made a genuinely live site render as a draft.
+  const orphan = { projectId: "p9", productId: null, live: true, status: PUBLISH_STATUS.published, publishedAt: "2026-08-01T00:00:00Z" };
+  const resolved = resolvePublishState([orphan]);
+  assert.equal(resolved.forProject("p9").projectId, "p9");
+  assert.equal(resolved.statusFor({ projectId: "p9" }), PUBLISH_STATUS.published);
+  assert.equal(resolved.statusFor({ productId: null, projectId: "p9" }), PUBLISH_STATUS.published);
+  assert.deepEqual(resolved.conflicts, [], "standing alone is not a conflict");
+});
+
+test("nothing published at all is a draft, not an absence", () => {
+  const resolved = resolvePublishState([]);
+  assert.equal(resolved.statusFor({ productId: PRODUCT }), PUBLISH_STATUS.draft);
+  assert.equal(resolved.statusFor({}), PUBLISH_STATUS.draft);
+});
+
+test("a tie resolves the same way every time", () => {
+  const same = "2026-08-01T00:00:00Z";
+  const a = { projectId: "aaa", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: same };
+  const b = { projectId: "bbb", productId: PRODUCT, live: true, status: PUBLISH_STATUS.published, publishedAt: same };
+  assert.equal(pickActiveSite([a, b]).projectId, pickActiveSite([b, a]).projectId,
+    "an unstable tiebreak is how two surfaces disagree while both are 'correct'");
+});
+
+test("there is exactly ONE publish resolver in the codebase", async () => {
+  const server = await readFile(fileURLToPath(new URL("../../shell/server/lib/publishState.mjs", import.meta.url)), "utf8");
+  assert.doesNotMatch(server, /export function statusForProduct/,
+    "the first-wins resolver must be gone, not merely unused");
+
+  const route = await readFile(fileURLToPath(new URL("../../shell/server/routes/conversations.mjs", import.meta.url)), "utf8");
+  assert.match(route, /resolvePublishState/, "the route must use the shared resolver");
+  assert.doesNotMatch(route, /new Map\(\s*\(await publishStates/,
+    "building its own Map is the last-wins bug");
+
+  const web = await readFile(fileURLToPath(new URL("../../shell/web/src/publish/publishState.js", import.meta.url)), "utf8");
+  assert.match(web, /resolvePublishState/, "the web app must use it too");
+  assert.doesNotMatch(web, /sites\.find\(/, "`.find()` is the first-wins bug");
+
+  // The status vocabulary must not be redefined either — two definitions of "published" is the
+  // same class of problem one level down.
+  const lifecycle = await readFile(fileURLToPath(new URL("../../shell/web/src/publish/publishLifecycle.js", import.meta.url)), "utf8");
+  assert.doesNotMatch(lifecycle, /export const STATUS = Object\.freeze/,
+    "STATUS must be re-exported from the shared module, never redefined");
+});
+
+test("the database refuses a second live record for one product", async () => {
+  const migration = await readFile(fileURLToPath(new URL(
+    "../../supabase/migrations/20260803210000_one_live_site_per_product.sql", import.meta.url)), "utf8");
+  assert.match(migration, /create unique index[\s\S]*published_sites_one_live_per_product/i);
+  assert.match(migration, /where unpublished_at is null and product_id is not null/i,
+    "partial, so a retired record and a project with no product are both exempt");
+  // The repair must come BEFORE the index, or the migration fails on the very data it fixes.
+  assert.ok(migration.indexOf("set unpublished_at = now()") < migration.indexOf("create unique index"),
+    "repair before constrain");
+  assert.doesNotMatch(migration, /delete from public\.published_sites/i,
+    "a superseded record is retired, never deleted — the slug and history live on it");
 });

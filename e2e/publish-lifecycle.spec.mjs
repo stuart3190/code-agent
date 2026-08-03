@@ -57,7 +57,41 @@ async function stub(page, initial, { onUnpublish = null } = {}) {
   await page.addInitScript(([key, session]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
   }, [`sb-${REF}-auth-token`, SESSION]);
-  await page.route("**/api/v1/conversations", (r) => r.fulfill({ json: { conversations: state.conversations } }));
+  // Filtering, searching and paging are SERVER-side now, so the stub has to behave like the
+  // server: a glob without the query string would not match `?tab=published` at all, and a stub
+  // that ignored the parameters would let a broken filter pass.
+  const TAB_STATUSES = {
+    drafts: ["draft", "unpublished"], published: ["published"], updates: ["update_available"],
+  };
+  const listRoute = (r) => {
+    const params = new URL(r.request().url()).searchParams;
+    const tab = params.get("tab") || "all";
+    const search = (params.get("q") || "").trim().toLowerCase();
+    const offset = Number(params.get("offset") || 0);
+    const limit = Number(params.get("limit") || 20);
+    const statuses = TAB_STATUSES[tab] || null;
+
+    const counts = { all: state.conversations.length };
+    for (const [id, list] of Object.entries(TAB_STATUSES)) {
+      counts[id] = state.conversations.filter((c) => list.includes(c.publishStatus || "draft")).length;
+    }
+    const matching = state.conversations.filter((c) => {
+      if (statuses && !statuses.includes(c.publishStatus || "draft")) return false;
+      return !search || String(c.title || "").toLowerCase().includes(search);
+    });
+    const page = matching.slice(offset, offset + limit);
+    return r.fulfill({ json: {
+      conversations: page,
+      counts,
+      page: {
+        offset, limit, total: matching.length,
+        nextOffset: offset + page.length < matching.length ? offset + page.length : null,
+        tab, search: search || null,
+      },
+    } });
+  };
+  await page.route("**/api/v1/conversations", listRoute);
+  await page.route("**/api/v1/conversations?**", listRoute);
   await page.route("**/api/v1/conversations/deleted", (r) => r.fulfill({ json: { items: [], recoveryDays: 7 } }));
   await page.route("**/api/v1/conversations/*/events**", (r) =>
     r.fulfill({ contentType: "text/event-stream", body: "" }));
