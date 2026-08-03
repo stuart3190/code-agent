@@ -19,6 +19,37 @@ async function request(path, options = {}) {
   return payload;
 }
 
+/**
+ * Download a file from an authenticated endpoint.
+ *
+ * `<a href download>` cannot work here: every API route authenticates from the Authorization
+ * header, and a plain link sends none — the log export buttons were downloading a 401 JSON body
+ * named like a CSV. The request is made with the token and the response saved from memory.
+ */
+export async function downloadWithAuth(path, fallbackName = "thrallo-download") {
+  const token = await accessToken();
+  const response = await fetch(`${apiBase()}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.error || `That download failed (${response.status})`);
+    error.code = payload.code;
+    throw error;
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const name = disposition.match(/filename="([^"]+)"/)?.[1] || fallbackName;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // Revoked on the next tick: revoking synchronously can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return name;
+}
+
 export async function capabilities() {
   const response = await fetch("/api/v1/capabilities");
   if (!response.ok) throw new Error("Control plane is unavailable");
@@ -291,6 +322,11 @@ export const projectAnalyticsLive = (projectId) =>
   request(`/api/v1/projects/${projectId}/analytics/live`);
 export const projectDeployments = (projectId) =>
   request(`/api/v1/projects/${projectId}/deployments`);
+export const rollbackDeployment = (projectId, deploymentId) =>
+  request(`/api/v1/projects/${projectId}/deployments/${deploymentId}/rollback`, { method: "POST" });
+export const downloadDeployment = (projectId, deploymentId, number) =>
+  downloadWithAuth(`/api/v1/projects/${projectId}/deployments/${deploymentId}/download`,
+    `thrallo-deployment-${number}.zip`);
 export const projectHealth = (projectId) => request(`/api/v1/projects/${projectId}/health`);
 
 // Project logs. The stream and export are plain URLs because EventSource and <a download> take
@@ -304,7 +340,10 @@ export const logStreamUrl = (projectId, params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
   return `${apiBase()}/api/v1/projects/${projectId}/logs/stream?${query}`;
 };
-export const logExportUrl = (projectId, params = {}) => {
+// Exports go through the authenticated download, not a bare link. A link sends no Authorization
+// header, so these buttons were saving a 401 JSON body under a .csv name.
+export const exportLogs = (projectId, params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
-  return `${apiBase()}/api/v1/projects/${projectId}/logs/export?${query}`;
+  const format = params.format === "csv" ? "csv" : "json";
+  return downloadWithAuth(`/api/v1/projects/${projectId}/logs/export?${query}`, `thrallo-logs.${format}`);
 };

@@ -57,6 +57,10 @@ export const CA_TABLES = [
   "projects",
   "build_jobs",
   "published_sites",
+  // Deployment history. Permanent while a project lives, and the only copy of the source that was
+  // actually published — losing it would make every rollback and every deployment download
+  // unrecoverable.
+  "deployments",
   "custom_domains",
   "ca_push_subscriptions",
   "entities",

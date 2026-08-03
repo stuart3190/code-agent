@@ -54,6 +54,8 @@ export const RESTORE_ORDER = [
   "projects",     // references ca_products -> restore after it
   "build_jobs",
   "published_sites",
+  // After published_sites: a deployment references the project and product those rows describe.
+  "deployments",
   "custom_domains",
   "ca_push_subscriptions",
   "entities",       // owner references auth.users -> after users are ensured
