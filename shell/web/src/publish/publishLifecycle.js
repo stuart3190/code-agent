@@ -108,7 +108,13 @@ export function badgesFor(conversation) {
 }
 
 // Which section of the dashboard a project belongs in.
+//
+// Favourites lead, and they must: the server already sorts them to the front, and without a group
+// of their own the regrouping below would put a pinned DRAFT back underneath every live app —
+// the pin would appear to do nothing. Grouping is allowed to reorder within the server's order,
+// never to overturn the one thing the customer explicitly asked for.
 export const GROUPS = Object.freeze([
+  { id: "favourites", label: "Favourites", matches: (c) => !!c.favourite },
   { id: "live", label: "Live apps", matches: (c) => isLive(statusOf(c)) },
   { id: "progress", label: "In progress", matches: (c) => !!c.activity || c.state === "waiting_user" },
   { id: "drafts", label: "Drafts", matches: () => true },

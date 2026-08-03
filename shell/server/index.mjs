@@ -91,6 +91,7 @@ import { handleTokenCreate, handleTokenList, handleTokenRevoke } from "./routes/
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
 import {
   handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
+  handleConversationsBulk,
 } from "./routes/conversations.mjs";
 import {
   notificationChannels, vapidPublicKey, saveSubscription, removeSubscription,
@@ -559,6 +560,13 @@ const server = http.createServer(async (req, res) => {
       return await handleConversations(req, res, {
         owner, method, url,
         body: method === "POST" ? await readJson(req, BODY_LIMITS.standard) : null,
+      });
+    }
+    // Before the :id matcher, or "bulk" is read as a conversation id.
+    if (p === "/api/v1/conversations/bulk" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleConversationsBulk(req, res, {
+        owner, body: await readJson(req, BODY_LIMITS.standard),
       });
     }
     const conversationMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)$/i);

@@ -7,7 +7,7 @@ import React, { useState } from "react";
 import { STATUS, displayUrl, relativeTime } from "./publishLifecycle.js";
 import { DOMAIN_LABEL, isDomainLive, healthStateOf, isHealthProblem } from "../../../shared/operationalState.mjs";
 
-export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings, onAnalytics, onHealth, health = null }) {
+export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnpublish, onSettings, onAnalytics, onHealth, health = null, today = null }) {
   const [copied, setCopied] = useState(false);
   if (!site) return null;
 
@@ -49,6 +49,9 @@ export default function ProjectPublishRow({ site, status, onPublishUpdate, onUnp
           {/* A domain still verifying is said to be verifying. Silence here read as "no domain",
               which is the same wrong answer the Overview tile used to give. */}
           {!offline && site.customDomain && " · custom domain"}
+          {/* Today's traffic, where any was collected. Absent rather than "0" for a site with no
+              day yet — a zero implies nobody came, which is a different claim. */}
+          {!offline && today?.visitors > 0 && ` · ${today.visitors} visitor${today.visitors === 1 ? "" : "s"} today`}
           {!offline && !site.customDomain && pendingDomain
             && ` · ${pendingDomain.domain} ${DOMAIN_LABEL[pendingDomain.status]?.toLowerCase() || "pending"}`}
         </span>

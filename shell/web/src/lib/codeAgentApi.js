@@ -131,12 +131,19 @@ export const setDiagnosticsPrefs = (retentionDays) => request("/api/v1/diagnosti
 // Filtering and paging are server-side: the client only ever holds one page, so filtering here
 // would silently hide everything after it and a tab count would describe the page rather than the
 // account.
-export const listConversations = ({ tab = null, q = "", offset = 0, limit = 0 } = {}) => {
+export const bulkConversations = (ids, action) => request("/api/v1/conversations/bulk", {
+  method: "POST", body: JSON.stringify({ ids, action }),
+});
+export const listConversations = ({ tab = null, q = "", offset = 0, limit = 0, sort = null, favourites = false, archived = false } = {}) => {
   const query = new URLSearchParams();
   if (tab && tab !== "all") query.set("tab", tab);
   if (q) query.set("q", q);
   if (offset) query.set("offset", String(offset));
   if (limit) query.set("limit", String(limit));
+  // Omitted at their defaults, so the commonest request stays a bare URL and stays cacheable.
+  if (sort && sort !== "activity") query.set("sort", sort);
+  if (favourites) query.set("favourites", "1");
+  if (archived) query.set("archived", "1");
   const suffix = query.toString();
   return request(`/api/v1/conversations${suffix ? `?${suffix}` : ""}`);
 };
