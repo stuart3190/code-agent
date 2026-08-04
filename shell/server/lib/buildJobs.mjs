@@ -471,7 +471,7 @@ function measureRound({ baseline, tree, build, usage, credits, model, previewUrl
 
 async function runJob(job) {
   const { prompt, tree: inputTree, plan, knowledge, style, designProfile: inputDesignProfile, redesign,
-    contract: inputContract } = job.input;
+    contract: inputContract, maxTurns: inputMaxTurns } = job.input;
   const projectId = job.projectId;
   const mode = job.mode;
   const owner = job.owner;
@@ -831,6 +831,10 @@ async function runJob(job) {
         provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
         contextSelection: scope.contextSelection,
         entryFile: scope.entryFile || "__no_entry__", // no confident match -> manifest-only seeding
+        // A repair that runs to the 25-turn default re-sends the project on every turn: one
+        // production round read 355,772 input tokens against 21,222 out — a 17:1 ratio — and cost
+        // 28.84 credits. The cap is per-complexity and is the single largest saving available.
+        ...(inputMaxTurns ? { maxTurns: inputMaxTurns } : {}),
       });
       combinedUsage.add(initial.telemetry);
     }

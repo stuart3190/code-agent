@@ -27,6 +27,8 @@ import {
 } from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
 import { honestyFailures, honestyScan } from "./honestyScan.mjs";
+import { deterministicRepairs, deterministicSummary } from "./deterministicRepair.mjs";
+import { classifyComplexity, profileFor } from "./buildProfile.mjs";
 import {
   functionalRepairBrief, regenerateModuleBrief, findingKey, nextFunctionalTier,
 } from "./functionalFindings.mjs";
@@ -1016,7 +1018,19 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   const verifyStarted = Date.now();
   let verdict;
   try {
-    verdict = await verifyApp({ previewUrl, usesBackend: treeUsesBackendSdk(result?.tree) });
+    // The generic signup/login probe. On the 62-credit booking site it failed three times and drove
+    // every repair round, on an app whose contract never mentioned accounts — so it is now run only
+    // when the CONTRACT says this app has authentication, not merely because the SDK is imported.
+    const complexity = classifyComplexity({ prompt: lifecycle.originalInput?.prompt || "", contract: diag.contract });
+    const buildProfile = profileFor(complexity.level);
+    const contractWantsAuth = diag.contract ? diag.contract.auth?.required === true : null;
+    const probeAuth = contractWantsAuth === null
+      ? (buildProfile.genericAuthProbe && treeUsesBackendSdk(result?.tree))
+      : contractWantsAuth;
+    if (!probeAuth) {
+      console.log(`[app-build ${diag.id?.slice(0, 8)}] skipping the generic auth probe: ${complexity.level} build, contract requires no authentication`);
+    }
+    verdict = await verifyApp({ previewUrl, usesBackend: probeAuth });
   } catch (error) {
     verdict = { pass: false, failures: [`Verification could not run: ${error.message}`], summary: "" };
   }
@@ -1173,6 +1187,41 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     return;
   }
 
+  // TIER 1 — the fix that costs nothing.
+  //
+  // The 28-credit repair round was a model reading 355,772 input tokens to make a change that, for
+  // fake persistence, is mechanical. Try it deterministically first; only what cannot be
+  // translated unambiguously reaches a model.
+  if (job?.honesty?.findings?.length && !lifecycle.deterministicTried) {
+    lifecycle.deterministicTried = true;
+    const { data: stored } = await serviceClient().from("projects")
+      .select("tree").eq("id", projectId).eq("owner", ctx.owner).maybeSingle();
+    const currentTree = stored?.tree || result?.tree || {};
+    const fixed = deterministicRepairs(currentTree, {
+      findings: job.honesty.findings, contract: diag.contract,
+    });
+    if (fixed.repaired.length) {
+      const rescanned = honestyScan(fixed.tree, { contract: diag.contract });
+      diag.step({
+        agent: "Compiler", kind: "deterministic_repair", label: "Deterministic repair (0 credits)",
+        status: rescanned.ok ? "ok" : "failed", round: attempt,
+        output: `${deterministicSummary(fixed)}
+findings before: ${job.honesty.findings.length} · after: ${rescanned.findings.length}`,
+      });
+      console.log(`[app-build ${diag.id?.slice(0, 8)}] ${deterministicSummary(fixed)}`);
+      if (rescanned.ok) {
+        // Fixed for free. Persist and re-verify without ever calling a model.
+        await deps.persistBuildResult(ctx.owner, projectId, { ...result, tree: fixed.tree });
+        job.honesty = rescanned;
+        await deps.verify(ctx, {
+          projectId, jobId, previewUrl, result: { ...result, tree: fixed.tree },
+          attempt, lifecycle, job, deps,
+        });
+        return;
+      }
+    }
+  }
+
   if (action.kind === "repair") {
     // The STRUCTURED findings, not a prose list. Handed the generic quality warnings, a production
     // repair swapped localStorage for sessionStorage and the loop called it progress. This brief
@@ -1214,6 +1263,11 @@ ${functional}`
 
     const nextRound = attempt + 1;
     const before = lifecycle.checkpoints.latest();
+    // How many turns this repair may take, by build complexity. Uncapped, a repair reads the whole
+    // project 25 times over.
+    lifecycle.repairMaxTurns = profileFor(
+      classifyComplexity({ prompt: lifecycle.originalInput?.prompt || "", contract: diag.contract }).level,
+    ).maxRepairTurns;
     diag.repairDispatched({ prompt: brief, round: nextRound });
     lifecycle.budget.noteRepair();
     recordOutcome(lifecycle, {
@@ -1232,6 +1286,7 @@ ${functional}`
       budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
       byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
       providerOverride: lifecycle.providerOverride,
+      maxTurns: lifecycle.repairMaxTurns,
     });
     lifecycle.budget.noteJob();
     relayBuildJob(ctx, { job: next, projectId, attempt: nextRound, lifecycle, deps });
