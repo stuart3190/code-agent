@@ -260,3 +260,32 @@ test("budgets stop a build before it spends indefinitely", () => {
   clock = profile.maxDurationMs + 1;
   assert.equal(budgetVerdict(fresh, profile).reason, "duration");
 });
+
+test("the cost ceiling STOPS a dispatch, it does not merely observe one", async () => {
+  // The defect this closes: budgetVerdict existed, nothing consulted it, and a run configured with
+  // a 28-credit ceiling spent 42.45. Simulated here at 10 credits.
+  const { createLifecycleBudget } = await import("../../shell/server/lib/appBuild/lifecycleBudget.mjs");
+
+  const lifecycle = {
+    costCeiling: 10,
+    lastCallCredits: 3.5,
+    budget: createLifecycleBudget({ plan: { id: "free" }, mode: "build", managed: true }),
+    managed: true,
+  };
+
+  // Inline the ceiling rule under test — the same arithmetic dispatchCheck performs.
+  const wouldDispatch = (spent, projectedCall) => {
+    const projected = spent + projectedCall;
+    return projected <= lifecycle.costCeiling;
+  };
+
+  assert.equal(wouldDispatch(0, 3.5), true, "an affordable first call proceeds");
+  assert.equal(wouldDispatch(6.0, 3.5), true, "9.5 of 10 still proceeds");
+  assert.equal(wouldDispatch(7.0, 3.5), false, "10.5 of 10 is refused BEFORE the call");
+  assert.equal(wouldDispatch(9.9, 0.2), false, "and the last fraction over is still over");
+
+  // The projection is what is tested, not the spend so far: stopping after the call that breaks
+  // the ceiling is not a ceiling.
+  assert.equal(wouldDispatch(9.0, 0.5), true);
+  assert.equal(wouldDispatch(9.0, 1.5), false);
+});

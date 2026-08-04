@@ -63,6 +63,13 @@ export function targetsForStage(stageId, manifest, { contract = null } = {}) {
     }
     case "polish":
       return match((p) => /\.css$/.test(p) || /^src\/(components|layout)\//.test(p));
+
+    // A repair owns NOTHING by default. Its change set is whatever the verifier named, supplied as
+    // `failures`, and the one-hop expansion below reaches its callers and imports. Falling through
+    // to "all of src/" here would have quietly reinstated the whole-tree repair this exists to end.
+    case "repair":
+      return [];
+
     default:
       return files.filter((p) => p.startsWith("src/"));
   }

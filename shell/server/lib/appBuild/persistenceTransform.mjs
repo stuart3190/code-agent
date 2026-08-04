@@ -63,9 +63,45 @@ const HYBRID_TERNARY = new RegExp(
 // judgement call, so the fallback is rewritten and the guard left in place. The result is correct
 // either way: both branches now write to the database.
 
+// Storage reached inside a component rather than a data module: a hook body, a callback, an event
+// handler, an inline expression in JSX. The latest production run put four of nine findings in
+// App.jsx this way, and a module-shaped transform saw none of them.
+const COMPONENT_PATTERNS = [
+  // useState(JSON.parse(localStorage.getItem(k) || "[]")) — the initial-state read. It becomes an
+  // empty initial state plus a load, because a database read cannot be synchronous.
+  {
+    id: "usestate_initialiser",
+    regex: new RegExp(String.raw`useState\s*\(\s*(?:\(\s*\)\s*=>\s*)?JSON\s*\.\s*parse\s*\(\s*${STORE_ACCESS}\s*\.\s*getItem\s*\([^)]*\)\s*(?:\|\|\s*(?:"\[\]"|'\[\]')\s*)?\)\s*\)`, "g"),
+    replace: () => "useState([])",
+  },
+  // A bare read inside a handler or effect.
+  {
+    id: "inline_read",
+    regex: new RegExp(String.raw`JSON\s*\.\s*parse\s*\(\s*${STORE_ACCESS}\s*\.\s*getItem\s*\([^)]*\)\s*(?:\|\|\s*(?:"\[\]"|'\[\]')\s*)?\)`, "g"),
+    replace: (entity) => `await db.entity("${entity}").list()`,
+  },
+  // A write inside a handler: setItem(k, JSON.stringify([...list, item])) or of a named record.
+  {
+    id: "inline_append",
+    regex: new RegExp(String.raw`${STORE_ACCESS}\s*\.\s*setItem\s*\([^,]+,\s*JSON\s*\.\s*stringify\s*\(\s*\[\s*\.\.\.\s*[\w$.]+\s*,\s*([\w$.]+)\s*\]\s*\)\s*\)`, "g"),
+    replace: (entity, match) => `await db.entity("${entity}").create(${match[1]})`,
+  },
+];
+
 /** Does this file touch browser storage at all? */
 export function usesBrowserStorage(source) {
   return new RegExp(String.raw`${STORE_ACCESS}\s*\.\s*(?:getItem|setItem|removeItem)|indexedDB\s*\.`, "").test(String(source || ""));
+}
+
+/**
+ * Is this a component rather than a data module?
+ *
+ * Components are transformed with the component patterns and, crucially, are NOT rewritten
+ * wholesale — a component is mostly rendering, and only its storage expressions may move.
+ */
+export function looksLikeComponent(source, path = "") {
+  return /\.(jsx|tsx)$/.test(path)
+    || /\buseState\s*\(|\buseEffect\s*\(|return\s*\(?\s*</.test(String(source || ""));
 }
 
 /**
@@ -105,6 +141,19 @@ export function transformModule(source, { entity, path = "" } = {}) {
     return realBranch.trim();
   });
 
+  // Component-local storage first: a useState initialiser must become an empty state before the
+  // generic read pattern turns it into an `await` inside a synchronous initialiser, which does not
+  // compile.
+  if (looksLikeComponent(original, path)) {
+    for (const pattern of COMPONENT_PATTERNS) {
+      working = working.replace(pattern.regex, (...args) => {
+        const match = args.slice(0, -2);
+        applied.push(pattern.id);
+        return pattern.replace(entity, match);
+      });
+    }
+  }
+
   for (const pattern of [...WRITE_PATTERNS, ...READ_PATTERNS]) {
     working = working.replace(pattern.regex, (...args) => {
       const match = args.slice(0, -2);
@@ -141,6 +190,12 @@ export function transformModule(source, { entity, path = "" } = {}) {
       if (alreadyAsync) return whole;
       const body = bodyOf(working, whole);
       if (!body || !/\bawait\b/.test(body)) return whole;
+      // NEVER a React component. A component whose body contains an awaiting handler is not itself
+      // async, and marking it so returns a Promise from render — the screen goes blank. An earlier
+      // version turned `export default function App()` into `async function App()` for exactly this
+      // reason: the await it found was inside a submit handler nested in the component.
+      const isComponent = /^[A-Z]/.test(name) && /return\s*\(?\s*</.test(body);
+      if (isComponent) return whole;
       return `${space}${exp || ""}async function ${name}(${params}) {`;
     });
 

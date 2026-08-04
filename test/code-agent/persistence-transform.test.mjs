@@ -147,3 +147,48 @@ test("storage detection covers the forms real code uses", () => {
   assert.equal(usesBrowserStorage("indexedDB.open('db')"), true);
   assert.equal(usesBrowserStorage("const x = 1;"), false);
 });
+
+test("COMPONENT-LOCAL — storage inside a component is transformed, not just data modules", () => {
+  // The latest production run put four of nine findings in App.jsx: a useState initialiser, reads
+  // inside handlers and an append in a submit callback. A module-shaped transform saw none of them.
+  const component = `import React, { useState } from "react";
+import { db } from "./lib/backend";
+
+export default function App() {
+  const [bookings, setBookings] = useState(JSON.parse(window.localStorage.getItem("bookings") || "[]"));
+
+  const submit = async (form) => {
+    const existing = JSON.parse(window.localStorage.getItem("bookings") || "[]");
+    const record = { ...form, id: Date.now() };
+    window.localStorage.setItem("bookings", JSON.stringify([...existing, record]));
+    setBookings([...existing, record]);
+  };
+
+  return <form onSubmit={submit}><button type="submit">Book</button></form>;
+}
+`;
+  const result = transformModule(component, { entity: "booking", path: "src/App.jsx" });
+  assert.equal(result.ok, true, `declined: ${result.declined.join("; ")}`);
+  assert.equal(usesBrowserStorage(result.source), false, "no browser storage may remain");
+
+  // The initialiser cannot become an await — a synchronous initialiser that awaits does not compile.
+  assert.match(result.source, /useState\(\[\]\)/);
+  assert.ok(result.applied.includes("usestate_initialiser"));
+  assert.match(result.source, /await db\.entity\("booking"\)\.list\(\)/);
+  assert.match(result.source, /await db\.entity\("booking"\)\.create\(record\)/);
+
+  // The component is otherwise untouched — this is a component, mostly rendering.
+  assert.match(result.source, /<form onSubmit=\{submit\}>/);
+  assert.match(result.source, /export default function App/);
+});
+
+test("a component transform still parses", () => {
+  const component = `import React, { useState } from "react";
+export default function App() {
+  const [x, setX] = useState(JSON.parse(localStorage.getItem("bookings") || "[]"));
+  return null;
+}`;
+  const result = transformModule(component, { entity: "booking", path: "src/App.jsx" });
+  assert.equal(result.ok, true);
+  assert.doesNotThrow(() => new Function(`return (${result.source.replace(/^import .*$/gm, "").replace(/export default /, "")})`));
+});

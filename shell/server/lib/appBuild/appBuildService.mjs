@@ -371,6 +371,11 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     notified: false,                                 // owner notification de-duplication
     byokWarned: false,
     endState: null,
+    // The per-complexity ceiling. Set once the contract exists (complexity is classified from it),
+    // and overridable per run for a controlled measurement. Checked by dispatchCheck before EVERY
+    // model call — a ceiling that is only observed after the fact is not a ceiling.
+    costCeiling: Number(process.env.THRALLO_BUILD_CREDIT_CEILING || 0) || null,
+    lastCallCredits: 0,
   };
 }
 
@@ -437,6 +442,31 @@ async function notifyTerminal(ctx, lifecycle, { title, body, url = null }) {
 // The gate every follow-up dispatch must pass — aggregate managed budget for managed users,
 // the user's own optional controls for BYOK users (off unless enabled).
 async function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
+  // THE PROFILE CEILING, checked before every model call.
+  //
+  // This existed as `budgetVerdict` and nothing consulted it, so a run configured with a 28-credit
+  // ceiling spent 42.45 and nothing stopped it. Checked here because every dispatch — build,
+  // repair, verification repair — passes through this one function, so there is no second door.
+  //
+  // The PROJECTED cost is what is tested, not the spent cost: stopping after the call that breaks
+  // the ceiling is not a ceiling.
+  const ceiling = lifecycle.costCeiling;
+  if (ceiling) {
+    const spent = lifecycle.budget.totals.credits || 0;
+    const projected = spent + (estimatedCredits || lifecycle.lastCallCredits || 0);
+    if (projected > ceiling) {
+      return {
+        ok: false, kind: "ceiling",
+        budgetCheck: {
+          ok: false, reason: "cost_ceiling",
+          message: `Budget exhausted before repair: ${spent.toFixed(2)} of ${ceiling} credits spent, `
+            + `and the next call is projected at ${(projected - spent).toFixed(2)}.`,
+          spent, ceiling, projected,
+        },
+      };
+    }
+  }
+
   const budgetCheck = lifecycle.budget.canDispatch({ estimatedCredits });
   if (!budgetCheck.ok) return { ok: false, kind: "budget", budgetCheck };
   if (!lifecycle.managed) {
@@ -683,6 +713,7 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         // Fold this job's real usage into the LIFECYCLE totals before any decision — the
         // aggregate budget is what the next dispatch is checked against.
         const measurements = job.measurements || null;
+        lifecycle.lastCallCredits = Number(measurements?.credits || 0) || lifecycle.lastCallCredits;
         lifecycle.budget.record({
           usage: measurements?.usage, credits: measurements?.credits, turns: measurements?.turns,
         });
@@ -876,6 +907,14 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
 // planner: budget refusals and BYOK-control refusals.
 function terminalMessageFor(lifecycle, action, check) {
   if (check && check.kind === "byok" && check.byok) return byokBlockedMessage(check.byok);
+  // The configured ceiling, stated plainly with what remains. This is a stop, not a failure: the
+  // last green checkpoint stands and the customer decides whether to spend more.
+  if (check?.kind === "ceiling") {
+    const b = check.budgetCheck;
+    return `Budget exhausted before repair. This build has used ${b.spent.toFixed(2)} of its `
+      + `${b.ceiling}-credit limit, and the next repair would take it past that. Your last working `
+      + `version is saved — tell me to continue if you'd like me to spend more on it.`;
+  }
   if (action.endState === "managed_budget_blocked" || check?.kind === "budget") {
     return budgetBlockedMessage(check?.budgetCheck || { reason: "credits" }, {
       alternatives: alternativesFor(lifecycle),

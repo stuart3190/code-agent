@@ -887,15 +887,81 @@ async function runJob(job) {
       serverLog(job, `staged build: ${stagesSummary(stageResult.stages)}`);
       initial = { telemetry: null, finalText: finalTextParts.filter(Boolean).join("\n\n") };
     } else {
+      // ── REPAIR CONTEXT v2 ──────────────────────────────────────────────────────────────────
+      //
+      // Staged generation was moved onto selective context and this path was left on the whole
+      // tree, which made repair 60% of the last build's cost: one call read 288,270 input tokens
+      // against 7,880 out — 36.6:1 — for 23.69 credits, while the largest staged call was 6.29.
+      //
+      // A repair gets the failing files, their direct callers and imports, the shared interfaces,
+      // the contract fragment and the exact findings. Nothing else, and it cannot read its way
+      // back to the rest.
+      const repairing = mode === "iterate";
+      let repairTools = { schemas: tools, impls: toolImpls };
+      let repairPrompt = enginePrompt;
+      let repairSelection = null;
+
+      if (repairing) {
+        const repairManifest = buildManifest(tree, { contract });
+        // The files the verifier and the diagnostics actually named — that is the change set.
+        const named = [...new Set([
+          ...String(enginePrompt).matchAll(/\b(src\/[\w./-]+\.(?:jsx?|tsx?|css))\b/g),
+        ].map((m) => m[1]))].filter((p) => tree[p]);
+
+        repairSelection = buildStageContext({
+          tree, manifest: repairManifest, stageId: "repair", contract,
+          objective: enginePrompt, systemPrompt,
+          failures: named.length ? named : [],
+          budgetTokens: 20_000,
+        });
+        const scoped = makeScopedFileTools(tree, {
+          manifest: repairManifest,
+          allowed: repairSelection.full.map((c) => c.path),
+          editFormat: "apply_patch",
+          maxExpansions: 4,
+          maxExpansionTokens: 8_000,
+          onEvent: (event) => {
+            if (event.type === "expanded") serverLog(job, `repair context: expanded ${event.path} (+${event.tokens} tok)`);
+            if (event.type === "refused") serverLog(job, `repair context: refused ${event.path}`);
+          },
+        });
+        repairTools = { schemas: scoped.schemas, impls: scoped.impls };
+        repairPrompt = `${renderContext(repairSelection, tree, repairManifest)}\n\n${enginePrompt}`;
+        job.repairScope = scoped;
+        serverLog(job, `repair context: ${repairSelection.tokens} tokens of ${repairSelection.budget} `
+          + `(whole tree ${repairSelection.wholeTreeTokens}) · ${repairSelection.full.length} full, `
+          + `${repairSelection.omitted.length} omitted`);
+      }
+
       initial = await runAgent({
-        provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
-        contextSelection: scope.contextSelection,
-        entryFile: scope.entryFile || "__no_entry__", // no confident match -> manifest-only seeding
-        // A repair that runs to the 25-turn default re-sends the project on every turn: one
-        // production round read 355,772 input tokens against 21,222 out — a 17:1 ratio — and cost
-        // 28.84 credits. The cap is per-complexity and is the single largest saving available.
+        provider, systemPrompt,
+        tools: repairTools.schemas, toolImpls: repairTools.impls,
+        tree, prompt: repairPrompt, log, onUsage,
+        // The selected context replaces seeded selection; leaving both on sends the files twice.
+        ...(repairing ? {} : {
+          contextSelection: scope.contextSelection,
+          entryFile: scope.entryFile || "__no_entry__",
+        }),
+        // A repair that runs to the 25-turn default re-sends the project on every turn.
         ...(inputMaxTurns ? { maxTurns: inputMaxTurns } : {}),
       });
+
+      if (repairSelection) {
+        const rebuilt = job.repairScope?.reconstructedTree(Object.keys(tree).length);
+        if (rebuilt) serverLog(job, "repair context: WARNING — the repair reconstructed more than half the tree");
+        job.contextTelemetry = job.contextTelemetry || [];
+        job.contextTelemetry.push({
+          stage: "repair",
+          initialTokens: repairSelection.tokens, budget: repairSelection.budget,
+          wholeTreeTokens: repairSelection.wholeTreeTokens,
+          fullFiles: repairSelection.full.length, omitted: repairSelection.omitted.length,
+          expansions: job.repairScope?.telemetry.expansionCount || 0,
+          expansionTokens: job.repairScope?.telemetry.expansionTokens || 0,
+          reconstructedTree: !!rebuilt,
+          reasons: repairSelection.full.map((c) => ({ path: c.path, reason: c.reason })),
+          usage: initial.telemetry,
+        });
+      }
       combinedUsage.add(initial.telemetry);
     }
     let finalText = initial.finalText;
