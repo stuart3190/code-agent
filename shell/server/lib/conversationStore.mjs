@@ -209,6 +209,17 @@ export class MemoryConversationStore {
     return this.profiles.get(owner) || null;
   }
 
+  async getOnboarding(owner) {
+    return this.onboarding?.get(owner) || {};
+  }
+
+  async setOnboarding(owner, patch) {
+    if (!this.onboarding) this.onboarding = new Map();
+    const next = { ...(this.onboarding.get(owner) || {}), ...patch };
+    this.onboarding.set(owner, next);
+    return next;
+  }
+
   async setOwnerProfile(owner, profile) {
     this.profiles.set(owner, profile);
     return profile;
@@ -454,6 +465,28 @@ export class SupabaseConversationStore {
     }, { onConflict: "owner" });
     if (error) throw new Error(error.message);
     return profile;
+  }
+
+  /**
+   * First-run state. NOT part of the encrypted profile blob: that one is decrypted into the Lead
+   * Agent system prompt as owner memory, and whether someone dismissed a tour is interface state,
+   * not something worth spending the agent context on every turn.
+   *
+   * An owner with no row has never onboarded — the absence must read as "show it", never as
+   * "already done", which is the mistake that would hide the tour from every new account.
+   */
+  async getOnboarding(owner) {
+    const row = maybe(await this.client.from("ca_owner_profile").select("onboarding")
+      .eq("owner", owner).maybeSingle());
+    return row?.onboarding || {};
+  }
+
+  async setOnboarding(owner, patch) {
+    const next = { ...(await this.getOnboarding(owner)), ...patch };
+    const { error } = await this.client.from("ca_owner_profile")
+      .upsert({ owner, onboarding: next, updated_at: now() }, { onConflict: "owner" });
+    if (error) throw new Error(error.message);
+    return next;
   }
 
   async addMemory(owner, { kind = "fact", content, product_id = null }) {

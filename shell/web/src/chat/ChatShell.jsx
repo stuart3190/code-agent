@@ -26,6 +26,10 @@ import PublishedPanel from "../publish/PublishedPanel.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 
 import ProjectDashboard from "../publish/ProjectDashboard.jsx";
+import Onboarding from "../start/Onboarding.jsx";
+import StarterGallery from "../start/StarterGallery.jsx";
+import HistoryView from "../history/HistoryView.jsx";
+import { onboardingState, updateOnboarding } from "../lib/codeAgentApi.js";
 import UnpublishConfirm from "../publish/UnpublishConfirm.jsx";
 import { usePublishState } from "../publish/publishState.js";
 
@@ -141,6 +145,13 @@ function Workspace({ user }) {
   const [runOverlayId, setRunOverlayId] = useState(null);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [toast, setToast] = useState("");
+  // First run. `null` while unknown: showing the tour before the answer arrives would flash it at
+  // every returning customer, and hiding it by default would deny it to every new one.
+  const [onboarding, setOnboarding] = useState(null);
+  const [showStarters, setShowStarters] = useState(false);
+  // Text put into the composer for the customer to edit — from a starter, or from "Edit & rebuild".
+  // Carries a nonce so choosing the SAME prompt twice still re-seeds the box.
+  const [composerSeed, setComposerSeed] = useState({ text: "", nonce: 0 });
   // Thrallo has one screen, so routing is one path rather than a router dependency. /pricing is a
   // real URL because it is shareable and gets linked to; everything else stays at "/".
   const [path, setPath] = useState(() => window.location.pathname);
@@ -492,12 +503,57 @@ function Workspace({ user }) {
 
   // /settings/:tab — a real address, for the same reasons the dashboard has one: Back works,
   // a refresh returns to the same tab, and "your billing is here" is a link someone can send.
+  // History is an address too, so it can be linked to and Back leaves it.
+  const historyOpen = useMemo(() => /^\/history\/?$/i.test(path), [path]);
   const settingsTab = useMemo(() => {
     const match = path.match(/^\/settings(?:\/([a-z]+))?$/i);
     if (!match) return null;
     return SETTINGS_TABS.some((t) => t.id === match[1]) ? match[1] : "usage";
   }, [path]);
   const closeSettings = useCallback(() => { setSheetSection(null); navigate("/"); }, [navigate]);
+
+  // ── First run ─────────────────────────────────────────────────────────────────────────
+  //
+  // Read once per session. A failure leaves it as "not pending" rather than showing the tour to
+  // someone who has already dismissed it — an unwanted tour is a worse outcome than a missed one,
+  // and Help can reopen it either way.
+  useEffect(() => {
+    let live = true;
+    onboardingState()
+      .then((state) => { if (live) setOnboarding(state); })
+      .catch(() => { if (live) setOnboarding({ pending: false, step: 0 }); });
+    return () => { live = false; };
+  }, []);
+
+  const finishOnboarding = useCallback((action, step = null) => {
+    setOnboarding((current) => ({ ...(current || {}), pending: false }));
+    updateOnboarding(action, step).catch(() => {
+      // The tour has already closed on screen. A failed write means it may return on the next
+      // device, which is a far smaller cost than refusing to let someone past it.
+    });
+  }, []);
+
+  const reopenOnboarding = useCallback(() => {
+    setSheetSection(null);
+    navigate("/");
+    setOnboarding({ pending: true, step: 0 });
+    updateOnboarding("reopen").catch(() => {});
+  }, [navigate]);
+
+  // A starter, or a prompt being reused, becomes an editable draft in the composer — never a send.
+  const seedComposer = useCallback((text) => {
+    setShowStarters(false);
+    setOnboarding((current) => ({ ...(current || {}), pending: false }));
+    setComposerSeed((current) => ({ text, nonce: current.nonce + 1 }));
+  }, []);
+
+  const useStarter = useCallback((prompt, starterId) => {
+    // Recorded as completion, with which starter began it, so "did the gallery actually get used"
+    // is answerable later without a second analytics path.
+    updateOnboarding("complete").catch(() => {});
+    seedComposer(prompt);
+    showToast(starterId ? "Edit anything, then send it." : "Edit anything, then send it.");
+  }, [seedComposer, showToast]);
 
   useEffect(() => {
     if (!route) {
@@ -575,6 +631,8 @@ function Workspace({ user }) {
         <div className="ct-dash">
           <PlanBanner planState={planState} onOpenPricing={() => navigate("/pricing")} />
           <Begin user={user} conversations={conversations} loaded={convosLoaded} onSend={send}
+            composerSeed={composerSeed} onOpenStarters={() => setShowStarters(true)}
+            onStarterPrompt={useStarter}
             counts={listing.counts} page={listing.page} busy={listBusy} error={listError}
             tab={listTab} onTab={setListTab}
             search={listSearch} onSearch={setListSearch}
@@ -698,6 +756,53 @@ function Workspace({ user }) {
               }} />
           )
       )}
+      {onboarding?.pending && (
+        <Onboarding initialStep={onboarding.step || 0}
+          onStep={(step) => updateOnboarding("step", step).catch(() => {})}
+          onSkip={(step) => finishOnboarding("skip", step)}
+          onComplete={(step) => finishOnboarding("complete", step)}
+          onUseStarter={useStarter} />
+      )}
+      {showStarters && !onboarding?.pending && (
+        <>
+          <div className="ct-scrim show" aria-hidden="true" onClick={() => setShowStarters(false)} />
+          <aside className="ct-sheet show ct-settings" aria-label="Start from an idea">
+            <div className="ct-sheet-head">
+              <h2>Start from an idea</h2>
+              <button className="ct-btn-quiet" onClick={() => setShowStarters(false)}>Close</button>
+            </div>
+            <div className="ct-sheet-body">
+              <StarterGallery onUse={useStarter} onClose={() => setShowStarters(false)} />
+            </div>
+          </aside>
+        </>
+      )}
+      {historyOpen && (
+        <>
+          <div className="ct-scrim show" aria-hidden="true" onClick={() => navigate("/")} />
+          <aside className="ct-sheet show ct-settings" aria-label="History">
+            <div className="ct-sheet-head">
+              <h2>History</h2>
+              <button className="ct-btn-quiet" onClick={() => navigate("/")}>Done</button>
+            </div>
+            <div className="ct-sheet-body">
+              <HistoryView showToast={showToast}
+                onUseAgain={(prompt, { edit }) => {
+                  navigate("/");
+                  seedComposer(prompt);
+                  showToast(edit ? "Change what you like, then send it." : "Ready to send again — this starts a new build.");
+                }}
+                onOpenConversation={(id) => {
+                  const found = conversationsRef.current.find((c) => String(c.id) === String(id));
+                  navigate("/");
+                  if (found) openConversation(found);
+                }}
+                onOpenDeployment={(deployment) => navigate(`/projects/${deployment.projectId}/deployments`)}
+                onOpenLogs={(item) => navigate(`/projects/${item.projectId}/logs${item.id ? `?ref=${encodeURIComponent(item.id)}` : ""}`)} />
+            </div>
+          </aside>
+        </>
+      )}
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}
         onOpenRun={(id) => setRunOverlayId(id)} />
@@ -737,6 +842,9 @@ function Workspace({ user }) {
           onOpen={(c) => { openConversation(c); setPaletteOpen(false); }}
           onSettings={() => { setPaletteOpen(false); navigate("/settings/usage"); }}
           onUsage={() => { setPaletteOpen(false); navigate("/settings/usage"); }}
+          onHistory={() => { setPaletteOpen(false); navigate("/history"); }}
+          onIdeas={() => { setPaletteOpen(false); setShowStarters(true); }}
+          onTour={() => { setPaletteOpen(false); reopenOnboarding(); }}
           onOpenView={(v) => { setPaletteOpen(false); setManageView(v); }} />
       )}
       {deleting && (
@@ -785,7 +893,7 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
-function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {},
+function Begin({ user, conversations, loaded = true, onSend, composerSeed = null, onOpenStarters = null, onStarterPrompt = () => {}, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {},
   counts: serverCounts = {}, page = null, busy = false, error = "", tab = "all", onTab = () => {},
   search = "", onSearch = () => {}, onLoadMore = () => {}, onRetryList = () => {},
   sorts = [], sort = "activity", onSort = () => {},
@@ -855,7 +963,8 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
       <div className="ct-halo" />
       <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
-      <Composer autoFocus={FINE_POINTER} onSend={onSend} placeholder="Describe anything — an app, a change, an idea…" />
+      <Composer autoFocus={FINE_POINTER} onSend={onSend} seed={composerSeed}
+        placeholder="Describe anything — an app, a change, an idea…" />
       {onModelChange && (
         <div className="ct-model-begin">
           <ModelSelector value={modelPref} onChange={onModelChange} onOpenSettings={onOpenSettings} />
@@ -955,14 +1064,19 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
               {group.items.map((c) => <ProjectCard key={c.id} c={c} {...cardProps} />)}
             </React.Fragment>
           ))}
+          {/* A narrowed view that finds nothing is NOT a first-time experience. Search, archive,
+              favourites and the status tabs each say what that particular view means and how to
+              leave it — showing "here is how Thrallo works" to someone with forty projects because
+              they filtered to Updates would be absurd. The genuine no-projects case is handled
+              below, outside the workspace, where the idea gallery is. */}
           {groups.length === 0 && (
             <div className="ct-ws-empty ct-hint">
-              {search ? `Nothing matches “${search}”.`
+              {search ? `Nothing matches “${search}”. Try a shorter word, or part of the address.`
                 : archived ? "Nothing is archived. Archiving puts a project out of the way without deleting anything — a published site keeps serving."
-                  : favouritesOnly ? "No favourites yet. Star a project to keep it at the top."
-                    : tab === "published" ? "Nothing is live yet. Publish a project and it will appear here."
-                      : tab === "updates" ? "Every published project is up to date."
-                        : "No projects here yet."}
+                  : favouritesOnly ? "No favourites yet. Star a project to keep it at the top of this list."
+                    : tab === "published" ? "Nothing is live yet. Publishing a project puts it on a real web address in seconds, and it will appear here."
+                      : tab === "updates" ? "Every published project is up to date — nothing has been built since its last publish."
+                        : "No projects in this view."}
             </div>
           )}
           {/* Paging, not a silent ceiling. The old dashboard showed six and said nothing about the
@@ -975,6 +1089,21 @@ function Begin({ user, conversations, loaded = true, onSend, onContinue, onDelet
           {page && page.total > 0 && page.nextOffset == null && page.total > page.limit && (
             <div className="ct-ws-empty ct-hint">All {page.total} projects shown.</div>
           )}
+        </div>
+      )}
+      {/* Never built anything. Not "no results": the difference is counts.all, which describes the
+          ACCOUNT rather than the current view, so archiving, starring or filtering to Updates can
+          never reach this. That is the rule — a narrowed empty view is not a first-time
+          experience, and an established customer must never be shown one. */}
+      {loaded && !error && (counts.all ?? 0) === 0 && !search && !archived && !favouritesOnly && onOpenStarters && (
+        <div className="ct-workspace ct-firstrun">
+          <div className="ct-ws-label">Your first build</div>
+          <p className="ct-hint ct-firstrun-lead">
+            Describe what you want in the box above and the team will plan it, build it and put it
+            online. If a blank page is hard, start from one of these — they are opening prompts you
+            can edit, not templates.
+          </p>
+          <StarterGallery compact onUse={onStarterPrompt} />
         </div>
       )}
       {deletedItems.length > 0 && (
@@ -1484,9 +1613,29 @@ function contextChipLabel(context) {
   return bits.filter(Boolean).join(" · ");
 }
 
-function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null }) {
+function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null, seed = "" }) {
   const [text, setText] = useState("");
   const ref = useRef(null);
+  // A seed is a DRAFT, never a send. "Edit & rebuild" and the starter gallery both put words in
+  // the box for the customer to change; sending on their behalf would take that away — and the
+  // whole point of an expert prompt is that it is a good first draft, not a finished answer.
+  //
+  // Keyed on the nonce rather than the text: choosing the SAME starter twice, or reusing the same
+  // prompt twice, has to re-seed the box, and comparing text alone would silently do nothing.
+  const seedNonce = seed?.nonce || 0;
+  useEffect(() => {
+    if (!seedNonce || !seed?.text) return;
+    setText(seed.text);
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 148)}px`;
+    // Caret at the start: these are long prompts and the first line is the one to edit.
+    el.setSelectionRange(0, 0);
+    el.scrollTop = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedNonce]);
   // Clear immediately (feels instant); if sending fails, put the draft back untouched.
   const submit = async () => {
     const draft = text;
@@ -1539,19 +1688,22 @@ function SettingsSection({ section, onBack, onClose }) {
   );
 }
 
-function Palette({ conversations, onNew, onOpen, onSettings, onOpenView, onUsage }) {
+function Palette({ conversations, onNew, onOpen, onSettings, onOpenView, onUsage, onHistory, onIdeas, onTour }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const actions = useMemo(() => [
     { key: "new", label: "＋ New conversation", hint: "start fresh", run: onNew },
     { key: "settings", label: "⚙ Settings", run: onSettings },
+    { key: "history", label: "◔ History", hint: "your prompts · builds · deployments", run: onHistory },
+    { key: "ideas", label: "✦ Start from an idea", hint: "expert opening prompts", run: onIdeas },
+    { key: "tour", label: "? Show me around", hint: "the first-run walkthrough", run: onTour },
     { key: "repos", label: "⌘ Repositories", hint: "connect · index · policies · PRs", run: () => onOpenView("repos") },
     { key: "usage", label: "▤ Usage & plan", hint: "budgets · guards", run: onUsage },
     { key: "diagnostics", label: "◔ Build diagnostics", hint: "logs · repairs · costs", run: () => onOpenView("diagnostics") },
     { key: "ops", label: "⚡ Operations", hint: "admin", run: () => onOpenView("ops") },
     { key: "analytics", label: "◈ Admin analytics", hint: "admin · spend · revenue", run: () => onOpenView("analytics") },
     { key: "intelligence", label: "◎ Provider intelligence", hint: "admin · learned routing", run: () => onOpenView("intelligence") },
-  ], [onNew, onSettings, onOpenView, onUsage]);
+  ], [onNew, onSettings, onOpenView, onUsage, onHistory, onIdeas, onTour]);
   const q = query.trim().toLowerCase();
   const shownActions = useMemo(
     () => actions.filter((a) => !q || a.label.toLowerCase().includes(q) || (a.hint || "").includes(q)),

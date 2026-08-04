@@ -114,6 +114,19 @@ export default function DomainsSection({ site }) {
         <span className="ct-live-badge st-published"><span className="dot" aria-hidden="true" />Active</span>
       </div>
 
+      {/* No custom domain is the NORMAL state, not a gap to apologise for — the Thrallo address
+          above already works. So this says what a custom domain adds and what it costs in effort,
+          rather than implying something is missing. Only shown once the list has actually loaded,
+          so a failed load never reads as "you have none". */}
+      {loaded && !loadError && domains.length === 0 && (
+        <div className="ct-hint" style={{ padding: "12px 0" }}>
+          <strong>No custom domain connected.</strong> Your Thrallo address above is live and stays
+          live. Connecting your own domain — <code>app.yourcompany.com</code> — takes one DNS record
+          at your registrar; Thrallo verifies it, issues the certificate and keeps both addresses
+          serving.
+        </div>
+      )}
+
       {domains.map((d) => (
         <div className="ct-domain" key={d.domain}>
           <div className="ct-domain-head">
