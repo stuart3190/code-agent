@@ -22,8 +22,17 @@ import {
 import { dailyByokSpend, dailyVerdict, dailyWarningMessage } from "./byokSpend.mjs";
 import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
 import { buildRepairBrief, headlineError } from "./repairContext.mjs";
-import { STRATEGIES, FIRST_STRATEGY, strategy, escalate, verifyPatch } from "./patchVerification.mjs";
+import {
+  STRATEGIES, FIRST_STRATEGY, strategy, escalate, verifyPatch, verifyFunctionalRepair,
+} from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
+import { honestyFailures, honestyScan } from "./honestyScan.mjs";
+import {
+  functionalRepairBrief, regenerateModuleBrief, findingKey, nextFunctionalTier,
+} from "./functionalFindings.mjs";
+import {
+  BUILD_STATES, resolveBuildState, customerMessageFor, isShippable,
+} from "../../../shared/buildStates.mjs";
 import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
 import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
 
@@ -746,7 +755,18 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         }
 
         if (action.kind === "verify") {
-          await ctx.emit("preview_ready", { url: data.result.previewUrl, projectId, message: "Preview ready — take a look." });
+          // preview_ready is EARNED, not granted for compiling. It used to be emitted here —
+          // before verification had run at all — and a production run ended "preview delivered,
+          // customer needed: no" with five of six contract journeys failing and seven honesty
+          // findings outstanding. The customer was handed a finished-looking app that did not work.
+          //
+          // The preview URL still goes out, because the customer should be able to watch the thing
+          // being checked; what it does NOT carry is the claim that it is finished.
+          lifecycle.state = BUILD_STATES.verificationPending;
+          await ctx.emit("verification_pending", {
+            url: data.result.previewUrl, projectId,
+            message: customerMessageFor(BUILD_STATES.verificationPending),
+          });
           deps.verify(ctx, { projectId, jobId, previewUrl: data.result.previewUrl, result: data.result, attempt, lifecycle, job, deps })
             .catch((error) => console.error("[app-build] verification:", error.message));
           return;
@@ -754,7 +774,14 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         if (action.kind === "warmup") {
           lifecycle.diag.finish("complete_unverified");
           recordOutcome(lifecycle, { action, attempt, trigger: job.trigger || "user", signals, progress });
-          recoverPreview(ctx, projectId).catch((error) => console.error("[app-build] preview recovery:", error.message));
+          // A contract with journeys means there is something to verify once the preview appears.
+          recoverPreview(ctx, projectId, {
+            verify: lifecycle.diag?.contract?.journeys?.length
+              ? (url) => deps.verify(ctx, {
+                projectId, jobId, previewUrl: url, result: data.result, attempt, lifecycle, job, deps,
+              })
+              : null,
+          }).catch((error) => console.error("[app-build] preview recovery:", error.message));
           const text = `${buildEndSummary(data.result)}${data.result?.finalText ? ` ${String(data.result.finalText).slice(0, 400)}` : ""}`;
           await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId } });
           await ctx.emit("message", { role: "lead", text, projectId });
@@ -1043,10 +1070,54 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     verdict.journeys = journeys;
   }
 
-  if (verdict.pass) {
+  // The honesty scan is part of the gate, not a bystander. A build whose controls do nothing is
+  // not "verified with warnings" — it is the exact defect the customer reported.
+  const honesty = job?.honesty || null;
+  if (honesty && honesty.ok === false) {
+    verdict = {
+      ...verdict,
+      pass: false,
+      failures: [...(verdict.failures || []), ...honestyFailures(honesty)],
+      honestyFailure: true,
+    };
+  }
+
+  // Did the LAST functional repair actually fix what it was sent to fix? Judged on the findings
+  // that triggered it, never on compile success — the project compiled through all three
+  // production rounds while the findings went 4 → 4 → 7.
+  if (lifecycle.functionalFindingsBefore && honesty) {
+    const functionalVerdict = verifyFunctionalRepair({
+      before: lifecycle.functionalFindingsBefore,
+      after: honesty.findings || [],
+      keyOf: findingKey,
+    });
+    diag.step({
+      agent: "Lead Agent", kind: "verification", label: `Functional repair verification (round ${attempt})`,
+      status: functionalVerdict.effective ? "ok" : "failed",
+      output: JSON.stringify(functionalVerdict, null, 2), round: attempt,
+    });
+    console.log(`[app-build ${diag.id?.slice(0, 8)}] functional repair ${functionalVerdict.verdict}: ${functionalVerdict.summary}`);
+    // One ineffective targeted attempt is enough to change approach.
+    if (!functionalVerdict.effective) {
+      lifecycle.functionalTier = nextFunctionalTier(lifecycle.functionalTier || "targeted");
+    }
+  }
+  if (honesty && honesty.ok === false) lifecycle.functionalFindingsBefore = honesty.findings;
+
+  const state = resolveBuildState({
+    compileOk: true,
+    previewUrl,
+    journeys: verdict.journeys || null,
+    honesty,
+  });
+  lifecycle.state = state;
+
+  if (verdict.pass && isShippable(state)) {
     diag.finish("passed");
     await ctx.emit("agent_done", { agent: "Verifier", ok: true });
     await ctx.emit("verification", { pass: true, summary: verdict.summary, projectId });
+    // Only here. Everything above this line has proved the app does what was agreed.
+    await ctx.emit("preview_ready", { url: previewUrl, projectId, message: "Preview ready — take a look." });
     const text = `Your app is built, verified, and live in this conversation.\n\n${verdict.summary}${result?.finalText ? `\n\n${String(result.finalText).slice(0, 300)}` : ""}`;
     await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { jobId, projectId, verified: true } });
     await ctx.emit("message", { role: "lead", text, projectId });
@@ -1058,6 +1129,13 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
 
   await ctx.emit("agent_done", { agent: "Verifier", ok: false });
   await ctx.emit("verification", { pass: false, failures: verdict.failures, projectId });
+  // The failed preview is never exposed as complete, and the customer is told plainly that this is
+  // being handled rather than being handed a broken app or an alarming error.
+  lifecycle.state = BUILD_STATES.verificationFailed;
+  await ctx.emit("verification_failed", {
+    projectId, failures: (verdict.failures || []).slice(0, 6),
+    message: customerMessageFor(BUILD_STATES.verificationFailed),
+  });
 
   // Fold the verification result into this round's signals so no-progress detection can see
   // whether the repair actually moved verification forward.
@@ -1076,8 +1154,46 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   });
   lifecycle.endState = action.endState;
 
+  // Tier three: the targeted fix and the module regeneration have both failed. Restore the last
+  // green checkpoint and stop. The customer gets their last working version and a clear statement
+  // that this feature is blocked — never a broken app presented as finished.
+  if (lifecycle.functionalTier === "restore_and_block") {
+    const green = lifecycle.checkpoints.lastKnownGood();
+    if (green) {
+      await restoreCheckpoint(green, { client: serviceClient(), owner: ctx.owner, projectId })
+        .catch((error) => console.error("[app-build] restore:", error.message));
+    }
+    lifecycle.state = BUILD_STATES.blocked;
+    await stopWithMessage(ctx, lifecycle, {
+      action: { ...action, kind: "blocked" }, attempt, jobId, projectId, signals, progress,
+      text: customerMessageFor(BUILD_STATES.blocked, {
+        detail: "the app's data was being stored in the browser rather than saved properly",
+      }),
+    });
+    return;
+  }
+
   if (action.kind === "repair") {
-    const brief = repairPrompt(verdict.failures);
+    // The STRUCTURED findings, not a prose list. Handed the generic quality warnings, a production
+    // repair swapped localStorage for sessionStorage and the loop called it progress. This brief
+    // names the files and lines, the prohibited APIs, the contract's entities and operations, and
+    // the one data API that is acceptable — and forbids the substitution that actually happened.
+    //
+    // Tier two regenerates just the defective module rather than taking another pass at the whole
+    // project: three blind full-project rounds is what cost 62 credits and made the app worse.
+    const functionalTier = lifecycle.functionalTier || "targeted";
+    const functional = functionalRepairBrief({
+      honesty: job?.honesty || null,
+      journeys: verdict.journeys || null,
+      contract: diag.contract || null,
+    });
+    const brief = functional
+      ? (functionalTier === "regenerate_module"
+        ? `${regenerateModuleBrief({ findings: (job?.honesty?.findings || []), contract: diag.contract })}
+
+${functional}`
+        : functional)
+      : repairPrompt(verdict.failures);
     const briefFp = fingerprintPrompt(brief);
     if (lifecycle.repairMemory.briefs.includes(briefFp)) {
       await stopWithMessage(ctx, lifecycle, {
@@ -1104,7 +1220,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
       action, attempt, trigger: "verification_repair", signals, progress,
       checkpointBefore: before?.id || null,
       extra: {
-        briefFingerprint: briefFp, strategy: "verification repair brief",
+        briefFingerprint: briefFp, strategy: functional ? `functional:${functionalTier}` : "verification repair brief",
         verificationBefore: previous?.verificationPassed ?? null, verificationAfter: verdict.pass,
       },
     });
@@ -1133,7 +1249,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
 // Late preview recovery: the container often finishes warming up shortly after the build
 // relay ends. Poll the provider, and the moment a URL exists, deliver the card + an honest
 // follow-up. If it never comes up, say so — with the sentence that fixes it.
-async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 } = {}) {
+async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000, verify = null } = {}) {
   for (let i = 0; i < attempts; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     try {
@@ -1141,6 +1257,17 @@ async function recoverPreview(ctx, projectId, { attempts = 9, delayMs = 20_000 }
       if (preview?.url) {
         await serviceClient().from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
           .eq("id", projectId).eq("owner", ctx.owner);
+        // This is the path for a build whose preview warmed up AFTER the relay ended, so
+        // verification never got the chance to run. Emitting preview_ready here would grant the
+        // completeness claim to a build nothing has checked — the same hole, one door along.
+        if (verify) {
+          await ctx.emit("verification_pending", {
+            url: preview.url, projectId,
+            message: customerMessageFor(BUILD_STATES.verificationPending),
+          });
+          await verify(preview.url);
+          return;
+        }
         await ctx.emit("preview_ready", { url: preview.url, projectId, message: "Preview ready — take a look." });
         const text = "Here's the preview — it needed a moment to warm up.";
         await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId } });

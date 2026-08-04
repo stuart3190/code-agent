@@ -68,6 +68,56 @@ export function escalate(fromId) {
   return at >= 0 && at < STRATEGIES.length - 1 ? STRATEGIES[at + 1].id : null;
 }
 
+/**
+ * Verify a FUNCTIONAL repair against the findings that triggered it.
+ *
+ * `verifyPatch` below answers "did the compiler error move?", which is the wrong question entirely
+ * for an honesty or journey failure. In production it answered "effective" twice while the honesty
+ * findings went 4 → 4 → 7, because the project compiled throughout. Compile success is irrelevant
+ * to this verdict.
+ *
+ * The rule: a repair is effective only when the original blocking findings are GONE and nothing
+ * equivalent or worse has appeared. Identity, not count — `localStorage` becoming `sessionStorage`
+ * is the same finding wearing a different name, and it must not read as progress.
+ */
+export function verifyFunctionalRepair({ before, after, keyOf }) {
+  const beforeKeys = new Set((before || []).map(keyOf));
+  const afterKeys = new Set((after || []).map(keyOf));
+
+  const resolved = [...beforeKeys].filter((key) => !afterKeys.has(key));
+  const remaining = [...beforeKeys].filter((key) => afterKeys.has(key));
+  const introduced = [...afterKeys].filter((key) => !beforeKeys.has(key));
+
+  // Same class of defect, different location or spelling. This is the substitution that actually
+  // happened, and counting keys alone would have called it progress.
+  const classOf = (key) => String(key).split(":")[0];
+  const beforeClasses = new Set([...beforeKeys].map(classOf));
+  const equivalent = introduced.filter((key) => beforeClasses.has(classOf(key)));
+
+  let verdict;
+  if (!after?.length) verdict = "effective";
+  else if (introduced.length && (after.length > (before || []).length || equivalent.length)) verdict = "worse";
+  else if (remaining.length) verdict = "ineffective";
+  else verdict = "effective";
+
+  return {
+    verdict,
+    effective: verdict === "effective",
+    resolved: resolved.length,
+    remaining: remaining.length,
+    introduced: introduced.length,
+    equivalent: equivalent.length,
+    beforeCount: (before || []).length,
+    afterCount: (after || []).length,
+    summary: verdict === "effective"
+      ? `all ${(before || []).length} finding(s) resolved`
+      : verdict === "worse"
+        ? `the repair made it worse: ${(before || []).length} finding(s) became ${(after || []).length}`
+          + `${equivalent.length ? `, including ${equivalent.length} of the same kind in a new place` : ""}`
+        : `${remaining.length} of ${(before || []).length} finding(s) are unchanged`,
+  };
+}
+
 
 /**
  * The file and symbol the failure actually names.
