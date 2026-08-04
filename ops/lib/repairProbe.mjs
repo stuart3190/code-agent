@@ -7,17 +7,27 @@
 //
 // This spends real tokens. Nothing calls it except a proof run with --with-agent.
 
+import { loadEnv } from "../../shell/server/lib/env.mjs";
 import { runAgent } from "../../src/engine/runAgent.mjs";
 import { makeFileTools } from "../../src/tools/fileTools.mjs";
 import { systemPromptForEdit } from "../../src/prompts/builder.mjs";
 import { createAnthropicProvider } from "../../src/providers/anthropicProvider.mjs";
+import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 
 export async function runRepairForProof({ tree, brief, provider = null }) {
+  // The proof runs on the VPS, where the provider key lives in shell/.env like every other secret.
+  // loadEnv fills process.env without overwriting anything already set, so an explicitly exported
+  // key still wins and the value is never read by this file.
+  loadEnv();
   const working = { ...tree };
   const before = { ...tree };
   const { schemas, impls, stats } = makeFileTools(working, { editFormat: "apply_patch" });
 
-  const engine = provider || createAnthropicProvider({ cache: false });
+  // Whichever provider this deployment actually repairs with. Production's managed lane runs on
+  // OpenAI — its ANTHROPIC_API_KEY is empty — and a proof that quietly used a different model from
+  // the one doing the real work would not be evidence about the real work.
+  const engine = provider
+    || (process.env.OPENAI_API_KEY ? createCodexProvider() : createAnthropicProvider({ cache: false }));
   const { telemetry, finalText } = await runAgent({
     provider: engine,
     systemPrompt: systemPromptForEdit("apply_patch"),
