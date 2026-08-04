@@ -178,11 +178,31 @@ test("Settings is an address, so Back works and a refresh returns to the same ta
   await tab(page, "Billing").click();
   expect(new URL(page.url()).pathname).toBe("/settings/billing");
 
+  // Back returns to the previous tab. This is the guarantee a customer relies on, and it is a
+  // same-document navigation driven by popstate.
+  await page.goBack();
+  await expect(tab(page, "Usage")).toHaveAttribute("aria-selected", "true");
+  expect(new URL(page.url()).pathname).toBe("/settings/usage");
+
+  // Forward works too, which is what makes it navigation rather than a one-way door.
+  await page.goForward();
+  await expect(tab(page, "Billing")).toHaveAttribute("aria-selected", "true");
+});
+
+test("a refresh returns to the same tab", async ({ page }) => {
+  // Separate from the Back test on purpose. Combining them meant reloading and THEN going back,
+  // which crosses a document boundary and lands in each engine's back/forward cache behaviour —
+  // Firefox restores the old document without firing popstate. That is a browser-history edge
+  // case, not the product guarantee; the guarantee is that each address renders its own tab.
+  await stub(page);
+  await page.goto("/settings/billing");
+  await expect(tab(page, "Billing")).toHaveAttribute("aria-selected", "true");
   await page.reload();
   await expect(tab(page, "Billing")).toHaveAttribute("aria-selected", "true");
 
-  await page.goBack();
-  await expect(tab(page, "Usage")).toHaveAttribute("aria-selected", "true");
+  await page.goto("/settings/keys");
+  await page.reload();
+  await expect(tab(page, "API keys")).toHaveAttribute("aria-selected", "true");
 });
 
 test("arrow keys move between tabs, as the tablist role promises", async ({ page }) => {

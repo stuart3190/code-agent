@@ -27,13 +27,13 @@ export async function handleSettings(_req, res, owner) {
     // the failure mode Phase 1 spent its length removing.
     const [tokens, unread, counts] = await Promise.all([
       listApiTokens(owner.id).catch((error) => {
-        console.error(`[settings] tokens unavailable: ${error.message}`); return null;
+        console.error(`[settings] tokens unavailable: ${describe(error)}`); return null;
       }),
       unreadCount(owner.id).catch((error) => {
-        console.error(`[settings] unread count unavailable: ${error.message}`); return null;
+        console.error(`[settings] unread count unavailable: ${describe(error)}`); return null;
       }),
       accountCounts(owner.id).catch((error) => {
-        console.error(`[settings] counts unavailable: ${error.message}`); return null;
+        console.error(`[settings] counts unavailable: ${describe(error)}`); return null;
       }),
     ]);
 
@@ -70,12 +70,18 @@ async function accountCounts(owner, { client = serviceClient() } = {}) {
       query = value === null ? query.is(column, null) : query.eq(column, value);
     }
     const { count: n, error } = await query;
-    if (error) throw new Error(error.message);
+    // The whole error, not just `.message`: PostgREST puts the useful part in `details` or `hint`
+    // for exactly the failure that happened here, so `.message` alone logged an empty reason.
+    if (error) throw new Error(describe(error));
     return n || 0;
   };
   const [projects, liveSites, deployments] = await Promise.all([
     count("ca_conversations", { deleted_at: null, archived_at: null }),
-    count("published_sites", { live: true }),
+    // `published_sites` has no `live` column — being live IS having no unpublished_at, which is the
+    // same rule resolvePublishState applies. Filtering on a column that does not exist threw, the
+    // catch above turned it into `counts: null`, and the Usage tab read "temporarily unavailable"
+    // for every customer from the moment Phase 6 shipped.
+    count("published_sites", { unpublished_at: null }),
     count("deployments"),
   ]);
   return { projects, liveSites, deployments };
@@ -147,4 +153,11 @@ async function wrap(fn) {
 function sendJson(res, code, value) {
   res.writeHead(code, { "Content-Type": "application/json" });
   res.end(JSON.stringify(value));
+}
+
+// A blank reason is a wasted log line. The one that mattered here — a filter on a column that does
+// not exist — printed as "[settings] counts unavailable:" with nothing after it, so the failure was
+// both visible and useless.
+function describe(error) {
+  return error?.message || error?.details || error?.hint || error?.code || String(error) || "unknown";
 }

@@ -32,7 +32,7 @@ export const SETTINGS_TABS = [
 
 export default function SettingsView({
   user, theme, setTheme, initialTab = "usage", onClose, onTabChange, onSection, onUpgrade,
-  onOpenUrl, showToast,
+  onOpenUrl, showToast, openedBy = null,
 }) {
   const [tab, setTabState] = useState(initialTab);
   const [data, setData] = useState(null);      // null = loading
@@ -71,7 +71,12 @@ export default function SettingsView({
   // Focus moves in on open and back out on close, so a keyboard user is not left tabbing through
   // the page behind this one.
   useEffect(() => {
-    opener.current = document.activeElement;
+    // document.activeElement is <body> on WebKit after a click: Safari deliberately does not focus
+    // buttons when they are clicked, so the overlay had nothing to hand focus back to and a
+    // keyboard user landed at the top of the document. `openedBy` is the element that triggered
+    // this, captured by the caller from the click itself, and is preferred when it exists.
+    const active = document.activeElement;
+    opener.current = active && active !== document.body ? active : (openedBy?.current || null);
     heading.current?.focus();
     return () => {
       const returnTo = opener.current;

@@ -77,6 +77,25 @@ export const NOT_PURGED = Object.freeze(new Map([
 
 // build_signals is keyed by build_id, not project_id, so it cannot be found by the loop above.
 // It is cleaned from the diag_runs ids being removed.
+/**
+ * Every matching row, a page at a time.
+ *
+ * An unbounded `.select()` is capped by PostgREST, and the cap is silent — you get a short list,
+ * not an error. Anywhere the caller's correctness depends on seeing ALL the rows (a purge, a
+ * cascade), that silence is a bug waiting for a customer big enough to trigger it.
+ */
+export async function* pagedRows(client, table, columns, filters = {}, { pageSize = 500 } = {}) {
+  for (let from = 0; ; from += pageSize) {
+    let query = client.from(table).select(columns).range(from, from + pageSize - 1);
+    for (const [column, value] of Object.entries(filters)) query = query.eq(column, value);
+    const { data, error } = await query;
+    if (error) throw new Error(`${table}: ${error.message}`);
+    if (!data?.length) return;
+    yield data;
+    if (data.length < pageSize) return;
+  }
+}
+
 async function purgeBuildSignals(client, ownerId, runIds) {
   if (!runIds.length) return;
   await client.from("build_signals").delete().eq("owner", ownerId).in("build_id", runIds);
@@ -151,15 +170,26 @@ export async function purgeProjectResources(ownerId, projectId, { client = servi
 
   // The end users of a generated app have their own auth identities; deleting the app must not
   // leave them able to sign in to nothing.
-  const { data: appUsers } = await client.from("app_users").select("auth_user_id").eq("app_id", projectId);
-  for (const user of appUsers || []) {
-    await client.auth.admin.deleteUser(user.auth_user_id).catch(() => {});
+  //
+  // Paged, deliberately. This was a bare `.select()`, and PostgREST caps an unbounded select at a
+  // configured maximum — so a popular app's end users beyond that cap were silently never deleted,
+  // leaving live auth identities for an app that no longer exists. A purge that quietly does most
+  // of the job is worse than one that fails, because nothing says so.
+  report.appUsers = 0;
+  for await (const rows of pagedRows(client, "app_users", "auth_user_id", { app_id: String(projectId) })) {
+    for (const user of rows) {
+      await client.auth.admin.deleteUser(user.auth_user_id).catch(() => {});
+      report.appUsers += 1;
+    }
   }
 
-  // build_signals is keyed by build, so collect the run ids before diag_runs is removed.
-  const { data: runs } = await client.from("diag_runs")
-    .select("id").eq("owner", ownerId).eq("project_id", String(projectId));
-  await purgeBuildSignals(client, ownerId, (runs || []).map((r) => r.id));
+  // build_signals is keyed by build, so collect the run ids before diag_runs is removed. Paged for
+  // the same reason: a long-lived project accumulates far more diagnostic runs than one page.
+  const runIds = [];
+  for await (const rows of pagedRows(client, "diag_runs", "id", { owner: ownerId, project_id: String(projectId) })) {
+    runIds.push(...rows.map((r) => r.id));
+  }
+  await purgeBuildSignals(client, ownerId, runIds);
 
   for (const { table, column, ownerScoped, label } of PROJECT_SCOPED_TABLES) {
     let query = client.from(table).delete().eq(column, String(projectId));

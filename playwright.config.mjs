@@ -27,6 +27,34 @@ export default defineConfig({
       use: { ...devices["iPad Pro 11 landscape"], browserName: "chromium", defaultBrowserType: "chromium" },
     },
     { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
+
+    /**
+     * Other engines.
+     *
+     * Every project above is Chromium, so until now "the full matrix" proved four viewports of one
+     * rendering engine. Firefox (Gecko) and WebKit cover the two engines Thrallo is not otherwise
+     * tested on, and WebKit is the closest thing available here to Safari on macOS and iOS — it is
+     * the same engine, not the same browser, and the difference is stated rather than glossed.
+     *
+     * These run a NAMED subset rather than the whole suite: the cross-engine risks are layout,
+     * focus, CSS support and the streaming APIs, not application logic, and running 600 specs three
+     * more times would cost half an hour to re-prove the same reducer.
+     *
+     * Edge is Chromium with the same engine version Playwright ships, so desktop-chromium covers
+     * it. Real Safari, real iOS and real Android devices are NOT covered — see PLATFORMS.md.
+     */
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      // Anchored on the separator: a bare "settings" also matched provider-settings.spec.mjs.
+      testMatch: /[\\/](cross-browser|chat-shell|settings|projects-experience)\.spec\.mjs$/,
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      // Anchored on the separator: a bare "settings" also matched provider-settings.spec.mjs.
+      testMatch: /[\\/](cross-browser|chat-shell|settings|projects-experience)\.spec\.mjs$/,
+    },
   ],
   webServer: process.env.E2E_BASE_URL ? undefined : {
     command: "node shell/server/index.mjs",

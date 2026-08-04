@@ -5,11 +5,12 @@
 // service of those.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+
 import { projectLogs, logStreamUrl, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
 import { TabSkeleton, TabError } from "./TabStates.jsx";
 import { useDebounced } from "../lib/useDebounced.js";
 import { LOG_LEVELS as LEVELS, LOG_SOURCES as SOURCES } from "../../../shared/logSources.mjs";
-
+import { LIVE_LIMIT, trimEntries } from "./logWindow.js";
 
 const stamp = (iso) => new Date(iso).toLocaleString("en-GB", {
   day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
@@ -127,7 +128,10 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
         const entry = JSON.parse(event.data);
         if (seen.current.has(entry.id)) return;
         seen.current.add(entry.id);
-        setEntries((current) => [entry, ...current]);
+        // Bounded. Both the rendered list and the dedupe Set grew without limit while Live was on,
+        // so a busy site left on this tab rendered an ever-longer list and held every id it had
+        // ever seen. "Load older" is how you reach what falls off the end.
+        setEntries((current) => trimEntries([entry, ...current], seen.current, LIVE_LIMIT));
       } catch { /* a malformed frame is not worth surfacing */ }
     });
     source.onerror = () => { /* EventSource reconnects on its own */ };

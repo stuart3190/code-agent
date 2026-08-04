@@ -20,6 +20,13 @@ const DEFAULT_MAX_TOKENS = 16000; // a generous cap (billed only for tokens actu
 
 // ---- neutral -> Messages API translation (pure; exported for offline tests) ----
 
+// A configurable timeout that cannot be configured into uselessness: a typo or a stray 0 must not
+// disable the bound, which is the state this provider was already in.
+function boundedMs(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 5_000 ? Math.floor(parsed) : fallback;
+}
+
 function safeParse(s) {
   if (typeof s !== "string") return s ?? {};
   try {
@@ -187,18 +194,66 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
 
     const body = buildRequestBody({ systemPrompt, messages, tools, model, maxTokens, cache });
 
-    const res = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-        accept: "text/event-stream",
-      },
-      body: JSON.stringify(body),
-    });
+    /**
+     * A stall timeout, not a deadline.
+     *
+     * This call had no bound of ANY kind, while every sibling provider had one. A connection that
+     * opened and then went quiet — a provider incident, a dropped route — hung here forever: the
+     * Lead Agent's turn neither threw nor returned, so nothing recovered it and the conversation
+     * sat on "Understanding request…" indefinitely. That is the ten-minute stuck build.
+     *
+     * A fixed deadline is the wrong instrument for a token stream: a genuinely long generation is
+     * healthy and would be killed mid-answer. What is unhealthy is SILENCE, so the timer measures
+     * the gap between chunks and is reset by each one. A hard ceiling sits behind it so a provider
+     * that trickles a byte forever still ends.
+     */
+    const stallMs = boundedMs(process.env.ANTHROPIC_STALL_MS, 120_000);
+    const ceilingMs = boundedMs(process.env.ANTHROPIC_MAX_MS, 900_000);
+    const controller = new AbortController();
+    let stallTimer = null;
+    let stalled = false;
+    const armStall = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => { stalled = true; controller.abort(); }, stallMs);
+    };
+    const ceiling = setTimeout(() => { stalled = true; controller.abort(); }, ceilingMs);
+    ceiling.unref?.();
+    armStall();
+    stallTimer.unref?.();
+
+    // Normalised so the router's retry classifier recognises it: a stall is a transient provider
+    // fault and is exactly the kind of thing worth failing over for.
+    const asStall = (cause) => {
+      const error = new Error(
+        `Anthropic stopped responding after ${Math.round(stallMs / 1000)}s of silence. `
+        + "The request was abandoned rather than left hanging.",
+      );
+      error.status = 504;
+      error.code = "anthropic_timeout";
+      error.cause = cause;
+      return error;
+    };
+
+    let res;
+    try {
+      res = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": ANTHROPIC_VERSION,
+          "content-type": "application/json",
+          accept: "text/event-stream",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(stallTimer); clearTimeout(ceiling);
+      throw stalled ? asStall(error) : error;
+    }
 
     if (!res.ok) {
+      clearTimeout(stallTimer); clearTimeout(ceiling);
       const errBody = await res.text(); // Anthropic errors do not echo the key
       const error = new Error(`Anthropic messages HTTP ${res.status}: ${errBody}`);
       error.status = res.status;
@@ -210,23 +265,32 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
     const acc = createAccumulator();
     let buf = "";
     const decoder = new TextDecoder();
-    for await (const chunk of res.body) {
-      buf += decoder.decode(chunk, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data) continue;
-        let evt;
-        try {
-          evt = JSON.parse(data);
-        } catch {
-          continue;
+    try {
+      for await (const chunk of res.body) {
+        // Each chunk is proof the provider is still there, so the silence timer starts again.
+        armStall();
+        buf += decoder.decode(chunk, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data) continue;
+          let evt;
+          try {
+            evt = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          acc.push(evt);
         }
-        acc.push(evt);
       }
+    } catch (error) {
+      throw stalled ? asStall(error) : error;
+    } finally {
+      clearTimeout(stallTimer);
+      clearTimeout(ceiling);
     }
 
     const { text, toolCalls, usage, stopReason } = acc.result();

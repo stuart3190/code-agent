@@ -23,9 +23,20 @@ let sweepTimer = null;
 
 export function startCheckpointSweeper({ client = null, intervalMs = SWEEP_INTERVAL_MS } = {}) {
   if (sweepTimer) return sweepTimer;
-  const run = () => sweepCheckpoints({ client: client || serviceClient() })
-    .then((n) => { if (n) console.log(`[checkpoints] swept ${n} expired checkpoint(s)`); })
-    .catch((error) => console.error("[checkpoints] sweep:", error.message));
+  // `serviceClient()` throws synchronously when Supabase is unconfigured, and this runs from the
+  // server's `listening` handler — so the throw escaped the promise chain entirely and took the
+  // whole process down at boot. A sweeper failing must degrade to a log line; it is maintenance,
+  // not a reason the server cannot serve.
+  const run = () => {
+    try {
+      return sweepCheckpoints({ client: client || serviceClient() })
+        .then((n) => { if (n) console.log(`[checkpoints] swept ${n} expired checkpoint(s)`); })
+        .catch((error) => console.error("[checkpoints] sweep:", error.message));
+    } catch (error) {
+      console.error("[checkpoints] sweep unavailable:", error.message);
+      return Promise.resolve();
+    }
+  };
   run();
   sweepTimer = setInterval(run, intervalMs);
   sweepTimer.unref?.();
