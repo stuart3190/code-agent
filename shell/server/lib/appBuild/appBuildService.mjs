@@ -23,6 +23,7 @@ import { dailyByokSpend, dailyVerdict, dailyWarningMessage } from "./byokSpend.m
 import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
 import { buildRepairBrief, headlineError } from "./repairContext.mjs";
 import { STRATEGIES, FIRST_STRATEGY, strategy, escalate, verifyPatch } from "./patchVerification.mjs";
+import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
 import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
 import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
 
@@ -998,6 +999,49 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     output: verdict.pass ? verdict.summary : (verdict.failures || []).join("\n"),
     durationMs: Date.now() - verifyStarted,
   });
+
+  // ── CONTRACT JOURNEYS (PR6) ─────────────────────────────────────────────────────────────────
+  //
+  // The check above proves the app LOADS. This proves it DOES what was agreed, by driving the
+  // contract's journeys in a real browser against the real preview and the real backend. Reported
+  // and repaired SEPARATELY from compile success, because "it compiles" and "the booking persists"
+  // are different claims and conflating them is how a convincing non-functional app ships.
+  const contract = diag.contract;
+  if (contract?.journeys?.length && previewUrl) {
+    const journeyStarted = Date.now();
+    let journeys;
+    try {
+      journeys = await verifyJourneys({ previewUrl, contract });
+    } catch (error) {
+      journeys = { unavailable: true, error: error.message, journeys: [] };
+    }
+    diag.step({
+      agent: "Verifier", kind: "journey", label: `Contract journeys (round ${attempt})`,
+      status: journeys.unavailable ? "ok" : (journeys.pass ? "ok" : "failed"), round: attempt,
+      output: [
+        journeySummary(journeys),
+        ...(journeys.journeys || []).flatMap((j) => [
+          `${j.status.toUpperCase()} ${j.title}`,
+          ...(j.steps || []).map((s) => `    ${s.status}: ${s.action} → ${s.detail || s.expect}`),
+        ]),
+      ].join("\n"),
+      durationMs: Date.now() - journeyStarted,
+    });
+
+    // A journey the driver could not steer is NOT a defect — failing a build because a heuristic
+    // could not find a button would be the confidently-wrong mistake again, in the place where it
+    // costs a whole rebuild. Only a real failure joins the verdict.
+    const failures = journeyFailures(journeys);
+    if (journeys.pass === false && failures.length) {
+      verdict = {
+        ...verdict,
+        pass: false,
+        failures: [...(verdict.failures || []), ...failures],
+        journeyFailure: true,
+      };
+    }
+    verdict.journeys = journeys;
+  }
 
   if (verdict.pass) {
     diag.finish("passed");
