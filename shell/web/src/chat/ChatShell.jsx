@@ -931,8 +931,12 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
   const counts = Object.keys(serverCounts).length ? serverCounts : countByTab(conversations);
   // Archived projects are a flat list. Grouping them by "Live apps / In progress / Drafts" would be
   // describing work nobody is doing.
+  // `.filter(items.length)` matters: the archived branch built its group unconditionally, so an
+  // empty archive produced ONE group containing nothing. `groups.length === 0` was therefore never
+  // true there and the "Nothing is archived" empty state — which exists and reads well — could not
+  // render. The archive simply showed a heading with a void under it.
   const groups = archived
-    ? [{ id: "archived", label: "Archived", items: conversations }]
+    ? [{ id: "archived", label: "Archived", items: conversations }].filter((g) => g.items.length)
     : groupProjects(conversations);
 
   const selectedSet = new Set(selected);

@@ -232,3 +232,15 @@ test("a published site with zero visits is told apart from an unpublished one", 
   // measurement rather than missing data.
   assert.match(view, /this is a real zero, not missing data/);
 });
+
+test("an empty archive can actually show its empty state", async () => {
+  const { groupProjects } = await import("../../shell/web/src/publish/publishLifecycle.js");
+  const shell = await readCode("../../shell/web/src/chat/ChatShell.jsx");
+  // The archived branch built its group unconditionally, so an empty archive produced ONE group
+  // containing nothing. `groups.length === 0` was never true there, so the "Nothing is archived"
+  // copy could not render and the archive showed a heading with a void under it.
+  assert.match(shell, /\.filter\(\(g\) => g\.items\.length\)/,
+    "an empty group must not count as a group");
+  // The non-archived path already dropped empty groups; this is the rule the archive missed.
+  assert.deepEqual(groupProjects([]), [], "grouping nothing yields no groups");
+});
