@@ -213,3 +213,24 @@ test("no contract produces no brief rather than a misleading one", () => {
   assert.equal(contractSummary(null), "no contract");
   assert.match(contractSummary(BOOKING), /3 journeys · 1 entities · 2 operations · 4 acceptance tests · 1 deferred/);
 });
+
+test("genuinely observable statements are not rejected for using unlisted verbs", () => {
+  // Every one of these was rejected by the first version of isVague, in production, on a real
+  // contract — which was then discarded whole, dropping the build back to uncontracted one-shot
+  // generation. An allowlist of verbs is the wrong shape for this check.
+  for (const statement of [
+    "an iCalendar file for the confirmed date and time is offered",
+    "Header navigation reaches Home, Book Now, Plan Your Visit, Our Farm",
+    "The guest step visibly states the adult and child entry or deposit amount",
+    "The booking flow states that no online payment is taken",
+    "Each service card carries its price per punnet and a picking duration",
+  ]) {
+    assert.equal(isVague(statement), false, `wrongly rejected: "${statement}"`);
+  }
+
+  // And the slogans are still caught, which is the whole point of keeping the check at all.
+  for (const slogan of ["booking works", "user management", "payment flow", "CRUD",
+    "add booking functionality", "implement authentication", "make it work"]) {
+    assert.equal(isVague(slogan), true, `wrongly accepted: "${slogan}"`);
+  }
+});

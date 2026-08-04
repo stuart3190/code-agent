@@ -71,11 +71,37 @@ const OBSERVABLE = new RegExp(`\\b(${[
   "redirect(s|ed)?", "return(s|ed)?",
 ].join("|")})\\b`, "i");
 
+/**
+ * Is this a slogan rather than an outcome?
+ *
+ * ASYMMETRIC, and it took a production run to get the asymmetry the right way round. The first
+ * version required a match against a list of observable verbs, and rejected these, all of which
+ * are perfectly checkable:
+ *
+ *   "an iCalendar file for the confirmed date and time is offered"
+ *   "Header navigation reaches Home, Book Now, Plan Your Visit, Our Farm"
+ *   "The guest step visibly states the adult and child entry amount"
+ *
+ * — because "offered", "reaches" and "states" were not on the list. The whole contract was
+ * discarded and the build silently fell back to one-shot generation with no contract at all. A
+ * checker that is confidently wrong is worse than no checker; that is as true here as it was for
+ * the import preflight.
+ *
+ * So the rule is now: reject what is RECOGNISABLY a slogan — a known empty phrase, or something too
+ * short and verbless to be a statement about anything — and accept everything else. An observable
+ * verb is strong positive evidence, not a requirement.
+ */
 export function isVague(text) {
   const value = String(text || "").trim();
   if (value.length < 12) return true;
   if (VAGUE.some((pattern) => pattern.test(value))) return true;
-  return !OBSERVABLE.test(value);
+
+  // A real outcome is a sentence about something. Short verbless fragments — "booking works",
+  // "user management", "payment flow" — are labels for work, not descriptions of it.
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length < 5 && !OBSERVABLE.test(value)) return true;
+
+  return false;
 }
 
 /**

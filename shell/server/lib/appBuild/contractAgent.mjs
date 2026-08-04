@@ -132,6 +132,11 @@ function normalise(contract, { prompt }) {
 export async function generateContract({ provider, prompt, knowledge = "", log = () => {}, onUsage = null }) {
   let lastProblems = [];
   let usageTotal = null;
+  // The best contract seen, even if it did not fully validate. Discarding a contract because one
+  // acceptance line reads weakly throws away the journeys, the entities and the deferred list —
+  // and in production that silently dropped the whole build back to unstaged, uncontracted
+  // generation. A contract with a soft edge is worth far more than none.
+  let best = null;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const ask = attempt === 1
@@ -157,11 +162,24 @@ export async function generateContract({ provider, prompt, knowledge = "", log =
       return { contract, attempts: attempt, problems: [], warnings: verdict.warnings, usage: usageTotal };
     }
     lastProblems = verdict.problems;
+    // Keep the one with fewer problems; a second attempt is not automatically better.
+    if (!best || verdict.problems.length < best.problems.length) best = { contract, problems: verdict.problems };
     log(`contract: attempt ${attempt} rejected — ${verdict.problems.slice(0, 3).join("; ")}`);
   }
 
-  // Two failures. A build without a contract loses verification, which is bad; a build that never
-  // happens is worse. Proceed, and say so where an operator will see it.
+  // Neither attempt fully validated. Fall back to the better of the two rather than to nothing:
+  // its journeys, entities and deferred list are still what the build should be judged against,
+  // and the specific weaknesses travel with it so nothing downstream mistakes it for clean.
+  if (best?.contract) {
+    // A contract with no journeys cannot drive staging or verification — that one really is
+    // unusable, and pretending otherwise would produce a stage plan built on nothing.
+    const usable = (best.contract.journeys || []).some((j) => (j.steps || []).length >= 2);
+    if (usable) {
+      log(`contract: accepted with ${best.problems.length} unresolved problem(s) — ${best.problems.slice(0, 2).join("; ")}`);
+      return { contract: best.contract, attempts: 2, problems: best.problems, warnings: [], usage: usageTotal, degraded: true };
+    }
+  }
+
   log(`contract: unavailable after 2 attempts — ${lastProblems.slice(0, 2).join("; ")}`);
   return { contract: null, attempts: 2, problems: lastProblems, warnings: [], usage: usageTotal };
 }
