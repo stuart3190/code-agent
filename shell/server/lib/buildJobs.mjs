@@ -31,7 +31,8 @@ import { REACT_VITE } from "../../../src/scaffolds/reactVite.mjs";
 import { makeFileTools } from "../../../src/tools/fileTools.mjs";
 import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "../../../src/prompts/builder.mjs";
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
-import { buildTree, ensureDeps } from "../../../harness/workspace.mjs";
+import { buildTree, ensureDeps, depsNodeModules } from "../../../harness/workspace.mjs";
+import { preflightImports, preflightSummary } from "./appBuild/importPreflight.mjs";
 // Phase 19 re-point: the credit ledger and legacy BYOK/welcome-grant seams are replaced by
 // Thrallo budget accounting and the Thrallo AI-connection store. The affordability logic
 // below is unchanged — it now runs against remaining monthly managed-token budget.
@@ -720,6 +721,42 @@ async function runJob(job) {
     await ensureDeps(() => {});
     await ensureDeps(() => {});
     let runtimeTree = withRuntimeEnv(tree, projectId);
+
+    // PREFLIGHT — resolve every import before spending a compile on it.
+    //
+    // The production failure this exists for cost a full build plus two repair rounds (~21 credits)
+    // to discover that one icon import named a symbol the pinned package does not export. Reading
+    // the export surface takes about 20ms. Corrections are applied to the SAVED tree as well as the
+    // runtime one, so the fix persists into the project rather than being re-broken next round.
+    const preflightStarted = Date.now();
+    try {
+      const preflight = await preflightImports(runtimeTree, { nodeModules: depsNodeModules() });
+      if (preflight.corrections.length) {
+        for (const correction of preflight.corrections) serverLog(job, `preflight: ${correction.message}`);
+        runtimeTree = preflight.tree;
+        // Carry each correction back into the saved tree too — the runtime tree is a copy with the
+        // backend .env injected, and only the saved tree survives the round.
+        for (const { file } of preflight.corrections) tree[file] = preflight.tree[file];
+      }
+      if (preflight.problems.length) {
+        for (const problem of preflight.problems) serverLog(job, `preflight: ${problem.message}`);
+      }
+      job.preflight = preflight;
+      job.diag?.step({
+        agent: "Compiler", kind: "preflight", label: "Import resolution",
+        status: preflight.ok ? "ok" : "failed",
+        output: [
+          preflightSummary(preflight),
+          ...preflight.corrections.map((c) => `CORRECTED ${c.message}`),
+          ...preflight.problems.map((p) => `UNRESOLVED ${p.message}`),
+        ].join("\n"),
+        durationMs: Date.now() - preflightStarted,
+      });
+    } catch (error) {
+      // A preflight that throws must never be the reason a good build does not happen.
+      serverLog(job, `preflight: skipped (${error.message})`);
+    }
+
     serverLog(job, "build: npm run build ...");
     const compileStarted = Date.now();
     let build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});

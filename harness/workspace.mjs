@@ -26,6 +26,11 @@ const NPM_PREFIX = process.platform === "win32"
 // shell's publish route reading dist/) resolve the workspace through this, not a copied path.
 export const workDirFor = (caseName) => path.join(WORK_DIR, caseName);
 
+// The shared scaffold's installed packages — the surface an import preflight must resolve against.
+// It is the same node_modules every built project is linked to, so what preflight reads is exactly
+// what the compiler will read.
+export const depsNodeModules = () => DEPS_NM;
+
 // Install scaffold deps into harness/.deps. Refresh when the scaffold manifest changes so newly
 // approved packages (for example a font family) cannot pass prompts but fail the actual build.
 let depsRefresh = null;
