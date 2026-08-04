@@ -6,6 +6,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../lib/useSession.js";
 import Landing from "../landing/Landing.jsx";
+import AccountMenu from "../auth/AccountMenu.jsx";
+import ConfirmDialog from "../settings/ConfirmDialog.jsx";
+import { rememberIntendedPath, signOutCompletely, takeIntendedPath } from "../auth/signOut.js";
 import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
@@ -125,7 +128,11 @@ export default function ChatShell() {
   // here, above the gate, and hand it to whichever screen renders.
   const billingReturn = readBillingReturn();
   if (billingReturn === "success") rememberBillingReturn("success");
-  if (!user) return <Landing billingReturn={billingReturn} />;
+  if (!user) {
+    // Where they were trying to go, so signing in returns them there rather than the dashboard.
+    rememberIntendedPath();
+    return <Landing billingReturn={billingReturn} />;
+  }
   return <Workspace user={user} />;
 }
 
@@ -161,6 +168,7 @@ function Workspace({ user }) {
   // Text put into the composer for the customer to edit — from a starter, or from "Edit & rebuild".
   // Carries a nonce so choosing the SAME prompt twice still re-seeds the box.
   const [composerSeed, setComposerSeed] = useState({ text: "", nonce: 0 });
+  const [confirmSignOut, setConfirmSignOut] = useState(null);
   // Thrallo has one screen, so routing is one path rather than a router dependency. /pricing is a
   // real URL because it is shareable and gets linked to; everything else stays at "/".
   const [path, setPath] = useState(() => window.location.pathname);
@@ -522,11 +530,44 @@ function Workspace({ user }) {
   }, [path]);
   const closeSettings = useCallback(() => { setSheetSection(null); navigate("/"); }, [navigate]);
 
+  /**
+   * Log out, asking first only when there is something to say.
+   *
+   * Builds run entirely server-side and keep going, so leaving does not lose work — but somebody
+   * watching a build has no way to know that, and a silent sign-out mid-build reads as having
+   * thrown it away. An unsent draft in the composer is the one thing that IS genuinely lost.
+   *
+   * No confirmation when neither is true: a dialog on every log out is a dialog nobody reads.
+   */
+  const requestSignOut = useCallback(() => {
+    const building = !!view.activeBuild || view.thinking;
+    const draft = !!pending;
+    if (!building && !draft) return signOutCompletely(client);
+
+    setConfirmSignOut({
+      building,
+      draft,
+      body: [
+        building && "Your build carries on running on Thrallo's servers — signing out does not stop "
+          + "it, and it will be waiting when you sign back in.",
+        draft && "The message you were writing has not been sent, and will be lost.",
+      ].filter(Boolean).join(" "),
+    });
+  }, [view.activeBuild, view.thinking, pending]);
+
   // ── First run ─────────────────────────────────────────────────────────────────────────
   //
   // Read once per session. A failure leaves it as "not pending" rather than showing the tour to
   // someone who has already dismissed it — an unwanted tour is a worse outcome than a missed one,
   // and Help can reopen it either way.
+  // A visitor who was sent to a deep link, signed in, and should land there rather than on the
+  // dashboard. Runs once: taking the value clears it, so a later refresh does not re-navigate.
+  useEffect(() => {
+    const intended = takeIntendedPath();
+    if (intended && intended !== window.location.pathname + window.location.search) navigate(intended);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let live = true;
     onboardingState()
@@ -624,8 +665,10 @@ function Workspace({ user }) {
         <div className={`ct-context ${active?.title ? "show" : ""}`}>
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
-        <button className="ct-avatar" title="Settings"
-          onClick={(e) => { overlayOpener.current = e.currentTarget; navigate("/settings/usage"); }}>{initial}</button>
+        <AccountMenu email={user.email} initial={initial} desktop={!!user.desktop}
+          onSettings={() => navigate("/settings/usage")}
+          onHistory={() => navigate("/history")}
+          onSignOut={requestSignOut} />
       </header>
 
       <DesktopUpdateNotice />
@@ -812,6 +855,15 @@ function Workspace({ user }) {
             </div>
           </aside>
         </>
+      )}
+      {confirmSignOut && (
+        <ConfirmDialog
+          title="Log out?"
+          body={confirmSignOut.body}
+          confirmLabel="Log out"
+          destructive={confirmSignOut.draft}
+          onCancel={() => setConfirmSignOut(null)}
+          onConfirm={() => signOutCompletely(client)} />
       )}
       <ManageView view={manageView} onClose={() => setManageView(null)}
         onSentence={(text) => { setManageView(null); send(text); }}

@@ -9,7 +9,6 @@
 // chosen in the composer, and there is no account-level default for it to write to.
 
 import React from "react";
-import { client } from "../lib/backend.js";
 
 const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "System"]];
 
@@ -25,9 +24,10 @@ export default function PreferencesTab({
             {data.ownerAccount ? "Owner account — limits are never enforced" : `${data.plan.name} plan`}
           </div>
         </div>
-        {!user.desktop && (
-          <button className="ct-btn-quiet" onClick={() => client().auth.signOut()}>Sign out</button>
-        )}
+        {/* Logging out lives in the account menu on the avatar, where people look for it — and
+            where it is reachable from every screen rather than three clicks into Settings. Two
+            sign-outs that end the session differently is exactly the drift this codebase removes
+            elsewhere, so there is one. */}
       </div>
 
       <div className="st-section">
