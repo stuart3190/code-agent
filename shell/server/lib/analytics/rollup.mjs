@@ -68,6 +68,10 @@ export async function rollupAnalytics({ client = serviceClient(), now = new Date
       for (const [dimension, value] of [
         ["path", row.path], ["referrer", row.referrer_host],
         ["browser", row.browser], ["os", row.os], ["device", row.device],
+        // Null when the geo database was unavailable at ingest, and bucket() skips falsy values —
+        // so a period collected without country data simply has no country rows, rather than a
+        // bucket of "unknown" that would read as a place.
+        ["country", row.country],
       ]) {
         if (!value) continue;
         const b = bucket(row, dimension, value);

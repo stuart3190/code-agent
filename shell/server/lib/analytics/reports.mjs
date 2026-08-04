@@ -6,6 +6,7 @@
 // publish with nothing to collect.
 
 import { serviceClient } from "../supabase.mjs";
+import { geoipStatus } from "./geoip.mjs";
 import { ownerSubscription } from "../usageBudgets.mjs";
 
 // Free sees a week, Starter a quarter, Pro everything. Null means unlimited.
@@ -182,9 +183,30 @@ export async function overview(owner, projectId, {
         }, [])
         .sort((a, b) => b.errors - a.errors).slice(0, 20)
       : null,
-    // Countries need MaxMind GeoLite2 and there is no licence key. Reported as unavailable rather
-    // than inferred from language or timezone, which would be a guess presented as a fact.
-    countries: { available: false, reason: "geoip_unconfigured" },
+    /**
+     * Countries, resolved at ingest from GeoLite2.
+     *
+     * The shape carries the STATE as well as the rows, because "no licence on this deployment",
+     * "database not downloaded yet" and "nobody visited" are three different sentences and the UI
+     * has to be able to tell them apart. A country is never inferred from language or timezone —
+     * that would be a guess presented as a fact — so rows are only ever real lookups.
+     *
+     * Gated with the other breakdowns: Free gets headline numbers, Starter and above get detail.
+     */
+    countries: (() => {
+      const status = geoipStatus();
+      if (!capabilities.fullAnalytics) return { available: false, reason: "plan", rows: [] };
+      if (!status.available) return { available: false, reason: status.reason, rows: [] };
+      return {
+        available: true,
+        reason: null,
+        // How old the data behind these answers is. Countries do not move, so an old database is
+        // degraded rather than wrong — but saying nothing about it would be the bigger lie.
+        builtAt: status.builtAt,
+        stale: status.stale,
+        rows: rank(all, "country"),
+      };
+    })(),
   };
 }
 

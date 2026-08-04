@@ -240,8 +240,25 @@ try {
   }
 
   // ── Countries ─────────────────────────────────────────────────────────────────────────
-  check(report.countries?.available === false && report.countries.reason === "geoip_unconfigured",
-    "countries report as unavailable rather than blank or inferred", JSON.stringify(report.countries));
+  // Countries became real in the release phase. What this asserts now is the CONTRACT rather than
+  // one state: the payload always says which of the four situations applies, and never returns
+  // rows without also saying how current the database behind them is. An inferred country — from
+  // language or timezone — would be a guess presented as a fact and is what this still guards.
+  {
+    const countries = report.countries || {};
+    const known = ["plan", "not_configured", "loading", "unavailable"];
+    check(typeof countries.available === "boolean", "countries state its availability", JSON.stringify(countries.available));
+    if (countries.available) {
+      check(!!countries.builtAt, "and, when available, how current the database is", countries.builtAt);
+      check(Array.isArray(countries.rows), "with rows that are a list, present or empty");
+      check(countries.rows.every((r) => /^[A-Z]{2}$/.test(r.key)),
+        "every row keyed by a real ISO country code", countries.rows.map((r) => r.key).join(",") || "none");
+    } else {
+      check(known.includes(countries.reason),
+        "and, when not, a reason the UI has a sentence for", String(countries.reason));
+      check((countries.rows || []).length === 0, "with no rows leaking through the gate");
+    }
+  }
 
   const live = await liveVisitors(OWNER, PROJECT, { client: db, now: today });
   check(typeof live.live === "number", "live visitors is a real number", `${live.live} in ${live.windowMinutes}m`);
