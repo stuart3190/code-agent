@@ -564,6 +564,23 @@ export async function startAppBuild(ctx, { description, productName = null }) {
   });
   lifecycle.budget.noteJob();
 
+  // Stage checkpoints (PR5). A green stage is the tree the run falls back to, so it is recorded
+  // in the same store as round checkpoints and with the same retention — a safety net that only
+  // exists in memory would not survive the restart it is most needed after.
+  job.onStageCheckpoint = ({ tree, stage, label, changedFiles }) => {
+    try {
+      lifecycle.checkpoints.create({
+        tree, buildId: lifecycle.diag.id, jobId: job.id, attempt: 1,
+        status: "stage", compileOk: true, previewOk: null,
+        usageTotals: lifecycle.budget.totals,
+        label: label || `stage ${stage}`,
+        stage, changedFiles,
+      });
+    } catch (error) {
+      console.error(`[app-build] stage checkpoint (${stage}):`, error.message);
+    }
+  };
+
   relayBuildJob(ctx, { job, projectId: project.id, lifecycle });
   await ctx.emit("build_started", {
     jobId: job.id,

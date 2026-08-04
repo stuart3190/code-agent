@@ -34,6 +34,8 @@ import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { buildTree, ensureDeps, depsNodeModules } from "../../../harness/workspace.mjs";
 import { preflightImports, preflightSummary } from "./appBuild/importPreflight.mjs";
 import { generateContract } from "./appBuild/contractAgent.mjs";
+import { runStagedBuild, stagesSummary, primaryStageOk } from "./appBuild/stagedBuild.mjs";
+import { runStageGate } from "./appBuild/stageGate.mjs";
 import { contractBrief, contractSummary } from "../../shared/implementationContract.mjs";
 // Phase 19 re-point: the credit ledger and legacy BYOK/welcome-grant seams are replaced by
 // Thrallo budget accounting and the Thrallo AI-connection store. The affordability logic
@@ -739,12 +741,96 @@ async function runJob(job) {
     }
 
     const builderStarted = Date.now();
-    const initial = await runAgent({
-      provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
-      contextSelection: scope.contextSelection,
-      entryFile: scope.entryFile || "__no_entry__", // no confident match -> manifest-only seeding
-    });
-    combinedUsage.add(initial.telemetry);
+    // Each stage narrates what it did; the customer-facing summary is those, joined.
+    const finalTextParts = [];
+    // ── STAGED GENERATION (PR5) ──────────────────────────────────────────────────────────────
+    //
+    // A fresh build with a contract is generated in five gated stages instead of one turn, so a
+    // fault in the foundation is found before 27 files rest on it, and a late failure has a green
+    // tree to fall back to. Iterates and contract-less builds keep the single-turn path: staging
+    // an edit would be five model calls to change one line, and staging without a contract has no
+    // basis on which to allocate the work.
+    const staged = mode === "build" && contract && !job.disableStaging;
+    let initial;
+    let stageReport = null;
+
+    if (staged) {
+      setPhase(job, "building");
+      const stageResult = await runStagedBuild({
+        contract, tree, request: prompt,
+        log: (line) => serverLog(job, line),
+        cancelled: () => job.cancelled,
+        runStage: async (stage, { tree: stageTree, prompt: stagePromptText, mode: stageMode, attempt }) => {
+          const stageStarted = Date.now();
+          // The first stage authors from the scaffold; every later one edits what exists, so it
+          // gets the edit prompt and apply_patch rather than whole-file rewrites.
+          const first = stage.id === "foundation" && attempt === 0;
+          const stageTools = makeFileTools(stageTree, { editFormat: first ? undefined : "apply_patch" });
+          const turn = await runAgent({
+            provider,
+            systemPrompt: first ? systemPrompt : `${systemPromptForEdit("apply_patch")}\n\n${designProfile ? renderDesignBrief(designProfile, approvedPhotos) : ""}`,
+            tools: stageTools.schemas, toolImpls: stageTools.impls,
+            tree: stageTree, prompt: stagePromptText, log, onUsage,
+          });
+          combinedUsage.add(turn.telemetry);
+          if (job.cancelled) throw new CancelledError();
+          job.diag?.step({
+            agent: "Builder", kind: "agent",
+            label: `${stage.title}${stageMode === "repair" ? ` — repair ${attempt}` : ""}`,
+            prompt: stagePromptText, output: turn.finalText,
+            usage: turn.telemetry, model: provider.model, durationMs: Date.now() - stageStarted,
+          });
+          finalTextParts.push(turn.finalText);
+        },
+        gate: async (stageTree) => {
+          const runtime = withRuntimeEnv(stageTree, projectId);
+          return runStageGate(runtime, {
+            nodeModules: depsNodeModules(),
+            baseline: REACT_VITE,
+            log: (line) => serverLog(job, line),
+            compile: async (candidate) => buildTree(
+              candidate, `stage-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {},
+            ),
+          });
+        },
+        checkpoint: ({ tree: greenTree, stage, label, changedFiles }) => {
+          // A green stage IS the fallback, so it is checkpointed from the gated tree only.
+          job.onStageCheckpoint?.({ tree: greenTree, stage, label, changedFiles });
+        },
+        onStageStart: (stage, index, total) => {
+          serverLog(job, `stage ${index + 1}/${total}: ${stage.title}`);
+          emit(job, "stage", { jobId: job.id, stage: stage.id, title: stage.title, index, total });
+        },
+        onStageEnd: (stage, result) => {
+          job.diag?.step({
+            agent: "Compiler", kind: "stage_gate", label: `${stage.title} gate`,
+            status: result.ok ? "ok" : "failed",
+            output: [
+              `${result.ok ? "GREEN" : "LOST"} after ${result.repairs} repair(s)`,
+              `checks: ${(result.checks || []).map((c) => `${c.name}:${c.ok ? "ok" : "FAILED"}`).join(" ")}`,
+              `files: ${result.changedFiles.join(", ") || "none"}`,
+              ...(result.problems || []).map((p) => `problem: ${p}`),
+            ].join("\n"),
+            durationMs: result.durationMs,
+          });
+        },
+      });
+
+      // The delivered tree is the last GREEN one — never whatever a failed stage left behind.
+      for (const path of Object.keys(tree)) if (!(path in stageResult.tree)) delete tree[path];
+      Object.assign(tree, stageResult.tree);
+      stageReport = stageResult;
+      job.stages = stageResult.stages;
+      serverLog(job, `staged build: ${stagesSummary(stageResult.stages)}`);
+      initial = { telemetry: null, finalText: finalTextParts.filter(Boolean).join("\n\n") };
+    } else {
+      initial = await runAgent({
+        provider, systemPrompt, tools, toolImpls, tree, prompt: enginePrompt, log, onUsage,
+        contextSelection: scope.contextSelection,
+        entryFile: scope.entryFile || "__no_entry__", // no confident match -> manifest-only seeding
+      });
+      combinedUsage.add(initial.telemetry);
+    }
     let finalText = initial.finalText;
     if (job.cancelled) throw new CancelledError();
     job.diag?.step({

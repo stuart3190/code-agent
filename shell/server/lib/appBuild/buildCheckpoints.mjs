@@ -113,6 +113,9 @@ export function createCheckpointStore({ max = DEFAULT_MAX_CHECKPOINTS, persist =
       tree, buildId = null, jobId = null, attempt = 1, status = null,
       compileOk = null, previewOk = null, verificationPassed = null,
       diagRef = null, usageTotals = null, label = null,
+      // PR5: which generation stage produced this, and what that stage touched. A checkpoint that
+      // cannot say which stage it is cannot be the thing a lost stage falls back to.
+      stage = null, changedFiles = null,
     } = {}) {
       seq += 1;
       // Scrubbed before it is stored anywhere — in memory or durably. A checkpoint is a
@@ -132,6 +135,8 @@ export function createCheckpointStore({ max = DEFAULT_MAX_CHECKPOINTS, persist =
         diagRef,
         usageTotals: usageTotals ? { ...usageTotals } : null,
         label,
+        stage,
+        changedFiles: changedFiles ? [...changedFiles] : null,
         createdAtSeq: seq,
       };
       entries.push(entry);
@@ -180,6 +185,7 @@ export function checkpointWriter({ client, owner, projectId, buildId }) {
       mark: entry.mark, compile_ok: entry.compileOk, preview_ok: entry.previewOk,
       verification_passed: entry.verificationPassed, status: entry.status,
       label: entry.label, file_count: entry.fileCount,
+      stage: entry.stage || null, changed_files: entry.changedFiles || null,
       tree: entry.tree || {}, usage_totals: entry.usageTotals,
       expires_at: expiresAt,
     })).then(({ error } = {}) => {
