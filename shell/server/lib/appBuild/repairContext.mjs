@@ -125,6 +125,7 @@ export function buildRepairBrief({
   reasons = [],
   strategy = null,
   patchVerdict = null,
+  contract = null,
 } = {}) {
   const headline = headlineError(output);
   const unchanged = !!fingerprint && !!previousFingerprint && fingerprint === previousFingerprint;
@@ -209,6 +210,22 @@ export function buildRepairBrief({
   if (reasons.length) {
     lines.push("CHECKS THAT FAILED:");
     for (const reason of reasons) lines.push(`- ${String(reason).replace(/\s+/g, " ").slice(0, 300)}`);
+    lines.push("");
+  }
+
+  // What the app is supposed to DO, so a repair cannot fix the compiler by deleting the feature.
+  // Truncated to the primary journey and the entities: a repair needs the shape of the agreement,
+  // not the whole document, and the full contract would crowd out the error itself.
+  if (contract) {
+    const primary = (contract.journeys || []).find((j) => j.priority === "primary");
+    lines.push("WHAT THIS APP MUST STILL DO after your fix:");
+    if (primary) {
+      lines.push(`  ${primary.title}: ${(primary.steps || []).map((s) => s.expect).filter(Boolean).join("; ")}`);
+    }
+    for (const entity of (contract.entities || []).slice(0, 6)) {
+      lines.push(`  - ${entity.name} is persisted through db.entity(), not component state`);
+    }
+    lines.push("Do not remove a feature to make the build pass.");
     lines.push("");
   }
 

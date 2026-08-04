@@ -128,6 +128,7 @@ function RunDetail({ runId, onBack }) {
                 <pre className="mg-mono" style={{ whiteSpace: "pre-wrap", margin: 0, padding: "8px 10px" }}>{run.plan}</pre>
               </>
             )}
+            {run.contract && <ContractSummary contract={run.contract} />}
             <div className="ct-actions">
               <a className="ct-btn-quiet" style={{ textDecoration: "none", border: "1px solid var(--line)" }}
                 href={`/api/v1/diagnostics/${run.id}/download`} download>Download diagnostics</a>
@@ -193,6 +194,89 @@ function RunDetail({ runId, onBack }) {
 
 // Context Inspector: exactly what each AI request carried — trigger, token classes,
 // task budget, and every seeded file with the reason it was included.
+/**
+ * The implementation contract, as what it is: the list of things this build was judged against.
+ *
+ * Shown as outcomes rather than as JSON, because the point of the contract is that a person can
+ * read "the booking is still shown after the reload" and know whether the build honoured it. The
+ * raw object is still in the downloadable diagnostics for anyone who wants it.
+ */
+function ContractSummary({ contract }) {
+  const [open, setOpen] = useState(false);
+  const journeys = contract.journeys || [];
+  const primary = journeys.find((j) => j.priority === "primary") || journeys[0];
+
+  return (
+    <>
+      <div className="mg-label">
+        What this build was judged against
+        <button className="ct-btn-quiet" style={{ marginLeft: 8, fontSize: 12 }}
+          aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          {open ? "Show less" : "Show all"}
+        </button>
+      </div>
+      <div style={{ fontSize: 14, display: "grid", gap: 10 }}>
+        {primary && (
+          <div>
+            <strong>Primary journey — {primary.title}</strong>
+            <ol style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+              {(primary.steps || []).map((step, i) => (
+                <li key={i} style={{ marginBottom: 2 }}>
+                  {step.action} → <span style={{ opacity: 0.85 }}>{step.expect}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {open && (
+          <>
+            {journeys.filter((j) => j !== primary).map((journey) => (
+              <div key={journey.id}>
+                <strong>{journey.title}</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                  {(journey.steps || []).map((step, i) => <li key={i}>{step.expect}</li>)}
+                </ul>
+              </div>
+            ))}
+            {!!(contract.entities || []).length && (
+              <div>
+                <strong>Persisted data</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                  {contract.entities.map((entity) => (
+                    <li key={entity.name}>
+                      {entity.name}{entity.owned ? " (per signed-in user)" : ""} —{" "}
+                      {(entity.fields || []).map((f) => f.name).join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!(contract.acceptance || []).length && (
+              <div>
+                <strong>Acceptance tests</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                  {contract.acceptance.map((test) => <li key={test.id}>{test.statement}</li>)}
+                </ul>
+              </div>
+            )}
+            {/* Deferred work is stated so an absent feature reads as a decision rather than a gap. */}
+            {!!(contract.deferred || []).length && (
+              <div>
+                <strong>Deliberately not built</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                  {contract.deferred.map((item, i) => (
+                    <li key={i}>{item.item}{item.reason ? ` — ${item.reason}` : ""}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 function ContextInspector({ runId }) {
   const [open, setOpen] = useState(false);
   const [requests, setRequests] = useState(null);

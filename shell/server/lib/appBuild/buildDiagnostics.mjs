@@ -186,6 +186,13 @@ export async function createDiagSession({ owner, projectId = null, conversationI
   };
 
   session.setPlan = (plan) => write(() => db.from("diag_runs").update({ plan: String(plan || "").slice(0, 100_000) }).eq("id", session.id));
+
+  // The contract is kept on the session as well as written through, because the repair path and
+  // the journey verifier both read it back within the same build rather than re-querying.
+  session.setContract = (contract) => {
+    session.contract = contract || null;
+    write(() => db.from("diag_runs").update({ contract: contract || null }).eq("id", session.id));
+  };
   session.setByok = (value) => { session.byok = Boolean(value); };
   session.setModel = (m) => { if (m && !model) { model = m; write(() => db.from("diag_runs").update({ model: m }).eq("id", session.id)); } };
 
@@ -264,7 +271,8 @@ export async function createDiagSession({ owner, projectId = null, conversationI
 export function nullDiagSession() {
   const noop = () => {};
   return {
-    id: null, step: noop, repairDispatched: noop, setPlan: noop, setModel: noop, finish: noop,
+    id: null, step: noop, repairDispatched: noop, setPlan: noop, setContract: noop,
+    setModel: noop, finish: noop, contract: null,
     failureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     rawFailureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     recorderForJob: () => ({ sessionId: null, setModel: noop, setByok: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),

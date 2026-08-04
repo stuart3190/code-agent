@@ -33,6 +33,8 @@ import { BUILD_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, systemPromptForEdit } from "..
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { buildTree, ensureDeps, depsNodeModules } from "../../../harness/workspace.mjs";
 import { preflightImports, preflightSummary } from "./appBuild/importPreflight.mjs";
+import { generateContract } from "./appBuild/contractAgent.mjs";
+import { contractBrief, contractSummary } from "../../shared/implementationContract.mjs";
 // Phase 19 re-point: the credit ledger and legacy BYOK/welcome-grant seams are replaced by
 // Thrallo budget accounting and the Thrallo AI-connection store. The affordability logic
 // below is unchanged — it now runs against remaining monthly managed-token budget.
@@ -465,7 +467,8 @@ function measureRound({ baseline, tree, build, usage, credits, model, previewUrl
 }
 
 async function runJob(job) {
-  const { prompt, tree: inputTree, plan, knowledge, style, designProfile: inputDesignProfile, redesign } = job.input;
+  const { prompt, tree: inputTree, plan, knowledge, style, designProfile: inputDesignProfile, redesign,
+    contract: inputContract } = job.input;
   const projectId = job.projectId;
   const mode = job.mode;
   const owner = job.owner;
@@ -594,6 +597,45 @@ async function runJob(job) {
       photography = await preparePhotography(designProfile, log);
     }
 
+    // ── IMPLEMENTATION CONTRACT (PR4) ────────────────────────────────────────────────────────
+    //
+    // What "built" means for this request, as observable outcomes. `diag_runs.plan` was null on
+    // both failed production runs, and the plan the planner did produce was prose — so nothing
+    // downstream could ask "did the booking actually persist?", because nothing had written down
+    // that it must. The contract is what the Builder is told, what a repair is judged against, and
+    // what the journey verifier drives.
+    //
+    // Only for fresh builds: an iterate has a contract already, carried on the run it belongs to.
+    let contract = inputContract || null;
+    if (mode === "build" && !contract) {
+      const contractStarted = Date.now();
+      try {
+        const result = await generateContract({
+          provider: buildProvider("generate"), prompt, knowledge, log, onUsage,
+        });
+        contract = result.contract;
+        combinedUsage.add(result.usage);
+        job.diag?.step({
+          agent: "Planner", kind: "contract", label: "Implementation contract",
+          prompt, status: contract ? "ok" : "failed",
+          output: contract
+            ? `${contractSummary(contract)}\n\n${JSON.stringify(contract, null, 2)}`
+            : `No usable contract after ${result.attempts} attempts:\n${result.problems.join("\n")}`,
+          usage: result.usage, model: buildProvider("generate").model,
+          durationMs: Date.now() - contractStarted,
+        });
+        if (contract) {
+          job.diag?.setContract(contract);
+          serverLog(job, `contract: ${contractSummary(contract)}`);
+        }
+      } catch (error) {
+        // A contract is leverage, not a prerequisite. Losing it costs verification; blocking the
+        // build on it would cost the customer their app.
+        serverLog(job, `contract: unavailable (${error.message})`);
+      }
+    }
+    job.contract = contract;
+
     // Iterate/repair jobs dispatched server-side (relay repairs, verification repairs,
     // repair_app) carry no client tree — hydrate the stored project tree. Building an
     // "edit" from an empty tree produced ENOENT repair rounds (diagnostics 17e00fd2).
@@ -688,6 +730,10 @@ async function runJob(job) {
     let enginePrompt = withKnowledge(plan
       ? `${prompt}\n\nAn approved implementation plan for this app follows. Build according to it:\n\n${plan}`
       : prompt);
+    // The contract goes LAST, after the request and any approved plan, because it is the thing the
+    // result is actually measured against — the prose above says what to build, this says what
+    // will be checked. An agent that reads only the tail still reads the checks.
+    if (contract) enginePrompt = `${enginePrompt}\n\n${contractBrief(contract)}`;
     if (redesign === true) {
       enginePrompt = `This is an explicit full-product frontend redesign. Preserve every working feature, route, data flow, form, and important piece of content while comprehensively replacing the visual system and composition. Read the shared shell and EVERY reachable screen component before editing. Apply one premium design language to the public page, dashboard, navigation destinations, forms, tables, calendars, modals, empty states and mobile menu. Keep an obvious route back to the public site from the app. At 360px, large mockups and floating panels must return to normal document flow and nothing may collide, clip or overlap unintentionally. Do not stop after making the landing page attractive.\n\n${enginePrompt}`;
     }
