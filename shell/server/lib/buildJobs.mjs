@@ -758,6 +758,8 @@ async function runJob(job) {
       setPhase(job, "building");
       const stageResult = await runStagedBuild({
         contract, tree, request: prompt,
+        // The design audit + polish turn below already does the visual pass.
+        includePolish: !designProfile,
         log: (line) => serverLog(job, line),
         cancelled: () => job.cancelled,
         runStage: async (stage, { tree: stageTree, prompt: stagePromptText, mode: stageMode, attempt }) => {
@@ -833,7 +835,10 @@ async function runJob(job) {
     }
     let finalText = initial.finalText;
     if (job.cancelled) throw new CancelledError();
-    job.diag?.step({
+    // A staged build already recorded a step per stage, with its own prompt, output and duration.
+    // Recording one more "Initial implementation" on top of them double-counts the work and reads,
+    // in Diagnostics, as though the whole project had been written twice.
+    if (!staged) job.diag?.step({
       agent: "Builder", kind: "agent", label: mode === "iterate" ? "Code changes" : "Initial implementation",
       prompt: enginePrompt, output: finalText,
       usage: initial.telemetry, model: provider.model, durationMs: Date.now() - builderStarted,

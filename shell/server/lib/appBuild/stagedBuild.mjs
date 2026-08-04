@@ -41,8 +41,9 @@ export async function runStagedBuild({
   checkpoint = null,
   log = () => {},
   cancelled = () => false,
+  includePolish = true,
 }) {
-  const plan = planStages(contract);
+  const plan = planStages(contract, { includePolish });
   log(`staged build: ${plan.length} stages — ${plan.map((s) => s.id).join(" → ")}`);
 
   const results = [];

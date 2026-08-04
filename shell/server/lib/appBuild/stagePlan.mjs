@@ -35,8 +35,11 @@ const DEFINITIONS = {
     instruction: [
       "Build ONLY the data layer: a module per entity that reads and writes through",
       "db.entity(\"<type>\") from ./lib/backend, plus the auth flow if the contract requires one.",
-      "No component may hold records in useState as its source of truth — state may cache what the",
-      "backend returned, but the backend is what a reload reads from.",
+      "The backend SDK is the ONLY store. Do not use localStorage, sessionStorage, IndexedDB, a",
+      "module-level array or a React context as the place records live. A production run built the",
+      "entire reservation layer on localStorage: it survived a reload on that one browser, looked",
+      "completely working, and lost every booking the moment anyone opened it anywhere else.",
+      "State may cache what the backend returned; the backend is what a reload reads from.",
       "Export the functions the screens will call. Wire nothing into the UI yet beyond what is",
       "needed to prove the module loads.",
     ].join(" "),
@@ -83,9 +86,15 @@ const DEFINITIONS = {
  * are entities) and skipped when they are not — a landing page has no data stage, and spending a
  * model call to be told so is waste.
  */
-export function planStages(contract, { skipEmpty = true } = {}) {
+export function planStages(contract, { skipEmpty = true, includePolish = true } = {}) {
   const stages = [];
   for (const id of STAGES) {
+    // The visual pass the pipeline already runs — design audit, then one focused polish turn — does
+    // this stage's job and, in the first staged production run, caught something the polish stage
+    // had missed (an invented image host). Running both is a model call spent twice on the same
+    // work, so the caller drops this one when a design profile is in play.
+    if (id === "polish" && !includePolish) continue;
+
     const definition = DEFINITIONS[id];
     const journeys = journeysForStage(contract, id);
     const entities = id === "data" ? (contract?.entities || []) : [];

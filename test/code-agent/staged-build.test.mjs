@@ -90,7 +90,8 @@ test("each stage prompt carries only its own slice of the contract", () => {
   assert.match(data, /booking — rows belong to the signed-in user/);
   assert.match(data, /slotId:string \(required\)/);
   assert.match(data, /db\.entity\('booking'\)\.create/);
-  assert.match(data, /No component may hold records in useState as its source of truth/);
+  assert.match(data, /The backend SDK is the ONLY store/);
+  assert.match(data, /State may cache what the backend returned/);
 
   const primary = stagePrompt(byId.primary_journey, CONTRACT, { request });
   assert.match(primary, /JOURNEY — A visitor books a slot \(PRIMARY\)/);
@@ -268,4 +269,26 @@ test("every stage definition instructs something materially different", () => {
   assert.equal(new Set(instructions).size, instructions.length);
   assert.match(STAGE_DEFINITIONS.polish.instruction, /Change no behaviour, remove no feature/);
   assert.match(STAGE_DEFINITIONS.data.instruction, /db\.entity/);
+});
+
+test("the polish stage is dropped when the design pass already covers it", () => {
+  // Found in the first staged production run: the polish stage and the existing design audit +
+  // polish turn did the same work, and the design audit caught something the polish stage had
+  // missed (an invented image host). Running both is a model call spent twice.
+  const withPolish = planStages(CONTRACT, { includePolish: true });
+  const without = planStages(CONTRACT, { includePolish: false });
+  assert.ok(withPolish.some((s) => s.id === "polish"));
+  assert.ok(!without.some((s) => s.id === "polish"));
+  assert.equal(without.length, withPolish.length - 1, "and nothing else changes");
+});
+
+test("the data stage forbids every fake persistence store, not just useState", () => {
+  // A production run built the whole reservation layer on localStorage. It survived a reload on
+  // that browser, looked completely working, and lost every booking anywhere else.
+  const data = planStages(CONTRACT).find((s) => s.id === "data");
+  const prompt = stagePrompt(data, CONTRACT, { request: "x" });
+  for (const store of ["localStorage", "sessionStorage", "IndexedDB", "module-level array", "React context"]) {
+    assert.ok(prompt.includes(store), `the data stage must rule out ${store}`);
+  }
+  assert.match(prompt, /The backend SDK is the ONLY store/);
 });

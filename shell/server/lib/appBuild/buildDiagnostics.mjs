@@ -241,6 +241,11 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       sessionId: session.id,
       setModel: (m) => session.setModel(m),
       setByok: (value) => session.setByok(value),
+      // The contract is produced inside the job but belongs to the RUN, so the recorder forwards
+      // it rather than holding its own copy. Missing here, the contract was generated, used to
+      // stage the build, and then never stored — invisible to Diagnostics and to PR6's verifier.
+      setContract: (contract) => session.setContract(contract),
+      get contract() { return session.contract || null; },
       terminal: (line) => { terminalLines.push(`${now()} ${String(line)}`); },
       step: (spec) => session.step({ ...spec, round }),
       files: (baseline, tree, { label = "File changes" } = {}) => {

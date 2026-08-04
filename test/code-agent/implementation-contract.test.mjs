@@ -234,3 +234,14 @@ test("genuinely observable statements are not rejected for using unlisted verbs"
     assert.equal(isVague(slogan), true, `wrongly accepted: "${slogan}"`);
   }
 });
+
+test("the per-job recorder forwards the contract to the run", async () => {
+  // Found in production: the contract was generated, used to stage the build, and then never
+  // stored, because `setContract` existed on the diagnostics SESSION but not on the per-job
+  // recorder that buildJobs is actually handed. It failed silently as
+  // "job.diag?.setContract is not a function" and PR6 would have had nothing to verify against.
+  const { nullDiagSession } = await import("../../shell/server/lib/appBuild/buildDiagnostics.mjs");
+  const nulled = nullDiagSession();
+  assert.equal(typeof nulled.setContract, "function", "the no-op session must implement it too");
+  assert.doesNotThrow(() => nulled.setContract({ journeys: [] }));
+});
