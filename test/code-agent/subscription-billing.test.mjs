@@ -25,13 +25,31 @@ function clearStripeEnv() {
 }
 
 function fakeStripe(event, subscription) {
-  return {
+  const stripe = {
     webhooks: { constructEvent: () => event },
     // No live subscription by default, so plan selection takes the first-time Checkout path.
     subscriptions: { retrieve: async () => subscription, list: async () => ({ data: [] }) },
-    customers: { create: async () => ({ id: "cus_new" }) },
+    // Models the customer surface the code actually uses. A fake that only implemented `create`
+    // let a stale email survive unnoticed: the real code returns an existing customer, and the
+    // whole point of the reconciliation is what it does to THAT one.
+    customers: {
+      store: new Map(),
+      create: async (params) => {
+        const customer = { id: "cus_new", email: params?.email ?? null, metadata: params?.metadata || {} };
+        stripe.customers.store.set(customer.id, customer);
+        return customer;
+      },
+      retrieve: async (id) => stripe.customers.store.get(id) || { id, email: null, deleted: false },
+      update: async (id, params) => {
+        const current = stripe.customers.store.get(id) || { id };
+        const next = { ...current, ...params };
+        stripe.customers.store.set(id, next);
+        return next;
+      },
+    },
     checkout: { sessions: { create: async (params) => ({ url: `https://checkout/${params.customer}` }) } },
   };
+  return stripe;
 }
 
 test("paid checkout is refused while pricing is not live", async () => {

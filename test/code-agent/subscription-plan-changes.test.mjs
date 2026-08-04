@@ -64,11 +64,25 @@ function fakeStripe({ subs = [] } = {}) {
     calls,
     subs,
     schedules: [],
+    // Reads and writes are modelled separately, because the distinction is the point: reusing an
+    // existing customer must involve no WRITE, but it does involve a read to reconcile the email
+    // against the account. A fake with only `create` made any read look like a creation.
     customers: {
+      records: new Map(),
       create: async (params, opts = {}) => once(opts.idempotencyKey, () => {
         calls.push("customers.create");
-        return { id: "cus_1", metadata: params.metadata };
+        const customer = { id: "cus_1", email: params.email ?? null, metadata: params.metadata };
+        api.customers.records.set(customer.id, customer);
+        return customer;
       }),
+      retrieve: async (id) => api.customers.records.get(id)
+        || { id, email: null, deleted: false, metadata: {} },
+      update: async (id, params) => {
+        calls.push("customers.update");
+        const next = { ...(api.customers.records.get(id) || { id }), ...params };
+        api.customers.records.set(id, next);
+        return next;
+      },
     },
     subscriptions: {
       list: async () => ({ data: api.subs }),

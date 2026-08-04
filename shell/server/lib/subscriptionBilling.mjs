@@ -102,12 +102,68 @@ function withOwnerLock(owner, fn) {
   return next;
 }
 
+/**
+ * The email Stripe should show for this owner: the one they are signed in with.
+ *
+ * Read from auth at the moment of checkout rather than stored anywhere, so it cannot go stale. If
+ * it cannot be read, the customer is created without one and Stripe asks — which is correct, and
+ * far better than prefilling a guess the customer then has to notice and correct.
+ */
+async function accountEmail(owner) {
+  try {
+    const { serviceClient } = await import("./supabase.mjs");
+    const { data } = await serviceClient().auth.admin.getUserById(owner);
+    const email = data?.user?.email;
+    return typeof email === "string" && email.includes("@") ? email : null;
+  } catch (error) {
+    // A shell with no Supabase configured is a dev or test shell, not a fault — say nothing.
+    if (!/Missing required env var SUPABASE/.test(error?.message || "")) {
+      console.error(`[thrallo-billing] could not read the account email: ${error?.message}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * The Stripe customer for this owner, with an email that matches the account.
+ *
+ * Two things were wrong here. The customer was created with metadata and NO email, so Checkout had
+ * nothing to prefill and no way to reach the buyer; and an existing customer was returned without
+ * ever being looked at, so whatever email it happened to carry — set by hand in the dashboard, or
+ * inherited from the other product that shares this Stripe account — was shown to the customer
+ * forever. A live session was observed prefilling stuart@thrallo.com for an account signed in as
+ * stuart3190@gmail.com.
+ *
+ * So: create WITH the account email, and reconcile an existing customer whose email has drifted.
+ * A customer deleted in Stripe is replaced rather than reused, because a deleted customer cannot
+ * be charged and returning its id would fail checkout with something unhelpful.
+ */
 async function ensureCustomer(client, store, owner, subscription) {
-  if (subscription.stripe_customer_id) return subscription.stripe_customer_id;
+  const email = await accountEmail(owner);
+
+  if (subscription.stripe_customer_id) {
+    try {
+      const existing = await client.customers.retrieve(subscription.stripe_customer_id);
+      if (!existing.deleted) {
+        // Reconcile. The account's email is the authority; Stripe's copy is a cache of it.
+        if (email && existing.email !== email) {
+          await client.customers.update(existing.id, { email });
+          console.log(`[thrallo-billing] customer ${existing.id}: email refreshed from the account`);
+        }
+        return existing.id;
+      }
+      console.error(`[thrallo-billing] customer ${subscription.stripe_customer_id} was deleted in Stripe; creating a new one`);
+    } catch (error) {
+      console.error(`[thrallo-billing] customer ${subscription.stripe_customer_id} unreadable (${error?.message}); creating a new one`);
+    }
+  }
+
   const customer = await client.customers.create(
-    { metadata: { thrallo_owner: owner } },
+    { ...(email ? { email } : {}), metadata: { thrallo_owner: owner } },
     // Two concurrent first-time checkouts must not create two Stripe customers for one owner.
-    { idempotencyKey: `thrallo:customer:${owner}` },
+    // Keyed on the email too: an idempotency key lasts 24 hours, and without the email in it a
+    // corrected address inside that window would silently return the customer with the old one.
+    { idempotencyKey: `thrallo:customer:${owner}:${email || "noemail"}` },
   );
   await store.upsertSubscription(owner, { stripe_customer_id: customer.id });
   return customer.id;
