@@ -254,22 +254,52 @@ test("BYOK still cannot loop forever: the structural limits are not spend limits
 
 // ── 6. fingerprints and no-progress detection ───────────────────────────────────────────
 
-test("identical failures still stop the loop", () => {
+// PR3 changed what an identical failure MEANS. It used to end the run — and in production it did,
+// at attempt 2 of 3, on four builds whose fingerprints were all ac60a9b42a79f171. Detecting no
+// progress was always right; surrendering to it was not. It now escalates to a different strategy,
+// and only the exhaustion of every strategy stops the loop.
+test("an identical failure escalates the strategy instead of ending the run", () => {
   const first = planEndAction(FAILED_CHECKS, { attempt: 1 });
   assert.equal(first.kind, "repair");
-  const repeat = planEndAction(FAILED_CHECKS, { attempt: 2, previousFingerprints: [first.fingerprint] });
-  assert.equal(repeat.kind, "blocked");
-  assert.match(repeat.message, /came back unchanged/);
+  assert.equal(first.strategy, "targeted_fix");
+
+  const repeat = planEndAction(FAILED_CHECKS, {
+    attempt: 2, previousFingerprints: [first.fingerprint], strategyId: first.strategy,
+  });
+  assert.equal(repeat.kind, "repair", "the same failure twice is a reason to change approach, not to stop");
+  assert.equal(repeat.strategy, "dependency_inspection");
+  assert.match(repeat.announcement, /changing approach/);
 });
 
-test("a repair that changes nothing meaningful stops the loop", () => {
+test("a repair that changes nothing meaningful escalates too", () => {
   const before = roundSignals({ compileOk: false, failures: ["a", "b"], filesChanged: 1, diffChars: 500 });
   const after = roundSignals({ compileOk: false, failures: ["a", "b"], filesChanged: 0, diffChars: 0 });
   const verdict = evaluateProgress(before, after);
   assert.equal(verdict.improved, false);
   assert.match(verdict.reason, /no meaningful code change/);
-  const action = planEndAction(FAILED_CHECKS, { attempt: 2, progress: verdict });
-  assert.equal(action.kind, "blocked");
+
+  const action = planEndAction(FAILED_CHECKS, { attempt: 2, progress: verdict, strategyId: "targeted_fix" });
+  assert.equal(action.kind, "repair");
+  assert.equal(action.strategy, "dependency_inspection");
+});
+
+test("the loop stops only when every strategy has been tried", () => {
+  // The fingerprint must genuinely repeat, or this is a first attempt rather than an escalation.
+  const fingerprint = planEndAction(FAILED_CHECKS, { attempt: 1 }).fingerprint;
+  const at = (strategyId) => planEndAction(FAILED_CHECKS, {
+    attempt: 2, previousFingerprints: [fingerprint], strategyId,
+  });
+
+  assert.equal(at("targeted_fix").strategy, "dependency_inspection");
+  assert.equal(at("dependency_inspection").strategy, "regenerate_module");
+  assert.equal(at("regenerate_module").strategy, "revert_and_rebuild");
+  // Tier 4 restores the last green checkpoint before rebuilding, so the floor is a working project.
+  assert.equal(at("regenerate_module").restoreCheckpoint, true);
+
+  const exhausted = at("revert_and_rebuild");
+  assert.equal(exhausted.kind, "blocked");
+  assert.equal(exhausted.exhausted, true);
+  assert.match(exhausted.message, /four materially different approaches/);
 });
 
 test("measurable improvement lets the loop continue", () => {

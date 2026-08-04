@@ -22,6 +22,7 @@ import {
 import { dailyByokSpend, dailyVerdict, dailyWarningMessage } from "./byokSpend.mjs";
 import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
 import { buildRepairBrief, headlineError } from "./repairContext.mjs";
+import { STRATEGIES, FIRST_STRATEGY, strategy, escalate, verifyPatch } from "./patchVerification.mjs";
 import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
 import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
 
@@ -128,6 +129,7 @@ export function planEndAction(data, {
   alternatives = [],
   autoFallback = false,
   diagnostics = null,
+  strategyId = FIRST_STRATEGY,
 } = {}) {
   const endState = classifyEndState(data);
 
@@ -211,33 +213,45 @@ export function planEndAction(data, {
     };
   }
 
-  // 8. Repairable failure. The two fingerprint guards and the no-progress guard all stop the
-  //    loop before it spends another job learning nothing.
-  if (previousFingerprints.includes(fingerprint)) {
+  // 8. Repairable failure.
+  //
+  //    This used to block the moment the fingerprint repeated — at attempt 2 of 3, before the
+  //    budget was spent — because an unchanged failure was treated as terminal. It is not: it is
+  //    the strongest signal available that the STRATEGY is wrong, and the answer to a wrong
+  //    strategy is a different one. The run now climbs the escalation ladder, and only stops when
+  //    the ladder is exhausted or the attempt budget genuinely runs out.
+  const repeated = previousFingerprints.includes(fingerprint);
+  const stalled = repeated || progress?.improved === false;
+  const escalated = stalled ? escalate(strategyId) : strategyId;
+
+  if (stalled && !escalated) {
+    // Every materially different approach has now been tried on this same failure.
     return {
-      kind: "blocked", endState, fingerprint,
-      message: `The same failure came back unchanged after an automatic repair — repeating it would spend your budget without progress:\n${reasons.map((r) => `- ${r}`).join("\n")}\nYour current work is saved. I need a decision from you on how to proceed.`,
-    };
-  }
-  if (progress && progress.improved === false) {
-    return {
-      kind: "blocked", endState, fingerprint, progress,
-      message: `${attemptSummary(attempt)} The last repair didn't move the build forward, so I've stopped rather than keep spending:\n${reasons.map((r) => `- ${r}`).join("\n")}\nYour current work is saved. I need a decision from you on how to proceed.`,
+      kind: "blocked", endState, fingerprint, progress, strategy: strategyId, exhausted: true,
+      message: `I tried four materially different approaches to this and it still fails the same way:\n${reasons.map((r) => `- ${r}`).join("\n")}\nRepeating it would spend your budget without progress. Your current work is saved — I need a decision from you on how to proceed.`,
     };
   }
 
+  const plan = strategy(escalated);
   const improved = progress?.improved === true && attempt > 1;
   return {
     kind: "repair", endState, fingerprint,
+    strategy: escalated,
+    // Tier 4 is a rollback: the relay restores the last green checkpoint before dispatching, so
+    // the customer's floor is a working project rather than whatever the failed repairs left.
+    restoreCheckpoint: escalated === "revert_and_rebuild",
     brief: repairBriefFor(reasons, diagnostics && {
       ...diagnostics,
       fingerprint,
       previousFingerprint: previousFingerprints[previousFingerprints.length - 1] || null,
       attempt, maxAttempts,
+      strategy: plan,
     }),
-    announcement: improved
-      ? `The last repair improved the build. I'm fixing the remaining issue now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`
-      : `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`,
+    announcement: stalled
+      ? `That didn't fix it — the build fails in exactly the same way. I'm changing approach: ${plan.label}.`
+      : improved
+        ? `The last repair improved the build. I'm fixing the remaining issue now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`
+        : `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`,
   };
 }
 
@@ -477,7 +491,7 @@ function signalsFromJob(job, data, { verdict = null, briefFingerprint = null } =
 // Assembled at the moment a round ends, from the job that just ran: the command, its complete
 // output, the tree it built, the manifest it built against, and what the round that just finished
 // actually touched. `buildRepairBrief` redacts before any of it reaches a model.
-function diagnosticsFor(job, data, lifecycle, signals) {
+function diagnosticsFor(job, data, lifecycle, signals, patchVerdict = null) {
   const tree = data?.result?.tree || job?.result?.tree || null;
   const output = job?.buildStderr || (data?.error ? String(data.error) : "");
   if (!output) return null;
@@ -490,6 +504,7 @@ function diagnosticsFor(job, data, lifecycle, signals) {
     tree,
     manifest: tree?.["package.json"] || null,
     worktree: job?.workdir || null,
+    patchVerdict,
     previousAttempts: previousRound?.changedPaths?.length
       ? [`round ${lifecycle.rounds.length - 1} edited ${previousRound.changedPaths.join(", ")} and the build still failed`]
       : [],
@@ -646,6 +661,30 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         const signals = signalsFromJob(job, data);
         const previous = lifecycle.rounds[lifecycle.rounds.length - 1] || null;
         const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
+
+        // Did the patch this round applied do the right thing? Checked BEFORE the plan, so the
+        // planner can act on the verdict and the next brief can quote it. A patch that never
+        // engaged with the error costs no attempt — otherwise escalating just burns budget faster.
+        const patchVerdict = attempt > 1 && lifecycle.treeBefore
+          ? verifyPatch({
+            before: lifecycle.treeBefore,
+            after: data.result?.tree || lifecycle.treeBefore,
+            output: job?.buildStderr || String(data?.error || ""),
+            fingerprint: signals.failureFingerprint,
+            previousFingerprint: previous?.failureFingerprint || null,
+            resolved: data.result?.buildOk === true,
+          })
+          : null;
+        if (patchVerdict) {
+          console.log(`[app-build ${lifecycle.diag.id.slice(0, 8)}] patch ${patchVerdict.verdict}: ${patchVerdict.summary}`);
+          lifecycle.diag.step({
+            agent: "Lead Agent", kind: "verification", label: `Patch verification (round ${attempt})`,
+            status: patchVerdict.verdict === "effective" ? "ok" : "failed",
+            output: JSON.stringify(patchVerdict, null, 2), round: attempt,
+          });
+        }
+        // The tree the NEXT round will be judged against.
+        if (data.result?.tree) lifecycle.treeBefore = data.result.tree;
         lifecycle.rounds.push(signals);
 
         const check = await dispatchCheck(lifecycle);
@@ -656,8 +695,12 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
           progress,
           alternatives: alternativesFor(lifecycle),
           autoFallback: lifecycle.allowFallback,
-          diagnostics: diagnosticsFor(job, data, lifecycle, signals),
+          diagnostics: diagnosticsFor(job, data, lifecycle, signals, patchVerdict),
+          strategyId: lifecycle.strategy || FIRST_STRATEGY,
         });
+        // Which rung the NEXT round climbs to, remembered on the lifecycle so an escalation
+        // survives across dispatches rather than restarting from the bottom every time.
+        if (action.strategy) lifecycle.strategy = action.strategy;
         lifecycle.endState = action.endState;
         await finishSpecialist(action.kind === "verify" || action.kind === "warmup");
 

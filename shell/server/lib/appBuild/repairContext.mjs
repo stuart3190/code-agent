@@ -22,6 +22,24 @@ const MAX_OUTPUT_CHARS = 6_000;
 const MAX_DIFF_CHARS = 2_000;
 const MAX_FILES_LISTED = 60;
 
+// eslint-disable-next-line no-control-regex
+const ANSI = /[[0-9;]*[A-Za-z]/g;
+
+/**
+ * Strip terminal colour codes.
+ *
+ * Vite and rollup colourise their output, so raw stderr is full of escape sequences. Left in, they
+ * corrupt every downstream parse - a path arrives as ESC[31msrc/App.jsx, and a patch verifier
+ * comparing that against a tree path finds no match - and they are noise in the brief besides.
+ * Stripped once, at the entry point everything else goes through.
+ *
+ * Anchored on the ESC character deliberately: a bare /[[0-9;]*[A-Za-z]/ also matches ordinary
+ * code (items[0]d, a CSS [data-state]) and would quietly corrupt source quoted in the brief.
+ */
+export function stripAnsi(text) {
+  return String(text || "").replace(ANSI, "");
+}
+
 /**
  * Redact anything that looks like a credential before it reaches a model.
  *
@@ -31,7 +49,7 @@ const MAX_FILES_LISTED = 60;
  * context, a false negative leaks a live key.
  */
 export function redact(text) {
-  return String(text || "")
+  return stripAnsi(text)
     // key=value and "key": "value" forms for anything that names itself a secret
     .replace(/([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Za-z0-9_]*\s*[:=]\s*)(["']?)([^\s"',}]+)\2/gi,
       (_, prefix, quote) => `${prefix}${quote}<redacted>${quote}`)
@@ -61,7 +79,7 @@ function trimOutput(text, limit = MAX_OUTPUT_CHARS) {
  * mistake that produced "addressing the build quality/lint failure".
  */
 export function headlineError(output) {
-  const text = String(output || "");
+  const text = stripAnsi(output);
   const patterns = [
     // Rollup/Vite: "X" is not exported by "Y", imported by "Z"
     /"[^"]+" is not exported by [^\n]+/,
@@ -105,6 +123,8 @@ export function buildRepairBrief({
   maxAttempts = null,
   previousAttempts = [],
   reasons = [],
+  strategy = null,
+  patchVerdict = null,
 } = {}) {
   const headline = headlineError(output);
   const unchanged = !!fingerprint && !!previousFingerprint && fingerprint === previousFingerprint;
@@ -131,6 +151,21 @@ export function buildRepairBrief({
     lines.push("THE LAST REPAIR DID NOT WORK. The failure signature is byte-for-byte identical to");
     lines.push("before your previous patch. Whatever you changed last time was not the cause.");
     lines.push("Do NOT repeat it or a variation of it. Read the error above and fix THAT.");
+    lines.push("");
+  }
+
+  // What the patch verifier concluded about the last round, in its own words — "you edited a file
+  // the error does not name" is far more actionable than "it still fails".
+  if (patchVerdict?.summary) {
+    lines.push(`VERIFIED ABOUT YOUR LAST PATCH: ${patchVerdict.summary}.`);
+    lines.push("");
+  }
+
+  // The escalation rung. Named explicitly so each round is a materially different approach rather
+  // than the same one restated — which is what four identical fingerprints in production were.
+  if (strategy) {
+    lines.push(`APPROACH FOR THIS ATTEMPT — ${strategy.label}:`);
+    lines.push(strategy.instruction);
     lines.push("");
   }
 

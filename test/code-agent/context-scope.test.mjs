@@ -114,15 +114,23 @@ test("restarting a preview makes zero AI calls (structural guarantee)", async ()
   assert.doesNotMatch(verifier, /modelGateway|createRouted|runAgent\(/, "verification itself is Playwright-local, no AI");
 });
 
-test("identical repair failures stop the loop instead of burning rounds", () => {
+test("identical repair failures change the approach instead of burning rounds", () => {
   const failed = { status: "complete", result: { buildOk: false, qualityWarnings: ["Backend runtime unavailable: app-auth 404"] } };
   const first = planEndAction(failed, { attempt: 1 });
   assert.equal(first.kind, "repair");
   assert.ok(first.fingerprint, "failure fingerprinted");
-  const second = planEndAction(failed, { attempt: 2, previousFingerprints: [first.fingerprint] });
-  assert.equal(second.kind, "blocked", "same failure twice -> stop, even under the round limit");
-  assert.match(second.message, /same failure/i);
-  assert.ok(2 < MAX_AUTO_ROUNDS + 1, "stopped before exhausting rounds");
+
+  // PR3: the same failure twice no longer ends the run. It ends the STRATEGY. Repeating the same
+  // approach was never the goal — but neither was stopping at attempt 2 of 3 with rounds to spare,
+  // which is what production did on four builds with fingerprint ac60a9b42a79f171.
+  const second = planEndAction(failed, {
+    attempt: 2, previousFingerprints: [first.fingerprint], strategyId: first.strategy,
+  });
+  assert.equal(second.kind, "repair");
+  assert.notEqual(second.strategy, first.strategy, "a repeated failure must change the approach");
+  assert.match(second.announcement, /changing approach/);
+  assert.ok(2 < MAX_AUTO_ROUNDS + 1, "and it did so without exhausting the rounds");
+
   // Different failure still repairs — the fingerprint guard is specific, not a blanket stop.
   const other = planEndAction(
     { status: "complete", result: { buildOk: false, qualityWarnings: ["a completely different check failed"] } },
