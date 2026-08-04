@@ -108,8 +108,13 @@ try {
   const repairs = (runs || []).reduce((total, r) => total + Number(r.repair_rounds || 0), 0);
 
   const { data: requests } = await db.from("ai_requests").select("id").eq("owner", owner);
-  const { data: steps } = await db.from("diag_steps")
-    .select("kind,status,label,run_id").in("run_id", (runs || []).map((r) => r.id).concat(["none"]));
+  // No "none" sentinel in the id list: run_id is a uuid column, and a non-uuid placeholder makes
+  // Postgres reject the whole filter — which reported "0 preflight steps, 0 compiles" for a run
+  // whose diagnostics plainly recorded both.
+  const runIds = (runs || []).map((r) => r.id);
+  const { data: steps } = runIds.length
+    ? await db.from("diag_steps").select("kind,status,label,run_id").in("run_id", runIds)
+    : { data: [] };
 
   const preflights = (steps || []).filter((s) => s.kind === "preflight");
   const compiles = (steps || []).filter((s) => s.kind === "compiler");
