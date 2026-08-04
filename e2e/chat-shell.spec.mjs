@@ -5,6 +5,7 @@
 // is covered by test/code-agent/chat-shell.test.mjs either way.
 
 import { expect, test } from "@playwright/test";
+import { openSettingsFromMenu } from "./accountMenu.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -161,8 +162,8 @@ test("settings sheet and command palette stay within the permanent four", async 
   await page.goto("/");
   await expect(page.getByText("What are we building today?")).toBeVisible();
 
-  await page.locator(".ct-avatar").click();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  // The avatar opens the account menu; Settings is an item on it.
+  await openSettingsFromMenu(page);
   await expect(page.locator(".ct-settings")).toContainText("e2e@thrallo.com");
   // Theme lives on Preferences now, not on the one long sheet.
   await page.getByRole("tab", { name: /Preferences/ }).click();
@@ -476,10 +477,17 @@ test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboa
   await page.keyboard.press("Control+k");
   const palInput = page.getByPlaceholder(/Type a command/);
   await expect(palInput).toBeVisible();
+  // Asserted on behaviour, not on a fixed row order: the palette gains and loses commands as the
+  // product grows (History was added, and shifted everything below it), and a test pinned to
+  // "row two is Repositories" fails on a change that is not a defect.
+  const selected = page.locator(".ct-pal-row.sel");
+  const first = await selected.textContent();
   await palInput.press("ArrowDown");
-  await expect(page.locator(".ct-pal-row.sel")).toHaveText(/Settings/);
-  await palInput.press("ArrowDown");
-  await expect(page.locator(".ct-pal-row.sel")).toHaveText(/Repositories/);
+  await expect(selected).not.toHaveText(first, { timeout: 5_000 });
+
+  // Filtering then Enter opens what is actually selected.
+  await palInput.fill("Repositories");
+  await expect(selected).toHaveText(/Repositories/);
   await palInput.press("Enter");
   await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
 });

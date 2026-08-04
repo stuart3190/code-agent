@@ -3,6 +3,7 @@
 // main surfaces. Guards the light-mode regression report of 2026-07-31.
 
 import { test, expect } from "@playwright/test";
+import { openSettingsFromMenu } from "./accountMenu.mjs";
 import { readFile } from "node:fs/promises";
 
 let REF = null;
@@ -73,7 +74,7 @@ test("light is the default; Light/Dark/System round-trip, persist, and stay read
   await assertThemeReadable(page, "light");
 
   // Selector: all three options present; Dark applies and is readable.
-  await page.getByRole("button", { name: "E", exact: true }).click();
+  await openSettingsFromMenu(page);
   const group = page.getByRole("group", { name: "Theme" });
   await expect(group.getByRole("button", { name: "Light" })).toBeVisible();
   await expect(group.getByRole("button", { name: "Dark" })).toBeVisible();
@@ -103,7 +104,7 @@ test("light is the default; Light/Dark/System round-trip, persist, and stay read
   expect(await rootTheme(page), "system persisted across reload").toBe("dark");
 
   // Explicit light persists too.
-  await page.getByRole("button", { name: "E", exact: true }).click();
+  await openSettingsFromMenu(page);
   await group.getByRole("button", { name: "Light" }).click();
   await page.reload();
   await expect(page.locator(".ct-question")).toBeVisible();

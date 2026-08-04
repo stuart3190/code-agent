@@ -6,6 +6,7 @@
 // exercises the real deployed bundle without touching a real account).
 
 import { expect, test } from "@playwright/test";
+import { openSettingsFromMenu } from "./accountMenu.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -51,8 +52,8 @@ async function openAiSettings(page, { connections = [], byokSafety = { global: {
 
   await page.goto("/");
   await expect(page.getByText("What are we building today?")).toBeVisible();
-  await page.getByRole("button", { name: "E", exact: true }).click();
-  await page.getByRole("heading", { name: "Settings" }).waitFor();
+  // The avatar is the account-menu trigger now; Settings is an item on that menu.
+  await openSettingsFromMenu(page);
   await page.getByRole("button", { name: "Manage" }).first().click();
   await expect(page.getByRole("heading", { name: "AI connection" })).toBeVisible();
 }
