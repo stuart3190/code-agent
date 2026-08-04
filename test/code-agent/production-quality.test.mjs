@@ -365,8 +365,12 @@ test("focus returns even on an engine that does not focus a clicked button", asy
       `${file}: falls back to what opened it`);
   }
   const shell = await readCode("../../shell/web/src/chat/ChatShell.jsx");
-  assert.match(shell, /overlayOpener\.current = e\.currentTarget/,
-    "and the shell captures the trigger from the click itself");
+  // The avatar became an account MENU, so the trigger now arrives from the menu rather than from a
+  // click handler on the avatar. The guarantee is unchanged; the source moved. Nothing set
+  // `overlayOpener` for a moment after that refactor, which silently lost focus return for
+  // Settings — hence asserting the wiring, not just the fallback.
+  assert.match(shell, /overlayOpener\.current = from/,
+    "and the shell records what opened the overlay");
   assert.match(shell, /openedBy=\{overlayOpener\}/);
 });
 
@@ -399,7 +403,7 @@ test("a paid customer returning without a session is not shown the marketing pag
   // The return was handled INSIDE the workspace, below `if (!user) return <Landing />`. Someone
   // who completed checkout in another browser — a phone, a second machine, a private window —
   // had just paid real money and was shown a marketing page with the payment unmentioned.
-  const gateAt = shell.indexOf("if (!user) return <Landing");
+  const gateAt = shell.indexOf("if (!user) {");
   const readAt = shell.indexOf("const billingReturn = readBillingReturn()");
   assert.ok(readAt > 0 && readAt < gateAt, "the return must be read ABOVE the auth gate");
   assert.match(shell, /<Landing billingReturn=\{billingReturn\} \/>/,

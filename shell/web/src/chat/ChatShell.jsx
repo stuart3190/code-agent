@@ -666,8 +666,8 @@ function Workspace({ user }) {
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
         <AccountMenu email={user.email} initial={initial} desktop={!!user.desktop}
-          onSettings={() => navigate("/settings/usage")}
-          onHistory={() => navigate("/history")}
+          onSettings={(from) => { overlayOpener.current = from; navigate("/settings/usage"); }}
+          onHistory={(from) => { overlayOpener.current = from; navigate("/history"); }}
           onSignOut={requestSignOut} />
       </header>
 

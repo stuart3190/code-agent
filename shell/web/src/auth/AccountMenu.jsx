@@ -52,7 +52,9 @@ export default function AccountMenu({ email, initial, desktop = false, onSetting
     };
   }, [open]);
 
-  const choose = (run) => () => { setOpen(false); run?.(); };
+  // The trigger goes with the action: an overlay opened from here returns focus to the avatar when
+  // it closes, which it cannot do if it never learns what opened it.
+  const choose = (run) => () => { setOpen(false); run?.(trigger.current); };
 
   return (
     <div className="ct-account">
