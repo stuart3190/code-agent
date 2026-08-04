@@ -21,8 +21,9 @@ import {
   createRateLimiter, parseJson, readBody, staticCacheControl,
 } from "./lib/httpSecurity.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
-import { haveStripeEnv } from "./lib/services.mjs";
-import { interruptLiveJobs, sweepInterrupted, sweepStaleJobs } from "./lib/buildJobs.mjs";
+import {
+  interruptLiveJobs, startStaleJobSweeper, stopStaleJobSweeper, sweepInterrupted, sweepStaleJobs,
+} from "./lib/buildJobs.mjs";
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
 import { handleExport } from "./routes/export.mjs";
@@ -70,6 +71,7 @@ import {
   handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
   handleOpsTelemetry, handlePlanSelect,
 } from "./routes/subscription.mjs";
+import { thralloStripeConfigured, thralloWebhookConfigured } from "./lib/subscriptionBilling.mjs";
 import { handlePublishState, handleProjectUnpublish } from "./routes/publishState.mjs";
 import {
   handleDomainAdd, handleCustomDomainRemove, handleDomainRetry, handleDomainVerify, handleDomainsList,
@@ -294,8 +296,19 @@ const server = http.createServer(async (req, res) => {
     // ── unauthenticated ───────────────────────────────────────────────────────────────────────
     if (p === "/api/health") {
       const deps = await deepHealth();
-      return sendJson(res, deps.ok ? 200 : 503, { ...deps, previewMode: publicConfig().previewMode,
-        stripe: haveStripeEnv(), byok: byokConfigured() });
+      // `stripe` used to read haveStripeEnv(), which checks the LEGACY Buildr101 variables
+      // (STRIPE_SECRET_KEY / STRIPE_PRICE_STARTER). Thrallo reads THRALLO_STRIPE_* by design, so
+      // this endpoint reported `stripe: false` in production while Thrallo's billing was fully
+      // configured and live — the one signal an operator would check to answer "can customers
+      // pay?", answering about a different product. Webhook config is reported separately because
+      // checkout working and webhooks arriving are different failures with different fixes.
+      return sendJson(res, deps.ok ? 200 : 503, {
+        ...deps,
+        previewMode: publicConfig().previewMode,
+        stripe: thralloStripeConfigured(),
+        stripeWebhook: thralloWebhookConfigured(),
+        byok: byokConfigured(),
+      });
     }
     if (p === "/api/config") return sendJson(res, 200, publicConfig());
     if (p === "/api/v1/capabilities" && method === "GET") {
@@ -971,19 +984,36 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[shell] server on http://${HOST || "localhost"}:${PORT}`);
   const cfg = publicConfig();
-  console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · stripe env: ${haveStripeEnv()}`);
-  // Any job rows THIS server left non-terminal are dead (their loop died with the process) —
-  // mark them interrupted so no build ever shows "building" forever. Scoped by server_id.
-  if (!CODE_AGENT_STANDALONE) {
+  console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · thrallo stripe: ${thralloStripeConfigured()} · webhook: ${thralloWebhookConfigured()}`);
+  /**
+   * Any job rows THIS server left non-terminal are dead — their loop died with the process — so
+   * mark them interrupted rather than leaving a build showing "building" forever. Scoped by
+   * server_id, so a second server's live jobs are never touched.
+   *
+   * These ran only when CODE_AGENT_STANDALONE was OFF, and production runs with it ON. Thrallo's
+   * own app_build path calls createJob() and writes build_jobs regardless of that flag, so the one
+   * sweep whose entire purpose is "no build shows building forever" never ran in production: five
+   * jobs were found stuck in queued/running for eleven and thirteen hours, from restarts that
+   * happened days earlier. The flag says whether the legacy Buildr101 surface is mounted; it was
+   * never a statement about whether Thrallo builds exist.
+   */
+  // Every one of these needs the database. Without it there are no job rows to sweep, and calling
+  // them anyway only produces noise — or, before the guard inside startCheckpointSweeper, a
+  // synchronous throw out of this handler that killed the server at boot.
+  if (haveSupabaseEnv()) {
     sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
     sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
     sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
-    // Repair checkpoints that outlived their retention window, plus the last-known-good
-    // restore for lifecycles this server killed mid-build (see recoverInterruptedLifecycles).
-    startCheckpointSweeper();
-    recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
-    if (haveSupabaseEnv()) startActionWorker();
   }
+  // Repair checkpoints that outlived their retention window, plus the last-known-good restore for
+  // lifecycles this server killed mid-build (see recoverInterruptedLifecycles).
+  if (haveSupabaseEnv()) startCheckpointSweeper();
+  // And keep sweeping: a build that wedges while the server stays up was never caught before.
+  if (haveSupabaseEnv()) startStaleJobSweeper();
+  if (haveSupabaseEnv()) recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
+  // The action worker drives integrations for the apps CUSTOMERS build, which is a Buildr101-era
+  // surface Thrallo does not mount — it stays behind the flag, unlike the job sweeps above.
+  if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();
   startCodeAgentWorker();
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
@@ -1020,6 +1050,7 @@ async function shutdown(signal) {
   stopDiagnosticsSweeper();
   stopAutomationSweeper();
   stopLeadAgentRecovery();
+  stopStaleJobSweeper();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {
     await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));

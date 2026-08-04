@@ -186,7 +186,13 @@ test("focus moves into the dashboard and back out again", async () => {
   const dash = await readCode("../../shell/web/src/publish/ProjectDashboard.jsx");
   assert.match(dash, /heading\.current\?\.focus\(\)/,
     "a keyboard user was left tabbing through the page behind the overlay");
-  assert.match(dash, /opener\.current = document\.activeElement/, "the opener is remembered");
+  // Was `opener.current = document.activeElement`. On WebKit that is <body> after a click —
+  // Safari deliberately does not focus a button when it is clicked — so there was nothing to hand
+  // focus back to and the overlay dropped a keyboard user at the top of the document. The element
+  // that triggered the overlay is now preferred when the active element tells us nothing.
+  assert.match(dash, /const active = document\.activeElement;/, "the opener is remembered");
+  assert.match(dash, /openedBy\?\.current/,
+    "with a fallback for engines that do not focus a clicked button");
   assert.match(dash, /returnTo\?\.isConnected/,
     "and focus is only returned if that element still exists");
   assert.match(dash, /ref=\{heading\} tabIndex=\{-1\}/,

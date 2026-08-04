@@ -17,7 +17,7 @@ const OTHER = "owner-2";
 function fakeClient(rows) {
   const calls = [];
   const table = (name) => {
-    const q = { _name: name, _filters: {}, _op: null };
+    const q = { _name: name, _filters: {}, _op: null, _range: null };
     const run = () => {
       const list = (rows[name] || []).filter((r) => Object.entries(q._filters).every(([k, v]) => String(r[k]) === String(v)));
       if (q._op === "delete") {
@@ -25,12 +25,17 @@ function fakeClient(rows) {
         calls.push(`${name}:delete:${list.length}`);
         return { error: rows.__failOn === name ? { message: "boom" } : null };
       }
+      // Ranges really slice. A fake that ignored .range() and returned everything would let a
+      // broken pager pass — and paging exists here precisely because the real client caps an
+      // unbounded select silently.
+      if (q._range) return { data: list.slice(q._range[0], q._range[1] + 1), error: null };
       return { data: list, error: null };
     };
     const chain = {
       select: () => chain, delete: () => { q._op = "delete"; return chain; },
       eq: (k, v) => { q._filters[k] = v; return chain; },
       neq: (k, v) => { q._filters[`neq:${k}`] = v; return chain; },
+      range: (from, to) => { q._range = [from, to]; return chain; },
       limit: () => chain,
       maybeSingle: async () => { const r = run(); return { data: r.data?.[0] ?? null, error: r.error }; },
       then: (resolve) => resolve(run()),

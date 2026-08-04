@@ -53,20 +53,25 @@ function fakeDb({ site = null, domains = [], appUsers = [], runs = [] } = {}) {
     from(table) {
       const f = {};
       let mode = null;
+      let range = null;
       const api = {
         select() { return api; },
         eq(c, v) { f[c] = v; return api; },
         in(c, v) { f[`in_${c}`] = v; return api; },
+        // Ranges really slice, so a pager that asked for one page and stopped would be caught
+        // rather than quietly passing on a fake that always returns everything.
+        range(from, to) { range = [from, to]; return api; },
         delete() { mode = "delete"; return api; },
         update(patch) { mode = "update"; f.patch = patch; return api; },
         maybeSingle: async () => ({ data: table === "published_sites" ? site : null, error: null }),
         then(resolve) {
           if (mode === "delete") deletes.push({ table, filters: { ...f } });
           if (mode === "update") updates.push({ table, filters: { ...f } });
-          const data = mode ? null
+          let data = mode ? null
             : table === "custom_domains" ? domains
               : table === "app_users" ? appUsers
                 : table === "diag_runs" ? runs : [];
+          if (!mode && range && Array.isArray(data)) data = data.slice(range[0], range[1] + 1);
           return Promise.resolve({ data, error: null }).then(resolve);
         },
       };

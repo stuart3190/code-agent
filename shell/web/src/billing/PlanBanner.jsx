@@ -9,11 +9,15 @@ import { formatBillingDate } from "./planState.js";
 
 // Product copy, kept in one place so it can be changed without hunting through markup.
 //
-// NOTE: "faster builds" is not currently backed by anything in the product — every plan runs at
-// MAX_CONCURRENT_BUILDS_PER_USER = 1 with no plan-based priority or queueing. Plans differ in
-// runs, managed tokens and compute hours. Confirm this line before real customers see it.
-const FREE_MESSAGE = "You're currently on the Free plan. Upgrade to Starter or Pro to unlock "
-  + "higher limits, faster builds and more AI usage.";
+// This said "higher limits, faster builds and more AI usage". Builds are NOT faster on a paid
+// plan: every plan runs at MAX_CONCURRENT_BUILDS_PER_USER = 1 with no plan-based priority and no
+// queue jumping. The claim was a sentence a customer could pay for and never receive.
+//
+// What paid plans actually give is what this now says: more of everything metered, and the
+// analytics history and error reporting that Free does not include. All four are real and all four
+// are visible in Settings → Usage, which is where someone checks after upgrading.
+const FREE_MESSAGE = "You're currently on the Free plan. Upgrade to Starter or Pro for more builds, "
+  + "more AI usage, longer analytics history and error reporting.";
 
 // showFreeUpgrade is off on the pricing page: the visitor is already looking at the plans, so an
 // "Upgrade Now" banner there would point at the page it is on. The scheduled-change notice still

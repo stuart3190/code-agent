@@ -35,7 +35,7 @@ const TABS = [
 
 export default function ProjectDashboard({
   site, initialTab = "overview", initialRef = null, onClose, onUpgrade, onSentence,
-  onPublishUpdate, onUnpublish, onTabChange = null,
+  onPublishUpdate, onUnpublish, onTabChange = null, openedBy = null,
 }) {
   const [tab, setTabState] = useState(initialTab);
   // The selected build travels with the tab, so a link to one deployment's logs reopens that
@@ -74,7 +74,12 @@ export default function ProjectDashboard({
    * opened before offering its controls.
    */
   useEffect(() => {
-    opener.current = document.activeElement;
+    // document.activeElement is <body> on WebKit after a click: Safari deliberately does not focus
+    // buttons when they are clicked, so the overlay had nothing to hand focus back to and a
+    // keyboard user landed at the top of the document. `openedBy` is the element that triggered
+    // this, captured by the caller from the click itself, and is preferred when it exists.
+    const active = document.activeElement;
+    opener.current = active && active !== document.body ? active : (openedBy?.current || null);
     heading.current?.focus();
     return () => {
       const returnTo = opener.current;

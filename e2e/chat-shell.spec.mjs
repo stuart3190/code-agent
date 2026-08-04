@@ -35,6 +35,29 @@ const SESSION = {
   },
 };
 
+// One Settings payload, shared by the specs that open Settings. Both used to depend on the real
+// server answering — which it does, with 401.
+const SETTINGS_FIXTURE = {
+  plan: { id: "free", name: "Free", monthly: { runs: 20, managedTokens: 1_500_000, computeSeconds: 10_800 } },
+  subscription: {
+    plan: "free", planName: "Free", status: "active", stripeManaged: false,
+    currentPeriodEnd: "2026-09-01T00:00:00.000Z", cancelAtPeriodEnd: false, periodEndMeans: "resets",
+    pendingPlan: null, pendingPlanName: null, pendingPlanAt: null,
+    overrides: { runs: null, managedTokens: null, computeSeconds: null },
+  },
+  plans: [], stripeConfigured: false,
+  capabilities: { plan: "free", retentionDays: 7, errorReporting: false, buildHistory: false, export: false, multiDomain: false },
+  ownerAccount: false, previewPlan: null, unlimited: false, pastDue: false,
+  period: { start: "2026-08-01T00:00:00.000Z", end: "2026-09-01T00:00:00.000Z" },
+  budgets: {
+    runs: { used: 0, limit: 20, remaining: 20 },
+    managedTokens: { used: 250_000, limit: 1_500_000, remaining: 1_250_000 },
+    computeSeconds: { used: 0, limit: 10_800, remaining: 10_800 },
+  },
+  tokens: [], notifications: { unread: 0, channels: {}, vapidPublicKey: "" },
+  counts: { projects: 1, liveSites: 0, deployments: 0 },
+};
+
 const EVENTS = [
   [1, "message", { role: "user", text: "Build me a pomodoro timer called FocusFlow" }],
   [2, "agent_spawned", { agent: "Lead Agent", status: "Understanding request…" }],
@@ -131,12 +154,18 @@ test("settings sheet and command palette stay within the permanent four", async 
   await stubApi(page);
   await page.route("**/api/v1/usage", (route) =>
     route.fulfill({ json: { plan: { id: "free", name: "Free" }, budgets: { managedTokens: { limit: 1_000_000, remaining: 750_000 } } } }));
+  // Settings reads /api/v1/settings now, and this spec never stubbed it — the request fell through
+  // to the real server, which answers 401 to a fake token. The assertions below happened to pass
+  // once and are now deterministic rather than dependent on which arrived first.
+  await page.route("**/api/v1/settings", (route) => route.fulfill({ json: SETTINGS_FIXTURE }));
   await page.goto("/");
   await expect(page.getByText("What are we building today?")).toBeVisible();
 
   await page.locator(".ct-avatar").click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByText("e2e@thrallo.com")).toBeVisible();
+  await expect(page.locator(".ct-settings")).toContainText("e2e@thrallo.com");
+  // Theme lives on Preferences now, not on the one long sheet.
+  await page.getByRole("tab", { name: /Preferences/ }).click();
   await page.getByRole("button", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.keyboard.press("Escape");
@@ -344,68 +373,10 @@ test("model selector: Begin choice rides with the first message; in-conversation
   await expect(page.getByText("Future requests will use OpenAI · gpt-5.6-terra.")).toBeVisible();
 });
 
-test("Usage & plan: clean dashboard, 90% warning, advanced section, admin gate", async ({ page }) => {
-  await stubApi(page);
-  await page.route("**/api/v1/usage", (r) => r.fulfill({ json: {
-    plan: { id: "free", name: "Free" }, budgets: {}, totals: {}, records: [
-      { id: "u1", provider: "openai", model: "gpt-5.6-sol", input_tokens: 1000, output_tokens: 200 },
-    ],
-  } }));
-  await page.route("**/api/v1/billing", (r) => r.fulfill({ json: {
-    period: { end: "2026-08-31T00:00:00Z" },
-    subscription: { plan: "free", stripeManaged: false, overrides: {} },
-    stripeConfigured: false,
-    budgets: {
-      runs: { used: 9, limit: 10 },                    // 90% -> amber warning
-      managedTokens: { used: 100_000, limit: 1_000_000 },
-      computeSeconds: { used: 600, limit: 7200 },
-    },
-    plans: [{ id: "free", name: "Free", priceGbp: 0, monthly: { runs: 10, managedTokens: 1_000_000, computeSeconds: 7200 } }],
-  } }));
-  await page.route("**/api/v1/usage/insights", (r) => r.fulfill({ json: {
-    month: "2026-08", buildsThisMonth: 3, aiCost: 5.2, aiCostGbp: 0.21, tokens: 160_000, requests: 12,
-    byModel: [{ key: "gpt-5.6-sol", cost: 5.2, tokens: 160_000, requests: 12 }],
-    byAgent: [{ key: "Builder", cost: 4.0, tokens: 120_000, requests: 6 }],
-    byProvider: [{ key: "openai", cost: 5.2, tokens: 160_000, requests: 12 }],
-    recentBuilds: [{ id: "b1", kind: "app_build", status: "passed", prompt: "Build me a shop", startedAt: "2026-08-01T10:00:00Z", durationMs: 65_000, repairRounds: 0, cost: 1.4, tokens: 26_000 }],
-    recentRequests: [{ provider: "openai", model: "gpt-5.6-sol", agent: "Builder", inputTokens: 10_000, outputTokens: 2_000, cachedTokens: 500, reasoningTokens: 300, durationMs: 9_000, cost: 0.5, buildId: "b1", projectId: "p1", createdAt: "2026-08-01T10:00:05Z" }],
-  } }));
-  await page.route("**/api/v1/usage/builds/b1", (r) => r.fulfill({ json: {
-    buildId: "b1", costByAgent: [{ key: "Builder", cost: 1.1, tokens: 20_000 }], costByModel: [{ key: "gpt-5.6-sol", cost: 1.4, tokens: 26_000 }],
-  } }));
-  await page.route("**/api/v1/admin/analytics", (r) => r.fulfill({ status: 403, json: { error: "Administrator access required", code: "admin_only" } }));
-
-  await page.goto("/");
-  await expect(page.getByText("What are we building today?")).toBeVisible();
-  await page.keyboard.press("Control+k");
-  const pal = page.getByPlaceholder(/Type a command/);
-  await pal.fill("usage");
-  await pal.press("Enter");
-
-  // Clean dashboard: plan, reset date, meters, 90% warning, month stats, activity.
-  await expect(page.getByRole("heading", { name: "Usage & plan" })).toBeVisible();
-  await expect(page.getByText(/Resets .*2026/)).toBeVisible();
-  await expect(page.getByText("90% used — nearly at the limit.")).toBeVisible();
-  await expect(page.getByText("You're close to a plan limit")).toBeVisible();
-  await expect(page.getByText("Estimated AI cost")).toBeVisible();
-  await expect(page.getByText("5.20 cr · ~£0.21")).toBeVisible();
-  await expect(page.getByText("Build me a shop")).toBeVisible();
-  // Advanced detail hidden by default; expands to the per-request table.
-  await expect(page.getByText("AI requests (this month, latest 50)")).not.toBeVisible();
-  await page.getByRole("button", { name: /Advanced usage/ }).click();
-  await expect(page.getByText("AI requests (this month, latest 50)")).toBeVisible();
-  await expect(page.getByText("openai / gpt-5.6-sol").first()).toBeVisible();
-  // Per-build breakdown expands with cost by agent/model.
-  await page.getByRole("button", { name: /Build me a shop/ }).click();
-  await expect(page.getByText("Builder · 1.10 cr")).toBeVisible();
-
-  // Admin analytics is a hard server-side boundary; the view renders it honestly.
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Control+k");
-  await pal.fill("admin analytics");
-  await pal.press("Enter");
-  await expect(page.getByText("This dashboard is only available to platform administrators.")).toBeVisible();
-});
+// The "Usage & plan" overlay this file used to drive was UsageView, deleted in Phase 6 when the
+// second usage dashboard was removed. Its coverage lives in e2e/settings.spec.mjs against the one
+// usage surface that remains — Settings → Usage — which asserts the same meters, the same warning
+// thresholds and the same reset date, plus the spend guards that moved with it.
 
 test("Build Diagnostics: browse runs, expand raw logs, evidence-grounded explanation", async ({ page }) => {
   await stubApi(page);
@@ -461,9 +432,10 @@ test("Downloads screen renders real release buttons from the manifest", async ({
       portable: { name: "Thrallo-Portable-x64.zip", label: "Portable ZIP", sizeBytes: 260000000, sha256: "b".repeat(64), url: "/downloads/Thrallo-Portable-x64.zip" },
     },
   } }));
-  await page.goto("/");
-  await page.getByRole("button", { name: "E", exact: true }).click();
-  await page.getByRole("button", { name: "Open" }).last().click(); // Downloads row
+  // Downloads is a drill-in from Settings → Preferences now, not a row on one long sheet.
+  await page.route("**/api/v1/settings", (route) => route.fulfill({ json: SETTINGS_FIXTURE }));
+  await page.goto("/settings/preferences");
+  await page.getByRole("button", { name: "Downloads" }).click();
   await expect(page.getByRole("link", { name: "Download for Windows" })).toHaveAttribute("href", "/downloads/Thrallo-Setup-x64.exe");
   await expect(page.getByRole("link", { name: /Portable ZIP/ })).toHaveAttribute("href", "/downloads/Thrallo-Portable-x64.zip");
   await expect(page.getByText(/Version 1\.131\.0 · 114 MB · released/)).toBeVisible();

@@ -50,14 +50,34 @@ export function parseJson(buffer) {
   }
 }
 
-export function allowedOrigins(appUrl = "https://buildr101.com") {
-  const origins = new Set([
-    "https://buildr101.com",
-    "https://www.buildr101.com",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-  ]);
-  try { origins.add(new URL(appUrl).origin); } catch {}
+/**
+ * Which origins may call this API cross-origin.
+ *
+ * Derived from APP_URL, not a hard-coded list. It used to contain https://buildr101.com and
+ * https://www.buildr101.com unconditionally — a DIFFERENT product's domains — plus the Vite dev
+ * origins. Production was verified serving `Access-Control-Allow-Origin: https://buildr101.com`
+ * to a request that asked for it: Thrallo's API trusted another product's front end, permanently,
+ * and a developer's localhost as well.
+ *
+ * Not a full compromise on its own — no credentials are allowed and auth is a bearer token, so a
+ * page on those origins still needs a token it has no way to obtain — but it is trust granted for
+ * no reason, and the isolation between these two products is the rule this codebase is built on.
+ *
+ * The dev origins are added only when APP_URL is itself a development address, so a production
+ * deployment cannot be reached from a page on someone's laptop.
+ */
+export function allowedOrigins(appUrl = "http://localhost:5173") {
+  const origins = new Set();
+  let parsed = null;
+  try { parsed = new URL(appUrl); } catch { /* fall through to dev defaults */ }
+  if (parsed) origins.add(parsed.origin);
+
+  const isDev = !parsed || parsed.protocol !== "https:"
+    || ["localhost", "127.0.0.1"].includes(parsed.hostname);
+  if (isDev) {
+    origins.add("http://localhost:5173");
+    origins.add("http://127.0.0.1:5173");
+  }
   return origins;
 }
 
@@ -98,7 +118,12 @@ export function applySecurityHeaders(res) {
     "font-src 'self' data:",
     "img-src 'self' data: blob: https:",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
-    // buildr101 preview/app origins stay until Phase 24 confirms nothing embeds them.
+    // The buildr101 preview origin is LOAD-BEARING, not leftover. provisiond on the production VPS
+    // runs with PREVIEW_PUBLIC_SUFFIX=preview.buildr101.com, so every live preview iframe in
+    // Thrallo is served from that origin — verified on the box, not assumed. Removing it from
+    // frame-src breaks every preview in the product. It comes out when the suffix is migrated to
+    // preview.thrallo.com, and not before; the app.buildr101.com entry rides with it because the
+    // publish suffix has the same provenance.
     "frame-src https://*.preview.thrallo.com https://*.app.thrallo.com https://*.preview.buildr101.com https://*.app.buildr101.com http://localhost:* http://127.0.0.1:*",
     "form-action 'self' https://checkout.stripe.com",
   ].join("; "));

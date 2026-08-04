@@ -167,6 +167,9 @@ function Workspace({ user }) {
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
   const toastTimer = useRef(null);
+  // What opened the overlay that is showing. WebKit does not focus a button on click, so
+  // document.activeElement is <body> by the time the overlay mounts and focus cannot be returned.
+  const overlayOpener = useRef(null);
 
   const showToast = useCallback((text) => {
     setToast(text);
@@ -462,7 +465,16 @@ function Workspace({ user }) {
     // Back from a build's logs to the log list would change nothing on screen.
     const onPop = () => { setPath(window.location.pathname); setQuery(window.location.search); };
     window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    // Firefox restores a page from its back/forward cache without firing popstate — the document
+    // comes back exactly as it was, including React state that describes the address it was cached
+    // AT, not the one it was restored TO. Going Back from a reloaded /settings/billing landed on
+    // /settings/usage in the URL bar with Billing still selected. `pageshow` is the event that
+    // fires on a bfcache restore, so re-reading the address there keeps the two in step.
+    window.addEventListener("pageshow", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("pageshow", onPop);
+    };
   }, []);
 
   // /projects/:projectId/:tab?ref=<buildId> — the dashboard as a real address.
@@ -546,7 +558,8 @@ function Workspace({ user }) {
         <div className={`ct-context ${active?.title ? "show" : ""}`}>
           <span className="ct-cdot" /><span>{active?.title || ""}</span>
         </div>
-        <button className="ct-avatar" title="Settings" onClick={() => navigate("/settings/usage")}>{initial}</button>
+        <button className="ct-avatar" title="Settings"
+          onClick={(e) => { overlayOpener.current = e.currentTarget; navigate("/settings/usage"); }}>{initial}</button>
       </header>
 
       <DesktopUpdateNotice />
@@ -670,7 +683,7 @@ function Workspace({ user }) {
           ? <SettingsSection section={sheetSection} onBack={() => setSheetSection(null)} onClose={closeSettings} />
           : (
             <SettingsView user={user} theme={theme} setTheme={setTheme} initialTab={settingsTab}
-              onClose={closeSettings} showToast={showToast}
+              onClose={closeSettings} showToast={showToast} openedBy={overlayOpener}
               onTabChange={(next) => navigate(`/settings/${next}`)}
               onSection={setSheetSection}
               onUpgrade={() => { setSheetSection(null); navigate("/pricing"); }}

@@ -310,14 +310,37 @@ export async function sweepStaleJobs(maxAgeMs = 90 * 60 * 1000) {
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
   const { data, error } = await db()
     .update({ status: "interrupted", phase: "interrupted",
-      error: "Build was interrupted before it could finish â€” please rebuild.",
+      error: "Build was interrupted before it could finish — please rebuild.",
       updated_at: new Date().toISOString() })
     .in("status", ["queued", "running"]).lt("created_at", cutoff).select("id");
   if (error) console.log(`[jobs] stale sweep WARN: ${error.message}`);
   else if (data?.length) console.log(`[jobs] swept ${data.length} stale job(s)`);
 }
 
-export async function interruptLiveJobs(reason = "Build was interrupted by a server restart â€” please rebuild.") {
+/**
+ * Keep sweeping while the server is up.
+ *
+ * The stale sweep ran only at boot, so it caught a build orphaned by a restart and nothing else. A
+ * build that stopped making progress on a server that stayed up — a runner wedged on a provider, a
+ * job whose loop threw somewhere unhandled — was never swept at all: it kept `running` until the
+ * next deploy. On a healthy service that can be weeks, and "building" is what the customer sees
+ * for all of it.
+ */
+let staleTimer = null;
+export function startStaleJobSweeper({ intervalMs = 10 * 60 * 1000 } = {}) {
+  if (staleTimer) return;
+  staleTimer = setInterval(() => {
+    sweepStaleJobs().catch((error) => console.log(`[jobs] stale sweep failed: ${error.message}`));
+  }, Math.max(intervalMs, 60_000));
+  staleTimer.unref?.();
+}
+
+export function stopStaleJobSweeper() {
+  if (staleTimer) clearInterval(staleTimer);
+  staleTimer = null;
+}
+
+export async function interruptLiveJobs(reason = "Build was interrupted by a server restart — please rebuild.") {
   const active = [...jobs.values()].filter((job) => !TERMINAL.has(job.status));
   await Promise.all(active.map(async (job) => {
     job.cancelled = true;

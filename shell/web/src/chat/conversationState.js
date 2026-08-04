@@ -133,6 +133,32 @@ export function applyEvent(view, event) {
         next.recovery = null;
       }
       break;
+    /**
+     * The server gave up on a turn and reset the conversation so it can be continued.
+     *
+     * This case did not exist, so `lead_recovered` fell through to `default` and was ignored as
+     * "future vocabulary". The recovery sweeper was working correctly — it flipped the stuck
+     * conversation back to idle after five minutes and said so — and the screen never found out.
+     * The roster kept showing "Lead Agent · Understanding request…" and `thinking` stayed true,
+     * which is exactly what a customer saw for ten minutes and more.
+     *
+     * Every agent is marked done, not just the Lead Agent: a specialist that was mid-work when the
+     * process died would otherwise spin forever beside a thread that has moved on.
+     */
+    case "lead_recovered":
+      next.roster = next.roster.map((agent) => (
+        agent.state === "working" ? { ...agent, state: "done" } : agent
+      ));
+      next.thinking = false;
+      next.waiting = false;
+      next.recovery = null;
+      push({
+        kind: "failure",
+        text: payload.message
+          || "I lost my train of thought during a restart — everything above is saved. Tell me to continue.",
+        reference: payload.reference || null,
+      });
+      break;
     case "lead_error":
     case "lead_agent_failed":
       // The server sends only sanitised copy plus a support reference — never raw errors.
