@@ -36,6 +36,7 @@ import { preflightImports, preflightSummary } from "./appBuild/importPreflight.m
 import { generateContract } from "./appBuild/contractAgent.mjs";
 import { runStagedBuild, stagesSummary, primaryStageOk } from "./appBuild/stagedBuild.mjs";
 import { runStageGate } from "./appBuild/stageGate.mjs";
+import { honestyScan, honestyFailures } from "./appBuild/honestyScan.mjs";
 import { contractBrief, contractSummary } from "../../shared/implementationContract.mjs";
 // Phase 19 re-point: the credit ledger and legacy BYOK/welcome-grant seams are replaced by
 // Thrallo budget accounting and the Thrallo AI-connection store. The affordability logic
@@ -911,6 +912,32 @@ async function runJob(job) {
       durationMs: Date.now() - compileStarted,
     });
 
+    // ── HONESTY SCAN (PR7) ───────────────────────────────────────────────────────────────────
+    //
+    // Everything above proves the app compiles, loads and can be driven. None of it catches the
+    // failure the customer actually reported: a convincing interface whose controls do nothing.
+    // This reads the source, where "saved to the backend" and "saved to a variable" are plainly
+    // different — from outside they look identical.
+    let honesty = null;
+    if (build.ok) {
+      try {
+        honesty = honestyScan(tree, { contract });
+        job.honesty = honesty;
+        for (const finding of honesty.findings) serverLog(job, `honesty: ${finding.message}`);
+        job.diag?.step({
+          agent: "Tester", kind: "honesty", label: "Implementation honesty scan",
+          status: honesty.ok ? "ok" : "failed",
+          output: [
+            honesty.summary,
+            ...honesty.findings.map((f) => `FAILS ${f.message}\n      ${f.snippet}`),
+            ...honesty.warnings.map((w) => `warns ${w.message}`),
+          ].join("\n"),
+        });
+      } catch (error) {
+        serverLog(job, `honesty: scan unavailable (${error.message})`);
+      }
+    }
+
     let qualityWarnings = [];
     if (needsDesignPass && build.ok && designProfile) {
       setPhase(job, "quality-checking");
@@ -1040,6 +1067,9 @@ async function runJob(job) {
       credits: need, model: provider.model, previewUrl: preview?.url || null,
       qualityWarnings,
     });
+    // Honesty findings are real defects, so they join the warnings the repair loop already acts
+    // on — a control that does nothing is not a lesser problem than a missing hero image.
+    if (honesty && !honesty.ok) qualityWarnings = [...qualityWarnings, ...honestyFailures(honesty)];
     job.result = {
       finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
       need, balance: balance.total, designProfile, qualityWarnings,
