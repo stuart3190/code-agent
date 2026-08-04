@@ -35,6 +35,9 @@ import { buildTree, ensureDeps, depsNodeModules } from "../../../harness/workspa
 import { preflightImports, preflightSummary } from "./appBuild/importPreflight.mjs";
 import { generateContract } from "./appBuild/contractAgent.mjs";
 import { classifyComplexity, profileFor } from "./appBuild/buildProfile.mjs";
+import { buildManifest } from "./appBuild/projectManifest.mjs";
+import { buildStageContext, renderContext, contextReport } from "./appBuild/contextBuilder.mjs";
+import { makeScopedFileTools } from "./appBuild/scopedFileTools.mjs";
 import { runStagedBuild, stagesSummary, primaryStageOk } from "./appBuild/stagedBuild.mjs";
 import { runStageGate } from "./appBuild/stageGate.mjs";
 import { honestyScan, honestyFailures } from "./appBuild/honestyScan.mjs";
@@ -758,6 +761,8 @@ async function runJob(job) {
     const stageTurnCap = profileFor(
       classifyComplexity({ prompt, contract }).level,
     ).maxStageTurns;
+    // Hard ceiling on what any one stage may be handed, enforced before the call.
+    const stageContextBudget = 40_000;
     let initial;
     let stageReport = null;
 
@@ -774,12 +779,61 @@ async function runJob(job) {
           // The first stage authors from the scaffold; every later one edits what exists, so it
           // gets the edit prompt and apply_patch rather than whole-file rewrites.
           const first = stage.id === "foundation" && attempt === 0;
-          const stageTools = makeFileTools(stageTree, { editFormat: first ? undefined : "apply_patch" });
+          // SELECTIVE CONTEXT. Rebuilt each stage because earlier stages have written files; it
+          // costs no model call and is about 4% of the tree.
+          const stageManifest = buildManifest(stageTree, { contract });
+          const selected = buildStageContext({
+            tree: stageTree, manifest: stageManifest, stageId: stage.id, contract,
+            objective: stagePromptText,
+            systemPrompt: first ? systemPrompt : systemPromptForEdit("apply_patch"),
+            budgetTokens: stageContextBudget,
+          });
+
+          // Enforced at the TOOL boundary too. A small initial context achieves nothing if the
+          // model then reads its way back to the whole project — which is exactly what produced the
+          // 292,652-token stage: overwhelmingly repeated reads, 81% of them cached.
+          const stageTools = makeScopedFileTools(stageTree, {
+            manifest: stageManifest,
+            allowed: selected.full.map((c) => c.path),
+            editFormat: first ? undefined : "apply_patch",
+            onEvent: (event) => {
+              if (event.type === "expanded") serverLog(job, `context: expanded ${event.path} (+${event.tokens} tok) — ${String(event.reason).slice(0, 70)}`);
+              if (event.type === "refused") serverLog(job, `context: refused ${event.path} — ${event.why}`);
+            },
+          });
+
+          serverLog(job, contextReport(selected).split("\n")[0]);
+          if (!selected.ok) serverLog(job, `context: OVER BUDGET for ${stage.id} — ${selected.tokens}/${selected.budget}`);
+
           const turn = await runAgent({
             provider,
             systemPrompt: first ? systemPrompt : `${systemPromptForEdit("apply_patch")}\n\n${designProfile ? renderDesignBrief(designProfile, approvedPhotos) : ""}`,
             tools: stageTools.schemas, toolImpls: stageTools.impls,
-            tree: stageTree, prompt: stagePromptText, log, onUsage,
+            tree: stageTree,
+            // The selected context leads: manifest, the files this stage may modify, summaries for
+            // everything else. The stage objective follows it.
+            prompt: `${renderContext(selected, stageTree, stageManifest)}\n\n${stagePromptText}`,
+            log, onUsage,
+            maxTurns: stageTurnCap,
+          });
+
+          // What it was given, what it asked for, and whether it rebuilt the tree anyway.
+          const rebuilt = stageTools.reconstructedTree(Object.keys(stageTree).length);
+          if (rebuilt) serverLog(job, `context: WARNING — ${stage.id} reconstructed more than half the tree through tools`);
+          job.contextTelemetry = job.contextTelemetry || [];
+          job.contextTelemetry.push({
+            stage: stage.id, attempt,
+            initialTokens: selected.tokens, budget: selected.budget,
+            wholeTreeTokens: selected.wholeTreeTokens,
+            fullFiles: selected.full.length, summaries: selected.summaries.length,
+            omitted: selected.omitted.length,
+            expansions: stageTools.telemetry.expansionCount,
+            expansionTokens: stageTools.telemetry.expansionTokens,
+            summaryReads: stageTools.telemetry.summaryReads.length,
+            refusals: stageTools.telemetry.refusals.length,
+            reconstructedTree: rebuilt,
+            reasons: selected.full.map((c) => ({ path: c.path, reason: c.reason })),
+            usage: turn.telemetry,
           });
           combinedUsage.add(turn.telemetry);
           if (job.cancelled) throw new CancelledError();
