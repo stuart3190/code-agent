@@ -82,6 +82,14 @@ export function countryFor(ip) {
 export function geoipStatus() {
   if (!geoipConfigured()) return { available: false, reason: "not_configured" };
   if (!state.reader) {
+    // Kick a one-shot load. The server calls startGeoipUpdater() at boot, but anything else that
+    // imports the reports module — a proof, a script, a worker — would otherwise report "loading"
+    // for the life of the process while a perfectly good database sat on disk beside it.
+    // Fire-and-forget on purpose: this function is synchronous and on the read path.
+    if (!state.loading) {
+      state.loading = true;
+      loadGeoip().finally(() => { state.loading = false; });
+    }
     return { available: false, reason: state.error ? "unavailable" : "loading" };
   }
   const builtAt = state.buildEpoch ? new Date(state.buildEpoch * 1000).toISOString() : null;
