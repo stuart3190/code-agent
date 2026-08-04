@@ -1301,8 +1301,10 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 }
 .st-starter-prompt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.ct-firstrun { margin-top: 10px; }
-.ct-firstrun-lead { max-width: 62ch; margin: 0 0 12px; line-height: 1.6; }
+/* One quiet line and one optional button under the composer — not a wall of cards. */
+.ct-firstrun { margin-top: 14px; display: grid; gap: 8px; justify-items: center; text-align: center; }
+.ct-firstrun-lead { max-width: 54ch; margin: 0; line-height: 1.6; }
+.ct-firstrun-browse { font-size: 13px; }
 
 /* History */
 .hs-view .hs-search { min-width: 190px; }

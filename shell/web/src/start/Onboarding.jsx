@@ -60,14 +60,16 @@ const STEPS = [
     id: "start",
     title: "Let's build something",
     body:
-      "Pick an idea to start from, or close this and describe your own. Either way the next thing "
-      + "that happens is a real build on your account.",
+      "Close this and describe what you want in your own words — that is the normal way to work, "
+      + "and the next thing that happens is a real build on your account. If a blank page is hard, "
+      + "there are some opening prompts you can browse and edit.",
     aside: null,
   },
 ];
 
 export default function Onboarding({ initialStep = 0, onStep, onSkip, onComplete, onUseStarter }) {
   const [index, setIndex] = useState(Math.min(Math.max(initialStep, 0), STEPS.length - 1));
+  const [ideas, setIdeas] = useState(false);
   const heading = useRef(null);
   const step = STEPS[index];
   const last = index === STEPS.length - 1;
@@ -117,9 +119,20 @@ export default function Onboarding({ initialStep = 0, onStep, onSkip, onComplete
           <p>{step.body}</p>
           {step.aside && <p className="ct-hint">{step.aside}</p>}
 
+          {/* Behind a disclosure, deliberately. Filling the final screen with cards made picking
+              one look like the required next step, when writing your own is the ordinary path and
+              the one the whole product is built around. */}
           {last && (
             <div className="st-onboard-gallery">
-              <StarterGallery compact onUse={(prompt, starterId) => onUseStarter(prompt, starterId)} />
+              <button className="st-disclosure" aria-expanded={ideas}
+                onClick={() => setIdeas((v) => !v)}>
+                <span>
+                  Browse starter ideas
+                  <span className="ct-hint">Ten opening prompts you can edit — optional</span>
+                </span>
+                <span className="ct-hint">{ideas ? "Hide" : "Show"}</span>
+              </button>
+              {ideas && <StarterGallery compact onUse={(prompt, starterId) => onUseStarter(prompt, starterId)} />}
             </div>
           )}
         </div>
@@ -127,7 +140,7 @@ export default function Onboarding({ initialStep = 0, onStep, onSkip, onComplete
         <div className="st-onboard-actions">
           <button className="ct-btn-quiet" disabled={index === 0} onClick={back}>Back</button>
           {last
-            ? <button className="ct-btn" onClick={() => onComplete(index)}>Close and write my own</button>
+            ? <button className="ct-btn" onClick={() => onComplete(index)}>Start writing</button>
             : <button className="ct-btn" onClick={next}>Next</button>}
         </div>
       </div>

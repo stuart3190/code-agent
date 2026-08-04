@@ -128,7 +128,10 @@ test("the tour explains the real product and ends by starting something", async 
   expect(seen.join(" | ")).toMatch(/plan/i);
   expect(seen.join(" | ")).toMatch(/asking|iterate/i);
   expect(seen.join(" | ")).toMatch(/Preview|publish/i);
-  // It ends on the REAL gallery, not a "you're all set" screen.
+  // It ends by handing over to the composer. Ideas are behind a disclosure — offered, not imposed.
+  await expect(page.getByRole("button", { name: "Start writing" })).toBeVisible();
+  await expect(page.locator(".st-onboard-gallery .st-starter")).toHaveCount(0);
+  await page.locator(".st-onboard-gallery").getByRole("button", { name: /Browse starter ideas/ }).click();
   await expect(page.locator(".st-onboard-gallery .st-starter").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Next" })).toHaveCount(0);
 });
@@ -166,13 +169,19 @@ test("the tour is navigable and dismissable by keyboard", async ({ page }) => {
 
 // ── Starters ────────────────────────────────────────────────────────────────────────────
 
-test("an empty account is offered ideas, and a starter arrives editable", async ({ page }) => {
+test("an empty account lands on the composer, with ideas merely offered", async ({ page }) => {
   await stub(page, { onboarding: { pending: false }, conversations: [], counts: { all: 0 } });
   await page.goto("/");
-  await expect(page.getByText("Your first build")).toBeVisible();
-  await expect(page.locator(".ct-firstrun .st-starter")).toHaveCount(10);
 
-  await page.locator(".ct-firstrun .st-starter").filter({ hasText: "Booking system" }).click();
+  // The composer is the product. Writing your own must never require dismissing anything first.
+  const composer = page.getByPlaceholder(/Describe anything/);
+  await expect(composer).toBeVisible();
+  await expect(page.locator(".st-starter")).toHaveCount(0, { timeout: 3000 });
+
+  // Ideas are one optional button, not a wall of cards.
+  await page.getByRole("button", { name: "Browse starter ideas" }).click();
+  await expect(page.locator(".st-starter").first()).toBeVisible();
+  await page.locator(".st-starter").filter({ hasText: "Booking system" }).click();
   const prompt = page.locator("#st-starter-prompt");
   await expect(prompt).toBeVisible();
   await expect(prompt).toHaveValue(/physiotherapy clinic/);
@@ -183,17 +192,14 @@ test("an empty account is offered ideas, and a starter arrives editable", async 
   await page.getByRole("button", { name: "Start building" }).click();
 
   // It lands in the composer, unsent — nothing is submitted on the customer's behalf.
-  const composer = page.getByPlaceholder(/Describe anything/);
   await expect(composer).toHaveValue(/barber shop/);
-  // Deliberately still offered: seeding the composer is not the same as having built anything, and
-  // the gallery belongs on the screen until this account actually has a project.
-  await expect(page.getByText("Your first build")).toBeVisible();
 });
 
 test("a starter can be reset to the expert original", async ({ page }) => {
   await stub(page, { onboarding: { pending: false }, conversations: [], counts: { all: 0 } });
   await page.goto("/");
-  await page.locator(".ct-firstrun .st-starter").filter({ hasText: "CRM" }).click();
+  await page.getByRole("button", { name: "Browse starter ideas" }).click();
+  await page.locator(".st-starter").filter({ hasText: "CRM" }).click();
   const prompt = page.locator("#st-starter-prompt");
   const original = await prompt.inputValue();
   await prompt.fill("something else entirely");
@@ -212,10 +218,10 @@ test("a filtered empty view never shows first-time copy", async ({ page }) => {
     counts: { all: 40, published: 0, favourites: 0 },
   });
   await page.goto("/");
-  await expect(page.getByText("Your first build")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Browse starter ideas" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /^Archived/ }).click();
-  await expect(page.getByText("Your first build")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Browse starter ideas" })).toHaveCount(0);
   await expect(page.locator(".ct-ws-empty")).toContainText("Nothing is archived");
 });
 

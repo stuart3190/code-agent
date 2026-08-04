@@ -1161,15 +1161,18 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
           ACCOUNT rather than the current view, so archiving, starring or filtering to Updates can
           never reach this. That is the rule — a narrowed empty view is not a first-time
           experience, and an established customer must never be shown one. */}
+        {/* The composer above is the product. This is one quiet line under it, not a wall of
+            cards: rendering the whole gallery here made choosing a starter look like step one,
+            when the ordinary path — describe what you want, in your own words — is the point.
+            Inspiration is offered, never imposed. */}
       {loaded && !error && (counts.all ?? 0) === 0 && !search && !archived && !favouritesOnly && onOpenStarters && (
-        <div className="ct-workspace ct-firstrun">
-          <div className="ct-ws-label">Your first build</div>
+        <div className="ct-firstrun">
           <p className="ct-hint ct-firstrun-lead">
-            Describe what you want in the box above and the team will plan it, build it and put it
-            online. If a blank page is hard, start from one of these — they are opening prompts you
-            can edit, not templates.
+            Describe what you want above and the team will plan it, build it and put it online.
           </p>
-          <StarterGallery compact onUse={onStarterPrompt} />
+          <button className="ct-btn-quiet ct-firstrun-browse" onClick={onOpenStarters}>
+            Browse starter ideas
+          </button>
         </div>
       )}
       {deletedItems.length > 0 && (
