@@ -1,15 +1,31 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AuthCard, Logo } from "../auth/AuthGate.jsx";
 
-export default function Landing() {
-  const [mode, setMode] = useState("signup");
+export default function Landing({ billingReturn = null }) {
+  // Someone returning from a completed checkout without a session in THIS browser has just paid
+  // real money. Opening on the marketing page, with the payment unmentioned, reads as though it
+  // did not work — so sign-in leads, and the outcome is stated first.
+  const [mode, setMode] = useState(billingReturn === "success" ? "signin" : "signup");
   const authRef = useRef(null);
+  // Land on the sign-in card immediately when a payment brought them here, rather than making
+  // someone who has just paid hunt for it.
+  useEffect(() => {
+    if (billingReturn === "success") authRef.current?.scrollIntoView({ block: "center" });
+  }, [billingReturn]);
   const showAuth = (next) => {
     setMode(next);
     authRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
   return (
     <div className="min-h-full overflow-auto bg-[#07080b] text-slate-200">
+      {billingReturn === "success" && (
+        <div className="border-b border-emerald-400/25 bg-emerald-400/10 px-6 py-3 text-center text-sm text-emerald-200"
+          role="status">
+          <strong className="font-semibold text-emerald-100">Payment received.</strong>{" "}
+          Your subscription is active. Sign in below with the account you paid for and it will be
+          waiting — nothing else is needed.
+        </div>
+      )}
       <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#07080b]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center px-6">
           <Logo /><span className="ml-2.5 font-display font-semibold text-white">Thrallo</span>

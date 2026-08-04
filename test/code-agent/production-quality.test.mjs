@@ -391,3 +391,46 @@ test("the browser matrix covers more than one engine", async () => {
   assert.match(platforms, /Real iOS/);
   assert.match(platforms, /Screen readers/);
 });
+
+// ── The post-checkout return ────────────────────────────────────────────────────────────
+
+test("a paid customer returning without a session is not shown the marketing page", async () => {
+  const shell = await readCode("../../shell/web/src/chat/ChatShell.jsx");
+  // The return was handled INSIDE the workspace, below `if (!user) return <Landing />`. Someone
+  // who completed checkout in another browser — a phone, a second machine, a private window —
+  // had just paid real money and was shown a marketing page with the payment unmentioned.
+  const gateAt = shell.indexOf("if (!user) return <Landing");
+  const readAt = shell.indexOf("const billingReturn = readBillingReturn()");
+  assert.ok(readAt > 0 && readAt < gateAt, "the return must be read ABOVE the auth gate");
+  assert.match(shell, /<Landing billingReturn=\{billingReturn\} \/>/,
+    "and handed to the screen that actually renders");
+
+  const landing = await readCode("../../shell/web/src/landing/Landing.jsx");
+  assert.match(landing, /Payment received/, "which states the outcome");
+  assert.match(landing, /billingReturn === "success" \? "signin" : "signup"/,
+    "and offers sign-in rather than sign-up to someone who already has an account");
+});
+
+test("the return survives the sign-in it may require", async () => {
+  const shell = await readCode("../../shell/web/src/chat/ChatShell.jsx");
+  assert.match(shell, /readBillingReturn\(\) \|\| takeRememberedBillingReturn\(\)/,
+    "the workspace seeds from the URL or from what was remembered through a sign-in");
+  const helper = await readCode("../../shell/web/src/billing/billingReturn.js");
+  assert.match(helper, /sessionStorage/, "remembered for the browser session, not forever");
+});
+
+test("/billing-success is a real destination, not a 404 that renders the landing page", async () => {
+  const { readBillingReturn } = await import("../../shell/web/src/billing/billingReturn.js");
+  // The SPA serves index.html for any path, so an unhandled /billing-success rendered the app,
+  // which had no session, which rendered the landing page. It was a route that existed nowhere.
+  assert.equal(readBillingReturn({ pathname: "/billing-success", search: "" }), "success");
+  assert.equal(readBillingReturn({ pathname: "/billing-success/", search: "" }), "success");
+  assert.equal(readBillingReturn({ pathname: "/billing-cancelled", search: "" }), "cancelled");
+  // The form checkout is actually configured with.
+  assert.equal(readBillingReturn({ pathname: "/", search: "?billing=success" }), "success");
+  assert.equal(readBillingReturn({ pathname: "/", search: "?billing=cancelled" }), "cancelled");
+  // And nothing else is mistaken for one.
+  assert.equal(readBillingReturn({ pathname: "/", search: "" }), null);
+  assert.equal(readBillingReturn({ pathname: "/projects/p1/logs", search: "" }), null);
+  assert.equal(readBillingReturn({ pathname: "/", search: "?billing=maybe" }), null);
+});

@@ -22,6 +22,9 @@ import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
 import SettingsView, { SETTINGS_TABS } from "../settings/SettingsView.jsx";
 import SuccessView from "../billing/SuccessView.jsx";
+import {
+  readBillingReturn, rememberBillingReturn, takeRememberedBillingReturn,
+} from "../billing/billingReturn.js";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
 import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
 
@@ -116,7 +119,13 @@ export default function ChatShell() {
       </div>
     );
   }
-  if (!user) return <Landing />;
+  // The billing return is a NAVIGATION and can arrive in any browser — a phone, a second machine,
+  // a private window. It used to be handled inside the workspace, BELOW this gate, so a customer
+  // who had just paid real money was shown the public landing page and told nothing. Remember it
+  // here, above the gate, and hand it to whichever screen renders.
+  const billingReturn = readBillingReturn();
+  if (billingReturn === "success") rememberBillingReturn("success");
+  if (!user) return <Landing billingReturn={billingReturn} />;
   return <Workspace user={user} />;
 }
 
@@ -158,8 +167,9 @@ function Workspace({ user }) {
   const [query, setQuery] = useState(() => window.location.search);
   // Stripe returns the customer to /?billing=success or /?billing=cancelled. Held in state rather
   // than read from the URL on every render, so returning to the dashboard clears it for good.
+  // From the URL, or from a return that arrived before this customer signed in.
   const [billingReturn, setBillingReturn] = useState(
-    () => new URLSearchParams(window.location.search).get("billing") || null,
+    () => readBillingReturn() || takeRememberedBillingReturn(),
   );
   const planState = usePlanState();
   const publish = usePublishState();
