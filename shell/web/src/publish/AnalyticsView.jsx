@@ -11,6 +11,33 @@ import React, { useCallback, useEffect, useState } from "react";
 import { projectAnalytics, projectAnalyticsLive, exportAnalytics } from "../lib/codeAgentApi.js";
 import { formatNumber } from "../manage/shared.jsx";
 import { TabSkeleton, TabError } from "./TabStates.jsx";
+import { formatBillingDate as formatDate } from "../billing/planState.js";
+
+/**
+ * A country name from its ISO code, and a flag from the same two letters.
+ *
+ * `Intl.DisplayNames` is in every engine this product supports and knows every code GeoLite2
+ * returns, so there is no country-name table to fall out of date. The flag is the two regional
+ * indicator characters — arithmetic on the code, not an image and not a lookup — and it degrades
+ * to nothing on a platform without the glyphs rather than to a broken box.
+ */
+const REGION_NAMES = typeof Intl !== "undefined" && Intl.DisplayNames
+  ? new Intl.DisplayNames(["en"], { type: "region" })
+  : null;
+
+function countryName(code) {
+  if (!/^[A-Z]{2}$/.test(code || "")) return code || "Unknown";
+  try {
+    return REGION_NAMES?.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+function flagFor(code) {
+  if (!/^[A-Z]{2}$/.test(code || "")) return "";
+  return String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+}
 
 const RANGES = [
   { days: 7, label: "7 days" },
@@ -354,15 +381,55 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
           </>
         )}
 
-        {/* Countries. Unavailable is stated, never inferred: guessing a country from language or
-            timezone would present a guess as a fact. */}
+        {/* Countries. Four distinct situations, because they need four different sentences —
+            collapsing them into one "unavailable" would be untrue in three of them. A country is
+            never inferred from language or timezone: that would present a guess as a fact. */}
         <div className="mg-label">Countries</div>
         <div className="mg-card">
-          <div className="ct-hint">
-            Country reporting is not available yet — it needs a MaxMind GeoLite2 licence, and
-            Thrallo will resolve country at ingest and store only the country, never the address.
-            It is deliberately not guessed from browser language or timezone.
-          </div>
+          {data.countries?.available && data.countries.rows?.length > 0 && (
+            <>
+              {data.countries.rows.map((row) => (
+                <div className="mg-row" key={row.key}>
+                  <div><span className="an-flag" aria-hidden="true">{flagFor(row.key)}</span> {countryName(row.key)}</div>
+                  <div className="ct-hint">{formatNumber(row.visitors)} visitors · {formatNumber(row.pageviews)} views</div>
+                </div>
+              ))}
+              {/* Countries do not move, so an old database is degraded rather than wrong — but
+                  saying nothing about its age would be the bigger lie. */}
+              {data.countries.stale && (
+                <div className="ct-hint" style={{ paddingTop: 8 }}>
+                  The country database was last updated {formatDate(data.countries.builtAt)}. It is
+                  refreshed automatically; countries change rarely, so these figures remain usable.
+                </div>
+              )}
+            </>
+          )}
+          {data.countries?.available && !data.countries.rows?.length && (
+            <div className="ct-hint">
+              No visits with a resolvable country in this period. Country comes from the visitor's
+              network, so private and unrouted addresses have none — this is a real absence, not
+              missing data.
+            </div>
+          )}
+          {!data.countries?.available && data.countries?.reason === "plan" && (
+            <div className="ct-hint">
+              Country reporting is included from Starter.{" "}
+              <button className="ct-linkish" onClick={onUpgrade}>See plans</button>
+            </div>
+          )}
+          {!data.countries?.available && data.countries?.reason === "not_configured" && (
+            <div className="ct-hint">
+              Country reporting is not available on this deployment — it needs a MaxMind GeoLite2
+              licence. Country is resolved at ingest and only the country is stored, never the
+              address, and it is deliberately not guessed from browser language or timezone.
+            </div>
+          )}
+          {!data.countries?.available && ["loading", "unavailable"].includes(data.countries?.reason) && (
+            <div className="ct-hint">
+              The country database is being prepared. Everything else on this page is unaffected —
+              analytics never waits on it — and countries will appear for visits recorded from now on.
+            </div>
+          )}
         </div>
 
         <div className="ct-hint" style={{ marginTop: 14 }}>

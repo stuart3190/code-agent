@@ -8,6 +8,7 @@
 import { serviceClient } from "../supabase.mjs";
 import { identify } from "./visitorIdentity.mjs";
 import { isBot, parseUserAgent, referrerHost, normalizePath } from "./userAgent.mjs";
+import { countryFor } from "./geoip.mjs";
 import { scrubErrorFields } from "./scrub.mjs";
 
 const KINDS = new Set(["pageview", "vitals", "error"]);
@@ -61,6 +62,10 @@ export async function recordBeacon({
 
   const { visitorHash, sessionHash } = await identify({ ip, userAgent, appId, now, client });
   const { browser, os, device } = parseUserAgent(userAgent);
+  // Country is resolved HERE, in the same short window the address is already being hashed in, and
+  // only the two-letter code survives the request. No raw IP is written by this line or any other.
+  // A missing or unavailable database yields null and changes nothing else about the event.
+  const country = countryFor(ip);
 
   const row = {
     owner: site.owner,
@@ -74,6 +79,7 @@ export async function recordBeacon({
     browser,
     os,
     device,
+    country,
   };
 
   if (kind === "pageview") {

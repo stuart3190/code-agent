@@ -85,6 +85,9 @@ export async function buildAnalyticsExport(owner, projectId, {
         operatingSystems: report.operatingSystems,
         devices: report.devices,
         coreWebVitals: report.vitals,
+        // The whole object, not just the rows: an export that carried country counts without
+        // saying the database was a month old would strip the caveat the UI shows.
+        countries: report.countries,
         errors: report.errors,
       }, null, 2),
     };
@@ -120,6 +123,14 @@ export async function buildAnalyticsExport(owner, projectId, {
       "",
       csvSection("Devices", ["Device", "Page views", "Unique visitors"],
         report.devices.map((r) => [r.key, r.pageviews, r.visitors])),
+      "",
+      // Only when there is something real to write. A section header over nothing reads as "no
+      // visitors", when the truth may be that this deployment has no geo database at all — so the
+      // reason is written instead.
+      report.countries?.available
+        ? csvSection("Countries", ["Country", "Page views", "Unique visitors"],
+          (report.countries.rows || []).map((r) => [r.key, r.pageviews, r.visitors]))
+        : `# Countries: unavailable (${report.countries?.reason || "unknown"})`,
     );
   }
 

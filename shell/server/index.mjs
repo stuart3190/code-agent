@@ -82,6 +82,7 @@ import {
   handleAnalyticsLive, handleAnalyticsExport,
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
+import { startGeoipUpdater, stopGeoipUpdater } from "./lib/analytics/geoip.mjs";
 import { handleProjectHealth } from "./routes/health.mjs";
 import { handleLogsList, handleLogsStream, handleLogsExport, handleLogRuns } from "./routes/logs.mjs";
 import {
@@ -1036,6 +1037,9 @@ server.listen(PORT, HOST, () => {
   // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
   // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.
   startAnalyticsRollup();
+  // Country resolution. Starts only when a licence key exists, loads whatever is already on disk
+  // immediately so country data works from the first request, and downloads only when stale.
+  startGeoipUpdater();
   // Probes every live site: uptime, response time, certificate expiry and DNS drift.
   startHealthMonitor();
   startDeletedProjectSweeper();
@@ -1057,6 +1061,7 @@ async function shutdown(signal) {
   stopRetentionSweeper();
   stopDomainVerifier();
   stopAnalyticsRollup();
+  stopGeoipUpdater();
   stopHealthMonitor();
   stopCheckpointSweeper();
   stopDeletedProjectSweeper();
