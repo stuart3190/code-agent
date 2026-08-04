@@ -199,7 +199,20 @@ export default function AnalyticsView({ site, onClose, onUpgrade , embedded = fa
 
         {data?.unavailable === "not_published" && (
           <div className="mg-card"><div className="ct-hint">
-            Analytics starts collecting the moment this project is published.
+            <strong>Nothing is being measured yet.</strong> Analytics starts the moment this project
+            is published — the script is added for you, there is nothing to install, and no cookie
+            banner is needed because visitors are counted without cookies.
+          </div></div>
+        )}
+
+        {/* Published, but nobody has been yet. A different sentence from "not published", because
+            it is a different situation with a different next action: the site works, it just has
+            no audience. Zero here is a real measurement, not a gap. */}
+        {totals && totals.visitors === 0 && totals.pageviews === 0 && (
+          <div className="mg-card"><div className="ct-hint">
+            <strong>No visits recorded in this period.</strong> The site is live and being measured —
+            this is a real zero, not missing data. Share the address and visits appear here within
+            about a minute of the first one.
           </div></div>
         )}
 

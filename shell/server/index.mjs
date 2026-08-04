@@ -95,6 +95,8 @@ import {
   handleTokenRename,
 } from "./routes/settings.mjs";
 import { handleAutomationDelete, handleAutomationUpdate, handleAutomations } from "./routes/automations.mjs";
+import { handleHistoryList } from "./routes/history.mjs";
+import { handleOnboardingGet, handleOnboardingUpdate } from "./routes/onboarding.mjs";
 import {
   handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
   handleConversationsBulk,
@@ -899,6 +901,17 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/settings" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleSettings(req, res, owner);
+    }
+    // First-run state and prompt history. Both owner-scoped in the statement, like every other
+    // read on this server.
+    if (p === "/api/v1/onboarding" && ["GET", "POST"].includes(method)) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (method === "GET") return await handleOnboardingGet(req, res, owner);
+      return await handleOnboardingUpdate(req, res, owner, await readJson(req));
+    }
+    if (p === "/api/v1/history" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleHistoryList(req, res, { owner, url });
     }
     if (p === "/api/v1/notifications" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

@@ -40,6 +40,8 @@ const MUST_BE_MOUNTED = new Set([
   "qa.mjs",              // restored 2026-08-01 (PR 3) — needed a qa_runs table that never existed
   "subscription.mjs",
   "settings.mjs",        // Phase 6 — the Settings screen in one read
+  "history.mjs",         // Phase 8 — prompt and build history
+  "onboarding.mjs",      // Phase 8 — first-run state
 ]);
 
 // Modules deliberately NOT mounted, each with the reason. A bare list would rot; a reason makes

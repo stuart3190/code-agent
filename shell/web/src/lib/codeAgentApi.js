@@ -112,6 +112,22 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
 // Everything Settings needs, in one read — see shell/server/routes/settings.mjs.
 export const accountSettings = () => request("/api/v1/settings");
+// First-run state lives on the server so it does not reappear on a second device.
+export const onboardingState = () => request("/api/v1/onboarding");
+export const updateOnboarding = (action, step = null) => request("/api/v1/onboarding", {
+  method: "POST", body: JSON.stringify({ action, step }),
+});
+// Prompt and build history, assembled server-side from the records builds already write.
+export const listHistory = ({ offset = 0, limit = 20, q = "", project = null, conversation = null } = {}) => {
+  const query = new URLSearchParams();
+  if (offset) query.set("offset", String(offset));
+  if (limit) query.set("limit", String(limit));
+  if (q) query.set("q", q);
+  if (project) query.set("project", project);
+  if (conversation) query.set("conversation", conversation);
+  const qs = query.toString();
+  return request(`/api/v1/history${qs ? `?${qs}` : ""}`);
+};
 // One endpoint for both directions: cancelling and un-cancelling are one field on one Stripe
 // object, and two endpoints would be two chances to drift apart.
 export const setCancellation = (cancel) => request("/api/v1/billing/cancel", {
