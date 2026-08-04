@@ -39,15 +39,59 @@ const SOURCE = /\.(jsx?|tsx?|mjs)$/;
 const IMPORT = /import\s+(?:([^;'"]*?)\s+from\s+)?["']([^"']+)["']/g;
 
 /**
+ * Blank out comments, preserving every newline so reported line numbers stay true.
+ *
+ * Found in production, on the first build after PR2 shipped: the scaffold's own backend SDK
+ * documents its usage in a header comment —
+ *
+ *   //   import { auth, db, storage, payments } from "./lib/backend";
+ *
+ * — and preflight reported that as an unresolved import on EVERY build. It did not block anything
+ * (problems are logged, not fatal) but a checker that cries wolf on every run is worse than no
+ * checker, because people stop reading it.
+ *
+ * A small scanner rather than a regex: `//` inside a string is not a comment, and "https://x" in an
+ * import specifier would otherwise swallow the rest of the line.
+ */
+function stripComments(source) {
+  const text = String(source);
+  let out = "";
+  let i = 0;
+  let quote = null;          // the quote character we are inside, or null
+  while (i < text.length) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (quote) {
+      if (ch === "\\") { out += text.slice(i, i + 2); i += 2; continue; }
+      if (ch === quote) quote = null;
+      out += ch; i += 1; continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; out += ch; i += 1; continue; }
+    if (ch === "/" && next === "/") {
+      while (i < text.length && text[i] !== "\n") i += 1;
+      continue;                                   // the newline itself is copied next pass
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+        if (text[i] === "\n") out += "\n";        // keep the line count honest
+        i += 1;
+      }
+      i += 2; continue;
+    }
+    out += ch; i += 1;
+  }
+  return out;
+}
+
+/**
  * The imports in one source file, with the line each sits on.
  *
  * Hand-rolled rather than a parser dependency: the shape being matched is narrow, and a build
  * server should not gain an AST toolchain to read the first ten lines of a file.
  */
 export function parseImports(source) {
-  const text = String(source || "");
-  // Strip comments and template/quoted bodies would be ideal; instead, only accept matches whose
-  // clause looks like a real import clause, which rejects the overwhelming majority of prose.
+  const text = stripComments(String(source || ""));
   const found = [];
   for (const match of text.matchAll(IMPORT)) {
     const [whole, clause = "", specifier] = match;

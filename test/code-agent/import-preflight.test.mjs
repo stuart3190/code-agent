@@ -232,3 +232,35 @@ test("build tooling imported by config files is not reported as a missing depend
   }, { nodeModules });
   assert.equal(absent.problems[0].kind, "missing_dependency");
 });
+
+test("imports inside comments are not imports", async () => {
+  // Found in production on the first build after PR2 shipped: the scaffold's own backend SDK
+  // documents its usage in a header comment, and preflight reported that documentation as an
+  // unresolved import on EVERY build.
+  const documented = [
+    "// Backend SDK entry point.",
+    "//",
+    "//   import { auth, db } from \"./lib/backend\";",
+    "//",
+    "/* import Thing from \"./nowhere\";",
+    "   import Other from \"./also-nowhere\"; */",
+    "import { real } from \"./actual\";",
+  ].join("\n");
+
+  const found = parseImports(documented);
+  assert.equal(found.length, 1, `only the real import counts, got: ${found.map((f) => f.specifier).join(", ")}`);
+  assert.equal(found[0].specifier, "./actual");
+  assert.equal(found[0].line, 7, "blanked comments must keep the line numbers true");
+
+  const result = await preflightImports({
+    "package.json": manifest({}),
+    "src/lib/backend/index.js": documented,
+    "src/lib/backend/actual.js": "export const real = 1;",
+  }, { nodeModules });
+  assert.deepEqual(result.problems, []);
+});
+
+test("a // inside a string is not a comment", () => {
+  const found = parseImports(`import x from "https://example.com/mod.js";\nimport y from "./y";`);
+  assert.deepEqual(found.map((f) => f.specifier), ["https://example.com/mod.js", "./y"]);
+});
