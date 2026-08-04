@@ -399,7 +399,9 @@ async function directDesign({ provider, prompt, projectId, style, knowledge, pla
 async function preparePhotography(profile, log) {
   if (!profile?.imagery?.required) return { assets: [], unavailable: false };
   if (!imagesConfigured()) {
-    log("design: photography unavailable (PEXELS_API_KEY is not configured)");
+    // Names what it costs, not just what is missing: this design profile asked for photographs and
+    // will not get any, so the app ships with placeholder imagery.
+    log("design: this design needs photographs and none are available — PEXELS_API_KEY is not configured on this deployment, so the app will be built with placeholder imagery instead");
     return { assets: [], unavailable: true };
   }
   const queries = [...(profile.imagery.queries || []), `${profile.category} authentic premium photography`];
@@ -426,17 +428,21 @@ async function preparePhotography(profile, log) {
 // What changed in this round, and how healthy the result is. Pure measurement — the
 // judgement about whether it counts as progress lives in repairProgress.mjs.
 function measureRound({ baseline, tree, build, usage, credits, model, previewUrl, qualityWarnings }) {
-  let filesChanged = 0;
   let diffChars = 0;
+  // The PATHS, not just the count. A repair brief that can say "your last patch touched
+  // src/lib/format.js" lets the next round notice it edited something the error never named —
+  // which is precisely what went unnoticed when two repairs in a row edited the wrong file.
+  const changedPaths = [];
   const paths = new Set([...Object.keys(baseline || {}), ...Object.keys(tree || {})]);
   for (const path of paths) {
     const before = baseline?.[path];
     const after = tree?.[path];
     if (before === after) continue;
-    filesChanged += 1;
+    changedPaths.push(path);
     diffChars += Math.abs(String(after || "").length - String(before || "").length)
       || Math.max(String(after || "").length, String(before || "").length);
   }
+  const filesChanged = changedPaths.length;
   // Compiler error lines: a count, so "fewer errors than last round" is measurable.
   const stderr = build?.ok ? "" : String(build?.stderr || "");
   const compilerErrorCount = stderr
@@ -447,6 +453,7 @@ function measureRound({ baseline, tree, build, usage, credits, model, previewUrl
     compilerErrorCount,
     previewOk: Boolean(previewUrl),
     filesChanged,
+    changedPaths,
     diffChars,
     qualityWarnings: [...(qualityWarnings || [])],
     usage: { ...usage },
@@ -717,7 +724,12 @@ async function runJob(job) {
     const compileStarted = Date.now();
     let build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
     serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
-    if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
+    // The repair brief quotes this verbatim, so it keeps far more than the 2 000 characters a
+    // status line needed. A rollup error names the file, symbol and importer across several lines;
+    // truncating to the tail of 2 000 was losing the "imported by" half of the only line that
+    // mattered. The brief redacts and trims it again on the way to the model.
+    job.buildCommand = "npm run build";
+    if (!build.ok) job.buildStderr = (build.stderr || "").slice(-20_000);
     job.diag?.step({
       agent: "Compiler", kind: "compiler", label: "npm run build",
       status: build.ok ? "ok" : "failed",

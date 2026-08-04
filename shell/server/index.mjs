@@ -83,6 +83,7 @@ import {
 } from "./routes/thralloAnalytics.mjs";
 import { startAnalyticsRollup, stopAnalyticsRollup } from "./lib/analytics/rollup.mjs";
 import { startGeoipUpdater, stopGeoipUpdater } from "./lib/analytics/geoip.mjs";
+import { reportCapabilities } from "./lib/capabilityReport.mjs";
 import { handleProjectHealth } from "./routes/health.mjs";
 import { handleLogsList, handleLogsStream, handleLogsExport, handleLogRuns } from "./routes/logs.mjs";
 import {
@@ -1046,6 +1047,11 @@ server.listen(PORT, HOST, () => {
   startDiagnosticsSweeper();
   startAutomationSweeper();
   startLeadAgentRecovery();
+  // Last, so it reports the state AFTER every subsystem has had its chance to load: which optional
+  // capabilities are on, which are off, and what each one costs when off. A missing PEXELS_API_KEY
+  // used to be visible only inside individual builds, so production shipped photo-less apps for an
+  // unknown length of time without anyone noticing.
+  try { reportCapabilities(); } catch (error) { console.warn("[capability] report failed:", error.message); }
 });
 
 let shuttingDown = false;

@@ -6,6 +6,7 @@ import { auditEvent } from "./projectState.mjs";
 import { deleteProjectSecret, getProjectSecret, setProjectSecret } from "./projectSecrets.mjs";
 import { safeBrowserUrl } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
+import { isMissingTable, noteMissingCapability } from "./schemaCapability.mjs";
 import { beginMetaOwnerOAuth, finishMetaOwnerOAuth, metaConfigured, testMetaOwner } from "./metaConnector.mjs";
 
 const ENVIRONMENT = "live";
@@ -109,6 +110,12 @@ async function integrationRows(owner, projectId, client) {
   const { data, error } = await client.from("project_integrations")
     .select("id,provider,status,config,last_error,created_at,updated_at")
     .eq("owner", owner).eq("project_id", projectId).eq("environment", ENVIRONMENT).in("provider", ids);
+  // The connector tables were never provisioned on this deployment. That is a missing optional
+  // feature, not a build failure — no connectors is exactly the same answer as no connector rows.
+  if (error && isMissingTable(error)) {
+    noteMissingCapability("connectors", error);
+    return [];
+  }
   if (error) throw new Error(`connectors: ${error.message}`);
   return data || [];
 }

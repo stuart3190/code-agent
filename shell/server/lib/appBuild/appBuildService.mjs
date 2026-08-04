@@ -21,6 +21,7 @@ import {
 } from "./buildCheckpoints.mjs";
 import { dailyByokSpend, dailyVerdict, dailyWarningMessage } from "./byokSpend.mjs";
 import { roundSignals, evaluateProgress, regressed } from "./repairProgress.mjs";
+import { buildRepairBrief, headlineError } from "./repairContext.mjs";
 import { normalizeByokSafety, byokDispatchCheck, byokBlockedMessage, byokWarning } from "./byokSafety.mjs";
 import { providerLabel, alternativeProviders, recordProviderSwitch, switchedMessage } from "../providerQuota.mjs";
 
@@ -65,20 +66,53 @@ export function repairStatusLine(repairNumber, { improved = null } = {}) {
   return line;
 }
 
-function repairBriefFor(reasons) {
-  return [
-    "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
-    "apply the smallest safe fix for each; change nothing else:",
-    ...reasons.map((r) => `- ${r}`),
-    "",
-    "Preserve the existing design, layout, branding and component structure exactly.",
-  ].join("\n");
+// The brief the repair agent is dispatched with.
+//
+// This used to be the reason list and nothing else — the reasons themselves capped at 200
+// characters — so a repair agent was asked to fix a rollup error it had never seen. It said so, in
+// production: "found no compile-time issue in the current source that can be safely changed without
+// the actual Build Diagnostics `baa3e8fc` output". Then it guessed, twice, wrongly.
+//
+// `diagnostics` carries the real thing: the command, the complete output, the previous patch and
+// whether it moved the failure. When it is absent (quality-warning rounds, and the pure-planner
+// unit tests) the reason list still stands on its own.
+function repairBriefFor(reasons, diagnostics = null) {
+  if (!diagnostics?.output) {
+    return [
+      "AUTONOMOUS REPAIR — the previous round failed these checks. Diagnose the root cause and",
+      "apply the smallest safe fix for each; change nothing else:",
+      ...reasons.map((r) => `- ${r}`),
+      "",
+      "Preserve the existing design, layout, branding and component structure exactly.",
+    ].join("\n");
+  }
+  return buildRepairBrief({ ...diagnostics, reasons });
 }
 
-function reasonsFor(data) {
+function reasonsFor(data, diagnostics = null) {
   if (data.status === "complete") {
-    return data.result?.qualityWarnings?.length ? data.result.qualityWarnings : ["the build's quality checks failed"];
+    // A compile failure arrives HERE, not on the failed branch: the job completes and reports
+    // buildOk false. It used to be described as "the build's quality checks failed" — which is
+    // exactly the sentence the repair agent read before announcing it was "addressing the build
+    // quality/lint failure" and deleting three unused imports. It is a compiler error; say so, and
+    // name it.
+    const warnings = data.result?.qualityWarnings || [];
+    if (data.result?.buildOk === false) {
+      const headline = diagnostics?.output ? headlineError(diagnostics.output) : "";
+      // The compile failure LEADS — it is why nothing runs — but the quality warnings are real
+      // findings and are still worth fixing in the same round, so they are kept alongside it.
+      // Naming the compiler error here also gives the fingerprint something to distinguish on:
+      // every compile failure used to hash to the same constant string, so two genuinely different
+      // errors looked like "the same failure came back unchanged" and ended the run.
+      return [
+        headline ? `the compiler rejected the project: ${headline}` : "the project failed to compile",
+        ...warnings,
+      ];
+    }
+    return warnings.length ? warnings : ["the build's quality checks failed"];
   }
+  // Kept short deliberately: this is the fingerprint input and the customer-facing sentence. The
+  // complete output travels in the brief's COMPLETE OUTPUT block, not through here.
   return [`the build ${data.status}${data.error ? `: ${String(data.error).slice(0, 200)}` : ""}`];
 }
 
@@ -93,6 +127,7 @@ export function planEndAction(data, {
   progress = null,
   alternatives = [],
   autoFallback = false,
+  diagnostics = null,
 } = {}) {
   const endState = classifyEndState(data);
 
@@ -109,7 +144,7 @@ export function planEndAction(data, {
     return { kind: data.result?.previewUrl ? "verify" : "warmup", endState };
   }
 
-  const reasons = reasonsFor(data);
+  const reasons = reasonsFor(data, diagnostics);
   const fingerprint = fingerprintFailure(reasons);
 
   // 3. A provider limit needs a DIFFERENT provider, never another blind attempt on the same
@@ -194,7 +229,12 @@ export function planEndAction(data, {
   const improved = progress?.improved === true && attempt > 1;
   return {
     kind: "repair", endState, fingerprint,
-    brief: repairBriefFor(reasons),
+    brief: repairBriefFor(reasons, diagnostics && {
+      ...diagnostics,
+      fingerprint,
+      previousFingerprint: previousFingerprints[previousFingerprints.length - 1] || null,
+      attempt, maxAttempts,
+    }),
     announcement: improved
       ? `The last repair improved the build. I'm fixing the remaining issue now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`
       : `A check found a problem. I'm repairing it now and will re-run verification — attempt ${attempt} of ${MAX_AUTO_REPAIRS}.`,
@@ -427,8 +467,33 @@ function signalsFromJob(job, data, { verdict = null, briefFingerprint = null } =
     verificationChecksPassed: checks.length ? checks.filter((c) => c.status === "pass").length : null,
     verificationChecksTotal: checks.length || null,
     filesChanged: m.filesChanged ?? 0,
+    changedPaths: m.changedPaths || [],
     diffChars: m.diffChars ?? 0,
   });
+}
+
+// Everything the repair agent needs to see the failure rather than be told one exists.
+//
+// Assembled at the moment a round ends, from the job that just ran: the command, its complete
+// output, the tree it built, the manifest it built against, and what the round that just finished
+// actually touched. `buildRepairBrief` redacts before any of it reaches a model.
+function diagnosticsFor(job, data, lifecycle, signals) {
+  const tree = data?.result?.tree || job?.result?.tree || null;
+  const output = job?.buildStderr || (data?.error ? String(data.error) : "");
+  if (!output) return null;
+  // The round that just ended IS the previous repair, from the next brief's point of view.
+  const previousRound = lifecycle.rounds.length > 1 ? lifecycle.rounds[lifecycle.rounds.length - 2] : null;
+  return {
+    command: job?.buildCommand || "npm run build",
+    output,
+    changedFiles: signals?.changedPaths || [],
+    tree,
+    manifest: tree?.["package.json"] || null,
+    worktree: job?.workdir || null,
+    previousAttempts: previousRound?.changedPaths?.length
+      ? [`round ${lifecycle.rounds.length - 1} edited ${previousRound.changedPaths.join(", ")} and the build still failed`]
+      : [],
+  };
 }
 
 // Build phases → the specialist the user watches. Sequential: each phase change retires the
@@ -591,6 +656,7 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
           progress,
           alternatives: alternativesFor(lifecycle),
           autoFallback: lifecycle.allowFallback,
+          diagnostics: diagnosticsFor(job, data, lifecycle, signals),
         });
         lifecycle.endState = action.endState;
         await finishSpecialist(action.kind === "verify" || action.kind === "warmup");

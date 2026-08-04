@@ -23,6 +23,7 @@ export function roundSignals({
   verificationChecksPassed = null,
   verificationChecksTotal = null,
   filesChanged = 0,
+  changedPaths = [],
   diffChars = 0,
 } = {}) {
   const list = [].concat(failures || []).map((f) => String(f));
@@ -39,6 +40,9 @@ export function roundSignals({
     verificationChecksPassed,
     verificationChecksTotal,
     filesChanged: Number(filesChanged) || 0,
+    // The paths, not just the count — the next repair brief names what the last patch touched, so
+    // an agent can see it edited a file the error never mentioned.
+    changedPaths: [].concat(changedPaths || []).map(String),
     diffChars: Number(diffChars) || 0,
   };
 }
