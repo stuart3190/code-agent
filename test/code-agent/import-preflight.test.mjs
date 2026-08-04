@@ -11,11 +11,20 @@ import {
 } from "../../shell/server/lib/appBuild/importPreflight.mjs";
 import { exportSurface, installedVersion, resetSurfaceCache } from "../../shell/server/lib/appBuild/moduleSurface.mjs";
 import { depsNodeModules } from "../../harness/workspace.mjs";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 const nodeModules = depsNodeModules();
+
+// Reading a real export surface needs the shared scaffold dependencies actually installed. CI does
+// not install them — they are a multi-hundred-megabyte lazy install done by ensureDeps at first
+// build — so those tests SKIP there rather than assert against an empty node_modules and fail for
+// a reason that has nothing to do with the code. The pure logic below runs everywhere.
+const INSTALLED = existsSync(join(nodeModules, "lucide-react", "package.json"));
+const needsDeps = { skip: INSTALLED ? false : "requires harness/.deps (run a build once, or npm run harness)" };
 const manifest = (deps) => JSON.stringify({ name: "t", dependencies: deps }, null, 2);
 
-test("the export surface is read exactly, without executing the package", async () => {
+test("the export surface is read exactly, without executing the package", needsDeps, async () => {
   resetSurfaceCache();
   const surface = await exportSurface("lucide-react", { nodeModules });
   assert.ok(surface, "lucide-react's surface must be readable");
@@ -27,7 +36,7 @@ test("the export surface is read exactly, without executing the package", async 
   assert.match(await installedVersion("lucide-react", { nodeModules }), /^\d+\.\d+\.\d+/);
 });
 
-test("a package whose surface cannot be read is UNKNOWN, never empty", async () => {
+test("a package whose surface cannot be read is UNKNOWN, never empty", needsDeps, async () => {
   // react is CJS: nothing is statically parseable. Reporting "exports nothing" would fail every
   // build in the product. Silence is the only safe answer.
   assert.equal(await exportSurface("react", { nodeModules }), null);
@@ -40,7 +49,7 @@ test("a package whose surface cannot be read is UNKNOWN, never empty", async () 
   assert.deepEqual(result.problems, [], "an unreadable surface must not produce a single problem");
 });
 
-test("FAULT 1 — an invalid lucide icon is caught and corrected before any build", async () => {
+test("FAULT 1 — an invalid lucide icon is caught and corrected before any build", needsDeps, async () => {
   const result = await preflightImports({
     "package.json": manifest({ "lucide-react": "1.28.0" }),
     "src/App.jsx": `import { Instagram, Clock } from "lucide-react";\nexport default () => <Instagram />;\n`,
@@ -60,7 +69,7 @@ test("FAULT 1 — an invalid lucide icon is caught and corrected before any buil
   assert.notEqual(result.tree, undefined);
 });
 
-test("substitution never creates a duplicate binding", async () => {
+test("substitution never creates a duplicate binding", needsDeps, async () => {
   // Renaming Instagram to Camera in a file that already imports Camera yields
   // `{ Camera, Camera }` — a SyntaxError, and a new build failure caused by the fix.
   const result = await preflightImports({
@@ -106,7 +115,7 @@ test("extensionless, index and @/ alias imports all resolve", async () => {
   assert.deepEqual(result.problems.map((p) => p.specifier), []);
 });
 
-test("FAULT 3 — a non-existent named export with no safe substitute is reported, not guessed", async () => {
+test("FAULT 3 — a non-existent named export with no safe substitute is reported, not guessed", needsDeps, async () => {
   const result = await preflightImports({
     "package.json": manifest({ "lucide-react": "1.28.0" }),
     "src/App.jsx": `import { TotallyMadeUpGlyph } from "lucide-react";\n`,
@@ -170,7 +179,7 @@ test("parseImports reads every clause form and reports honest line numbers", () 
   assert.equal(found[4].line, 5);
 });
 
-test("a deep import is left alone rather than judged against the root's surface", async () => {
+test("a deep import is left alone rather than judged against the root's surface", needsDeps, async () => {
   // `lucide-react/icons/camera` has its own entry and a default-only surface. Checking it against
   // the barrel's names would report a false failure.
   const result = await preflightImports({
@@ -180,7 +189,7 @@ test("a deep import is left alone rather than judged against the root's surface"
   assert.deepEqual(result.problems, []);
 });
 
-test("a clean project reports clean, and the tree is returned unchanged", async () => {
+test("a clean project reports clean, and the tree is returned unchanged", needsDeps, async () => {
   const tree = {
     "package.json": manifest({ "lucide-react": "1.28.0" }),
     "src/App.jsx": `import { Camera, Clock } from "lucide-react";\n`,
@@ -204,7 +213,7 @@ test("the summary names what was corrected and what was not", () => {
   );
 });
 
-test("build tooling imported by config files is not reported as a missing dependency", async () => {
+test("build tooling imported by config files is not reported as a missing dependency", needsDeps, async () => {
   // Caught by ops/prove-pipeline-reliability.mjs, not by a unit test: `vite.config.js` imports
   // `vite` and `@vitejs/plugin-react`, which live in the shared scaffold's node_modules and are
   // deliberately absent from the generated manifest. Flagging them would have failed EVERY real
