@@ -164,32 +164,40 @@ for (const attempt of [
 }
 
 // ── Claims match behaviour ──────────────────────────────────────────────────────────────
+//
+// Read across the main bundle AND every split chunk. Checking only the main bundle would report a
+// missing sentence for every string that lives in a lazily-loaded tab — which, since the tabs were
+// split, is most of the customer-facing copy in the product.
 {
   const index = await get("/");
   const main = index.text.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
-  const bundle = (await get(main)).text;
+  const mainBundle = (await get(main)).text;
+  const chunkNames = [...mainBundle.matchAll(/["'`]\.\/([\w.-]*-[\w-]{6,}\.js)["'`]/g)].map((m) => m[1]);
+  const chunks = await Promise.all([...new Set(chunkNames)].map((name) => get(`/assets/${name}`)));
+  const client = [mainBundle, ...chunks.map((c) => c.text)].join("\n");
+  check(chunkNames.length > 0, "the client is code-split", `${new Set(chunkNames).size} chunk(s)`);
 
-  check(!/faster builds/i.test(bundle),
+  check(!/faster builds/i.test(client),
     "the deployed client does not promise faster builds on a paid plan");
-  check(/does not meter storage/.test(bundle),
+  check(/does not meter storage/.test(client),
     "and says plainly that storage is not metered");
   // Countries stay unavailable until a GeoLite2 licence exists. The honest check is that the
   // product SAYS so rather than inferring a country from a language header.
-  check(/Countries/.test(bundle), "the analytics view still has a countries section");
-  check(/unavailable|not available/i.test(bundle),
+  check(/Countries/.test(client), "the analytics view still has a countries section");
+  check(/unavailable|not available/i.test(client),
     "which states unavailability rather than guessing");
-}
+  // Asserted positively. A "must not contain 'guessed from'" check matched the product's own
+  // disclaimer — "deliberately not guessed from browser language or timezone" — and reported the
+  // right behaviour as a failure.
+  check(/not guessed from browser language or timezone/i.test(client),
+    "and states that it is not inferred from language or timezone");
+  check(/GeoLite2/i.test(client), "naming what it is waiting for");
 
-// ── The deployed client can exit a stuck conversation ───────────────────────────────────
-{
-  const index = await get("/");
-  const main = index.text.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
-  const bundle = (await get(main)).text;
   // The server emitted `lead_recovered` and nothing in the client handled it, so a recovered
   // conversation kept showing "Understanding request…" indefinitely.
-  check(bundle.includes("lead_recovered"),
+  check(client.includes("lead_recovered"),
     "the deployed client handles the recovery event the server sends");
-  check(/train of thought/.test(bundle), "and has a sentence for it");
+  check(/train of thought/.test(client), "and has a sentence for it");
 }
 
 console.log(`\n${out.join("\n")}\n`);
