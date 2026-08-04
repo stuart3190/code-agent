@@ -6,6 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import { openSettingsFromMenu } from "./accountMenu.mjs";
+import { SETTINGS_FIXTURE } from "./settingsStub.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -34,29 +35,6 @@ const SESSION = {
     app_metadata: { provider: "email" },
     created_at: "2026-01-01T00:00:00Z",
   },
-};
-
-// One Settings payload, shared by the specs that open Settings. Both used to depend on the real
-// server answering — which it does, with 401.
-const SETTINGS_FIXTURE = {
-  plan: { id: "free", name: "Free", monthly: { runs: 20, managedTokens: 1_500_000, computeSeconds: 10_800 } },
-  subscription: {
-    plan: "free", planName: "Free", status: "active", stripeManaged: false,
-    currentPeriodEnd: "2026-09-01T00:00:00.000Z", cancelAtPeriodEnd: false, periodEndMeans: "resets",
-    pendingPlan: null, pendingPlanName: null, pendingPlanAt: null,
-    overrides: { runs: null, managedTokens: null, computeSeconds: null },
-  },
-  plans: [], stripeConfigured: false,
-  capabilities: { plan: "free", retentionDays: 7, errorReporting: false, buildHistory: false, export: false, multiDomain: false },
-  ownerAccount: false, previewPlan: null, unlimited: false, pastDue: false,
-  period: { start: "2026-08-01T00:00:00.000Z", end: "2026-09-01T00:00:00.000Z" },
-  budgets: {
-    runs: { used: 0, limit: 20, remaining: 20 },
-    managedTokens: { used: 250_000, limit: 1_500_000, remaining: 1_250_000 },
-    computeSeconds: { used: 0, limit: 10_800, remaining: 10_800 },
-  },
-  tokens: [], notifications: { unread: 0, channels: {}, vapidPublicKey: "" },
-  counts: { projects: 1, liveSites: 0, deployments: 0 },
 };
 
 const EVENTS = [

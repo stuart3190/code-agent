@@ -6,7 +6,8 @@
 // exercises the real deployed bundle without touching a real account).
 
 import { expect, test } from "@playwright/test";
-import { openSettingsFromMenu } from "./accountMenu.mjs";
+import { openPreferences } from "./accountMenu.mjs";
+import { stubSettings } from "./settingsStub.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -50,10 +51,11 @@ async function openAiSettings(page, { connections = [], byokSafety = { global: {
   } }));
   await page.route("**/api/v1/ai/evaluations", (r) => r.fulfill({ json: { health: [], evaluations: [] } }));
 
+  await stubSettings(page);
   await page.goto("/");
   await expect(page.getByText("What are we building today?")).toBeVisible();
   // The avatar is the account-menu trigger now; Settings is an item on that menu.
-  await openSettingsFromMenu(page);
+  await openPreferences(page);
   await page.getByRole("button", { name: "Manage" }).first().click();
   await expect(page.getByRole("heading", { name: "AI connection" })).toBeVisible();
 }
@@ -118,6 +120,7 @@ test("'Configure provider' in the model selector lands on the AI connection scre
     autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "x", stats: null },
   } }));
 
+  await stubSettings(page);
   await page.goto("/");
   await expect(page.getByText("What are we building today?")).toBeVisible();
   await page.locator(".ct-model-pill").click();

@@ -15,9 +15,21 @@ export async function openAccountMenu(page) {
   return menu;
 }
 
-/** Open Settings from the account menu, and wait for the sheet. */
+/** Open Settings from the account menu, and wait for the sheet. Lands on the Usage tab. */
 export async function openSettingsFromMenu(page) {
   const menu = await openAccountMenu(page);
   await menu.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+}
+
+/**
+ * Open Settings and land on Preferences.
+ *
+ * Settings became a tabbed address (`/settings/usage`, `/settings/preferences`, …). Theme and the
+ * "Manage" link into the AI connection screen both moved onto Preferences, so specs that used to
+ * find them on one long sheet have to ask for the tab now.
+ */
+export async function openPreferences(page) {
+  await openSettingsFromMenu(page);
+  await page.getByRole("tab", { name: /Preferences/ }).click();
 }

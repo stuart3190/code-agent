@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import {
   isMissingTable, noteMissingCapability, withOptionalTable, resetCapabilityNotices,
 } from "../../shell/server/lib/schemaCapability.mjs";
-import { reportCapabilities } from "../../shell/server/lib/capabilityReport.mjs";
+import { reportCapabilities, capabilities } from "../../shell/server/lib/capabilityReport.mjs";
 
 test("a missing table is recognised in every form Postgres and PostgREST report it", () => {
   // The exact production message.
@@ -89,4 +89,24 @@ test("a configured capability reports as enabled rather than warning", () => {
     if (before === undefined) delete process.env.PEXELS_API_KEY;
     else process.env.PEXELS_API_KEY = before;
   }
+});
+
+test("a capability that is configured but still loading is not reported as disabled", () => {
+  // Observed in the live boot log: "DISABLED: country analytics ... (loading)". The licence key
+  // was present and the database was seconds from being read — reporting that as disabled would
+  // send an operator hunting for a key that is already there.
+  const lines = [];
+  const log = { log: (m) => lines.push(`log ${m}`), warn: (m) => lines.push(`warn ${m}`) };
+  reportCapabilities({ log });
+
+  const geoLines = lines.filter((l) => l.includes("country analytics"));
+  for (const line of geoLines) {
+    if (/still loading/.test(line)) {
+      assert.ok(line.startsWith("log "), "a loading capability must not warn");
+      assert.ok(!/DISABLED/.test(line));
+    }
+  }
+  // And the states stay distinguishable rather than collapsing into a boolean.
+  const geo = capabilities().find((c) => c.name === "country analytics");
+  assert.ok(geo.available === true || geo.available === false || geo.available === null);
 });

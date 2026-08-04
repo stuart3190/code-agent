@@ -22,9 +22,21 @@ function capabilities() {
   let geoip = { available: false, detail: "THRALLO_MAXMIND_LICENSE_KEY is not set" };
   try {
     const status = geoipStatus();
-    geoip = status?.available
-      ? { available: true, detail: status.builtAt ? `database built ${status.builtAt}` : "database loaded" }
-      : { available: false, detail: status?.reason || "THRALLO_MAXMIND_LICENSE_KEY is not set" };
+    if (status?.available) {
+      geoip = { available: true, detail: status.builtAt ? `database built ${status.builtAt}` : "database loaded" };
+    } else if (status?.reason === "loading") {
+      // The report runs at boot, and the database loads asynchronously. Calling that DISABLED is
+      // untrue — the licence key is present and the file is on its way in. `pending` says so and
+      // prints as neither enabled nor a warning.
+      geoip = { available: null, detail: "the database is still loading" };
+    } else {
+      geoip = {
+        available: false,
+        detail: status?.reason === "not_configured"
+          ? "THRALLO_MAXMIND_LICENSE_KEY is not set"
+          : `the database is unavailable (${status?.reason || "unknown"})`,
+      };
+    }
   } catch {
     geoip = { available: false, detail: "geoip status unavailable" };
   }
@@ -58,15 +70,21 @@ function capabilities() {
  */
 export function reportCapabilities({ log = console } = {}) {
   const list = capabilities();
-  const off = list.filter((c) => !c.available);
-  const on = list.filter((c) => c.available).map((c) => c.name);
+  // `available: null` is a third state — configured but not settled yet — and must not be reported
+  // as DISABLED, which would send an operator hunting for a missing key that is present.
+  const off = list.filter((c) => c.available === false);
+  const pending = list.filter((c) => c.available === null);
+  const on = list.filter((c) => c.available === true).map((c) => c.name);
 
   if (on.length) log.log(`[capability] enabled: ${on.join(", ")}`);
+  for (const capability of pending) {
+    log.log(`[capability] starting: ${capability.name} — ${capability.detail}`);
+  }
   for (const capability of off) {
     // warn, not log: an operator filtering for warnings should see this.
     log.warn(`[capability] DISABLED: ${capability.name} — ${capability.consequence} (${capability.detail})`);
   }
-  if (!off.length) log.log("[capability] all optional capabilities are configured");
+  if (!off.length && !pending.length) log.log("[capability] all optional capabilities are configured");
   return list;
 }
 

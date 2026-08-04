@@ -3,7 +3,8 @@
 // main surfaces. Guards the light-mode regression report of 2026-07-31.
 
 import { test, expect } from "@playwright/test";
-import { openSettingsFromMenu } from "./accountMenu.mjs";
+import { openPreferences } from "./accountMenu.mjs";
+import { stubSettings } from "./settingsStub.mjs";
 import { readFile } from "node:fs/promises";
 
 let REF = null;
@@ -68,13 +69,14 @@ async function assertThemeReadable(page, label) {
 test("light is the default; Light/Dark/System round-trip, persist, and stay readable", async ({ page }) => {
   await stub(page);
   await page.emulateMedia({ colorScheme: "dark" }); // a dark OS must NOT darken the app by itself
+  await stubSettings(page);
   await page.goto("/");
   await expect(page.locator(".ct-question")).toBeVisible();
   expect(await rootTheme(page), "fresh load defaults to light even on a dark OS").toBe("light");
   await assertThemeReadable(page, "light");
 
   // Selector: all three options present; Dark applies and is readable.
-  await openSettingsFromMenu(page);
+  await openPreferences(page);
   const group = page.getByRole("group", { name: "Theme" });
   await expect(group.getByRole("button", { name: "Light" })).toBeVisible();
   await expect(group.getByRole("button", { name: "Dark" })).toBeVisible();
@@ -103,8 +105,9 @@ test("light is the default; Light/Dark/System round-trip, persist, and stay read
   expect(await page.evaluate(() => localStorage.getItem("thrallo-theme"))).toBe("system");
   expect(await rootTheme(page), "system persisted across reload").toBe("dark");
 
-  // Explicit light persists too.
-  await openSettingsFromMenu(page);
+  // Explicit light persists too. Settings is an address now, so the reload above restored the
+  // Preferences tab exactly where it was — reopening it would click an avatar that the sheet covers.
+  await expect(group.getByRole("button", { name: "Light" })).toBeVisible();
   await group.getByRole("button", { name: "Light" }).click();
   await page.reload();
   await expect(page.locator(".ct-question")).toBeVisible();
@@ -118,6 +121,7 @@ test("account preference follows the user to a fresh device", async ({ page }) =
   await page.route(`https://${REF}.supabase.co/auth/v1/user**`, (route) => route.fulfill({
     json: { ...SESSION.user, user_metadata: { ...SESSION.user.user_metadata, thrallo_theme: "dark" } },
   }));
+  await stubSettings(page);
   await page.goto("/");
   await expect(page.locator(".ct-question")).toBeVisible();
   await expect.poll(() => rootTheme(page), { message: "account dark preference adopted" }).toBe("dark");
