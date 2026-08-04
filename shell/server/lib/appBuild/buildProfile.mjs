@@ -95,6 +95,10 @@ export const PROFILES = Object.freeze({
     maxAiCalls: 8,
     maxDurationMs: 8 * 60_000,
     maxRepairTurns: 6,
+    // Supporting screens read 292,652 input tokens against 7,920 out — a 37:1 ratio — because it
+    // re-reads the whole accumulated tree on every uncapped turn. The contract requirements in its
+    // prompt are untouched; only the number of times it re-reads the project is bounded.
+    maxStageTurns: 8,
     // A simple app's foundation and journey are the same work; splitting them buys nothing and
     // costs a model call plus a compile.
     mergeStages: true,
@@ -108,6 +112,7 @@ export const PROFILES = Object.freeze({
     maxAiCalls: 14,
     maxDurationMs: 15 * 60_000,
     maxRepairTurns: 8,
+    maxStageTurns: 12,
     mergeStages: false,
     genericAuthProbe: true,
   },
@@ -117,6 +122,7 @@ export const PROFILES = Object.freeze({
     maxAiCalls: 24,
     maxDurationMs: 30 * 60_000,
     maxRepairTurns: 12,
+    maxStageTurns: 18,
     mergeStages: false,
     genericAuthProbe: true,
   },

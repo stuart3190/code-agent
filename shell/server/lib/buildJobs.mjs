@@ -34,6 +34,7 @@ import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { buildTree, ensureDeps, depsNodeModules } from "../../../harness/workspace.mjs";
 import { preflightImports, preflightSummary } from "./appBuild/importPreflight.mjs";
 import { generateContract } from "./appBuild/contractAgent.mjs";
+import { classifyComplexity, profileFor } from "./appBuild/buildProfile.mjs";
 import { runStagedBuild, stagesSummary, primaryStageOk } from "./appBuild/stagedBuild.mjs";
 import { runStageGate } from "./appBuild/stageGate.mjs";
 import { honestyScan, honestyFailures } from "./appBuild/honestyScan.mjs";
@@ -752,6 +753,11 @@ async function runJob(job) {
     // an edit would be five model calls to change one line, and staging without a contract has no
     // basis on which to allocate the work.
     const staged = mode === "build" && contract && !job.disableStaging;
+    // Bound how many times a stage may re-read the project. Measured: the later a stage runs the
+    // larger the tree it re-reads, and Supporting screens reached a 37:1 input-to-output ratio.
+    const stageTurnCap = profileFor(
+      classifyComplexity({ prompt, contract }).level,
+    ).maxStageTurns;
     let initial;
     let stageReport = null;
 

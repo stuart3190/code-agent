@@ -27,7 +27,7 @@ import {
 } from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
 import { honestyFailures, honestyScan } from "./honestyScan.mjs";
-import { deterministicRepairs, deterministicSummary } from "./deterministicRepair.mjs";
+import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { classifyComplexity, profileFor } from "./buildProfile.mjs";
 import {
   functionalRepairBrief, regenerateModuleBrief, findingKey, nextFunctionalTier,
@@ -1197,18 +1197,18 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     const { data: stored } = await serviceClient().from("projects")
       .select("tree").eq("id", projectId).eq("owner", ctx.owner).maybeSingle();
     const currentTree = stored?.tree || result?.tree || {};
-    const fixed = deterministicRepairs(currentTree, {
+    const fixed = transformPersistence(currentTree, {
       findings: job.honesty.findings, contract: diag.contract,
     });
-    if (fixed.repaired.length) {
+    if (fixed.fixed.length) {
       const rescanned = honestyScan(fixed.tree, { contract: diag.contract });
       diag.step({
         agent: "Compiler", kind: "deterministic_repair", label: "Deterministic repair (0 credits)",
         status: rescanned.ok ? "ok" : "failed", round: attempt,
-        output: `${deterministicSummary(fixed)}
+        output: `${transformSummary(fixed)}
 findings before: ${job.honesty.findings.length} · after: ${rescanned.findings.length}`,
       });
-      console.log(`[app-build ${diag.id?.slice(0, 8)}] ${deterministicSummary(fixed)}`);
+      console.log(`[app-build ${diag.id?.slice(0, 8)}] ${transformSummary(fixed)}`);
       if (rescanned.ok) {
         // Fixed for free. Persist and re-verify without ever calling a model.
         await deps.persistBuildResult(ctx.owner, projectId, { ...result, tree: fixed.tree });
