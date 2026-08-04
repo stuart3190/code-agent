@@ -234,7 +234,13 @@ async function createCheckoutSession(client, owner, planId, customerId) {
   }, {
     // A double click, or the same page open in two tabs, returns the SAME session rather than two.
     // Without this, paying in both tabs buys two subscriptions.
-    idempotencyKey: `thrallo:checkout:${owner}:${customerId}:${price}`,
+    //
+    // Bucketed by the hour, though, rather than stable forever. A Stripe idempotency key lives for
+    // 24 hours, so a fixed key meant the FIRST session of the day was returned for the rest of it —
+    // including after that session had expired, and including after the customer's details had been
+    // corrected. A stale, unpayable link came back looking freshly minted. An hour is far longer
+    // than a double click and far shorter than a day.
+    idempotencyKey: `thrallo:checkout:${owner}:${customerId}:${price}:${Math.floor(Date.now() / 3_600_000)}`,
   });
   return session.url;
 }
