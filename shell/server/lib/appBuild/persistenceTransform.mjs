@@ -23,7 +23,7 @@ const READ_PATTERNS = [
   // JSON.parse(<store>.getItem(<key>) || "[]")  — the list read, with or without a fallback
   {
     id: "json_list_read",
-    regex: new RegExp(String.raw`JSON\s*\.\s*parse\s*\(\s*${STORE_ACCESS}\s*\.\s*getItem\s*\([^)]*\)\s*(?:\|\|\s*(?:"\[\]"|'\[\]'|` + "`\\[\\]`" + String.raw`)\s*)?\)`, "g"),
+    regex: new RegExp(String.raw`JSON\s*\.\s*parse\s*\(\s*${STORE_ACCESS}\s*\.\s*getItem\s*\([^)]*\)\s*(?:(?:\|\||\?\?)\s*(?:"\[\]"|'\[\]'|` + "`\\[\\]`" + String.raw`)\s*)?\)`, "g"),
     replace: (entity) => `await db.entity("${entity}").list()`,
   },
 ];
@@ -62,6 +62,20 @@ const HYBRID_TERNARY = new RegExp(
 // Once the fallback becomes a real create, the guard is redundant — but removing the guard is a
 // judgement call, so the fallback is rewritten and the guard left in place. The result is correct
 // either way: both branches now write to the database.
+
+// SHAPE A from run f4c1c00c: the lazy React state initialiser with try/catch —
+//
+//   useState(() => { try { return JSON.parse(localStorage.getItem(KEY)) || fb; } catch { return fb; } })
+//
+// The initialiser is a cross-refresh convenience CACHE of state the component also holds live. The
+// provable mapping: the initial state becomes the fallback, and the paired same-key writes are
+// removed, so the component's in-session behaviour is unchanged (first render = fallback either
+// way) and the authoritative record lives in db.entity(). Requires the try-fallback and the
+// catch-fallback to be textually identical — different fallbacks mean intent this cannot prove.
+const LAZY_INIT_TRY = new RegExp(
+  String.raw`useState\s*\(\s*\(\s*\)\s*=>\s*\{\s*try\s*\{\s*return\s+JSON\s*\.\s*parse\s*\(\s*${STORE_ACCESS}\s*\.\s*getItem\s*\(\s*([\w$]+|["'][^"']+["'])\s*\)\s*\)\s*(?:(?:\|\||\?\?)\s*([^;]+?))?\s*;\s*\}\s*catch\s*(?:\([^)]*\)\s*)?\{\s*return\s+([^;]+?)\s*;\s*\}\s*\}\s*\)`,
+  "g",
+);
 
 // Storage reached inside a component rather than a data module: a hook body, a callback, an event
 // handler, an inline expression in JSX. The latest production run put four of nine findings in
@@ -141,6 +155,34 @@ export function transformModule(source, { entity, path = "" } = {}) {
     return realBranch.trim();
   });
 
+  // SHAPE A: the lazy try/catch initialiser (run f4c1c00c, src/App.jsx:378). Replace the whole
+  // initialiser with its fallback, and remove the same-key writes so no storage remains. The keys
+  // it neutralises are collected so the statement sweep below knows which writes are paired.
+  const neutralisedKeys = new Set();
+  if (looksLikeComponent(original, path)) {
+    working = working.replace(LAZY_INIT_TRY, (whole, key, tryFallback, catchFallback) => {
+      const a = (tryFallback || "").trim();
+      const b = (catchFallback || "").trim();
+      const fallback = a || b;
+      // Different fallbacks mean intent this transform cannot prove — leave it for the model.
+      if (a && b && a !== b) return whole;
+      applied.push("lazy_init_try");
+      neutralisedKeys.add(key);
+      return `useState(${fallback || "null"})`;
+    });
+    // The paired writes: whole statements that only mirror the neutralised state into storage.
+    for (const key of neutralisedKeys) {
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      working = working.replace(
+        new RegExp(String.raw`^\s*(?:window\s*\.\s*|globalThis\s*\.\s*)?(?:localStorage|sessionStorage)\s*\.\s*(?:setItem\s*\(\s*${escaped}\s*,[^;]*|removeItem\s*\(\s*${escaped}\s*\))\s*\)?\s*;\s*$`, "gm"),
+        (statement) => {
+          applied.push("paired_cache_write_removed");
+          return statement.replace(/\S[\s\S]*$/, "// (browser cache removed — the record lives in the database)");
+        },
+      );
+    }
+  }
+
   // Component-local storage first: a useState initialiser must become an empty state before the
   // generic read pattern turns it into an `await` inside a synchronous initialiser, which does not
   // compile.
@@ -151,6 +193,59 @@ export function transformModule(source, { entity, path = "" } = {}) {
         applied.push(pattern.id);
         return pattern.replace(entity, match);
       });
+    }
+  }
+
+  // SHAPE B (run f4c1c00c, src/data/reservations.js:46): a whole-value save helper —
+  //
+  //   function saveX(value) { localStorage.setItem(KEY, JSON.stringify(value)); }
+  //
+  // The helper itself has no provable mapping: "persist this whole list" is not a db.entity()
+  // operation. Its CALLERS do. When every caller is an append ([...] spread, or push-then-save) or
+  // a filter-by-property, each call site maps exactly — create(item), or list-and-delete-matching —
+  // and the helper then has no callers and is removed along with its key constant. Any caller
+  // outside those forms leaves the helper in place, and the module declines loudly as before.
+  const saveHelper = working.match(new RegExp(
+    String.raw`function\s+([\w$]+)\s*\(\s*([\w$]+)\s*\)\s*\{\s*${STORE_ACCESS}\s*\.\s*setItem\s*\(\s*([\w$]+|["'][^"']+["'])\s*,\s*JSON\s*\.\s*stringify\s*\(\s*\2\s*\)\s*\)\s*;?\s*\}`,
+  ));
+  if (saveHelper) {
+    const [helperText, helperName, , keyToken] = saveHelper;
+    const name = helperName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let rewrote = false;
+
+    // save([...list, item]) → create(item)
+    working = working.replace(
+      new RegExp(String.raw`(?:await\s+)?${name}\s*\(\s*\[\s*\.\.\.\s*[\w$.()]+\s*,\s*([\w$.]+)\s*\]\s*\)\s*;?`, "g"),
+      (whole, item) => { rewrote = true; applied.push("save_helper_append"); return `await db.entity("${entity}").create(${item});`; },
+    );
+    // list.push(item); save(list) → create(item)
+    working = working.replace(
+      new RegExp(String.raw`([\w$]+)\s*\.\s*push\s*\(\s*([\w$]+)\s*\)\s*;\s*\n?\s*(?:await\s+)?${name}\s*\(\s*\1\s*\)\s*;?`, "g"),
+      (whole, list, item) => { rewrote = true; applied.push("save_helper_push"); return `await db.entity("${entity}").create(${item});`; },
+    );
+    // save(list.filter((r) => r.prop !== value)) → delete every row whose prop matches
+    working = working.replace(
+      new RegExp(String.raw`(?:await\s+)?${name}\s*\(\s*[\w$.()]+\s*\.\s*filter\s*\(\s*\(?\s*([\w$]+)\s*\)?\s*=>\s*\1\s*\.\s*([\w$]+)\s*!==?\s*([\w$.]+)\s*\)\s*\)\s*;?`, "g"),
+      (whole, row, prop, value) => {
+        rewrote = true; applied.push("save_helper_filter_delete");
+        return `{\n    const rows = await db.entity("${entity}").list();\n    for (const r of rows) if (r.${prop} === ${value}) await db.entity("${entity}").delete(r.id);\n  }`;
+      },
+    );
+
+    // Only when every caller was rewritten may the helper (and its now-orphaned key) be removed —
+    // a surviving caller means an unprovable use, and the untouched helper makes the module
+    // decline below rather than half-transform.
+    const callersLeft = (working.match(new RegExp(String.raw`\b${name}\s*\(`, "g")) || [])
+      .length - 1; // the declaration itself
+    if (rewrote && callersLeft === 0) {
+      working = working.replace(helperText, "");
+      if (/^[\w$]+$/.test(keyToken)) {
+        const keyRefs = (working.match(new RegExp(String.raw`\b${keyToken}\b`, "g")) || []).length;
+        // The const declaration plus at most the read pattern (rewritten next) may remain.
+        if (keyRefs <= 2) {
+          working = working.replace(new RegExp(String.raw`^\s*const\s+${keyToken}\s*=\s*["'][^"']*["']\s*;\s*$`, "m"), "");
+        }
+      }
     }
   }
 

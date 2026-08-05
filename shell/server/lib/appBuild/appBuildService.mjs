@@ -466,7 +466,20 @@ async function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
   // BYOK never reserves: it pays the user's own provider account, not managed credits.
   const ceiling = lifecycle.costCeiling;
   if (ceiling && lifecycle.managed && lifecycle.reservations) {
-    const estimate = estimatedCredits || lifecycle.lastCallCredits || 4;
+    // THE ESTIMATE RULE (final verification build, run f4c1c00c). The fallback used to be
+    // lastCallCredits — which after a staged build is the WHOLE PREVIOUS JOB's cost. A 4-credit
+    // repair therefore asked to reserve ~17 against 8 remaining and was refused, at 17.00/25.
+    // A targeted repair's estimate is the smallest of: the configured repair cap for this build's
+    // complexity, and the measured cost of the last actual REPAIR when one exists. The preceding
+    // staged-job total must never be the estimate for a targeted repair.
+    const repairCap = profileFor(classifyComplexity({
+      prompt: lifecycle.originalInput?.prompt || "", contract: lifecycle.diag?.contract || null,
+    }).level).maxRepairCredits;
+    const estimate = Math.min(
+      estimatedCredits || repairCap,
+      lifecycle.lastRepairCredits || repairCap,
+      repairCap,
+    );
     const reservation = await lifecycle.reservations.reserve({
       buildId: lifecycle.diag?.id || lifecycle.projectId, credits: estimate, ceiling,
     });
@@ -746,6 +759,9 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         // aggregate budget is what the next dispatch is checked against.
         const measurements = job.measurements || null;
         lifecycle.lastCallCredits = Number(measurements?.credits || 0) || lifecycle.lastCallCredits;
+        if (/repair/.test(job.trigger || "")) {
+          lifecycle.lastRepairCredits = Number(measurements?.credits || 0) || lifecycle.lastRepairCredits;
+        }
         // Reconcile this job's reservation to what it actually cost; release the remainder. A job
         // that failed after metering still settles at its real usage — the tokens were incurred.
         if (lifecycle.activeHold) {
