@@ -85,6 +85,19 @@ export const RESTORE_ORDER = [
   "project_logs",
   "health_checks",
   "health_status",
+  // Builder v2 (FK-safe: snapshots before their files and pointers).
+  "bv2_feature_flags",
+  "bv2_migration_state",
+  "bv2_project_knowledge",
+  "bv2_blobs",
+  "bv2_snapshots",
+  "bv2_snapshot_files",
+  "bv2_project_pointers",
+  "bv2_contracts",
+  "bv2_builds",
+  "bv2_assets",
+  "bv2_retrieval_traces",
+  "bv2_patches",
 ];
 
 const BATCH = 500;

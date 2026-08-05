@@ -34,7 +34,15 @@ const INTENTIONALLY_NOT_BACKED_UP = new Map([
   "project_actions", "app_jobs", "runtime_usage", "app_usage_ledger", "action_schedules",
   "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",
   "app_user_integrations", "app_connector_oauth_states",
-].map((table) => [table, UNAPPLIED_LEGACY]));
+].map((table) => [table, UNAPPLIED_LEGACY]).concat([
+  // Builder v2 DERIVED data: the indexer rebuilds all four deterministically from any snapshot
+  // (content-hash keyed), so backing them up doubles snapshot size for zero recovery value.
+  ["bv2_file_revisions", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
+  ["bv2_symbols", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
+  ["bv2_symbol_refs", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
+  ["bv2_dependency_edges", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
+  ["bv2_verification_cache", "a cache keyed by owners_hash; re-verification regenerates it and restoring stale verdicts would be worse than empty"],
+]));
 
 // EVERY table any migration creates. This deliberately does NOT filter by name: the previous
 // version matched a hardcoded allowlist (`ca_\w+|projects|build_jobs|…`), so seven tables added

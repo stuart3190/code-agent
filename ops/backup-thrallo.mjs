@@ -94,6 +94,23 @@ export const CA_TABLES = [
   "project_logs",
   "health_checks",
   "health_status",
+  // Builder v2 foundation (2026-08-05, docs/BUILDER-V2-MASTER-PLAN.md). Snapshots and blobs
+  // are the projects themselves under v2; pointers are the promotion state; knowledge,
+  // contracts, builds, assets, retrieval traces and patches are the audit trail. The DERIVED
+  // index tables (file_revisions/symbols/symbol_refs/dependency_edges) and the verification
+  // cache are deliberately excluded below — rebuildable deterministically from snapshots.
+  "bv2_feature_flags",
+  "bv2_migration_state",
+  "bv2_project_knowledge",
+  "bv2_blobs",
+  "bv2_snapshots",
+  "bv2_snapshot_files",
+  "bv2_project_pointers",
+  "bv2_contracts",
+  "bv2_builds",
+  "bv2_assets",
+  "bv2_retrieval_traces",
+  "bv2_patches",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
