@@ -53,7 +53,16 @@ test("budgetLedger.debit records a standalone app_build usage row and always suc
   });
   assert.equal(out.ok, true);
   assert.equal(out.partial, false);
-  assert.equal(out.debited, Math.round((1600 / TOKENS_PER_CREDIT) * 10_000) / 10_000);
+  // The debit uses the SAME cache-aware, model-weighted formula as every reporting surface.
+  // This assertion previously pinned the flat total/TOKENS_PER_CREDIT rule — it encoded the
+  // 2026-08-05 billing defect as the expected behaviour, which is how the defect survived
+  // 961 tests: the one test that looked at the debit agreed with the wrong answer.
+  const { creditsForUsage } = await import("../../src/billing/costModel.mjs");
+  const canonical = creditsForUsage({
+    usage: { input: 900, cached: 100, output: 500, reasoning: 200, total: 1600 }, model: "gpt-test",
+  });
+  assert.equal(out.debited, Math.round(canonical * 10_000) / 10_000);
+  assert.ok(out.debited > 0, "an unknown model still prices at the default rate rather than zero");
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].owner, "owner-1");
   assert.equal(recorded[0].row.billing_source, "managed");

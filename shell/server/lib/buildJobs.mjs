@@ -494,6 +494,19 @@ async function runJob(job) {
     const buildContext = await resolveBuildContext(owner.id, { preferProvider: job.providerOverride });
     const byok = buildContext.byok;
     job.diag?.setByok?.(byok); // stamps ai_requests so BYOK spend is separable from managed
+
+    // BILLING INCIDENT KILL SWITCH (2026-08-05). Managed settlement charged cached input tokens at
+    // the full fresh rate — run 83883309 was debited 51.33 credits for 19.25 of real cost. While
+    // reconciliation is under way, managed dispatch fails CLOSED rather than continuing to charge
+    // with a known-wrong formula. BYOK is unaffected: it never touches the managed ledger.
+    if (!byok && process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED === "1") {
+      serverLog(job, "billing: managed settlement is PAUSED for billing reconciliation — refusing managed dispatch");
+      throw new ManagedBillingError(
+        "Managed builds are briefly paused while we correct a billing calculation in your favour. "
+        + "Your credits and your work are safe — please try again shortly, or connect your own API key to continue now.",
+        "settlement_paused",
+      );
+    }
     const providerConfig = { provider: buildContext.providerLabel, strong: buildContext.strongModel };
     const buildProvider = buildContext.buildProvider;
 

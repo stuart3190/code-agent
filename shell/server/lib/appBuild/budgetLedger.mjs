@@ -12,6 +12,10 @@
 import { codeAgentStore } from "../codeAgentStore.mjs";
 import { budgetOverview } from "../usageBudgets.mjs";
 import { TOKENS_PER_CREDIT } from "../../../../src/cost.mjs";
+// The ONE pricing function. The 2026-08-05 incident happened because this module priced debits
+// with its own flat rule while every reporting surface used costModel — right in the report,
+// wrong on the debit.
+import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 
 const r4 = (n) => Math.round(n * 10_000) / 10_000;
 
@@ -48,7 +52,19 @@ export function createBudgetLedger({
       billing_source: "managed",
       metadata: { kind: "app_build", ref: String(ref || "").slice(0, 200), total_tokens: tokens.total },
     });
-    const need = r4(tokens.total / TOKENS_PER_CREDIT);
+    // THE 2026-08-05 BILLING DEFECT LIVED ON THIS LINE. It read:
+    //
+    //   const need = r4(tokens.total / TOKENS_PER_CREDIT);
+    //
+    // — a flat tokens-per-credit rule that priced every cached input token as a fresh one and
+    // ignored model weighting entirely. Run 83883309: 356,455 of 518,992 tokens were cached, the
+    // real cost was 19.25 credits, and this line debited 51.33. Diagnostics, ai_requests and the
+    // profiler all used the cache-aware costModel and agreed with each other; the one formula that
+    // took the money was the one that disagreed.
+    //
+    // There is now exactly one pricing function. If the price is wrong, it is wrong everywhere at
+    // once, visibly — never right in the report and wrong on the debit.
+    const need = r4(creditsForUsage({ usage: tokens, model }));
     const balance = await getBalance(owner);
     void allowPartial;
     return { ok: true, debited: need, need, partial: false, balance };
