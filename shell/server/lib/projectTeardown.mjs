@@ -50,6 +50,22 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   // prompts behind. diag_steps cascades from it.
   { table: "diag_runs", column: "project_id", ownerScoped: true, label: "build diagnostics" },
 
+  // Builder v2 (docs/BUILDER-V2-MASTER-PLAN.md Part 12): a deleted project's snapshots ARE its
+  // source — none of it may survive. Children before parents: snapshot_files/pointers cascade
+  // from snapshots via FK, but symbols/refs/edges cascade from file_revisions, so revisions
+  // purge covers all four index tables. bv2_blobs is per-owner content-addressed and swept by
+  // GC when no retained snapshot references a hash; the manifest rows deleting here is what
+  // makes those blobs unreferenced.
+  { table: "bv2_migration_state", column: "project_id", ownerScoped: true, label: "builder migration state" },
+  { table: "bv2_project_knowledge", column: "project_id", ownerScoped: true, label: "project knowledge" },
+  { table: "bv2_file_revisions", column: "project_id", ownerScoped: true, label: "code index" },
+  { table: "bv2_project_pointers", column: "project_id", ownerScoped: true, label: "snapshot pointers" },
+  { table: "bv2_snapshots", column: "project_id", ownerScoped: true, label: "snapshots" },
+  { table: "bv2_contracts", column: "project_id", ownerScoped: true, label: "build contracts" },
+  { table: "bv2_verification_cache", column: "project_id", ownerScoped: true, label: "verification cache" },
+  { table: "bv2_builds", column: "project_id", ownerScoped: true, label: "builds" },
+  { table: "bv2_assets", column: "project_id", ownerScoped: true, label: "project imagery" },
+
   // Last: qa_runs cascades from this, and nothing else may reference it afterwards.
   { table: "projects", column: "id", ownerScoped: true, label: "project" },
 ]);
@@ -65,6 +81,14 @@ const UNAPPLIED_LEGACY = "defined by an unapplied Buildr101-era migration; absen
 export const NOT_PURGED = Object.freeze(new Map([
   ["qa_runs", "cascades from projects (FK ON DELETE CASCADE) — deleting it here would be redundant"],
   ["diag_steps", "cascades from diag_runs (FK ON DELETE CASCADE)"],
+  ["bv2_symbols", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
+  ["bv2_symbol_refs", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
+  ["bv2_dependency_edges", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
+  ["bv2_snapshot_files", "cascades from bv2_snapshots (FK ON DELETE CASCADE)"],
+  ["bv2_retrieval_traces", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
+  ["bv2_patches", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
+  ["bv2_blobs", "per-owner content-addressed store; GC removes hashes no retained snapshot references once manifests are purged above"],
+  ["bv2_feature_flags", "platform-global flags — carries no project or app column, listed for the guard only"],
   ...[
     "project_secrets", "project_integrations", "project_environments", "project_releases",
     "background_tasks", "audit_events", "payment_products", "payment_orders",
