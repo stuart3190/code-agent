@@ -9,10 +9,10 @@
 import { createSupabaseBackend } from "../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
 import { makeBookingSystem, CREATE_RESULT, BOOKING_STATUS } from "../src/scaffolds/reactVite/lib/capabilities/booking.js";
 import { makeNewsletter, NEWSLETTER_RESULT } from "../src/scaffolds/reactVite/lib/capabilities/forms.js";
-import "../shell/server/lib/env.mjs";
+import { optionalEnv } from "../shell/server/lib/env.mjs";
 
-const url = process.env.SUPABASE_URL || process.env.CODE_AGENT_SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.CODE_AGENT_SUPABASE_SERVICE_ROLE_KEY;
+const url = optionalEnv("SUPABASE_URL");
+const key = optionalEnv("SUPABASE_SERVICE_ROLE_KEY") || optionalEnv("SUPABASE_SERVICE_ROLE");
 if (!url || !key) { console.error("no supabase service credentials in env"); process.exit(1); }
 
 const APP_ID = "bv2-capability-proof";
