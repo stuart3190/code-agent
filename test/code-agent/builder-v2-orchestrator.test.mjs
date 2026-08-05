@@ -373,6 +373,40 @@ test("WP9 regression — a byte-identical no-op batch is rejected deterministica
     `the model is TOLD it emitted a no-op: ${JSON.stringify(fedBack)}`);
 });
 
+test("WP9 regression — a capability-usage defect is rejected deterministically with the interface taught back", async () => {
+  let round = 0;
+  let fedBack = null;
+  const BAD_CONTACT_PATCH = [{
+    newFile: "src/routes/BookPage.jsx",
+    content: `import React from "react";
+import { makeContactForm } from "../lib/capabilities";
+
+const contactForm = makeContactForm({ entity: "contactMessage" });
+
+export default function BookPage() {
+  async function go() { await contactForm.submit({ name: "x" }); }
+  return <main><h1>Book a farm visit</h1><p role="status">Booking confirmed — reference SA-1</p><button onClick={go}>Submit booking</button></main>;
+}
+`,
+  }];
+  const { orchestrator } = harness({
+    patchPlan: {
+      core: ({ rejections }) => {
+        round += 1;
+        if (round === 1) return BAD_CONTACT_PATCH;
+        fedBack = rejections;
+        return CORE_PATCH;
+      },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "green", "round 2 recovers with the taught interface");
+  assert.ok(fedBack?.some((r) => r.signature === "capability-usage" && /\[submitContact\]/.test(r.reason)),
+    `the rejection teaches the REAL interface: ${JSON.stringify(fedBack)}`);
+});
+
 test("WP8 — renderAssetData is deterministic and placeholder-safe", () => {
   const resolved = [
     { slot: "hero", via: "search", asset: { alt_text: "a", original_url: "https://x/o.jpg", optimised_url: null, width: 100, height: 50, variants: {} } },

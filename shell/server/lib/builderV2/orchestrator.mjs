@@ -16,6 +16,7 @@ import { indexTree } from "./indexerV0.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches } from "./patchEngine.mjs";
 import { tierContract, bindCapabilities, imageIntents, previewEligibility } from "./contractTiering.mjs";
+import { lintCapabilityUsage } from "./capabilityLint.mjs";
 import {
   verifyStage, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
@@ -158,6 +159,15 @@ export function createOrchestrator({
             + "and make every journey outcome visible as real UI text",
         }];
         log(`${step}: no-op batch rejected deterministically`);
+        continue;
+      }
+      // D1 capability-usage lint — a call to a method the capability does not export is a
+      // guaranteed runtime failure; caught HERE it costs a free round, not a browser cycle
+      // (live run 3 lost its build to contactForm.submit vs submitContact).
+      const usage = lintCapabilityUsage(applied.tree);
+      if (!usage.ok) {
+        rejections = usage.problems.map((reason) => ({ signature: "capability-usage", reason }));
+        log(`${step}: ${usage.problems.length} capability-usage defect(s) rejected deterministically`);
         continue;
       }
       const gate = await verifyStage(applied.tree, gateOptions(contract, step, journeys));

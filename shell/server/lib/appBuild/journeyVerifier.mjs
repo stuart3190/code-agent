@@ -337,7 +337,9 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     if (outcome) return outcome;
   }
 
-  if (!navigated && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book/i.test(action)) {
+  // "use" joined the verb list after a live run: "use the page navigation (Contact
+  // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
+  if (!navigated && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book|use/i.test(action)) {
     const target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
     if (target) {
       await target.click({ timeout: 5_000 }).catch(() => {});

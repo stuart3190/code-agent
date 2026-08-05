@@ -72,6 +72,17 @@ export function validateBindings(bindings = []) {
   return { ok: problems.length === 0, problems };
 }
 
+// The EXACT methods each factory's instance exposes — one source of truth with the D1
+// usage lint (capabilityLint.mjs pins the same table; a drift test compares both against
+// the real factories). Live run 3 failed on contactForm.submit vs submitContact because
+// the brief named the factories but never their methods.
+const INSTANCE_METHODS = Object.freeze({
+  crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
+  booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
+  contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
+  newsletter: "makeNewsletter(...) → { subscribe(email) }",
+});
+
 /** The interface brief a build prompt carries — small, byte-stable, sorted. */
 export function capabilityBrief(names = Object.keys(CAPABILITIES)) {
   const lines = ["CAPABILITIES (import from ./lib/capabilities — never reimplement):"];
@@ -79,6 +90,7 @@ export function capabilityBrief(names = Object.keys(CAPABILITIES)) {
     const entry = CAPABILITIES[name];
     if (!entry) continue;
     lines.push(`  ${entry.name}@${entry.version}: ${entry.interface.join(", ")}`);
+    if (INSTANCE_METHODS[name]) lines.push(`    ${INSTANCE_METHODS[name]}`);
     if (entry.uiContract.length) lines.push(`    UI must render states: ${entry.uiContract.join(", ")}`);
   }
   return lines.join("\n");
