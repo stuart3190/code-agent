@@ -1249,6 +1249,47 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   const previous = lifecycle.rounds[previousIndex - 1] || null;
   const progress = attempt > 1 ? evaluateProgress(previous, signals) : null;
 
+  // TIER 1 — the fix that costs nothing, BEFORE the budget gate.
+  //
+  // In the final verification build this block sat after dispatchCheck: the ceiling refused the
+  // model repair's reservation at 21.65/25 and the run stopped — while a zero-credit fix for the
+  // exact finding was sitting right here. A deterministic repair makes no model call, so it must
+  // never be blocked by the model-credit ceiling, and it reserves nothing.
+  //
+  // Declines are RECORDED now. In that same run the transform reached this point and declined on
+  // the module's shape — silently, because the step was only logged on success. An invisible
+  // decline reads as "never attempted", which is exactly how it was misreported.
+  if (job?.honesty?.findings?.length && !lifecycle.deterministicTried) {
+    lifecycle.deterministicTried = true;
+    const { data: stored } = await serviceClient().from("projects")
+      .select("tree").eq("id", projectId).eq("owner", ctx.owner).maybeSingle();
+    const currentTree = stored?.tree || result?.tree || {};
+    const fixed = transformPersistence(currentTree, {
+      findings: job.honesty.findings, contract: diag.contract,
+    });
+    const rescanned = fixed.fixed.length ? honestyScan(fixed.tree, { contract: diag.contract }) : null;
+    diag.step({
+      agent: "Compiler", kind: "deterministic_repair", label: "Deterministic repair (0 credits)",
+      status: rescanned?.ok ? "ok" : "failed", round: attempt,
+      output: [
+        transformSummary(fixed),
+        ...(rescanned ? [`findings before: ${job.honesty.findings.length} · after: ${rescanned.findings.length}`] : []),
+        ...fixed.declined.map((d) => `DECLINED ${d.file}: ${d.reasons.join("; ")}`),
+      ].join("\n"),
+    });
+    console.log(`[app-build ${diag.id?.slice(0, 8)}] deterministic: ${transformSummary(fixed)}`);
+    if (rescanned?.ok) {
+      // Fixed for free. Persist and re-verify — no model call, no reservation, no budget consult.
+      await deps.persistBuildResult(ctx.owner, projectId, { ...result, tree: fixed.tree });
+      job.honesty = rescanned;
+      await deps.verify(ctx, {
+        projectId, jobId, previewUrl, result: { ...result, tree: fixed.tree },
+        attempt, lifecycle, job, deps,
+      });
+      return;
+    }
+  }
+
   const check = await dispatchCheck(lifecycle);
   const action = planVerificationAction(verdict, {
     attempt,
@@ -1275,41 +1316,6 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
       }),
     });
     return;
-  }
-
-  // TIER 1 — the fix that costs nothing.
-  //
-  // The 28-credit repair round was a model reading 355,772 input tokens to make a change that, for
-  // fake persistence, is mechanical. Try it deterministically first; only what cannot be
-  // translated unambiguously reaches a model.
-  if (job?.honesty?.findings?.length && !lifecycle.deterministicTried) {
-    lifecycle.deterministicTried = true;
-    const { data: stored } = await serviceClient().from("projects")
-      .select("tree").eq("id", projectId).eq("owner", ctx.owner).maybeSingle();
-    const currentTree = stored?.tree || result?.tree || {};
-    const fixed = transformPersistence(currentTree, {
-      findings: job.honesty.findings, contract: diag.contract,
-    });
-    if (fixed.fixed.length) {
-      const rescanned = honestyScan(fixed.tree, { contract: diag.contract });
-      diag.step({
-        agent: "Compiler", kind: "deterministic_repair", label: "Deterministic repair (0 credits)",
-        status: rescanned.ok ? "ok" : "failed", round: attempt,
-        output: `${transformSummary(fixed)}
-findings before: ${job.honesty.findings.length} · after: ${rescanned.findings.length}`,
-      });
-      console.log(`[app-build ${diag.id?.slice(0, 8)}] ${transformSummary(fixed)}`);
-      if (rescanned.ok) {
-        // Fixed for free. Persist and re-verify without ever calling a model.
-        await deps.persistBuildResult(ctx.owner, projectId, { ...result, tree: fixed.tree });
-        job.honesty = rescanned;
-        await deps.verify(ctx, {
-          projectId, jobId, previewUrl, result: { ...result, tree: fixed.tree },
-          attempt, lifecycle, job, deps,
-        });
-        return;
-      }
-    }
   }
 
   if (action.kind === "repair") {

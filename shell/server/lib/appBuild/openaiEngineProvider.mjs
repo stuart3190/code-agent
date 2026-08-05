@@ -84,7 +84,16 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
         toolCalls.push({ id: item.call_id, name: item.name, rawArguments: item.arguments, arguments: args });
       }
     }
-    return { text: text.trim(), toolCalls, usage: normalizeUsage(data.usage) };
+    return {
+      text: text.trim(),
+      toolCalls,
+      // The provider's own response id rides with the usage. The 2026-08-05 billing incident could
+      // only be reconciled against tariff tables because no provider id was stored — and the first
+      // fix patched src/providers/codexProvider (used by ops probes), while THIS is the provider
+      // production's managed path actually runs on. The verification build recorded zero ids,
+      // which is how the mistake surfaced.
+      usage: { ...normalizeUsage(data.usage), providerRequestId: data.id || null },
+    };
   }
 
   return { runTurn, model: resolvedModel };

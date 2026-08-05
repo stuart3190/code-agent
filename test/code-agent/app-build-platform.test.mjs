@@ -121,7 +121,12 @@ test("openaiEngineProvider speaks the engine runTurn contract over the Responses
   assert.equal(out.toolCalls.length, 2);
   assert.deepEqual(out.toolCalls[0], { id: "c1", name: "apply_patch", rawArguments: '{"patch":"x"}', arguments: { patch: "x" } });
   assert.deepEqual(out.toolCalls[1].arguments, { __raw: "{not json" });
-  assert.deepEqual(out.usage, { input: 120, output: 40, reasoning: 8, cached: 30, total: 160 });
+  // providerRequestId joined the usage shape on 2026-08-05 (billing-incident follow-up): the
+  // response id rides with the usage so ai_requests can be reconciled against provider billing.
+  assert.deepEqual(out.usage, {
+    input: 120, output: 40, reasoning: 8, cached: 30, total: 160,
+    providerRequestId: null, // this fixture's response carries no id; capture is proven elsewhere
+  });
 });
 
 test("openaiEngineProvider surfaces HTTP errors with status", async () => {
