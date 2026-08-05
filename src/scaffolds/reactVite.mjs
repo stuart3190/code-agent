@@ -236,6 +236,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   "src/lib/backend/index.js": sdk("lib/backend/index.js"),
   "src/lib/backend/supabaseBackend.js": sdk("lib/backend/supabaseBackend.js"),
 
+  // Anonymous visitor sessions — maintained, tested platform infrastructure. Generated apps
+  // IMPORT ensureVisitorSession; they never write their own bootstrap (a 46.10-credit build spent
+  // three in-stage repair rounds re-inventing this file badly). The honesty scan exempts exactly
+  // this module and blocks local variants; the stage gate protects it from edits.
+  "src/lib/visitorSession.js": sdk("lib/visitorSession.js"),
+
   // Dev-only preview error reporter (the shell's "Fix it" loop). Fixed file, imported
   // first by main.jsx; absent from production builds via the import.meta.env.DEV guard.
   "src/lib/devReporter.js": sdk("lib/devReporter.js"),

@@ -40,6 +40,8 @@ const DEFINITIONS = {
       "module-level array or a React context as the place records live. A production run built the",
       "entire reservation layer on localStorage: it survived a reload on that one browser, looked",
       "completely working, and lost every booking the moment anyone opened it anywhere else.",
+      "For anonymous visitors, import { ensureVisitorSession } from \"./lib/visitorSession\" —",
+      "it ships with the scaffold. Do NOT write a session/bootstrap module of your own.",
       "State may cache what the backend returned; the backend is what a reload reads from.",
       "Export the functions the screens will call. Wire nothing into the UI yet beyond what is",
       "needed to prove the module loads.",
@@ -191,22 +193,36 @@ export function stagePrompt(stage, contract, { request }) {
     lines.push("");
   }
 
-  // The expectations are rendered as what the VERIFIER will literally test, not as prose. The
-  // 24.26-credit booking build implemented every step "impressionistically" and then failed
-  // verification on wording: the page never said "selected", never said "confirmation" — because
-  // nothing had told the builder the check is visible text. Same source of truth on both sides.
+  // The expectations are rendered as STATE TRANSITIONS, not vocabulary. The first correction of
+  // this block told the builder which words the verifier looks for — and the 46.10-credit run
+  // answered by putting "selected" and "date" in static copy, which the verifier correctly
+  // rejected: it snapshots the page BEFORE each action and only counts what changed AFTER it.
+  // So each step now states the full transition contract: initial state, action, resulting
+  // state, and how the result must be reflected in the DOM.
   if (stage.journeys?.length) {
-    lines.push("JOURNEYS THIS STAGE MUST MAKE PASS — a real browser will drive every step and then");
-    lines.push("look for the named words as VISIBLE TEXT on the page. Internal state that renders");
-    lines.push("nothing does not count. After each action, the outcome must be on screen:");
+    lines.push("JOURNEYS THIS STAGE MUST MAKE PASS — a real browser drives every step. The verifier");
+    lines.push("snapshots the page BEFORE each action and passes the step only when the expected");
+    lines.push("outcome APPEARS OR CHANGES as a result of the action. Words already present as");
+    lines.push("static copy count for NOTHING — a page that always says \"selected\" fails the");
+    lines.push("selection step. Every outcome must be a real state transition:");
+    lines.push("  - choosing an option: it renders unchosen first, and the click adds a visible");
+    lines.push("    active/selected state (class or aria-selected AND visible text that changes);");
+    lines.push("  - submitting: confirmation wording and any reference/id must NOT exist before");
+    lines.push("    submit and must render after it;");
+    lines.push("  - cancelling or updating: the visible status text changes to the new state;");
+    lines.push("  - menus and navigation: closed first, open after the trigger, driveable by");
+    lines.push("    keyboard and touch via real buttons/links with accessible names.");
     lines.push("");
   }
   for (const journey of stage.journeys || []) {
     lines.push(`JOURNEY — ${journey.title}${journey.priority === "primary" ? " (PRIMARY — the preview is gated on this)" : ""}:`);
     for (const [i, step] of (journey.steps || []).entries()) {
-      lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
+      lines.push(`  ${i + 1}. ACTION: ${step.action}${step.target ? ` (${step.target})` : ""}`);
+      lines.push(`     RESULT (must be caused by the action): ${step.expect}`);
       const wanted = expectationKeywords(step.expect);
-      if (wanted.length) lines.push(`     verifier looks for on-page text: ${wanted.join(", ")}`);
+      if (wanted.length) {
+        lines.push(`     before: ${wanted.join(", ")} absent (or in their pre-action state) · after: they newly appear or visibly change`);
+      }
     }
     lines.push("");
   }
@@ -259,10 +275,13 @@ export const STAGE_RUNTIME_CONTRACT = [
   "The app runs on the fixed Vite + React scaffold. Persistence is the backend SDK only:",
   '  import { auth, db } from "./lib/backend" — db.entity("<type>").create/list/update/delete,',
   "  auth.signUp / signIn / currentUser / signOut.",
-  "Entities are owner-scoped: reads and writes need a signed-in session; for apps without",
-  "sign-in, establish an anonymous visitor session and keep its credentials as the ONLY thing",
-  "cached in the browser.",
-  "localStorage, sessionStorage and IndexedDB are NOT persistence and fail the honesty scan.",
+  "Entities are owner-scoped: reads and writes need a signed-in session. For apps without",
+  "sign-in, the scaffold PROVIDES the anonymous session:",
+  '  import { ensureVisitorSession } from "./lib/visitorSession";',
+  "Call it before any anonymous persist/read. NEVER write your own session or bootstrap module",
+  "and never edit src/lib/visitorSession.js — a hand-written variant fails the honesty scan and",
+  "the stage gate. localStorage, sessionStorage and IndexedDB are NOT persistence anywhere in",
+  "app code and fail the scan.",
 ].join("\n");
 
 export const STAGE_GLOBAL_INVARIANTS = [

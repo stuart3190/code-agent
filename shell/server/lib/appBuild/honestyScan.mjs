@@ -21,7 +21,12 @@
 // a variable" — both look identical from outside — and the source says plainly which one it is.
 
 const SOURCE = /\.(jsx?|tsx?)$/;
-const APP_SOURCE = (path) => SOURCE.test(path) && path.startsWith("src/") && !path.startsWith("src/lib/backend/");
+// src/lib/backend/ is the shipped SDK; src/lib/visitorSession.js is the maintained visitor-session
+// bootstrap (its credential cache is session state, not records). Both are platform infrastructure,
+// centrally tested, and protected from edits by the stage gate — app-code REIMPLEMENTATIONS of
+// either remain blocking findings.
+const APP_SOURCE = (path) => SOURCE.test(path) && path.startsWith("src/")
+  && !path.startsWith("src/lib/backend/") && path !== "src/lib/visitorSession.js";
 
 // Comments and string bodies produce false hits — a comment saying "TODO: wire up the backend" is
 // not a fake handler. Blanked, preserving newlines so reported line numbers stay true.
@@ -241,16 +246,17 @@ export function honestyScan(tree, { contract = null, stageScoped = false } = {})
           continue;
         }
 
-        // Session-credential bootstrap: storage whose only consumer is auth.signIn/auth.signUp.
-        // Reported — the cache is real and worth seeing — but as a warning, because the records
-        // themselves live in the database under the session it establishes.
+        // A LOCAL session-bootstrap variant. The scaffold ships the maintained module
+        // (src/lib/visitorSession.js, excluded above); an app-code reimplementation stays a
+        // BLOCKING finding — the 46.10-credit run spent three in-stage repair rounds on a model
+        // reinventing this file in shapes nothing could verify — but it is labelled precisely so
+        // the deterministic transform (which maps it to the scaffold) is chosen over regeneration.
         if (pattern.id === "fake_persistence" && isSessionBootstrap(code, match.index)) {
-          warnings.push({
-            id: "session_credentials", severity: "soft", file: path, line,
-            label: "session credentials cached in the browser", snippet,
-            message: `${path}:${line} — session credentials cached in the browser: the cached value `
-              + "only signs into the backend (auth.signIn/auth.signUp); the records themselves live "
-              + "in the database",
+          findings.push({
+            id: "local_session_bootstrap", severity: "hard", file: path, line,
+            label: "a hand-written visitor-session bootstrap", snippet,
+            message: `${path}:${line} — a hand-written visitor-session bootstrap: use the supported `
+              + 'src/lib/visitorSession.js (import { ensureVisitorSession }) instead of reimplementing it',
           });
           continue;
         }

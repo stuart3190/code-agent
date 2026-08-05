@@ -28,6 +28,79 @@ const REASON_RANK = { target: 5, failure: 5, dependency: 4, prior_stage: 4, call
 // Small enough that including it wholesale is cheaper than reasoning about whether to.
 const ALWAYS_FULL = new Set(["package.json"]);
 
+// A prior-stage file bigger than this is SLICED by symbol, never resent whole. In the
+// 46.10-credit run the supporting stage opened at 32.7k tokens because the full App.jsx
+// (by then ~10k tokens) rode along as a prior-stage file even though the stage's own edits
+// touched a fraction of it — R1 had removed discovery turns and replaced them with
+// over-inclusion.
+const PRIOR_FULL_THRESHOLD = 2_500;
+
+/**
+ * Slice a source file into its top-level blocks and keep only the ones relevant to this stage.
+ *
+ * A block runs from one top-level declaration to the next — deterministic, no parser. The
+ * preamble (imports, constants before the first declaration) is always kept; a small block is
+ * always kept. A large block is elided when it clearly belongs to ANOTHER stage's journey:
+ * raw keyword presence cannot discriminate on a one-file app (every component mentions
+ * "booking"), so blocks are scored on the words DISTINCTIVE to this stage's journeys versus the
+ * words distinctive to other stages' — the 3,160-token BookingPage scores as the primary
+ * journey's and leaves the supporting stage's slice; ManagePage and NewsletterSection stay.
+ */
+export function sliceSource(source, { keywords = [], foreignKeywords = [], path = "" } = {}) {
+  const text = String(source || "");
+  const header = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|class)\s+([\w$]+)/gm;
+  const marks = [];
+  let m;
+  while ((m = header.exec(text)) !== null) marks.push({ name: m[1], start: m.index });
+  if (!marks.length) return { text, kept: [], elided: [] };
+
+  const own = new Set(keywords.map((k) => String(k).toLowerCase()));
+  const foreign = new Set(foreignKeywords.map((k) => String(k).toLowerCase()));
+  // Distinctive words only: anything shared between the sets discriminates nothing.
+  const ownDistinct = [...own].filter((w) => !foreign.has(w));
+  const foreignDistinct = [...foreign].filter((w) => !own.has(w));
+
+  const parts = [text.slice(0, marks[0].start)];
+  const kept = [];
+  const elided = [];
+
+  for (let i = 0; i < marks.length; i += 1) {
+    const block = text.slice(marks[i].start, marks[i + 1] ? marks[i + 1].start : text.length);
+    const lower = block.toLowerCase();
+    const lines = block.split("\n").length;
+    const ownScore = ownDistinct.filter((w) => lower.includes(w)).length;
+    const foreignScore = foreignDistinct.filter((w) => lower.includes(w)).length;
+    // Elide only on a CLEAR foreign majority in a big block — ambiguity keeps the body.
+    const foreignOwned = lines > 15 && foreignScore >= 2 && foreignScore > ownScore * 2;
+    if (!foreignOwned) {
+      parts.push(block);
+      kept.push(marks[i].name);
+    } else {
+      const signature = block.split("\n")[0].trim();
+      parts.push(`// ${signature} … } — ${marks[i].name} (${lines} lines) belongs to another stage's journey; read_file("${path}") is free if you need it\n`);
+      elided.push(marks[i].name);
+    }
+  }
+  return { text: parts.join("\n"), kept, elided };
+}
+
+/** The words that make a symbol relevant to a stage: its journeys and the contract's entities. */
+export function stageSliceKeywords(stageId, contract) {
+  return stageSliceKeywordSets(stageId, contract).own;
+}
+
+/** Own vs foreign journey vocabulary for a stage — the discriminator sliceSource scores with. */
+export function stageSliceKeywordSets(stageId, contract) {
+  const owns = (j) => (j.stage || "primary_journey") === stageId
+    || (stageId === "supporting" && (j.stage || "primary_journey") !== "primary_journey" && j.stage !== "foundation");
+  const wordsOf = (journeys) => journeys.flatMap((j) => `${j.id} ${j.title} ${(j.steps || []).map((s) => `${s.action} ${s.expect}`).join(" ")}`
+    .toLowerCase().match(/[a-z]{4,}/g) || []);
+  const entities = (contract?.entities || []).map((e) => String(e.name).toLowerCase());
+  const own = [...new Set([...wordsOf((contract?.journeys || []).filter(owns)), ...entities])];
+  const foreign = [...new Set(wordsOf((contract?.journeys || []).filter((j) => !owns(j))))];
+  return { own, foreign };
+}
+
 /**
  * Which files a stage may modify.
  *
@@ -143,10 +216,30 @@ export function buildStageContext({
     .sort((a, b) => REASON_RANK[b.reason] - REASON_RANK[a.reason] || a.tokens - b.tokens);
 
   const full = [];
+  const slices = [];
   const summaries = [];
   let used = fixed + manifestTokens;
+  const sliceKeywordSets = stageSliceKeywordSets(stageId, contract);
 
   for (const candidate of candidates) {
+    // A large file whose ONLY claim is "an earlier stage wrote it" is sliced by symbol: relevant
+    // blocks in full, the rest as signatures, a whole-file read free at the tool boundary. Files
+    // the stage will MODIFY (target/failure/dependency/caller) keep their full body — a patch
+    // needs exact context.
+    if (candidate.reason === "prior_stage" && candidate.tokens > PRIOR_FULL_THRESHOLD) {
+      const sliced = sliceSource(tree[candidate.path], {
+        keywords: sliceKeywordSets.own, foreignKeywords: sliceKeywordSets.foreign, path: candidate.path,
+      });
+      const sliceTokens = tokensOf(sliced.text);
+      if (used + sliceTokens <= budgetTokens) {
+        slices.push({ ...candidate, tokens: sliceTokens, content: sliced.text, kept: sliced.kept, elided: sliced.elided, reason: "prior_stage (sliced)" });
+        used += sliceTokens;
+      } else {
+        summaries.push({ ...candidate, reason: "prior_stage (summarised: context budget)" });
+        used += tokensOf(summariseFile(candidate.file));
+      }
+      continue;
+    }
     if (used + candidate.tokens <= budgetTokens) {
       full.push(candidate);
       used += candidate.tokens;
@@ -158,13 +251,13 @@ export function buildStageContext({
     }
   }
 
-  const included = new Set([...full, ...summaries].map((c) => c.path));
+  const included = new Set([...full, ...slices, ...summaries].map((c) => c.path));
   const omitted = map.files.filter((f) => !included.has(f.path))
     .map((f) => ({ path: f.path, tokens: f.tokens, reason: "not in the change set or one hop from it" }));
 
   return {
     stageId,
-    full, summaries, omitted,
+    full, slices, summaries, omitted,
     tokens: used,
     budget: budgetTokens,
     ok: used <= budgetTokens,
@@ -174,6 +267,7 @@ export function buildStageContext({
       contract: tokensOf(contract ? JSON.stringify(contract) : ""),
       manifest: manifestTokens,
       fullFiles: full.reduce((s, c) => s + c.tokens, 0),
+      sliced: slices.reduce((s, c) => s + c.tokens, 0),
       summaries: summaries.reduce((s, c) => s + tokensOf(summariseFile(c.file)), 0),
     },
     // What a whole-tree context would have cost, for the comparison that justifies all of this.
@@ -193,6 +287,11 @@ export function renderContext(context, tree, manifest) {
       lines.push(tree[path]);
     }
   }
+  for (const slice of context.slices || []) {
+    lines.push(`\n// ${slice.path} — written by an earlier stage; symbols relevant to THIS stage in full,`);
+    lines.push(`// the rest as signatures (${slice.elided.join(", ") || "none elided"}). read_file("${slice.path}") is free if you need a body.`);
+    lines.push(slice.content);
+  }
   if (context.summaries.length) {
     lines.push("\nVERIFIED FILES, SUMMARISED — ask for one by name if you need its implementation:");
     for (const { file } of context.summaries) lines.push(summariseFile(file));
@@ -207,8 +306,10 @@ export function contextReport(context) {
     `context for ${context.stageId}: ${context.tokens} tokens of ${context.budget} `
       + `(whole tree would be ${context.wholeTreeTokens})`,
     `  system ${b.system} · objective ${b.objective} · contract ${b.contract} · manifest ${b.manifest} `
-      + `· ${context.full.length} full files ${b.fullFiles} · ${context.summaries.length} summaries ${b.summaries}`,
+      + `· ${context.full.length} full files ${b.fullFiles} · ${(context.slices || []).length} sliced ${b.sliced || 0} `
+      + `· ${context.summaries.length} summaries ${b.summaries}`,
     `  omitted ${context.omitted.length} files (${context.omitted.reduce((s, o) => s + o.tokens, 0)} tokens)`,
     ...context.full.map((c) => `  FULL ${c.path} (${c.tokens}) — ${REASONS[c.reason] || c.reason}`),
+    ...(context.slices || []).map((c) => `  SLICE ${c.path} (${c.tokens}) — kept ${c.kept.join(",") || "preamble"}; elided ${c.elided.join(",") || "none"}`),
   ].join("\n");
 }

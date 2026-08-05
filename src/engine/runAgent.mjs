@@ -96,9 +96,20 @@ export async function runAgent({
         ` (total ${usage.total}) · cost-if-metered ${fmtGBP(c.gbp)}` +
         ` · running ${s.total} tok = ${(s.total / TOKENS_PER_CREDIT).toFixed(2)} credits`
     );
-    if (onUsage) await onUsage(usage);
+    // A budget guard that throws here stops the loop BEFORE the next provider request — but this
+    // turn's response is already paid for, so its tool calls are applied first and the abort
+    // happens after. Discarding paid work made every budget stop cost one wasted turn.
+    let budgetStop = null;
+    if (onUsage) {
+      try {
+        await onUsage(usage);
+      } catch (error) {
+        budgetStop = error;
+      }
+    }
 
     if (toolCalls.length === 0) {
+      if (budgetStop && !text.trim()) throw budgetStop;
       if (text.trim() !== "") {
         finalText = text; // normal completion: a summary with no further tool calls
         break;
@@ -160,6 +171,9 @@ export async function runAgent({
         }
       }
     }
+
+    // The paid work is applied; now the budget stop may fire — before any further provider call.
+    if (budgetStop) throw budgetStop;
   }
 
   return { tree, telemetry: { ...telemetry.summary(), prunedTokens }, turnLog, finalText };

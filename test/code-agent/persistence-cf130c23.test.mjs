@@ -1,17 +1,12 @@
-// The two deterministic-persistence shapes from run cf130c23 / build 94ad0b0f, proven against the
-// EXACT production sources (test/code-agent/fixtures/cf130c23/* is the stored project tree of the
-// blocked build, byte-for-byte — not simplified fixtures).
+// The persistence shapes from runs cf130c23 (blocked booking build) and 178f7fc8 (the
+// 46.10-credit run), proven against the EXACT production sources in fixtures/cf130c23.
 //
-// That run's honesty scan recorded FOUR hard findings and the transform declined both files:
-//   src/App.jsx:63/70                 — the visitor-session credential cache in ensureBookingSession
-//   src/data/newsletterSignup.js:38/39 — the guest fallback branch (capped-array localStorage write)
-//
-// The corrected classifications, pinned here:
-//   App.jsx's storage is AUTH BOOTSTRAP — its cached value's only consumer is auth.signIn/signUp,
-//   and replacing it with db.entity() is circular (entities are owner-scoped by RLS; the read
-//   would need the session the credentials establish). It becomes a WARNING, not a hard finding.
-//   The newsletter guest branch IS fake persistence, and its provable fix is the app's own
-//   bootstrap moved verbatim into a shared module — records land in the database for visitors too.
+// Design after the 46.10-credit run: the visitor-session bootstrap is a MAINTAINED SCAFFOLD
+// MODULE (src/lib/visitorSession.js), exempted from the honesty scan by path and protected from
+// edits by the stage gate. Hand-written variants — the file the model kept re-inventing through
+// three in-stage repair loops — are BLOCKING findings with their own label, and the deterministic
+// transform maps them to the scaffold: guest fallback branches call ensureVisitorSession, local
+// bootstrap functions become an import alias of it. Same callers, one tested implementation.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,11 +15,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { honestyScan, isSessionBootstrap, findSessionBootstrapFunction } from "../../shell/server/lib/appBuild/honestyScan.mjs";
 import { transformPersistence, transformGuestFallback, usesBrowserStorage } from "../../shell/server/lib/appBuild/persistenceTransform.mjs";
+import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "cf130c23");
 const read = (name) => readFileSync(path.join(FIXTURES, name), "utf8");
 
 const CONTRACT = { entities: [{ name: "booking" }, { name: "newsletterSignup" }] };
+const SCAFFOLD_SESSION = "src/lib/visitorSession.js";
 
 function productionTree() {
   return {
@@ -34,115 +31,114 @@ function productionTree() {
   };
 }
 
-// ── classification ────────────────────────────────────────────────────────────────────────────
+// ── the scaffold module itself ────────────────────────────────────────────────────────────────
 
-test("SHAPE A — the visitor-session credential cache classifies as session bootstrap, not fake persistence", () => {
+test("the scaffold ships ONE maintained visitor-session module and the scan exempts exactly it", () => {
+  const module = REACT_VITE[SCAFFOLD_SESSION];
+  assert.ok(module, "src/lib/visitorSession.js ships with the scaffold");
+  assert.match(module, /export async function ensureVisitorSession/);
+  assert.match(module, /auth\.signIn|auth\.signUp/);
+
+  // The scan does not flag the scaffold module — by PATH, not by shape. (Stage-scoped: a
+  // one-file tree has no db.entity call, and the whole-app rule is not what is under test.)
+  const scan = honestyScan({ [SCAFFOLD_SESSION]: module }, { contract: CONTRACT, stageScoped: true });
+  assert.equal(scan.findings.length, 0, JSON.stringify(scan.findings));
+});
+
+// ── classification: local variants BLOCK ──────────────────────────────────────────────────────
+
+test("a hand-written bootstrap is a BLOCKING finding with its own label (the repair-loop shape)", () => {
   const scan = honestyScan(productionTree(), { contract: CONTRACT });
 
-  // The run recorded 4 hard findings; the correct count is the 2 newsletter lines.
-  const hard = scan.findings.filter((f) => f.id === "fake_persistence");
-  assert.equal(hard.length, 2, JSON.stringify(scan.findings, null, 1));
-  assert.ok(hard.every((f) => f.file === "src/data/newsletterSignup.js"));
-  assert.deepEqual(hard.map((f) => f.line).sort(), [38, 39]);
+  // All four production expressions are hard findings now — two plain fake persistence in the
+  // newsletter module, two labelled as the local bootstrap in App.jsx.
+  const newsletter = scan.findings.filter((f) => f.id === "fake_persistence");
+  const bootstrap = scan.findings.filter((f) => f.id === "local_session_bootstrap");
+  assert.deepEqual(newsletter.map((f) => f.file), ["src/data/newsletterSignup.js", "src/data/newsletterSignup.js"]);
+  assert.deepEqual(bootstrap.map((f) => f.file), ["src/App.jsx", "src/App.jsx"]);
+  assert.match(bootstrap[0].message, /src\/lib\/visitorSession\.js/, "the finding names the supported module");
 
-  // App.jsx:63/70 are still REPORTED — as session-credential warnings, visible but not blocking.
-  const sessions = scan.warnings.filter((w) => w.id === "session_credentials");
-  assert.equal(sessions.length, 2);
-  assert.ok(sessions.every((w) => w.file === "src/App.jsx"));
-  assert.deepEqual(sessions.map((w) => w.line).sort((a, b) => a - b), [63, 70]);
+  // The classifier is still narrow: the newsletter guest branch is NOT a bootstrap.
+  const source = read("newsletterSignup.js");
+  assert.equal(isSessionBootstrap(source, source.indexOf("localStorage.getItem")), false);
+  assert.equal(findSessionBootstrapFunction(read("App.jsx"))?.name, "ensureBookingSession");
 });
 
-test("SHAPE A — the exemption is narrow: the newsletter guest branch is NOT session bootstrap", () => {
-  const newsletter = read("newsletterSignup.js");
-  // Both flagged expressions in the newsletter module stay hard findings.
-  const idx38 = newsletter.indexOf('localStorage.getItem("berry-brook-newsletter-signups"');
-  const idx39 = newsletter.indexOf('localStorage.setItem("berry-brook-newsletter-signups"');
-  assert.ok(idx38 > 0 && idx39 > 0, "the exact recorded expressions exist in the fixture");
-  assert.equal(isSessionBootstrap(newsletter, idx38), false);
-  assert.equal(isSessionBootstrap(newsletter, idx39), false);
-  // And the bootstrap finder locates the app's own function, by name, verbatim.
-  const found = findSessionBootstrapFunction(read("App.jsx"));
-  assert.equal(found?.name, "ensureBookingSession");
-  assert.match(found.text, /berry-brook-visitor-session/);
-  assert.match(found.text, /auth\.signIn\(saved\)/);
-});
+// ── the transform: everything maps to the scaffold ────────────────────────────────────────────
 
-// ── the transform ─────────────────────────────────────────────────────────────────────────────
-
-test("SHAPE B — the guest fallback branch maps to the app's own visitor session, moved verbatim", () => {
+test("the transform aliases the local bootstrap to the scaffold and rewires the guest branch", () => {
   const tree = productionTree();
   const scan = honestyScan(tree, { contract: CONTRACT });
   const result = transformPersistence(tree, { findings: scan.findings, contract: CONTRACT });
 
   assert.deepEqual(result.declined, [], JSON.stringify(result.declined, null, 1));
-  const files = result.fixed.map((f) => f.file).sort();
-  assert.deepEqual(files, ["src/App.jsx", "src/data/newsletterSignup.js"]);
 
-  // The bootstrap now lives in ONE shared module, byte-identical logic, exported.
-  const shared = result.tree["src/data/visitorSession.js"];
-  assert.ok(shared, "src/data/visitorSession.js was created");
-  assert.match(shared, /export async function ensureBookingSession\(\)/);
-  assert.match(shared, /berry-brook-visitor-session/);
-  assert.match(shared, /import \{ auth \} from "\.\.\/lib\/backend"/);
+  // The scaffold module was added to this older tree, verbatim.
+  assert.equal(result.tree[SCAFFOLD_SESSION], REACT_VITE[SCAFFOLD_SESSION]);
 
-  // The newsletter module: no browser storage at all; the guest branch establishes the SAME
-  // visitor session and falls through to the real create.
-  const newsletter = result.tree["src/data/newsletterSignup.js"];
-  assert.equal(usesBrowserStorage(newsletter), false);
-  assert.match(newsletter, /user = await ensureBookingSession\(\);/);
-  assert.match(newsletter, /import \{ ensureBookingSession \} from "\.\/visitorSession"/);
-  // Exported name, validation, and the real entity path are untouched.
-  assert.match(newsletter, /export async function createNewsletterSignup\(email\)/);
-  assert.match(newsletter, /Email must look like an email address\./);
-  assert.match(newsletter, /newsletterEntity\(\)\.create\(/);
-
-  // The origin: function replaced with a pointer comment, import added, callers intact.
+  // App.jsx: the hand-written function is GONE; its name now aliases the scaffold export, so
+  // every existing caller works unchanged.
   const app = result.tree["src/App.jsx"];
   assert.equal(usesBrowserStorage(app), false);
-  assert.match(app, /import \{ ensureBookingSession \} from "\.\/data\/visitorSession"/);
-  assert.match(app, /await ensureBookingSession\(\)/, "App.jsx still calls the bootstrap");
   assert.doesNotMatch(app, /async function ensureBookingSession/);
+  assert.match(app, /import \{ ensureVisitorSession as ensureBookingSession \} from "\.\/lib\/visitorSession"/);
+  assert.match(app, /await ensureBookingSession\(\)/, "callers untouched");
 
-  // Untouched bystander: booking.js is byte-identical.
+  // The newsletter guest branch: same scaffold session, then the real create.
+  const newsletter = result.tree["src/data/newsletterSignup.js"];
+  assert.equal(usesBrowserStorage(newsletter), false);
+  assert.match(newsletter, /user = await ensureVisitorSession\(\);/);
+  assert.match(newsletter, /import \{ ensureVisitorSession \} from "\.\.\/lib\/visitorSession"/);
+  assert.match(newsletter, /export async function createNewsletterSignup\(email\)/);
+  assert.match(newsletter, /newsletterEntity\(\)\.create\(/);
+
+  // Booking and newsletter therefore share ONE real backend session — the scaffold's.
   assert.equal(result.tree["src/data/booking.js"], tree["src/data/booking.js"]);
-});
 
-test("SHAPE B — the transformed tree rescans clean: zero hard findings, zero fake persistence", () => {
-  const tree = productionTree();
-  const first = honestyScan(tree, { contract: CONTRACT });
-  const result = transformPersistence(tree, { findings: first.findings, contract: CONTRACT });
+  // And the rescan is clean: no scanner/repair loop is possible on this tree.
   const rescan = honestyScan(result.tree, { contract: CONTRACT });
-
-  assert.equal(rescan.ok, true, JSON.stringify(rescan.findings, null, 1));
-  assert.equal(rescan.findings.length, 0);
-  // The moved bootstrap is still visible — as the session-credentials warning, in its new home.
-  assert.ok(rescan.warnings.some((w) => w.id === "session_credentials" && w.file === "src/data/visitorSession.js"));
-  // No business persistence in the browser anywhere in app code.
-  for (const [file, source] of Object.entries(result.tree)) {
-    if (file === "src/data/visitorSession.js") continue; // session credentials, classified above
-    assert.equal(usesBrowserStorage(source), false, `${file} still touches browser storage`);
-  }
+  assert.equal(rescan.findings.length, 0, JSON.stringify(rescan.findings, null, 1));
 });
 
-test("SHAPE B — with no bootstrap anywhere in the tree, the module declines loudly with no edits", () => {
-  const tree = productionTree();
-  delete tree["src/App.jsx"]; // the only session bootstrap in the app
+test("the 46.10-run shape — a local variant living in its own module — maps to the scaffold too", () => {
+  // The move-target shape the previous design produced (and the model kept re-inventing):
+  // a data-module bootstrap with the exact production function text.
+  const local = findSessionBootstrapFunction(read("App.jsx"));
+  const tree = {
+    "src/data/visitorSession.js": `import { auth } from "../lib/backend";\n\nexport ${local.text.replace(/^export\s+/, "")}\n`,
+    "src/data/newsletterSignup.js": read("newsletterSignup.js"),
+    "src/data/booking.js": read("booking.js"),
+  };
+  const scan = honestyScan(tree, { contract: CONTRACT });
+  assert.ok(scan.findings.some((f) => f.id === "local_session_bootstrap" && f.file === "src/data/visitorSession.js"),
+    "the local variant is a blocking finding");
+
+  const result = transformPersistence(tree, { findings: scan.findings, contract: CONTRACT });
+  assert.deepEqual(result.declined, []);
+  const variant = result.tree["src/data/visitorSession.js"];
+  assert.equal(usesBrowserStorage(variant), false, "the hand-written storage is gone");
+  assert.match(variant, /import \{ ensureVisitorSession as ensureBookingSession \} from "\.\.\/lib\/visitorSession"/);
+  assert.equal(honestyScan(result.tree, { contract: CONTRACT }).findings.length, 0,
+    "one deterministic pass, zero model repairs — the three-stage loop cannot recur");
+});
+
+test("an unprovable persistence shape still declines loudly with zero partial edits", () => {
+  const tree = {
+    "src/data/weird.js": 'export function weird() { localStorage.setItem("x", JSON.stringify(window.everything)); }',
+  };
   const scan = honestyScan(tree, { contract: CONTRACT });
   const result = transformPersistence(tree, { findings: scan.findings, contract: CONTRACT });
-
-  const declined = result.declined.find((d) => d.file === "src/data/newsletterSignup.js");
-  assert.ok(declined, "the newsletter module must decline, not half-transform");
-  assert.ok(declined.reasons.some((r) => /no session-bootstrap function/.test(r)), declined.reasons.join("; "));
-  // No partial edits: the module is byte-identical and no shared module appeared.
-  assert.equal(result.tree["src/data/newsletterSignup.js"], tree["src/data/newsletterSignup.js"]);
-  assert.equal(result.tree["src/data/visitorSession.js"], undefined);
+  const declined = result.declined.find((d) => d.file === "src/data/weird.js");
+  assert.ok(declined, "no matching mapping means a loud decline");
+  assert.equal(result.tree["src/data/weird.js"], tree["src/data/weird.js"], "byte-identical — no half-transform");
 });
 
-test("SHAPE B — re-running the transform on the fixed tree changes nothing (idempotent)", () => {
+test("re-running the transform on a fixed tree changes nothing (idempotent)", () => {
   const tree = productionTree();
   const first = honestyScan(tree, { contract: CONTRACT });
   const once = transformPersistence(tree, { findings: first.findings, contract: CONTRACT });
-  const again = transformGuestFallback(once.tree, { files: ["src/data/newsletterSignup.js"] });
+  const again = transformGuestFallback(once.tree, { files: ["src/data/newsletterSignup.js", "src/App.jsx"] });
   assert.deepEqual(again.appliedByFile, {}, "no second application");
   assert.equal(again.tree["src/data/newsletterSignup.js"], once.tree["src/data/newsletterSignup.js"]);
+  assert.equal(again.tree["src/App.jsx"], once.tree["src/App.jsx"]);
 });

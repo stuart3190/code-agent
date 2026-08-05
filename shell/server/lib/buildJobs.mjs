@@ -374,12 +374,19 @@ function usageBucket() {
   };
 }
 
-function managedUsageGuard(limit, model, tracked = usageBucket()) {
+export function managedUsageGuard(limit, model, tracked = usageBucket()) {
   return async (turnUsage) => {
     tracked.add(turnUsage);
-    if (creditsForUsage({ usage: tracked.summary(), model }) > limit + 1e-9) {
-      throw new ManagedCreditBudgetError(limit);
-    }
+    const spent = creditsForUsage({ usage: tracked.summary(), model });
+    if (spent > limit + 1e-9) throw new ManagedCreditBudgetError(limit);
+    // Pre-emptive floor (the 46.10-credit run): the cheapest POSSIBLE next turn re-sends this
+    // turn's input fully cached and produces nothing. If even that cannot fit under the limit,
+    // no further provider call may start — stopping now, with this turn's paid work applied,
+    // beats discovering the overrun after the next response arrives.
+    const minNextTurn = creditsForUsage({
+      usage: { input: turnUsage.input || 0, cached: turnUsage.input || 0, output: 0 }, model,
+    });
+    if (spent + minNextTurn > limit + 1e-9) throw new ManagedCreditBudgetError(limit);
   };
 }
 
@@ -697,6 +704,11 @@ async function runJob(job) {
       // latest version into edited legacy projects so future exports and builds keep new APIs.
       tree["src/lib/backend/index.js"] = REACT_VITE["src/lib/backend/index.js"];
       tree["src/lib/backend/supabaseBackend.js"] = REACT_VITE["src/lib/backend/supabaseBackend.js"];
+      // Same for the visitor-session module — but only refresh it where it already exists:
+      // forcing it into a legacy project that never referenced it would be an unrelated new file.
+      if (tree["src/lib/visitorSession.js"]) {
+        tree["src/lib/visitorSession.js"] = REACT_VITE["src/lib/visitorSession.js"];
+      }
     }
     const editFormat = mode === "iterate" ? "apply_patch" : undefined;
     const { schemas, impls } = makeFileTools(tree, { editFormat });
@@ -846,7 +858,9 @@ async function runJob(job) {
           // 292,652-token stage: overwhelmingly repeated reads, 81% of them cached.
           const stageTools = makeScopedFileTools(stageTree, {
             manifest: stageManifest,
-            allowed: selected.full.map((c) => c.path),
+            // Sliced prior-stage files are ALLOWED: reading one in full is free and unpenalised,
+            // so a slice that turns out too narrow costs one read turn, never an expansion ask.
+            allowed: [...selected.full.map((c) => c.path), ...(selected.slices || []).map((c) => c.path)],
             editFormat: first ? undefined : "apply_patch",
             onEvent: (event) => {
               if (event.type === "expanded") serverLog(job, `context: expanded ${event.path} (+${event.tokens} tok) — ${String(event.reason).slice(0, 70)}`);

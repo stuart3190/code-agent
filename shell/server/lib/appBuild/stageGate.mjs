@@ -59,6 +59,13 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
         problems.push(`${path} was modified — the backend SDK must not be edited`);
       }
     }
+    // The visitor-session module is equally infrastructure — the 46.10-credit run's three repair
+    // loops were a model editing its own version of this file, stage after stage. Absence is
+    // legal (legacy trees predate it); modification is not.
+    const session = "src/lib/visitorSession.js";
+    if (baseline[session] && tree[session] !== undefined && tree[session] !== baseline[session]) {
+      problems.push(`${session} was modified — the visitor-session module is platform infrastructure; import ensureVisitorSession instead of editing it`);
+    }
   }
 
   if (tree["index.html"] && !/<div id="root"/.test(tree["index.html"])) {

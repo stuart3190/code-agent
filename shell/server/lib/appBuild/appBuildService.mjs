@@ -473,6 +473,21 @@ async function notifyTerminal(ctx, lifecycle, { title, body, url = null }) {
   return true;
 }
 
+// The in-job credit ceiling handed to a BYOK/Codex dispatch. One staged Codex job reached 46.10
+// against a 25-credit build ceiling because the ceiling was consulted only BETWEEN dispatches and
+// the per-turn usage guard was armed for managed lanes alone. Every dispatch now carries the
+// smallest applicable cap, NET of what the lifecycle has already spent, and buildJobs' per-turn
+// guard enforces it inside the job: no provider call starts that cannot possibly fit.
+export function byokJobCeiling(lifecycle) {
+  if (lifecycle.managed) return null;
+  const caps = [];
+  if (lifecycle.byokSafety?.maxCostPerBuild != null) caps.push(Number(lifecycle.byokSafety.maxCostPerBuild));
+  if (lifecycle.costCeiling) {
+    caps.push(Math.max(0, lifecycle.costCeiling - (Number(lifecycle.budget.totals.credits) || 0)));
+  }
+  return caps.length ? Math.min(...caps) : null;
+}
+
 // The gate every follow-up dispatch must pass — aggregate managed budget for managed users,
 // the user's own optional controls for BYOK users (off unless enabled).
 async function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
@@ -668,7 +683,7 @@ export async function startAppBuild(ctx, { description, productName = null }) {
     ...originalInput,
     diag: diag.recorderForJob({ round: 1 }),
     budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
-    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+    byokCostLimit: byokJobCeiling(lifecycle),
   });
   lifecycle.budget.noteJob();
 
@@ -960,7 +975,7 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
             trigger: isRetry ? "transient_retry" : "autonomous_repair",
             diag: lifecycle.diag.recorderForJob({ round: nextRound }),
             budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
-            byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+            byokCostLimit: byokJobCeiling(lifecycle),
             providerOverride: lifecycle.providerOverride,
           });
           lifecycle.budget.noteJob();
@@ -1125,7 +1140,7 @@ async function handleProviderSwitch(ctx, { action, lifecycle, attempt, jobId, pr
     trigger: "provider_switch",
     diag: lifecycle.diag.recorderForJob({ round: nextRound }),
     budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
-    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+    byokCostLimit: byokJobCeiling(lifecycle),
     providerOverride: target.id,
   });
   lifecycle.budget.noteJob();
@@ -1417,7 +1432,7 @@ ${functional}`
       trigger: "verification_repair",
       diag: diag.recorderForJob({ round: nextRound }),
       budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
-      byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+      byokCostLimit: byokJobCeiling(lifecycle),
       providerOverride: lifecycle.providerOverride,
       maxTurns: lifecycle.repairMaxTurns,
     });
@@ -1506,7 +1521,7 @@ export async function repairApp(ctx, { issue, productName = null }) {
     ...originalInput, // taskHint classifies from the user's words, not the REPAIR MODE wrapper
     diag: diag.recorderForJob({ round: 1 }),
     budgetAllowance: lifecycle.managed ? lifecycle.budget.jobAllowance(Infinity) : null,
-    byokCostLimit: lifecycle.managed ? null : lifecycle.byokSafety.maxCostPerBuild,
+    byokCostLimit: byokJobCeiling(lifecycle),
   });
   lifecycle.budget.noteJob();
   relayBuildJob(ctx, { job, projectId: project.id, lifecycle });

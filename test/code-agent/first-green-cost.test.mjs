@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildStageContext } from "../../shell/server/lib/appBuild/contextBuilder.mjs";
-import { buildManifest } from "../../shell/server/lib/appBuild/projectManifest.mjs";
+import { buildManifest, tokensOf } from "../../shell/server/lib/appBuild/projectManifest.mjs";
 import { planStages, stagePrompt, acceptanceCoverage, STAGE_RUNTIME_CONTRACT, STAGE_GLOBAL_INVARIANTS } from "../../shell/server/lib/appBuild/stagePlan.mjs";
 import { expectationKeywords } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { runStageGate } from "../../shell/server/lib/appBuild/stageGate.mjs";
@@ -70,10 +70,14 @@ test("R1 — the data stage opens with the files it previously spent two turns d
     tree, manifest: buildManifest(tree, { contract: CONTRACT }),
     stageId: "data", contract: CONTRACT, priorFiles, budgetTokens: 40_000,
   });
-  const full = context.full.map((c) => c.path);
-  // In run cf130c23 the model paid turns 1-3 (23k tokens + an expansion) to see App.jsx.
-  assert.ok(full.includes("src/App.jsx"), `data stage must open with App.jsx; got ${full.join(", ")}`);
-  assert.equal(context.full.find((c) => c.path === "src/App.jsx").reason, "prior_stage");
+  // In run cf130c23 the model paid turns 1-3 (23k tokens + an expansion) to see App.jsx. It now
+  // opens the stage — SLICED, because a 46KB prior file resent whole is the 46.10-credit
+  // run's over-inclusion defect. The slice is real file text, and a full read is free.
+  const opened = [...context.full, ...context.slices].map((c) => c.path);
+  assert.ok(opened.includes("src/App.jsx"), `data stage must open with App.jsx; got ${opened.join(", ")}`);
+  const app = context.slices.find((c) => c.path === "src/App.jsx");
+  assert.ok(app, "a large prior file arrives as a slice, not a whole body");
+  assert.ok(app.tokens < tokensOf(tree["src/App.jsx"]) * 0.8, `slice (${app.tokens}) materially under full`);
 });
 
 test("R1 — the supporting stage opens with every file it manually expanded in the real run", () => {
@@ -84,11 +88,14 @@ test("R1 — the supporting stage opens with every file it manually expanded in 
     tree, manifest: buildManifest(tree, { contract: CONTRACT }),
     stageId: "supporting", contract: CONTRACT, priorFiles, budgetTokens: 40_000,
   });
-  const full = context.full.map((c) => c.path);
-  // The run expanded exactly these, one costed turn at a time.
+  const opened = [...context.full, ...context.slices].map((c) => c.path);
+  // The run expanded exactly these, one costed turn at a time. Small priors arrive whole; the
+  // big App.jsx arrives sliced to this stage's journeys.
   for (const file of ["src/App.jsx", "src/data/booking.js", "src/index.css"]) {
-    assert.ok(full.includes(file), `supporting stage must open with ${file}; got ${full.join(", ")}`);
+    assert.ok(opened.includes(file), `supporting stage must open with ${file}; got ${opened.join(", ")}`);
   }
+  const app = context.slices.find((c) => c.path === "src/App.jsx");
+  assert.ok(app && app.kept.length, "the slice keeps the symbols this stage's journeys touch");
 });
 
 test("R1 — no broad preload: prior files are the only addition and the budget still binds", () => {
@@ -203,7 +210,7 @@ test("R4 — coverage fails loudly when a journey is owned by no stage", () => {
   assert.ok(coverage.missing.some((m) => m.journey === "use-responsive-navigation"));
 });
 
-test("R4 — the stage prompt tells the builder the verifier's literal on-page words", () => {
+test("R4 — the stage prompt demands state TRANSITIONS, and names the verifier's freshness rule", () => {
   const stages = planStages(CONTRACT, { includePolish: false });
   const primary = stages.find((s) => s.id === "primary_journey");
   const prompt = stagePrompt(primary, CONTRACT, { request: "booking site" });
@@ -212,9 +219,13 @@ test("R4 — the stage prompt tells the builder the verifier's literal on-page w
   const step = CONTRACT.journeys[0].steps.find((s) => s.action.includes("choose an available date"));
   const wanted = expectationKeywords(step.expect);
   assert.ok(wanted.includes("selected") && wanted.includes("highlighted"), wanted.join(","));
-  assert.ok(prompt.includes(`verifier looks for on-page text: ${wanted.join(", ")}`),
-    "the builder sees the exact words the verifier will test");
-  assert.match(prompt, /look for the named words as VISIBLE TEXT/);
+  // v2: initial state → action → resulting state, with the anti-gaming rule stated plainly —
+  // the 46.10-credit run answered a keyword list with static copy and correctly failed.
+  assert.ok(prompt.includes(`before: ${wanted.join(", ")} absent (or in their pre-action state) · after: they newly appear or visibly change`));
+  assert.match(prompt, /snapshots the page BEFORE each action/);
+  assert.match(prompt, /static copy count for NOTHING/);
+  assert.match(prompt, /a real state transition/);
+  assert.ok(!prompt.includes("verifier looks for on-page text:"), "the keyword-list phrasing that invited static copy is gone");
 });
 
 // ── R5: deterministic checks run inside the stage gate ────────────────────────────────────────
@@ -228,7 +239,7 @@ test("R5 — the localStorage defect is caught and FIXED by the gate of the stag
   });
   assert.equal(gate.ok, true, JSON.stringify(gate.problems));
   assert.ok(gate.deterministicRepair, "the safe transform was applied in-stage at zero credits");
-  assert.ok(gate.tree["src/data/visitorSession.js"], "the visitor-session move happened here, not at final verification");
+  assert.ok(gate.tree["src/lib/visitorSession.js"], "the SCAFFOLD session module backs the fix — nothing hand-written");
   assert.ok(gate.checks.some((c) => c.name === "honesty" && c.ok));
   assert.ok(!gate.tree["src/data/newsletterSignup.js"].includes("localStorage.setItem(\"berry-brook-newsletter-signups\""));
 });

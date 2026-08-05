@@ -16,6 +16,7 @@
 // unmapped expression is handed to targeted AI repair rather than half-transformed.
 
 import { findSessionBootstrapFunction } from "./honestyScan.mjs";
+import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
 
 // Every way a generated app reaches browser storage, including through `window.` and common
 // aliases. Detection is broad; the TRANSFORM is what stays narrow.
@@ -338,13 +339,17 @@ function bodyOf(source, header) {
 // slice(0, N) cap bounded a guest-only list this module never reads back; the database keeps
 // every record (the source of truth), and any visible cap belongs on display reads.
 //
-// The session logic is NOT synthesised: the app's OWN bootstrap function (the one the honesty
-// scan classifies as session credentials) is moved VERBATIM to src/data/visitorSession.js and
-// imported from both its origin and here — same storage key, same visitor account, so bookings
-// and newsletter signups land under one identity per browser. No bootstrap in the tree means
-// no provable session strategy, and the module declines loudly as before.
+// The session strategy is the SCAFFOLD's maintained module, never a synthesis and no longer a
+// per-app move: src/lib/visitorSession.js ships with every generated app, is exempted by the
+// honesty scan by PATH, and is protected from edits by the stage gate. Guest branches call its
+// ensureVisitorSession; a hand-written local bootstrap is replaced with an import alias of it —
+// same callers, same contract, one centrally-tested implementation. (The previous design moved
+// the app's OWN bootstrap into src/data/visitorSession.js; the 46.10-credit run showed where
+// that leads — the model re-invents the file per build and the scanner cannot bless every
+// variant, so three stages went through repair loops over one helper.)
 
-const VISITOR_SESSION_PATH = "src/data/visitorSession.js";
+const VISITOR_SESSION_PATH = "src/lib/visitorSession.js";
+const SCAFFOLD_VISITOR_SESSION = REACT_VITE[VISITOR_SESSION_PATH];
 
 function relativeImport(fromFile, toFile) {
   const from = fromFile.split("/").slice(0, -1);
@@ -370,85 +375,76 @@ export function transformGuestFallback(tree, { files = [] } = {}) {
   const working = { ...tree };
   const appliedByFile = {};
   const notes = [];
-
-  // The app's own session bootstrap, wherever it lives (including an earlier run's move target —
-  // that makes a re-run of this transform idempotent).
-  let bootstrap = null;
-  for (const [path, source] of Object.entries(working)) {
-    if (!/^src\/.*\.(jsx?|tsx?)$/.test(path) || path.startsWith("src/lib/backend/")) continue;
-    const found = findSessionBootstrapFunction(source);
-    if (found) { bootstrap = { file: path, ...found }; break; }
-  }
-  if (!bootstrap) {
-    return { tree, appliedByFile, notes: ["no session-bootstrap function in the tree — no provable session strategy for guest fallbacks"] };
-  }
-
   let rewired = false;
+
+  const ensureScaffold = () => {
+    if (!working[VISITOR_SESSION_PATH] && SCAFFOLD_VISITOR_SESSION) {
+      working[VISITOR_SESSION_PATH] = SCAFFOLD_VISITOR_SESSION;
+      notes.push(`added the scaffold ${VISITOR_SESSION_PATH} (older tree predates it)`);
+    }
+  };
+
   for (const file of files) {
     const source = working[file];
-    if (!source || file === bootstrap.file) continue;
+    if (!source || file === VISITOR_SESSION_PATH) continue;
+    const applied = [];
+    let next = source;
 
+    // A hand-written local bootstrap: replace the whole function with an import alias of the
+    // scaffold's ensureVisitorSession — same name, same callers, same contract (returns the
+    // signed-in user, establishing the session on the way).
+    const local = findSessionBootstrapFunction(next);
+    if (local && next.includes(local.text)) {
+      next = next.replace(local.text,
+        `// (${local.name} is the supported scaffold module now — see src/lib/visitorSession.js)`);
+      const alias = local.name === "ensureVisitorSession"
+        ? "ensureVisitorSession"
+        : `ensureVisitorSession as ${local.name}`;
+      if (!new RegExp(String.raw`import\s*\{[^}]*\b${local.name}\b`).test(next)) {
+        next = `import { ${alias} } from "${relativeImport(file, VISITOR_SESSION_PATH)}";\n${next}`;
+      }
+      applied.push("local_bootstrap_aliased_to_scaffold");
+    }
+
+    // The guest fallback branch: provable only when it stores in the browser, returns early,
+    // never touches the database — and the real create exists after it, on a `let` variable.
     const header = /if\s*\(\s*!\s*([\w$]+)\s*\)\s*\{/g;
     let match = null;
     let rewrite = null;
-    while ((match = header.exec(source)) !== null) {
-      const open = source.indexOf("{", match.index + match[0].length - 1);
-      const end = matchBrace(source, open);
+    while ((match = header.exec(next)) !== null) {
+      const open = next.indexOf("{", match.index + match[0].length - 1);
+      const end = matchBrace(next, open);
       if (end === -1) continue;
-      const body = source.slice(open + 1, end);
-      // Provable only when the branch stores in the browser, returns early, never touches the
-      // database — and the real create exists after it, on a reassignable (`let`) variable.
+      const body = next.slice(open + 1, end);
       const storesInBrowser = new RegExp(String.raw`${STORE_ACCESS}\s*\.\s*setItem\b`).test(body);
       const returnsEarly = /\breturn\b/.test(body);
       const touchesDb = /\bdb\s*\.|\.\s*(?:create|list|update|delete)\s*\(/.test(body);
-      const createAfter = /\.\s*create\s*\(/.test(source.slice(end));
-      const reassignable = new RegExp(String.raw`\blet\s+${match[1]}\b`).test(source);
+      const createAfter = /\.\s*create\s*\(/.test(next.slice(end));
+      const reassignable = new RegExp(String.raw`\blet\s+${match[1]}\b`).test(next);
       if (storesInBrowser && returnsEarly && !touchesDb && createAfter && reassignable) {
         rewrite = { start: match.index, end: end + 1, variable: match[1] };
         break;
       }
     }
-    if (!rewrite) continue;
-
-    let next = source.slice(0, rewrite.start)
-      + `if (!${rewrite.variable}) {\n    ${rewrite.variable} = await ${bootstrap.name}();\n  }`
-      + source.slice(rewrite.end);
-    if (!new RegExp(String.raw`import\s*\{[^}]*\b${bootstrap.name}\b`).test(next)) {
-      next = `import { ${bootstrap.name} } from "${relativeImport(file, VISITOR_SESSION_PATH)}";\n${next}`;
+    if (rewrite) {
+      next = next.slice(0, rewrite.start)
+        + `if (!${rewrite.variable}) {\n    ${rewrite.variable} = await ensureVisitorSession();\n  }`
+        + next.slice(rewrite.end);
+      if (!/import\s*\{[^}]*\bensureVisitorSession\b/.test(next)) {
+        next = `import { ensureVisitorSession } from "${relativeImport(file, VISITOR_SESSION_PATH)}";\n${next}`;
+      }
+      applied.push("guest_fallback_bootstrap");
     }
-    working[file] = next;
-    appliedByFile[file] = ["guest_fallback_bootstrap"];
-    rewired = true;
+
+    if (applied.length) {
+      working[file] = next;
+      appliedByFile[file] = applied;
+      rewired = true;
+    }
   }
 
   if (!rewired) return { tree, appliedByFile: {}, notes };
-
-  // Move the bootstrap into its own module so data modules can import it without a cycle.
-  if (bootstrap.file !== VISITOR_SESSION_PATH) {
-    const origin = working[bootstrap.file];
-    if (!origin || !origin.includes(bootstrap.text)) {
-      // The move cannot be located exactly — make NO edits at all rather than half of them.
-      return { tree, appliedByFile: {}, notes: [`could not locate ${bootstrap.name} verbatim in ${bootstrap.file} — guest fallback left for the model`] };
-    }
-    working[VISITOR_SESSION_PATH] = [
-      `// The app's visitor-session bootstrap, moved verbatim from ${bootstrap.file} so data modules`,
-      "// can establish the same anonymous backend session: records persist server-side under one",
-      "// visitor account per browser. The cached value is credentials for auth.signIn/auth.signUp —",
-      "// session state, not records; the records themselves live in db.entity().",
-      `import { auth } from "${relativeImport(VISITOR_SESSION_PATH, "src/lib/backend")}";`,
-      "",
-      `export ${bootstrap.text.replace(/^export\s+/, "")}`,
-      "",
-    ].join("\n");
-    let replaced = origin.replace(bootstrap.text,
-      `// (${bootstrap.name} moved to ${VISITOR_SESSION_PATH} so data modules share the same visitor session)`);
-    if (new RegExp(String.raw`\b${bootstrap.name}\s*\(`).test(replaced)) {
-      replaced = `import { ${bootstrap.name} } from "${relativeImport(bootstrap.file, VISITOR_SESSION_PATH)}";\n${replaced}`;
-    }
-    working[bootstrap.file] = replaced;
-    appliedByFile[bootstrap.file] = ["session_bootstrap_moved"];
-  }
-
+  ensureScaffold();
   return { tree: working, appliedByFile, notes };
 }
 
@@ -465,7 +461,9 @@ export function transformPersistence(tree, { findings = [], contract = null } = 
   const fixed = [];
   const declined = [];
 
-  const files = [...new Set(findings.filter((f) => f.id === "fake_persistence" && f.file).map((f) => f.file))];
+  const files = [...new Set(findings
+    .filter((f) => (f.id === "fake_persistence" || f.id === "local_session_bootstrap") && f.file)
+    .map((f) => f.file))];
 
   // SHAPE C first: it is tree-level (the fix moves the app's own bootstrap into a shared module),
   // and a module it fully cleans never reaches the call-site patterns at all.

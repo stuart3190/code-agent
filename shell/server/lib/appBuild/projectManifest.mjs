@@ -150,7 +150,13 @@ function resolveRelative(fromPath, specifier, byPath) {
  */
 export function summariseFile(file) {
   const parts = [`${file.path}`];
-  if (file.exports.length) parts.push(`  exports: ${file.exports.join(", ")}`);
+  // Bounded: a summary is the FALLBACK when the budget is spent, so its own size must be capped —
+  // a 120-component file once produced a summary bigger than some whole files.
+  if (file.exports.length) {
+    const shown = file.exports.slice(0, 20);
+    const more = file.exports.length - shown.length;
+    parts.push(`  exports: ${shown.join(", ")}${more > 0 ? ` … +${more} more` : ""}`);
+  }
   if (file.imports.length) parts.push(`  imports: ${file.imports.join(", ")}`);
   if (file.entities.length) parts.push(`  entities: ${file.entities.join(", ")}`);
   if (file.routes.length) parts.push(`  routes: ${file.routes.join(", ")}`);

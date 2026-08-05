@@ -96,8 +96,11 @@ test("each stage prompt carries only its own slice of the contract", () => {
   const primary = stagePrompt(byId.primary_journey, CONTRACT, { request });
   assert.match(primary, /JOURNEY — A visitor books a slot \(PRIMARY — the preview is gated on this\)/);
   assert.match(primary, /a confirmation reference is shown/);
-  // R4: the builder is told the verifier's literal on-page words for every step.
-  assert.match(primary, /verifier looks for on-page text: confirmation, reference/);
+  // R4 v2: the builder is told the TRANSITION the verifier tests, not vocabulary to display —
+  // the 46.10-credit run answered a keyword list with static copy, which correctly failed.
+  assert.match(primary, /snapshots the page BEFORE each action/);
+  assert.match(primary, /before: confirmation, reference absent .* after: they newly appear or visibly change/);
+  assert.match(primary, /Words already present as/);
   assert.match(primary, /readable after a full page reload/);
 
   // Deferred work is named in every stage, because any stage could fake it.

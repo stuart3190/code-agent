@@ -221,10 +221,22 @@ async function runStep(page, step, { marker, previewUrl }) {
     }
   }
 
-  // A majority of the named things on screen is the bar — requiring all would fail on synonyms,
-  // requiring one would pass on coincidence. Plus, for any step that CHANGED something, at least
-  // one of those matches must be new: a step whose every match was already there has demonstrated
-  // nothing. Navigation and reload are exempt, since the whole page is new by definition.
+  return expectationOutcome({ wanted, found, fresh, drove, action });
+}
+
+/**
+ * The step verdict, pure and exported: given what the contract wanted, what is visible, and what
+ * is NEWLY visible since before the action, decide the outcome. Exported so the freshness rule —
+ * static pre-existing copy proves nothing; only change caused by the action counts — can be
+ * proven directly, and so the stage prompts (which now teach TRANSITIONS, not vocabulary) are
+ * demonstrably aligned with what this actually tests.
+ *
+ * A majority of the named things on screen is the bar — requiring all would fail on synonyms,
+ * requiring one would pass on coincidence. Plus, for any step that CHANGED something, at least
+ * one of those matches must be new: a step whose every match was already there has demonstrated
+ * nothing. Navigation and reload are exempt, since the whole page is new by definition.
+ */
+export function expectationOutcome({ wanted, found, fresh, drove, action }) {
   const ratio = found.length / wanted.length;
   const navigational = /open|go to|navigate|visit|reload|refresh/i.test(action);
   if (ratio >= 0.5 && (navigational || fresh.length > 0)) {
