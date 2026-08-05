@@ -62,10 +62,17 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
     }
     // The visitor-session module is equally infrastructure — the 46.10-credit run's three repair
     // loops were a model editing its own version of this file, stage after stage. Absence is
-    // legal (legacy trees predate it); modification is not.
+    // legal (legacy trees predate it); modification is not. Same rule for the capability
+    // modules (Builder v2): behaviour lives in the platform, screens import it.
     const session = "src/lib/visitorSession.js";
     if (baseline[session] && tree[session] !== undefined && tree[session] !== baseline[session]) {
       problems.push(`${session} was modified — the visitor-session module is platform infrastructure; import ensureVisitorSession instead of editing it`);
+    }
+    for (const path of Object.keys(baseline)) {
+      if (!path.startsWith("src/lib/capabilities/")) continue;
+      if (tree[path] !== undefined && tree[path] !== baseline[path]) {
+        problems.push(`${path} was modified — capabilities are platform infrastructure; import them, never edit them`);
+      }
     }
   }
 

@@ -315,6 +315,14 @@ export default function HomePage() {
   // this module and blocks local variants; the stage gate protects it from edits.
   "src/lib/visitorSession.js": sdk("lib/visitorSession.js"),
 
+  // Headless capabilities (Builder v2, master plan Part 6): the supported implementations of
+  // cross-app behaviour. Generated code IMPORTS these; the honesty scan, stage gate and patch
+  // engine all treat src/lib/capabilities/ as protected platform infrastructure.
+  "src/lib/capabilities/index.js": sdk("lib/capabilities/index.js"),
+  "src/lib/capabilities/crud.js": sdk("lib/capabilities/crud.js"),
+  "src/lib/capabilities/session.js": sdk("lib/capabilities/session.js"),
+  "src/lib/capabilities/roles.js": sdk("lib/capabilities/roles.js"),
+
   // Dev-only preview error reporter (the shell's "Fix it" loop). Fixed file, imported
   // first by main.jsx; absent from production builds via the import.meta.env.DEV guard.
   "src/lib/devReporter.js": sdk("lib/devReporter.js"),
