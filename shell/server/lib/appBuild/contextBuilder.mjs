@@ -116,8 +116,10 @@ export function targetsForStage(stageId, manifest, { contract = null } = {}) {
     case "foundation":
       // The shell and the design system only. An earlier version matched all of src/components/,
       // which on the real booking tree is 20 of 27 files — the foundation stage would have been
-      // handed most of the project to establish routing.
-      return match((p) => /^src\/(App|main)\.(jsx?|tsx?)$/.test(p) || /^src\/(layout|routes)\//.test(p) || /\.css$/.test(p));
+      // handed most of the project to establish routing. On the modular layout it owns the shell,
+      // the route files it creates, shared layout chrome, and the styles.
+      return match((p) => /^src\/(App|main)\.(jsx?|tsx?)$/.test(p) || /^src\/(layout|routes|styles)\//.test(p)
+        || /^src\/components\/(?!ui\/)(Header|Nav|Footer|Layout|Mobile)/i.test(p) || /\.css$/.test(p));
     case "data":
       return match((p) => /^src\/(data|lib|api|services|hooks)\//.test(p) && !p.startsWith("src/lib/backend/"));
     case "primary_journey": {
@@ -128,12 +130,12 @@ export function targetsForStage(stageId, manifest, { contract = null } = {}) {
     case "supporting": {
       const words = (contract?.journeys || []).filter((j) => j.priority !== "primary")
         .flatMap((j) => `${j.id} ${j.title}`.toLowerCase().match(/[a-z]{4,}/g) || []);
-      // Screens and pages, plus anything the secondary journeys name. NOT src/components/ui/ —
-      // those are the design-system primitives (Button, Input, Label), which a supporting-screens
-      // stage consumes rather than edits, and which made up most of its 18-file context.
+      // Only what the secondary journeys NAME, plus legacy pages/screens dirs. The old broad
+      // `src/components/` matcher is gone: on the modular tree it made every screen a target and
+      // handed the supporting stage 21 full files — the primary journey's modules arrive as
+      // interface summaries instead, with a free full read when genuinely needed.
       return match((p) => (words.some((w) => p.toLowerCase().includes(w))
-        || /^src\/(pages|screens)\//.test(p)
-        || (/^src\/components\//.test(p) && !/^src\/components\/ui\//.test(p))));
+        || /^src\/(pages|screens)\//.test(p)));
     }
     case "polish":
       return match((p) => /\.css$/.test(p) || /^src\/(components|layout)\//.test(p));
@@ -198,9 +200,14 @@ export function buildStageContext({
     }
   }
 
-  // The backend SDK is the interface every data operation is written against, and it is small.
+  // The backend SDK's SURFACE is the interface every data operation is written against, and it
+  // is small. Its implementation (supabaseBackend.js, ~5k tokens) is protected infrastructure the
+  // model may never edit — it rode every stage of the 46.10-credit run as a full body for no
+  // reason a prompt could use. The manifest still lists it; a read is answered with its summary.
   for (const file of map.files) {
-    if (file.path.startsWith("src/lib/backend/")) note(file.path, "shared");
+    if (file.path === "src/lib/backend/index.js" || file.path === "src/lib/visitorSession.js") {
+      note(file.path, "shared");
+    }
     if (/^src\/main\./.test(file.path)) note(file.path, "entry");
     if (ALWAYS_FULL.has(file.path)) note(file.path, "shared");
   }
@@ -221,7 +228,22 @@ export function buildStageContext({
   let used = fixed + manifestTokens;
   const sliceKeywordSets = stageSliceKeywordSets(stageId, contract);
 
+  const interfaces = [];
+
   for (const candidate of candidates) {
+    // STRUCTURAL ownership on the modular tree: a SCREEN another stage wrote (src/routes/,
+    // src/components/ minus the design-system primitives) arrives as an interface summary with a
+    // FREE full read — never as a body this stage did not ask for. "The budget fits everything"
+    // is exactly how the supporting stage came to open with 21 full files. Files this stage
+    // targets, a verifier named, or that are direct dependencies keep their bodies; data modules
+    // and the App shell are the interfaces every stage codes against and stay too.
+    if (candidate.reason === "prior_stage"
+      && /^src\/(routes|components)\//.test(candidate.path)
+      && !candidate.path.startsWith("src/components/ui/")) {
+      interfaces.push({ ...candidate, reason: "prior_stage (interface summary; full read is free)" });
+      used += tokensOf(summariseFile(candidate.file));
+      continue;
+    }
     // A large file whose ONLY claim is "an earlier stage wrote it" is sliced by symbol: relevant
     // blocks in full, the rest as signatures, a whole-file read free at the tool boundary. Files
     // the stage will MODIFY (target/failure/dependency/caller) keep their full body — a patch
@@ -251,13 +273,13 @@ export function buildStageContext({
     }
   }
 
-  const included = new Set([...full, ...slices, ...summaries].map((c) => c.path));
+  const included = new Set([...full, ...slices, ...interfaces, ...summaries].map((c) => c.path));
   const omitted = map.files.filter((f) => !included.has(f.path))
     .map((f) => ({ path: f.path, tokens: f.tokens, reason: "not in the change set or one hop from it" }));
 
   return {
     stageId,
-    full, slices, summaries, omitted,
+    full, slices, interfaces, summaries, omitted,
     tokens: used,
     budget: budgetTokens,
     ok: used <= budgetTokens,
@@ -268,6 +290,7 @@ export function buildStageContext({
       manifest: manifestTokens,
       fullFiles: full.reduce((s, c) => s + c.tokens, 0),
       sliced: slices.reduce((s, c) => s + c.tokens, 0),
+      interfaces: interfaces.reduce((s, c) => s + tokensOf(summariseFile(c.file)), 0),
       summaries: summaries.reduce((s, c) => s + tokensOf(summariseFile(c.file)), 0),
     },
     // What a whole-tree context would have cost, for the comparison that justifies all of this.
@@ -292,6 +315,11 @@ export function renderContext(context, tree, manifest) {
     lines.push(`// the rest as signatures (${slice.elided.join(", ") || "none elided"}). read_file("${slice.path}") is free if you need a body.`);
     lines.push(slice.content);
   }
+  if (context.interfaces?.length) {
+    lines.push("\nSCREENS FROM EARLIER STAGES — interfaces only. They are green and NOT yours to edit;");
+    lines.push("read_file on any of them is free if you genuinely need an implementation:");
+    for (const { file } of context.interfaces) lines.push(summariseFile(file));
+  }
   if (context.summaries.length) {
     lines.push("\nVERIFIED FILES, SUMMARISED — ask for one by name if you need its implementation:");
     for (const { file } of context.summaries) lines.push(summariseFile(file));
@@ -307,7 +335,7 @@ export function contextReport(context) {
       + `(whole tree would be ${context.wholeTreeTokens})`,
     `  system ${b.system} · objective ${b.objective} · contract ${b.contract} · manifest ${b.manifest} `
       + `· ${context.full.length} full files ${b.fullFiles} · ${(context.slices || []).length} sliced ${b.sliced || 0} `
-      + `· ${context.summaries.length} summaries ${b.summaries}`,
+      + `· ${(context.interfaces || []).length} interfaces ${b.interfaces || 0} · ${context.summaries.length} summaries ${b.summaries}`,
     `  omitted ${context.omitted.length} files (${context.omitted.reduce((s, o) => s + o.tokens, 0)} tokens)`,
     ...context.full.map((c) => `  FULL ${c.path} (${c.tokens}) — ${REASONS[c.reason] || c.reason}`),
     ...(context.slices || []).map((c) => `  SLICE ${c.path} (${c.tokens}) — kept ${c.kept.join(",") || "preamble"}; elided ${c.elided.join(",") || "none"}`),

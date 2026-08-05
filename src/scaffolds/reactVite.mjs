@@ -225,8 +225,81 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 }
 `,
 
-  "src/App.jsx": `export default function App() {
-  return <div>{/* build here */}</div>;
+  // The application shell — ROUTING AND LAYOUT ONLY, modular by construction. Generated apps
+  // fill known-good slots (one route file per page under src/routes/, reusable interactions
+  // under src/components/, persistence under src/data/) instead of inventing an architecture.
+  // The 46.10-credit booking build concentrated five journeys in one 40KB App.jsx that every
+  // stage re-read, rewrote and dragged through history; the modularity gate now rejects that
+  // shape, and this shell is what makes the modular one the path of least resistance.
+  "src/App.jsx": `// The application shell — routing, layout and error boundary ONLY.
+//
+// Feature code does not live here. One route = one file under src/routes/, registered in the
+// ROUTES map below. Reusable interactions live under src/components/; persistence lives under
+// src/data/ (never inside a React component); shared infrastructure under src/lib/. The build
+// gates enforce this: App.jsx must stay small, and a stage that merges pages back into it does
+// not go green.
+import { Component, useEffect, useState } from "react";
+import HomePage from "./routes/HomePage";
+
+// One entry per route, one file per route. Add new pages as files and register them here.
+const ROUTES = {
+  "/": HomePage,
+};
+
+export function navigateTo(path) {
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function useRoute() {
+  const [path, setPath] = useState(() => window.location.pathname || "/");
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname || "/");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  return ROUTES[path] ? path : "/";
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: "2rem", textAlign: "center" }}>
+          <h1>Something went wrong</h1>
+          <p>Reload the page to try again.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  const path = useRoute();
+  const Page = ROUTES[path] || HomePage;
+  return (
+    <ErrorBoundary>
+      <Page />
+    </ErrorBoundary>
+  );
+}
+`,
+
+  "src/routes/HomePage.jsx": `// One route, one file. Replace this placeholder with the real home page; add further routes as
+// their own files in this directory and register them in src/App.jsx's ROUTES map.
+export default function HomePage() {
+  return <main>{/* build here */}</main>;
 }
 `,
 

@@ -85,7 +85,7 @@ export async function runStagedBuild({
       await runStage(stage, { tree: stageTree, prompt, mode: attempt === 0 ? "stage" : "repair", attempt });
       if (cancelled()) break;
 
-      lastGate = await gate(stageTree, stage);
+      lastGate = await gate(stageTree, stage, { previousGreen: before });
       // Preflight may have corrected imports; adopt the corrected files.
       if (lastGate.tree) Object.assign(stageTree, lastGate.tree);
       working = stageTree;

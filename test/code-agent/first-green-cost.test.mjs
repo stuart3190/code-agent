@@ -232,8 +232,25 @@ test("R4 — the stage prompt demands state TRANSITIONS, and names the verifier'
 
 const okCompile = async () => ({ ok: true, stderr: "" });
 
+test("R5 — the monolithic production tree now fails the gate at MODULARITY, before anything else", async () => {
+  // The exact 94ad0b0f tree: one 11.5k-token App.jsx owning every journey. That shape is now a
+  // structural stage-gate failure — the gate that keeps the 46.10-credit economics from recurring.
+  const gate = await runStageGate(bookingTree(), {
+    contract: CONTRACT, stage: { id: "data", journeys: [] }, compile: okCompile,
+  });
+  assert.equal(gate.ok, false);
+  assert.ok(gate.checks.some((c) => c.name === "modularity" && !c.ok));
+  assert.ok(gate.problems.some((p) => /src\/App\.jsx is \d+ tokens/.test(p) && /src\/routes\//.test(p)),
+    JSON.stringify(gate.problems));
+});
+
 test("R5 — the localStorage defect is caught and FIXED by the gate of the stage that wrote it", async () => {
-  const tree = bookingTree(); // contains the exact production newsletter guest branch
+  // A MODULAR data-stage tree containing the exact production newsletter guest branch.
+  const tree = {
+    ...bookingTree(),
+    "src/App.jsx": "import HomePage from \"./routes/HomePage\";\nexport default function App() { return <HomePage />; }",
+    "src/routes/HomePage.jsx": "export default function HomePage() { return <main>Berry Brook</main>; }",
+  };
   const gate = await runStageGate(tree, {
     contract: CONTRACT, stage: { id: "data", journeys: [] }, compile: okCompile,
   });
@@ -288,8 +305,13 @@ test("R5 — a journey outcome with zero trace in any screen fails the owning st
   assert.ok(gate.checks.some((c) => c.name === "expectations" && !c.ok));
   assert.ok(gate.problems.some((p) => /newsletter/.test(p) && /verifier will look for/.test(p)));
 
-  // And with the real tree — where the newsletter UI exists — the same check passes.
-  const real = await runStageGate(bookingTree(), {
+  // And with the journey's OWN module present — where the newsletter UI exists — it passes.
+  const modular = {
+    ...bare,
+    "src/components/NewsletterSignup.jsx":
+      "export default function NewsletterSignup() { return <section>Newsletter signup — a success message confirms you joined.</section>; }",
+  };
+  const real = await runStageGate(modular, {
     contract: CONTRACT, stage: { id: "supporting", journeys: [newsletter] }, compile: okCompile,
   });
   assert.ok(real.checks.some((c) => c.name === "expectations" && c.ok), JSON.stringify(real.problems));

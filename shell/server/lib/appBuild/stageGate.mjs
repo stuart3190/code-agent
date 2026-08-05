@@ -13,6 +13,7 @@ import { preflightImports, preflightSummary } from "./importPreflight.mjs";
 import { honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { expectationKeywords } from "./journeyVerifier.mjs";
+import { modularityCheck, modularitySummary } from "./modularity.mjs";
 
 // Files the generated app must not lose or corrupt. A stage that deletes vite.config.js compiles
 // nothing afterwards, and the resulting error names a missing module rather than the real cause.
@@ -87,7 +88,7 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
  */
 export async function runStageGate(tree, {
   nodeModules, baseline = null, compile = null, log = () => {},
-  contract = null, stage = null,
+  contract = null, stage = null, previousGreen = null,
 } = {}) {
   const checks = [];
   const record = (name, ok, detail) => { checks.push({ name, ok, detail }); return ok; };
@@ -115,6 +116,18 @@ export async function runStageGate(tree, {
   const config = validateBuildConfig(working, { baseline });
   if (!record("config", config.ok, config.ok ? "intact" : config.problems.join("; "))) {
     return { ok: false, checks, tree: working, corrections, problems: config.problems };
+  }
+
+  // 2b. modularity — static and instant. The monolith shape (one App.jsx owning every journey)
+  // is what made the 46.10-credit run's later stages so expensive; catching it at the stage that
+  // produces it costs a cheap in-stage repair instead of the whole build's economics. The
+  // anti-collapse rule (previousGreen) stops a later stage merging modules back together.
+  if (contract) {
+    const modular = modularityCheck(working, { contract, previousGreen });
+    for (const flag of modular.flags) log(`stage-gate: modularity exception — ${flag}`);
+    if (!record("modularity", modular.ok, modular.ok ? modularitySummary(modular) : `${modular.problems.length} structural problem(s)`)) {
+      return { ok: false, checks, tree: working, corrections, problems: modular.problems };
+    }
   }
 
   // 3. the compiler — the expensive one, last.

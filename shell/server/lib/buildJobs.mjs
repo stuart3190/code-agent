@@ -858,9 +858,14 @@ async function runJob(job) {
           // 292,652-token stage: overwhelmingly repeated reads, 81% of them cached.
           const stageTools = makeScopedFileTools(stageTree, {
             manifest: stageManifest,
-            // Sliced prior-stage files are ALLOWED: reading one in full is free and unpenalised,
-            // so a slice that turns out too narrow costs one read turn, never an expansion ask.
-            allowed: [...selected.full.map((c) => c.path), ...(selected.slices || []).map((c) => c.path)],
+            // Sliced prior files and earlier stages' screens (interface summaries) are ALLOWED:
+            // reading one in full is free and unpenalised, so a slice or summary that turns out
+            // too narrow costs one read turn, never an expansion ask.
+            allowed: [
+              ...selected.full.map((c) => c.path),
+              ...(selected.slices || []).map((c) => c.path),
+              ...(selected.interfaces || []).map((c) => c.path),
+            ],
             editFormat: first ? undefined : "apply_patch",
             onEvent: (event) => {
               if (event.type === "expanded") serverLog(job, `context: expanded ${event.path} (+${event.tokens} tok) — ${String(event.reason).slice(0, 70)}`);
@@ -932,7 +937,7 @@ async function runJob(job) {
           });
           finalTextParts.push(turn.finalText);
         },
-        gate: async (stageTree, stage) => {
+        gate: async (stageTree, stage, { previousGreen = null } = {}) => {
           const runtime = withRuntimeEnv(stageTree, projectId);
           return runStageGate(runtime, {
             nodeModules: depsNodeModules(),
@@ -943,9 +948,12 @@ async function runJob(job) {
             ),
             // R5: honesty scan + safe deterministic transforms + expectation presence run inside
             // the gate — a localStorage defect is caught by the stage that wrote it, not twenty
-            // minutes later when the budget has no room left to fix it.
+            // minutes later when the budget has no room left to fix it. Modularity runs here too:
+            // the monolith App.jsx shape fails the stage that produces it, and previousGreen
+            // stops any later stage merging the modular tree back together.
             contract,
             stage,
+            previousGreen,
           });
         },
         checkpoint: ({ tree: greenTree, stage, label, changedFiles }) => {
