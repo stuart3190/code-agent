@@ -174,6 +174,37 @@ test("A1/A3 — the asset index filters and the manifest is deterministic per pr
   assert.ok(manifest.every((m) => m.assetId && m.providerAssetId));
 });
 
+// ── V2-A3: the asset manifest versions WITH snapshots ─────────────────────────────────────────
+
+test("A3 — a snapshot pins its imagery: regeneration changes the NEW manifest, never the old snapshot's", async () => {
+  const { createSnapshotStore } = await import("../../shell/server/lib/builderV2/snapshotStore.mjs");
+  const { svc } = service();
+  const store = createSnapshotStore();
+  const tree = { "src/App.jsx": "export default () => null;" };
+
+  await svc.resolveIntents("o", "proj-1", INTENTS);
+  const manifestV1 = await svc.assetManifestFor("o", "proj-1");
+  const snapV1 = await store.createSnapshot("o", "proj-1", tree, { reason: "initial", assetManifest: manifestV1 });
+  assert.equal(snapV1.state, "ready");
+  assert.deepEqual(snapV1.asset_manifest, manifestV1);
+
+  await svc.regenerate("o", "proj-1", { slots: ["hero"], directive: "darker" });
+  const manifestV2 = await svc.assetManifestFor("o", "proj-1");
+  const snapV2 = await store.createSnapshot("o", "proj-1", tree, {
+    reason: "increment:regenerate-hero", parent: snapV1.id, assetManifest: manifestV2,
+  });
+
+  const heroV1 = manifestV1.find((m) => m.slot === "hero");
+  const heroV2 = manifestV2.find((m) => m.slot === "hero");
+  assert.notEqual(heroV1.providerAssetId, heroV2.providerAssetId, "the live project moved on");
+  const frozen = await store.getSnapshot(snapV1.id);
+  assert.deepEqual(frozen.asset_manifest, manifestV1, "the old snapshot still pins the ORIGINAL imagery");
+  assert.deepEqual((await store.getSnapshot(snapV2.id)).asset_manifest, manifestV2);
+  // The manifest entry carries provider + providerAssetId — everything a restore needs to
+  // re-pin the exact photo without a fresh search.
+  assert.ok(frozen.asset_manifest.every((m) => m.provider && m.providerAssetId));
+});
+
 // ── V2-A2: sharp optimisation + scaffold rendering helpers ────────────────────────────────────
 
 function fakeBucketClient(uploads = []) {
