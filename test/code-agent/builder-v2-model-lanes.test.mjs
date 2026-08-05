@@ -171,6 +171,10 @@ test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment corr
   assert.equal(a, renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS, tree, rejections: [], problems: [] }));
   assert.match(a, /ESSENTIAL scope only/);
   assert.match(a, /do NOT build it now/i);
+  // The v1 transition brief (the run-2 fix): exact verifier keywords + the snapshot rule.
+  assert.match(a, /snapshots the page BEFORE each action/);
+  assert.match(a, /EXACT words as visible text: \[confirmation\]/, "keywords come from the verifier's own filter");
+  assert.match(a, /DISTINCTIVE confirmation copy/);
 
   const inc = renderPatchPrompt({
     step: "increment:extra", contract: CONTRACT, tiers: TIERS, tree,

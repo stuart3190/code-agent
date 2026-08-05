@@ -105,6 +105,18 @@ const orchestrator = createOrchestrator({
     const result = await verifyJourneysAttributed({
       previewUrl: preview.url, contract: { ...contractRef.current, journeys }, graph, timeoutMs: 240_000,
     });
+    // Run 2's failure evidence lived only in memory — every verdict now lands in diagnostics.
+    try {
+      diag.step({
+        agent: "BuilderV2", kind: "verification",
+        label: `journeys: ${result.journeys.map((j) => `${j.id}=${j.status}`).join(" ")}`,
+        status: result.journeys.some((j) => j.status === "fail") ? "failed" : "passed",
+        output: JSON.stringify({ journeys: result.journeys, consoleErrors: result.consoleErrors, failedRequests: result.failedRequests }),
+      });
+    } catch { /* diagnostics never block */ }
+    for (const j of result.journeys) {
+      for (const s of j.steps || []) log(`  ${j.id} · ${String(s.action || "").slice(0, 60)} → ${s.status}${s.detail ? ` — ${s.detail}` : ""}`);
+    }
     return { journeys: result.journeys };
   },
   compile: async (candidate) => buildTree(withRuntimeEnv(candidate, projectId), "bv2_first_build", () => {}),

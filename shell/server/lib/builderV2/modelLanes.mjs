@@ -7,6 +7,7 @@
 import { generateContract } from "../appBuild/contractAgent.mjs";
 import { contractBrief } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
+import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
 import { capabilityBrief } from "./capabilityRegistry.mjs";
 
@@ -56,7 +57,44 @@ function renderTreeContext(tree) {
   ].join("\n");
 }
 
+// The live-proven v1 transition brief (stagePlan.mjs): the verifier snapshots the page
+// BEFORE each action and only counts what changed AFTER it; a step passes when ≥ half its
+// expectation keywords are visible — NEWLY visible, unless the step is navigational. The
+// second live run failed exactly because the builder was never told this contract.
+function renderJourneyBrief(journeys) {
+  const lines = [
+    "JOURNEYS THIS STEP MUST MAKE PASS — a real browser drives every step. The verifier",
+    "snapshots the page BEFORE each action and passes the step only when the expected",
+    "outcome APPEARS OR CHANGES as a result of the action. Words already present as",
+    "static copy count for NOTHING on action steps — a page that always says \"received\"",
+    "fails the submit step. Every outcome must be a real state transition:",
+    "  - choosing an option: unchosen first; the click adds a visible active/selected state;",
+    "  - submitting: the confirmation wording must NOT exist anywhere before submit and must",
+    "    render after it — use DISTINCTIVE confirmation copy, not words the page already shows;",
+    "  - cancelling or updating: the visible status text changes to the new state;",
+    "  - navigation/page-load steps: at least half the listed keywords must be visible on the page.",
+    "",
+  ];
+  for (const journey of journeys) {
+    if (!journey) continue;
+    lines.push(`JOURNEY — ${journey.title}${journey.priority === "primary" ? " (PRIMARY — the preview is gated on this)" : ""}:`);
+    for (const [i, step] of (journey.steps || []).entries()) {
+      lines.push(`  ${i + 1}. ACTION: ${step.action}${step.target ? ` (${step.target})` : ""}`);
+      lines.push(`     RESULT (must be caused by the action): ${step.expect}`);
+      const wanted = expectationKeywords(step.expect);
+      if (wanted.length) {
+        lines.push(`     the verifier looks for these EXACT words as visible text: [${wanted.join(", ")}] — at least half must be present (newly, unless this step is navigation/page-load)`);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 export function renderPatchPrompt({ step, contract, tiers, tree, journey, rejections = [], problems = [] }) {
+  const scopedJourneys = step === "core"
+    ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
+    : [journey];
   const parts = [
     `STEP: ${step}`,
     step === "core"
@@ -66,11 +104,7 @@ export function renderPatchPrompt({ step, contract, tiers, tree, journey, reject
     "IMPLEMENTATION CONTRACT:",
     contractBrief(contract),
     "",
-    "JOURNEYS IN SCOPE (each step's `expect` must be visible in the UI):",
-    JSON.stringify(step === "core"
-      ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
-      : [journey], null, 1),
-    "",
+    renderJourneyBrief(scopedJourneys),
     renderTreeContext(tree),
   ];
   if (rejections.length) {
