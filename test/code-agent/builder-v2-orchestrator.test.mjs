@@ -127,8 +127,28 @@ function clientChain(rows, nextId) {
   return api;
 }
 
-function harness({ failJourneys = [], patchPlan = null, assetService = recordedAssetService() } = {}) {
-  const buildStore = memoryBuildStore();
+// The REAL bv2_builds columns — a store that rejects anything else, exactly as PostgREST
+// does. The first live run died on this gap between the permissive memory fake and prod.
+const BUILD_COLUMNS = new Set([
+  "owner", "project_id", "profile", "request", "state", "budget_credits", "spent_credits",
+  "contract_id", "final_snapshot", "error", "started_at", "finished_at",
+]);
+function strictBuildStore() {
+  const rows = new Map();
+  let n = 0;
+  const check = (patch) => {
+    for (const key of Object.keys(patch)) {
+      if (!BUILD_COLUMNS.has(key)) throw new Error(`Could not find the '${key}' column of 'bv2_builds' in the schema cache`);
+    }
+  };
+  return {
+    async create(row) { check(row); const id = `b-${++n}`; rows.set(id, { ...row, states: [row.state] }); return id; },
+    async update(id, patch) { check(patch); const row = rows.get(id); Object.assign(row, patch); if (patch.state) row.states.push(patch.state); },
+    async get(id) { return rows.get(id) || null; },
+  };
+}
+
+function harness({ failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore() } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const journeyDrives = [];
@@ -309,6 +329,48 @@ test("WP8 — the shadow entry is triple-gated and fails closed in every directi
   assert.equal(shadow.handled, false);
   assert.match(shadow.reason, /WP-9/);
   __resetFlagCacheForTests();
+});
+
+test("WP9 regression — the REAL bv2_builds column set survives green AND blocked end states", async () => {
+  const green = harness({ buildStore: strictBuildStore() });
+  const ok = await green.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(ok.state, "green", JSON.stringify(ok));
+  assert.deepEqual(ok.pendingIncrements, [], "rich result fields still come back — they are just not persisted");
+
+  const blockedStore = strictBuildStore();
+  const blocked = harness({ failJourneys: ["book-a-visit"], buildStore: blockedStore });
+  const bad = await blocked.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(bad.state, "blocked", "the exact end state the first live run died on");
+  assert.ok(bad.error, "the failure detail rides the ERROR column and the return value");
+});
+
+test("WP9 regression — a byte-identical no-op batch is rejected deterministically, never gated", async () => {
+  const { indexFile } = await import("../../shell/server/lib/builderV2/indexerV0.mjs");
+  const scaffoldHome = clone(fromScaffold(REACT_VITE))["src/routes/HomePage.jsx"];
+  const symbol = indexFile("src/routes/HomePage.jsx", scaffoldHome).symbols.find((s) => s.name === "HomePage");
+  const identical = scaffoldHome.slice(symbol.start, symbol.end);
+
+  let round = 0;
+  let fedBack = null;
+  const { orchestrator } = harness({
+    patchPlan: {
+      core: ({ rejections }) => {
+        round += 1;
+        if (round === 1) {
+          // Exactly what the first live model did: "replace" the stub with its own content.
+          return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "replace_symbol", symbol: "HomePage", content: identical }] }];
+        }
+        fedBack = rejections;
+        return CORE_PATCH;
+      },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "green", "round 2 recovers");
+  assert.ok(fedBack?.some((r) => /byte-identical|no-op/.test(r.reason)),
+    `the model is TOLD it emitted a no-op: ${JSON.stringify(fedBack)}`);
 });
 
 test("WP8 — renderAssetData is deterministic and placeholder-safe", () => {

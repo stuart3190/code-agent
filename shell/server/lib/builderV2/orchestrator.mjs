@@ -146,6 +146,20 @@ export function createOrchestrator({
         log(`${step}: ${applied.rejected.length} patch op(s) rejected, feeding reasons back`);
         continue;
       }
+      // No-op batches are rejected DETERMINISTICALLY, before a gate cycle is spent on them:
+      // the first live run's model "replaced" a stub with its own identical content, twice.
+      const changed = Object.keys(applied.tree).some((p) => applied.tree[p] !== working[p])
+        || Object.keys(working).some((p) => !(p in applied.tree));
+      if (!changed) {
+        rejections = [{
+          signature: "no-op",
+          reason: "your batch left every file byte-identical — re-emitting current content is not implementation. "
+            + "CREATE the required sections/pages as newFile entries (src/routes/…), register them in src/App.jsx, "
+            + "and make every journey outcome visible as real UI text",
+        }];
+        log(`${step}: no-op batch rejected deterministically`);
+        continue;
+      }
       const gate = await verifyStage(applied.tree, gateOptions(contract, step, journeys));
       if (gate.ok) return { ok: true, tree: gate.tree };
       const gateProblems = gate.layers.d0d2.problems || [];
@@ -167,21 +181,37 @@ export function createOrchestrator({
         owner, project_id: projectId, profile, request, state: "created",
         budget_credits: budgetCredits, started_at: new Date().toISOString(),
       });
+      // Only REAL bv2_builds columns reach the store; everything else is return-value only
+      // (the first live run died writing `problems` into the table). A store failure at
+      // finish must never mask the build's actual outcome.
+      const PERSISTED_FIELDS = ["error", "final_snapshot", "contract_id", "spent_credits"];
       const finish = async (state, extra = {}) => {
-        await buildStore.update(buildId, { state, finished_at: new Date().toISOString(), ...extra });
+        const patch = { state, finished_at: new Date().toISOString() };
+        for (const key of PERSISTED_FIELDS) if (key in extra) patch[key] = extra[key];
+        try {
+          await buildStore.update(buildId, patch);
+        } catch (error) {
+          log(`build row update failed (result unaffected): ${error.message}`);
+        }
         return { buildId, state, ...extra };
+      };
+
+      // State transitions are telemetry — a transient store failure must never kill a
+      // build that has already spent money.
+      const setState = async (state) => {
+        try { await buildStore.update(buildId, { state }); } catch (error) { log(`state update failed: ${error.message}`); }
       };
 
       try {
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
-        await buildStore.update(buildId, { state: "contracting" });
+        await setState("contracting");
         const contract = await contractFn({ owner, projectId, request, profile });
         const tiers = tierContract(contract, { userCritical });
         bindCapabilities(contract); // throws on an unknown/invalid binding — fail before spending anything
         const intents = imageIntents(contract);
 
         // 2. assets resolve BEFORE any generation, zero model turns, cache-first.
-        await buildStore.update(buildId, { state: "assets" });
+        await setState("assets");
         const { resolved, providerCalls } = await assetService.resolveIntents(owner, projectId, intents);
         log(`assets: ${resolved.length} slot(s), ${providerCalls} provider call(s)`);
 
@@ -190,7 +220,7 @@ export function createOrchestrator({
         const secondaryJourneys = tiers.secondary.journeys.map((id) => journeysById.get(id)).filter(Boolean);
 
         // 3. CORE: the essential set only.
-        await buildStore.update(buildId, { state: "core" });
+        await setState("core");
         let tree = baseTree();
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
@@ -200,7 +230,7 @@ export function createOrchestrator({
         tree = core.tree;
 
         // 4. verify essential journeys (differential), then the C4 eligibility decision.
-        await buildStore.update(buildId, { state: "verify_core" });
+        await setState("verify_core");
         const coreVerdicts = await verifyJourneySet({ owner, projectId, contract, journeys: essentialJourneys, tree, snapshotId: null });
         const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys } });
         if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; ") });
@@ -210,7 +240,7 @@ export function createOrchestrator({
           buildId, reason: "core", assetManifest: await assetService.assetManifestFor(owner, projectId),
         });
         await snapshotStore.promote(owner, projectId, "green", coreSnapshot.id);
-        await buildStore.update(buildId, { state: "green", final_snapshot: coreSnapshot.id });
+        try { await buildStore.update(buildId, { state: "green", final_snapshot: coreSnapshot.id }); } catch (error) { log(`green state update failed: ${error.message}`); }
         log(`core green: snapshot ${coreSnapshot.id}`);
 
         // 6. secondary increments — one at a time, each rolled back ALONE on failure.
@@ -219,7 +249,7 @@ export function createOrchestrator({
         const pendingIncrements = [...eligibility.pendingIncrements];
         for (const journey of secondaryJourneys) {
           const step = `increment:${journey.id}`;
-          await buildStore.update(buildId, { state: step });
+          await setState(step);
           const startTree = await snapshotStore.materialize(owner, lastGreen.id);
           const increment = await buildIncrement({
             step, owner, contract, tiers, tree: startTree, assets: resolved, journeys: [journey],

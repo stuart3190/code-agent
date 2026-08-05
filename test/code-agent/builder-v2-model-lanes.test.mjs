@@ -42,6 +42,7 @@ test("WP9 — codex wire: strict passes through per-tool, forced tool_choice dis
   assert.equal(bodies[0].tools[0].strict, true, "emit_patches opts INTO strict and it reaches the wire");
   assert.deepEqual(bodies[0].tool_choice, { type: "function", name: "emit_patches" });
   assert.equal(bodies[0].parallel_tool_calls, false, "a forced single tool is not parallel");
+  assert.equal(bodies[0].reasoning, undefined, "no reasoning field unless asked for");
   assert.equal(turn.toolCalls[0].name, "emit_patches");
   assert.deepEqual(turn.toolCalls[0].arguments, { patches: [] });
 
@@ -51,6 +52,11 @@ test("WP9 — codex wire: strict passes through per-tool, forced tool_choice dis
   assert.equal(bodies[1].tool_choice, "auto");
   assert.equal(bodies[1].parallel_tool_calls, true);
   assert.equal(bodies[1].tools[0].strict, false);
+  assert.equal(bodies[1].reasoning, undefined);
+
+  // The lanes ask for thinking room on patch calls; the wire shape is codex_cli_rs's.
+  await provider.runTurn({ systemPrompt: "s", messages: [{ role: "user", content: "u" }], reasoningEffort: "medium" });
+  assert.deepEqual(bodies[2].reasoning, { effort: "medium" });
 });
 
 // ── the lanes ─────────────────────────────────────────────────────────────────────────────────

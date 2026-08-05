@@ -53,7 +53,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
   // fetchImpl/tokenProvider are injectable so the identifier plumbing is provable without a
   // ChatGPT account; production always uses the defaults.
-  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice }) {
+  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort }) {
     const { accessToken, accountId } = await tokenProvider();
 
     const body = {
@@ -64,6 +64,9 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       store: false, // backend rejects store:true/stream:false; no `metadata` (would 400)
     };
     if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
+    // Optional reasoning-effort override (codex_cli_rs sends the same field shape). Omitted
+    // entirely when unset — existing callers' wire bodies are byte-identical.
+    if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
     const wireTools = toWireTools(tools);
     if (wireTools) {
       body.tools = wireTools;

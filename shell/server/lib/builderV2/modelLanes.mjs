@@ -38,7 +38,11 @@ against a code index. Rules:
   with the helpers in src/lib/assets.js (imageProps / pictureSources / isPlaceholder /
   placeholderStyle). Never hardcode an image URL and never invent one.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
-- Keep components small; one route file per page plus small shared components.`;
+- Keep components small; one route file per page plus small shared components.
+- BUILD THE WHOLE STEP IN THIS ONE BATCH. A real step is several patches and several
+  kilobytes of new JSX: new files for every section/page, real copy, real form state, and
+  the App.jsx registration. A batch that re-emits existing content, leaves scaffold stubs
+  in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
 
 function renderTreeContext(tree) {
   const paths = Object.keys(tree).sort();
@@ -134,6 +138,9 @@ export function createModelLanes({
         messages: [{ role: "user", content: prompt }],
         tools: [EMIT_PATCHES_SCHEMA],
         toolChoice: { type: "function", name: EMIT_PATCHES_SCHEMA.name },
+        // The first live run produced an 82-token no-op with zero reasoning; a forced tool
+        // call still needs thinking room to design the whole step.
+        reasoningEffort: "medium",
       });
       const call = (turn.toolCalls || []).find((c) => c.name === EMIT_PATCHES_SCHEMA.name);
       // Record BEFORE the guard can throw — the ceiling stopping a build never hides spend.
