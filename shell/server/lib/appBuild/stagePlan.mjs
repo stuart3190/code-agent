@@ -13,6 +13,7 @@
 // so on.
 
 import { STAGES, journeysForStage, primaryJourney } from "../../../shared/implementationContract.mjs";
+import { expectationKeywords } from "./journeyVerifier.mjs";
 
 const DEFINITIONS = {
   foundation: {
@@ -107,7 +108,43 @@ export function planStages(contract, { skipEmpty = true, includePolish = true } 
 
     stages.push({ id, ...definition, journeys, entities });
   }
+
+  // A skipped stage must not take its journeys with it. In the 24.26-credit booking build the
+  // contract assigned use-responsive-navigation to POLISH, polish was dropped (a design profile
+  // already covers the visual pass) — and the mobile-navigation expectations were handed to no
+  // stage at all. The verifier then failed a journey nothing had ever been asked to build.
+  // Orphaned journeys land on the last stage that builds screens.
+  const planned = new Set(stages.map((s) => s.id));
+  const orphans = (contract?.journeys || []).filter((j) => !planned.has(j.stage || "primary_journey"));
+  if (orphans.length) {
+    const home = stages.find((s) => s.id === "supporting")
+      || stages.find((s) => s.id === "primary_journey")
+      || stages.find((s) => s.id === "foundation");
+    if (home) home.journeys = [...home.journeys, ...orphans];
+  }
+
   return stages;
+}
+
+/**
+ * Does every journey the verifier will drive belong to a stage that will actually run?
+ *
+ * Deterministic, checked BEFORE generation. A journey the plan does not own is a verification
+ * failure already paid for — the model can only build the expectations it is given.
+ */
+export function acceptanceCoverage(contract, stages) {
+  const owned = new Map();
+  for (const stage of stages) {
+    for (const journey of stage.journeys || []) owned.set(journey.id, stage.id);
+  }
+  const missing = (contract?.journeys || []).filter((j) => !owned.has(j.id));
+  return {
+    ok: missing.length === 0,
+    covered: (contract?.journeys || [])
+      .filter((j) => owned.has(j.id))
+      .map((j) => ({ journey: j.id, stage: owned.get(j.id), steps: (j.steps || []).length })),
+    missing: missing.map((j) => ({ journey: j.id, declaredStage: j.stage || "primary_journey" })),
+  };
 }
 
 /**
@@ -154,10 +191,22 @@ export function stagePrompt(stage, contract, { request }) {
     lines.push("");
   }
 
+  // The expectations are rendered as what the VERIFIER will literally test, not as prose. The
+  // 24.26-credit booking build implemented every step "impressionistically" and then failed
+  // verification on wording: the page never said "selected", never said "confirmation" — because
+  // nothing had told the builder the check is visible text. Same source of truth on both sides.
+  if (stage.journeys?.length) {
+    lines.push("JOURNEYS THIS STAGE MUST MAKE PASS — a real browser will drive every step and then");
+    lines.push("look for the named words as VISIBLE TEXT on the page. Internal state that renders");
+    lines.push("nothing does not count. After each action, the outcome must be on screen:");
+    lines.push("");
+  }
   for (const journey of stage.journeys || []) {
-    lines.push(`JOURNEY — ${journey.title}${journey.priority === "primary" ? " (PRIMARY)" : ""}:`);
+    lines.push(`JOURNEY — ${journey.title}${journey.priority === "primary" ? " (PRIMARY — the preview is gated on this)" : ""}:`);
     for (const [i, step] of (journey.steps || []).entries()) {
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
+      const wanted = expectationKeywords(step.expect);
+      if (wanted.length) lines.push(`     verifier looks for on-page text: ${wanted.join(", ")}`);
     }
     lines.push("");
   }
@@ -194,3 +243,34 @@ export function stagePrompt(stage, contract, { request }) {
 }
 
 export { DEFINITIONS as STAGE_DEFINITIONS };
+
+// ── the byte-stable shared prefix (cache stabilisation) ───────────────────────────────────────
+//
+// Every stage call after the foundation shares one system prompt assembled in a fixed order:
+// edit instructions → design brief → runtime/SDK contract → implementation contract → these
+// invariants. Nothing dynamic — no timestamps, ids, or stage-specific text — may appear in it,
+// because the provider's prompt cache works on byte-identical prefixes: in the 24.26-credit
+// booking build every stage OPENED with cached=0, paying full price for the same preamble four
+// times. Stage-specific content (manifest, objective, evidence) belongs in the user message,
+// AFTER the stable prefix ends.
+
+export const STAGE_RUNTIME_CONTRACT = [
+  "RUNTIME AND SDK:",
+  "The app runs on the fixed Vite + React scaffold. Persistence is the backend SDK only:",
+  '  import { auth, db } from "./lib/backend" — db.entity("<type>").create/list/update/delete,',
+  "  auth.signUp / signIn / currentUser / signOut.",
+  "Entities are owner-scoped: reads and writes need a signed-in session; for apps without",
+  "sign-in, establish an anonymous visitor session and keep its credentials as the ONLY thing",
+  "cached in the browser.",
+  "localStorage, sessionStorage and IndexedDB are NOT persistence and fail the honesty scan.",
+].join("\n");
+
+export const STAGE_GLOBAL_INVARIANTS = [
+  "GLOBAL INVARIANTS — checked deterministically after every stage, not negotiable:",
+  "- every import resolves and the project compiles (npm run build).",
+  "- src/lib/backend/ is infrastructure and is never edited.",
+  "- no control is present that does nothing; deferred work is omitted or visibly disabled.",
+  "- an outcome a journey names must be VISIBLE on the page after its action — rendered text or",
+  "  state, not internal variables.",
+  "- every declared route renders a real component.",
+].join("\n");

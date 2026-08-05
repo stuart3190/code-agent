@@ -60,10 +60,13 @@ const after = honestyScan(fixed.tree, { contract: run.contract });
 console.log(`findings after: ${after.findings.length} hard (${after.ok ? "scan OK" : "scan still failing"})`);
 if (!after.ok || after.findings.length !== 0) fail("hard findings did not reach zero");
 for (const [file, source] of Object.entries(fixed.tree)) {
-  if (file === "src/data/visitorSession.js") continue; // session credentials, classified and warned
-  if (/^src\//.test(file) && usesBrowserStorage(source)) fail(`${file} still touches browser storage`);
+  // Same scope as the honesty scan: app source only. src/lib/backend/ is the shipped SDK (its
+  // auth session storage is the platform's, not the app's), and visitorSession.js is the
+  // classified session-credential cache.
+  if (!/^src\//.test(file) || file.startsWith("src/lib/backend/") || file === "src/data/visitorSession.js") continue;
+  if (usesBrowserStorage(source)) fail(`${file} still touches browser storage`);
+  if (/\bindexedDB\b/.test(source)) fail(`${file} uses indexedDB persistence`);
 }
-if (/indexedDB/i.test(Object.values(fixed.tree).join("\n"))) fail("indexedDB persistence remains");
 console.log("no localStorage/sessionStorage/IndexedDB business persistence remains");
 
 // ── the repaired tree still compiles ──────────────────────────────────────────────────────────

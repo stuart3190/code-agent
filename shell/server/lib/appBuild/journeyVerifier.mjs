@@ -38,6 +38,17 @@ function keywords(text, limit = 6) {
   return [...new Set(wordsOf(text))].filter((w) => !NOISE.has(w)).slice(0, limit);
 }
 
+/**
+ * The EXACT words this verifier will look for on the page after a step runs — exported so the
+ * builder can be told them BEFORE generation. The booking build failed steps like "choose an
+ * available date" because the page never showed "selected"/"highlighted": the builder had read
+ * the same expectation prose but nothing told it the check is literal visible text. One source
+ * of truth for both sides ends that split.
+ */
+export function expectationKeywords(expect) {
+  return keywords(expect, 5);
+}
+
 /** Every locator worth trying for one described control, best guess first. */
 function candidatesFor(page, description) {
   const words = keywords(description, 4);

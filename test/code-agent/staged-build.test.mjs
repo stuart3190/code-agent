@@ -94,8 +94,10 @@ test("each stage prompt carries only its own slice of the contract", () => {
   assert.match(data, /State may cache what the backend returned/);
 
   const primary = stagePrompt(byId.primary_journey, CONTRACT, { request });
-  assert.match(primary, /JOURNEY — A visitor books a slot \(PRIMARY\)/);
+  assert.match(primary, /JOURNEY — A visitor books a slot \(PRIMARY — the preview is gated on this\)/);
   assert.match(primary, /a confirmation reference is shown/);
+  // R4: the builder is told the verifier's literal on-page words for every step.
+  assert.match(primary, /verifier looks for on-page text: confirmation, reference/);
   assert.match(primary, /readable after a full page reload/);
 
   // Deferred work is named in every stage, because any stage could fake it.

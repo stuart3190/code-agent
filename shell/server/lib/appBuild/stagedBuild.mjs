@@ -85,7 +85,7 @@ export async function runStagedBuild({
       await runStage(stage, { tree: stageTree, prompt, mode: attempt === 0 ? "stage" : "repair", attempt });
       if (cancelled()) break;
 
-      lastGate = await gate(stageTree);
+      lastGate = await gate(stageTree, stage);
       // Preflight may have corrected imports; adopt the corrected files.
       if (lastGate.tree) Object.assign(stageTree, lastGate.tree);
       working = stageTree;
@@ -128,6 +128,7 @@ export async function runStagedBuild({
       repairs: outcome?.attempt ?? MAX_STAGE_REPAIRS,
       changedFiles,
       checks: lastGate?.checks || [],
+      deterministicRepair: lastGate?.deterministicRepair || null,
       problems: outcome?.ok ? [] : (lastGate?.problems || []),
       durationMs: Date.now() - started,
     });

@@ -10,6 +10,9 @@
 // reason to spend four seconds compiling to learn the same thing.
 
 import { preflightImports, preflightSummary } from "./importPreflight.mjs";
+import { honestyScan } from "./honestyScan.mjs";
+import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
+import { expectationKeywords } from "./journeyVerifier.mjs";
 
 // Files the generated app must not lose or corrupt. A stage that deletes vite.config.js compiles
 // nothing afterwards, and the resulting error names a missing module rather than the real cause.
@@ -77,6 +80,7 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
  */
 export async function runStageGate(tree, {
   nodeModules, baseline = null, compile = null, log = () => {},
+  contract = null, stage = null,
 } = {}) {
   const checks = [];
   const record = (name, ok, detail) => { checks.push({ name, ok, detail }); return ok; };
@@ -118,7 +122,71 @@ export async function runStageGate(tree, {
     }
   }
 
-  return { ok: true, checks, tree: working, corrections, problems: [] };
+  // 4. honesty, IN the stage that created the defect. The 24.26-credit booking build wrote
+  // localStorage persistence in its data stage and heard about it twenty minutes later, at final
+  // verification, when the budget left no room to fix it. The scan costs milliseconds; the safe
+  // deterministic transforms cost nothing; and a defect the transform cannot fix feeds the CHEAP
+  // in-stage repair (scoped context, two attempts) instead of a whole-build repair round.
+  let deterministicRepair = null;
+  if (contract) {
+    let scan = honestyScan(working, { contract, stageScoped: true });
+    if (scan.findings.length) {
+      const fixed = transformPersistence(working, { findings: scan.findings, contract });
+      if (fixed.fixed.length) {
+        const rescanned = honestyScan(fixed.tree, { contract, stageScoped: true });
+        if (rescanned.findings.length < scan.findings.length) {
+          // Adopt the transform — and the compile must still pass on the transformed tree.
+          if (compile) {
+            const rebuilt = await compile(fixed.tree);
+            if (!rebuilt.ok) {
+              return {
+                ok: false, checks, tree: working, corrections,
+                problems: ["the deterministic persistence transform broke the build", ...(scan.findings.map((f) => f.message))],
+                stderr: rebuilt.stderr || "",
+              };
+            }
+          }
+          working = { ...fixed.tree };
+          deterministicRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
+          scan = rescanned;
+          log(`stage-gate: deterministic transform — ${deterministicRepair.summary}`);
+        }
+      }
+    }
+    if (!record("honesty", scan.findings.length === 0,
+      scan.findings.length ? scan.summary : `honest${deterministicRepair ? " (after deterministic transform)" : ""}`)) {
+      return {
+        ok: false, checks, tree: working, corrections, deterministicRepair,
+        problems: scan.findings.map((f) => f.message),
+      };
+    }
+  }
+
+  // 5. expectation presence — only for the stage that owns journeys, and only the strong signal.
+  // If NONE of a step's verifier keywords appear anywhere in the app's rendered source, the
+  // outcome was never built; the verifier will fail it later at fifty times the price. A partial
+  // match proves nothing either way and is deliberately not checked.
+  if (stage?.journeys?.length) {
+    const rendered = Object.entries(working)
+      .filter(([path]) => /^src\/.*\.(jsx|tsx)$/.test(path) && !path.startsWith("src/lib/backend/"))
+      .map(([, source]) => String(source).toLowerCase())
+      .join("\n");
+    const absent = [];
+    for (const journey of stage.journeys) {
+      for (const step of journey.steps || []) {
+        const wanted = expectationKeywords(step.expect);
+        if (wanted.length && !wanted.some((word) => rendered.includes(word))) {
+          absent.push(`"${step.expect}" — none of [${wanted.join(", ")}] appears in any screen; the verifier will look for these as visible text`);
+        }
+      }
+    }
+    if (!record("expectations", absent.length === 0,
+      absent.length ? `${absent.length} outcome(s) with no trace in the UI` : "all step outcomes have some trace")) {
+      return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+    }
+  }
+
+  return { ok: true, checks, tree: working, corrections, deterministicRepair, problems: [] };
 }
 
 /** One line for the diagnostics step and the job log. */

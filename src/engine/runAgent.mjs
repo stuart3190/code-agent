@@ -44,11 +44,21 @@ export async function runAgent({
   // the cache, so --cache and --ctx are alternatives, not stacked.
   cacheFriendly = false,
   entryFile = "src/App.jsx",
+  // Stale-read compaction. In the 24.26-credit booking build every full-file read stayed verbatim
+  // in history for the rest of its stage — the supporting stage's turn-1 reads of four files rode
+  // along in seven later turns, AFTER the model had patched those same files, so the history was
+  // both large and WRONG. When on: once a file is successfully mutated, earlier read results for
+  // it are replaced with a deterministic summary (path, hashes, exports, what changed). The
+  // current contents stay one read_file away and the model is told exactly that.
+  compactStaleReads = false,
 }) {
   const messages = [{ role: "user", content: prompt }];
   const telemetry = createTelemetry();
   const turnLog = []; // per-turn output attribution, for the cliff re-measurement
   let finalText = "";
+  // message index -> { path, bytes } for full read results still in history verbatim.
+  const liveReads = new Map();
+  let prunedTokens = 0;
 
   // --ctx wins if both are set (they're alternative input strategies).
   const useCache = cacheFriendly && !contextSelection;
@@ -129,10 +139,68 @@ export async function runAgent({
         name: tc.name,
         output: JSON.stringify(result),
       });
+
+      if (compactStaleReads) {
+        // Remember where this full read landed so a later mutation can supersede it.
+        if (tc.name === "read_file" && typeof result?.contents === "string") {
+          liveReads.set(messages.length - 1, { path: tc.arguments?.path, contents: result.contents });
+        }
+        // A successful mutation makes every EARLIER read of that file stale — compact them now,
+        // before the next turn resends history.
+        for (const changed of mutatedPaths(tc, result)) {
+          for (const [index, read] of liveReads) {
+            if (read.path !== changed || index === messages.length - 1) continue;
+            prunedTokens += Math.ceil(read.contents.length / 4);
+            messages[index] = {
+              ...messages[index],
+              output: JSON.stringify(staleReadStub(read, tree[changed])),
+            };
+            liveReads.delete(index);
+          }
+        }
+      }
     }
   }
 
-  return { tree, telemetry: telemetry.summary(), turnLog, finalText };
+  return { tree, telemetry: { ...telemetry.summary(), prunedTokens }, turnLog, finalText };
+}
+
+// Paths a tool call SUCCESSFULLY changed. write_file/edit_file report per-path; apply_patch
+// reports the list. A failed call changed nothing and supersedes nothing.
+function mutatedPaths(tc, result) {
+  if (result?.error) return [];
+  if (tc.name === "write_file" || tc.name === "edit_file") {
+    return tc.arguments?.path && result?.ok !== false ? [tc.arguments.path] : [];
+  }
+  if (tc.name === "apply_patch" && result?.ok) return result.changed || [];
+  return [];
+}
+
+// The deterministic summary that replaces a superseded read: enough to know what the file was,
+// what it became, and that the history copy must not be trusted. The full old body stays in
+// diagnostics and checkpoints — it is removed from the ACTIVE context only.
+function staleReadStub(read, currentSource) {
+  const exports = typeof currentSource === "string"
+    ? [...currentSource.matchAll(/export\s+(?:default\s+)?(?:async\s+)?(?:function|const|class)\s+([\w$]+)/g)].map((m) => m[1]).slice(0, 20)
+    : [];
+  return {
+    _superseded: "this read is stale — the file was patched after it",
+    path: read.path,
+    readHash: fnv(read.contents),
+    currentHash: typeof currentSource === "string" ? fnv(currentSource) : null,
+    currentExports: exports,
+    note: "Your later patch to this file was applied successfully. The context block / read_file has the current contents; do not rely on this old copy.",
+  };
+}
+
+// Tiny stable content hash for the stubs — identity, not cryptography.
+function fnv(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 // Paths a tool call brought into play, so context selection keeps their current contents in

@@ -17,12 +17,13 @@ export const REASONS = Object.freeze({
   target: "will be modified by this stage",
   dependency: "directly imported by a file being modified",
   caller: "directly calls a file being modified",
+  prior_stage: "written by an earlier stage this one builds on",
   shared: "shared interface, type or contract",
   failure: "a verifier pointed at this file",
   entry: "application entry point",
 });
 
-const REASON_RANK = { target: 5, failure: 5, dependency: 4, caller: 3, entry: 2, shared: 1 };
+const REASON_RANK = { target: 5, failure: 5, dependency: 4, prior_stage: 4, caller: 3, entry: 2, shared: 1 };
 
 // Small enough that including it wholesale is cheaper than reasoning about whether to.
 const ALWAYS_FULL = new Set(["package.json"]);
@@ -83,7 +84,7 @@ export function targetsForStage(stageId, manifest, { contract = null } = {}) {
  */
 export function buildStageContext({
   tree, manifest = null, stageId, contract = null, objective = "",
-  systemPrompt = "", failures = [], budgetTokens = 40_000,
+  systemPrompt = "", failures = [], budgetTokens = 40_000, priorFiles = [],
 }) {
   const map = manifest || buildManifest(tree, { contract });
   const targets = new Set(targetsForStage(stageId, map, { contract }));
@@ -101,6 +102,16 @@ export function buildStageContext({
   };
 
   for (const path of targets) note(path, failures.length ? "failure" : "target");
+
+  // What earlier stages WROTE. This is the discovery-turn fix from the 24.26-credit booking
+  // build: the data stage's targets were empty (its modules did not exist yet), so one-hop
+  // expansion had nothing to hop from, and the model spent two full turns reading App.jsx and
+  // listing files that the pipeline knew about all along — then a third asking permission for
+  // the body. Every later stage integrates with what the earlier ones produced; those files
+  // (and only those — never the tree) belong in its opening context.
+  for (const path of priorFiles) {
+    if (map.get(path)) note(path, "prior_stage");
+  }
 
   // One hop out from the change set, both directions. Two hops is the whole project again.
   for (const path of [...targets]) {

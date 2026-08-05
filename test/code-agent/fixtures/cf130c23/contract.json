@@ -1,0 +1,491 @@
+{
+  "auth": {
+    "model": "public visitor flow with booking lookup by reference and email",
+    "rules": [
+      "no account is required to book a picking slot",
+      "a booking is displayed only when the entered reference and email match the stored reservation",
+      "newsletter signup does not require an account"
+    ],
+    "required": false
+  },
+  "routes": [
+    {
+      "auth": false,
+      "name": "Home",
+      "path": "/",
+      "purpose": "Marketing landing page with seasonal announcement, booking call-to-action, how it works, farm highlights, practical visitor information, testimonials and newsletter signup."
+    },
+    {
+      "auth": false,
+      "name": "Book a picking slot",
+      "path": "/book",
+      "purpose": "Multi-step reservation flow for selecting date, timed slot, party size, customer details, farm terms and confirmation."
+    },
+    {
+      "auth": false,
+      "name": "Manage booking",
+      "path": "/booking/manage",
+      "purpose": "Lookup and cancellation entry point for existing reservations using booking reference and email."
+    },
+    {
+      "auth": false,
+      "name": "Plan your visit",
+      "path": "/visit",
+      "purpose": "Practical visitor information including opening hours, what to bring, etiquette, weather guidance, accessibility and directions."
+    },
+    {
+      "auth": false,
+      "name": "Our Farm",
+      "path": "/our-farm",
+      "purpose": "Farm story, sustainable growing practices and team or farm photography-style content."
+    }
+  ],
+  "states": [
+    {
+      "empty": "seasonal status still shows the farm announcement and booking call-to-action",
+      "error": "newsletter signup failed, please try again",
+      "loading": "page content renders without blocking external media requests",
+      "success": "newsletter signup confirmation message is visible",
+      "surface": "home page",
+      "validation": "newsletter email must look like an email address"
+    },
+    {
+      "empty": "a friendly message says no picking dates are currently available and links back to visitor information",
+      "error": "availability could not be loaded, please try again",
+      "loading": "availability skeleton or loading message is visible while seeded slots and existing bookings are evaluated",
+      "success": "selected date is highlighted and available timed slots are shown",
+      "surface": "booking page date step",
+      "validation": "a date must be selected before continuing"
+    },
+    {
+      "empty": "all slots for the selected date show as full and cannot be selected",
+      "error": "that slot is no longer available",
+      "loading": "slot availability indicators are calculating",
+      "success": "selected slot is highlighted and remaining capacity is visible",
+      "surface": "booking page slot step",
+      "validation": "a timed 90-minute slot must be selected before continuing"
+    },
+    {
+      "empty": "booking summary prompts the visitor to choose a date, time and party size",
+      "error": "saving failed, try again",
+      "loading": "saving reservation message is visible after submit",
+      "success": "confirmation with booking reference, arrival instructions and add-to-calendar-style action is visible",
+      "surface": "booking page details step",
+      "validation": "name, valid email, phone and farm terms acceptance are required"
+    },
+    {
+      "empty": "lookup form prompts for booking reference and email",
+      "error": "we could not find that reservation",
+      "loading": "looking up reservation message is visible after submit",
+      "success": "matching reservation details are visible",
+      "surface": "booking management page",
+      "validation": "booking reference and valid email are required"
+    },
+    {
+      "empty": "menu still displays all primary links",
+      "error": "no broken navigation links are shown",
+      "loading": "navigation is usable without waiting for data",
+      "success": "selected route opens and active navigation state is visible",
+      "surface": "responsive navigation",
+      "validation": "keyboard focus is visible on menu button and links"
+    }
+  ],
+  "summary": "A polished customer-facing website and booking system for Berry Brook Farm where visitors learn about the farm, reserve timed strawberry-picking slots, and manage reservations by reference and email.",
+  "version": 1,
+  "deferred": [
+    {
+      "item": "real card payment or deposit collection",
+      "reason": "the requested experience labels payment as on-arrival and strawberries are paid by weight at the farm"
+    },
+    {
+      "item": "external map provider",
+      "reason": "the application must not use external APIs and will show a map-style visual with written directions"
+    },
+    {
+      "item": "real calendar file download or calendar provider integration",
+      "reason": "the requested add-to-calendar-style action is a demo interaction and no external calendar integration is required"
+    },
+    {
+      "item": "live weather API",
+      "reason": "weather guidance is displayed as static visitor advice without external API calls"
+    },
+    {
+      "item": "staff administration dashboard",
+      "reason": "the request is for a customer-facing website and booking management by visitors"
+    },
+    {
+      "item": "real photography uploads",
+      "reason": "the requested farm-field imagery can be represented with tasteful visual placeholders and illustrated motifs"
+    },
+    {
+      "item": "user accounts and authentication",
+      "reason": "visitors manage reservations using booking reference and email rather than signing in"
+    }
+  ],
+  "entities": [
+    {
+      "name": "booking",
+      "owned": false,
+      "fields": [
+        {
+          "name": "reference",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "slotId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "slotLabel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "adults",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "children",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "totalGuests",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "customerName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "customerEmail",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "customerPhone",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "termsAccepted",
+          "type": "boolean",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "cancelledAt",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "relationships": [
+        "a booking references one seeded in-code date and timed slot",
+        "active bookings reduce the visible remaining capacity for their referenced slot"
+      ]
+    },
+    {
+      "name": "newsletterSignup",
+      "owned": false,
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": []
+    }
+  ],
+  "journeys": [
+    {
+      "id": "reserve-picking-slot",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the home page",
+          "expect": "a hero section is visible with the heading 'Strawberry season is here' and a prominent 'Book a picking slot' call-to-action",
+          "target": "/"
+        },
+        {
+          "action": "click the book call-to-action",
+          "expect": "the booking page opens and shows step 1 with available dates for the next several weeks",
+          "target": "Book a picking slot"
+        },
+        {
+          "action": "choose an available date",
+          "expect": "the selected date is highlighted and timed 90-minute picking slots with availability indicators are visible",
+          "target": "date selector"
+        },
+        {
+          "action": "choose an available timed slot",
+          "expect": "the selected slot is highlighted and the visitor count step becomes available",
+          "target": "slot selector"
+        },
+        {
+          "action": "enter adult and child counts",
+          "expect": "the booking summary updates with date, time, party size, reservation deposit or entry fee messaging, and 'strawberries paid by weight on arrival'",
+          "target": "visitor count controls"
+        },
+        {
+          "action": "enter name, email and phone, accept the farm terms, and submit",
+          "expect": "a confirmation state appears with a booking reference, arrival instructions, and an add-to-calendar-style action",
+          "target": "booking details form"
+        },
+        {
+          "action": "reload the page and look up the reservation by reference and email",
+          "expect": "the same reservation details are displayed after the reload",
+          "target": "manage booking lookup"
+        }
+      ],
+      "title": "A visitor reserves an available strawberry picking slot",
+      "priority": "primary",
+      "acceptance": [
+        "a reservation created in the browser remains retrievable by booking reference and email after a full page reload",
+        "the confirmation displays a unique booking reference and the selected date, time and party size",
+        "a slot at capacity cannot be selected for a new reservation"
+      ]
+    },
+    {
+      "id": "manage-reservation",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the booking management area",
+          "expect": "a lookup form is visible with booking reference and email fields",
+          "target": "/booking/manage"
+        },
+        {
+          "action": "submit a valid booking reference and matching email",
+          "expect": "the reservation details are shown with date, time, party size, contact information and a cancel option",
+          "target": "lookup form"
+        },
+        {
+          "action": "click the cancel option and confirm cancellation",
+          "expect": "the reservation status changes to 'Cancelled' and the slot availability increases by the cancelled party size",
+          "target": "cancel reservation control"
+        },
+        {
+          "action": "search again for the cancelled reservation",
+          "expect": "the reservation is shown with a visible 'Cancelled' status and no active cancel button",
+          "target": "lookup form"
+        }
+      ],
+      "title": "A visitor looks up and cancels an existing reservation",
+      "priority": "secondary",
+      "acceptance": [
+        "a matching reference and email displays the correct reservation",
+        "a non-matching email displays a friendly 'We could not find that reservation' message",
+        "a cancelled reservation is visibly marked as cancelled when looked up again"
+      ]
+    },
+    {
+      "id": "browse-farm-information",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the plan your visit page",
+          "expect": "opening hours, what to bring, field etiquette, weather guidance, accessibility information and directions are visible",
+          "target": "/visit"
+        },
+        {
+          "action": "view the map area",
+          "expect": "a map-style visual placeholder is visible with Berry Brook Farm location details",
+          "target": "directions section"
+        },
+        {
+          "action": "open the our farm page",
+          "expect": "the farm story, sustainable growing practices and team or farm photography-style panels are visible",
+          "target": "/our-farm"
+        }
+      ],
+      "title": "A visitor browses practical farm information",
+      "priority": "secondary",
+      "acceptance": [
+        "the visit page displays parking, accessibility, dogs and picnic policy information",
+        "the our farm page displays sustainable growing practice content",
+        "navigation links move between home, book now, plan your visit and our farm without a page error"
+      ]
+    },
+    {
+      "id": "newsletter-signup",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the home page",
+          "expect": "a newsletter signup section is visible",
+          "target": "/"
+        },
+        {
+          "action": "enter a valid email address and submit",
+          "expect": "a success message confirms the visitor has joined the Berry Brook Farm seasonal updates list",
+          "target": "newsletter signup form"
+        },
+        {
+          "action": "enter an invalid email address and submit",
+          "expect": "an inline validation message says the email must look like an email address",
+          "target": "newsletter signup form"
+        }
+      ],
+      "title": "A visitor signs up for seasonal farm updates",
+      "priority": "secondary",
+      "acceptance": [
+        "a valid newsletter signup shows a visible success message",
+        "an invalid newsletter signup keeps the form visible and shows an email validation message",
+        "submitting an already-signed-up email shows a friendly message that the address is already on the list"
+      ]
+    },
+    {
+      "id": "use-responsive-navigation",
+      "stage": "polish",
+      "steps": [
+        {
+          "action": "open the site on a narrow viewport",
+          "expect": "a menu button and persistent 'Book now' call-to-action are visible",
+          "target": "mobile header"
+        },
+        {
+          "action": "open the mobile menu",
+          "expect": "navigation links for Home, Book Now, Plan Your Visit and Our Farm are visible",
+          "target": "menu button"
+        },
+        {
+          "action": "select a navigation link",
+          "expect": "the selected page opens and the mobile menu closes",
+          "target": "mobile menu link"
+        }
+      ],
+      "title": "A visitor uses the responsive site navigation",
+      "priority": "secondary",
+      "acceptance": [
+        "the mobile header includes a visible booking call-to-action",
+        "the mobile menu can be opened and closed",
+        "all primary navigation links are reachable on mobile"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "kind": "navigation",
+      "journey": "reserve-picking-slot",
+      "statement": "clicking 'Book a picking slot' on the home page opens the booking page and displays available dates."
+    },
+    {
+      "id": "a2",
+      "kind": "validation",
+      "journey": "reserve-picking-slot",
+      "statement": "submitting a booking without a customer name, valid email, phone or accepted terms shows visible inline validation messages and does not create a confirmation."
+    },
+    {
+      "id": "a3",
+      "kind": "success",
+      "journey": "reserve-picking-slot",
+      "statement": "after a successful booking, the confirmation displays a booking reference, selected date, selected time, party size and arrival instructions."
+    },
+    {
+      "id": "a4",
+      "kind": "persistence",
+      "journey": "reserve-picking-slot",
+      "statement": "a submitted active booking is readable after a full page reload by entering its booking reference and matching email."
+    },
+    {
+      "id": "a5",
+      "kind": "capacity",
+      "journey": "reserve-picking-slot",
+      "statement": "when remaining capacity for a slot is less than the selected party size, submitting the booking shows 'That slot is no longer available' and no booking confirmation is created."
+    },
+    {
+      "id": "a6",
+      "kind": "capacity",
+      "journey": "reserve-picking-slot",
+      "statement": "a full slot is visibly labelled 'Full' or 'Sold out' and cannot be selected."
+    },
+    {
+      "id": "a7",
+      "kind": "privacy",
+      "journey": "manage-reservation",
+      "statement": "looking up a booking with the correct reference but a different email shows 'We could not find that reservation' and does not display the booking details."
+    },
+    {
+      "id": "a8",
+      "kind": "update",
+      "journey": "manage-reservation",
+      "statement": "cancelling an active booking changes its displayed status to 'Cancelled' and removes the active cancel button."
+    },
+    {
+      "id": "a9",
+      "kind": "content",
+      "journey": "browse-farm-information",
+      "statement": "the home, visit and our farm pages each display the Berry Brook Farm name and a persistent header book call-to-action."
+    },
+    {
+      "id": "a10",
+      "kind": "responsive",
+      "journey": "use-responsive-navigation",
+      "statement": "on a mobile-width viewport, opening the menu reveals links for Home, Book Now, Plan Your Visit and Our Farm."
+    }
+  ],
+  "operations": [
+    {
+      "id": "create-booking",
+      "kind": "create",
+      "entity": "booking",
+      "journey": "reserve-picking-slot",
+      "description": "Persist a new active reservation with generated booking reference, selected date, selected 90-minute slot, party size, customer contact details and accepted terms."
+    },
+    {
+      "id": "read-booking-by-reference-email",
+      "kind": "read",
+      "entity": "booking",
+      "journey": "manage-reservation",
+      "description": "Find and display a reservation only when booking reference and customer email match."
+    },
+    {
+      "id": "cancel-booking",
+      "kind": "update",
+      "entity": "booking",
+      "journey": "manage-reservation",
+      "description": "Update an active booking to status 'Cancelled' and record a cancellation timestamp."
+    },
+    {
+      "id": "create-newsletter-signup",
+      "kind": "create",
+      "entity": "newsletterSignup",
+      "journey": "newsletter-signup",
+      "description": "Persist a newsletter signup email and show a visible success message."
+    }
+  ],
+  "projectType": "booking",
+  "integrations": [
+    {
+      "name": "none",
+      "purpose": "The demo uses in-app seeded availability, stored booking records and visual placeholders instead of external services.",
+      "required": false
+    }
+  ]
+}

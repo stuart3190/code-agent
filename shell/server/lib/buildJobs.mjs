@@ -39,6 +39,7 @@ import { buildManifest } from "./appBuild/projectManifest.mjs";
 import { buildStageContext, renderContext, contextReport } from "./appBuild/contextBuilder.mjs";
 import { makeScopedFileTools } from "./appBuild/scopedFileTools.mjs";
 import { runStagedBuild, stagesSummary, primaryStageOk } from "./appBuild/stagedBuild.mjs";
+import { planStages, acceptanceCoverage, STAGE_RUNTIME_CONTRACT, STAGE_GLOBAL_INVARIANTS } from "./appBuild/stagePlan.mjs";
 import { runStageGate } from "./appBuild/stageGate.mjs";
 import { honestyScan, honestyFailures } from "./appBuild/honestyScan.mjs";
 import { contractBrief, contractSummary } from "../../shared/implementationContract.mjs";
@@ -781,6 +782,40 @@ async function runJob(job) {
 
     if (staged) {
       setPhase(job, "building");
+
+      // ── the byte-stable shared prefix (R3) ─────────────────────────────────────────────────
+      // One system prompt for every post-foundation stage call, assembled in a fixed order with
+      // nothing dynamic in it. The design brief is FROZEN with the pre-approved photos: letting a
+      // mid-build search_images grow it would silently bust the prefix between stages.
+      const frozenDesignBrief = designProfile ? renderDesignBrief(designProfile, [...approvedPhotos]) : "";
+      const stageSharedSystem = [
+        systemPromptForEdit("apply_patch"),
+        frozenDesignBrief,
+        STAGE_RUNTIME_CONTRACT,
+        contractBrief(contract),
+        STAGE_GLOBAL_INVARIANTS,
+      ].filter(Boolean).join("\n\n");
+      const stagePrefixHash = crypto.createHash("sha256").update(stageSharedSystem).digest("hex").slice(0, 16);
+      const foundationPrefixHash = crypto.createHash("sha256").update(systemPrompt).digest("hex").slice(0, 16);
+      serverLog(job, `context: shared stage prefix ${stagePrefixHash} (${Math.ceil(stageSharedSystem.length / 4)} tok, byte-stable across stages)`);
+
+      // ── acceptance coverage (R4) — before any generation ───────────────────────────────────
+      // Every journey the verifier will drive must be owned by a stage that runs; a journey no
+      // stage was given is a verification failure already paid for.
+      const coverage = acceptanceCoverage(contract, planStages(contract, { includePolish: !designProfile }));
+      job.diag?.step({
+        agent: "Planner", kind: "acceptance_coverage", label: "Acceptance coverage",
+        status: coverage.ok ? "ok" : "failed",
+        output: [
+          ...coverage.covered.map((c) => `${c.journey} → stage ${c.stage} (${c.steps} steps)`),
+          ...coverage.missing.map((m) => `MISSING ${m.journey} — declared stage "${m.declaredStage}" is not in the plan`),
+        ].join("\n"),
+      });
+      serverLog(job, `acceptance coverage: ${coverage.ok ? `all ${coverage.covered.length} journeys owned` : `${coverage.missing.length} journey(s) UNOWNED`}`);
+
+      // What earlier green stages wrote — the opening context of every later stage (R1).
+      const priorStageFiles = new Set();
+
       const stageResult = await runStagedBuild({
         contract, tree, request: prompt,
         // The design audit + polish turn below already does the visual pass.
@@ -798,8 +833,12 @@ async function runJob(job) {
           const selected = buildStageContext({
             tree: stageTree, manifest: stageManifest, stageId: stage.id, contract,
             objective: stagePromptText,
-            systemPrompt: first ? systemPrompt : systemPromptForEdit("apply_patch"),
+            systemPrompt: first ? systemPrompt : stageSharedSystem,
             budgetTokens: stageContextBudget,
+            // R1: what earlier stages wrote opens later stages — the data stage's targets are
+            // files that do not exist yet, and without this the model paid whole turns to read
+            // App.jsx and list files the pipeline knew about all along.
+            priorFiles: [...priorStageFiles],
           });
 
           // Enforced at the TOOL boundary too. A small initial context achieves nothing if the
@@ -817,17 +856,22 @@ async function runJob(job) {
 
           serverLog(job, contextReport(selected).split("\n")[0]);
           if (!selected.ok) serverLog(job, `context: OVER BUDGET for ${stage.id} — ${selected.tokens}/${selected.budget}`);
+          const prefixHash = first ? foundationPrefixHash : stagePrefixHash;
+          serverLog(job, `context: prefix ${prefixHash} · prior-stage files ${[...priorStageFiles].join(", ") || "none"}`);
 
           const turn = await runAgent({
             provider,
-            systemPrompt: first ? systemPrompt : `${systemPromptForEdit("apply_patch")}\n\n${designProfile ? renderDesignBrief(designProfile, approvedPhotos) : ""}`,
+            // R3: byte-stable across every post-foundation stage — cache-shared, hash-logged.
+            systemPrompt: first ? systemPrompt : stageSharedSystem,
             tools: stageTools.schemas, toolImpls: stageTools.impls,
             tree: stageTree,
             // The selected context leads: manifest, the files this stage may modify, summaries for
-            // everything else. The stage objective follows it.
+            // everything else. The stage objective follows it. All of it AFTER the stable prefix.
             prompt: `${renderContext(selected, stageTree, stageManifest)}\n\n${stagePromptText}`,
             log, onUsage,
             maxTurns: stageTurnCap,
+            // R2: a read superseded by the model's own patch is compacted out of active history.
+            compactStaleReads: true,
           });
 
           // What it was given, what it asked for, and whether it rebuilt the tree anyway.
@@ -843,11 +887,20 @@ async function runJob(job) {
             expansions: stageTools.telemetry.expansionCount,
             expansionTokens: stageTools.telemetry.expansionTokens,
             summaryReads: stageTools.telemetry.summaryReads.length,
+            fullReads: stageTools.telemetry.fullReads.length,
             refusals: stageTools.telemetry.refusals.length,
             reconstructedTree: rebuilt,
             reasons: selected.full.map((c) => ({ path: c.path, reason: c.reason })),
+            // R1/R2/R3 accounting: what was predicted, what was pruned, which prefix was paid for.
+            prefixHash,
+            priorFiles: [...priorStageFiles],
+            predictedFiles: selected.full.map((c) => c.path),
+            staleHistoryTokensPruned: turn.telemetry.prunedTokens || 0,
             usage: turn.telemetry,
           });
+          if (turn.telemetry.prunedTokens) {
+            serverLog(job, `context: compacted ${turn.telemetry.prunedTokens} tok of stale reads out of ${stage.id} history`);
+          }
           combinedUsage.add(turn.telemetry);
           if (job.cancelled) throw new CancelledError();
           job.diag?.step({
@@ -855,10 +908,17 @@ async function runJob(job) {
             label: `${stage.title}${stageMode === "repair" ? ` — repair ${attempt}` : ""}`,
             prompt: stagePromptText, output: turn.finalText,
             usage: turn.telemetry, model: provider.model, durationMs: Date.now() - stageStarted,
+            contextMeta: {
+              stage: stage.id, prefixHash,
+              predictedFiles: selected.full.map((c) => c.path),
+              priorFiles: [...priorStageFiles],
+              expansions: stageTools.telemetry.expansionCount,
+              staleHistoryTokensPruned: turn.telemetry.prunedTokens || 0,
+            },
           });
           finalTextParts.push(turn.finalText);
         },
-        gate: async (stageTree) => {
+        gate: async (stageTree, stage) => {
           const runtime = withRuntimeEnv(stageTree, projectId);
           return runStageGate(runtime, {
             nodeModules: depsNodeModules(),
@@ -867,10 +927,18 @@ async function runJob(job) {
             compile: async (candidate) => buildTree(
               candidate, `stage-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {},
             ),
+            // R5: honesty scan + safe deterministic transforms + expectation presence run inside
+            // the gate — a localStorage defect is caught by the stage that wrote it, not twenty
+            // minutes later when the budget has no room left to fix it.
+            contract,
+            stage,
           });
         },
         checkpoint: ({ tree: greenTree, stage, label, changedFiles }) => {
           // A green stage IS the fallback, so it is checkpointed from the gated tree only.
+          for (const path of changedFiles || []) {
+            if (path.startsWith("src/") && !path.startsWith("src/lib/backend/")) priorStageFiles.add(path);
+          }
           job.onStageCheckpoint?.({ tree: greenTree, stage, label, changedFiles });
         },
         onStageStart: (stage, index, total) => {
@@ -885,10 +953,14 @@ async function runJob(job) {
               `${result.ok ? "GREEN" : "LOST"} after ${result.repairs} repair(s)`,
               `checks: ${(result.checks || []).map((c) => `${c.name}:${c.ok ? "ok" : "FAILED"}`).join(" ")}`,
               `files: ${result.changedFiles.join(", ") || "none"}`,
+              ...(result.deterministicRepair ? [`deterministic (0 credits): ${result.deterministicRepair.summary}`] : []),
               ...(result.problems || []).map((p) => `problem: ${p}`),
             ].join("\n"),
             durationMs: result.durationMs,
           });
+          if (result.deterministicRepair) {
+            serverLog(job, `stage ${stage.id}: deterministic transform applied in-stage — ${result.deterministicRepair.summary}`);
+          }
         },
       });
 

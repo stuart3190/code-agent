@@ -214,7 +214,7 @@ export function findSessionBootstrapFunction(source) {
  * Returns `{ ok, findings, warnings, summary }` — `ok` false means the app claims to do something
  * it does not.
  */
-export function honestyScan(tree, { contract = null } = {}) {
+export function honestyScan(tree, { contract = null, stageScoped = false } = {}) {
   const findings = [];
   const warnings = [];
   const deferred = (contract?.deferred || []).map((d) => String(d.item || "").toLowerCase());
@@ -267,7 +267,10 @@ export function honestyScan(tree, { contract = null } = {}) {
 
   // A contract that declares entities, in an app that never once calls the backend, is the
   // whole-application version of the same lie — every screen may look right and nothing is stored.
-  if (entities.length && !anyBackendCall) {
+  // WHOLE-app only: a stage-scoped scan runs before the data stage has written anything, and
+  // flagging the foundation for not yet calling a backend it is forbidden to touch would fail
+  // every staged build at stage one.
+  if (!stageScoped && entities.length && !anyBackendCall) {
     findings.push({
       id: "no_backend_at_all", severity: "hard", file: "src/", line: 0,
       label: "declared data that is never stored",
