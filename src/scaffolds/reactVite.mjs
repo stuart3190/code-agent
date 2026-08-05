@@ -322,6 +322,8 @@ export default function HomePage() {
   "src/lib/capabilities/crud.js": sdk("lib/capabilities/crud.js"),
   "src/lib/capabilities/session.js": sdk("lib/capabilities/session.js"),
   "src/lib/capabilities/roles.js": sdk("lib/capabilities/roles.js"),
+  "src/lib/capabilities/booking.js": sdk("lib/capabilities/booking.js"),
+  "src/lib/capabilities/forms.js": sdk("lib/capabilities/forms.js"),
 
   // Dev-only preview error reporter (the shell's "Fix it" loop). Fixed file, imported
   // first by main.jsx; absent from production builds via the import.meta.env.DEV guard.

@@ -5,7 +5,7 @@
 // so screens never touch row internals. Persistence NEVER lives in components — components
 // import a store made here (usually via a src/data/ module that names the entity once).
 
-import { db } from "../backend";
+import { db } from "../backend/index.js";
 
 function flatten(row) {
   if (!row) return null;

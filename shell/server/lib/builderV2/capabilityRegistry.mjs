@@ -36,8 +36,25 @@ export const CAPABILITIES = Object.freeze({
     uiContract: [],
     upgradePolicy: "replace-on-iterate",
   },
-  // WP-5 lands: booking, availability, conflict-prevention, cancellation, contact, newsletter —
-  // each with a real uiContract (e.g. newsletter: ["idle", "invalid", "success", "duplicate"]).
+  booking: {
+    name: "booking", version: "1.0.0", package: "src/lib/capabilities/booking.js",
+    interface: ["makeBookingSystem"],
+    systemInterface: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
+    entities: ["booking"],
+    // The states a booking UI MUST render — the exact behaviours the 32.65-credit run lacked.
+    uiContract: ["idle", "invalid", "over_capacity", "confirmed_with_reference", "cancel_confirm_prompt", "cancelled"],
+    upgradePolicy: "replace-on-iterate",
+  },
+  contact: {
+    name: "contact", version: "1.0.0", package: "src/lib/capabilities/forms.js",
+    interface: ["makeContactForm"], entities: ["contactMessage"],
+    uiContract: ["idle", "invalid", "sent"], upgradePolicy: "replace-on-iterate",
+  },
+  newsletter: {
+    name: "newsletter", version: "1.0.0", package: "src/lib/capabilities/forms.js",
+    interface: ["makeNewsletter"], entities: ["newsletterSignup"],
+    uiContract: ["idle", "invalid", "success", "duplicate"], upgradePolicy: "replace-on-iterate",
+  },
 });
 
 /** Validate a contract's capability bindings against the registry. */

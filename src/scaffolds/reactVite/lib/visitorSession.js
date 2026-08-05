@@ -10,9 +10,9 @@
 //   import { ensureVisitorSession } from "./lib/visitorSession";
 //   const user = (await auth.currentUser()) || (await ensureVisitorSession());
 
-import { auth } from "./backend";
+import { auth } from "./backend/index.js";
 
-const KEY = `visitor-session:${import.meta.env.VITE_APP_ID || "app"}`;
+const KEY = `visitor-session:${import.meta.env?.VITE_APP_ID || "app"}`;
 
 export async function ensureVisitorSession() {
   const current = await auth.currentUser().catch(() => null);

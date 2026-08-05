@@ -4,8 +4,8 @@
 // supported way to get one — a signed-in user when the app has accounts, the shared visitor
 // session otherwise. Nothing else in app code may touch credentials or storage.
 
-import { auth } from "../backend";
-import { ensureVisitorSession } from "../visitorSession";
+import { auth } from "../backend/index.js";
+import { ensureVisitorSession } from "../visitorSession.js";
 
 export { ensureVisitorSession };
 
