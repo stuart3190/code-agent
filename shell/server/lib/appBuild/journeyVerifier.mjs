@@ -261,6 +261,9 @@ async function driveSelection(page, step) {
   if (!groups.length) return null;
 
   const scored = groups
+    // A group of "+"/"−" buttons is a STEPPER, not a selection — clicking one never yields a
+    // selected state, and judging it here misfired on "choose numbers of adults and children".
+    .filter((g) => g.options.some((o) => (o.text || "").length >= 3))
     .map((g) => ({ ...g, score: wanted.filter((w) => g.contextText.includes(w)).length }))
     .sort((a, b) => b.score - a.score);
   const group = scored[0];
@@ -323,9 +326,13 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
 
   // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
   // option and off the previous one), never on text freshness — a default-selected date is
-  // valid product behaviour and static copy proves nothing in either direction.
-  if (!navigated && /\b(choose|select|pick)\b/i.test(action)
-    && keywords(expect, 8).some((w) => ["selected", "highlighted", "chosen", "active"].includes(w))) {
+  // valid product behaviour and static copy proves nothing in either direction. Triggered on
+  // the ACTION verb, not the expectation's wording: "select an available date → timed slots
+  // become visible" is still a selection, even though its expect describes the consequence —
+  // gating on the word "selected" sent exactly that step back to the text path, which refused
+  // the default-selected date all over again. When no selectable group matches, the generic
+  // path below still applies.
+  if (!navigated && /\b(choose|select|pick)\b/i.test(action) && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
     const outcome = await driveSelection(page, step);
     if (outcome) return outcome;
   }
