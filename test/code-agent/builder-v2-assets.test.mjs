@@ -8,6 +8,11 @@ import { pexelsProvider, PEXELS_LICENSE_SNAPSHOT } from "../../shell/server/lib/
 import {
   createAssetService, rankCandidates, seededIndex, placeholderFor, rewriteDirective,
 } from "../../shell/server/lib/builderV2/assets/assetService.mjs";
+import { createOptimiser, variantWidthsFor, RESPONSIVE_WIDTHS } from "../../shell/server/lib/builderV2/assets/optimiser.mjs";
+import {
+  imageProps, pictureSources, placeholderStyle, isPlaceholder,
+} from "../../src/scaffolds/reactVite/lib/assets.js";
+import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
 // ── the real Pexels response shape, recorded ──────────────────────────────────────────────────
 
@@ -167,4 +172,103 @@ test("A1/A3 — the asset index filters and the manifest is deterministic per pr
   const manifest = await svc.assetManifestFor("o", "proj-1");
   assert.deepEqual(manifest.map((m) => m.slot), ["hero", "route:/visit"], "sorted, snapshot-ready");
   assert.ok(manifest.every((m) => m.assetId && m.providerAssetId));
+});
+
+// ── V2-A2: sharp optimisation + scaffold rendering helpers ────────────────────────────────────
+
+function fakeBucketClient(uploads = []) {
+  return {
+    storage: {
+      from: () => ({
+        upload: async (path, bytes, opts) => { uploads.push({ path, size: bytes.length, contentType: opts.contentType }); return { error: null }; },
+        getPublicUrl: (path) => ({ data: { publicUrl: `https://cdn.test/${path}` } }),
+      }),
+    },
+  };
+}
+
+test("A2 — REAL sharp: AVIF+WebP responsive variants + blur LQIP land in the bucket", async () => {
+  const sharp = (await import("sharp")).default;
+  const source = await sharp({ create: { width: 1400, height: 900, channels: 3, background: { r: 180, g: 60, b: 60 } } })
+    .jpeg().toBuffer();
+  const uploads = [];
+  const optimiser = createOptimiser({
+    fetchImpl: async () => ({ ok: true, arrayBuffer: async () => source }),
+    client: fakeBucketClient(uploads),
+  });
+
+  const out = await optimiser.optimise("owner-1", { url: "https://images.pexels.com/x/original.jpg", alt: "test" });
+  assert.equal(out.width, 1400);
+  assert.deepEqual(out.variants.avif.map((v) => v.width), [640, 1280], "only widths the source supports");
+  assert.deepEqual(out.variants.webp.map((v) => v.width), [640, 1280]);
+  assert.match(out.variants.blur, /^data:image\/webp;base64,/, "inline LQIP");
+  assert.ok(out.variants.blur.length < 2000, "blur stays tiny enough to inline");
+  assert.equal(uploads.length, 4, "2 widths × 2 formats uploaded");
+  assert.ok(uploads.every((u) => u.path.startsWith(`bv2-assets/owner-1/${out.content_hash}/`)), "content-addressed per owner");
+  assert.ok(uploads.every((u) => u.size > 0));
+  assert.equal(out.optimised_url, `https://cdn.test/${out.storage_path}/1280.webp`, "primary = largest webp");
+  assert.equal(out.content_hash.length, 64, "sha256 of the ORIGINAL bytes");
+
+  // A source smaller than every rung still gets exactly one variant at its own width.
+  assert.deepEqual(variantWidthsFor(300), [300]);
+  assert.deepEqual(variantWidthsFor(4000), RESPONSIVE_WIDTHS);
+});
+
+test("A2 — the service merges optimiser output onto the row; optimiser failure keeps original URLs", async () => {
+  const goodOptimiser = { optimise: async (owner, { alt }) => ({
+    content_hash: "c".repeat(64), storage_path: `bv2-assets/o/${"c".repeat(64)}`,
+    optimised_url: "https://cdn.test/opt.webp",
+    variants: { avif: [], webp: [{ width: 640, url: "https://cdn.test/640.webp" }], blur: "data:image/webp;base64,xx" },
+    width: 640, height: 400, alt,
+  }) };
+  const client = fakeAssetClient();
+  const provider = pexelsProvider({ apiKey: "k", fetchImpl: recordedFetch() });
+  const svc = createAssetService({ providers: [provider], client, now: FIXED_NOW, optimiser: goodOptimiser });
+  await svc.resolveIntents("o", "proj-1", [INTENTS[0]]);
+  const row = client._rows[0];
+  assert.equal(row.optimised_url, "https://cdn.test/opt.webp");
+  assert.equal(row.content_hash, "c".repeat(64));
+  assert.ok(row.variants.blur, "blur travels on the row");
+  assert.ok(row.width > 640, "provider dimensions are not clobbered by variant dimensions");
+
+  const failing = { optimise: async () => { throw new Error("sharp exploded"); } };
+  const client2 = fakeAssetClient();
+  const svc2 = createAssetService({ providers: [pexelsProvider({ apiKey: "k", fetchImpl: recordedFetch() })], client: client2, now: FIXED_NOW, optimiser: failing });
+  const { resolved } = await svc2.resolveIntents("o", "proj-1", [INTENTS[0]]);
+  assert.equal(resolved[0].via, "search", "the build continues");
+  assert.equal(client2._rows[0].optimised_url, null);
+  assert.ok(client2._rows[0].original_url, "original provider URL still serves");
+});
+
+test("A2 — scaffold assets.js renders picture/srcset/lazy/blur and ships in the scaffold tree", () => {
+  assert.ok(REACT_VITE["src/lib/assets.js"].includes("pictureSources"), "registered in the scaffold");
+
+  const asset = {
+    alt_text: "strawberry rows at golden hour", original_url: "https://images.pexels.com/o.jpg",
+    optimised_url: "https://cdn.test/1280.webp", width: 2400, height: 1600,
+    variants: {
+      avif: [{ width: 640, url: "https://cdn.test/640.avif" }, { width: 1280, url: "https://cdn.test/1280.avif" }],
+      webp: [{ width: 640, url: "https://cdn.test/640.webp" }, { width: 1280, url: "https://cdn.test/1280.webp" }],
+      blur: "data:image/webp;base64,abc",
+    },
+  };
+  const props = imageProps(asset);
+  assert.equal(props.loading, "lazy");
+  assert.equal(props.decoding, "async");
+  assert.equal(props.srcSet, "https://cdn.test/640.webp 640w, https://cdn.test/1280.webp 1280w");
+  assert.equal(props.width, 2400, "dimensions pin layout against shift");
+  assert.match(props.style.backgroundImage, /^url\(data:image\/webp/, "blur backdrop until pixels arrive");
+
+  const sources = pictureSources(asset);
+  assert.deepEqual(sources.map((s) => s.type), ["image/avif", "image/webp"], "AVIF preferred");
+
+  const unoptimised = { alt_text: "x", original_url: "https://images.pexels.com/o.jpg" };
+  assert.equal(imageProps(unoptimised).src, "https://images.pexels.com/o.jpg");
+  assert.equal(imageProps(unoptimised).srcSet, undefined, "no fabricated srcset");
+  assert.deepEqual(pictureSources(unoptimised), []);
+
+  const ph = placeholderFor("p", { slot: "hero", intent: "farm" });
+  assert.ok(isPlaceholder(ph));
+  assert.equal(imageProps(ph), null, "placeholders render as styled blocks, not <img>");
+  assert.match(placeholderStyle(ph).background, /^linear-gradient/);
 });

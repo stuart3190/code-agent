@@ -51,7 +51,7 @@ export function placeholderFor(projectId, { slot, intent }) {
 
 // ── the service ───────────────────────────────────────────────────────────────────────────────
 
-export function createAssetService({ providers = [], client = serviceClient(), now = () => new Date() } = {}) {
+export function createAssetService({ providers = [], client = serviceClient(), now = () => new Date(), optimiser = null } = {}) {
   const provider = () => providers.find((p) => p.configured());
 
   async function cachedAsset(owner, projectId, slot) {
@@ -76,6 +76,21 @@ export function createAssetService({ providers = [], client = serviceClient(), n
       content_hash: null, variants: {},
       usage_count: 1, last_used: now().toISOString(),
     };
+    if (optimiser) {
+      // Best-effort (V2-A2): our own AVIF/WebP/blur copies in thrallo-artifacts. Any
+      // failure leaves the asset serving its original provider URLs — never blocks.
+      try {
+        const opt = await optimiser.optimise(owner, { url: row.original_url, alt: row.alt_text });
+        row.content_hash = opt.content_hash;
+        row.storage_path = opt.storage_path;
+        row.optimised_url = opt.optimised_url;
+        row.variants = opt.variants;
+        if (!row.width) row.width = opt.width;
+        if (!row.height) row.height = opt.height;
+      } catch (error) {
+        console.error(`[bv2-assets] optimise ${slot}: ${error.message} — original URLs kept`);
+      }
+    }
     const { data, error } = await client.from("bv2_assets")
       .upsert(row, { onConflict: "owner,project_id,provider,provider_asset_id,slot" })
       .select("*").maybeSingle();

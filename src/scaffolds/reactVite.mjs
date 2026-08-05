@@ -325,6 +325,10 @@ export default function HomePage() {
   "src/lib/capabilities/booking.js": sdk("lib/capabilities/booking.js"),
   "src/lib/capabilities/forms.js": sdk("lib/capabilities/forms.js"),
 
+  // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering
+  // for the imagery the Asset Service resolves. Headless props-builders, no JSX.
+  "src/lib/assets.js": sdk("lib/assets.js"),
+
   // Dev-only preview error reporter (the shell's "Fix it" loop). Fixed file, imported
   // first by main.jsx; absent from production builds via the import.meta.env.DEV guard.
   "src/lib/devReporter.js": sdk("lib/devReporter.js"),
