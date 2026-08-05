@@ -13,6 +13,7 @@ import { openAIConfigured } from "../openAIProvider.mjs";
 import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
+import { v2BuildEligible, startAppBuildV2 } from "../builderV2/entry.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
 // is expressed as a nullable type, and invokes treat null as absent.
@@ -66,6 +67,15 @@ export function registerCoreCapabilities() {
           error.code = "budget_exceeded";
           throw error;
         }
+      }
+      // Builder v2 shadow entry (WP-8): triple-gated, fails closed. An eligible owner
+      // routes to the v2 orchestrator; until WP-9 wires its model lanes the entry
+      // declines with a reason and v1 builds exactly as before.
+      const v2 = await v2BuildEligible(ctx.owner);
+      if (v2.eligible) {
+        const shadow = await startAppBuildV2(ctx, input);
+        if (shadow.handled) return shadow.result;
+        console.log(`[bv2] eligible owner declined by shadow entry: ${shadow.reason} — v1 build proceeds`);
       }
       return startAppBuild(ctx, {
         description: String(input.description),
