@@ -91,6 +91,7 @@ export function createCodexProvider() {
     let text = "";
     const toolCalls = [];
     let usage = null;
+    let providerRequestId = null;
     let buf = "";
     const decoder = new TextDecoder();
     for await (const chunk of res.body) {
@@ -125,7 +126,7 @@ export function createCodexProvider() {
       }
     }
 
-    return { text: text.trim(), toolCalls, usage: normalizeUsage(usage) };
+    return { text: text.trim(), toolCalls, usage: { ...normalizeUsage(usage), providerRequestId } };
   }
 
   return { runTurn };

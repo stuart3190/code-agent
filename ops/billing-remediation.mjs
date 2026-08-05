@@ -1,74 +1,91 @@
 // Remediation for the 2026-08-05 cached-token billing defect. DRY RUN by default.
 //
-// The defect: budgetLedger.debit priced managed usage at a flat (input+output)/TOKENS_PER_CREDIT,
-// charging cached input tokens as fresh and ignoring model weighting. Every reporting surface
-// (ai_requests.cost, diag_steps, diag_runs.totals) used the cache-aware costModel and was right;
-// the debit was wrong. Run 83883309: real cost 19.25 credits, debited 51.33.
+// GROUNDED IN THE ACTUAL LEDGER (ca_usage_records), not reconstructed from ai_requests. The first
+// draft of this script reconstructed charges from the per-call diagnostics and proposed restoring
+// 222.85 credits across 13 owners — but 11 of those owners were throwaway proof accounts whose
+// deletion cascaded their ledger rows away. They have no debit to restore. The pre-apply check
+// ("no build without an actual managed-ledger debit") caught it, which is exactly what it is for.
 //
-// What was actually harmed: the managed MONTHLY ALLOWANCE (token-denominated) burned ~2.5× faster
-// than the canonical cost basis, and every credit figure shown to a customer or compared against a
-// ceiling was inflated. No per-build Stripe charge exists, so no cash moved — the correction is an
-// allowance restoration, not a refund.
+// The remediation universe is therefore every SURVIVING managed app_build debit row with cached
+// tokens: for each, the flat rule charged metadata.total_tokens/TOKENS_PER_CREDIT, and the
+// canonical price is creditsForUsage over the row's own recorded token split. The correction is
+// one appended adjustment row per ledger row, keyed cached-fix:<ledger_row_id> — stable, unique,
+// and idempotent. Originals are never edited or deleted.
 //
-// The correction: one idempotent adjustment row per affected BUILD (stable id
-// `cached-fix:<build_id>`), restoring tokens equal to the overcharge in credits ×
-// TOKENS_PER_CREDIT. Original usage rows are never rewritten or deleted.
-//
-//   node ops/billing-remediation.mjs           # dry run — prints the full reconciliation
-//   node ops/billing-remediation.mjs --apply   # appends adjustments (idempotent; re-run safe)
+//   node ops/billing-remediation.mjs           # dry run — full reconciliation, writes nothing
+//   node ops/billing-remediation.mjs --apply   # append adjustments (re-run safe)
 
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { TOKENS_PER_CREDIT } from "../src/cost.mjs";
+import { creditsForUsage } from "../src/billing/costModel.mjs";
 
 loadEnv();
 const APPLY = process.argv.includes("--apply");
 const db = serviceClient();
+const r4 = (n) => Math.round(n * 10_000) / 10_000;
 
-// Per-build overcharge, computed from the immutable per-call records. ai_requests.cost is the
-// canonical cache-aware figure; the flat charge is reconstructed from the stored token counts.
-const { data: builds, error: qerr } = await db.from("ai_requests")
-  .select("owner,build_id,input_tokens,output_tokens,cost,cached_tokens,byok,created_at")
+const { data: debits, error } = await db.from("ca_usage_records")
+  .select("id,owner,model,input_tokens,cached_tokens,output_tokens,reasoning_tokens,metadata,created_at")
+  .eq("billing_source", "managed")
   .gt("cached_tokens", 0);
-if (qerr) { console.error(qerr.message); process.exit(1); }
+if (error) { console.error(error.message); process.exit(1); }
 
-const byBuild = new Map();
-for (const r of builds || []) {
-  if (r.byok === true || !r.build_id) continue;
-  const entry = byBuild.get(r.build_id) || { owner: r.owner, flat: 0, canonical: 0, calls: 0, at: r.created_at };
-  entry.flat += (r.input_tokens + r.output_tokens) / TOKENS_PER_CREDIT;
-  entry.canonical += Number(r.cost || 0);
-  entry.calls += 1;
-  byBuild.set(r.build_id, entry);
-}
+const rows = (debits || []).filter((u) => u.metadata?.kind === "app_build");
 
-let totalOver = 0;
-const owners = new Set();
-console.log("build     owner     calls  flat     canonical  overcharge  restore_tokens");
-for (const [buildId, e] of byBuild) {
-  const over = Math.max(0, e.flat - e.canonical);
+// Idempotency: which corrections already exist?
+const { data: existing } = await db.from("ca_usage_records")
+  .select("metadata").eq("model", "adjustment");
+const done = new Set((existing || [])
+  .filter((r) => r.metadata?.kind === "cached_token_billing_correction")
+  .map((r) => r.metadata?.ref));
+
+let totalRestore = 0;
+let pending = 0;
+const owners = new Map();
+console.log("ledger_row  owner     model          flat     corrected  restore   status");
+for (const u of rows.sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+  const totalTok = Number(u.metadata?.total_tokens || (u.input_tokens + u.output_tokens));
+  const flat = r4(totalTok / TOKENS_PER_CREDIT);
+  const corrected = r4(creditsForUsage({
+    usage: {
+      input: u.input_tokens, cached: u.cached_tokens,
+      output: u.output_tokens, reasoning: u.reasoning_tokens, total: totalTok,
+    },
+    model: u.model,
+  }));
+  const over = r4(Math.max(0, flat - corrected));
   if (over < 0.005) continue;
-  totalOver += over;
-  owners.add(e.owner);
-  const restore = Math.round(over * TOKENS_PER_CREDIT);
-  console.log(`${buildId.slice(0, 8)}  ${e.owner.slice(0, 8)}  ${String(e.calls).padStart(3)}  ${e.flat.toFixed(2).padStart(7)}  ${e.canonical.toFixed(2).padStart(8)}  ${over.toFixed(2).padStart(9)}  ${restore}`);
 
-  if (APPLY) {
-    // Idempotent: the stable metadata ref is checked before insert, so re-running appends nothing.
-    const ref = `cached-fix:${buildId}`;
-    const { data: existing } = await db.from("usage_records")
-      .select("id").eq("metadata->>ref", ref).limit(1);
-    if (existing?.length) { console.log(`  (already adjusted — skipped)`); continue; }
-    const { error: ierr } = await db.from("usage_records").insert({
-      owner: e.owner, provider: "app-build", model: "adjustment",
-      input_tokens: -restore, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0,
+  const ref = `cached-fix:${u.id}`;
+  const already = done.has(ref);
+  if (!already) pending += 1;
+  totalRestore += already ? 0 : over;
+  owners.set(u.owner, r4((owners.get(u.owner) || 0) + (already ? 0 : over)));
+  const restoreTokens = Math.round(over * TOKENS_PER_CREDIT);
+  console.log(`${u.id.slice(0, 8)}    ${u.owner.slice(0, 8)}  ${String(u.model).padEnd(13)} ${flat.toFixed(2).padStart(7)}  ${corrected.toFixed(2).padStart(8)}  ${over.toFixed(2).padStart(7)}   ${already ? "already-adjusted" : "pending"}`);
+
+  if (APPLY && !already) {
+    const { error: ierr } = await db.from("ca_usage_records").insert({
+      owner: u.owner, run_id: null, provider: "app-build", model: "adjustment",
+      // Negative input restores the token-denominated allowance by exactly the overcharge.
+      input_tokens: -restoreTokens, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0,
       compute_seconds: 0, amount_gbp: 0, billing_source: "managed",
-      metadata: { kind: "cached_token_billing_correction", ref, build_id: buildId,
-        overcharge_credits: Number(over.toFixed(4)) },
+      metadata: {
+        kind: "cached_token_billing_correction", ref,
+        original_debit_credits: flat, corrected_debit_credits: corrected,
+        restored_credits: over, restored_tokens: restoreTokens,
+        source_ledger_row: u.id, reason: "cached tokens were priced as fresh input by a flat tokens-per-credit rule",
+      },
     });
-    if (ierr) console.error(`  FAILED: ${ierr.message}`);
-    else console.log(`  adjusted: +${restore} tokens restored`);
+    // Stop on any mismatch rather than partially guessing.
+    if (ierr) { console.error(`  FAILED on ${ref}: ${ierr.message} — stopping.`); process.exit(1); }
+    console.log(`  adjusted: +${restoreTokens} tokens (${over.toFixed(4)} credits) restored`);
   }
 }
-console.log(`\n${byBuild.size} builds inspected · ${owners.size} owners · total overcharge ${totalOver.toFixed(2)} credits`);
-console.log(APPLY ? "ADJUSTMENTS APPLIED (idempotent)." : "DRY RUN — nothing written. Re-run with --apply after review.");
+
+console.log(`\n${rows.length} surviving managed debit rows with cached tokens`);
+console.log(`${pending} pending correction(s) · ${done.size} already applied`);
+for (const [owner, amount] of owners) if (amount > 0) console.log(`  owner ${owner.slice(0, 8)}: ${amount.toFixed(2)} credits to restore`);
+console.log(`TOTAL ${APPLY ? "RESTORED" : "TO RESTORE"}: ${totalRestore.toFixed(2)} credits`);
+console.log(APPLY ? "APPLIED (idempotent — re-running changes nothing)." : "DRY RUN — nothing written.");

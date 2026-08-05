@@ -92,6 +92,12 @@ export function normalizeTelemetry(usage) {
     cached: Number(usage.cached ?? usage.cachedTokens ?? 0),
     reasoning: Number(usage.reasoning ?? usage.reasoningTokens ?? 0),
     total: Number(usage.total ?? usage.totalTokens ?? input + output),
+    // Provider response ids, when the provider surfaced them. Not numeric, deliberately carried:
+    // normalisation used to strip them, which made the storage below silently never happen — the
+    // 2026-08-05 incident could only be reconciled against tariff tables for exactly this reason.
+    providerRequestIds: Array.isArray(usage.providerRequestIds) && usage.providerRequestIds.length
+      ? usage.providerRequestIds.map(String)
+      : null,
   };
 }
 
@@ -166,6 +172,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       write(() => db.from("ai_requests").insert({
         id: randomUUID(), owner, provider: providerForModel(usedModel), model: usedModel,
         agent, input_tokens: norm.input, output_tokens: norm.output,
+        provider_request_ids: norm.providerRequestIds?.length ? norm.providerRequestIds : null,
         cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,
         duration_ms: durationMs, cost, build_id: session.id, project_id: projectId,
         byok: session.byok,

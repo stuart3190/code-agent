@@ -85,7 +85,9 @@ test("per-request accounting records every required field with correct normaliza
   assert.ok(req.build_id && req.project_id && req.created_at, "build/project/timestamp linkage");
   // Both telemetry shapes normalize identically.
   assert.deepEqual(normalizeTelemetry({ inputTokens: 5, outputTokens: 3, cachedTokens: 1, reasoningTokens: 2 }),
-    { input: 5, output: 3, cached: 1, reasoning: 2, total: 8 });
+    // providerRequestIds joined the shape on 2026-08-05 (billing-incident follow-up): null when
+    // the provider surfaced none, so absence is distinguishable from an empty batch.
+    { input: 5, output: 3, cached: 1, reasoning: 2, total: 8, providerRequestIds: null });
   assert.equal(providerForModel("claude-sonnet-4-6"), "anthropic");
   assert.equal(providerForModel("gemini-2.5-pro"), "google");
 });

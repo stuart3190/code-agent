@@ -13,7 +13,8 @@ export function createTelemetry() {
   let output = 0;
   let reasoning = 0;
   let cached = 0; // Phase 2.3: input tokens served from the prompt cache (a subset of `input`)
-  let cacheWrite = 0; // BYOK adapter: input tokens WRITTEN to the cache (billed at a write premium)
+  let cacheWrite = 0;
+  const providerRequestIds = []; // BYOK adapter: input tokens WRITTEN to the cache (billed at a write premium)
   let total = 0;
   let usd = 0;
 
@@ -28,6 +29,7 @@ export function createTelemetry() {
       output += usage.output;
       reasoning += usage.reasoning;
       cached += usage.cached ?? 0;
+      if (usage.providerRequestId) providerRequestIds.push(usage.providerRequestId);
       cacheWrite += usage.cacheWrite ?? 0;
       total += usage.total;
       usd += c.usd;
@@ -41,6 +43,7 @@ export function createTelemetry() {
         output,
         reasoning,
         cached,
+        providerRequestIds: [...providerRequestIds],
         cacheWrite,
         cacheHitRate: input ? cached / input : 0, // fraction of input billed at the cached rate
         total,

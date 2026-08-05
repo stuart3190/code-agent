@@ -86,3 +86,16 @@ test("the 28-credit ceiling now admits the repair it wrongly refused", () => {
   assert.ok(projectedWithCorrectTotal <= ceiling, "the corrected total admits the repair");
   assert.ok(projectedWithInflatedTotal > ceiling, "the inflated total is why it was refused");
 });
+
+test("provider request ids survive normalisation into the recorded row", async () => {
+  // Without this the column exists and is never written: normalizeTelemetry stripped everything
+  // non-numeric, so norm.providerRequestIds was always undefined and storage silently never ran.
+  const { normalizeTelemetry } = await import("../../shell/server/lib/appBuild/buildDiagnostics.mjs");
+  const norm = normalizeTelemetry({
+    input: 100, output: 50, cached: 20, reasoning: 5, total: 150,
+    providerRequestIds: ["resp_abc123", "resp_def456"],
+  });
+  assert.deepEqual(norm.providerRequestIds, ["resp_abc123", "resp_def456"]);
+  assert.equal(normalizeTelemetry({ input: 1, output: 1 }).providerRequestIds, null,
+    "absent ids stay null rather than an empty array");
+});
