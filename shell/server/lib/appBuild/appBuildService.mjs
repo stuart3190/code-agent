@@ -27,6 +27,7 @@ import {
 } from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
 import { createReservations } from "./creditReservations.mjs";
+import { resolveProviderPolicy, permittedAlternatives, preflightSummary as providerPreflight } from "./providerPolicy.mjs";
 import { honestyFailures, honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { classifyComplexity, profileFor } from "./buildProfile.mjs";
@@ -371,6 +372,10 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     rounds: [],                                      // measured signals, one per round
     plan, managed, byokSafety, allowFallback,
     activeProvider, credentials,
+    // The provider POLICY: which lanes this lifecycle may ever use, resolved from the active
+    // connection and immutable for the build's lifetime. alternativesFor filters every fallback
+    // candidate through it, so a lane change is a selection-time decision, never an error path.
+    providerPolicy: resolveProviderPolicy({ provider: activeProvider }),
     providerOverride: null,                          // set when a fallback switch happens
     notify: notifyOwnerIfAway,                       // seam: every terminal path notifies once
     switches: [],
@@ -396,11 +401,17 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
 // pairs. Only CONNECTED credentials are offered — a provider whose key last failed is not
 // an alternative.
 function alternativesFor(lifecycle) {
-  return alternativeProviders({
+  const candidates = alternativeProviders({
     current: lifecycle.providerOverride || lifecycle.activeProvider,
     credentials: (lifecycle.credentials || []).filter((c) => c.status === "connected"),
     managedAvailable: lifecycle.activeProvider !== "managed",
-  }).map((id) => ({ id, label: providerLabel(id) }));
+  });
+  // The provider POLICY is the whole list of permitted lanes, decided at selection time. With no
+  // permitted alternative, a provider failure stops the build plainly — it does not switch lanes.
+  // "Managed" as a fallback is a billing decision, and this filter is where a Codex-connected
+  // build's silent slide onto managed credits became impossible.
+  return permittedAlternatives(lifecycle.providerPolicy, candidates)
+    .map((id) => ({ id, label: providerLabel(id) }));
 }
 
 // One Diagnostics row per decision (§15). Raw technical detail stays here and never reaches

@@ -23,6 +23,7 @@ import {
   isAutomaticallyRetryable, isProviderBlocked, END_STATES, STOP_REASONS,
 } from "../../shell/server/lib/appBuild/endState.mjs";
 import { createLifecycleBudget, lifecycleLimits } from "../../shell/server/lib/appBuild/lifecycleBudget.mjs";
+import { resolveProviderPolicy } from "../../shell/server/lib/appBuild/providerPolicy.mjs";
 import {
   normalizeByokSafety, byokDispatchCheck, byokControlsEnabled, BYOK_SAFETY_DEFAULTS,
 } from "../../shell/server/lib/appBuild/byokSafety.mjs";
@@ -631,6 +632,9 @@ async function runRelayScenario(endFrames, {
     rounds: [], plan: "pro", managed,
     byokSafety: normalizeByokSafety(null), allowFallback,
     activeProvider, credentials, providerOverride: null,
+    // Mirrors createLifecycle: the provider policy is resolved from the active connection and is
+    // what alternativesFor filters every fallback candidate through.
+    providerPolicy: resolveProviderPolicy({ provider: activeProvider }),
     notify: async (...args) => { notifications.push(args); },
     switches: [], notified: false, byokWarned: false, endState: null,
     notifications, diagFinished: null,
