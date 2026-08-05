@@ -97,6 +97,7 @@ export function createOrchestrator({
   compile = async () => ({ ok: true }),
   baseTree,                         // () → scaffold tree (injected so tests pin the real REACT_VITE)
   baseline = null,                  // protected-path baseline for the stage gate
+  extraGateOptions = {},            // e.g. { nodeModules, log } for live runs — merged into every gate call
   maxCoreAttempts = 3,              // 1 generation + 2 repairs (Part 4 stop rule)
   log = () => {},
 } = {}) {
@@ -105,7 +106,7 @@ export function createOrchestrator({
   }
 
   const gateOptions = (contract, stepId, journeys) => ({
-    contract, stage: { id: stepId, journeys }, compile, ...(baseline ? { baseline } : {}),
+    contract, stage: { id: stepId, journeys }, compile, ...(baseline ? { baseline } : {}), ...extraGateOptions,
   });
 
   async function verifyJourneySet({ owner, projectId, contract, journeys, tree, snapshotId }) {

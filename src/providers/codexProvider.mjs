@@ -34,7 +34,8 @@ function toInputItems(messages) {
   return items;
 }
 
-// neutral tools -> Responses function tools
+// neutral tools -> Responses function tools. A tool may opt INTO strict schema validation
+// (builder v2's emit_patches does); everything else keeps the proven strict:false wire shape.
 function toWireTools(tools) {
   if (!tools?.length) return undefined;
   return tools.map((t) => ({
@@ -42,7 +43,7 @@ function toWireTools(tools) {
     name: t.name,
     description: t.description,
     parameters: t.parameters,
-    strict: false,
+    strict: t.strict === true,
   }));
 }
 
@@ -52,7 +53,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
   // fetchImpl/tokenProvider are injectable so the identifier plumbing is provable without a
   // ChatGPT account; production always uses the defaults.
-  async function runTurn({ systemPrompt, messages, tools, promptCacheKey }) {
+  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice }) {
     const { accessToken, accountId } = await tokenProvider();
 
     const body = {
@@ -66,8 +67,10 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
     const wireTools = toWireTools(tools);
     if (wireTools) {
       body.tools = wireTools;
-      body.tool_choice = "auto";
-      body.parallel_tool_calls = true;
+      // Callers may FORCE one tool ({type:"function", name}) — builder v2's patch calls do;
+      // a forced single tool disables parallel calls. Default behaviour is unchanged.
+      body.tool_choice = toolChoice || "auto";
+      body.parallel_tool_calls = toolChoice ? false : true;
     }
 
     const res = await fetchImpl(CODEX_RESPONSES_URL, {
