@@ -29,7 +29,10 @@ export function createTelemetry() {
       output += usage.output;
       reasoning += usage.reasoning;
       cached += usage.cached ?? 0;
-      if (usage.providerRequestId) providerRequestIds.push(usage.providerRequestId);
+      // Deduplicated: a retried delivery of the same response must not double-record its id.
+      if (usage.providerRequestId && !providerRequestIds.includes(usage.providerRequestId)) {
+        providerRequestIds.push(usage.providerRequestId);
+      }
       cacheWrite += usage.cacheWrite ?? 0;
       total += usage.total;
       usd += c.usd;

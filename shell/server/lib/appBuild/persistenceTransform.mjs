@@ -15,6 +15,8 @@
 // guessed code. An expression it cannot prove is left alone and reported, and a module with any
 // unmapped expression is handed to targeted AI repair rather than half-transformed.
 
+import { findSessionBootstrapFunction } from "./honestyScan.mjs";
+
 // Every way a generated app reaches browser storage, including through `window.` and common
 // aliases. Detection is broad; the TRANSFORM is what stays narrow.
 const STORE_ACCESS = String.raw`(?:window\s*\.\s*|globalThis\s*\.\s*)?(?:localStorage|sessionStorage)`;
@@ -317,6 +319,139 @@ function bodyOf(source, header) {
   return null;
 }
 
+// ── SHAPE C from run cf130c23 (src/data/newsletterSignup.js:38-39): the guest fallback branch ──
+//
+//   if (!user) {
+//     const record = { id: `local-…`, …, localOnly: true };
+//     try {
+//       const existing = JSON.parse(localStorage.getItem(KEY) || "[]");
+//       localStorage.setItem(KEY, JSON.stringify([record, ...existing].slice(0, N)));
+//     } catch { … }
+//     return record;
+//   }
+//   …
+//   const row = await entity().create({ … });
+//
+// The module already has the REAL create path; only anonymous visitors were shunted into the
+// browser. The branch's actual job — "persist even for visitors who never signed in" — is done
+// properly by establishing a visitor session and falling through to the real create. The
+// slice(0, N) cap bounded a guest-only list this module never reads back; the database keeps
+// every record (the source of truth), and any visible cap belongs on display reads.
+//
+// The session logic is NOT synthesised: the app's OWN bootstrap function (the one the honesty
+// scan classifies as session credentials) is moved VERBATIM to src/data/visitorSession.js and
+// imported from both its origin and here — same storage key, same visitor account, so bookings
+// and newsletter signups land under one identity per browser. No bootstrap in the tree means
+// no provable session strategy, and the module declines loudly as before.
+
+const VISITOR_SESSION_PATH = "src/data/visitorSession.js";
+
+function relativeImport(fromFile, toFile) {
+  const from = fromFile.split("/").slice(0, -1);
+  const to = toFile.split("/");
+  while (from.length && to.length > 1 && from[0] === to[0]) { from.shift(); to.shift(); }
+  const up = from.length ? "../".repeat(from.length) : "./";
+  return (up + to.join("/")).replace(/\.(jsx?|tsx?)$/, "");
+}
+
+function matchBrace(source, open) {
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+export function transformGuestFallback(tree, { files = [] } = {}) {
+  const working = { ...tree };
+  const appliedByFile = {};
+  const notes = [];
+
+  // The app's own session bootstrap, wherever it lives (including an earlier run's move target —
+  // that makes a re-run of this transform idempotent).
+  let bootstrap = null;
+  for (const [path, source] of Object.entries(working)) {
+    if (!/^src\/.*\.(jsx?|tsx?)$/.test(path) || path.startsWith("src/lib/backend/")) continue;
+    const found = findSessionBootstrapFunction(source);
+    if (found) { bootstrap = { file: path, ...found }; break; }
+  }
+  if (!bootstrap) {
+    return { tree, appliedByFile, notes: ["no session-bootstrap function in the tree — no provable session strategy for guest fallbacks"] };
+  }
+
+  let rewired = false;
+  for (const file of files) {
+    const source = working[file];
+    if (!source || file === bootstrap.file) continue;
+
+    const header = /if\s*\(\s*!\s*([\w$]+)\s*\)\s*\{/g;
+    let match = null;
+    let rewrite = null;
+    while ((match = header.exec(source)) !== null) {
+      const open = source.indexOf("{", match.index + match[0].length - 1);
+      const end = matchBrace(source, open);
+      if (end === -1) continue;
+      const body = source.slice(open + 1, end);
+      // Provable only when the branch stores in the browser, returns early, never touches the
+      // database — and the real create exists after it, on a reassignable (`let`) variable.
+      const storesInBrowser = new RegExp(String.raw`${STORE_ACCESS}\s*\.\s*setItem\b`).test(body);
+      const returnsEarly = /\breturn\b/.test(body);
+      const touchesDb = /\bdb\s*\.|\.\s*(?:create|list|update|delete)\s*\(/.test(body);
+      const createAfter = /\.\s*create\s*\(/.test(source.slice(end));
+      const reassignable = new RegExp(String.raw`\blet\s+${match[1]}\b`).test(source);
+      if (storesInBrowser && returnsEarly && !touchesDb && createAfter && reassignable) {
+        rewrite = { start: match.index, end: end + 1, variable: match[1] };
+        break;
+      }
+    }
+    if (!rewrite) continue;
+
+    let next = source.slice(0, rewrite.start)
+      + `if (!${rewrite.variable}) {\n    ${rewrite.variable} = await ${bootstrap.name}();\n  }`
+      + source.slice(rewrite.end);
+    if (!new RegExp(String.raw`import\s*\{[^}]*\b${bootstrap.name}\b`).test(next)) {
+      next = `import { ${bootstrap.name} } from "${relativeImport(file, VISITOR_SESSION_PATH)}";\n${next}`;
+    }
+    working[file] = next;
+    appliedByFile[file] = ["guest_fallback_bootstrap"];
+    rewired = true;
+  }
+
+  if (!rewired) return { tree, appliedByFile: {}, notes };
+
+  // Move the bootstrap into its own module so data modules can import it without a cycle.
+  if (bootstrap.file !== VISITOR_SESSION_PATH) {
+    const origin = working[bootstrap.file];
+    if (!origin || !origin.includes(bootstrap.text)) {
+      // The move cannot be located exactly — make NO edits at all rather than half of them.
+      return { tree, appliedByFile: {}, notes: [`could not locate ${bootstrap.name} verbatim in ${bootstrap.file} — guest fallback left for the model`] };
+    }
+    working[VISITOR_SESSION_PATH] = [
+      `// The app's visitor-session bootstrap, moved verbatim from ${bootstrap.file} so data modules`,
+      "// can establish the same anonymous backend session: records persist server-side under one",
+      "// visitor account per browser. The cached value is credentials for auth.signIn/auth.signUp —",
+      "// session state, not records; the records themselves live in db.entity().",
+      `import { auth } from "${relativeImport(VISITOR_SESSION_PATH, "src/lib/backend")}";`,
+      "",
+      `export ${bootstrap.text.replace(/^export\s+/, "")}`,
+      "",
+    ].join("\n");
+    let replaced = origin.replace(bootstrap.text,
+      `// (${bootstrap.name} moved to ${VISITOR_SESSION_PATH} so data modules share the same visitor session)`);
+    if (new RegExp(String.raw`\b${bootstrap.name}\s*\(`).test(replaced)) {
+      replaced = `import { ${bootstrap.name} } from "${relativeImport(bootstrap.file, VISITOR_SESSION_PATH)}";\n${replaced}`;
+    }
+    working[bootstrap.file] = replaced;
+    appliedByFile[bootstrap.file] = ["session_bootstrap_moved"];
+  }
+
+  return { tree: working, appliedByFile, notes };
+}
+
 /**
  * Transform every module the findings implicate.
  *
@@ -331,9 +466,27 @@ export function transformPersistence(tree, { findings = [], contract = null } = 
   const declined = [];
 
   const files = [...new Set(findings.filter((f) => f.id === "fake_persistence" && f.file).map((f) => f.file))];
+
+  // SHAPE C first: it is tree-level (the fix moves the app's own bootstrap into a shared module),
+  // and a module it fully cleans never reaches the call-site patterns at all.
+  const guest = transformGuestFallback(working, { files });
+  Object.assign(working, guest.tree);
+  for (const [file, applied] of Object.entries(guest.appliedByFile)) {
+    if (!files.includes(file) && !usesBrowserStorage(working[file])) {
+      // A file edited only as the move's origin (not itself a finding) — count it as fixed work.
+      fixed.push({ file, entity: null, applied });
+    }
+  }
+
   for (const file of files) {
     const source = working[file];
     if (!source) continue;
+
+    const guestApplied = guest.appliedByFile[file] || [];
+    if (guestApplied.length && !usesBrowserStorage(source)) {
+      fixed.push({ file, entity: null, applied: guestApplied });
+      continue;
+    }
 
     // Which entity is this module about? Its path first, then its content, then — only when the
     // app has exactly one entity — that one.
@@ -344,9 +497,9 @@ export function transformPersistence(tree, { findings = [], contract = null } = 
     const result = transformModule(source, { entity: entity?.name, path: file });
     if (result.ok) {
       working[file] = result.source;
-      fixed.push({ file, entity: entity?.name, applied: result.applied });
+      fixed.push({ file, entity: entity?.name, applied: [...guestApplied, ...result.applied] });
     } else {
-      declined.push({ file, reasons: result.declined, partial: result.applied });
+      declined.push({ file, reasons: [...guest.notes, ...result.declined], partial: [...guestApplied, ...result.applied] });
     }
   }
 
@@ -355,7 +508,7 @@ export function transformPersistence(tree, { findings = [], contract = null } = 
 
 export function transformSummary({ fixed, declined }) {
   const parts = [];
-  if (fixed.length) parts.push(`rewrote ${fixed.length} module(s) with no model call: ${fixed.map((f) => `${f.file} → db.entity("${f.entity}")`).join(", ")}`);
+  if (fixed.length) parts.push(`rewrote ${fixed.length} module(s) with no model call: ${fixed.map((f) => (f.entity ? `${f.file} → db.entity("${f.entity}")` : `${f.file} (${f.applied.join("+")})`)).join(", ")}`);
   if (declined.length) parts.push(`declined ${declined.length}: ${declined.map((d) => `${d.file} (${d.reasons[0]})`).join("; ")}`);
   return parts.join(" · ") || "nothing to transform";
 }

@@ -120,6 +120,91 @@ const PATTERNS = [
 // the whole database.
 const USES_BACKEND = /\b(?:db\s*\.\s*entity|auth\s*\.\s*(?:signUp|signIn|currentUser)|storage\s*\.)/;
 
+// ── Session-credential bootstrap (run cf130c23, src/App.jsx ensureBookingSession) ─────────────
+//
+// Entities are owner-scoped by RLS, so an app whose contract requires no sign-in can only persist
+// visitor data by minting a visitor account — and the only place that account's generated
+// credentials can live between reloads is the browser. That localStorage use is AUTH BOOTSTRAP,
+// not fake persistence: the cached value's sole purpose is to be handed to auth.signIn/auth.signUp,
+// and the records themselves live in db.entity() under the session it establishes. Flagging it as
+// dishonest blocked a build whose bookings demonstrably persisted server-side and survived reload.
+//
+// The classification is deliberately narrow — ALL of these must hold in the ENCLOSING FUNCTION:
+//   - a variable is assigned from JSON.parse(<store>.getItem(...)),
+//   - that SAME variable is the argument of auth.signIn(...) or auth.signUp(...),
+//   - the function mints credentials (a `password` field appears in code, not just strings).
+// Business records handed to a sign-in call is not a shape a generated app produces; anything
+// looser than this stays a hard finding.
+
+function functionRanges(code) {
+  const ranges = [];
+  const header = /(?:async\s+)?function\s*[\w$]*\s*\([^)]*\)\s*\{|=>\s*\{/g;
+  let m;
+  while ((m = header.exec(code)) !== null) {
+    const open = code.indexOf("{", m.index + m[0].length - 1);
+    let depth = 0;
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === "{") depth += 1;
+      else if (code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) { ranges.push({ start: open, end: i + 1 }); break; }
+      }
+    }
+  }
+  return ranges;
+}
+
+function bootstrapBodyTest(body) {
+  const cached = /([\w$]+)\s*=\s*JSON\s*\.\s*parse\s*\(\s*(?:window\s*\.\s*|globalThis\s*\.\s*)?(?:localStorage|sessionStorage)\s*\.\s*getItem\b/.exec(body);
+  if (!cached) return false;
+  const name = cached[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(String.raw`auth\s*\.\s*(?:signIn|signUp)\s*\(\s*${name}\s*\)`).test(body)
+    && /\bpassword\b/.test(body);
+}
+
+/** Is the storage expression at `index` part of a session-credential bootstrap? */
+export function isSessionBootstrap(code, index) {
+  const enclosing = functionRanges(code)
+    .filter((r) => r.start <= index && index < r.end)
+    .sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+  return enclosing ? bootstrapBodyTest(code.slice(enclosing.start, enclosing.end)) : false;
+}
+
+/**
+ * The app's own session-bootstrap function, if it declares one: a NAMED top-level function whose
+ * body passes the same three-part test. The persistence transform reuses it verbatim rather than
+ * synthesising session logic it cannot prove.
+ */
+export function findSessionBootstrapFunction(source) {
+  const code = stripNonCode(String(source || ""));
+  const header = /(?:async\s+)?function\s+([\w$]+)\s*\([^)]*\)\s*\{/g;
+  let m;
+  while ((m = header.exec(code)) !== null) {
+    const open = code.indexOf("{", m.index + m[0].length - 1);
+    let depth = 0;
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === "{") depth += 1;
+      else if (code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          if (bootstrapBodyTest(code.slice(open, i + 1))) {
+            // Return the ORIGINAL text (comments and strings intact), located by the same offsets:
+            // stripNonCode preserves newlines and brace structure, so the stripped offsets map to
+            // the same function in the raw source via its header-to-close line span.
+            const raw = String(source || "");
+            const startLine = lineOf(code, m.index);
+            const endLine = lineOf(code, i);
+            const lines = raw.split("\n");
+            return { name: m[1], text: lines.slice(startLine - 1, endLine).join("\n") };
+          }
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Scan a generated project.
  *
@@ -153,6 +238,20 @@ export function honestyScan(tree, { contract = null } = {}) {
         // agreement being kept. Only "coming soon"-style labels can be excused this way: a fake
         // persistence call is dishonest whatever was deferred.
         if (pattern.severity === "soft" && deferred.some((item) => snippet.toLowerCase().includes(item.split(" ")[0]))) {
+          continue;
+        }
+
+        // Session-credential bootstrap: storage whose only consumer is auth.signIn/auth.signUp.
+        // Reported — the cache is real and worth seeing — but as a warning, because the records
+        // themselves live in the database under the session it establishes.
+        if (pattern.id === "fake_persistence" && isSessionBootstrap(code, match.index)) {
+          warnings.push({
+            id: "session_credentials", severity: "soft", file: path, line,
+            label: "session credentials cached in the browser", snippet,
+            message: `${path}:${line} — session credentials cached in the browser: the cached value `
+              + "only signs into the backend (auth.signIn/auth.signUp); the records themselves live "
+              + "in the database",
+          });
           continue;
         }
 
