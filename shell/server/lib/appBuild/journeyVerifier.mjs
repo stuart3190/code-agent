@@ -34,8 +34,16 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input"]);
 
+// QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
+// "a polished confirmation state" failed a live build because the page did not contain the word
+// "polished" — an adjective no reasonable app renders. Observable requirements become literal
+// assertions; adjectives never do.
+export const QUALITATIVE = new Set(["polished", "premium", "modern", "professional", "beautiful",
+  "elegant", "stylish", "seamless", "delightful", "clean", "sleek", "attractive", "lovely",
+  "gorgeous", "immersive", "impressive", "refined", "sophisticated", "crisp", "tasteful"]);
+
 function keywords(text, limit = 6) {
-  return [...new Set(wordsOf(text))].filter((w) => !NOISE.has(w)).slice(0, limit);
+  return [...new Set(wordsOf(text))].filter((w) => !NOISE.has(w) && !QUALITATIVE.has(w)).slice(0, limit);
 }
 
 /**
@@ -134,9 +142,152 @@ async function fillVisibleForm(page, marker) {
   return filled;
 }
 
+// ── selection semantics ───────────────────────────────────────────────────────────────────────
+//
+// Default-selected dates and slots are valid product behaviour: the live modular build
+// pre-selected the first date, so the word "selected" existed before the click and the text
+// freshness rule refused a perfectly working selector. Selection steps are therefore judged on
+// the SEMANTIC transition — the click must MOVE selection to the clicked option and off the
+// previous one — read from aria-selected / aria-pressed / checked / data-state / an
+// active-selected class, never from static copy.
+
+/**
+ * Pure verdict over a selection interaction. `before`/`after` are the option group's states in
+ * stable order; `clickedIndex` is the option the driver clicked.
+ */
+export function selectionTransition({ before = [], after = [], clickedIndex = -1 } = {}) {
+  const beforeSelected = before.findIndex((o) => o.selected);
+  if (clickedIndex < 0 || !after[clickedIndex]) {
+    return { ok: false, reason: "no clickable option was identified" };
+  }
+  if (clickedIndex === beforeSelected) {
+    return { ok: false, reason: "clicked the already-selected option — no transition to observe" };
+  }
+  const gained = after[clickedIndex].selected === true;
+  const previousCleared = beforeSelected === -1 || after[beforeSelected]?.selected === false;
+  if (gained && previousCleared) {
+    return {
+      ok: true,
+      detail: beforeSelected === -1
+        ? `selection created on "${(after[clickedIndex].text || "").slice(0, 40)}"`
+        : `selection moved from "${(before[beforeSelected].text || "").slice(0, 40)}" to "${(after[clickedIndex].text || "").slice(0, 40)}"`,
+      selectedText: after[clickedIndex].text || "",
+    };
+  }
+  if (gained) return { ok: false, reason: "selection did not MOVE — the previous option still shows a selected state" };
+  return { ok: false, reason: "the clicked option never gained a selected state (aria/data-state/class all unchanged)" };
+}
+
+/**
+ * Pure check that a confirmation actually reflects what was selected. Formatting varies, but the
+ * NUMBERS in a chosen date or slot ("Sat 21 Jun", "10:30–12:00") survive any rendering; if the
+ * selections carried no numbers there is nothing checkable and the check abstains.
+ */
+export function confirmationReflectsSelections(confirmationText, selections = []) {
+  const numbers = [...new Set(selections.flatMap((s) => String(s || "").match(/\d[\d:.]*/g) || []))];
+  if (!numbers.length) return { checked: false, ok: true };
+  const text = String(confirmationText || "");
+  const matched = numbers.find((n) => text.includes(n));
+  return matched
+    ? { checked: true, ok: true, matched }
+    : { checked: true, ok: false, detail: `the confirmation shows none of the selected values (${numbers.slice(0, 5).join(", ")})` };
+}
+
+// Group the page's selectable options by parent, tagging each element for later clicks.
+async function selectionGroups(page) {
+  return page.evaluate(() => {
+    const isSelected = (el) => {
+      const state = (el.getAttribute("data-state") || "").toLowerCase();
+      const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
+      return el.getAttribute("aria-selected") === "true"
+        || el.getAttribute("aria-pressed") === "true"
+        || el.checked === true
+        || ["on", "active", "selected", "checked"].includes(state)
+        || /(^|[\s_-])(is[-_])?(selected|active)([\s_-]|$)/.test(cls);
+    };
+    const candidates = [...document.querySelectorAll(
+      '[role="option"],[role="tab"],[role="radio"],[aria-selected],[aria-pressed],[data-state],input[type="radio"],button',
+    )].filter((el) => el.offsetParent !== null && !el.disabled);
+    const byParent = new Map();
+    for (const el of candidates) {
+      if (!el.parentElement) continue;
+      if (!byParent.has(el.parentElement)) byParent.set(el.parentElement, []);
+      byParent.get(el.parentElement).push(el);
+    }
+    const groups = [];
+    let id = 0;
+    for (const [parent, els] of byParent) {
+      if (els.length < 2) continue;
+      groups.push({
+        groupId: id,
+        contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
+        options: els.map((el, i) => {
+          el.setAttribute("data-thrallo-opt", `${id}:${i}`);
+          return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80), selected: isSelected(el) };
+        }),
+      });
+      id += 1;
+    }
+    return groups;
+  }).catch(() => []);
+}
+
+async function groupState(page, groupId) {
+  return page.evaluate((gid) => {
+    const isSelected = (el) => {
+      const state = (el.getAttribute("data-state") || "").toLowerCase();
+      const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
+      return el.getAttribute("aria-selected") === "true"
+        || el.getAttribute("aria-pressed") === "true"
+        || el.checked === true
+        || ["on", "active", "selected", "checked"].includes(state)
+        || /(^|[\s_-])(is[-_])?(selected|active)([\s_-]|$)/.test(cls);
+    };
+    return [...document.querySelectorAll(`[data-thrallo-opt^="${gid}:"]`)]
+      .map((el) => ({
+        index: Number(el.getAttribute("data-thrallo-opt").split(":")[1]),
+        text: (el.innerText || el.value || "").trim().slice(0, 80),
+        selected: isSelected(el),
+      }))
+      .sort((a, b) => a.index - b.index);
+  }, groupId).catch(() => []);
+}
+
+// Drive a selection step semantically. Returns a full step outcome, or null when no selectable
+// group matches — the caller falls back to the generic text path.
+async function driveSelection(page, step) {
+  const wanted = keywords(`${step.target || ""} ${step.action} ${step.expect}`, 8);
+  const groups = await selectionGroups(page);
+  if (!groups.length) return null;
+
+  const scored = groups
+    .map((g) => ({ ...g, score: wanted.filter((w) => g.contextText.includes(w)).length }))
+    .sort((a, b) => b.score - a.score);
+  const group = scored[0];
+  if (!group || group.score === 0) return null;
+
+  const before = group.options;
+  const beforeSelected = before.findIndex((o) => o.selected);
+  // Click a DIFFERENT available option than the current selection (or the first, if none).
+  const clickIndex = before.findIndex((o, i) => i !== beforeSelected);
+  if (clickIndex === -1) return null;
+
+  await page.locator(`[data-thrallo-opt="${group.groupId}:${clickIndex}"]`).click({ timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  const after = await groupState(page, group.groupId);
+
+  const verdict = selectionTransition({ before, after, clickedIndex: clickIndex });
+  return {
+    drove: true,
+    status: verdict.ok ? "pass" : "fail",
+    detail: verdict.ok ? verdict.detail : verdict.reason,
+    selectedText: verdict.selectedText || null,
+  };
+}
+
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
-async function runStep(page, step, { marker, previewUrl }) {
+async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
   const expect = String(step.expect || "");
@@ -146,6 +297,7 @@ async function runStep(page, step, { marker, previewUrl }) {
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
   // match was the word "booking" in the button the step had just clicked.
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  const urlBefore = page.url();
 
   // Navigation, when the step names a route.
   const route = (step.target || "").match(/^\/[\w/-]*/) || action.match(/\s(\/[\w/-]+)/);
@@ -168,6 +320,16 @@ async function runStep(page, step, { marker, previewUrl }) {
   // earlier version therefore navigated AND clicked — submitting the form on step one, so that by
   // step three the confirmation was already on screen and the real submit proved nothing.
   const navigated = drove;
+
+  // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
+  // option and off the previous one), never on text freshness — a default-selected date is
+  // valid product behaviour and static copy proves nothing in either direction.
+  if (!navigated && /\b(choose|select|pick)\b/i.test(action)
+    && keywords(expect, 8).some((w) => ["selected", "highlighted", "chosen", "active"].includes(w))) {
+    const outcome = await driveSelection(page, step);
+    if (outcome) return outcome;
+  }
+
   if (!navigated && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book/i.test(action)) {
     const target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
     if (target) {
@@ -221,7 +383,21 @@ async function runStep(page, step, { marker, previewUrl }) {
     }
   }
 
-  return expectationOutcome({ wanted, found, fresh, drove, action });
+  // A click that changed the URL is a navigation whatever verb the contract used: the CTA step
+  // failed live because the words it expected existed on the HOME page too — but the whole page
+  // was new, which is exactly the navigational exemption.
+  const urlChanged = page.url() !== urlBefore;
+  const outcome = expectationOutcome({ wanted, found, fresh, drove, action, urlChanged });
+
+  // A passing confirmation must reflect what was actually selected earlier in the journey — the
+  // numbers in a chosen date/slot survive any formatting.
+  if (outcome.status === "pass" && selections.length && /confirmation|reference|summary|booking details/i.test(expect)) {
+    const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    const reflect = confirmationReflectsSelections(textAfter, selections);
+    if (reflect.checked && !reflect.ok) return { ...outcome, status: "fail", detail: reflect.detail };
+    if (reflect.checked) outcome.detail += ` · reflects the selection (${reflect.matched})`;
+  }
+  return outcome;
 }
 
 /**
@@ -236,9 +412,9 @@ async function runStep(page, step, { marker, previewUrl }) {
  * one of those matches must be new: a step whose every match was already there has demonstrated
  * nothing. Navigation and reload are exempt, since the whole page is new by definition.
  */
-export function expectationOutcome({ wanted, found, fresh, drove, action }) {
+export function expectationOutcome({ wanted, found, fresh, drove, action, urlChanged = false }) {
   const ratio = found.length / wanted.length;
-  const navigational = /open|go to|navigate|visit|reload|refresh/i.test(action);
+  const navigational = urlChanged || /open|go to|navigate|visit|reload|refresh/i.test(action);
   if (ratio >= 0.5 && (navigational || fresh.length > 0)) {
     return { drove, status: "pass", detail: `found: ${found.join(", ")}${fresh.length ? ` (new: ${fresh.join(", ")})` : ""}` };
   }
@@ -317,11 +493,13 @@ export async function verifyJourneys({
       await page.waitForTimeout(700);
 
       const steps = [];
+      const selections = []; // what this journey actually chose — confirmations must reflect it
       for (const step of journey.steps || []) {
         if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
-        const outcome = await runStep(page, step, { marker, previewUrl }).catch((error) => ({
+        const outcome = await runStep(page, step, { marker, previewUrl, selections }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
+        if (outcome.selectedText) selections.push(outcome.selectedText);
         steps.push({ action: step.action, expect: step.expect, ...outcome });
       }
 

@@ -108,6 +108,42 @@ test("a selected-date defect loads DateSelector and its caller — not App.jsx, 
   assert.ok(!full.includes("src/components/NewsletterSignup.jsx"), "unrelated modules stay out");
 });
 
+test("the SDK surface answers what the live build paid a discovery turn for — update() and friends", () => {
+  // Run 17b6513f expanded into supabaseBackend.js (+5,813 tokens) with the reason "Need db.entity
+  // CRUD method signatures, especially update()". The surface (index.js — the file every stage
+  // receives in full) now documents the COMPLETE supported API, so the implementation stays
+  // protected and out of context with nothing left to discover.
+  const surface = REACT_VITE["src/lib/backend/index.js"];
+  for (const signature of [".create(values)", ".get(id)", ".list({ filters, order, ascending, limit, cursor })",
+    ".count(filters)", ".update(id, values)", ".delete(id)", ".subscribe(callback)"]) {
+    assert.ok(surface.includes(signature), `surface documents ${signature}`);
+  }
+  assert.match(surface, /REPLACES row\.data with `values` wholesale — it does NOT merge/,
+    "the update() trap is stated, with the read-modify-write recipe");
+  assert.match(surface, /eq \| neq \| gte \| lte \| ilike \| in/, "filtering is documented");
+  assert.match(surface, /cursor: a created_at value for keyset pagination/, "pagination is documented");
+  assert.match(surface, /Rows belong to the signed-in\s*\n?\/\/ user \(RLS\)/, "ownership behaviour is documented");
+  assert.match(surface, /THIS COMMENT IS THE COMPLETE SUPPORTED SURFACE/, "and it says so, so the model stops looking");
+
+  // The stage context ships the surface in full and the implementation as nothing more than a
+  // manifest line — the expansion is structurally unnecessary now.
+  const tree = {
+    "package.json": "{}",
+    "src/App.jsx": REACT_VITE["src/App.jsx"],
+    "src/routes/HomePage.jsx": REACT_VITE["src/routes/HomePage.jsx"],
+    "src/lib/backend/index.js": surface,
+    "src/lib/backend/supabaseBackend.js": REACT_VITE["src/lib/backend/supabaseBackend.js"],
+    "src/data/bookings.js": "export const b = 1;",
+  };
+  const context = buildStageContext({
+    tree, manifest: buildManifest(tree, { contract: CONTRACT }),
+    stageId: "data", contract: CONTRACT, budgetTokens: 40_000,
+  });
+  const full = context.full.map((c) => c.path);
+  assert.ok(full.includes("src/lib/backend/index.js"), "the surface rides in full");
+  assert.ok(!full.includes("src/lib/backend/supabaseBackend.js"), "the implementation does not");
+});
+
 test("stage prompts and invariants teach the modular shape; foundation maps one file per route", () => {
   const stages = planStages(CONTRACT, { includePolish: false });
   const foundation = stagePrompt(stages.find((s) => s.id === "foundation"), CONTRACT, { request: "booking site" });

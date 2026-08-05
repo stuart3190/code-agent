@@ -27,7 +27,7 @@ import {
 } from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
 import { createReservations } from "./creditReservations.mjs";
-import { resolveProviderPolicy, permittedAlternatives, preflightSummary as providerPreflight } from "./providerPolicy.mjs";
+import { resolveProviderPolicy, permittedAlternatives, usesManagedCredits, preflightSummary as providerPreflight } from "./providerPolicy.mjs";
 import { honestyFailures, honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { classifyComplexity, profileFor } from "./buildProfile.mjs";
@@ -320,39 +320,39 @@ export function planVerificationAction(verdict, {
 // from a field that never existed on the job object.
 
 export async function createLifecycle({ owner, projectId, diag, originalInput, mode, redesign = false, client = null }) {
-  let managed = true;
-  let laneProvider = "managed"; // the EFFECTIVE lane, mirroring buildContext's resolution exactly
-  let byokSafety = normalizeByokSafety(null);
-  let allowFallback = true;
-  let activeProvider = "managed";
-  let credentials = [];
-  let plan = "free";
+  // Credential FETCH may fail soft (an unreachable store resolves to the managed lane, LOUDLY —
+  // see the per-call catches below). Lane CLASSIFICATION may not fail at all: for six days a
+  // missing import made `usesManagedCredits` throw a ReferenceError here, a broad catch swallowed
+  // it, and every lifecycle silently classified managed — the in-job Codex ceiling never armed
+  // and one build ran to 32.65 credits against a 25-credit policy. A classification error now
+  // PROPAGATES: the build fails to start, with the real error attached, rather than starting
+  // under a lane nobody chose.
+  const { aiCredentialStore, activeAiCredential } = await import("../aiCredentialStore.mjs");
+  const store = aiCredentialStore();
+  const soft = (what, fallback) => (error) => {
+    console.error(`[app-build] lifecycle classification: ${what} unreadable for owner ${String(owner).slice(0, 8)} `
+      + `(project ${String(projectId).slice(0, 8)}) — ${error.message}; using the managed-lane default`);
+    return fallback;
+  };
+  const [preference, active, list] = await Promise.all([
+    store.getPreference(owner).catch(soft("preference", null)),
+    activeAiCredential(owner).catch(soft("active credential", { provider: "managed" })),
+    store.listCredentials(owner).catch(soft("credential list", [])),
+  ]);
+  const activeProvider = active?.provider || "managed";
+  // ONE authoritative lane classification, derived from the provider policy — never assigned
+  // independently, never silently defaulted. The effective lane mirrors buildContext exactly:
+  // an API-key provider with no usable secret resolves to managed there, and must classify the
+  // same way here; Codex needs no secret.
+  const laneProvider = (activeProvider === "codex" || active?.secret) ? activeProvider : "managed";
+  const managed = usesManagedCredits(resolveProviderPolicy({ provider: laneProvider }));
+  // Per-provider safeguards override the user's global defaults for the connection this
+  // lifecycle actually runs on.
+  const byokSafety = normalizeByokSafety(preference?.byok_safety, { provider: activeProvider });
+  const allowFallback = preference?.allow_fallback ?? true;
+  const credentials = list || [];
 
-  try {
-    const { aiCredentialStore, activeAiCredential } = await import("../aiCredentialStore.mjs");
-    const store = aiCredentialStore();
-    const [preference, active, list] = await Promise.all([
-      store.getPreference(owner).catch(() => null),
-      activeAiCredential(owner).catch(() => ({ provider: "managed" })),
-      store.listCredentials(owner).catch(() => []),
-    ]);
-    activeProvider = active?.provider || "managed";
-    // ONE authoritative lane classification, derived from the provider policy — never assigned
-    // independently. The line this replaces read `activeProvider === "codex" || !active?.secret`
-    // and classified a Codex build as MANAGED while buildContext billed it BYOK: the split-brain
-    // that created managed reservations for a Codex run, priced 456k Codex tokens against the
-    // managed ceiling, and refused an affordable Codex repair at "24.56 of 25 spent".
-    //
-    // The effective lane mirrors buildContext exactly: an API-key provider with no usable secret
-    // resolves to managed there, and must classify the same way here; Codex needs no secret.
-    laneProvider = (activeProvider === "codex" || active?.secret) ? activeProvider : "managed";
-    managed = usesManagedCredits(resolveProviderPolicy({ provider: laneProvider }));
-    // Per-provider safeguards override the user's global defaults for the connection this
-    // lifecycle actually runs on.
-    byokSafety = normalizeByokSafety(preference?.byok_safety, { provider: activeProvider });
-    allowFallback = preference?.allow_fallback ?? true;
-    credentials = list || [];
-  } catch { /* an unreadable connection means managed defaults — never a crash */ }
+  let plan = "free";
 
   try {
     const { ownerSubscription } = await import("../usageBudgets.mjs");
