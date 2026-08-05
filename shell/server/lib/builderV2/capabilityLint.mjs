@@ -25,6 +25,21 @@ const FACTORY_PROPERTIES = Object.freeze({
 const GENERATED_FILE = /^src\/.*\.(jsx?|tsx?)$/;
 const PLATFORM_PATH = /^src\/lib\//;
 
+// Entity types OWNED by a capability: persisting them any other way bypasses session
+// management and validation. Live run 4 wrote its own db.entity("contactMessage").create
+// data layer with no session — an unauthenticated insert, a 401, and a dead build.
+const OWNED_ENTITIES = Object.freeze({
+  contactMessage: 'makeContactForm().submitContact(fields)',
+  newsletterSignup: 'makeNewsletter().subscribe(email)',
+  booking: 'makeBookingSystem().createBooking(...)',
+});
+
+// Stores are usually bound first (const store = db.entity(...)), so the mutation check is
+// two-part: the module touches db.entity AND calls a mutating method on something.
+const USES_ENTITIES_RE = /\bdb\s*\.\s*entity\s*\(/;
+const MUTATION_RE = /\.\s*(create|update|remove|delete)\s*\(/;
+const SESSION_RE = /ensureSession|ensureVisitorSession|currentUser/;
+
 /**
  * Scan generated files for capability-instance method calls that the capability does not
  * export. Returns { ok, problems } with teaching-quality reasons.
@@ -34,6 +49,28 @@ export function lintCapabilityUsage(tree) {
   for (const [path, source] of Object.entries(tree)) {
     if (!GENERATED_FILE.test(path) || PLATFORM_PATH.test(path)) continue;
     const code = String(source);
+
+    // Capability-owned entities may ONLY be persisted through their capability.
+    for (const [entity, correctCall] of Object.entries(OWNED_ENTITIES)) {
+      const direct = new RegExp(`\\bdb\\s*\\.\\s*entity\\s*\\(\\s*["'\`]${entity}["'\`]`);
+      if (direct.test(code)) {
+        problems.push(
+          `${path}: db.entity("${entity}") is a direct write to a capability-owned entity — `
+          + `use ${correctCall} instead. The capability establishes the visitor session and `
+          + `validation; the raw path sends an unauthenticated insert and fails with 401.`,
+        );
+      }
+    }
+
+    // Any other raw entity MUTATION in a module that never touches session management is an
+    // unauthenticated write for anonymous visitors — same 401, different table.
+    if (USES_ENTITIES_RE.test(code) && MUTATION_RE.test(code) && !SESSION_RE.test(code)) {
+      problems.push(
+        `${path}: db.entity(...).create/update/remove with NO session in this module — call `
+        + `await ensureVisitorSession() (from ../lib/capabilities) before mutating, or use the `
+        + `owning capability. Unauthenticated writes fail with 401 under row-level security.`,
+      );
+    }
     for (const [factory, methods] of Object.entries(FACTORY_METHODS)) {
       // Every binding of this factory's instance: const x = makeContactForm(...),
       // including through useMemo(() => makeContactForm(...)).

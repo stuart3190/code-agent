@@ -59,6 +59,42 @@ async function go() {
   assert.match(bad.problems[0], /\[subscribe\]/);
 });
 
+test("D1 lint — run 4's bespoke data layer is rejected: owned entities go through their capability", () => {
+  // Verbatim shape from the blocked run: a data module writing contactMessage raw, sessionless.
+  const bad = lintCapabilityUsage({
+    "src/data/contactMessages.js": `
+import { db } from "../lib/backend/index.js";
+const store = db.entity("contactMessage");
+export async function createContactMessage(fields) {
+  return store.create({ ...fields, createdAt: new Date().toISOString() });
+}
+`,
+  });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.problems.some((p) => /capability-owned entity/.test(p) && /submitContact/.test(p)),
+    JSON.stringify(bad.problems));
+  assert.ok(bad.problems.some((p) => /NO session/.test(p) && /401/.test(p)), "the generic sessionless rule fires too");
+
+  // A custom entity mutated WITH session management is legitimate.
+  const okCustom = lintCapabilityUsage({
+    "src/data/projects.js": `
+import { db } from "../lib/backend/index.js";
+import { ensureVisitorSession } from "../lib/capabilities";
+export async function saveProject(fields) {
+  await ensureVisitorSession();
+  return db.entity("project").create(fields);
+}
+`,
+  });
+  assert.equal(okCustom.ok, true, JSON.stringify(okCustom.problems));
+
+  // Reads without mutation don't need the session rule.
+  const okRead = lintCapabilityUsage({
+    "src/data/lookup.js": 'import { db } from "../lib/backend/index.js";\nexport const listFaqs = () => db.entity("faq").list();',
+  });
+  assert.equal(okRead.ok, true, JSON.stringify(okRead.problems));
+});
+
 test("D1 lint — the capability brief now carries the instance methods the model must call", () => {
   const brief = capabilityBrief();
   assert.match(brief, /submitContact\(fields\)/);
