@@ -76,3 +76,47 @@ console.log(`  round-trip OK · cross-owner materialisation refused (C1) · gree
 if (!snapOther.id) fail("owner-B snapshot missing");
 
 console.log("\nREPLAY PASSED — indexing deterministic, graph sound, snapshots atomic and tenant-isolated.");
+
+// ── --supabase: the SAME proofs against the real production tables, under a test owner ────────
+if (process.argv.includes("--supabase")) {
+  const { serviceClient } = await import("../shell/server/lib/supabase.mjs");
+  const { persistIndex, supabaseGraph, supabaseSnapshotStorage, purgeOwnerForTests } =
+    await import("../shell/server/lib/builderV2/supabaseTwins.mjs");
+  const client = serviceClient();
+  const TEST_OWNER = "00000000-b0b2-4000-8000-00000000b072"; // bv2 replay test tenant, purged below
+  const PROJECT = "00000000-b0b2-4000-8000-000000000001";
+
+  console.log("\nSUPABASE MODE (real tables, test owner, purged after)");
+  try {
+    const modularTree = trees[modularLabel];
+    const treeIndex = indexes[modularLabel];
+    const manifest = Object.fromEntries([...treeIndex.files].map(([p, f]) => [p, f.contentHash]));
+
+    const wrote = await persistIndex(TEST_OWNER, PROJECT, treeIndex, { client });
+    const again = await persistIndex(TEST_OWNER, PROJECT, treeIndex, { client });
+    if (again.written.length !== 0) fail("supabase persistIndex is not idempotent");
+    const persisted = await supabaseGraph(TEST_OWNER, PROJECT, manifest, { client });
+    const memory = memoryGraph(TEST_OWNER, PROJECT, treeIndex);
+    if (persisted.treeHash !== memory.treeHash) fail("supabase graph tree hash diverges");
+    const probe = "src/components/BookingSlotSelector.jsx";
+    if (JSON.stringify(persisted.importersOf(probe)) !== JSON.stringify(memory.importersOf(probe))) {
+      fail("supabase graph importersOf diverges");
+    }
+    console.log(`  graph: ${wrote.written.length} revisions persisted · idempotent re-run wrote 0 · answers match memory`);
+
+    const store = createSnapshotStore(supabaseSnapshotStorage({ client }));
+    const snap = await store.createSnapshot(TEST_OWNER, PROJECT, modularTree, { reason: "replay" });
+    if (snap.state !== "ready") fail("supabase snapshot not ready");
+    await store.promote(TEST_OWNER, PROJECT, "green", snap.id);
+    const back = await store.materialize(TEST_OWNER, snap.id);
+    if (Object.keys(back).length !== Object.keys(modularTree).length) fail("supabase materialise lost files");
+    for (const [p, content] of Object.entries(modularTree)) {
+      if (back[p] !== String(content)) fail(`supabase blob round-trip differs at ${p}`);
+    }
+    console.log(`  snapshot: ${snap.id.slice(0, 8)} ready · green pointer set · ${Object.keys(back).length} files byte-identical`);
+    console.log("SUPABASE MODE PASSED");
+  } finally {
+    await purgeOwnerForTests(TEST_OWNER, { client });
+    console.log("  test owner purged");
+  }
+}

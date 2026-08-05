@@ -35,7 +35,10 @@ export function memorySnapshotStorage() {
       return blobs.has(`${owner}:${contentHash}`) ? blobs.get(`${owner}:${contentHash}`) : null;
     },
     async deleteBlob(owner, contentHash) { blobs.delete(`${owner}:${contentHash}`); },
-    async blobKeys() { return [...blobs.keys()]; },
+    async listOwnerBlobHashes(owner) {
+      const prefix = owner + ":";
+      return [...blobs.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+    },
 
     async insertSnapshot(row) { const id = `snap-${++idCounter}`; snapshots.set(id, { ...row, id }); return id; },
     async updateSnapshot(id, patch) { Object.assign(snapshots.get(id), patch); },
@@ -186,9 +189,7 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         for (const entry of await storage.getManifest(snapshot.id)) referenced.add(entry.contentHash);
       }
       const removedBlobs = [];
-      for (const key of await storage.blobKeys()) {
-        const [blobOwner, hash] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
-        if (blobOwner !== owner) continue;
+      for (const hash of await storage.listOwnerBlobHashes(owner)) {
         if (!referenced.has(hash)) {
           await storage.deleteBlob(owner, hash);
           removedBlobs.push(hash);
