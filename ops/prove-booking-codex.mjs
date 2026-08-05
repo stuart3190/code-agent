@@ -98,6 +98,18 @@ try {
       break;
     }
 
+    // Run constraint: at most ONE model-powered verification repair round. A second means the
+    // first did not converge — stop with the latest green checkpoint rather than spend more.
+    const { data: roundRows } = await db.from("diag_runs")
+      .select("repair_rounds").eq("owner", owner).gte("created_at", startedIso);
+    const repairRounds = (roundRows || []).reduce((t, r) => t + Number(r.repair_rounds || 0), 0);
+    if (repairRounds > 1) {
+      hardStop = { repairCap: `repair rounds reached ${repairRounds} — the cap for this run is 1` };
+      verdict = "hard_stop";
+      await cancelJob(owner, jobId).catch(() => {});
+      break;
+    }
+
     if (events.some((e) => e.type === "lead_error")) { verdict = "failed"; break; }
 
     // Terminal: no diagnostics running for this owner since the start mark, sustained.
