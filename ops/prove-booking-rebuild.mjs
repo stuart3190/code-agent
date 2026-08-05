@@ -37,7 +37,13 @@ console.log(`Re-sending the exact prompt from ${original.id.slice(0, 8)} (${orig
 console.log(`That run: ${original.status}, ${Number(original.totals?.cost || 0).toFixed(2)} credits, ${original.repair_rounds} repair round(s).\n`);
 
 // ── a fresh account, on the managed lane every new customer lands on ───────────────────────────
-const { data: created, error: createError } = await db.auth.admin.createUser({
+// BOOKING_OWNER runs the fixture under an EXISTING account instead of a throwaway. Needed for the
+// Codex-only verification: a throwaway resolves to the managed lane, which is paused — the build
+// must run as the Codex-connected owner, and that account's data must never be cleaned up.
+const existingOwner = process.env.BOOKING_OWNER || null;
+const { data: created, error: createError } = existingOwner
+  ? { data: { user: { id: existingOwner } }, error: null }
+  : await db.auth.admin.createUser({
   email: `pipeline-rebuild-${Date.now()}@thrallo.invalid`,
   password: `Pr!${Math.random().toString(36).slice(2)}Aa1`, email_confirm: true,
 });
@@ -45,6 +51,9 @@ if (createError) { console.error(`could not create account: ${createError.messag
 const owner = created.user.id;
 
 async function cleanup() {
+  // NEVER touch a pre-existing account's data: the throwaway cleanup deletes every conversation
+  // the owner has, which on a real account would destroy real history.
+  if (existingOwner) return;
   const { data: convos } = await db.from("ca_conversations").select("id").eq("owner", owner);
   const ids = (convos || []).map((c) => c.id);
   for (const table of ["ca_conversation_events", "ca_conversation_turns"]) {

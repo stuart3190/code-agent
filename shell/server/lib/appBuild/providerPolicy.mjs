@@ -70,6 +70,15 @@ export function permittedAlternatives(policy, candidates = []) {
   });
 }
 
+/** The global managed-settlement kill switch, readable from every lane — not only buildJobs. */
+export function managedSettlementPaused() {
+  return process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED === "1";
+}
+
+export const MANAGED_PAUSED_MESSAGE =
+  "Managed AI is briefly paused while we correct a billing calculation in your favour. "
+  + "Your work and credits are safe — please try again shortly, or connect your own API key to continue now.";
+
 /** The pre-build summary the operator sees before any live spend. */
 export function preflightSummary(policy) {
   const lane = {

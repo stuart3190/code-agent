@@ -263,6 +263,12 @@ export async function processRun(run, {
     const credential = await credentialResolver(run.owner);
     billingSource = credential.provider === "managed" ? "managed"
       : credential.provider === "codex" ? "codex" : "byok";
+    // The settlement kill switch covers background agents too — every managed dispatch in the
+    // product, not only buildJobs. Codex and BYOK runs pass: they bill the owner's own accounts.
+    if (billingSource === "managed") {
+      const { managedSettlementPaused, MANAGED_PAUSED_MESSAGE } = await import("./appBuild/providerPolicy.mjs");
+      if (managedSettlementPaused()) throw new Error(MANAGED_PAUSED_MESSAGE);
+    }
     await emit("model.selected", {
       provider: credential.provider,
       message: credential.provider === "codex"

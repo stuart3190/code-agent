@@ -321,6 +321,7 @@ export function planVerificationAction(verdict, {
 
 export async function createLifecycle({ owner, projectId, diag, originalInput, mode, redesign = false, client = null }) {
   let managed = true;
+  let laneProvider = "managed"; // the EFFECTIVE lane, mirroring buildContext's resolution exactly
   let byokSafety = normalizeByokSafety(null);
   let allowFallback = true;
   let activeProvider = "managed";
@@ -336,7 +337,16 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
       store.listCredentials(owner).catch(() => []),
     ]);
     activeProvider = active?.provider || "managed";
-    managed = activeProvider === "managed" || activeProvider === "codex" || !active?.secret;
+    // ONE authoritative lane classification, derived from the provider policy — never assigned
+    // independently. The line this replaces read `activeProvider === "codex" || !active?.secret`
+    // and classified a Codex build as MANAGED while buildContext billed it BYOK: the split-brain
+    // that created managed reservations for a Codex run, priced 456k Codex tokens against the
+    // managed ceiling, and refused an affordable Codex repair at "24.56 of 25 spent".
+    //
+    // The effective lane mirrors buildContext exactly: an API-key provider with no usable secret
+    // resolves to managed there, and must classify the same way here; Codex needs no secret.
+    laneProvider = (activeProvider === "codex" || active?.secret) ? activeProvider : "managed";
+    managed = usesManagedCredits(resolveProviderPolicy({ provider: laneProvider }));
     // Per-provider safeguards override the user's global defaults for the connection this
     // lifecycle actually runs on.
     byokSafety = normalizeByokSafety(preference?.byok_safety, { provider: activeProvider });
@@ -375,7 +385,7 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     // The provider POLICY: which lanes this lifecycle may ever use, resolved from the active
     // connection and immutable for the build's lifetime. alternativesFor filters every fallback
     // candidate through it, so a lane change is a selection-time decision, never an error path.
-    providerPolicy: resolveProviderPolicy({ provider: activeProvider }),
+    providerPolicy: resolveProviderPolicy({ provider: laneProvider }),
     providerOverride: null,                          // set when a fallback switch happens
     notify: notifyOwnerIfAway,                       // seam: every terminal path notifies once
     switches: [],

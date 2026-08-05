@@ -93,22 +93,23 @@ test("managed completions are blocked when the token budget is spent; BYOK is no
   assert.equal([...store.usageRecords.values()].at(-1).billing_source, "byok");
 });
 
-test("codex credentials fall back to managed models for completions", async () => {
+test("codex credentials do NOT fall back to managed models for completions", async () => {
+  // This test used to assert the silent codex→managed rewrite — the same lane substitution that
+  // ran four managed lead-agent turns during a Codex-only build. The policy forbids it: a
+  // Codex-selected account is never quietly rebilled to managed, so inline completion is
+  // unavailable rather than mis-billed.
   resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
-  const capture = {};
-  const result = await completeCode(OWNER, parseCompletionInput({ prefix: "let y = " }), {
-    store,
-    credentialResolver: async () => ({ provider: "codex", secret: "{}" }),
-    providerFactory: (candidate, credential) => {
-      capture.candidate = candidate;
-      capture.credential = credential;
-      return fakeProvider("2;")();
-    },
-  });
-  assert.equal(result.completion, "2;");
-  assert.equal(capture.credential.provider, "managed");
-  assert.equal(capture.candidate.tier, "fast");
+  let providerCalled = false;
+  await assert.rejects(
+    completeCode(OWNER, parseCompletionInput({ prefix: "let y = " }), {
+      store,
+      credentialResolver: async () => ({ provider: "codex", secret: "{}" }),
+      providerFactory: () => { providerCalled = true; return fakeProvider("2;")(); },
+    }),
+    (error) => error.code === "completion_unavailable",
+  );
+  assert.equal(providerCalled, false, "no model is dispatched on any lane");
 });
 
 test("the per-owner completion limiter rolls over a one-minute window", () => {

@@ -106,7 +106,10 @@ export async function resolveBuildContext(ownerId, {
   // unavailable the build STOPS rather than switching lanes.
   if (credential.provider === "codex") {
     const { createCodexProvider } = await import("../../../../src/providers/codexProvider.mjs");
-    const strong = optionalEnv("CODEX_MODEL", "gpt-5.3-codex");
+    // The transport's REAL wire model, not a cosmetic label: the ChatGPT-account backend rejects
+    // "-codex"-suffixed names, and telemetry recording a model the wire never used would be the
+    // same class of lie as recording null.
+    const strong = createCodexProvider().model;
     return {
       byok: true, // never reserves or debits managed credits
       providerLabel: "codex",

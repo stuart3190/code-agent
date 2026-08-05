@@ -129,7 +129,11 @@ export function createCodexProvider() {
     return { text: text.trim(), toolCalls, usage: { ...normalizeUsage(usage), providerRequestId } };
   }
 
-  return { runTurn };
+  // The transport's identity, exposed so telemetry stops recording model:null — which made every
+  // Codex usage row price at the default rate and classify by guesswork. `model` is the REAL wire
+  // model (the ChatGPT-account backend rejects "-codex"-suffixed names), and `providerId` names
+  // the lane so billing rows are attributable without inference.
+  return { runTurn, model: MODEL, providerId: "codex" };
 }
 
 // Codex usage shape -> neutral blended shape a BYOK adapter could also fill.

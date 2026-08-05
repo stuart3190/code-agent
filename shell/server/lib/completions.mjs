@@ -82,7 +82,20 @@ export async function completeCode(owner, input, {
 
   let credential = await credentialResolver(owner).catch(() => ({ provider: "managed", secret: null }));
   if (credential.provider === "codex") {
+    // Same rule as the lead agent: a Codex-selected account is never silently rebilled to managed.
+    // Inline completion is an optional nicety — absent beats mis-billed.
+    const { resolveProviderPolicy } = await import("./appBuild/providerPolicy.mjs");
+    if (!resolveProviderPolicy({ provider: "codex" }).allowManagedFallback) {
+      throw serviceError("Inline completion is unavailable on a Codex connection.", 409, "completion_unavailable");
+    }
     credential = { provider: "managed", secret: null };
+  }
+  {
+    // The settlement kill switch covers every managed dispatch, this one included.
+    const { managedSettlementPaused, MANAGED_PAUSED_MESSAGE } = await import("./appBuild/providerPolicy.mjs");
+    if (credential.provider === "managed" && managedSettlementPaused()) {
+      throw serviceError(MANAGED_PAUSED_MESSAGE, 503, "managed_paused");
+    }
   }
   const candidate = pickFastCandidate(credential);
   if (!candidate) {

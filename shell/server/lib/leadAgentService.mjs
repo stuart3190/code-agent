@@ -135,9 +135,34 @@ export async function processConversation(conversation, {
   try {
     let credential = await credentialResolver(conversation.owner)
       .catch(() => ({ provider: "managed", secret: null, routing: {} }));
-    if (credential.provider === "codex") credential = { provider: "managed", secret: null, routing: {} };
+
+    // The line this replaces read: `if (provider === "codex") credential = { provider: "managed" }`.
+    // A silent lane rewrite — during a Codex-only verification build it ran four managed
+    // orchestration turns that bypassed both the provider policy and the settlement pause. The
+    // conversation orchestrator has no Codex adapter yet, and a lane the chosen policy cannot
+    // reach must STOP before spending, never switch billing lanes on the owner's behalf.
+    if (credential.provider === "codex") {
+      const { resolveProviderPolicy } = await import("./appBuild/providerPolicy.mjs");
+      if (!resolveProviderPolicy({ provider: "codex" }).allowManagedFallback) {
+        await finishWithMessage(store, conversation,
+          "Your AI connection is set to Codex, which powers your builds. The conversation "
+          + "orchestrator can't run on Codex yet, and I won't quietly bill your managed credits "
+          + "instead — switch your active connection (or add an API key) to chat, or keep Codex "
+          + "and use builds directly.");
+        return;
+      }
+      credential = { provider: "managed", secret: null, routing: {} };
+    }
+
     let billingSource = credential.provider === "managed" ? "managed" : "byok";
     if (billingSource === "managed") {
+      // The settlement kill switch covers EVERY managed dispatch in the product, not only
+      // buildJobs — this lane's four paused-era turns are why that sentence has to exist.
+      const { managedSettlementPaused, MANAGED_PAUSED_MESSAGE } = await import("./appBuild/providerPolicy.mjs");
+      if (managedSettlementPaused()) {
+        await finishWithMessage(store, conversation, MANAGED_PAUSED_MESSAGE);
+        return;
+      }
       const overview = await overviewResolver(conversation.owner, { store: runStore });
       if (overview.budgets.managedTokens.remaining <= 0 && !overview.unlimited) {
         // Exhausted — but a hard stop is the LAST resort. If the owner has another
