@@ -53,24 +53,33 @@ const ZERO = Object.freeze({
 
 // A lifecycle budget instance. `managed` false means BYOK: totals still accumulate (they
 // feed Diagnostics and the optional BYOK controls) but no credit ceiling is applied.
-export function createLifecycleBudget({ plan = "free", mode = "build", redesign = false, managed = true, startedAt = Date.now() } = {}) {
+export function createLifecycleBudget({ plan = "free", mode = "build", redesign = false, managed = true, startedAt = Date.now(), spentSupplier = null } = {}) {
   const limits = lifecycleLimits({ plan, mode, redesign });
   const totals = { ...ZERO };
 
   const elapsed = (now = Date.now()) => Math.max(0, now - startedAt);
 
+  // CANONICAL SPEND (2026-08-05 billing incident). Credits are no longer an independently
+  // accumulated running total — that accumulator is how one build simultaneously "cost" 19.25 in
+  // every report and 51.33 at the ceiling. When a supplier is provided, credits are DERIVED from
+  // the same per-event record every other surface reads (the diagnostics session's per-call
+  // costModel totals, which back ai_requests). Without a supplier — pure-planner unit tests — the
+  // local accumulator remains, and both paths use the same pricing function, so they cannot drift.
+  const spentCredits = () => (spentSupplier ? Number(spentSupplier()) || 0 : totals.credits);
+
   return {
     limits,
     managed,
-    get totals() { return { ...totals, elapsedMs: elapsed() }; },
+    get totals() { return { ...totals, credits: spentCredits(), elapsedMs: elapsed() }; },
 
     // Called once per dispatched job, before it runs.
     noteJob() { totals.jobs += 1; return totals.jobs; },
     noteRepair() { totals.repairRounds += 1; return totals.repairRounds; },
 
-    // Called when a job ends, with whatever the pipeline actually measured.
+    // Called when a job ends, with whatever the pipeline actually measured. Token and turn
+    // counters accumulate here; CREDITS deliberately do not when a canonical supplier exists.
     record({ usage = null, credits = 0, turns = 0 } = {}) {
-      totals.credits += Number(credits) || 0;
+      if (!spentSupplier) totals.credits += Number(credits) || 0;
       totals.inputTokens += Number(usage?.input || 0);
       totals.outputTokens += Number(usage?.output || 0);
       totals.cachedTokens += Number(usage?.cached || 0);
@@ -81,7 +90,7 @@ export function createLifecycleBudget({ plan = "free", mode = "build", redesign 
 
     remaining() {
       return {
-        credits: managed ? Math.max(0, limits.credits - totals.credits) : Infinity,
+        credits: managed ? Math.max(0, limits.credits - spentCredits()) : Infinity,
         jobs: Math.max(0, limits.jobs - totals.jobs),
         turns: Math.max(0, limits.turns - totals.turns),
         elapsedMs: Math.max(0, limits.elapsedMs - elapsed()),

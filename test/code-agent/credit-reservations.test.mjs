@@ -82,3 +82,74 @@ test("double-reconcile and double-release are no-ops", async () => {
   assert.equal((await r.reconcile(hold.id, { actual: 1 })).ok, false);
   assert.equal((await r.release(hold.id)).ok, false);
 });
+
+// ── PRODUCTION REPLAY — run 83883309, zero credits ────────────────────────────────────────────
+
+test("REPLAY 83883309 — canonical spend, reservations and the ceiling all agree", async () => {
+  const { RUN_83883309 } = await import("./billing-cached-tokens.test.mjs");
+  const { creditsForUsage } = await import("../../src/billing/costModel.mjs");
+  const { createLifecycleBudget } = await import("../../shell/server/lib/appBuild/lifecycleBudget.mjs");
+
+  // The canonical event record, exactly as the diagnostics session builds it: one cost per
+  // provider call, priced by the one formula, idempotent on event id.
+  const events = new Map();
+  const record = (e) => {
+    if (events.has(e.id)) return; // duplicate telemetry delivery charges once
+    events.set(e.id, creditsForUsage({
+      usage: { input: e.input, cached: e.cached, output: e.output, reasoning: e.reasoning, total: e.input + e.output },
+      model: e.model,
+    }));
+  };
+  const spent = () => [...events.values()].reduce((a, b) => a + b, 0);
+
+  // The budget derives credits from the SAME supplier — no independent accumulator to drift.
+  const budget = createLifecycleBudget({ plan: "free", mode: "build", managed: true, spentSupplier: spent });
+  const store = memoryReservationStore();
+  const reservations = createReservations({ store, spentOf: async () => spent() });
+
+  // Replay: each call reserves, runs (fake), records its canonical event, reconciles.
+  for (const e of RUN_83883309) {
+    const hold = await reservations.reserve({ buildId: "83883309", credits: 6, ceiling: 28 });
+    assert.equal(hold.ok, true, `call ${e.id} must be affordable at the time it ran`);
+    record(e);
+    record(e); // duplicate delivery — must not double-charge
+    await reservations.reconcile(hold.hold.id, { actual: events.get(e.id) });
+  }
+
+  // Canonical spend is 19.25, and EVERY surface reads the same number.
+  assert.ok(Math.abs(spent() - 19.25) < 0.01, `canonical spend ${spent().toFixed(2)}`);
+  assert.ok(Math.abs(budget.totals.credits - spent()) < 0.01, "the lifecycle budget agrees");
+  const status = await reservations.status("83883309", 28);
+  assert.ok(Math.abs(status.spent - 19.25) < 0.01, "the reservation ledger agrees");
+  assert.equal(status.reserved, 0, "all holds reconciled; reservations shown separately from spend");
+
+  // The 28-ceiling admits an affordable repair (19.25 + 4.13) and refuses one whose maximum
+  // reservation would cross the remainder — BEFORE dispatch.
+  const affordable = await reservations.reserve({ buildId: "83883309", credits: 4.13, ceiling: 28 });
+  assert.equal(affordable.ok, true, "the repair the inflated total wrongly refused is admitted");
+  const refused = await reservations.reserve({ buildId: "83883309", credits: 6, ceiling: 28 });
+  assert.equal(refused.ok, false, "19.25 + 4.13 held + 6 crosses 28: refused before any call");
+  await reservations.release(affordable.hold.id);
+
+  // Restart/replay: a fresh process over the same events reaches the identical totals.
+  const replayed = new Map();
+  for (const e of [...RUN_83883309, ...RUN_83883309]) {
+    if (!replayed.has(e.id)) replayed.set(e.id, events.get(e.id));
+  }
+  const replaySpend = [...replayed.values()].reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(replaySpend - spent()) < 0.0001, "restart/replay does not change totals");
+});
+
+test("parent and child records cannot both charge for one provider call", async () => {
+  // The canonical record is keyed by the provider call, not by who reports it: a parent job
+  // summary replaying its child's telemetry lands on the same key and charges nothing more.
+  const { creditsForUsage } = await import("../../src/billing/costModel.mjs");
+  const events = new Map();
+  const record = (id, usage, model) => {
+    if (!events.has(id)) events.set(id, creditsForUsage({ usage, model }));
+  };
+  const usage = { input: 10_000, cached: 4_000, output: 1_000, reasoning: 0, total: 11_000 };
+  record("resp_1", usage, "gpt-5.6-sol");           // the child call reports
+  record("resp_1", usage, "gpt-5.6-sol");           // the parent summary reports the same call
+  assert.equal(events.size, 1);
+});

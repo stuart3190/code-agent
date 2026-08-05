@@ -26,6 +26,7 @@ import {
   STRATEGIES, FIRST_STRATEGY, strategy, escalate, verifyPatch, verifyFunctionalRepair,
 } from "./patchVerification.mjs";
 import { verifyJourneys, journeyFailures, journeySummary } from "./journeyVerifier.mjs";
+import { createReservations } from "./creditReservations.mjs";
 import { honestyFailures, honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { classifyComplexity, profileFor } from "./buildProfile.mjs";
@@ -357,7 +358,12 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     owner, projectId, diag, client: db,
     originalInput,                                   // the COMPLETE original job input
     repairMemory: { fingerprints: [], briefs: [] },  // unchanged semantics, now lifecycle-scoped
-    budget: createLifecycleBudget({ plan, mode, redesign, managed }),
+    budget: createLifecycleBudget({
+      plan, mode, redesign, managed,
+      // Canonical spend: the diagnostics session's per-event costModel aggregate — the same
+      // numbers that become ai_requests rows. One source; the ceiling cannot disagree with it.
+      spentSupplier: () => Number(diag?.totals?.cost || 0),
+    }),
     checkpoints: createCheckpointStore({
       seed,
       persist: checkpointWriter({ client: db, owner, projectId, buildId: diag.id }),
@@ -376,6 +382,13 @@ export async function createLifecycle({ owner, projectId, diag, originalInput, m
     // model call — a ceiling that is only observed after the fact is not a ceiling.
     costCeiling: Number(process.env.THRALLO_BUILD_CREDIT_CEILING || 0) || null,
     lastCallCredits: 0,
+    // Reservation-backed dispatch (2026-08-05). Canonical spend is the diagnostics session's
+    // per-event costModel total — the same numbers that back ai_requests — so the ceiling can
+    // never again disagree with the reports. The store is per-lifecycle in memory DELIBERATELY:
+    // holds share fate with the jobs they cover, so a crash cannot leak a hold that blocks every
+    // later dispatch, while canonical spend (persisted per event) survives the restart.
+    reservations: createReservations({ spentOf: async () => Number(diag?.totals?.cost || 0) }),
+    activeHold: null,
   };
 }
 
@@ -442,29 +455,36 @@ async function notifyTerminal(ctx, lifecycle, { title, body, url = null }) {
 // The gate every follow-up dispatch must pass — aggregate managed budget for managed users,
 // the user's own optional controls for BYOK users (off unless enabled).
 async function dispatchCheck(lifecycle, { estimatedCredits = 0 } = {}) {
-  // THE PROFILE CEILING, checked before every model call.
+  // THE PROFILE CEILING, now RESERVATION-BACKED (2026-08-05 incident follow-up).
   //
-  // This existed as `budgetVerdict` and nothing consulted it, so a run configured with a 28-credit
-  // ceiling spent 42.45 and nothing stopped it. Checked here because every dispatch — build,
-  // repair, verification repair — passes through this one function, so there is no second door.
+  // The first version projected spent + estimate and compared — which two racing dispatches could
+  // both pass, and which counted nothing for work already in flight. A dispatch now takes an
+  // atomic HOLD for its worst-case cost; the ceiling decision includes canonical spend PLUS every
+  // active hold, and the provider call does not begin unless the hold was granted. The relay
+  // reconciles the hold to actual cost when the job ends, releasing the remainder.
   //
-  // The PROJECTED cost is what is tested, not the spent cost: stopping after the call that breaks
-  // the ceiling is not a ceiling.
+  // BYOK never reserves: it pays the user's own provider account, not managed credits.
   const ceiling = lifecycle.costCeiling;
-  if (ceiling) {
-    const spent = lifecycle.budget.totals.credits || 0;
-    const projected = spent + (estimatedCredits || lifecycle.lastCallCredits || 0);
-    if (projected > ceiling) {
+  if (ceiling && lifecycle.managed && lifecycle.reservations) {
+    const estimate = estimatedCredits || lifecycle.lastCallCredits || 4;
+    const reservation = await lifecycle.reservations.reserve({
+      buildId: lifecycle.diag?.id || lifecycle.projectId, credits: estimate, ceiling,
+    });
+    if (!reservation.ok) {
       return {
         ok: false, kind: "ceiling",
         budgetCheck: {
           ok: false, reason: "cost_ceiling",
-          message: `Budget exhausted before repair: ${spent.toFixed(2)} of ${ceiling} credits spent, `
-            + `and the next call is projected at ${(projected - spent).toFixed(2)}.`,
-          spent, ceiling, projected,
+          spent: reservation.spent, reserved: reservation.reserved, ceiling,
+          message: `Build budget reached before the next AI step. Your last verified work is safe. `
+            + `Spent ${reservation.spent.toFixed(2)} of ${ceiling} credits, with `
+            + `${reservation.reserved.toFixed(2)} reserved for work in progress.`,
         },
       };
     }
+    // Held until the job it covers ends. The relay MUST reconcile or release it — a dropped hold
+    // would block every later dispatch, which is why both terminal paths handle it below.
+    lifecycle.activeHold = reservation.hold;
   }
 
   const budgetCheck = lifecycle.budget.canDispatch({ estimatedCredits });
@@ -596,6 +616,18 @@ export async function startAppBuild(ctx, { description, productName = null }) {
   const lifecycle = await createLifecycle({
     owner: ctx.owner, projectId: project.id, diag, originalInput, mode: "build", client,
   });
+
+  // The INITIAL dispatch reserves too — every follow-up already passed through dispatchCheck, and
+  // an unreserved first job would be the one path where a provider call begins with no hold.
+  const initialCheck = await dispatchCheck(lifecycle, { estimatedCredits: lifecycle.costCeiling ? Math.min(12, lifecycle.costCeiling) : 0 });
+  if (!initialCheck.ok) {
+    const text = terminalMessageFor(lifecycle, { endState: "managed_budget_blocked" }, initialCheck);
+    diag.finish("failed");
+    await ctx.conversations.appendTurn(ctx.conversation, { role: "lead", content: text, payload: { projectId: project.id } });
+    await ctx.emit("message", { role: "lead", text, projectId: project.id });
+    return { projectId: project.id, blocked: true, note: "The build was refused before any AI spend." };
+  }
+
   const { job } = await createJob({
     owner: { id: ctx.owner },
     projectId: project.id,
@@ -714,6 +746,14 @@ function relayBuildJob(ctx, { job, projectId, attempt = 1, lifecycle, deps = REA
         // aggregate budget is what the next dispatch is checked against.
         const measurements = job.measurements || null;
         lifecycle.lastCallCredits = Number(measurements?.credits || 0) || lifecycle.lastCallCredits;
+        // Reconcile this job's reservation to what it actually cost; release the remainder. A job
+        // that failed after metering still settles at its real usage — the tokens were incurred.
+        if (lifecycle.activeHold) {
+          await lifecycle.reservations.reconcile(lifecycle.activeHold.id, {
+            actual: Number(measurements?.credits || 0),
+          }).catch((error) => console.error("[app-build] reservation reconcile:", error.message));
+          lifecycle.activeHold = null;
+        }
         lifecycle.budget.record({
           usage: measurements?.usage, credits: measurements?.credits, turns: measurements?.turns,
         });
@@ -911,9 +951,13 @@ function terminalMessageFor(lifecycle, action, check) {
   // last green checkpoint stands and the customer decides whether to spend more.
   if (check?.kind === "ceiling") {
     const b = check.budgetCheck;
-    return `Budget exhausted before repair. This build has used ${b.spent.toFixed(2)} of its `
-      + `${b.ceiling}-credit limit, and the next repair would take it past that. Your last working `
-      + `version is saved — tell me to continue if you'd like me to spend more on it.`;
+    // Spent and reserved are DIFFERENT numbers and are shown as such — a reservation is money
+    // held for work in flight, not money gone.
+    return `Build budget reached before the next AI step. Your last verified work is safe. `
+      + `Spent: ${Number(b.spent || 0).toFixed(2)} credits. Reserved for work in progress: `
+      + `${Number(b.reserved || 0).toFixed(2)}. Build ceiling: ${b.ceiling}. `
+      + `What remains unfinished is listed in this build's Diagnostics — tell me to continue if `
+      + `you'd like me to spend more on it.`;
   }
   if (action.endState === "managed_budget_blocked" || check?.kind === "budget") {
     return budgetBlockedMessage(check?.budgetCheck || { reason: "credits" }, {
@@ -926,6 +970,13 @@ function terminalMessageFor(lifecycle, action, check) {
 // Every terminal stop goes through here: restore a better checkpoint if this round made
 // things worse, finish Diagnostics, tell the user calmly, and notify exactly once.
 async function stopWithMessage(ctx, lifecycle, { action, attempt, jobId, projectId, signals, progress, text, briefFingerprint = null }) {
+  // A stop that arrives while a hold is outstanding means the covered call never ran (or its end
+  // path was bypassed). Release it: cancelled queued work owes nothing, and a leaked hold would
+  // silently block every subsequent dispatch against the ceiling.
+  if (lifecycle.activeHold) {
+    await lifecycle.reservations.release(lifecycle.activeHold.id).catch(() => {});
+    lifecycle.activeHold = null;
+  }
   // If the last round regressed, put the better version back before stopping (§8).
   let restored = null;
   const previous = lifecycle.rounds[lifecycle.rounds.length - 2] || null;
