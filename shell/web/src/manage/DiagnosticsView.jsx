@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from "react";
 import {
   listDiagnostics, getDiagnostics, getDiagnosticsStep, explainDiagnostics,
-  diagnosticsPrefs, setDiagnosticsPrefs, diagnosticsRequests,
+  diagnosticsPrefs, setDiagnosticsPrefs, diagnosticsRequests, diagnosticsBv2,
 } from "../lib/codeAgentApi.js";
 import { SkeletonRows, formatCompact } from "./shared.jsx";
 
@@ -82,6 +82,54 @@ export default function DiagnosticsView() {
   );
 }
 
+// Builder v2 (WP-12): the pipeline story — build state machine + spend, per-step cost from
+// the trace hierarchy, snapshot lineage, and which snapshot each pointer currently serves.
+function BuilderV2Panel({ runId }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    diagnosticsBv2(runId).then(setData).catch(() => setData(null));
+  }, [runId]);
+  if (!data?.v2) return null;
+  const pointerFor = (snapId) => (data.pointers || []).filter((p) => p.snapshot_id === snapId).map((p) => p.label);
+  return (
+    <div className="mg-card">
+      <div className="mg-label" style={{ marginTop: 0 }}>Builder v2 pipeline</div>
+      {(data.builds || []).slice(0, 3).map((b) => (
+        <div key={b.id} style={{ fontSize: 13.5, marginBottom: 4 }}>
+          <span className="mg-mono">{b.id.slice(0, 8)}</span> · {b.profile} · <b>{b.state}</b>
+          {b.final_snapshot ? <> · snapshot <span className="mg-mono">{b.final_snapshot.slice(0, 8)}</span></> : null}
+          {b.error ? <span style={{ color: "var(--bad)" }}> · {String(b.error).slice(0, 90)}</span> : null}
+        </div>
+      ))}
+      {(data.steps || []).length > 0 && (
+        <>
+          <div className="mg-label">Spend by pipeline step</div>
+          {(data.steps || []).map((s) => (
+            <div key={s.step} style={{ fontSize: 13, display: "flex", gap: 10 }}>
+              <span className="mg-mono" style={{ minWidth: 110 }}>{s.step}</span>
+              <span>{s.calls} call{s.calls === 1 ? "" : "s"}</span>
+              <span>{formatCompact(s.inputTokens)} in ({formatCompact(s.cachedTokens)} cached)</span>
+              <span>{formatCompact(s.outputTokens)} out</span>
+              <span><b>{s.cost.toFixed(2)} cr</b></span>
+            </div>
+          ))}
+        </>
+      )}
+      {(data.snapshots || []).length > 0 && (
+        <>
+          <div className="mg-label">Snapshots</div>
+          {(data.snapshots || []).map((s) => (
+            <div key={s.id} style={{ fontSize: 13 }}>
+              <span className="mg-mono">{s.id.slice(0, 8)}</span> · {s.reason} · {s.state} · {s.file_count} files
+              {pointerFor(s.id).map((l) => <b key={l} style={{ color: "var(--good)" }}> ← {l}</b>)}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function RunDetail({ runId, onBack }) {
   const [run, setRun] = useState(null);
   const [error, setError] = useState("");
@@ -146,6 +194,7 @@ function RunDetail({ runId, onBack }) {
             )}
           </div>
 
+          {/^app_(build|edit)_v2$/.test(run.kind || "") && <BuilderV2Panel runId={run.id} />}
           <ContextInspector runId={run.id} />
 
           {rounds.length > 1 && (

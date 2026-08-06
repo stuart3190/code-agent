@@ -153,6 +153,7 @@ export const getDiagnostics = (runId) => request(`/api/v1/diagnostics/${runId}`)
 export const getDiagnosticsStep = (runId, seq) => request(`/api/v1/diagnostics/${runId}/step/${seq}`);
 export const explainDiagnostics = (runId) => request(`/api/v1/diagnostics/${runId}/explain`, { method: "POST" });
 export const diagnosticsRequests = (runId) => request(`/api/v1/diagnostics/${runId}/requests`);
+export const diagnosticsBv2 = (runId) => request(`/api/v1/diagnostics/${runId}/bv2`);
 export const listIncidents = (conversationId = null) =>
   request(`/api/v1/diagnostics/incidents${conversationId ? `?conversation=${conversationId}` : ""}`);
 export const incidentDetails = (reference) => request(`/api/v1/diagnostics/incidents/${reference}`);

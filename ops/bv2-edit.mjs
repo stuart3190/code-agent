@@ -84,6 +84,7 @@ const orchestrator = createOrchestrator({
         label: `journeys: ${result.journeys.map((j) => `${j.id}=${j.status}`).join(" ")}`,
         status: result.journeys.some((j) => j.status === "fail") ? "failed" : "passed",
         output: JSON.stringify({ journeys: result.journeys, consoleErrors: result.consoleErrors, failedRequests: result.failedRequests }),
+        trace: { traceId: diag.id, parentId: diag.id, step: "verify" },
       });
     } catch { /* diagnostics never block */ }
     for (const j of result.journeys) for (const s of j.steps || []) log(`  ${j.id} · ${String(s.action || "").slice(0, 55)} → ${s.status}${s.detail ? ` — ${s.detail}` : ""}`);

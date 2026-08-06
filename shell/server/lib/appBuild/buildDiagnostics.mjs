@@ -139,7 +139,10 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     started_at: now(),
   }));
 
-  session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round, contextMeta = null }) => {
+  // trace: optional { traceId, parentId, step } — the Builder v2 hierarchy (trace root =
+  // the build; every model call/verification names its pipeline step). Columns exist since
+  // the bv2 foundation migration; v1 callers simply leave them null.
+  session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round, contextMeta = null, trace = null }) => {
     session.seq += 1;
     if (agent) session.agents.add(agent);
     const norm = normalizeTelemetry(usage);
@@ -164,6 +167,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       ...packOutput(output),
       usage: norm || null, cost,
       started_at: now(), duration_ms: durationMs,
+      trace_id: trace?.traceId || null, parent_id: trace?.parentId || null,
     }));
     // Per-AI-request accounting: every usage-bearing step becomes an ai_requests row —
     // the source of truth for customer AI-cost summaries and admin analytics.
@@ -179,6 +183,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
         trigger: contextMeta?.trigger || null,
         run_id: contextMeta?.runId || null,
         context: contextMeta ? { ...contextMeta, trigger: undefined, runId: undefined } : null,
+        trace_id: trace?.traceId || null, parent_id: trace?.parentId || null, step: trace?.step || null,
         created_at: now(),
       }));
     }

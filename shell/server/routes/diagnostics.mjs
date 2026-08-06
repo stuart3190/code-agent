@@ -67,6 +67,46 @@ export async function handleDiagnosticsRequests(req, res, { owner, runId, client
   });
 }
 
+// Builder v2 view (WP-12): the pipeline story behind an app_build_v2/app_edit_v2 run —
+// the bv2 build rows for the project (state machine + spend + snapshot), the snapshot
+// lineage, the green pointer, and per-STEP spend from the trace columns.
+export async function handleDiagnosticsBv2(req, res, { owner, runId, client = null }) {
+  const db = client || serviceClient();
+  const { data: run } = await db.from("diag_runs").select("id, project_id, kind")
+    .eq("id", runId).eq("owner", owner.id).maybeSingle();
+  if (!run) return json(res, 404, { error: "No diagnostics found for that Build ID." });
+  if (!/^app_(build|edit)_v2$/.test(run.kind || "")) return json(res, 200, { v2: false });
+
+  const [{ data: builds }, { data: snapshots }, { data: pointers }, { data: requests }] = await Promise.all([
+    db.from("bv2_builds").select("id, profile, request, state, spent_credits, final_snapshot, error, started_at, finished_at")
+      .eq("owner", owner.id).eq("project_id", run.project_id).order("started_at", { ascending: false }).limit(10),
+    db.from("bv2_snapshots").select("id, reason, state, file_count, parent_snapshot, created_at")
+      .eq("owner", owner.id).eq("project_id", run.project_id).order("created_at", { ascending: false }).limit(10),
+    db.from("bv2_project_pointers").select("label, snapshot_id")
+      .eq("owner", owner.id).eq("project_id", run.project_id),
+    db.from("ai_requests").select("step, input_tokens, output_tokens, cached_tokens, cost")
+      .eq("build_id", runId).eq("owner", owner.id),
+  ]);
+
+  const bySteps = {};
+  for (const r of requests || []) {
+    const key = r.step || "(untraced)";
+    const s = bySteps[key] || (bySteps[key] = { step: key, calls: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, cost: 0 });
+    s.calls += 1;
+    s.inputTokens += Number(r.input_tokens || 0);
+    s.outputTokens += Number(r.output_tokens || 0);
+    s.cachedTokens += Number(r.cached_tokens || 0);
+    s.cost += Number(r.cost || 0);
+  }
+  return json(res, 200, {
+    v2: true,
+    builds: builds || [],
+    snapshots: snapshots || [],
+    pointers: pointers || [],
+    steps: Object.values(bySteps).sort((a, b) => b.cost - a.cost),
+  });
+}
+
 export async function handleDiagnosticsPrefs(req, res, { owner, method, body }) {
   if (method === "POST") {
     const retentionDays = body?.retentionDays === null || body?.retentionDays === undefined

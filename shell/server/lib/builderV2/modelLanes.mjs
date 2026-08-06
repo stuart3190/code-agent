@@ -183,15 +183,37 @@ export function renderPatchPrompt({ step, contract, tiers, tree, journey, reject
  * ONE job-wide credit ceiling. Throws ManagedCreditBudgetError (reason job_credit_limit)
  * the moment accumulated spend can no longer fit under the ceiling.
  */
+// Per-step routing (master plan Part 10, WP-12): one transport model on the Codex lane,
+// so the routable lever is REASONING EFFORT — full thinking where design happens, less
+// where the step is mechanical. Tuned from live traces as they accumulate.
+export const STEP_ROUTING = Object.freeze({
+  contract: { reasoningEffort: "medium" },
+  core: { reasoningEffort: "medium" },
+  repair: { reasoningEffort: "medium" },
+  edit: { reasoningEffort: "low" },
+  increment: { reasoningEffort: "low" },
+});
+
+export function routeForStep(step) {
+  const kind = String(step || "").startsWith("increment:") ? "increment" : String(step || "");
+  return STEP_ROUTING[kind] || STEP_ROUTING.core;
+}
+
 export function createModelLanes({
   provider, ceilingCredits, diag = null, log = () => {},
   bucket = jobUsageBucket(),
 }) {
   if (!provider || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const guard = managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
+  // WP-12 trace hierarchy: root = the diag run (the build); every model call is a child
+  // span named by its pipeline step. Verification spans join from the runners.
   const record = (step, { label, prompt, output, usage, durationMs }) => {
     try {
-      diag?.step({ agent: "BuilderV2", kind: "agent", label: `${step}: ${label}`, status: "info", prompt, output, usage, model: provider.model, durationMs });
+      diag?.step({
+        agent: "BuilderV2", kind: "agent", label: `${step}: ${label}`, status: "info",
+        prompt, output, usage, model: provider.model, durationMs,
+        trace: { traceId: diag?.id || null, parentId: diag?.id || null, step },
+      });
     } catch { /* diagnostics never block a build */ }
   };
 
@@ -230,8 +252,8 @@ export function createModelLanes({
         tools: [EMIT_PATCHES_SCHEMA],
         toolChoice: { type: "function", name: EMIT_PATCHES_SCHEMA.name },
         // The first live run produced an 82-token no-op with zero reasoning; a forced tool
-        // call still needs thinking room to design the whole step.
-        reasoningEffort: "medium",
+        // call still needs thinking room — how much is the per-step routing table's call.
+        reasoningEffort: routeForStep(step).reasoningEffort,
       });
       const call = (turn.toolCalls || []).find((c) => c.name === EMIT_PATCHES_SCHEMA.name);
       // Record BEFORE the guard can throw — the ceiling stopping a build never hides spend.
