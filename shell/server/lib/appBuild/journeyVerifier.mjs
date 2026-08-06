@@ -314,15 +314,18 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     drove = true;
   }
 
+  // Only if the step was not itself a navigation. "open the booking page" matches /book/, and an
+  // earlier version therefore navigated AND clicked — submitting the form on step one, so that by
+  // step three the confirmation was already on screen and the real submit proved nothing.
+  // CAPTURED BEFORE THE FILL: a fill is not a navigation. Treating it as one meant every
+  // combined "enter … then submit" step filled the form and NEVER CLICKED — three live bv2
+  // runs (and untold v1 submit steps) failed working apps on exactly this line.
+  const navigated = drove;
+
   if (/enter|type|fill|complete|provide/i.test(action)) {
     const filled = await fillVisibleForm(page, marker);
     drove = drove || filled.length > 0;
   }
-
-  // Only if the step was not itself a navigation. "open the booking page" matches /book/, and an
-  // earlier version therefore navigated AND clicked — submitting the form on step one, so that by
-  // step three the confirmation was already on screen and the real submit proved nothing.
-  const navigated = drove;
 
   // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
   // option and off the previous one), never on text freshness — a default-selected date is
