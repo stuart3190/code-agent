@@ -139,7 +139,7 @@ test("the welcome and security notifications say the right thing", async () => {
 // ── The security boundary ───────────────────────────────────────────────────────────────
 
 test("column grants make `source` a claim only the service role can make", async () => {
-  const sql = await read("../../supabase/migrations/20260801220000_app_notifications.sql");
+  const sql = await read("../../supabase/migrations/20260801203017_app_notifications_column_grants.sql");
   const ddl = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
 
   // Both alternatives were tried against production and rejected: a single `for all` policy let

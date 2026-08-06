@@ -72,7 +72,7 @@ test("Thrallo notifications are a different table from the ones customers' apps 
 });
 
 test("a repeat of an unread alert refreshes it rather than stacking", async () => {
-  const migration = await read("../../supabase/migrations/20260805090000_account_notifications_cancellation.sql");
+  const migration = await read("../../supabase/migrations/20260803233001_account_notifications_cancellation.sql");
   assert.match(migration, /create unique index if not exists ca_notifications_owner_tag_unread_idx[\s\S]*?where read_at is null/,
     "a domain failing four sweeps is one thing that is wrong, not four");
 });

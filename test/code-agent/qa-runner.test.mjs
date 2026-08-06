@@ -47,7 +47,7 @@ test("QA artifacts are Thrallo-branded, not buildr", async () => {
 });
 
 test("the qa_runs migration uses Thrallo's isolation posture, not the legacy browser-readable one", async () => {
-  const sql = await read("../../supabase/migrations/20260801200000_qa_runs_thrallo.sql");
+  const sql = await read("../../supabase/migrations/20260801195851_qa_runs_thrallo.sql");
   const ddl = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
 
   assert.match(ddl, /enable row level security/i);

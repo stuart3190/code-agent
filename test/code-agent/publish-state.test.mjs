@@ -358,7 +358,7 @@ test("there is exactly ONE publish resolver in the codebase", async () => {
 
 test("the database refuses a second live record for one product", async () => {
   const migration = await readFile(fileURLToPath(new URL(
-    "../../supabase/migrations/20260803210000_one_live_site_per_product.sql", import.meta.url)), "utf8");
+    "../../supabase/migrations/20260803124509_one_live_site_per_product.sql", import.meta.url)), "utf8");
   assert.match(migration, /create unique index[\s\S]*published_sites_one_live_per_product/i);
   assert.match(migration, /where unpublished_at is null and product_id is not null/i,
     "partial, so a retired record and a project with no product are both exempt");

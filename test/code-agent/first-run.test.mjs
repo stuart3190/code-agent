@@ -62,7 +62,7 @@ test("onboarding state is kept out of the agent's memory blob", async () => {
   // someone dismissed a tour is interface state and would be context spent on nothing, every turn.
   assert.match(store, /from\("ca_owner_profile"\)\.select\("onboarding"\)/);
   assert.doesNotMatch(store, /profile_encrypted[^\n]*onboarding/);
-  const migration = await read("../../supabase/migrations/20260806090000_onboarding_state.sql");
+  const migration = await read("../../supabase/migrations/20260804090105_onboarding_state.sql");
   assert.match(migration, /add column if not exists onboarding jsonb/);
 });
 

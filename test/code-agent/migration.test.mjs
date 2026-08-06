@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const migrationPath = new URL("../../supabase/migrations/20260729122234_code_agent_control_plane.sql", import.meta.url);
-const githubMigrationPath = new URL("../../supabase/migrations/20260729140251_github_app_installations.sql", import.meta.url);
-const hardeningMigrationPath = new URL("../../supabase/migrations/20260729164642_harden_code_agent_schema.sql", import.meta.url);
-const anonLockdownMigrationPath = new URL("../../supabase/migrations/20260729165131_lock_down_code_agent_anon_access.sql", import.meta.url);
+const migrationPath = new URL("../../supabase/migrations/20260729164522_code_agent_control_plane.sql", import.meta.url);
+const githubMigrationPath = new URL("../../supabase/migrations/20260729164535_github_app_installations.sql", import.meta.url);
+const hardeningMigrationPath = new URL("../../supabase/migrations/20260729164721_harden_code_agent_schema.sql", import.meta.url);
+const anonLockdownMigrationPath = new URL("../../supabase/migrations/20260729165144_lock_down_code_agent_anon_access.sql", import.meta.url);
 const webhookMigrationPath = new URL("../../supabase/migrations/20260729231426_github_webhook_ledger.sql", import.meta.url);
 const policyRolesMigrationPath = new URL("../../supabase/migrations/20260729232141_restrict_code_agent_policy_roles.sql", import.meta.url);
 const aiConnectionsMigrationPath = new URL("../../supabase/migrations/20260729234551_ai_provider_connections.sql", import.meta.url);
@@ -13,10 +13,10 @@ const rejectAnonymousMigrationPath = new URL("../../supabase/migrations/20260729
 const repositoryIndexMigrationPath = new URL("../../supabase/migrations/20260730001803_repository_hybrid_index.sql", import.meta.url);
 const repositoryIntelligenceMigrationPath = new URL("../../supabase/migrations/20260730063059_repository_code_intelligence.sql", import.meta.url);
 const modelRoutingMigrationPath = new URL("../../supabase/migrations/20260730083259_model_routing_and_evaluations.sql", import.meta.url);
-const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730143000_subscriptions_budgets_telemetry.sql", import.meta.url);
-const phase8MigrationPath = new URL("../../supabase/migrations/20260730170000_approval_policies_resume_artifacts.sql", import.meta.url);
-const phase9MigrationPath = new URL("../../supabase/migrations/20260730200000_egress_command_policies_retention.sql", import.meta.url);
-const apiTokensMigrationPath = new URL("../../supabase/migrations/20260730223000_api_tokens.sql", import.meta.url);
+const subscriptionsMigrationPath = new URL("../../supabase/migrations/20260730091313_subscriptions_budgets_telemetry.sql", import.meta.url);
+const phase8MigrationPath = new URL("../../supabase/migrations/20260730100937_approval_policies_resume_artifacts.sql", import.meta.url);
+const phase9MigrationPath = new URL("../../supabase/migrations/20260730102731_egress_command_policies_retention.sql", import.meta.url);
+const apiTokensMigrationPath = new URL("../../supabase/migrations/20260730104416_api_tokens.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -225,7 +225,7 @@ test("phase 9 migration adds egress/command policies and retention tracking", as
 
 test("review-run migration adds a validated pull-request column", async () => {
   const sql = await readFile(
-    new URL("../../supabase/migrations/20260731003000_review_runs.sql", import.meta.url),
+    new URL("../../supabase/migrations/20260730110931_review_runs.sql", import.meta.url),
     "utf8",
   );
   assert.match(sql, /alter table public\.ca_runs[\s\S]*add column pull_request bigint/i);
@@ -234,7 +234,7 @@ test("review-run migration adds a validated pull-request column", async () => {
 
 test("automations migration is server-only with provenance and due-scan indexes", async () => {
   const sql = await readFile(
-    new URL("../../supabase/migrations/20260731020000_automations.sql", import.meta.url),
+    new URL("../../supabase/migrations/20260730114324_automations.sql", import.meta.url),
     "utf8",
   );
   assert.match(sql, /create table public\.ca_automations/i);
@@ -250,7 +250,7 @@ test("automations migration is server-only with provenance and due-scan indexes"
 
 test("conversation platform migration is encrypted-at-rest and server-only", async () => {
   const sql = await readFile(
-    new URL("../../supabase/migrations/20260730220000_conversation_platform.sql", import.meta.url),
+    new URL("../../supabase/migrations/20260730203059_conversation_platform.sql", import.meta.url),
     "utf8",
   );
   for (const table of [

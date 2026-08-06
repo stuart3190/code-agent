@@ -61,15 +61,15 @@ test("PR-01 — unsafe live controls fail the safety classification", () => {
   assert.equal(state.safe, false);
 });
 
-test("PR-01 — migration evidence deterministically exposes the current duplicate versions", () => {
+test("PR-02 — authoritative active migration history has no duplicate versions", () => {
   const inventory = collectMigrationBaseline(path.join(ROOT, "supabase", "migrations"));
   assert.ok(inventory.count > 0);
   assert.match(inventory.manifestHash, /^[a-f0-9]{64}$/);
-  assert.deepEqual(inventory.duplicateVersions.map((row) => row.version), ["20260801200000", "20260801220000"]);
+  assert.deepEqual(inventory.duplicateVersions, []);
   const violations = baselineViolations({
     git: { matchesOriginMain: true, matchesAuditedCommit: true },
     migrations: inventory,
     safety: { complete: false, safe: false },
   });
-  assert.deepEqual(violations, ["runnable Supabase migration versions are duplicated"]);
+  assert.deepEqual(violations, []);
 });

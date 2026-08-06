@@ -202,7 +202,7 @@ test("checkpoint data is tenant-isolated", async () => {
 test("the checkpoints table is service-role only with RLS on and no policies", async () => {
   const fs = await import("node:fs");
   const sql = await fs.promises.readFile(
-    new URL("../../supabase/migrations/20260801160000_persistent_build_checkpoints.sql", import.meta.url), "utf8");
+    new URL("../../supabase/migrations/20260801162814_persistent_build_checkpoints.sql", import.meta.url), "utf8");
   assert.match(sql, /alter table public\.build_checkpoints enable row level security/i);
   assert.match(sql, /revoke all on table public\.build_checkpoints from public, anon, authenticated/i);
   assert.match(sql, /grant all privileges on table public\.build_checkpoints\s+to service_role/i);
