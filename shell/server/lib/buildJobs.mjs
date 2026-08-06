@@ -50,6 +50,7 @@ import { createBudgetLedger, ensureBudgetGrant as ensureWelcomeGrant } from "./a
 import { resolveBuildContext } from "./appBuild/buildContext.mjs";
 import { previewProvider } from "../preview/index.mjs";
 import { withRuntimeEnv } from "./runtimeEnv.mjs";
+import { shadowIndexBuild } from "./builderV2/shadow.mjs";
 import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLOCK } from "./images.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
@@ -1311,6 +1312,9 @@ async function runJob(job) {
       finalText, tree, buildOk: build.ok, previewUrl: preview?.url || null,
       need, balance: balance.total, designProfile, qualityWarnings,
     };
+    // WP-14 shadow week: index the completed tree into the v2 stores. Fire-and-forget and
+    // internally fault-isolated — v1's result is already sealed above, whatever happens here.
+    void shadowIndexBuild({ owner: owner.id, projectId, tree, buildId: job.diag?.id || job.id });
     finish(job, "complete");
   } catch (e) {
     if (e instanceof CancelledError) {
