@@ -48,6 +48,8 @@
     "supabase:lint": "supabase db lint --local --schema public --level error --fail-on error",
     "supabase:diff": "supabase db diff --local --schema public",
     "supabase:migrations": "supabase migration list --local",
+    "supabase:history:verify": "node ops/validate-migration-history.mjs",
+    "supabase:edge:check": "npx --yes deno@2.5.1 check supabase/functions/app-auth/index.ts",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },

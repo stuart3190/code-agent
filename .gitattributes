@@ -2,3 +2,4 @@
 # let platform-specific Git settings rewrite line endings or non-ASCII SQL comments.
 supabase/migrations/*.sql -text
 supabase/migration-history-archive/**/*.sql -text
+*.sh text eol=lf

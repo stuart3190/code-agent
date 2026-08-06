@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -22,3 +22,33 @@ jobs:
       - run: npm --prefix shell/web ci
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify authoritative history and backup coverage
+        run: |
+          npm run supabase:history:verify
+          node --test test/code-agent/backup-coverage.test.mjs
+      - name: Start disposable Supabase and reset from zero
+        run: |
+          npm exec -- supabase start
+          npm run supabase:reset
+          npm exec -- supabase migration list --local
+      - name: Lint and prove no schema diff
+        run: |
+          npm run supabase:lint
+          npm exec -- supabase db diff --local --schema public > schema-diff.sql
+          test ! -s schema-diff.sql
+      - name: Type-check Edge Function dependencies
+        run: npm run supabase:edge:check
+      - name: Stop disposable Supabase
+        if: always()
+        run: npm exec -- supabase stop --no-backup
