@@ -143,6 +143,33 @@ test("WP2 — the strict tool schema is complete: every property required, optio
   assert.equal(schema.strict, true);
   assert.deepEqual(schema.parameters.required, ["patches"]);
   const item = schema.parameters.properties.patches.items;
-  assert.deepEqual(item.required.sort(), ["content", "deleteFile", "file", "newFile", "ops"].sort(),
+  assert.deepEqual(item.required.sort(), ["content", "deleteFile", "file", "newFile", "ops", "replaceFile"].sort(),
     "strict tools need ALL properties required (the P18 lesson) with nullable optionals");
+});
+
+// ── WP-11 live evidence: replaceFile is the mutation path for index-opaque files ──────────────
+
+test("replaceFile: the only way to change CSS — validated, protected-path-aware, parse-checked for JS", () => {
+  const tree = {
+    "src/index.css": ":root { --x: 1; }",
+    "src/routes/A.jsx": "export default function A() { return null; }",
+    "src/lib/capabilities/forms.js": "// protected",
+  };
+  const ok = applyPatches(tree, [{ replaceFile: "src/index.css", content: ":root { --x: 2; } .hero { color: red; }" }]);
+  assert.equal(ok.rejected.length, 0, JSON.stringify(ok.rejected));
+  assert.match(ok.tree["src/index.css"], /--x: 2/);
+  assert.equal(ok.applied[0].kind, "replaceFile");
+
+  const missing = applyPatches(tree, [{ replaceFile: "src/nope.css", content: "x" }]);
+  assert.match(missing.rejected[0].reason, /does not exist/);
+
+  const protectedHit = applyPatches(tree, [{ replaceFile: "src/lib/capabilities/forms.js", content: "x" }]);
+  assert.match(protectedHit.rejected[0].reason, /protected platform infrastructure/);
+
+  const badJs = applyPatches(tree, [{ replaceFile: "src/routes/A.jsx", content: "export default function A() { return (" }]);
+  assert.match(badJs.rejected[0].reason, /does not parse/);
+
+  // The opaque-file teaching now names the way out.
+  const opaqueOp = applyPatches(tree, [{ file: "src/index.css", ops: [{ op: "append", content: "x" }] }]);
+  assert.match(opaqueOp.rejected[0].reason, /use replaceFile with the COMPLETE new content/);
 });

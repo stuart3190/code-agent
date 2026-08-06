@@ -108,3 +108,17 @@ test("WP3 — cached FAILURES are never reused, and owning-module edits invalida
   assert.ok(afterEdit.drive.some((d) => d.journey.id === "newsletter-signup"),
     "the newsletter journey re-drives after its data module changed");
 });
+
+// ── WP-11 live evidence: a compile failure's brief must carry the compiler's own words ────────
+
+test("a failing compile surfaces the stderr excerpt in problems — repairs are never briefed blind", async () => {
+  const tree = { ...structuredClone(TREE) };
+  const failed = await verifyStage(tree, {
+    contract: CONTRACT, stage: { id: "data", journeys: [] },
+    compile: async () => ({ ok: false, stderr: "src/routes/BookPage.jsx:41:7 error: 'slots' is not defined\n  at renderSlots" }),
+  });
+  assert.equal(failed.ok, false);
+  assert.ok(failed.layers.d0d2.problems.some((p) => /the project does not compile/.test(p)));
+  assert.ok(failed.layers.d0d2.problems.some((p) => /compiler output:/.test(p) && /'slots' is not defined/.test(p)),
+    JSON.stringify(failed.layers.d0d2.problems));
+});

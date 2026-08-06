@@ -21,7 +21,9 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
   name: "emit_patches",
   description: "Apply your changes as symbol-level operations. Every op is validated against "
     + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
-    + "that do not exist yet; never rewrite a whole existing file through newFile.",
+    + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
+    + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
+    + "COMPLETE new content.",
   strict: true,
   parameters: {
     type: "object",
@@ -33,7 +35,7 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["file", "ops", "newFile", "content", "deleteFile"],
+          required: ["file", "ops", "newFile", "content", "deleteFile", "replaceFile"],
           properties: {
             file: { type: ["string", "null"], description: "Existing file to modify with ops" },
             ops: {
@@ -50,8 +52,9 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
               },
             },
             newFile: { type: ["string", "null"], description: "Path of a file to CREATE" },
-            content: { type: ["string", "null"], description: "Content for newFile" },
+            content: { type: ["string", "null"], description: "Content for newFile or replaceFile" },
             deleteFile: { type: ["string", "null"], description: "Path of a file to DELETE" },
+            replaceFile: { type: ["string", "null"], description: "EXISTING file to replace wholesale with `content` — the only way to change files the index treats as opaque (CSS, config)" },
           },
         },
       },
@@ -64,6 +67,7 @@ const isProtected = (path) => PROTECTED_PATHS.some((re) => re.test(path));
 function opSignature(patch, op) {
   if (patch.newFile) return `new:${patch.newFile}`;
   if (patch.deleteFile) return `del:${patch.deleteFile}`;
+  if (patch.replaceFile) return `repl:${patch.replaceFile}`;
   return `${patch.file}:${op.op}:${op.symbol || ""}`;
 }
 
@@ -93,6 +97,20 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       continue;
     }
 
+    // ── whole-file replace (the ONLY mutation path for index-opaque files like CSS) ──────
+    if (patch.replaceFile) {
+      if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`); continue; }
+      if (isProtected(patch.replaceFile)) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`); continue; }
+      const content = String(patch.content || "");
+      if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
+        const probe = indexFile(patch.replaceFile, content);
+        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`); continue; }
+      }
+      working[patch.replaceFile] = content;
+      applied.push({ signature: opSignature(patch, {}), file: patch.replaceFile, kind: "replaceFile" });
+      continue;
+    }
+
     // ── delete ───────────────────────────────────────────────────────────────────────────
     if (patch.deleteFile) {
       if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`); continue; }
@@ -114,7 +132,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     for (const op of patch.ops || []) {
       const current = String(working[file]);
       const index = indexFile(file, current);
-      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — only whole-file regeneration can change it`); continue; }
+      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`); continue; }
 
       if (op.op === "append") {
         const candidate = `${current}\n${op.content || ""}`;

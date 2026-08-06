@@ -40,9 +40,17 @@ export function attributeFailures(journeyResults, graph, contract) {
  */
 export async function verifyStage(tree, options = {}) {
   const gate = await runStageGate(tree, options);
+  // A repair round can only fix what its brief names: "the project does not compile" with
+  // no compiler output sent a live booking build into blind guessing until the stop rule.
+  // The stderr excerpt rides WITH the problem so the next round sees file, line and error.
+  const problems = [...(gate.problems || [])];
+  if (!gate.ok && gate.stderr) {
+    const excerpt = String(gate.stderr).split(/\r?\n/).filter((l) => l.trim()).slice(0, 15).join("\n");
+    if (excerpt) problems.push(`compiler output:\n${excerpt}`);
+  }
   return {
     ok: gate.ok,
-    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems: gate.problems } },
+    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems } },
     tree: gate.tree,
     deterministicRepair: gate.deterministicRepair || null,
   };
