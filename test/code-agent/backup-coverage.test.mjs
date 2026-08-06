@@ -147,6 +147,9 @@ test("authoritative migration identity is line-ending independent without changi
 });
 
 test("systemd units and the runbook ship with the repository", async () => {
+  const backup = await readFile(new URL("../../ops/backup-thrallo.mjs", import.meta.url), "utf8");
+  assert.match(backup, /\.incomplete-thrallo-/);
+  assert.match(backup, /await rename\(dir, finalDir\)/);
   const service = await readFile(new URL("../../ops/thrallo-backup.service", import.meta.url), "utf8");
   assert.match(service, /ExecStart=\/usr\/bin\/node ops\/backup-thrallo\.mjs/);
   // Drift runs AFTER the backup, so a drift failure can never stop a backup being taken.

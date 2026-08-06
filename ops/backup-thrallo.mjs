@@ -12,7 +12,7 @@
 // shell/.env — every credential, source excerpt, and evaluation is encrypted with it — so an
 // offline copy of shell/.env is part of the disaster-recovery kit.
 
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -211,7 +211,8 @@ async function main() {
   const keepDays = Number(process.env.THRALLO_BACKUP_KEEP_DAYS || 14);
 
   const stamp = new Date().toISOString().replace(/:/g, "").slice(0, 17);
-  const dir = path.join(backupRoot, `thrallo-${stamp}`);
+  const finalDir = path.join(backupRoot, `thrallo-${stamp}`);
+  const dir = path.join(backupRoot, `.incomplete-thrallo-${stamp}`);
   await mkdir(path.join(dir, "storage"), { recursive: true });
 
   const manifest = {
@@ -321,6 +322,7 @@ async function main() {
 
   const validation = await validateBackupDirectory(dir);
   console.log(`  validation: ${validation.files} files decoded, counted and checksummed`);
+  await rename(dir, finalDir);
 
   let removed = 0;
   const cutoff = Date.now() - keepDays * 86_400_000;
@@ -331,7 +333,7 @@ async function main() {
       removed += 1;
     }
   }
-  console.log(`backup OK -> ${dir} (${manifest.bytes} bytes gz total, pruned ${removed} old runs)`);
+  console.log(`backup OK -> ${finalDir} (${manifest.bytes} bytes gz total, pruned ${removed} old runs)`);
 }
 
 function sha256(bytes) {
