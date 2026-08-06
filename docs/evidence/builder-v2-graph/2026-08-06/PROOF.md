@@ -46,7 +46,7 @@ path, symbol, reference, edge and derived-query parity.
 | Extra edge | Exact `dependency_edges` drift evidence |
 | Wrong opaque state/hash | `wrong_opaque` / `wrong_content_hash` evidence |
 | Missing/extra path | `missing_path` / `extra_path` evidence |
-| Stale run | `stale_shadow_run` evidence beyond configured age |
+| Stale or missing run | `stale_shadow_run` or durable `missing_shadow_run` evidence |
 | Complete reload parity | Stored production fixture clean across base data and graph answers |
 | Safe garbage collection | Shadow- and snapshot-pinned revisions retained |
 
@@ -58,3 +58,6 @@ and ownership/revision links. The existing pre-migration production backup remai
 pre-migration state. A new production backup and isolated restore are mandatory after deployment
 and before restarting the shadow week.
 
+The final repository regression run passed 1,209/1,209 Code Agent tests. No model-powered build,
+provider request, Stripe transaction, production SQL, production migration or shadow restart was
+used by these proofs.
