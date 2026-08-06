@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import { createModelLanes, jobUsageBucket, renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
+import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
 
@@ -156,12 +157,15 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
     runTurn: async () => ({ text: contractJson, toolCalls: [], usage: { input: 5000, output: 1500, cached: 0, reasoning: 0, total: 6500 } }),
   };
   const diag = fakeDiag();
-  const lanes = createModelLanes({ provider, ceilingCredits: 5, diag });
-  const contract = await lanes.contractFn({ request: "landing page" });
+  const knowledgeStore = memoryKnowledgeStore();
+  await knowledgeStore.upsert({ owner: "o", project_id: "p", kind: "constraint", key: "brand", value: { text: "keep the existing farm name" } });
+  const lanes = createModelLanes({ provider, ceilingCredits: 5, diag, knowledgeStore });
+  const contract = await lanes.contractFn({ owner: "o", projectId: "p", request: "landing page" });
   assert.equal(contract.journeys[0].id, "send-message");
   assert.equal(contract.journeys[0].priority, "primary");
   const step = diag.steps.find((s) => /contract/.test(s.label));
   assert.ok(step, "contract call recorded");
+  assert.match(step.prompt, /keep the existing farm name/, "persistent project knowledge reaches contract generation");
   assert.ok(step.usage.input >= 5000, `usage delta captured (got ${JSON.stringify(step.usage)})`);
 });
 
@@ -194,6 +198,7 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
     "src/routes/BookPage.jsx": big("BookPage", "booking wizard slots"),
     "src/routes/FarmPage.jsx": big("FarmPage", "farm story panels"),
     "src/routes/VisitPage.jsx": big("VisitPage", "visit guidance"),
+    "src/lib/capabilities/crud.js": "export function makeEntityStore() { return {}; }",
   };
 
   // Repair: the compiler named BookPage — its body must be IN, the unrelated pages must NOT be full.
@@ -207,9 +212,16 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
   assert.match(repair, /FILE TREE \(paths only/, "the model still sees the full shape");
 
   // Edit: keyword targeting picks the file; identical inputs render byte-identically.
-  const edit = renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" });
+  const edit = renderScopedContext(tree, {
+    step: "edit", editRequest: "update the visit guidance opening hours",
+    capabilityPaths: ["src/lib/capabilities/crud.js"],
+  });
   assert.match(edit, /VisitPage\.jsx — will be modified by this step/);
-  assert.equal(edit, renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" }));
+  assert.match(edit, /makeEntityStore/, "bound capability interfaces are integrated into retrieval");
+  assert.equal(edit, renderScopedContext(tree, {
+    step: "edit", editRequest: "update the visit guidance opening hours",
+    capabilityPaths: ["src/lib/capabilities/crud.js"],
+  }));
 });
 
 test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors never do", async () => {

@@ -166,13 +166,13 @@ export function createOrchestrator({
    * rejections fed straight back, the Part 4 stop rule on repeated identical failure.
    * Returns { ok, tree } or { ok:false, problems }.
    */
-  async function buildIncrement({ step, owner, contract, tiers, tree, assets, journeys, editRequest = null, initialProblems = [] }) {
+  async function buildIncrement({ step, owner, projectId, contract, tiers, tree, assets, journeys, editRequest = null, initialProblems = [] }) {
     let working = tree;
     let rejections = [];
     let problems = initialProblems;
     let lastSignature = null;
     for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
-      const patches = await patchesFn({ step, owner, contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null, editRequest });
+      const patches = await patchesFn({ step, owner, projectId, contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null, editRequest });
       const applied = applyPatches(working, patches, { contract });
       if (applied.rejected.length) {
         rejections = applied.rejected;
@@ -272,7 +272,7 @@ export function createOrchestrator({
         let tree = baseTree();
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
-          step: "core", owner, contract, tiers, tree, assets: resolved, journeys: essentialJourneys,
+          step: "core", owner, projectId, contract, tiers, tree, assets: resolved, journeys: essentialJourneys,
         });
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems });
         tree = core.tree;
@@ -303,7 +303,7 @@ export function createOrchestrator({
           await setState(`repair:${round}`);
           log(`repair ${round}/${maxJourneyRepairs}: ${evidence.length} verified failure(s)`);
           const repair = await buildIncrement({
-            step: "repair", owner, contract, tiers, tree, assets: resolved,
+            step: "repair", owner, projectId, contract, tiers, tree, assets: resolved,
             journeys: essentialJourneys, initialProblems: evidence,
           });
           if (!repair.ok) break;
@@ -334,7 +334,7 @@ export function createOrchestrator({
           await setState(step);
           const startTree = await snapshotStore.materialize(owner, lastGreen.id);
           const increment = await buildIncrement({
-            step, owner, contract, tiers, tree: startTree, assets: resolved, journeys: [journey],
+            step, owner, projectId, contract, tiers, tree: startTree, assets: resolved, journeys: [journey],
           });
           let verdicts = null;
           if (increment.ok) {
@@ -411,7 +411,7 @@ export function createOrchestrator({
 
         await setState("editing");
         const edit = await buildIncrement({
-          step: "edit", owner, contract, tiers, tree: ctx.tree, assets: [], journeys, editRequest: request,
+          step: "edit", owner, projectId, contract, tiers, tree: ctx.tree, assets: [], journeys, editRequest: request,
         });
         if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
 

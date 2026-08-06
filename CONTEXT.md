@@ -6,11 +6,12 @@ Work is active on branch `remediation/builder-v2-production` from audited main
 `92e4c9fe5c864799eee228f304849064bacb0190`. PR-01 baseline is commit `c4c530a`; the C2
 essential-attribution fix is `a5be84a`; C3 cache hardening is `57cfbaa`; C5 snapshot integrity is
 `7ebceae`; C6 app-auth hardening is `1be62c2`; asset ingestion/Pexels hardening is `9d71704`;
-the current local unit redacts diagnostics at the persistence boundary and adds prompt/source
-retention controls. Sharp process isolation remains explicitly deferred to the build-worker PR. Builder V1
+diagnostics redaction is `b6808ee`; the current local unit fixes typed retrieval, removes the
+nonexistent `read_file` claim, and integrates capability/project-knowledge context. Sharp process
+isolation remains explicitly deferred to the build-worker PR. Builder V1
 remains the default, Builder V2 rollout remains paused, and no production action, model spend,
 provider call, Stripe action or migration has been performed. The full local code-agent suite is
-green at 1,182 tests; static and HTTP security checks and the web build also pass. Continue from
+green at 1,186 tests; static and HTTP security checks and the web build also pass. Continue from
 `docs/PRODUCTION-AUDIT-REMEDIATION.md`; PR-02 migration-history
 repair still requires explicitly approved read-only production evidence and must not be guessed.
 

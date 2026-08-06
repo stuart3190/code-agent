@@ -81,9 +81,10 @@ export function indexFile(path, source) {
 
   let symbols = null;
   try {
+    const typescript = /\.tsx?$/.test(path);
     const ast = parse(text, {
       sourceType: "module",
-      plugins: ["jsx"],
+      plugins: [typescript ? "typescript" : null, /\.(?:jsx|tsx)$/.test(path) ? "jsx" : null].filter(Boolean),
       errorRecovery: true, // recover enough to REPORT errors; recovered files stay opaque
     });
     if (!ast.errors?.length) symbols = symbolsFromAst(ast, text);

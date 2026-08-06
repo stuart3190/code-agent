@@ -70,6 +70,15 @@ test("WP13 — strict refinement: v1 parses files v0's raw brace count falsely r
   assert.equal(ix1.symbols[0].name, "Smile");
 });
 
+test("H12 — TypeScript and TSX use the TypeScript parser instead of becoming opaque", () => {
+  const ts = v1.indexFile("src/data/user.ts", "export type User = { id: string };\nexport function userId(user: User): string { return user.id; }\n");
+  assert.equal(ts.opaque, false);
+  assert.ok(ts.symbols.some((symbol) => symbol.name === "userId"));
+  const tsx = v1.indexFile("src/routes/User.tsx", "type Props = { name: string };\nexport default function User({ name }: Props) { return <h1>{name}</h1>; }\n");
+  assert.equal(tsx.opaque, false);
+  assert.equal(tsx.symbols.find((symbol) => symbol.name === "User")?.kind, "component");
+});
+
 test("WP13 — error recovery still means OPAQUE: a broken file never gets a guessed index", () => {
   const broken = "export function f() { const = 3; }\n";
   const ix1 = v1.indexFile("src/broken.js", broken);

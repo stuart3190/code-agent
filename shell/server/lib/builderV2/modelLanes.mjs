@@ -13,6 +13,8 @@ import { capabilityBrief } from "./capabilityRegistry.mjs";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
+import { bindCapabilities } from "./contractTiering.mjs";
+import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -79,12 +81,17 @@ function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
  * 9k-token budget — instead of whole files (the WP-10 edit paid ~8k tokens per round to
  * re-send a monolith page it barely touched).
  */
-export function renderScopedContext(tree, { step, editRequest = null, problems = [], journeys = [] } = {}) {
+export function renderScopedContext(tree, {
+  step, editRequest = null, problems = [], journeys = [], capabilityPaths = [],
+} = {}) {
   const graph = memoryGraph("ctx", "ctx", indexTree(tree));
   const evidenceText = step === "edit" ? String(editRequest || "") : problems.join(" ");
   const failureRefs = [...new Set(problems.join("\n").match(/src\/[\w/.-]+\.(?:jsx?|tsx?|css|mjs)/g) || [])];
   const targets = editTargets(tree, evidenceText, { limit: 4 });
-  const result = retrieve({ graph, tree, targets, failureRefs, journeys, budgetTokens: 9_000 });
+  const result = retrieve({ graph, tree, targets, failureRefs, journeys, capabilityPaths, budgetTokens: 9_000 });
+  if (result.requiredUnavailable.length) {
+    throw new Error(`retrieval cannot provide complete required context: ${result.requiredUnavailable.map((row) => row.path).join(", ")}`);
+  }
   const paths = Object.keys(tree).sort().map((p) => `  ${p}`).join("\n");
   return [
     "FILE TREE (paths only — retrieval below carries the relevant content):", paths, "",
@@ -142,7 +149,10 @@ function renderJourneyBrief(journeys) {
   return lines.join("\n");
 }
 
-export function renderPatchPrompt({ step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null }) {
+export function renderPatchPrompt({
+  step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
+  projectKnowledge = null,
+}) {
   const isEdit = step === "edit";
   const isRepair = step === "repair";
   const scopedJourneys = step === "core" || isRepair
@@ -161,9 +171,14 @@ export function renderPatchPrompt({ step, contract, tiers, tree, journey, reject
     "IMPLEMENTATION CONTRACT:",
     contractBrief(contract),
     "",
+    projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
+    "",
     renderJourneyBrief(scopedJourneys),
     isEdit || isRepair
-      ? renderScopedContext(tree, { step, editRequest, problems, journeys: scopedJourneys })
+      ? renderScopedContext(tree, {
+        step, editRequest, problems, journeys: scopedJourneys,
+        capabilityPaths: bindCapabilities(contract).map((binding) => binding.package),
+      })
       : renderTreeContext(tree),
   ];
   if (rejections.length) {
@@ -203,7 +218,7 @@ export function routeForStep(step) {
 
 export function createModelLanes({
   provider, ceilingCredits, diag = null, log = () => {},
-  bucket = jobUsageBucket(),
+  bucket = jobUsageBucket(), knowledgeStore = null,
 }) {
   if (!provider || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const guard = managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
@@ -218,16 +233,23 @@ export function createModelLanes({
       });
     } catch { /* diagnostics never block a build */ }
   };
+  const loadKnowledge = async (owner, projectId) => {
+    if (!owner || !projectId) return "PROJECT KNOWLEDGE: not loaded for this request.";
+    const facts = await getKnowledge(owner, projectId, knowledgeStore ? { store: knowledgeStore } : {});
+    return knowledgeBrief(facts);
+  };
 
   return {
     bucket,
 
-    contractFn: async ({ request }) => {
+    contractFn: async ({ owner, projectId, request }) => {
       const startedAt = Date.now();
       const before = bucket.summary();
+      const projectKnowledge = await loadKnowledge(owner, projectId);
+      const contractRequest = `${projectKnowledge}\n\nUSER REQUEST:\n${request}`;
       let outcome;
       try {
-        outcome = await generateContract({ provider, prompt: request, log, onUsage: guard });
+        outcome = await generateContract({ provider, prompt: contractRequest, log, onUsage: guard });
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
         // `usage` reports only its last attempt). Recorded even when the guard throws —
@@ -236,7 +258,7 @@ export function createModelLanes({
         const delta = Object.fromEntries(Object.keys(after).map((k) => [k, after[k] - (before[k] || 0)]));
         record("contract", {
           label: outcome?.degraded ? "implementation contract (degraded)" : "implementation contract",
-          prompt: request, output: outcome ? JSON.stringify(outcome.contract) : null,
+          prompt: contractRequest, output: outcome ? JSON.stringify(outcome.contract) : null,
           usage: delta, durationMs: Date.now() - startedAt,
         });
       }
@@ -244,8 +266,9 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ step, contract, tiers, tree, journey, rejections, problems, editRequest }) => {
-      const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems, editRequest });
+    patchesFn: async ({ owner, projectId, step, contract, tiers, tree, journey, rejections, problems, editRequest }) => {
+      const projectKnowledge = await loadKnowledge(owner, projectId);
+      const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge });
       const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
       const startedAt = Date.now();
       // ONE retry on transport-shaped failures: a dropped SSE stream ("terminated") killed

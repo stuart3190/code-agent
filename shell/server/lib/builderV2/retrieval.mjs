@@ -13,7 +13,7 @@ export const FORMS = Object.freeze(["full", "interface", "summary", "omitted"]);
 
 function interfaceOf(fileIndex) {
   if (!fileIndex) return "(unknown file)";
-  if (fileIndex.opaque) return `${fileIndex.path} (opaque: ${fileIndex.tokens} tok — read_file for the body)`;
+  if (fileIndex.opaque) return `${fileIndex.path} (opaque: ${fileIndex.tokens} tok; no safe symbol interface available)`;
   const lines = [`${fileIndex.path}`];
   for (const s of fileIndex.symbols) {
     const entities = s.meta.entities.length ? ` entities:${s.meta.entities.join(",")}` : "";
@@ -73,6 +73,7 @@ export function retrieve({
   });
 
   const full = [];
+  const requiredUnavailable = [];
   const budgetOmitted = [];
   const interfaces = [];
   const summaries = [];
@@ -89,6 +90,10 @@ export function retrieve({
     if (wantedForm === "full" && used + bodyTokens <= budgetTokens) {
       full.push({ ...entry, form: "full", tokens: bodyTokens });
       used += bodyTokens;
+    } else if (fileIndex?.opaque && wantedForm === "full") {
+      // The patch lane has no read_file tool. An empty interface is not usable context.
+      requiredUnavailable.push({ ...entry, form: "omitted", tokens: 0, reason: `${entry.reason}; opaque body exceeds retrieval budget` });
+      budgetOmitted.push({ ...entry, form: "omitted", tokens: 0, demoted: true });
     } else if (wantedForm !== "summary" && used + ifaceTokens <= budgetTokens) {
       interfaces.push({ ...entry, form: "interface", tokens: ifaceTokens, demoted: wantedForm === "full", iface: interfaceOf(fileIndex) });
       used += ifaceTokens;
@@ -113,7 +118,7 @@ export function retrieve({
   ].sort();
 
   return {
-    full, interfaces, summaries, omitted,
+    full, interfaces, summaries, omitted, requiredUnavailable,
     tokens: used,
     budget: budgetTokens,
     trace: {
@@ -133,7 +138,7 @@ export function renderRetrieval(result, tree) {
     for (const f of result.full) lines.push(`\n// ${f.path} — ${f.reason}`, tree[f.path]);
   }
   if (result.interfaces.length) {
-    lines.push("\nINTERFACES — green modules you code against; a full read is free if genuinely needed:");
+    lines.push("\nINTERFACES — complete exported surfaces for green modules you code against:");
     for (const f of result.interfaces) lines.push(f.iface || f.path);
   }
   if (result.summaries.length) {

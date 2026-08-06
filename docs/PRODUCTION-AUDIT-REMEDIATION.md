@@ -49,7 +49,7 @@ values.
 | PR-10 Durable build leases | Pending | Audit evidence confirmed | None |
 | PR-11 Build worker | Pending | Audit evidence confirmed | None |
 | PR-12 Atomic deployment | Pending | Audit evidence confirmed | None |
-| PR-13 Cost/retrieval | Pending | Audit evidence confirmed | None |
+| PR-13 Cost/retrieval | Retrieval correctness local-complete; cost reservation pending | TS/TSX parser, opaque-context fail-closed, capability and project-knowledge integration proven | None |
 | PR-14 V2 composition | Pending | Placeholder confirmed | None |
 | PR-15 Operational surfaces | Pending | Audit evidence confirmed | None |
 | PR-16 Release pipeline | Pending | Audit evidence confirmed | None |
@@ -113,3 +113,10 @@ and corresponding live objects have been compared.
   prompts, plans and contracts; `DIAG_CAPTURE_SOURCE_DIFFS=0` retains changed-path audit metadata
   without source diff bodies. Runtime contracts remain in memory so disabling persistence does
   not silently cripple repair. Cross-store project/account erasure is not yet claimed complete.
+- The production indexer now activates Babel's TypeScript plugin for `.ts`/`.tsx` and JSX for
+  `.jsx`/`.tsx`; valid typed modules no longer become opaque. The patch lane has no `read_file`
+  tool, so retrieval no longer claims one exists: an opaque required body that cannot fit the
+  hard context budget fails before provider dispatch instead of sending an unusable interface.
+  Bound capability packages are included in scoped retrieval, and persistent project knowledge
+  is loaded into both contract generation and patch prompts through the existing knowledge-store
+  seam. No model call or provider credit was used to prove these paths.
