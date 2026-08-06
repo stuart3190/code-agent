@@ -128,3 +128,29 @@ test("a click that changes the URL is navigational — pre-existing words on the
   });
   assert.equal(after.status, "pass", after.detail);
 });
+
+// ── in-page section navigation is navigational (bv2 live run 5) ───────────────────────────────
+
+test("jump/scroll-to-section steps pass on static presence — a single-page app cannot mint fresh words", () => {
+  // Both verdicts from the live run, re-judged: every section was statically rendered, the
+  // click scrolled, nothing was "fresh" — and the step is navigation in all but verb.
+  for (const action of [
+    "use the navigation to jump to services",
+    "scroll to the about section",
+    "use the page navigation",
+  ]) {
+    const outcome = expectationOutcome({
+      wanted: ["services", "section", "room", "styling", "full"],
+      found: ["services", "section", "room", "styling", "full"], fresh: [],
+      drove: true, action, urlChanged: false,
+    });
+    assert.equal(outcome.status, "pass", `${action}: ${outcome.detail}`);
+  }
+
+  // An ACTION step (submit) still demands a transition — static presence keeps failing it.
+  const submit = expectationOutcome({
+    wanted: ["clear", "confirmation", "stating"], found: ["clear", "confirmation", "stating"], fresh: [],
+    drove: true, action: "fill in name, email, and message and submit", urlChanged: false,
+  });
+  assert.equal(submit.status, "fail", "the navigational exemption must not leak into submits");
+});

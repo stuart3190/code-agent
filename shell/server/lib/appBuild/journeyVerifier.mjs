@@ -340,7 +340,18 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
   if (!navigated && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book|use/i.test(action)) {
-    const target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
+    // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
+    // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
+    // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"
+    // while the real type=submit button sat below it, and a working app failed verification.
+    let target = null;
+    if (/submit|send/i.test(action)) {
+      const formSubmit = page
+        .locator("form:has(input:visible) button[type=submit]:visible, form:has(textarea:visible) button[type=submit]:visible")
+        .last();
+      if (await formSubmit.count().catch(() => 0)) target = formSubmit;
+    }
+    if (!target) target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
     if (target) {
       await target.click({ timeout: 5_000 }).catch(() => {});
       drove = true;
@@ -361,14 +372,27 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   if (!wanted.length) return { drove, status: "undriveable", detail: "the expectation named nothing findable" };
 
   const before = textBefore.toLowerCase();
-  const found = [];
-  const fresh = [];
-  for (const word of wanted) {
-    const hit = await page.getByText(new RegExp(word, "i")).first().isVisible().catch(() => false);
-    if (!hit) continue;
-    found.push(word);
-    // New since the step ran, which is the only kind of evidence that the step DID something.
-    if (!before.includes(word)) fresh.push(word);
+  // A first anonymous write legitimately takes seconds (visitor-session establishment plus
+  // the insert; longer on an edge-function cold start) — a fixed 900ms sample failed a
+  // WORKING app live. A driven step therefore polls until its outcome appears or 10s
+  // passes; undriven/static checks still resolve on the first sample.
+  let found = [];
+  let fresh = [];
+  const pollDeadline = Date.now() + (drove ? 10_000 : 0);
+  for (;;) {
+    found = [];
+    fresh = [];
+    for (const word of wanted) {
+      const hit = await page.getByText(new RegExp(word, "i")).first().isVisible().catch(() => false);
+      if (!hit) continue;
+      found.push(word);
+      // New since the step ran, which is the only kind of evidence that the step DID something.
+      if (!before.includes(word)) fresh.push(word);
+    }
+    if (Date.now() >= pollDeadline) break;
+    const early = expectationOutcome({ wanted, found, fresh, drove, action, urlChanged: page.url() !== urlBefore });
+    if (early.status === "pass") break;
+    await page.waitForTimeout(500);
   }
 
   // Some expectations are about FORM STATE, not visible text — "the fields accept the details",
@@ -423,7 +447,10 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
  */
 export function expectationOutcome({ wanted, found, fresh, drove, action, urlChanged = false }) {
   const ratio = found.length / wanted.length;
-  const navigational = urlChanged || /open|go to|navigate|visit|reload|refresh/i.test(action);
+  // jump/scroll/navigation joined the navigational class after a live run: a single-page
+  // app renders every section statically, so "use the navigation to jump to services" can
+  // never produce FRESH words — static presence at ≥half the keywords is the right bar.
+  const navigational = urlChanged || /open|go to|navigate|navigation|visit|reload|refresh|jump|scroll/i.test(action);
   if (ratio >= 0.5 && (navigational || fresh.length > 0)) {
     return { drove, status: "pass", detail: `found: ${found.join(", ")}${fresh.length ? ` (new: ${fresh.join(", ")})` : ""}` };
   }
