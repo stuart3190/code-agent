@@ -94,6 +94,7 @@ export function createOrchestrator({
   snapshotStore = createSnapshotStore(),
   buildStore = memoryBuildStore(),
   verificationCache = memoryVerificationCache(),
+  verificationContext = {},          // safe release/runtime/config versions for cache identity
   journeysFn = null,                // browser layer: async ({tree, journeys, graph}) → {journeys:[{id,title,status,priority}]}
   backendProbeFn = null,            // D4 row check: async ({owner, projectId, contract, tiers}) → [{journeyId, detail}]
   maxJourneyRepairs = 2,            // V2-20 repair tier: targeted rounds against verified browser failures
@@ -115,7 +116,10 @@ export function createOrchestrator({
   async function verifyJourneySet({ owner, projectId, contract, journeys, tree, snapshotId }) {
     const graph = memoryGraph(owner, projectId, indexTree(tree));
     const scoped = { ...contract, journeys };
-    const plan = await planJourneyVerification({ owner, projectId, contract: scoped, graph, cache: verificationCache });
+    const plan = await planJourneyVerification({
+      owner, projectId, contract: scoped, identityContract: contract, graph, cache: verificationCache,
+      verificationContext,
+    });
     let driven = { journeys: [] };
     if (plan.drive.length && journeysFn) {
       driven = await journeysFn({ tree, journeys: plan.drive.map((d) => d.journey), graph });

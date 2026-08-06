@@ -39,7 +39,7 @@ values.
 |---|---|---|---|
 | PR-01 Freeze and current-state baseline | Local implementation complete | Current main matched; local capture, 5 focused tests, full code-agent suite, web build, and 118 browser tests pass | Live read awaiting explicit approval |
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
-| PR-03 Essential verdicts and cache | Pending | Audit evidence confirmed | None |
+| PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
 | PR-04 Atomic graph and shadow | Pending | Audit evidence confirmed; current shadow period invalid | None |
 | PR-05 Immutable snapshots | Pending | Audit evidence confirmed | None |
 | PR-06 App eligibility/reset | Pending | Audit evidence confirmed | None |
@@ -67,3 +67,17 @@ values.
 PR-02 must not guess any of these values. In particular, duplicate local migration filenames must
 not be renamed or repaired remotely until the real `supabase_migrations.schema_migrations` history
 and corresponding live objects have been compared.
+
+## Implemented correctness units
+
+- `a5be84a` keeps unattributed essential failures blocking, records
+  `journey_ownership_missing` separately, and supplies repair with deterministic bounded fallback
+  context. The production orchestrator now uses the attribution result instead of bypassing it.
+- Differential cache identity now includes the journey definition, full contract, verifier
+  version, owner contents, transitive dependency contents, capability versions, generated
+  backend/runtime contents and explicit environment/config versions. Zero-owner journeys are
+  never cached. Every reuse carries its original verdict/evidence snapshot and a reason.
+- Cache rows expire after 30 days by default; project/journey invalidation and retention pruning
+  are explicit operations in both the memory and Supabase adapters. The existing
+  `owners_hash` column stores the composite content-addressed key, so this safety fix adds no
+  migration before PR-02 repairs migration history.

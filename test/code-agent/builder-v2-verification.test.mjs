@@ -12,7 +12,8 @@ import { indexTree } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import {
   verifyStage, attributeFailures, boundedAttributionFallback, ownersHashOf,
-  memoryVerificationCache, planJourneyVerification, recordJourneyVerdicts,
+  verificationCacheIdentity, memoryVerificationCache, supabaseVerificationCache,
+  planJourneyVerification, recordJourneyVerdicts,
 } from "../../shell/server/lib/builderV2/verification.mjs";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -97,7 +98,95 @@ test("WP3 — verify twice: the second pass drives ZERO journeys, reuses five, a
   assert.match(second.summary, /drive 0, reuse 5/);
   for (const row of second.reused) {
     assert.ok(row.verdict && row.ownersHash && row.evidenceSnapshot, "reuse carries its evidence");
+    assert.equal(row.reuseReason, "complete cache identity matched and original verdict passed");
+    assert.deepEqual(row.originalEvidence, row.verdict);
+    assert.equal(row.verdict.cacheIdentity.journeyId, row.journeyId);
   }
+});
+
+test("C3 — cache identity moves with journey, contract, transitive dependencies and runtime config", () => {
+  const journey = CONTRACT.journeys.find((j) => j.id === "reserve-picking-slot");
+  const before = verificationCacheIdentity({ journey, contract: CONTRACT, graph });
+  assert.ok(before.cacheable && before.owners.length > 0);
+  assert.ok(before.components.transitiveDependencyClosure.some((f) => f.path === "src/lib/utils.js"));
+  assert.ok(before.components.capabilityVersions.length > 0);
+  assert.ok(before.components.runtimeFiles.length > 0);
+
+  const dependencyEdit = { ...TREE, "src/lib/utils.js": `// changed dependency\n${TREE["src/lib/utils.js"]}` };
+  const dependencyGraph = memoryGraph("o", "p", indexTree(dependencyEdit));
+  assert.equal(ownersHashOf(journey, dependencyGraph), ownersHashOf(journey, graph), "direct owners did not change");
+  assert.notEqual(verificationCacheIdentity({ journey, contract: CONTRACT, graph: dependencyGraph }).key, before.key,
+    "a changed transitive dependency invalidates reuse");
+
+  const changedJourney = { ...journey, steps: [...journey.steps, { action: "reload", expect: "reservation persists" }] };
+  assert.notEqual(verificationCacheIdentity({ journey: changedJourney, contract: CONTRACT, graph }).key, before.key);
+  assert.notEqual(verificationCacheIdentity({ journey, contract: { ...CONTRACT, summary: "changed contract" }, graph }).key, before.key);
+  assert.notEqual(verificationCacheIdentity({
+    journey, contract: CONTRACT, graph, context: { configVersion: "journey-verification-config/2" },
+  }).key, before.key);
+});
+
+test("C3 — zero-owner journeys are never read from or written to cache", async () => {
+  let gets = 0;
+  let puts = 0;
+  const cache = {
+    async get() { gets += 1; return { verdict: { status: "pass" } }; },
+    async put() { puts += 1; },
+  };
+  const ghost = { id: "zzqx-ghost", title: "Qqzy unowned", priority: "primary", steps: [] };
+  const contract = { ...CONTRACT, journeys: [ghost] };
+  const plan = await planJourneyVerification({ owner: "o", projectId: "p", contract, graph, cache });
+  assert.equal(gets, 0, "an empty owner set cannot look up the shared empty hash");
+  assert.equal(plan.drive.length, 1);
+  assert.equal(plan.drive[0].cacheable, false);
+  await recordJourneyVerdicts({
+    owner: "o", projectId: "p", cache, plan, snapshotId: "snap",
+    results: { journeys: [{ id: ghost.id, status: "pass" }] },
+  });
+  assert.equal(puts, 0, "even a pass with zero owners is never cached");
+});
+
+test("C3 — cache retention and explicit invalidation are deterministic", async () => {
+  let clock = Date.parse("2026-08-06T00:00:00Z");
+  const cache = memoryVerificationCache({ retentionMs: 1_000, now: () => clock });
+  await cache.put("o", "p", "j1", "h1", { status: "pass" }, "snap-1");
+  await cache.put("o", "p", "j2", "h2", { status: "pass" }, "snap-2");
+  assert.ok(await cache.get("o", "p", "j1", "h1"));
+  assert.equal(await cache.invalidate("o", "p", "j1"), 1);
+  assert.equal(await cache.get("o", "p", "j1", "h1"), null);
+  clock += 1_001;
+  assert.equal(await cache.prune(), 1);
+  assert.equal(await cache.get("o", "p", "j2", "h2"), null);
+});
+
+test("C3 — Supabase cache applies retention on reads and exposes scoped invalidation/pruning", async () => {
+  const calls = [];
+  const client = {
+    from(table) {
+      const api = {
+        select(columns) { calls.push(["select", table, columns]); return api; },
+        eq(column, value) { calls.push(["eq", column, value]); return api; },
+        gte(column, value) { calls.push(["gte", column, value]); return api; },
+        lt(column, value) { calls.push(["lt", column, value]); return api; },
+        upsert(payload, options) { calls.push(["upsert", payload, options]); return Promise.resolve({ error: null }); },
+        delete(options) { calls.push(["delete", options]); return api; },
+        maybeSingle() { return Promise.resolve({ data: { verdict: { status: "pass" }, snapshot_id: "s", created_at: "now" }, error: null }); },
+        then(resolve, reject) { return Promise.resolve({ error: null, count: 2 }).then(resolve, reject); },
+      };
+      return api;
+    },
+  };
+  const now = Date.parse("2026-08-06T00:00:00Z");
+  const cache = supabaseVerificationCache(client, { retentionMs: 1_000, now: () => now });
+  assert.ok(await cache.get("o", "p", "j", "h"));
+  assert.deepEqual(calls.find((call) => call[0] === "gte"), ["gte", "created_at", "2026-08-05T23:59:59.000Z"]);
+  await cache.put("o", "p", "j", "h", { status: "pass" }, "s");
+  const upsert = calls.find((call) => call[0] === "upsert");
+  assert.equal(upsert[1].created_at, "2026-08-06T00:00:00.000Z");
+  assert.equal(await cache.invalidate("o", "p", "j"), 2);
+  assert.ok(calls.some((call) => call[0] === "delete" && call[1]?.count === "exact"));
+  assert.equal(await cache.prune(), 2);
+  assert.ok(calls.some((call) => call[0] === "lt" && call[1] === "created_at"));
 });
 
 test("WP3 — cached FAILURES are never reused, and owning-module edits invalidate reuse", async () => {

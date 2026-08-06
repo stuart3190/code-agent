@@ -1,5 +1,15 @@
 # Thrallo handoff
 
+## Builder V2 production remediation (2026-08-06)
+
+Work is active on branch `remediation/builder-v2-production` from audited main
+`92e4c9fe5c864799eee228f304849064bacb0190`. PR-01 baseline is commit `c4c530a`; the C2
+essential-attribution fix is `a5be84a`; C3 cache hardening is the current local unit. Builder V1
+remains the default, Builder V2 rollout remains paused, and no production action, model spend,
+provider call, Stripe action or migration has been performed. The full local code-agent suite is
+green at 1,172 tests. Continue from `docs/PRODUCTION-AUDIT-REMEDIATION.md`; PR-02 migration-history
+repair still requires explicitly approved read-only production evidence and must not be guessed.
+
 ## Current milestone
 
 **The v2 pivot is approved and underway.** `docs/PRINCIPLES.md` (12 principles +

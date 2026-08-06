@@ -11,8 +11,23 @@
 import crypto from "node:crypto";
 import { runStageGate } from "../appBuild/stageGate.mjs";
 import { verifyJourneys, journeySummary } from "../appBuild/journeyVerifier.mjs";
+import { bindCapabilities } from "./contractTiering.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
+const canonical = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+};
+
+export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-06.1";
+export const DEFAULT_VERIFICATION_CONTEXT = Object.freeze({
+  verifierVersion: VERIFICATION_CACHE_VERSION,
+  backendVersion: "generated-backend/1",
+  runtimeVersion: "react-vite-runtime/1",
+  environmentVersion: "preview-environment/1",
+  configVersion: "journey-verification-config/1",
+});
 
 // ── attribution ───────────────────────────────────────────────────────────────────────────────
 
@@ -127,34 +142,114 @@ export function ownersHashOf(journey, graph) {
   return sha256(pairs.join("\n"));
 }
 
-export function memoryVerificationCache() {
+/**
+ * Full differential-cache identity. The existing `owners_hash` database column stores the
+ * final content-addressed key; all components are retained in verdict.cacheIdentity so a
+ * reuse can prove exactly why it was valid without a schema migration.
+ */
+export function verificationCacheIdentity({ journey, contract, graph, context = {} }) {
+  const effectiveContext = { ...DEFAULT_VERIFICATION_CONTEXT, ...context };
+  const owners = graph.owners(journey).sort();
+  const closure = new Set();
+  const frontier = [...owners];
+  while (frontier.length) {
+    const path = frontier.shift();
+    for (const dependency of graph.importsOf(path)) {
+      if (owners.includes(dependency) || closure.has(dependency)) continue;
+      closure.add(dependency);
+      frontier.push(dependency);
+    }
+  }
+  const fileIdentity = (path) => ({ path, contentHash: graph.file(path)?.contentHash || "missing" });
+  const runtimeFiles = graph.paths()
+    .filter((path) => /^src\/lib\/(?:backend|capabilities)\//.test(path) || path === "src/lib/visitorSession.js")
+    .sort().map(fileIdentity);
+  const components = {
+    journeyId: journey.id,
+    journeyDefinitionHash: sha256(canonical(journey)),
+    contractHash: sha256(canonical(contract)),
+    verifierVersion: effectiveContext.verifierVersion,
+    owningModules: owners.map(fileIdentity),
+    transitiveDependencyClosure: [...closure].sort().map(fileIdentity),
+    capabilityVersions: bindCapabilities(contract)
+      .map(({ name, version }) => ({ name, version })).sort((a, b) => a.name.localeCompare(b.name)),
+    backendVersion: effectiveContext.backendVersion,
+    runtimeVersion: effectiveContext.runtimeVersion,
+    runtimeFiles,
+    environmentVersion: effectiveContext.environmentVersion,
+    configVersion: effectiveContext.configVersion,
+  };
+  return { key: sha256(canonical(components)), components, owners, cacheable: owners.length > 0 };
+}
+
+const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+
+export function memoryVerificationCache({ retentionMs = DEFAULT_RETENTION_MS, now = () => Date.now() } = {}) {
   const rows = new Map();
   const key = (o, p, j, h) => `${o}:${p}:${j}:${h}`;
   return {
     async get(owner, projectId, journeyId, ownersHash) {
-      return rows.get(key(owner, projectId, journeyId, ownersHash)) || null;
+      const cacheKey = key(owner, projectId, journeyId, ownersHash);
+      const row = rows.get(cacheKey) || null;
+      if (row && now() - Date.parse(row.created_at) > retentionMs) {
+        rows.delete(cacheKey);
+        return null;
+      }
+      return row;
     },
     async put(owner, projectId, journeyId, ownersHash, verdict, snapshotId) {
-      rows.set(key(owner, projectId, journeyId, ownersHash), { verdict, snapshot_id: snapshotId, created_at: new Date().toISOString() });
+      rows.set(key(owner, projectId, journeyId, ownersHash), { verdict, snapshot_id: snapshotId, created_at: new Date(now()).toISOString() });
+    },
+    async invalidate(owner, projectId, journeyId = null) {
+      let removed = 0;
+      const prefix = `${owner}:${projectId}:`;
+      for (const cacheKey of rows.keys()) {
+        if (!cacheKey.startsWith(prefix) || (journeyId && !cacheKey.startsWith(`${prefix}${journeyId}:`))) continue;
+        rows.delete(cacheKey);
+        removed += 1;
+      }
+      return removed;
+    },
+    async prune() {
+      let removed = 0;
+      for (const [cacheKey, row] of rows) {
+        if (now() - Date.parse(row.created_at) <= retentionMs) continue;
+        rows.delete(cacheKey);
+        removed += 1;
+      }
+      return removed;
     },
   };
 }
 
-export function supabaseVerificationCache(client) {
+export function supabaseVerificationCache(client, { retentionMs = DEFAULT_RETENTION_MS, now = () => Date.now() } = {}) {
+  const cutoff = () => new Date(now() - retentionMs).toISOString();
   return {
     async get(owner, projectId, journeyId, ownersHash) {
       const { data, error } = await client.from("bv2_verification_cache").select("verdict,snapshot_id,created_at")
         .eq("owner", owner).eq("project_id", projectId)
-        .eq("journey_id", journeyId).eq("owners_hash", ownersHash).maybeSingle();
+        .eq("journey_id", journeyId).eq("owners_hash", ownersHash).gte("created_at", cutoff()).maybeSingle();
       if (error) return null; // a broken cache means re-verification, never a wrong reuse
       return data;
     },
     async put(owner, projectId, journeyId, ownersHash, verdict, snapshotId) {
       const { error } = await client.from("bv2_verification_cache").upsert({
         owner, project_id: projectId, journey_id: journeyId, owners_hash: ownersHash,
-        verdict, snapshot_id: snapshotId,
+        verdict, snapshot_id: snapshotId, created_at: new Date(now()).toISOString(),
       }, { onConflict: "owner,project_id,journey_id,owners_hash" });
       if (error) console.error(`[bv2] verification cache write failed (re-verification will occur): ${error.message}`);
+    },
+    async invalidate(owner, projectId, journeyId = null) {
+      let query = client.from("bv2_verification_cache").delete({ count: "exact" }).eq("owner", owner).eq("project_id", projectId);
+      if (journeyId) query = query.eq("journey_id", journeyId);
+      const { error, count } = await query;
+      if (error) throw new Error(`verification cache invalidation: ${error.message}`);
+      return count || 0;
+    },
+    async prune() {
+      const { error, count } = await client.from("bv2_verification_cache").delete({ count: "exact" }).lt("created_at", cutoff());
+      if (error) throw new Error(`verification cache retention: ${error.message}`);
+      return count || 0;
     },
   };
 }
@@ -164,16 +259,27 @@ export function supabaseVerificationCache(client) {
  * Reuse requires: a cached verdict under the journey's current owners-hash AND a passing one —
  * failures are always re-driven (a cached failure must never block a fixed build).
  */
-export async function planJourneyVerification({ owner, projectId, contract, graph, cache, snapshotId = null }) {
+export async function planJourneyVerification({
+  owner, projectId, contract, identityContract = contract, graph, cache, verificationContext = {}, snapshotId = null,
+}) {
   const drive = [];
   const reused = [];
   for (const journey of contract?.journeys || []) {
-    const ownersHash = ownersHashOf(journey, graph);
+    const identity = verificationCacheIdentity({ journey, contract: identityContract, graph, context: verificationContext });
+    const ownersHash = identity.key; // legacy column/API name; now the complete identity hash
+    if (!identity.cacheable) {
+      drive.push({ journey, ownersHash, identity, cacheable: false, reason: "journey has zero owning modules" });
+      continue;
+    }
     const cached = await cache.get(owner, projectId, journey.id, ownersHash);
     if (cached && cached.verdict?.status === "pass") {
-      reused.push({ journeyId: journey.id, ownersHash, verdict: cached.verdict, evidenceSnapshot: cached.snapshot_id });
+      reused.push({
+        journeyId: journey.id, ownersHash, identity, verdict: cached.verdict,
+        originalEvidence: cached.verdict, evidenceSnapshot: cached.snapshot_id,
+        reuseReason: "complete cache identity matched and original verdict passed",
+      });
     } else {
-      drive.push({ journey, ownersHash });
+      drive.push({ journey, ownersHash, identity, cacheable: true, reason: cached ? "cached verdict did not pass" : "no valid cache entry" });
     }
   }
   return {
@@ -187,10 +293,16 @@ export async function planJourneyVerification({ owner, projectId, contract, grap
 /** Store fresh verdicts after a drive so the NEXT identical state reuses them. */
 export async function recordJourneyVerdicts({ owner, projectId, cache, plan, results, snapshotId }) {
   const byId = new Map((results?.journeys || []).map((j) => [j.id, j]));
-  for (const { journey, ownersHash } of plan.drive) {
+  for (const { journey, ownersHash, identity, cacheable } of plan.drive) {
+    if (!cacheable) continue;
     const outcome = byId.get(journey.id);
     if (!outcome) continue;
     await cache.put(owner, projectId, journey.id, ownersHash,
-      { status: outcome.status, failedSteps: outcome.failedSteps || 0 }, snapshotId);
+      {
+        status: outcome.status,
+        failedSteps: outcome.failedSteps || 0,
+        steps: outcome.steps || [],
+        cacheIdentity: identity.components,
+      }, snapshotId);
   }
 }

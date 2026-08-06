@@ -154,7 +154,7 @@ function editHarness() {
   return { orchestrator, snapshotStore, journeyDrives, assetService, setEditPatches: (p) => { editPatches = p; } };
 }
 
-test("WP10 — an edit re-drives EXACTLY the touched journey; the others reuse cached verdicts", async () => {
+test("WP10/C3 — an edit re-drives the touched journey and every zero-owner journey", async () => {
   const h = editHarness();
   const build = await h.orchestrator.runBuild({ owner: "o", projectId: "p1", request: "booking site" });
   assert.equal(build.state, "green");
@@ -162,9 +162,10 @@ test("WP10 — an edit re-drives EXACTLY the touched journey; the others reuse c
 
   const edit = await h.orchestrator.runEdit({ owner: "o", projectId: "p1", request: "reword the newsletter confirmation", contract: CONTRACT });
   assert.equal(edit.state, "green", JSON.stringify(edit));
-  assert.deepEqual(edit.drove, ["newsletter-signup"], "EXACTLY the journey whose owning module changed");
-  assert.deepEqual(edit.reused.sort(), ["book-a-visit", "browse-info"], "unchanged owners reuse cached PASS verdicts");
-  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup"]], "the browser drove one journey, once");
+  assert.deepEqual(edit.drove, ["newsletter-signup", "browse-info"],
+    "the changed owner invalidates newsletter; browse has zero owners and is never cached");
+  assert.deepEqual(edit.reused, ["book-a-visit"], "only a complete matching identity reuses a PASS verdict");
+  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup", "browse-info"]]);
 
   // Lineage + promotion: the edit snapshot's parent is the prior green, pointer moved.
   const pointer = await h.snapshotStore.pointer("o", "p1", "green");
