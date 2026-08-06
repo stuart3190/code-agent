@@ -28,7 +28,7 @@ function fakeSupabase() {
   const rowsOf = (name) => { if (!tables.has(name)) tables.set(name, []); return tables.get(name); };
 
   function chain(tableName) {
-    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, onConflict: null };
+    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, onConflict: null, selectAfter: false };
     const matches = (row) => state.filters.every(([col, val]) => row[col] === val);
     const runQuery = () => {
       const rows = rowsOf(tableName);
@@ -59,7 +59,9 @@ function fakeSupabase() {
         return { data: null, error: null };
       }
       if (state.op === "update") {
-        for (const row of rows) if (matches(row)) Object.assign(row, state.payload);
+        const updated = [];
+        for (const row of rows) if (matches(row)) { Object.assign(row, state.payload); updated.push({ ...row }); }
+        if (state.selectAfter) return { data: state.single || state.maybe ? (updated[0] || null) : updated, error: null };
         return { data: null, error: null };
       }
       if (state.op === "delete") {

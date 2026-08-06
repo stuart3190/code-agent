@@ -41,7 +41,7 @@ values.
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
 | PR-04 Atomic graph and shadow | Pending | Audit evidence confirmed; current shadow period invalid | None |
-| PR-05 Immutable snapshots | Pending | Audit evidence confirmed | None |
+| PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Pending | Audit evidence confirmed | None |
 | PR-07 Assets | Pending | Audit evidence confirmed/partially confirmed | None |
 | PR-08 Diagnostics/erasure | Pending | Audit evidence confirmed/partially confirmed | None |
@@ -81,3 +81,8 @@ and corresponding live objects have been compared.
   are explicit operations in both the memory and Supabase adapters. The existing
   `owners_hash` column stores the composite content-addressed key, so this safety fix adds no
   migration before PR-02 repairs migration history.
+- Snapshot creation and materialisation now hash the bytes read back from storage, manifests are
+  immutable, and ready finalisation is a conditional building-to-ready transition. Promotion
+  byte-verifies the target immediately before activation and uses compare-and-set pointer updates;
+  concurrent promotions cannot silently overwrite one another. Corrupt snapshots are marked
+  `corrupt` and cannot become green, preview or published.

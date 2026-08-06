@@ -156,11 +156,28 @@ export async function supabaseGraph(owner, projectId, manifest, { client = servi
 export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ARTIFACT_BUCKET } = {}) {
   return {
     async putBlob(owner, contentHash, content) {
+      const body = String(content);
+      if (sha256(body) !== contentHash) throw new Error("blob content does not match content hash");
+      const existing = unwrap(await client.from("bv2_blobs").select("content,storage_path")
+        .eq("owner", owner).eq("content_hash", contentHash).maybeSingle(), "blob immutability probe");
+      if (existing) {
+        const prior = existing.content !== null && existing.content !== undefined
+          ? existing.content
+          : await (async () => {
+            const { data, error } = await client.storage.from(bucket).download(existing.storage_path);
+            if (error) return null;
+            return Buffer.from(await data.arrayBuffer()).toString("utf8");
+          })();
+        if (prior === null || sha256(String(prior)) !== contentHash) throw new Error("immutable blob is corrupt");
+        return;
+      }
       const bytes = Buffer.byteLength(content);
       if (bytes <= INLINE_LIMIT) {
         unwrap(await client.from("bv2_blobs").upsert({
           owner, content_hash: contentHash, content, storage_path: null, size_bytes: bytes,
         }, { onConflict: "owner,content_hash" }), "blob upsert");
+        const stored = await this.getBlob(owner, contentHash);
+        if (stored === null || sha256(String(stored)) !== contentHash) throw new Error("blob byte verification failed");
         return;
       }
       const storagePath = `${BV2_BUCKET_PREFIX}/${owner}/${contentHash}`;
@@ -170,6 +187,8 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       unwrap(await client.from("bv2_blobs").upsert({
         owner, content_hash: contentHash, content: null, storage_path: storagePath, size_bytes: bytes,
       }, { onConflict: "owner,content_hash" }), "blob row upsert");
+      const stored = await this.getBlob(owner, contentHash);
+      if (stored === null || sha256(String(stored)) !== contentHash) throw new Error("blob byte verification failed");
     },
 
     async hasBlob(owner, contentHash) {
@@ -209,6 +228,12 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
     async updateSnapshot(id, patch) {
       unwrap(await client.from("bv2_snapshots").update(patch).eq("id", id), "snapshot update");
     },
+    async finalizeSnapshot(id, { treeHash, fileCount }) {
+      const row = unwrap(await client.from("bv2_snapshots").update({ state: "ready" })
+        .eq("id", id).eq("state", "building").eq("tree_hash", treeHash).eq("file_count", fileCount)
+        .select("id").maybeSingle(), "snapshot finalise");
+      return !!row;
+    },
     async getSnapshot(id) {
       return unwrap(await client.from("bv2_snapshots").select("*").eq("id", id).maybeSingle(), "snapshot read");
     },
@@ -244,6 +269,22 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       const row = unwrap(await client.from("bv2_project_pointers").select("snapshot_id")
         .eq("owner", owner).eq("project_id", projectId).eq("label", label).maybeSingle(), "pointer read");
       return row?.snapshot_id || null;
+    },
+    async compareAndSetPointer(owner, projectId, label, expected, snapshotId) {
+      if (expected === null) {
+        const { error } = await client.from("bv2_project_pointers").insert({
+          owner, project_id: projectId, label, snapshot_id: snapshotId,
+          updated_at: new Date().toISOString(),
+        });
+        if (error?.code === "23505") return false;
+        if (error) throw new Error(`pointer compare-and-set: ${error.message}`);
+        return true;
+      }
+      const row = unwrap(await client.from("bv2_project_pointers").update({
+        snapshot_id: snapshotId, updated_at: new Date().toISOString(),
+      }).eq("owner", owner).eq("project_id", projectId).eq("label", label)
+        .eq("snapshot_id", expected).select("snapshot_id").maybeSingle(), "pointer compare-and-set");
+      return row?.snapshot_id === snapshotId;
     },
   };
 }

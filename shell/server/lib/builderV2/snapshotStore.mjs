@@ -28,7 +28,13 @@ export function memorySnapshotStorage() {
   const pointers = new Map();   // `${owner}:${projectId}:${label}` -> snapshotId
   let idCounter = 0;
   return {
-    async putBlob(owner, contentHash, content) { blobs.set(`${owner}:${contentHash}`, content); },
+    async putBlob(owner, contentHash, content) {
+      const bytes = String(content);
+      if (sha256(bytes) !== contentHash) throw new Error("blob content does not match content hash");
+      const key = `${owner}:${contentHash}`;
+      if (blobs.has(key) && blobs.get(key) !== bytes) throw new Error("immutable blob collision");
+      if (!blobs.has(key)) blobs.set(key, bytes);
+    },
     async hasBlob(owner, contentHash) { return blobs.has(`${owner}:${contentHash}`); },
     async getBlob(owner, contentHash) {
       // C1: resolution is owner-scoped — another owner's identical hash is invisible here.
@@ -42,6 +48,12 @@ export function memorySnapshotStorage() {
 
     async insertSnapshot(row) { const id = `snap-${++idCounter}`; snapshots.set(id, { ...row, id }); return id; },
     async updateSnapshot(id, patch) { Object.assign(snapshots.get(id), patch); },
+    async finalizeSnapshot(id, { treeHash, fileCount }) {
+      const row = snapshots.get(id);
+      if (!row || row.state !== "building" || row.tree_hash !== treeHash || row.file_count !== fileCount) return false;
+      row.state = "ready";
+      return true;
+    },
     async getSnapshot(id) { return snapshots.get(id) || null; },
     async listSnapshots(owner, projectId) {
       return [...snapshots.values()].filter((s) => s.owner === owner && s.project_id === projectId);
@@ -51,11 +63,21 @@ export function memorySnapshotStorage() {
     },
     async deleteSnapshot(id) { snapshots.delete(id); manifests.delete(id); },
 
-    async putManifest(id, entries) { manifests.set(id, entries.map((e) => ({ ...e }))); },
+    async putManifest(id, entries) {
+      if (manifests.has(id)) throw new Error("snapshot manifest is immutable");
+      manifests.set(id, entries.map((e) => ({ ...e })));
+    },
     async getManifest(id) { return (manifests.get(id) || []).map((e) => ({ ...e })); },
 
     async setPointer(owner, projectId, label, snapshotId) { pointers.set(`${owner}:${projectId}:${label}`, snapshotId); },
     async getPointer(owner, projectId, label) { return pointers.get(`${owner}:${projectId}:${label}`) || null; },
+    async compareAndSetPointer(owner, projectId, label, expected, snapshotId) {
+      const key = `${owner}:${projectId}:${label}`;
+      const current = pointers.get(key) || null;
+      if (current !== expected) return false;
+      pointers.set(key, snapshotId);
+      return true;
+    },
   };
 }
 
@@ -71,8 +93,9 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       for (const [path, content] of Object.entries(tree)) {
         const contentHash = sha256(String(content));
         await storage.putBlob(owner, contentHash, String(content));
-        if (!(await storage.hasBlob(owner, contentHash))) {
-          throw new Error(`snapshot aborted: blob for ${path} did not persist`);
+        const storedContent = await storage.getBlob(owner, contentHash);
+        if (storedContent === null || sha256(String(storedContent)) !== contentHash) {
+          throw new Error(`snapshot aborted: blob bytes for ${path} do not match content hash`);
         }
         entries.push({ path, contentHash });
       }
@@ -94,15 +117,18 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       const stored = await storage.getManifest(id);
       if (stored.length !== entries.length) throw new Error("snapshot aborted: manifest incomplete");
       for (const entry of stored) {
-        if (!(await storage.hasBlob(owner, entry.contentHash))) {
-          throw new Error(`snapshot aborted: missing blob for ${entry.path}`);
+        const content = await storage.getBlob(owner, entry.contentHash);
+        if (content === null || sha256(String(content)) !== entry.contentHash) {
+          throw new Error(`snapshot aborted: corrupt blob for ${entry.path}`);
         }
       }
       const recomputed = treeHashFromPairs(stored.map((e) => [e.path, e.contentHash]));
       if (recomputed !== expectedTreeHash) throw new Error("snapshot aborted: tree hash mismatch");
 
       // 5. only now does it become usable.
-      await storage.updateSnapshot(id, { state: "ready" });
+      if (!(await storage.finalizeSnapshot(id, { treeHash: expectedTreeHash, fileCount: entries.length }))) {
+        throw new Error("snapshot aborted: finalisation precondition failed");
+      }
       return { ...(await storage.getSnapshot(id)) };
     },
 
@@ -114,13 +140,23 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       if (!snapshot || snapshot.owner !== owner) throw new Error("snapshot not found for this owner");
       if (snapshot.state !== "ready") throw new Error(`snapshot is ${snapshot.state}, not ready`);
       const tree = {};
-      for (const entry of await storage.getManifest(id)) {
+      const manifest = await storage.getManifest(id);
+      if (manifest.length !== snapshot.file_count) {
+        await storage.updateSnapshot(id, { state: "corrupt" });
+        throw new Error("snapshot corrupt: manifest file count mismatch");
+      }
+      for (const entry of manifest) {
         const content = await storage.getBlob(owner, entry.contentHash);
-        if (content === null) {
+        if (content === null || sha256(String(content)) !== entry.contentHash) {
           await storage.updateSnapshot(id, { state: "corrupt" });
-          throw new Error(`snapshot corrupt: missing blob for ${entry.path}`);
+          throw new Error(`snapshot corrupt: blob bytes do not match content hash for ${entry.path}`);
         }
         tree[entry.path] = content;
+      }
+      const materializedHash = treeHashFromPairs(manifest.map((entry) => [entry.path, sha256(String(tree[entry.path]))]));
+      if (materializedHash !== snapshot.tree_hash) {
+        await storage.updateSnapshot(id, { state: "corrupt" });
+        throw new Error("snapshot corrupt: materialized tree hash mismatch");
       }
       return tree;
     },
@@ -142,8 +178,11 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         throw new Error("snapshot not found for this owner/project");
       }
       if (snapshot.state !== "ready") throw new Error(`only ready snapshots promote (this one is ${snapshot.state})`);
+      await this.materialize(owner, snapshotId); // byte proof immediately before activation
       const previous = await storage.getPointer(owner, projectId, label);
-      await storage.setPointer(owner, projectId, label, snapshotId);
+      if (!(await storage.compareAndSetPointer(owner, projectId, label, previous, snapshotId))) {
+        throw new Error("snapshot promotion conflict: pointer changed concurrently");
+      }
       return { label, snapshotId, previous };
     },
 

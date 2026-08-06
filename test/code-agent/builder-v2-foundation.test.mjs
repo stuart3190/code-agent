@@ -208,12 +208,49 @@ test("G/C2 — creation is atomic in effect: interrupted work exposes nothing us
   await assert.rejects(store.promote("o", "p", "green", strays[0].id), /only ready snapshots/);
 
   // A missing blob blocks creation outright.
-  const noBlob = { ...storage, hasBlob: async () => false };
-  await assert.rejects(createSnapshotStore(noBlob).createSnapshot("o", "p", { "a.js": "x" }), /did not persist/);
+  const corruptBlob = { ...storage, getBlob: async () => "different bytes" };
+  await assert.rejects(createSnapshotStore(corruptBlob).createSnapshot("o", "p", { "a.js": "x" }), /do not match content hash/);
 
   // GC sweeps building strays.
   const swept = await store.gc("o", "p", { keepLatest: 20 });
   assert.ok(swept.removedSnapshots.includes(strays[0].id));
+});
+
+test("C5 — materialisation byte-verifies every blob and corrupt snapshots cannot promote", async () => {
+  const storage = memorySnapshotStorage();
+  let corruptReads = false;
+  const wrapped = {
+    ...storage,
+    async getBlob(owner, hash) {
+      const content = await storage.getBlob(owner, hash);
+      return corruptReads && content !== null ? `${content}!tampered` : content;
+    },
+  };
+  const store = createSnapshotStore(wrapped);
+  const snapshot = await store.createSnapshot("o", "p", { "src/a.js": "trusted bytes" });
+  corruptReads = true;
+  await assert.rejects(store.materialize("o", snapshot.id), /bytes do not match content hash/);
+  assert.equal((await store.getSnapshot(snapshot.id)).state, "corrupt");
+  await assert.rejects(store.promote("o", "p", "green", snapshot.id), /only ready snapshots/);
+  assert.equal(await store.pointer("o", "p", "green"), null);
+});
+
+test("C5 — concurrent promotions compare-and-set: exactly one wins from the same pointer", async () => {
+  const store = createSnapshotStore();
+  const first = await store.createSnapshot("o", "p", { "a.js": "one" });
+  const second = await store.createSnapshot("o", "p", { "a.js": "two" });
+  const third = await store.createSnapshot("o", "p", { "a.js": "three" });
+  await store.promote("o", "p", "green", first.id);
+
+  const results = await Promise.allSettled([
+    store.promote("o", "p", "green", second.id),
+    store.promote("o", "p", "green", third.id),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match(results.find((result) => result.status === "rejected").reason.message, /pointer changed concurrently/);
+  const winner = results.find((result) => result.status === "fulfilled").value.snapshotId;
+  assert.equal(await store.pointer("o", "p", "green"), winner);
 });
 
 test("G/C2 — promotion is one pointer write; failure keeps the old pointer; rollback is one write back", async () => {
