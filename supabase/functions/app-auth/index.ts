@@ -37,7 +37,8 @@
 // Callers authenticate with the project anon key (Authorization: Bearer <anon>), which satisfies
 // the platform's verify_jwt gate; per-user auth is what this function IS, so there is no user JWT yet.
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { UUID_RE, requestOrigin, originIsEligible, hmacHex } from "./policy.mjs";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -45,6 +46,7 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Thrallo <noreply@thrallo.com>";
 const SYNTH_DOMAIN = "apps.thrallo.com";
+const RESET_PEPPER = Deno.env.get("APP_AUTH_RESET_PEPPER") || "";
 
 const RESET_TTL_MIN = 15;
 const RESET_MAX_ATTEMPTS = 5;
@@ -59,13 +61,13 @@ const PLATFORM_IPS = (Deno.env.get("PLATFORM_EGRESS_IPS") || "51.195.136.189")
 
 const svc = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
+const cors = (origin: string | null) => ({
+  ...(origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
   "Access-Control-Allow-Headers": "authorization, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...CORS } });
+});
+const json = (status: number, body: unknown, origin: string | null = null) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors(origin) } });
 
 async function sha256hex(s: string): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -76,7 +78,23 @@ async function syntheticEmail(appId: string, email: string): Promise<string> {
   return `u.${(await sha256hex(`${appId}|${email.toLowerCase()}`)).slice(0, 32)}@${SYNTH_DOMAIN}`;
 }
 
-const codeHash = (appId: string, email: string, code: string) => sha256hex(`${appId}|${email}|${code}`);
+const codeHash = (appId: string, email: string, code: string) =>
+  hmacHex(RESET_PEPPER, `${appId}|${email}|${code}`);
+
+async function eligibleApplication(appId: string, origin: string | null): Promise<boolean> {
+  if (!UUID_RE.test(appId) || !origin) return false;
+  const { data: project, error } = await svc.from("projects").select("id,preview_ref").eq("id", appId).maybeSingle();
+  if (error || !project) return false;
+  if (originIsEligible(origin, { previewRef: project.preview_ref })) return true;
+  const { data: site } = await svc.from("published_sites").select("url,slug,unpublished_at")
+    .eq("project_id", appId).maybeSingle();
+  if (originIsEligible(origin, { site })) return true;
+  let host = "";
+  try { host = new URL(origin).hostname; } catch { return false; }
+  const { data: domain } = await svc.from("custom_domains").select("domain,verified_at")
+    .eq("project_id", appId).eq("domain", host).maybeSingle();
+  return originIsEligible(origin, { domain });
+}
 
 function callerIp(req: Request): string {
   return (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
@@ -135,11 +153,13 @@ async function sendResetEmail(to: string, code: string, appId: string): Promise<
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (req.method !== "POST") return json(405, { error: "POST only" });
+  const origin = requestOrigin(req.headers.get("origin"));
+  const reply = (status: number, responseBody: unknown) => json(status, responseBody, origin);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
+  if (req.method !== "POST") return reply(405, { error: "POST only" });
 
   let body: { action?: string; appId?: string; email?: string; password?: string; code?: string; newPassword?: string };
-  try { body = await req.json(); } catch { return json(400, { error: "invalid JSON" }); }
+  try { body = await req.json(); } catch { return reply(400, { error: "invalid JSON" }); }
   const action = String(body.action || "");
   const appId = String(body.appId || "").trim();
   const email = String(body.email || "").trim().toLowerCase();
@@ -148,23 +168,24 @@ Deno.serve(async (req: Request) => {
   const platformCaller = PLATFORM_IPS.includes(ip);
 
   if (!["signup", "signin", "reset", "reset-confirm"].includes(action)) {
-    return json(400, { error: "action must be signup, signin, reset or reset-confirm" });
+    return reply(400, { error: "action must be signup, signin, reset or reset-confirm" });
   }
-  if (!appId || !/^[\w.-]{1,64}$/.test(appId)) return json(400, { error: "valid appId required" });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(400, { error: "valid email required" });
+  if (!UUID_RE.test(appId)) return reply(400, { error: "valid appId required" });
+  if (!(await eligibleApplication(appId, origin))) return reply(403, { error: "This application is not eligible for authentication." });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply(400, { error: "valid email required" });
 
   // ── reset: email a one-time code. 200 no matter what — never reveal whether an account exists.
   if (action === "reset") {
-    if (!RESEND_API_KEY) return json(503, { error: "Password reset isn't available yet for this app." });
+    if (!RESEND_API_KEY || !RESET_PEPPER) return reply(503, { error: "Password reset isn't available yet for this app." });
     if (await eventCount("reset", ip) >= LIMIT_RESET_PER_IP_H) {
-      return json(429, { error: "Too many reset requests — try again later." });
+      return reply(429, { error: "Too many reset requests — try again later." });
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
     const { count: recent } = await svc
       .from("app_password_resets").select("id", { count: "exact", head: true })
       .eq("app_id", appId).eq("email", email).gte("created_at", hourAgo);
     if ((recent ?? 0) >= LIMIT_RESET_PER_TARGET_H) {
-      return json(429, { error: "Too many reset requests — try again later." });
+      return reply(429, { error: "Too many reset requests — try again later." });
     }
     await logEvent("reset", ip, appId);
 
@@ -180,36 +201,41 @@ Deno.serve(async (req: Request) => {
       });
       if (!insErr) await sendResetEmail(email, code, appId);
     }
-    return json(200, { ok: true });
+    return reply(200, { ok: true });
   }
 
   // ── reset-confirm: verify the code, set the new password, sign in.
   if (action === "reset-confirm") {
     const code = String(body.code || "").trim();
     const newPassword = String(body.newPassword || "");
-    if (!/^\d{6}$/.test(code)) return json(400, { error: "Invalid or expired code." });
-    if (newPassword.length < 8) return json(400, { error: "password must be at least 8 characters" });
+    if (!/^\d{6}$/.test(code)) return reply(400, { error: "Invalid or expired code." });
+    if (newPassword.length < 8) return reply(400, { error: "password must be at least 8 characters" });
 
     const { data: row } = await svc
       .from("app_password_resets").select("id, code_hash, attempts, expires_at")
       .eq("app_id", appId).eq("email", email).is("used_at", null)
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     const expired = !row || new Date(row.expires_at) < new Date() || row.attempts >= RESET_MAX_ATTEMPTS;
-    if (expired) return json(400, { error: "Invalid or expired code." });
+    if (expired) return reply(400, { error: "Invalid or expired code." });
 
-    // Burn an attempt BEFORE comparing, so parallel guesses can't exceed the cap.
-    await svc.from("app_password_resets").update({ attempts: row.attempts + 1 }).eq("id", row.id);
-    if (row.code_hash !== (await codeHash(appId, email, code))) {
-      return json(400, { error: "Invalid or expired code." });
+    const matches = row.code_hash === (await codeHash(appId, email, code));
+    const claimedAt = new Date().toISOString();
+    // Compare-and-set makes attempt consumption atomic. A correct code is marked used in the
+    // SAME write before changing the password, so parallel confirmations have exactly one winner.
+    const { data: claimed } = await svc.from("app_password_resets")
+      .update({ attempts: row.attempts + 1, ...(matches ? { used_at: claimedAt } : {}) })
+      .eq("id", row.id).eq("attempts", row.attempts).is("used_at", null)
+      .select("id").maybeSingle();
+    if (!claimed || !matches) {
+      return reply(400, { error: "Invalid or expired code." });
     }
 
     const { data: target } = await svc
       .from("app_users").select("auth_user_id").eq("app_id", appId).eq("email", email).eq("status", "active").maybeSingle();
-    if (!target) return json(400, { error: "Invalid or expired code." });
+    if (!target) return reply(400, { error: "Invalid or expired code." });
 
     const { error: updErr } = await svc.auth.admin.updateUserById(target.auth_user_id, { password: newPassword });
-    if (updErr) return json(500, { error: `reset failed: ${updErr.message}` });
-    await svc.from("app_password_resets").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+    if (updErr) return reply(500, { error: `reset failed: ${updErr.message}` });
     // Real event integration 2: the notification a user must not be able to write for
     // themselves — it is how they find out about a change they did not make.
     await notifyAppUser(appId, target.auth_user_id, "password_changed", "Your password was changed",
@@ -220,32 +246,32 @@ Deno.serve(async (req: Request) => {
     const { data: signed, error: signErr } = await anon.auth.signInWithPassword({
       email: await syntheticEmail(appId, email), password: newPassword,
     });
-    if (signErr || !signed.session) return json(500, { error: "Password was reset — sign in with your new password." });
-    return json(200, {
+    if (signErr || !signed.session) return reply(500, { error: "Password was reset — sign in with your new password." });
+    return reply(200, {
       user: { id: signed.user.id, email },
       session: { access_token: signed.session.access_token, refresh_token: signed.session.refresh_token },
     });
   }
 
-  if (password.length < 8) return json(400, { error: "password must be at least 8 characters" });
+  if (password.length < 8) return reply(400, { error: "password must be at least 8 characters" });
 
   const synth = await syntheticEmail(appId, email);
   const { data: existing, error: lookupErr } = await svc
     .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
-  if (lookupErr) return json(500, { error: `lookup failed: ${lookupErr.message}` });
+  if (lookupErr) return reply(500, { error: `lookup failed: ${lookupErr.message}` });
 
   if (action === "signup" && !existing) {
     // Abuse guards: a promo spike is fine; a signup script is not. The platform's own
     // egress (preview verification) skips ONLY the per-IP cap; every other guard applies.
     if (!platformCaller && await eventCount("signup", ip) >= LIMIT_SIGNUP_PER_IP_H) {
-      return json(429, { error: "Too many signups from this network — try again later." });
+      return reply(429, { error: "Too many signups from this network — try again later." });
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
     const { count: appRecent } = await svc
       .from("app_users").select("id", { count: "exact", head: true })
       .eq("app_id", appId).gte("created_at", hourAgo);
     if ((appRecent ?? 0) >= LIMIT_SIGNUP_PER_APP_H) {
-      return json(429, { error: "This app is getting a lot of signups right now — try again in a bit." });
+      return reply(429, { error: "This app is getting a lot of signups right now — try again in a bit." });
     }
 
     // createUser with ONE retry on transient auth-schema errors. Losing a parallel race
@@ -265,7 +291,7 @@ Deno.serve(async (req: Request) => {
       if (createErr && /already.*(regist|exist)/i.test(createErr.message)) { createErr = null; break; }
       if (createErr && attempt === 0) await new Promise((r) => setTimeout(r, 400));
     }
-    if (createErr) return json(500, { error: `signup failed: ${createErr.message}` });
+    if (createErr) return reply(500, { error: `signup failed: ${createErr.message}` });
 
     if (created) {
       const { error: mapErr } = await svc.from("app_users").insert({
@@ -274,7 +300,7 @@ Deno.serve(async (req: Request) => {
       if (mapErr && !/duplicate|unique|conflict|23505/i.test(mapErr.message)) {
         // A real mapping failure: roll back the auth user so a retry works.
         await svc.auth.admin.deleteUser(created.user.id).catch(() => {});
-        return json(500, { error: `signup failed: ${mapErr.message}` });
+        return reply(500, { error: `signup failed: ${mapErr.message}` });
       }
       // A duplicate mapping row = we lost the race after user creation; the winner's rows
       // stand and the sign-in below resolves the session either way.
@@ -289,19 +315,19 @@ Deno.serve(async (req: Request) => {
     // an error; a DIFFERENT password for an existing account still gets the explicit 409.
     const probe = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
     const { error: probeErr } = await probe.auth.signInWithPassword({ email: synth, password });
-    if (probeErr) return json(409, { error: "An account with this email already exists for this app — sign in instead." });
+    if (probeErr) return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
   } else if (!existing) {
-    return json(401, { error: "Invalid email or password." });
+    return reply(401, { error: "Invalid email or password." });
   } else if (existing.status !== "active") {
-    return json(403, { error: "This account has been disabled by the app owner." });
+    return reply(403, { error: "This account has been disabled by the app owner." });
   }
 
   // Both paths end in a REAL password sign-in against the synthetic address -> native session.
   const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
   const { data: signed, error: signErr } = await anon.auth.signInWithPassword({ email: synth, password });
-  if (signErr || !signed.session) return json(401, { error: "Invalid email or password." });
+  if (signErr || !signed.session) return reply(401, { error: "Invalid email or password." });
 
-  return json(200, {
+  return reply(200, {
     user: { id: signed.user.id, email }, // the REAL email, not the synthetic one
     session: {
       access_token: signed.session.access_token,

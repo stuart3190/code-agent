@@ -5,10 +5,10 @@
 Work is active on branch `remediation/builder-v2-production` from audited main
 `92e4c9fe5c864799eee228f304849064bacb0190`. PR-01 baseline is commit `c4c530a`; the C2
 essential-attribution fix is `a5be84a`; C3 cache hardening is `57cfbaa`; C5 snapshot integrity is
-the current local unit. Builder V1
+`7ebceae`; C6 app-auth hardening is the current local unit. Builder V1
 remains the default, Builder V2 rollout remains paused, and no production action, model spend,
 provider call, Stripe action or migration has been performed. The full local code-agent suite is
-green at 1,172 tests. Continue from `docs/PRODUCTION-AUDIT-REMEDIATION.md`; PR-02 migration-history
+green at 1,179 tests. Continue from `docs/PRODUCTION-AUDIT-REMEDIATION.md`; PR-02 migration-history
 repair still requires explicitly approved read-only production evidence and must not be guessed.
 
 ## Current milestone

@@ -42,7 +42,7 @@ values.
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
 | PR-04 Atomic graph and shadow | Pending | Audit evidence confirmed; current shadow period invalid | None |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
-| PR-06 App eligibility/reset | Pending | Audit evidence confirmed | None |
+| PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Pending | Audit evidence confirmed/partially confirmed | None |
 | PR-08 Diagnostics/erasure | Pending | Audit evidence confirmed/partially confirmed | None |
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
@@ -86,3 +86,9 @@ and corresponding live objects have been compared.
   byte-verifies the target immediately before activation and uses compare-and-set pointer updates;
   concurrent promotions cannot silently overwrite one another. Corrupt snapshots are marked
   `corrupt` and cannot become green, preview or published.
+- Generated-app auth now accepts only a real `projects.id` UUID and an origin matching that
+  project's active preview, live published site or verified custom domain. Reset codes use HMAC
+  with the dedicated `APP_AUTH_RESET_PEPPER` Edge Function secret. Attempt consumption is a
+  compare-and-set; a correct code is marked used before the password mutation, so parallel reset
+  confirmations have one winner. The Edge Function must not be deployed until the pepper has
+  been created and a rollback deployment is retained.

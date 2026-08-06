@@ -184,7 +184,7 @@ test("app-auth carries both real event integrations and cannot break auth", asyn
 
   // The security alert is written BEFORE the response is returned, so it cannot be skipped.
   const confirm = fn.slice(fn.indexOf('action === "reset-confirm"'));
-  assert.ok(confirm.indexOf('"password_changed"') < confirm.indexOf("return json(200"),
+  assert.ok(confirm.indexOf('"password_changed"') < confirm.indexOf("return reply(200"),
     "the alert must be recorded before the success response");
 });
 
