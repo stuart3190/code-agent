@@ -881,6 +881,29 @@ is connected), shipped as `thrallo-0.3.0.vsix`.
   post-refresh run-restoration defects. The fixes are tracked in PR #1 and deployed.
 - Never reuse Buildr101 production Supabase, Stripe, or provider secrets for this product.
 
+## Builder v2 (2026-08-05/06)
+
+The app-build pipeline rebuild. Canonical docs, read in order: `docs/BUILDER-V2-MASTER-PLAN.md`
+(architecture, approved with corrections C1-C8), `docs/BUILDER-V2-FINISH-PLAN.md` (execution,
+WP-1…WP-19), `docs/BUILDER-V2-HEADTOHEAD.md` (measured v1-vs-v2 results). Code lives in
+`shell/server/lib/builderV2/` — orchestrator (first-green loop + repair tiers), patch engine
+(strict `emit_patches`: symbol ops, `add_import`, `replaceFile`), indexer (`indexer.mjs`
+facade = v1 on @babel/parser; v0 is the floor), retrieval (hard-budget slices), verification
+facade + differential planner, capability registry/lints, asset service (Part 18: intents,
+cache-first, licence-stamped, sharp variants), model lanes (one shared ceiling per job,
+per-step reasoning routing), shadow (WP-14), rollout guard rails (WP-16).
+
+State: WP-1..14 engineering DONE; gates WP-9 (simple, 1.73cr green) and WP-10 (edit, 1.64cr
+green) passed; WP-11 booking parked at 13.58cr/3 attempts (v1 spent 102.9/3 on the same
+prompt) — attempt 4 awaits Stuart. Shadow week started 2026-08-06 (`bv2.shadow` on; daily
+`ops/bv2-shadow-drift.mjs` via the VPS `bv2-drift.timer`); the managed-settlement unpause
+audit happens ONLY at its end (~08-13). Flags: `bv2.enabled`/`bv2.owners` off (customer
+traffic stays v1), `THRALLO_BV2_KILL=1` is the absolute off switch. Runners:
+`ops/bv2-first-build.mjs`, `ops/bv2-edit.mjs`, `ops/bv2-booking-build.mjs` (all `--live`
+gated — NO paid run without Stuart), `ops/bv2-dual-run.mjs` (zero-credit comparator).
+Diagnostics: v2 runs appear in DiagnosticsView with a Builder v2 panel (per-step spend,
+snapshot lineage, pointers) via `/api/v1/diagnostics/:id/bv2`.
+
 ## Next implementation slice
 
 Phase 24 completion: Stuart's steps 1-2 (Meta ad, Stripe audit — YOU_NEED_TO_DO.md), then

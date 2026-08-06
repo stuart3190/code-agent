@@ -25,6 +25,12 @@ const FACTORY_PROPERTIES = Object.freeze({
 const GENERATED_FILE = /^src\/.*\.(jsx?|tsx?)$/;
 const PLATFORM_PATH = /^src\/lib\//;
 
+// The monolith tax (WP-10 variance): a whole-app-in-one-file page makes every future edit
+// carry the whole app as context (~8k tokens/round measured live). Generous cap — real
+// booking pages are big — but a file beyond it must split into components.
+const MAX_GENERATED_FILE_TOKENS = 3000;
+const tokensOf = (text) => Math.ceil(String(text || "").length / 4);
+
 // Entity types OWNED by a capability: persisting them any other way bypasses session
 // management and validation. Live run 4 wrote its own db.entity("contactMessage").create
 // data layer with no session — an unauthenticated insert, a 401, and a dead build.
@@ -49,6 +55,16 @@ export function lintCapabilityUsage(tree) {
   for (const [path, source] of Object.entries(tree)) {
     if (!GENERATED_FILE.test(path) || PLATFORM_PATH.test(path)) continue;
     const code = String(source);
+
+    // The monolith cap: every edit to an oversized file pays its whole body as context.
+    const size = tokensOf(code);
+    if (size > MAX_GENERATED_FILE_TOKENS) {
+      problems.push(
+        `${path} is ${size} tokens (cap ${MAX_GENERATED_FILE_TOKENS}) — split sections into `
+        + `components under src/components/ and import them; single-file apps make every `
+        + `future edit pay the whole file as context.`,
+      );
+    }
 
     // Capability-owned entities may ONLY be persisted through their capability.
     for (const [entity, correctCall] of Object.entries(OWNED_ENTITIES)) {

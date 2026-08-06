@@ -99,3 +99,80 @@ test("WP14 — FAULT INJECTION: a shadow-store outage never throws and never tou
   });
   __resetFlagCacheForTests();
 });
+
+// ── WP-16 guard rails, drill-tested before any rollout ────────────────────────────────────────
+
+test("WP16 — per-owner auto-rollback: 2 consecutive bad builds pull the owner from bv2.owners", async () => {
+  const { autoRollbackCheck } = await import("../../shell/server/lib/builderV2/rollout.mjs");
+  const { setFlag, flagValue, __resetFlagCacheForTests } = await import("../../shell/server/lib/builderV2/featureFlags.mjs");
+
+  const flags = new Map([["bv2.owners", ["owner-a", "owner-b"]], ["bv2.enabled", true]]);
+  const flagClient = {
+    from: () => ({
+      select: async () => ({ data: [...flags.entries()].map(([key, value]) => ({ key, value })), error: null }),
+      upsert: (row) => { flags.set(row.key, row.value); return { then: (r) => Promise.resolve({ error: null }).then(r) }; },
+    }),
+  };
+  const buildsClient = (rows) => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({ order: () => ({ limit: async () => ({ data: rows.slice(0, 2), error: null }) }) }),
+        gte: async () => ({ data: rows, error: null }),
+      }),
+    }),
+  });
+  const lines = [];
+  const opts = { client: flagClient, env: {}, now: Date.now };
+
+  __resetFlagCacheForTests();
+  const result = await autoRollbackCheck({
+    owner: "owner-a",
+    client: buildsClient([{ state: "blocked" }, { state: "failed" }, { state: "green" }]),
+    flagOptions: opts, log: (l) => lines.push(l),
+  });
+  assert.equal(result.action, "owner_reverted");
+  assert.deepEqual(flags.get("bv2.owners"), ["owner-b"], "the failing owner builds on v1 now");
+  assert.ok(lines.some((l) => /INCIDENT owner_reverted/.test(l)));
+
+  // A green in the last two builds means no revert.
+  __resetFlagCacheForTests();
+  const fine = await autoRollbackCheck({
+    owner: "owner-b",
+    client: buildsClient([{ state: "green" }, { state: "blocked" }]),
+    flagOptions: opts, log: () => {},
+  });
+  assert.equal(fine.action, "none");
+  assert.deepEqual(flags.get("bv2.owners"), ["owner-b"]);
+  __resetFlagCacheForTests();
+});
+
+test("WP16 — global auto-off: >20% failures over the window kills bv2.enabled for everyone", async () => {
+  const { autoRollbackCheck } = await import("../../shell/server/lib/builderV2/rollout.mjs");
+  const { __resetFlagCacheForTests } = await import("../../shell/server/lib/builderV2/featureFlags.mjs");
+  const flags = new Map([["bv2.owners", []], ["bv2.enabled", true]]);
+  const flagClient = {
+    from: () => ({
+      select: async () => ({ data: [...flags.entries()].map(([key, value]) => ({ key, value })), error: null }),
+      upsert: (row) => { flags.set(row.key, row.value); return { then: (r) => Promise.resolve({ error: null }).then(r) }; },
+    }),
+  };
+  const windowRows = [
+    { state: "green" }, { state: "green" }, { state: "failed" }, { state: "blocked" },
+    { state: "green" }, { state: "green" }, { state: "green" }, { state: "green" },
+  ]; // 2/8 bad = 25% > 20%
+  const client = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ order: () => ({ limit: async () => ({ data: [{ state: "green" }], error: null }) }) }),
+        gte: async () => ({ data: windowRows, error: null }),
+      }),
+    }),
+  };
+  const lines = [];
+  __resetFlagCacheForTests();
+  const result = await autoRollbackCheck({ owner: "anyone", client, flagOptions: { client: flagClient, env: {}, now: Date.now }, log: (l) => lines.push(l) });
+  assert.equal(result.action, "global_off");
+  assert.equal(flags.get("bv2.enabled"), false, "v2 is off for everyone until a human looks");
+  assert.ok(lines.some((l) => /INCIDENT global_off/.test(l)));
+  __resetFlagCacheForTests();
+});

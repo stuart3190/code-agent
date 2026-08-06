@@ -102,3 +102,18 @@ test("D1 lint — the capability brief now carries the instance methods the mode
   assert.match(brief, /subscribe\(email\)/);
   assert.match(brief, /createBooking, getBooking, listBookings, cancelBooking, remaining/);
 });
+
+test("monolith cap — an oversized generated file is rejected with the split taught", () => {
+  const big = `export default function HomePage() {\n  return (<main>${"<p>section content here</p>".repeat(500)}</main>);\n}`;
+  const bad = lintCapabilityUsage({ "src/routes/HomePage.jsx": big });
+  assert.equal(bad.ok, false);
+  assert.match(bad.problems[0], /tokens \(cap 3000\)/);
+  assert.match(bad.problems[0], /split sections into/);
+
+  // Platform lib files and reasonable files are untouched.
+  const ok = lintCapabilityUsage({
+    "src/routes/HomePage.jsx": "export default function HomePage() {\n  return null;\n}",
+    "src/lib/capabilities/forms.js": big,
+  });
+  assert.equal(ok.ok, true, JSON.stringify(ok.problems));
+});
