@@ -2,8 +2,9 @@
 // Parts 2 §10/§11 and 9).
 //
 // ONE entry over the existing, production-proven gates — nothing is reimplemented. What v2
-// adds is discipline: every D3 failure must be ATTRIBUTED to owning modules (or it degrades
-// to a warning: a failure that names nothing cannot brief a targeted repair), and journeys
+// adds is discipline: every D3 failure is ATTRIBUTED to owning modules when possible. An
+// attribution miss is a separate platform defect and NEVER changes the journey verdict;
+// repair instead receives a broad, bounded fallback file set. Journeys
 // whose owning modules' content is unchanged REUSE their cached verdict — recorded as
 // `reused` with the original evidence, never silently.
 
@@ -15,20 +16,64 @@ const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 
 // ── attribution ───────────────────────────────────────────────────────────────────────────────
 
+const FALLBACK_FILE_LIMIT = 16;
+const FALLBACK_TOKEN_LIMIT = 6_000;
+
+/** Deterministic emergency context for an unattributed failure, below repair's hard budget. */
+export function boundedAttributionFallback(graph, {
+  maxFiles = FALLBACK_FILE_LIMIT,
+  maxTokens = FALLBACK_TOKEN_LIMIT,
+} = {}) {
+  if (!graph || maxFiles <= 0 || maxTokens <= 0) return [];
+  const priority = (path) => {
+    if (/^src\/(?:App|main|index)\.[^/]+$/i.test(path)) return 0;
+    if (/^src\/(?:routes|components|data|lib)\//i.test(path)) return 1;
+    if (/^src\//i.test(path)) return 2;
+    return 3;
+  };
+  const candidates = graph.paths().slice().sort((a, b) => {
+    const rank = priority(a) - priority(b);
+    if (rank) return rank;
+    const size = Number(graph.file(a)?.tokens || 0) - Number(graph.file(b)?.tokens || 0);
+    return size || a.localeCompare(b);
+  });
+  const selected = [];
+  let usedTokens = 0;
+  for (const path of candidates) {
+    if (selected.length >= maxFiles) break;
+    const tokens = Math.max(0, Number(graph.file(path)?.tokens || 0));
+    if (usedTokens + tokens > maxTokens) continue;
+    selected.push(path);
+    usedTokens += tokens;
+  }
+  return selected;
+}
+
 /**
- * Attach owning modules to every journey verdict. A FAILED journey that maps to no modules
- * downgrades to `warn`: it cannot brief a repair, so treating it as blocking would block a
- * build on evidence nobody can act on. Pure; exported for direct proof.
+ * Attach owning modules to every journey verdict. A failed journey with no owner remains
+ * failed. The miss is recorded separately and repair receives bounded fallback references.
  */
 export function attributeFailures(journeyResults, graph, contract) {
   const journeysById = new Map((contract?.journeys || []).map((j) => [j.id, j]));
+  let fallbackRefs = null;
   return (journeyResults?.journeys || []).map((result) => {
     const journey = journeysById.get(result.id) || { id: result.id, title: result.title };
     const owners = graph ? graph.owners(journey) : [];
     if (result.status === "fail" && owners.length === 0) {
-      return { ...result, status: "warn", owners, downgraded: "failure attributed to no owning module" };
+      fallbackRefs ||= boundedAttributionFallback(graph);
+      return {
+        ...result,
+        owners,
+        fallbackRefs,
+        attributionStatus: "missing",
+        attributionDefect: {
+          code: "journey_ownership_missing",
+          journeyId: result.id,
+          message: "failed journey attributed to no owning module",
+        },
+      };
     }
-    return { ...result, owners };
+    return { ...result, owners, attributionStatus: result.status === "fail" ? "attributed" : "not_required" };
   });
 }
 
@@ -61,12 +106,14 @@ export async function verifyJourneysAttributed({ previewUrl, contract, graph, ti
   const raw = await verifyJourneys({ previewUrl, contract, timeoutMs });
   const attributed = attributeFailures(raw, graph, contract);
   const failures = attributed.filter((j) => j.status === "fail");
+  const platformDefects = attributed.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
   return {
     ...raw,
     journeys: attributed,
     failures,
     pass: raw.unavailable ? null : failures.filter((j) => j.priority === "primary").length === 0,
-    failureRefs: [...new Set(failures.flatMap((j) => j.owners))],
+    failureRefs: [...new Set(failures.flatMap((j) => [...j.owners, ...(j.fallbackRefs || [])]))],
+    platformDefects,
     summary: journeySummary(raw),
   };
 }

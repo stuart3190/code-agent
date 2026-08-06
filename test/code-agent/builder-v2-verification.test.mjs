@@ -11,7 +11,7 @@ import { runStageGate } from "../../shell/server/lib/appBuild/stageGate.mjs";
 import { indexTree } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import {
-  verifyStage, attributeFailures, ownersHashOf,
+  verifyStage, attributeFailures, boundedAttributionFallback, ownersHashOf,
   memoryVerificationCache, planJourneyVerification, recordJourneyVerdicts,
 } from "../../shell/server/lib/builderV2/verification.mjs";
 
@@ -30,7 +30,7 @@ test("WP3 — the facade NEVER drifts from the gate: identical checks and proble
   assert.deepEqual(facade.layers.d0d2.problems, direct.problems);
 });
 
-test("WP3 — a failure attributed to no owning module DOWNGRADES to warn, with the reason", () => {
+test("C2 — a failure attributed to no owning module stays blocking and records a platform defect", () => {
   const results = { journeys: [
     { id: "reserve-picking-slot", title: "reserve", status: "fail", priority: "primary" },
     { id: "ghost-journey", title: "nothing owns this", status: "fail", priority: "secondary" },
@@ -46,8 +46,21 @@ test("WP3 — a failure attributed to no owning module DOWNGRADES to warn, with 
   assert.equal(reserve.status, "fail", "an attributable failure stays a failure");
   assert.ok(reserve.owners.length > 0, `owners: ${reserve.owners.join(", ")}`);
   const ghost = attributed.find((j) => j.id === "ghost-journey");
-  assert.equal(ghost.status, "warn", "unattributable failures cannot brief a repair — they warn");
-  assert.match(ghost.downgraded, /no owning module/);
+  assert.equal(ghost.status, "fail", "attribution failure must never make an essential journey green");
+  assert.equal(ghost.attributionStatus, "missing");
+  assert.equal(ghost.attributionDefect.code, "journey_ownership_missing");
+  assert.match(ghost.attributionDefect.message, /no owning module/);
+  assert.ok(ghost.fallbackRefs.length > 0, "repair receives fallback context instead of a downgraded verdict");
+});
+
+test("C2 — attribution fallback is deterministic, broad and strictly bounded", () => {
+  const first = boundedAttributionFallback(graph, { maxFiles: 8, maxTokens: 1_500 });
+  const second = boundedAttributionFallback(graph, { maxFiles: 8, maxTokens: 1_500 });
+  assert.deepEqual(first, second);
+  assert.ok(first.length > 0 && first.length <= 8);
+  assert.ok(first.some((p) => /^src\//.test(p)), first.join(", "));
+  const used = first.reduce((sum, p) => sum + Number(graph.file(p)?.tokens || 0), 0);
+  assert.ok(used <= 1_500, `fallback used ${used} tokens`);
 });
 
 test("WP3 — owners hash moves with owning-module content and nothing else", () => {

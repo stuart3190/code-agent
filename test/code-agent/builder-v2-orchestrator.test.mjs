@@ -148,7 +148,7 @@ function strictBuildStore() {
   };
 }
 
-function harness({ failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null } = {}) {
+function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const journeyDrives = [];
@@ -161,7 +161,7 @@ function harness({ failJourneys = [], patchPlan = null, assetService = recordedA
   };
   const failSet = new Set(failJourneys);
   const orchestrator = createOrchestrator({
-    contractFn: async () => CONTRACT,
+    contractFn: async () => contract,
     patchesFn: async (ctx) => { patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length, problems: ctx.problems }); return plan[ctx.step](ctx); },
     assetService,
     snapshotStore,
@@ -234,6 +234,34 @@ test("WP8/C4 — a failing ESSENTIAL journey blocks: no snapshot, no green point
   assert.equal(result.state, "blocked");
   assert.match(result.error, /book-a-visit/);
   assert.ok(!(await snapshotStore.pointer("o", "proj-1", "green")), "nothing was ever promotable");
+});
+
+test("C2 — an unattributed essential failure blocks, is recorded separately, and briefs bounded fallback context", async () => {
+  const ghostContract = {
+    ...CONTRACT,
+    journeys: [{
+      id: "zzqx-ghost-flow", title: "Qqzy unowned workflow", priority: "primary",
+      steps: [{ action: "submit the booking form", expect: "booking confirmed" }],
+    }],
+  };
+  let repairProblems = [];
+  const { orchestrator, snapshotStore } = harness({
+    contract: ghostContract,
+    failJourneys: ["zzqx-ghost-flow"],
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: ({ problems }) => {
+        repairProblems = problems;
+        return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// bounded unattributed repair attempt\n" }] }];
+      },
+    },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.match(result.error, /zzqx-ghost-flow/);
+  assert.deepEqual(result.platformDefects?.map((d) => d.code), ["journey_ownership_missing"]);
+  assert.ok(repairProblems.some((p) => /bounded fallback files:.*src\//.test(p)), JSON.stringify(repairProblems));
+  assert.ok(!(await snapshotStore.pointer("o", "proj-1", "green")), "unattributed failure promoted nothing");
 });
 
 test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 receives the reasons and lands", async () => {

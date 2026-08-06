@@ -18,7 +18,7 @@ import { applyPatches } from "./patchEngine.mjs";
 import { tierContract, bindCapabilities, imageIntents, previewEligibility } from "./contractTiering.mjs";
 import { lintCapabilityUsage } from "./capabilityLint.mjs";
 import {
-  verifyStage, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
+  verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -119,8 +119,11 @@ export function createOrchestrator({
     let driven = { journeys: [] };
     if (plan.drive.length && journeysFn) {
       driven = await journeysFn({ tree, journeys: plan.drive.map((d) => d.journey), graph });
+      driven = { ...driven, journeys: attributeFailures(driven, graph, scoped) };
       await recordJourneyVerdicts({ owner, projectId, cache: verificationCache, plan, results: driven, snapshotId });
     }
+    const platformDefects = driven.journeys.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
+    for (const defect of platformDefects) log(JSON.stringify({ event: "bv2.platform_defect", ...defect }));
     const merged = [
       ...driven.journeys,
       ...plan.reused.map((r) => {
@@ -128,7 +131,7 @@ export function createOrchestrator({
         return { id: r.journeyId, title: journey?.title, priority: journey?.priority, ...r.verdict, reused: true };
       }),
     ];
-    return { journeys: merged, plan };
+    return { journeys: merged, plan, platformDefects };
   }
 
   /**
@@ -253,9 +256,13 @@ export function createOrchestrator({
           const evidence = [
             ...coreVerdicts.journeys.filter((j) => j.status === "fail").flatMap((j) => {
               const failedSteps = (j.steps || []).filter((s) => s.status === "fail");
-              return failedSteps.length
+              const journeyEvidence = failedSteps.length
                 ? failedSteps.map((s) => `journey ${j.id} · step "${s.action}" FAILED in a real browser: ${s.detail || "expected outcome never appeared"}`)
                 : [`journey ${j.id} FAILED in a real browser (no per-step evidence recorded)`];
+              const attributionEvidence = j.attributionDefect
+                ? [`platform defect ${j.attributionDefect.code}: journey ${j.id} has no owning module; bounded fallback files: ${(j.fallbackRefs || []).join(", ") || "none available"}`]
+                : [];
+              return [...journeyEvidence, ...attributionEvidence];
             }),
             ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
           ];
@@ -272,7 +279,10 @@ export function createOrchestrator({
           backendRowFailures = backendProbeFn ? await backendProbeFn({ owner, projectId, contract, tiers }) : [];
           eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures });
         }
-        if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; ") });
+        if (!eligibility.eligible) return finish("blocked", {
+          error: eligibility.failures.join("; "),
+          platformDefects: coreVerdicts.platformDefects,
+        });
 
         // 5. GREEN: atomic snapshot + pointer promotion. Preview may ship NOW (C4).
         const coreSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
@@ -377,7 +387,10 @@ export function createOrchestrator({
         await setState("verify_edit");
         const verdicts = await verifyJourneySet({ owner, projectId, contract, journeys, tree: edit.tree, snapshotId: ctx.snapshotId });
         const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: verdicts.journeys } });
-        if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; ") });
+        if (!eligibility.eligible) return finish("blocked", {
+          error: eligibility.failures.join("; "),
+          platformDefects: verdicts.platformDefects,
+        });
 
         const snapshot = await snapshotStore.createSnapshot(owner, projectId, edit.tree, {
           buildId, parent: ctx.snapshotId, reason: "edit",
