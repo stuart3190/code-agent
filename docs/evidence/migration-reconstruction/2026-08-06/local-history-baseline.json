@@ -1,0 +1,338 @@
+{
+  "capturedAt": "2026-08-06T20:48:39.612Z",
+  "git": {
+    "commit": "43d706441ecc9a0f2457280ea6b139910c1ff11c",
+    "branch": "remediation/builder-v2-production",
+    "preReconstructionWorktreeStatus": "",
+    "captureToolStatus": "?? ops/reconstruct-supabase-history.mjs"
+  },
+  "activeDirectory": "supabase/migrations",
+  "archiveDirectory": "supabase/migration-history-archive/pre-authoritative-reconstruction-2026-08-06",
+  "files": [
+    {
+      "filename": "20260721131113_platform_foundations.sql",
+      "sha256": "dfc5303cf3f0f9d3349fe035edd98ffbb4d3c903af6ef39f7970e827d3c9038f",
+      "bytes": 7644
+    },
+    {
+      "filename": "20260721131732_foundation_fk_indexes.sql",
+      "sha256": "cdd70719d9a8a2c115b5205da1791a071dc9d889577ced46dc3d628cde37fd61",
+      "bytes": 466
+    },
+    {
+      "filename": "20260721132051_qa_runs.sql",
+      "sha256": "f7b0f4e8602c431098e5fb54595bc3e60246d57a8523349c8562ef2dda92d3bd",
+      "bytes": 1369
+    },
+    {
+      "filename": "20260721133223_saas_payments_runtime.sql",
+      "sha256": "89812c6128e11d305d9c9d9477417bf137bc44881b52c4a9b9055e9df1e302eb",
+      "bytes": 2885
+    },
+    {
+      "filename": "20260721133847_saas_payment_fk_indexes.sql",
+      "sha256": "de6b2e892a36a8d8f11d048774af04bf2b6660f93d642ae5f0d2793fd03e2518",
+      "bytes": 190
+    },
+    {
+      "filename": "20260721133945_visual_brand_kits.sql",
+      "sha256": "592ff6584ceb0b92579312783e69e06584b071897b4b70e2d92bb8c1d3679f0b",
+      "bytes": 1920
+    },
+    {
+      "filename": "20260721134315_owner_console_controls.sql",
+      "sha256": "fede5e9cb1169b8d4e625c5d374e61287863b11cacf3f199ccefac05a121e7f1",
+      "bytes": 340
+    },
+    {
+      "filename": "20260721135020_app_integrations_notifications.sql",
+      "sha256": "afc5f57f200fba94f2ed0376c833782e261d9890285c7f0e7bf381e8dd543980",
+      "bytes": 1406
+    },
+    {
+      "filename": "20260721135445_app_analytics_events.sql",
+      "sha256": "ca1fe70dbfd416a4445995068bc179474c519a9a78a5df1929ad1093d0ef87c5",
+      "bytes": 1390
+    },
+    {
+      "filename": "20260721140139_project_templates.sql",
+      "sha256": "90cc2b3aa42dda2578ff7cd7577e1b37bde790ba9cdd3a3fc9150bcc23910c51",
+      "bytes": 1340
+    },
+    {
+      "filename": "20260721152000_connector_hub.sql",
+      "sha256": "255fb028c870010dfded8b2578b256c702f9f09dd21033951edb44e39a35c426",
+      "bytes": 2524
+    },
+    {
+      "filename": "20260721224922_capability_runtime.sql",
+      "sha256": "dbae24a6d3f2a13861ce1d34c0835920950ea0d64968bb8f443037ea70bb35b8",
+      "bytes": 22215
+    },
+    {
+      "filename": "20260721231924_capability_runtime_fk_indexes.sql",
+      "sha256": "68b9bfa9c5b1f7277a5f41d2d3ba9c7774999a7bc3deeca35d393c8578e45ddf",
+      "bytes": 476
+    },
+    {
+      "filename": "20260721232626_capability_runtime_rollout.sql",
+      "sha256": "b65e78d53c3fc5124ffa5ad0e2afd86ceb614f886a24f349703284a1812ee9e8",
+      "bytes": 281
+    },
+    {
+      "filename": "20260722091357_meta_publishing_connectors.sql",
+      "sha256": "3d55d481b99bb94b081c1b360879aa67f6bc9a1f5f4e22e88f2796a6fead5b51",
+      "bytes": 2617
+    },
+    {
+      "filename": "20260729122234_code_agent_control_plane.sql",
+      "sha256": "d1c7610af56614a4af119897fd029bbca258d812cf0b6129185f5886a62db67d",
+      "bytes": 10765
+    },
+    {
+      "filename": "20260729140251_github_app_installations.sql",
+      "sha256": "fd72ae8cc0b3293f58e6a1170bdaa03a6e74a3da1b403a9f89bbb8b59e4f5246",
+      "bytes": 1427
+    },
+    {
+      "filename": "20260729164642_harden_code_agent_schema.sql",
+      "sha256": "d4f16d0161cef5ffa638ba80126bf2d7230eac26e5fccfc93e83556d9bc57fbe",
+      "bytes": 1946
+    },
+    {
+      "filename": "20260729165131_lock_down_code_agent_anon_access.sql",
+      "sha256": "8df693b56afaf962c011719d015ddf0d449a3f55bfccd07981d895b0602e3528",
+      "bytes": 494
+    },
+    {
+      "filename": "20260729231426_github_webhook_ledger.sql",
+      "sha256": "0f10779d104a5d705ce225d9820512de2dfb9064f97923439c9a4aae033fc228",
+      "bytes": 4379
+    },
+    {
+      "filename": "20260729232141_restrict_code_agent_policy_roles.sql",
+      "sha256": "471ca9b4bf7861780fdf4c712a0dd129932d61b31a15a8c3d6f5da3cba87e767",
+      "bytes": 920
+    },
+    {
+      "filename": "20260729234551_ai_provider_connections.sql",
+      "sha256": "839eb0dab162556dc05c74485ce14e08b82831014896fc7f6d3bf1e5abb70f57",
+      "bytes": 2125
+    },
+    {
+      "filename": "20260729234651_reject_anonymous_code_agent_access.sql",
+      "sha256": "95b43a717e42fbb67b6bb400ac5ff4bb99ecef3aa3d55779c4e73eddd458a567",
+      "bytes": 1415
+    },
+    {
+      "filename": "20260730001803_repository_hybrid_index.sql",
+      "sha256": "e195c0ccad5b53d4efd65c9ed43bf5d3f41f103d89b9793ad59495157b5b0b72",
+      "bytes": 5230
+    },
+    {
+      "filename": "20260730063059_repository_code_intelligence.sql",
+      "sha256": "c05eedf4b9f2df1dbf3597dbc2f600b74808536107e09f7c47187fea5a00963c",
+      "bytes": 6763
+    },
+    {
+      "filename": "20260730083259_model_routing_and_evaluations.sql",
+      "sha256": "9080be2e28e24145db9110e86e24227705b53d4ff97b58694b1287285bcc23f9",
+      "bytes": 5685
+    },
+    {
+      "filename": "20260730143000_subscriptions_budgets_telemetry.sql",
+      "sha256": "137e0ccbb78e81e7c677a7b24ecffed8c01f729e2d38db36076a527d785a9440",
+      "bytes": 2428
+    },
+    {
+      "filename": "20260730170000_approval_policies_resume_artifacts.sql",
+      "sha256": "8cc997cdc15c343d79db60690a72ecb1b916fa75b2d8946061fc86a04c5d1d39",
+      "bytes": 1092
+    },
+    {
+      "filename": "20260730200000_egress_command_policies_retention.sql",
+      "sha256": "40d0e0cbc1538232223f06e49afb679ffe094e08b9bc9e28966e5df81330ed88",
+      "bytes": 693
+    },
+    {
+      "filename": "20260730220000_conversation_platform.sql",
+      "sha256": "bb199fae3698536eeaa2d855ebc3d0a3ca363592999428cf7f0ca3e13524324a",
+      "bytes": 5963
+    },
+    {
+      "filename": "20260730223000_api_tokens.sql",
+      "sha256": "aee963770319ee4d4e4fef4fa8dc43390aa6bf8257b5ad1201dda473291786a7",
+      "bytes": 1241
+    },
+    {
+      "filename": "20260731003000_review_runs.sql",
+      "sha256": "5fea250cab978a05e8f5633180e2a01041bfc47c94fea052df57a424e227eeab",
+      "bytes": 287
+    },
+    {
+      "filename": "20260731020000_automations.sql",
+      "sha256": "b3eea9c66668c789dea4bd298c4c55fde2aedad3eaa1236cc53b371b74a893ed",
+      "bytes": 1930
+    },
+    {
+      "filename": "20260731100000_app_build_platform.sql",
+      "sha256": "8b996485f39b7c4d213d1477bd1279628fe66dc2dfb77513b60744578df8b348",
+      "bytes": 2324
+    },
+    {
+      "filename": "20260731150000_app_publish_platform.sql",
+      "sha256": "e7663db79ab3041becb3ec3d1d5d298280704992c9382ff453a162a7f8705417",
+      "bytes": 2407
+    },
+    {
+      "filename": "20260801090000_owner_accounts.sql",
+      "sha256": "2dc369b21e1a80d024c0a6b1a60ba01048b9adf0e405dde325b77bf8ecc85a25",
+      "bytes": 417
+    },
+    {
+      "filename": "20260801120000_repair_pipeline_hardening.sql",
+      "sha256": "6e0fb07b7aaa03072dc74c4c2199775261118f688400349e7020b36b7e770e71",
+      "bytes": 1413
+    },
+    {
+      "filename": "20260801150000_per_app_runtime.sql",
+      "sha256": "dd8c8805a84abde4f0e4273dec2ced44fb55b99605aaa9e65c7671c447ce11bb",
+      "bytes": 3278
+    },
+    {
+      "filename": "20260801160000_persistent_build_checkpoints.sql",
+      "sha256": "19e9c08d664b56ea93d3370ae45f6b729f67049f6040ac5d7b0d309b77072cca",
+      "bytes": 3151
+    },
+    {
+      "filename": "20260801180000_provider_constraints_and_telemetry_grants.sql",
+      "sha256": "e04f7616fbf2be4416341533049e417030a1e4689a6f5e382d7aadcd5bb8c8cd",
+      "bytes": 2666
+    },
+    {
+      "filename": "20260801200000_qa_runs_thrallo.sql",
+      "sha256": "70b850511a7f8a5573d600ae3761d9c3eced1ac94ca3262ffa7b347809de00a9",
+      "bytes": 2909
+    },
+    {
+      "filename": "20260801200000_soft_delete.sql",
+      "sha256": "b963c12b9067ac0eb525157b492eb4c3ddf97fc14aeabee60a6dfcf059dfe02f",
+      "bytes": 375
+    },
+    {
+      "filename": "20260801220000_app_notifications.sql",
+      "sha256": "f26a8bed672d6e3d19fa4a729b83487b583fb5f00d3da77027d29f5165c39999",
+      "bytes": 4491
+    },
+    {
+      "filename": "20260801220000_build_diagnostics.sql",
+      "sha256": "3a1238fcd3a2e21eada210ad9c38a96a2edb87ace5c7005e0c750f2fa6de8ce8",
+      "bytes": 1740
+    },
+    {
+      "filename": "20260802100000_ai_requests.sql",
+      "sha256": "1806f378458df0dfe381d36b4a3f2dec1ac909b776b165149076e71851a74720",
+      "bytes": 884
+    },
+    {
+      "filename": "20260802120000_ai_requests_context.sql",
+      "sha256": "b35ddcdc6d4fef739ee55c42488731aa607e5b493aaf339705894a3927f10db8",
+      "bytes": 395
+    },
+    {
+      "filename": "20260802140000_conversation_model_pref.sql",
+      "sha256": "490706a8623d2f2bbea0124f5b7a12b298d5259b98fe2cfbf6c0b22db5f6a58b",
+      "bytes": 252
+    },
+    {
+      "filename": "20260802160000_diag_incidents.sql",
+      "sha256": "735de13546ad50d24d9066eeb343ade07cccd06819e744ef0ff9e858bc0097a0",
+      "bytes": 898
+    },
+    {
+      "filename": "20260802180000_build_signals.sql",
+      "sha256": "8cb95bb4f7604539e2220e9b8178c98b9efd54f4d8e75ce3de465a3d8907f46a",
+      "bytes": 586
+    },
+    {
+      "filename": "20260802200000_allow_xai_provider.sql",
+      "sha256": "0f8f12ba58276ce6f3ca18cb7b26acddc3dbe41508f9cb9c0b6df04d2290d885",
+      "bytes": 1297
+    },
+    {
+      "filename": "20260802220000_subscription_plan_changes.sql",
+      "sha256": "b1f478e9430f2c43f5aef2c89e19d051a2bf3cbadb7aa91dd55e10f4ada3f7d9",
+      "bytes": 1645
+    },
+    {
+      "filename": "20260803000000_publish_lifecycle_unpublish.sql",
+      "sha256": "ab707fb0ce38d722d123a7971d7a4f955e4649fe9e397fc1174e51033fc49d18",
+      "bytes": 882
+    },
+    {
+      "filename": "20260803120000_custom_domain_verification.sql",
+      "sha256": "6a1f512eeaa57cf5a816d9d3ac3f02551d19bfc1e196fa33bdb85a3961a5f15e",
+      "bytes": 2688
+    },
+    {
+      "filename": "20260803180000_analytics_logs_health_tables.sql",
+      "sha256": "8d5b300e73cf170f783edda5cf0a05d57eb207acf95edd74e3d59921377907cd",
+      "bytes": 11181
+    },
+    {
+      "filename": "20260803210000_one_live_site_per_product.sql",
+      "sha256": "c53ce6862e8de544fd7d2ad2a7d50a3f10b5c1593aa2fb679c0a90d324e976c3",
+      "bytes": 2605
+    },
+    {
+      "filename": "20260803230000_deployments.sql",
+      "sha256": "a4d454f3295fea211988417a8bf7003761bd952742bbfa50c988f01549ff5427",
+      "bytes": 5385
+    },
+    {
+      "filename": "20260804120000_conversation_favourites_archive.sql",
+      "sha256": "b9580f8c66d8e48db6dfcd6e99bc701d3261363acd23b4b990383e03cb7fa28b",
+      "bytes": 1951
+    },
+    {
+      "filename": "20260805090000_account_notifications_cancellation.sql",
+      "sha256": "8806539fe77fce2e468d510b48e3c71f1b65aafe54348043be45a1b837352416",
+      "bytes": 3933
+    },
+    {
+      "filename": "20260806090000_onboarding_state.sql",
+      "sha256": "0351634444ccb2127cb66eee62508c98dc7b2d1df26a746f27514566189ea28a",
+      "bytes": 1499
+    },
+    {
+      "filename": "20260807090000_analytics_country.sql",
+      "sha256": "114001a881706fd4b3b70d36d3f41db5ada72518b39f22bb0d032383991c01f5",
+      "bytes": 1481
+    },
+    {
+      "filename": "20260808090000_diag_runs_implementation_contract.sql",
+      "sha256": "63f7fd1f910f7d3bf533fd6f58dda15962bc746e2f7e3eb0ccd15b124c5d7b41",
+      "bytes": 938
+    },
+    {
+      "filename": "20260808100000_build_checkpoints_stage.sql",
+      "sha256": "be014eefe15b450f394f94d17e5d67fbe66d69e1a7ca6ada0012302306d40ba8",
+      "bytes": 822
+    },
+    {
+      "filename": "20260808110000_ai_requests_provider_request_ids.sql",
+      "sha256": "75d2cfdc230fb4f8c429931419e0e57f0c3afde1e12350ddbb590b661cf06466",
+      "bytes": 506
+    },
+    {
+      "filename": "20260809090000_builder_v2_foundation.sql",
+      "sha256": "3c696933e4ef590419d81780017d1fdfe41907000b628434d7a21395786d6aaa",
+      "bytes": 12537
+    },
+    {
+      "filename": "20260810213000_bv2_verification_cache_nullable_snapshot.sql",
+      "sha256": "5dc0fc4f916cd4676e047232021d4e4c5c6e2409782ac642cc340408bfd4cf8d",
+      "bytes": 502
+    }
+  ]
+}

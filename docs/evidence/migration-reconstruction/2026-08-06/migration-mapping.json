@@ -1,0 +1,837 @@
+[
+  {
+    "currentLocalFilename": "20260721131113_platform_foundations.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721131732_foundation_fk_indexes.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721132051_qa_runs.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721133223_saas_payments_runtime.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721133847_saas_payment_fk_indexes.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721133945_visual_brand_kits.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721134315_owner_console_controls.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721135020_app_integrations_notifications.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721135445_app_analytics_events.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721140139_project_templates.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721152000_connector_hub.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721224922_capability_runtime.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721231924_capability_runtime_fk_indexes.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260721232626_capability_runtime_rollout.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260722091357_meta_publishing_connectors.sql",
+    "authoritative": [],
+    "sqlEquivalence": "no authoritative ledger migration by mapped name",
+    "representation": "no production migration",
+    "finalReconstructedFilenames": []
+  },
+  {
+    "currentLocalFilename": "20260729122234_code_agent_control_plane.sql",
+    "authoritative": [
+      {
+        "version": "20260729164522",
+        "name": "code_agent_control_plane"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729164522_code_agent_control_plane.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729140251_github_app_installations.sql",
+    "authoritative": [
+      {
+        "version": "20260729164535",
+        "name": "github_app_installations"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729164535_github_app_installations.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729164642_harden_code_agent_schema.sql",
+    "authoritative": [
+      {
+        "version": "20260729164721",
+        "name": "harden_code_agent_schema"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729164721_harden_code_agent_schema.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729165131_lock_down_code_agent_anon_access.sql",
+    "authoritative": [
+      {
+        "version": "20260729165144",
+        "name": "lock_down_code_agent_anon_access"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729165144_lock_down_code_agent_anon_access.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729231426_github_webhook_ledger.sql",
+    "authoritative": [
+      {
+        "version": "20260729231426",
+        "name": "github_webhook_ledger"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729231426_github_webhook_ledger.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729232141_restrict_code_agent_policy_roles.sql",
+    "authoritative": [
+      {
+        "version": "20260729232141",
+        "name": "restrict_code_agent_policy_roles"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729232141_restrict_code_agent_policy_roles.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729234551_ai_provider_connections.sql",
+    "authoritative": [
+      {
+        "version": "20260729234551",
+        "name": "ai_provider_connections"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729234551_ai_provider_connections.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260729234651_reject_anonymous_code_agent_access.sql",
+    "authoritative": [
+      {
+        "version": "20260729234651",
+        "name": "reject_anonymous_code_agent_access"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260729234651_reject_anonymous_code_agent_access.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730001803_repository_hybrid_index.sql",
+    "authoritative": [
+      {
+        "version": "20260730001803",
+        "name": "repository_hybrid_index"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730001803_repository_hybrid_index.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730063059_repository_code_intelligence.sql",
+    "authoritative": [
+      {
+        "version": "20260730063059",
+        "name": "repository_code_intelligence"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730063059_repository_code_intelligence.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730083259_model_routing_and_evaluations.sql",
+    "authoritative": [
+      {
+        "version": "20260730083259",
+        "name": "model_routing_and_evaluations"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730083259_model_routing_and_evaluations.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730143000_subscriptions_budgets_telemetry.sql",
+    "authoritative": [
+      {
+        "version": "20260730091313",
+        "name": "subscriptions_budgets_telemetry"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730091313_subscriptions_budgets_telemetry.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730170000_approval_policies_resume_artifacts.sql",
+    "authoritative": [
+      {
+        "version": "20260730100937",
+        "name": "approval_policies_resume_artifacts"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730100937_approval_policies_resume_artifacts.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730200000_egress_command_policies_retention.sql",
+    "authoritative": [
+      {
+        "version": "20260730102731",
+        "name": "egress_command_policies_retention"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730102731_egress_command_policies_retention.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730220000_conversation_platform.sql",
+    "authoritative": [
+      {
+        "version": "20260730203059",
+        "name": "conversation_platform"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730203059_conversation_platform.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260730223000_api_tokens.sql",
+    "authoritative": [
+      {
+        "version": "20260730104416",
+        "name": "api_tokens"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730104416_api_tokens.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260731003000_review_runs.sql",
+    "authoritative": [
+      {
+        "version": "20260730110931",
+        "name": "review_runs"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730110931_review_runs.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260731020000_automations.sql",
+    "authoritative": [
+      {
+        "version": "20260730114324",
+        "name": "automations"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730114324_automations.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260731100000_app_build_platform.sql",
+    "authoritative": [
+      {
+        "version": "20260730212120",
+        "name": "app_build_platform"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730212120_app_build_platform.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260731150000_app_publish_platform.sql",
+    "authoritative": [
+      {
+        "version": "20260730233508",
+        "name": "app_publish_platform"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260730233508_app_publish_platform.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801090000_owner_accounts.sql",
+    "authoritative": [
+      {
+        "version": "20260731100621",
+        "name": "owner_accounts"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260731100621_owner_accounts.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801120000_repair_pipeline_hardening.sql",
+    "authoritative": [
+      {
+        "version": "20260801160607",
+        "name": "repair_pipeline_hardening"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801160607_repair_pipeline_hardening.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801150000_per_app_runtime.sql",
+    "authoritative": [
+      {
+        "version": "20260731113457",
+        "name": "per_app_runtime"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260731113457_per_app_runtime.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801160000_persistent_build_checkpoints.sql",
+    "authoritative": [
+      {
+        "version": "20260801162814",
+        "name": "persistent_build_checkpoints"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801162814_persistent_build_checkpoints.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801180000_provider_constraints_and_telemetry_grants.sql",
+    "authoritative": [
+      {
+        "version": "20260801180459",
+        "name": "provider_constraints_and_telemetry_grants"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801180459_provider_constraints_and_telemetry_grants.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801200000_qa_runs_thrallo.sql",
+    "authoritative": [
+      {
+        "version": "20260801195851",
+        "name": "qa_runs_thrallo"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801195851_qa_runs_thrallo.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801200000_soft_delete.sql",
+    "authoritative": [
+      {
+        "version": "20260731151901",
+        "name": "soft_delete"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260731151901_soft_delete.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801220000_app_notifications.sql",
+    "authoritative": [
+      {
+        "version": "20260801202309",
+        "name": "app_notifications"
+      },
+      {
+        "version": "20260801202626",
+        "name": "app_notifications_source_is_trusted_only"
+      },
+      {
+        "version": "20260801203017",
+        "name": "app_notifications_column_grants"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "3 production migrations",
+    "finalReconstructedFilenames": [
+      "20260801202309_app_notifications.sql",
+      "20260801202626_app_notifications_source_is_trusted_only.sql",
+      "20260801203017_app_notifications_column_grants.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260801220000_build_diagnostics.sql",
+    "authoritative": [
+      {
+        "version": "20260801000408",
+        "name": "build_diagnostics"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801000408_build_diagnostics.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802100000_ai_requests.sql",
+    "authoritative": [
+      {
+        "version": "20260801080238",
+        "name": "ai_requests"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801080238_ai_requests.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802120000_ai_requests_context.sql",
+    "authoritative": [
+      {
+        "version": "20260801082604",
+        "name": "ai_requests_context"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801082604_ai_requests_context.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802140000_conversation_model_pref.sql",
+    "authoritative": [
+      {
+        "version": "20260801090748",
+        "name": "conversation_model_pref"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801090748_conversation_model_pref.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802160000_diag_incidents.sql",
+    "authoritative": [
+      {
+        "version": "20260801120332",
+        "name": "diag_incidents"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801120332_diag_incidents.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802180000_build_signals.sql",
+    "authoritative": [
+      {
+        "version": "20260801134602",
+        "name": "build_signals"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260801134602_build_signals.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802200000_allow_xai_provider.sql",
+    "authoritative": [
+      {
+        "version": "20260801140736",
+        "name": "ai_credentials_allow_xai"
+      },
+      {
+        "version": "20260801140806",
+        "name": "ai_preferences_allow_xai"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "2 production migrations",
+    "finalReconstructedFilenames": [
+      "20260801140736_ai_credentials_allow_xai.sql",
+      "20260801140806_ai_preferences_allow_xai.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260802220000_subscription_plan_changes.sql",
+    "authoritative": [
+      {
+        "version": "20260802150108",
+        "name": "subscription_plan_changes"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260802150108_subscription_plan_changes.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260803000000_publish_lifecycle_unpublish.sql",
+    "authoritative": [
+      {
+        "version": "20260802185336",
+        "name": "publish_lifecycle_unpublish"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260802185336_publish_lifecycle_unpublish.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260803120000_custom_domain_verification.sql",
+    "authoritative": [
+      {
+        "version": "20260802210939",
+        "name": "custom_domain_verification"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260802210939_custom_domain_verification.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260803180000_analytics_logs_health_tables.sql",
+    "authoritative": [
+      {
+        "version": "20260802220217",
+        "name": "thrallo_analytics_foundation"
+      },
+      {
+        "version": "20260802223316",
+        "name": "health_monitoring"
+      },
+      {
+        "version": "20260802234247",
+        "name": "project_logs"
+      },
+      {
+        "version": "20260803005550",
+        "name": "analytics_logs_health_tables_reconcile"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "4 production migrations",
+    "finalReconstructedFilenames": [
+      "20260802220217_thrallo_analytics_foundation.sql",
+      "20260802223316_health_monitoring.sql",
+      "20260802234247_project_logs.sql",
+      "20260803005550_analytics_logs_health_tables_reconcile.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260803210000_one_live_site_per_product.sql",
+    "authoritative": [
+      {
+        "version": "20260803124509",
+        "name": "one_live_site_per_product"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260803124509_one_live_site_per_product.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260803230000_deployments.sql",
+    "authoritative": [
+      {
+        "version": "20260803150144",
+        "name": "deployments"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260803150144_deployments.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260804120000_conversation_favourites_archive.sql",
+    "authoritative": [
+      {
+        "version": "20260803205904",
+        "name": "conversation_favourites_archive"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260803205904_conversation_favourites_archive.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260805090000_account_notifications_cancellation.sql",
+    "authoritative": [
+      {
+        "version": "20260803233001",
+        "name": "account_notifications_cancellation"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260803233001_account_notifications_cancellation.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260806090000_onboarding_state.sql",
+    "authoritative": [
+      {
+        "version": "20260804090105",
+        "name": "onboarding_state"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260804090105_onboarding_state.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260807090000_analytics_country.sql",
+    "authoritative": [
+      {
+        "version": "20260804103902",
+        "name": "analytics_country"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260804103902_analytics_country.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260808090000_diag_runs_implementation_contract.sql",
+    "authoritative": [
+      {
+        "version": "20260804201913",
+        "name": "diag_runs_implementation_contract"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260804201913_diag_runs_implementation_contract.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260808100000_build_checkpoints_stage.sql",
+    "authoritative": [
+      {
+        "version": "20260804203403",
+        "name": "build_checkpoints_stage"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260804203403_build_checkpoints_stage.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260808110000_ai_requests_provider_request_ids.sql",
+    "authoritative": [
+      {
+        "version": "20260805072157",
+        "name": "ai_requests_provider_request_ids"
+      }
+    ],
+    "sqlEquivalence": "canonical SQL exact",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260805072157_ai_requests_provider_request_ids.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260809090000_builder_v2_foundation.sql",
+    "authoritative": [
+      {
+        "version": "20260805190622",
+        "name": "builder_v2_foundation"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260805190622_builder_v2_foundation.sql"
+    ]
+  },
+  {
+    "currentLocalFilename": "20260810213000_bv2_verification_cache_nullable_snapshot.sql",
+    "authoritative": [
+      {
+        "version": "20260805212028",
+        "name": "bv2_verification_cache_nullable_snapshot"
+      }
+    ],
+    "sqlEquivalence": "not text-equivalent; catalog/semantic comparison required",
+    "representation": "one production migration",
+    "finalReconstructedFilenames": [
+      "20260805212028_bv2_verification_cache_nullable_snapshot.sql"
+    ]
+  }
+]
