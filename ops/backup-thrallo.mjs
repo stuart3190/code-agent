@@ -377,9 +377,10 @@ async function buildMigrationState(ledger) {
     if (!match) throw new Error(`invalid active migration filename: ${filename}`);
     const sql = await readFile(path.join(migrationsDir, filename));
     const row = authoritative.get(match[1]);
-    const sqlSha256 = sha256(sql);
+    const fileSha256 = sha256(sql);
+    const sqlSha256 = canonicalSqlHash(sql);
     if (row && row.sqlSha256 !== sqlSha256) throw new Error(`applied migration hash diverged: ${filename}`);
-    state.push({ version: match[1], name: match[2], filename, sqlSha256, applied: !!row, appliedOrder: row?.appliedOrder ?? null });
+    state.push({ version: match[1], name: match[2], filename, sqlSha256, fileSha256, applied: !!row, appliedOrder: row?.appliedOrder ?? null });
   }
   for (const migration of ledger.migrations) {
     if (!state.some((row) => row.version === String(migration.version))) {
@@ -396,6 +397,10 @@ async function currentGitCommit() {
   if (!ref) return null;
   const value = (await readFile(path.resolve(".git", ref), "utf8").catch(() => "")).trim();
   return /^[0-9a-f]{40}$/i.test(value) ? value : null;
+}
+
+export function canonicalSqlHash(bytes) {
+  return sha256(Buffer.from(Buffer.from(bytes).toString("utf8").replace(/\r\n/g, "\n")));
 }
 
 if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1]))) {

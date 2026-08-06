@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { CA_TABLES } from "../../ops/backup-thrallo.mjs";
+import { CA_TABLES, canonicalSqlHash } from "../../ops/backup-thrallo.mjs";
 import { RESTORE_ORDER } from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 
@@ -137,6 +137,13 @@ test("backup validation verifies storage, filesystem, and migration-ledger paylo
   assert.equal((await validateBackupDirectory(dir)).ok, true);
   await writeFile(path.join(dir, filesystemFile), gzipSync(Buffer.from("tampered")));
   await assert.rejects(validateBackupDirectory(dir), /byte|checksum/i);
+});
+
+test("authoritative migration identity is line-ending independent without changing file hashes", async () => {
+  const lf = Buffer.from("select 1;\nselect 2;\n");
+  const crlf = Buffer.from("select 1;\r\nselect 2;\r\n");
+  assert.notEqual(createHash("sha256").update(lf).digest("hex"), createHash("sha256").update(crlf).digest("hex"));
+  assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
 test("systemd units and the runbook ship with the repository", async () => {
