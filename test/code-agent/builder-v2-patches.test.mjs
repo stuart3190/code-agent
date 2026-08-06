@@ -173,3 +173,32 @@ test("replaceFile: the only way to change CSS — validated, protected-path-awar
   const opaqueOp = applyPatches(tree, [{ file: "src/index.css", ops: [{ op: "append", content: "x" }] }]);
   assert.match(opaqueOp.rejected[0].reason, /use replaceFile with the COMPLETE new content/);
 });
+
+// ── WP-11 attempt-3 evidence: imports are lines, duplicate defaults are free rejections ───────
+
+test("add_import inserts after the last import; naming an import as a symbol teaches the op", () => {
+  const tree = { "src/App.jsx": 'import React from "react";\nimport { A } from "./a";\n\nexport default function App() { return null; }\n' };
+  const ok = applyPatches(tree, [{ file: "src/App.jsx", ops: [{ op: "add_import", symbol: null, content: 'import HomePage from "./routes/HomePage";' }] }]);
+  assert.equal(ok.rejected.length, 0, JSON.stringify(ok.rejected));
+  const lines = ok.tree["src/App.jsx"].split("\n");
+  assert.equal(lines[2], 'import HomePage from "./routes/HomePage";', "after the LAST existing import");
+
+  const bad = applyPatches(tree, [{ file: "src/App.jsx", ops: [{ op: "add_import", symbol: null, content: "const x = 1;" }] }]);
+  assert.match(bad.rejected[0].reason, /must be a complete import statement/);
+
+  // The exact live miss: an import statement named as a symbol — the rejection names add_import.
+  const miss = applyPatches(tree, [{ file: "src/App.jsx", ops: [{ op: "insert_after_symbol", symbol: 'import HomePage from "./routes/HomePage";', content: "x" }] }]);
+  assert.match(miss.rejected[0].reason, /use \{op: "add_import"/);
+});
+
+test("a second default export is rejected at APPLY time with the fix named — never a compile round", () => {
+  const tree = { "src/routes/HomePage.jsx": "export default function HomePage() {\n  return null;\n}\n" };
+  const dup = applyPatches(tree, [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", symbol: null, content: "export default function BetterHome() {\n  return 1;\n}" }] }]);
+  assert.equal(dup.applied.length, 0);
+  assert.match(dup.rejected[0].reason, /2 default exports.*HomePage.*BetterHome/s);
+  assert.match(dup.rejected[0].reason, /use replace_symbol on the existing default/);
+
+  // The correct move still works.
+  const ok = applyPatches(tree, [{ file: "src/routes/HomePage.jsx", ops: [{ op: "replace_symbol", symbol: "HomePage", content: "export default function HomePage() {\n  return 2;\n}" }] }]);
+  assert.equal(ok.rejected.length, 0, JSON.stringify(ok.rejected));
+});

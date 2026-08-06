@@ -45,7 +45,7 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
                 additionalProperties: false,
                 required: ["op", "symbol", "content"],
                 properties: {
-                  op: { type: "string", enum: ["replace_symbol", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append"] },
+                  op: { type: "string", enum: ["replace_symbol", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
                   symbol: { type: ["string", "null"] },
                   content: { type: ["string", "null"] },
                 },
@@ -63,6 +63,16 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
 });
 
 const isProtected = (path) => PROTECTED_PATHS.some((re) => re.test(path));
+
+// Two default exports compile-fail EVERY time — a live run burned a full gate round on
+// "Multiple exports with the same name 'default'" from an append that should have been a
+// replace_symbol. Caught here it costs a free rejection with the fix named.
+function duplicateDefault(probe) {
+  const defaults = (probe.symbols || []).filter((s) => s.isDefault);
+  if (defaults.length <= 1) return null;
+  return `this would leave ${defaults.length} default exports (${defaults.map((s) => s.name).join(", ")}) — `
+    + `use replace_symbol on the existing default component instead of adding another`;
+}
 
 function opSignature(patch, op) {
   if (patch.newFile) return `new:${patch.newFile}`;
@@ -134,10 +144,29 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       const index = indexFile(file, current);
       if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`); continue; }
 
+      // Imports are lines, not symbols — two live runs burned whole rounds trying to name
+      // an import statement as a symbol. add_import inserts after the file's last import.
+      if (op.op === "add_import") {
+        const statement = String(op.content || "").trim();
+        if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement"); continue; }
+        const lines = current.split("\n");
+        let lastImport = -1;
+        for (let i = 0; i < lines.length; i += 1) if (/^\s*import\b/.test(lines[i])) lastImport = i;
+        lines.splice(lastImport + 1, 0, statement);
+        const candidate = lines.join("\n");
+        const probe = indexFile(file, candidate);
+        if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse"); continue; }
+        working[file] = candidate;
+        applied.push({ signature: opSignature(patch, op), file, kind: op.op });
+        continue;
+      }
+
       if (op.op === "append") {
         const candidate = `${current}\n${op.content || ""}`;
         const probe = indexFile(file, candidate);
         if (probe.opaque) { reject(patch, op, "append: resulting file does not parse"); continue; }
+        const dupDefault = duplicateDefault(probe);
+        if (dupDefault) { reject(patch, op, dupDefault); continue; }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -146,7 +175,10 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       const symbol = index.symbols.find((s) => s.name === op.symbol);
       if (!symbol) {
         const known = index.symbols.map((s) => s.name).join(", ");
-        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}`);
+        const importHint = /^\s*import\b/.test(String(op.symbol || ""))
+          ? ' — to ADD an import, use {op: "add_import", content: "import …"} instead of naming the statement as a symbol'
+          : "";
+        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}${importHint}`);
         continue;
       }
 
@@ -166,6 +198,8 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
       const probe = indexFile(file, candidate);
       if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`); continue; }
+      const dupDefault = duplicateDefault(probe);
+      if (dupDefault) { reject(patch, op, dupDefault); continue; }
       working[file] = candidate;
       applied.push({ signature: opSignature(patch, op), file, kind: op.op });
     }

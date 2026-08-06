@@ -29,7 +29,9 @@ const PATCH_SYSTEM_PROMPT = `You are the implementation engine of an app builder
 implementation contract, the current file tree of a React+Vite app, and pre-resolved image
 assets. You make changes ONLY by calling emit_patches — symbol-level operations validated
 against a code index. Rules:
-- newFile creates files; never rewrite an existing file via newFile. Ops modify existing files.
+- newFile creates files; never rewrite an existing file via newFile. Ops modify existing files:
+  add_import adds an import line (imports are NOT symbols); replace_symbol swaps a component
+  wholesale (never append a second default component); replaceFile is for index-opaque files.
 - Pages live in src/routes/<Name>.jsx and MUST be registered in src/App.jsx's ROUTES map
   (replace_symbol on the existing map or the App component).
 - src/lib/backend/, src/lib/visitorSession.js and src/lib/capabilities/ are protected platform

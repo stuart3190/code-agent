@@ -112,6 +112,7 @@ const orchestrator = createOrchestrator({
   compile: async (candidate) => buildTree(withRuntimeEnv(candidate, projectId), "bv2_booking", () => {}),
   baseTree: () => clone(fromScaffold(REACT_VITE)),
   baseline: REACT_VITE,
+  maxCoreAttempts: 4, // medium profile (Part 4): det → 2 targeted → 1 regen-class round
   extraGateOptions: { nodeModules: depsNodeModules(), log },
   log: (line) => {
     if (/^core green:/.test(line) && coreGreenCredits === null) {
