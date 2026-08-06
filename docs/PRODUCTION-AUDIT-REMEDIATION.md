@@ -40,7 +40,7 @@ values.
 | PR-01 Freeze and current-state baseline | Local implementation complete | Current main matched; local capture, 5 focused tests, full code-agent suite, web build, and 118 browser tests pass | Live read awaiting explicit approval |
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
-| PR-04 Atomic graph and shadow | Pending | Audit evidence confirmed; current shadow period invalid | None |
+| PR-04 Atomic graph and shadow | Local implementation and disposable proof complete; production approval pending | Atomic failure/retry/concurrency, owner/browser isolation, stored-fixture parity, complete drift matrix, fresh reset/lint/zero diff | Do not apply migration or restart shadow without approval |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
@@ -69,6 +69,21 @@ not be renamed or repaired remotely until the real `supabase_migrations.schema_m
 and corresponding live objects have been compared.
 
 ## Implemented correctness units
+
+- Atomic graph persistence is implemented by the pending additive migration
+  `20260806221153_bv2_atomic_graph_and_full_shadow.sql`. One service-only RPC transaction owns the
+  revision, symbols, references, edges, readiness/count metadata and immutable graph hash.
+  Transaction-scoped advisory locking serializes identical revisions; retries repair quarantined
+  incomplete rows and reject conflicting ready graphs. Composite project/owner/revision foreign
+  keys prevent tenant mixing, while authenticated/anonymous roles have no table or RPC access.
+- Shadow results now pin an exact revision manifest and append every validation check. CLEAN means
+  exact equivalence across paths, hashes, opaque state, symbols/spans/hashes/metadata, references,
+  edges, callers/importers/imports and ownership answers. Missing, extra, incomplete, corrupt or
+  stale evidence exits non-zero. The old shadow week remains invalid and has not been restarted.
+- Fresh reset, lint, migration history and zero-diff checks passed on a disposable Supabase stack.
+  Real Postgres fault triggers proved rollback at all four write stages, safe retry, concurrent
+  convergence, tenant/browser isolation and snapshot/shadow-aware GC. See
+  `docs/evidence/builder-v2-graph/2026-08-06/PROOF.md`.
 
 - `a5be84a` keeps unattributed essential failures blocking, records
   `journey_ownership_missing` separately, and supplies repair with deterministic bounded fallback

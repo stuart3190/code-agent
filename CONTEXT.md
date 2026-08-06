@@ -919,6 +919,22 @@ gated — NO paid run without Stuart), `ops/bv2-dual-run.mjs` (zero-credit compa
 Diagnostics: v2 runs appear in DiagnosticsView with a Builder v2 panel (per-step spend,
 snapshot lineage, pointers) via `/api/v1/diagnostics/:id/bv2`.
 
+Phase B atomic graph remediation is locally complete on `remediation/builder-v2-production`.
+Pending migration `20260806221153_bv2_atomic_graph_and_full_shadow.sql` replaces per-child
+PostgREST writes with one service-only transaction per file, quarantines incomplete revisions,
+serializes duplicate writers and records exact shadow manifests/checks. The complete shadow proof
+now compares paths, hashes, opaque state, symbols/spans/hashes, refs/resolution, edges,
+callers/importers/imports and ownership answers; stale/incomplete/missing/extra state is non-zero
+drift. Fresh reset, lint, zero diff, real Postgres fault injection, concurrent/owner/browser
+isolation, stored production-fixture parity and GC pin proofs pass. No production migration or flag
+change occurred. Runbook: `docs/BUILDER-V2-SHADOW-RUNBOOK.md`; evidence:
+`docs/evidence/builder-v2-graph/2026-08-06/PROOF.md`.
+
+The 2026-08-06 shadow week remains invalid and has NOT restarted. Before restart: approve/apply
+pending migrations in order after production upgrade proof, deploy the matching app, re-confirm V1
+default/V2 paused/settlement paused, take and isolate-restore a post-migration backup, prove one
+real V1 completion writes an immediate CLEAN check, then record a new timestamp from zero.
+
 ## Next implementation slice
 
 Phase 24 completion: Stuart's steps 1-2 (Meta ad, Stripe audit — YOU_NEED_TO_DO.md), then
