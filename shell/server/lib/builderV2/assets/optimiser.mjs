@@ -4,11 +4,12 @@
 // copied into thrallo-artifacts as AVIF + WebP responsive variants plus a tiny inline blur
 // placeholder (LQIP), so previews never hotlink a provider CDN that may purge, and the
 // scaffold's src/lib/assets.js helper can render picture/srcset/lazy/blur from the
-// variants map alone. Optimisation is best-effort: any failure leaves the asset serving
-// its original provider URLs — a build never blocks on image processing.
+// variants map alone. Optimisation is the ingestion boundary: rejected remote bytes are
+// never persisted or served, while the caller can continue with a local placeholder.
 
 import crypto from "node:crypto";
 import { serviceClient } from "../../supabase.mjs";
+import { fetchSafeImage } from "./safeImageFetch.mjs";
 
 const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
 const ASSET_PREFIX = "bv2-assets";
@@ -16,6 +17,8 @@ const ASSET_PREFIX = "bv2-assets";
 /** Responsive rungs; each variant is generated only when the source is at least that wide. */
 export const RESPONSIVE_WIDTHS = [640, 1280, 1920];
 const BLUR_WIDTH = 16;
+const MAX_INPUT_PIXELS = 40_000_000;
+const MAX_DIMENSION = 10_000;
 
 export function variantWidthsFor(sourceWidth) {
   const widths = RESPONSIVE_WIDTHS.filter((w) => w <= sourceWidth);
@@ -27,7 +30,7 @@ export function variantWidthsFor(sourceWidth) {
  * provable on generated pixels with a capturing fake bucket (no network, no prod writes).
  */
 export function createOptimiser({
-  sharpImpl = null, fetchImpl = fetch, client = null, bucket = ARTIFACT_BUCKET,
+  sharpImpl = null, fetchImpl = fetch, dnsLookup = undefined, client = null, bucket = ARTIFACT_BUCKET,
 } = {}) {
   let sharpPromise = null;
   const loadSharp = () => {
@@ -45,11 +48,14 @@ export function createOptimiser({
      */
     async optimise(owner, { url, alt = "" }) {
       const sharp = await loadSharp();
-      const res = await fetchImpl(url);
-      if (!res.ok) throw new Error(`asset download failed: HTTP ${res.status}`);
-      const original = Buffer.from(await res.arrayBuffer());
+      const { bytes: original } = await fetchSafeImage(url, { fetchImpl, ...(dnsLookup ? { dnsLookup } : {}) });
       const contentHash = crypto.createHash("sha256").update(original).digest("hex");
-      const meta = await sharp(original).metadata();
+      const image = () => sharp(original, {
+        failOn: "error", limitInputPixels: MAX_INPUT_PIXELS, limitInputChannels: 4, sequentialRead: true,
+      });
+      const meta = await image().metadata();
+      if (!meta.width || !meta.height || meta.width > MAX_DIMENSION || meta.height > MAX_DIMENSION
+        || meta.width * meta.height > MAX_INPUT_PIXELS) throw new Error("asset dimensions exceed safe limits");
       const widths = variantWidthsFor(meta.width || RESPONSIVE_WIDTHS[0]);
 
       const supa = storageClient();
@@ -58,24 +64,26 @@ export function createOptimiser({
 
       async function put(path, bytes, contentType) {
         const { error } = await supa.storage.from(bucket)
-          .upload(path, bytes, { upsert: true, contentType });
+          .upload(path, bytes, { upsert: false, contentType });
         if (error) throw new Error(`asset variant upload: ${error.message}`);
       }
       const publicUrl = (path) => supa.storage.from(bucket).getPublicUrl(path)?.data?.publicUrl || null;
 
       for (const width of widths) {
-        const resized = sharp(original).resize({ width, withoutEnlargement: true });
+        const resized = image().resize({ width, withoutEnlargement: true });
         const [avif, webp] = await Promise.all([
           resized.clone().avif({ quality: 55 }).toBuffer(),
           resized.clone().webp({ quality: 78 }).toBuffer(),
         ]);
-        await put(`${basePath}/${width}.avif`, avif, "image/avif");
-        await put(`${basePath}/${width}.webp`, webp, "image/webp");
-        variants.avif.push({ width, path: `${basePath}/${width}.avif`, url: publicUrl(`${basePath}/${width}.avif`) });
-        variants.webp.push({ width, path: `${basePath}/${width}.webp`, url: publicUrl(`${basePath}/${width}.webp`) });
+        const avifPath = `${basePath}/${width}-${crypto.createHash("sha256").update(avif).digest("hex")}.avif`;
+        const webpPath = `${basePath}/${width}-${crypto.createHash("sha256").update(webp).digest("hex")}.webp`;
+        await put(avifPath, avif, "image/avif");
+        await put(webpPath, webp, "image/webp");
+        variants.avif.push({ width, path: avifPath, url: publicUrl(avifPath) });
+        variants.webp.push({ width, path: webpPath, url: publicUrl(webpPath) });
       }
 
-      const blurBytes = await sharp(original)
+      const blurBytes = await image()
         .resize({ width: BLUR_WIDTH }).webp({ quality: 30 }).toBuffer();
       variants.blur = `data:image/webp;base64,${blurBytes.toString("base64")}`;
 

@@ -9,6 +9,7 @@ import {
   createAssetService, rankCandidates, seededIndex, placeholderFor, rewriteDirective,
 } from "../../shell/server/lib/builderV2/assets/assetService.mjs";
 import { createOptimiser, variantWidthsFor, RESPONSIVE_WIDTHS } from "../../shell/server/lib/builderV2/assets/optimiser.mjs";
+import { fetchSafeImage, publicIp } from "../../shell/server/lib/builderV2/assets/safeImageFetch.mjs";
 import {
   imageProps, pictureSources, placeholderStyle, isPlaceholder,
 } from "../../src/scaffolds/reactVite/lib/assets.js";
@@ -18,13 +19,13 @@ import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
 const RECORDED_PHOTOS = [
   { id: 101, width: 1920, height: 1280, alt: "family picking strawberries in a sunny field",
-    photographer: "A. Farmer", src: { original: "https://images.pexels.com/101/original.jpg", large2x: "https://images.pexels.com/101/large2x.jpg", medium: "https://images.pexels.com/101/medium.jpg" } },
+    photographer: "A. Farmer", photographer_url: "https://www.pexels.com/@a-farmer", url: "https://www.pexels.com/photo/family-picking-101/", src: { original: "https://images.pexels.com/101/original.jpg", large2x: "https://images.pexels.com/101/large2x.jpg", medium: "https://images.pexels.com/101/medium.jpg" } },
   { id: 102, width: 2400, height: 1600, alt: "strawberry rows at golden hour on a family farm",
-    photographer: "B. Grower", src: { original: "https://images.pexels.com/102/original.jpg", large2x: "https://images.pexels.com/102/large2x.jpg", medium: "https://images.pexels.com/102/medium.jpg" } },
+    photographer: "B. Grower", photographer_url: "https://www.pexels.com/@b-grower", url: "https://www.pexels.com/photo/strawberry-rows-102/", src: { original: "https://images.pexels.com/102/original.jpg", large2x: "https://images.pexels.com/102/large2x.jpg", medium: "https://images.pexels.com/102/medium.jpg" } },
   { id: 103, width: 640, height: 960, alt: "berries",
-    photographer: "C. Small", src: { original: "https://images.pexels.com/103/original.jpg", large: "https://images.pexels.com/103/large.jpg", medium: "https://images.pexels.com/103/medium.jpg" } },
+    photographer: "C. Small", photographer_url: "https://www.pexels.com/@c-small", url: "https://www.pexels.com/photo/berries-103/", src: { original: "https://images.pexels.com/103/original.jpg", large: "https://images.pexels.com/103/large.jpg", medium: "https://images.pexels.com/103/medium.jpg" } },
   { id: 104, width: 1800, height: 1200, alt: "fresh strawberries close up in a wooden basket",
-    photographer: "D. Macro", src: { original: "https://images.pexels.com/104/original.jpg", large2x: "https://images.pexels.com/104/large2x.jpg", medium: "https://images.pexels.com/104/medium.jpg" } },
+    photographer: "D. Macro", photographer_url: "https://www.pexels.com/@d-macro", url: "https://www.pexels.com/photo/strawberries-104/", src: { original: "https://images.pexels.com/104/original.jpg", large2x: "https://images.pexels.com/104/large2x.jpg", medium: "https://images.pexels.com/104/medium.jpg" } },
 ];
 
 function recordedFetch(log = []) {
@@ -54,7 +55,11 @@ function fakeAssetClient() {
         const saved = rows.find((r) => keys.every((k) => r[k] === state.payload[k]));
         return state.maybe ? { data: { ...saved }, error: null } : { data: [{ ...saved }], error: null };
       }
-      if (state.op === "update") { for (const r of rows) if (matches(r)) Object.assign(r, state.payload); return { data: null, error: null }; }
+      if (state.op === "update") {
+        const changed = [];
+        for (const r of rows) if (matches(r)) { Object.assign(r, state.payload); changed.push({ ...r }); }
+        return state.maybe ? { data: changed[0] || null, error: null } : { data: changed, error: null };
+      }
       if (state.op === "delete") { const keep = rows.filter((r) => !matches(r)); rows.length = 0; rows.push(...keep); return { data: null, error: null }; }
       return { data: null, error: { message: "unsupported" } };
     };
@@ -103,8 +108,12 @@ test("A1 — every cached asset carries the C6 licence snapshot with its retriev
   const row = client._rows[0];
   assert.equal(row.license.name, PEXELS_LICENSE_SNAPSHOT.name);
   assert.equal(row.license.attributionRequired, false);
+  assert.equal(row.license.apiLinkRequired, true);
   assert.ok(row.license.prohibited.length >= 4, "the prohibitions travel with the asset");
   assert.equal(row.license.retrievedAt, FIXED_NOW().toISOString());
+  assert.equal(row.license.attribution.providerUrl, "https://www.pexels.com");
+  assert.match(row.license.attribution.photographerUrl, /^https:\/\/www\.pexels\.com\/@/);
+  assert.match(row.license.attribution.photoUrl, /^https:\/\/www\.pexels\.com\/photo\//);
   assert.equal(row.provider, "pexels");
   assert.ok(row.provider_asset_id);
   assert.ok(row.original_url.startsWith("https://images.pexels.com/"));
@@ -146,18 +155,45 @@ test("A1 — provider failure degrades to a deterministic branded placeholder; t
 test("A1/A3 — regeneration touches ONLY the selected slot, changes the image, honours the directive", async () => {
   const { svc, client, log } = service();
   await svc.resolveIntents("o", "proj-1", INTENTS);
-  const heroBefore = client._rows.find((r) => r.slot === "hero");
+  const heroBefore = { ...client._rows.find((r) => r.slot === "hero") };
   const visitBefore = { ...client._rows.find((r) => r.slot === "route:/visit") };
 
   const { results } = await svc.regenerate("o", "proj-1", { slots: ["hero"], directive: "use darker photography" });
   assert.equal(results[0].via, "regenerated");
   assert.notEqual(results[0].asset.provider_asset_id, heroBefore.provider_asset_id, "the image actually changed");
+  assert.equal(results[0].asset.id, heroBefore.id, "the slot switches with one atomic row update");
+  assert.equal(client._rows.length, 2, "replacement does not create a second live row");
   assert.match(log[log.length - 1], /dark\+moody|dark%20moody/, "the directive rewrote the provider query");
 
   const visitAfter = client._rows.find((r) => r.slot === "route:/visit");
   assert.equal(visitAfter.provider_asset_id, visitBefore.provider_asset_id, "unselected slots byte-identical");
   assert.equal(rewriteDirective("make it more modern and brighter"), "bright airy natural light modern minimalist");
   assert.equal(rewriteDirective("no known words"), "");
+});
+
+test("H5 — a failed asset replacement leaves the current slot unchanged", async () => {
+  let calls = 0;
+  const optimiser = {
+    optimise: async () => {
+      calls += 1;
+      if (calls > 1) throw new Error("replacement decode failed");
+      return {
+        content_hash: "a".repeat(64), storage_path: "bv2-assets/a",
+        optimised_url: "https://cdn.test/a.webp", variants: {}, width: 1200, height: 800,
+      };
+    },
+  };
+  const client = fakeAssetClient();
+  const provider = pexelsProvider({ apiKey: "k", fetchImpl: recordedFetch() });
+  const svc = createAssetService({ providers: [provider], client, now: FIXED_NOW, optimiser });
+  await svc.resolveIntents("o", "proj-1", [INTENTS[0]]);
+  const before = structuredClone(client._rows[0]);
+
+  await assert.rejects(
+    svc.regenerate("o", "proj-1", { slots: ["hero"], directive: "darker" }),
+    /asset ingestion rejected: replacement decode failed/,
+  );
+  assert.deepEqual(client._rows, [before], "no pointer or metadata changes before replacement succeeds");
 });
 
 test("A1/A3 — the asset index filters and the manifest is deterministic per project", async () => {
@@ -211,7 +247,7 @@ function fakeBucketClient(uploads = []) {
   return {
     storage: {
       from: () => ({
-        upload: async (path, bytes, opts) => { uploads.push({ path, size: bytes.length, contentType: opts.contentType }); return { error: null }; },
+        upload: async (path, bytes, opts) => { uploads.push({ path, size: bytes.length, contentType: opts.contentType, upsert: opts.upsert }); return { error: null }; },
         getPublicUrl: (path) => ({ data: { publicUrl: `https://cdn.test/${path}` } }),
       }),
     },
@@ -224,7 +260,8 @@ test("A2 — REAL sharp: AVIF+WebP responsive variants + blur LQIP land in the b
     .jpeg().toBuffer();
   const uploads = [];
   const optimiser = createOptimiser({
-    fetchImpl: async () => ({ ok: true, arrayBuffer: async () => source }),
+    fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers({ "content-type": "image/jpeg" }), arrayBuffer: async () => source }),
+    dnsLookup: async () => [{ address: "8.8.8.8" }],
     client: fakeBucketClient(uploads),
   });
 
@@ -236,8 +273,10 @@ test("A2 — REAL sharp: AVIF+WebP responsive variants + blur LQIP land in the b
   assert.ok(out.variants.blur.length < 2000, "blur stays tiny enough to inline");
   assert.equal(uploads.length, 4, "2 widths × 2 formats uploaded");
   assert.ok(uploads.every((u) => u.path.startsWith(`bv2-assets/owner-1/${out.content_hash}/`)), "content-addressed per owner");
+  assert.ok(uploads.every((u) => /\/[0-9]+-[a-f0-9]{64}\.(?:avif|webp)$/.test(u.path)), "derived bytes have immutable content-addressed names");
+  assert.ok(uploads.every((u) => u.upsert === false), "immutable variants cannot be overwritten");
   assert.ok(uploads.every((u) => u.size > 0));
-  assert.equal(out.optimised_url, `https://cdn.test/${out.storage_path}/1280.webp`, "primary = largest webp");
+  assert.match(out.optimised_url, new RegExp(`^https://cdn\\.test/${out.storage_path}/1280-[a-f0-9]{64}\\.webp$`), "primary = largest immutable webp");
   assert.equal(out.content_hash.length, 64, "sha256 of the ORIGINAL bytes");
 
   // A source smaller than every rung still gets exactly one variant at its own width.
@@ -245,7 +284,7 @@ test("A2 — REAL sharp: AVIF+WebP responsive variants + blur LQIP land in the b
   assert.deepEqual(variantWidthsFor(4000), RESPONSIVE_WIDTHS);
 });
 
-test("A2 — the service merges optimiser output onto the row; optimiser failure keeps original URLs", async () => {
+test("A2/H5 — the service merges optimiser output; rejected ingestion uses a placeholder", async () => {
   const goodOptimiser = { optimise: async (owner, { alt }) => ({
     content_hash: "c".repeat(64), storage_path: `bv2-assets/o/${"c".repeat(64)}`,
     optimised_url: "https://cdn.test/opt.webp",
@@ -266,9 +305,36 @@ test("A2 — the service merges optimiser output onto the row; optimiser failure
   const client2 = fakeAssetClient();
   const svc2 = createAssetService({ providers: [pexelsProvider({ apiKey: "k", fetchImpl: recordedFetch() })], client: client2, now: FIXED_NOW, optimiser: failing });
   const { resolved } = await svc2.resolveIntents("o", "proj-1", [INTENTS[0]]);
-  assert.equal(resolved[0].via, "search", "the build continues");
-  assert.equal(client2._rows[0].optimised_url, null);
-  assert.ok(client2._rows[0].original_url, "original provider URL still serves");
+  assert.equal(resolved[0].via, "placeholder", "the build continues without serving rejected remote bytes");
+  assert.equal(client2._rows.length, 0, "a failed security boundary persists no remote asset row");
+});
+
+test("H5 — image fetch rejects SSRF, redirects, oversized bodies and MIME confusion", async () => {
+  assert.equal(publicIp("127.0.0.1"), false);
+  assert.equal(publicIp("169.254.169.254"), false);
+  assert.equal(publicIp("10.0.0.1"), false);
+  assert.equal(publicIp("8.8.8.8"), true);
+  const publicDns = async () => [{ address: "8.8.8.8" }];
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const response = (bytes, headers = { "content-type": "image/jpeg" }, status = 200) => ({
+    ok: status >= 200 && status < 300, status, headers: new Headers(headers), arrayBuffer: async () => bytes,
+  });
+
+  await assert.rejects(fetchSafeImage("http://images.pexels.com/x.jpg", { fetchImpl: async () => response(jpeg), dnsLookup: publicDns }), /allowlisted HTTPS/);
+  await assert.rejects(fetchSafeImage("https://images.pexels.com/x.jpg", {
+    fetchImpl: async () => response(jpeg), dnsLookup: async () => [{ address: "127.0.0.1" }],
+  }), /non-public/);
+  await assert.rejects(fetchSafeImage("https://images.pexels.com/x.jpg", {
+    fetchImpl: async () => response(Buffer.from("not an image"), { "content-type": "image/jpeg" }), dnsLookup: publicDns,
+  }), /MIME/);
+  await assert.rejects(fetchSafeImage("https://images.pexels.com/x.jpg", {
+    fetchImpl: async () => response(jpeg, { "content-type": "image/jpeg", "content-length": "100" }), dnsLookup: publicDns, maxBytes: 10,
+  }), /exceeds/);
+  await assert.rejects(fetchSafeImage("https://images.pexels.com/x.jpg", {
+    fetchImpl: async () => response(Buffer.alloc(0), { location: "https://evil.example/x.jpg" }, 302), dnsLookup: publicDns,
+  }), /allowlisted HTTPS/);
+  const safe = await fetchSafeImage("https://images.pexels.com/x.jpg", { fetchImpl: async () => response(jpeg), dnsLookup: publicDns });
+  assert.equal(safe.mime, "image/jpeg");
 });
 
 test("A2 — scaffold assets.js renders picture/srcset/lazy/blur and ships in the scaffold tree", () => {

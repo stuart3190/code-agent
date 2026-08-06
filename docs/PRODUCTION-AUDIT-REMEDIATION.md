@@ -43,7 +43,7 @@ values.
 | PR-04 Atomic graph and shadow | Pending | Audit evidence confirmed; current shadow period invalid | None |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
-| PR-07 Assets | Pending | Audit evidence confirmed/partially confirmed | None |
+| PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
 | PR-08 Diagnostics/erasure | Pending | Audit evidence confirmed/partially confirmed | None |
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
 | PR-10 Durable build leases | Pending | Audit evidence confirmed | None |
@@ -92,3 +92,17 @@ and corresponding live objects have been compared.
   compare-and-set; a correct code is marked used before the password mutation, so parallel reset
   confirmations have one winner. The Edge Function must not be deployed until the pepper has
   been created and a rollback deployment is retained.
+- Asset ingestion now accepts only allowlisted HTTPS origins, checks every DNS answer and
+  redirect, enforces a ten-second timeout and 15 MiB body ceiling, verifies declared MIME against
+  raster signatures, and applies Sharp channel, dimension, pixel and decode limits. Rejected
+  bytes persist no remote row and fall back visibly to a generated placeholder. Sharp is pinned
+  to `0.35.3`; the production dependency audit reports zero vulnerabilities.
+- Responsive variants use output-byte hashes in immutable object names with overwrites disabled.
+  Regeneration completes validation/transformation before atomically updating the existing slot
+  row, so replacement failure leaves the active asset unchanged. CPU/memory process isolation is
+  deliberately not faked here: Sharp must move behind PR-11's real worker boundary before H5 is
+  closed and customer V2 builds are enabled.
+- Pexels-specific API rules remain inside the provider adapter. Photographer, photographer-page,
+  photo-page and provider metadata are persisted with the dated licence snapshot, exposed through
+  `ASSET_CREDITS`, and enforced by a deterministic orchestration lint requiring generated UI to
+  consume the credits, link Pexels, and link photographer credit to `photoUrl`.

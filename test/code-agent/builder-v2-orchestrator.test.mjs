@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createOrchestrator, memoryBuildStore, renderAssetData } from "../../shell/server/lib/builderV2/orchestrator.mjs";
+import { createOrchestrator, lintAssetAttribution, memoryBuildStore, renderAssetData } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
 import { createAssetService } from "../../shell/server/lib/builderV2/assets/assetService.mjs";
 import { pexelsProvider, PEXELS_LICENSE_SNAPSHOT } from "../../shell/server/lib/builderV2/assets/pexelsProvider.mjs";
@@ -34,7 +34,7 @@ const CONTRACT = {
 const CORE_PATCH = [{
   newFile: "src/routes/BookPage.jsx",
   content: `import React, { useState } from "react";
-import { ASSETS } from "../lib/assetData.js";
+import { ASSETS, ASSET_CREDITS } from "../lib/assetData.js";
 import { imageProps, isPlaceholder, placeholderStyle } from "../lib/assets.js";
 
 export default function BookPage() {
@@ -46,6 +46,7 @@ export default function BookPage() {
       {isPlaceholder(hero) ? <div style={placeholderStyle(hero)} /> : <img {...imageProps(hero)} />}
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-1</p> : null}
       <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
 }
@@ -80,7 +81,7 @@ export default function AboutSection() {
 
 const RECORDED_PHOTOS = [
   { id: 201, width: 2000, height: 1300, alt: "strawberry farm rows in summer light",
-    photographer: "T", src: { original: "https://images.pexels.com/201/o.jpg", large2x: "https://images.pexels.com/201/l.jpg", medium: "https://images.pexels.com/201/m.jpg" } },
+    photographer: "T", photographer_url: "https://www.pexels.com/@t", url: "https://www.pexels.com/photo/farm-201/", src: { original: "https://images.pexels.com/201/o.jpg", large2x: "https://images.pexels.com/201/l.jpg", medium: "https://images.pexels.com/201/m.jpg" } },
 ];
 
 function recordedAssetService() {
@@ -291,7 +292,7 @@ test("WP8 — stop rule: the same defect surviving a repair round blocks instead
       // gate fails identically every round.
       core: () => [{
         newFile: "src/routes/BookPage.jsx",
-        content: "import React from \"react\";\n\nexport default function BookPage() {\n  return <main><h1>Placeholder</h1></main>;\n}\n",
+        content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\n\nexport default function BookPage() {\n  return <main><h1>Placeholder</h1><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
       }],
     },
   });
@@ -449,6 +450,7 @@ test("WP11/V2-20 — the repair tier: a verified browser failure earns a targete
       <h1>Book a farm visit</h1>
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-2 (repaired)</p> : null}
       <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
 }` }],
@@ -522,4 +524,21 @@ test("WP8 — renderAssetData is deterministic and placeholder-safe", () => {
   assert.equal(rendered, renderAssetData([...resolved].reverse()), "slot order is canonical");
   assert.match(rendered, /placeholder.*true/s);
   assert.match(rendered, /do not hardcode image URLs/);
+  assert.match(rendered, /ASSET_CREDITS/);
+});
+
+test("H6 — Pexels API linking is a deterministic gate, not prompt-only guidance", () => {
+  const assets = [{ via: "search", asset: { provider: "pexels", license: { apiLinkRequired: true } } }];
+  assert.deepEqual(lintAssetAttribution({ "src/App.jsx": "export default function App(){}" }, assets), {
+    ok: false,
+    problems: [
+      "Pexels API compliance: render credits from ASSET_CREDITS in generated UI",
+      "Pexels API compliance: include a visible link to https://www.pexels.com",
+      "Pexels API compliance: link each available photographer credit to photoUrl",
+    ],
+  });
+  const compliant = `import { ASSET_CREDITS } from "./lib/assetData.js";
+    export const Footer = () => <footer><a href="https://www.pexels.com">Pexels</a>
+      {ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer>`;
+  assert.deepEqual(lintAssetAttribution({ "src/Footer.jsx": compliant }, assets), { ok: true, problems: [] });
 });

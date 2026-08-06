@@ -45,7 +45,9 @@ against a code index. Rules:
   other entity mutation must call await ensureVisitorSession() first.
 - Imagery: import { ASSETS } from "./lib/assetData.js" (adjust the relative path) and render
   with the helpers in src/lib/assets.js (imageProps / pictureSources / isPlaceholder /
-  placeholderStyle). Never hardcode an image URL and never invent one.
+  placeholderStyle). Never hardcode an image URL and never invent one. When ASSET_CREDITS
+  contains Pexels assets, render a visible footer link to Pexels and link each available
+  photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
 - Keep components small; one route file per page plus small shared components.
 - BUILD THE WHOLE STEP IN THIS ONE BATCH. A real step is several patches and several

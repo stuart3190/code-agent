@@ -61,7 +61,7 @@ export function createAssetService({ providers = [], client = serviceClient(), n
     return data;
   }
 
-  async function persistAsset(owner, projectId, { slot, intent, orientation }, chosen, providerName, license) {
+  async function persistAsset(owner, projectId, { slot, intent, orientation }, chosen, providerName, license, { replaceId = null } = {}) {
     const row = {
       owner, project_id: projectId,
       provider: providerName, provider_asset_id: chosen.id,
@@ -72,7 +72,17 @@ export function createAssetService({ providers = [], client = serviceClient(), n
       tags: chosen.tags, page: null, section: null, slot,
       alt_text: chosen.alt || intent,
       width: chosen.width, height: chosen.height, orientation: chosen.orientation,
-      license: { ...license, retrievedAt: now().toISOString() },
+      license: {
+        ...license,
+        retrievedAt: now().toISOString(),
+        attribution: {
+          provider: providerName,
+          providerUrl: providerName === "pexels" ? "https://www.pexels.com" : null,
+          photographer: chosen.photographer || null,
+          photographerUrl: chosen.photographerUrl || null,
+          photoUrl: chosen.photoUrl || null,
+        },
+      },
       content_hash: null, variants: {},
       usage_count: 1, last_used: now().toISOString(),
     };
@@ -88,12 +98,13 @@ export function createAssetService({ providers = [], client = serviceClient(), n
         if (!row.width) row.width = opt.width;
         if (!row.height) row.height = opt.height;
       } catch (error) {
-        console.error(`[bv2-assets] optimise ${slot}: ${error.message} — original URLs kept`);
+        throw new Error(`asset ingestion rejected: ${error.message}`);
       }
     }
-    const { data, error } = await client.from("bv2_assets")
-      .upsert(row, { onConflict: "owner,project_id,provider,provider_asset_id,slot" })
-      .select("*").maybeSingle();
+    const mutation = replaceId
+      ? client.from("bv2_assets").update(row).eq("id", replaceId)
+      : client.from("bv2_assets").upsert(row, { onConflict: "owner,project_id,provider,provider_asset_id,slot" });
+    const { data, error } = await mutation.select("*").maybeSingle();
     if (error) throw new Error(`asset persist: ${error.message}`);
     return data || row;
   }
@@ -162,8 +173,17 @@ export function createAssetService({ providers = [], client = serviceClient(), n
         const pool = ranked.slice(0, 5).filter((c) => c.id !== existing?.provider_asset_id); // a regeneration must CHANGE the image
         if (!pool.length) { results.push({ slot, via: "unchanged", asset: existing }); continue; }
         const chosen = pool[seededIndex(projectId, query, pool.length)];
-        if (existing) await client.from("bv2_assets").delete().eq("id", existing.id);
-        const row = await persistAsset(owner, projectId, { slot, intent, orientation: existing?.orientation }, chosen, active.name, active.license);
+        // Validate and transform before switching the slot with one atomic row update.
+        // A failed replacement leaves the existing asset intact.
+        const row = await persistAsset(
+          owner,
+          projectId,
+          { slot, intent, orientation: existing?.orientation },
+          chosen,
+          active.name,
+          active.license,
+          { replaceId: existing?.id || null },
+        );
         results.push({ slot, via: "regenerated", asset: row });
       }
       return { results, providerCalls };

@@ -36,6 +36,7 @@ const CONTRACT = {
 const CORE_PATCH = [{
   newFile: "src/routes/BookPage.jsx",
   content: `import React, { useState } from "react";
+import { ASSET_CREDITS } from "../lib/assetData.js";
 
 export default function BookPage() {
   const [state, setState] = useState("idle");
@@ -44,6 +45,7 @@ export default function BookPage() {
       <h1>Book a farm visit</h1>
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-1</p> : null}
       <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
 }
@@ -123,7 +125,7 @@ function recordedAssetService() {
   };
   const provider = pexelsProvider({
     apiKey: "k",
-    fetchImpl: async () => ({ ok: true, json: async () => ({ photos: [{ id: 1, width: 2000, height: 1300, alt: "farm rows in light", src: { original: "https://images.pexels.com/1/o.jpg", large2x: "https://images.pexels.com/1/l.jpg", medium: "https://images.pexels.com/1/m.jpg" } }] }) }),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ photos: [{ id: 1, width: 2000, height: 1300, alt: "farm rows in light", photographer: "T", photographer_url: "https://www.pexels.com/@t", url: "https://www.pexels.com/photo/farm-1/", src: { original: "https://images.pexels.com/1/o.jpg", large2x: "https://images.pexels.com/1/l.jpg", medium: "https://images.pexels.com/1/m.jpg" } }] }) }),
   });
   return createAssetService({ providers: [provider], client: { from: chain }, now: () => new Date("2026-08-06T08:00:00Z") });
 }
