@@ -23,8 +23,8 @@ import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 // Foreign-key-safe insert order. ca_automations and ca_runs reference each other, so
 // automations insert first with last_run_id withheld and patched after runs exist.
 export const RESTORE_ORDER = [
-  "ca_repositories",
   "ca_github_installations",
+  "ca_repositories",
   "ca_github_webhook_deliveries",
   "ca_agents",
   "ca_automations",
@@ -120,6 +120,17 @@ async function insertRows(svc, table, rows) {
   }
 }
 
+export function prepareRowsForRestore(table, rows) {
+  if (table !== "ca_run_events" || rows.length === 0) return rows;
+  const sorted = [...rows].sort((a, b) => Number(a.id) - Number(b.id));
+  for (let index = 0; index < sorted.length; index += 1) {
+    if (Number(sorted[index].id) !== index + 1) {
+      throw new Error("ca_run_events identity has gaps; exact restore requires a database-native OVERRIDING SYSTEM VALUE path");
+    }
+  }
+  return sorted.map(({ id: _generatedIdentity, ...row }) => row);
+}
+
 async function main() {
   const dir = path.resolve(process.argv[2] || "");
   if (!process.argv[2]) {
@@ -176,6 +187,7 @@ async function main() {
       }
       rows = rows.map((row) => ({ ...row, parent_snapshot: null }));
     }
+    rows = prepareRowsForRestore(table, rows);
     await insertRows(svc, table, rows);
     console.log(`  ${table}: ${rows.length} restored`);
   }

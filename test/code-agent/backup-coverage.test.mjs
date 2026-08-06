@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { CA_TABLES, canonicalSqlHash } from "../../ops/backup-thrallo.mjs";
-import { RESTORE_ORDER } from "../../ops/restore-thrallo.mjs";
+import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 
 const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
@@ -73,6 +73,7 @@ test("every deliberate backup exclusion carries a written reason", () => {
 
 test("the restore order covers exactly the backed-up tables", () => {
   assert.deepEqual([...RESTORE_ORDER].sort(), [...CA_TABLES].sort());
+  assert.ok(RESTORE_ORDER.indexOf("ca_github_installations") < RESTORE_ORDER.indexOf("ca_repositories"));
   assert.ok(RESTORE_ORDER.indexOf("ca_repositories") < RESTORE_ORDER.indexOf("ca_agents"));
   assert.ok(RESTORE_ORDER.indexOf("ca_agents") < RESTORE_ORDER.indexOf("ca_runs"));
   assert.ok(RESTORE_ORDER.indexOf("ca_automations") < RESTORE_ORDER.indexOf("ca_runs"));
@@ -144,6 +145,14 @@ test("authoritative migration identity is line-ending independent without changi
   const crlf = Buffer.from("select 1;\r\nselect 2;\r\n");
   assert.notEqual(createHash("sha256").update(lf).digest("hex"), createHash("sha256").update(crlf).digest("hex"));
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
+});
+
+test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
+  assert.deepEqual(prepareRowsForRestore("ca_run_events", [{ id: 2, value: "b" }, { id: 1, value: "a" }]), [
+    { value: "a" },
+    { value: "b" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("ca_run_events", [{ id: 1 }, { id: 3 }]), /identity has gaps/);
 });
 
 test("systemd units and the runbook ship with the repository", async () => {
