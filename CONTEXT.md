@@ -916,6 +916,22 @@ User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flippin
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
 and set the `THRALLO_STRIPE_*` environment.
 
+## Builder V2 production remediation (2026-08-06)
+
+Implementation is on `remediation/builder-v2-production`, based on audited/current `origin/main`
+`92e4c9fe5c864799eee228f304849064bacb0190`. The approved programme is tracked in
+`docs/PRODUCTION-AUDIT-REMEDIATION.md`. PR-01's local implementation is complete: its five focused
+tests, full code-agent suite, production web build, and 118 browser tests pass. The approved live
+read remains outstanding. The 2026-08-06 shadow period is diagnostic history and must restart
+after PR-04 because the current persistence/drift path cannot prove a complete graph.
+
+Hard stops remain: no model-powered build/provider spend, Stripe call, production mutation,
+migration/history repair, or rollout flag change without its explicit approval. Builder V1 remains
+the customer default. `THRALLO_MANAGED_SETTLEMENT_PAUSED=1` must stay armed; V2 customer flags stay
+off and the environment kill remains armed until the approved internal-pilot gate. Next after PR-01
+proof is PR-02 migration reproducibility; do not rename duplicate migration versions before a
+read-only comparison with the real production migration history and schema.
+
 ## Important boundaries
 
 - Browser: publishable Supabase key only.
