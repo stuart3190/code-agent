@@ -41,6 +41,13 @@
     "test:code-agent": "node --test test/code-agent/*.test.mjs",
     "test:ui": "playwright test e2e/public-shell.spec.mjs e2e/chat-shell.spec.mjs e2e/theme-check.spec.mjs e2e/provider-settings.spec.mjs",
     "audit:remediation-baseline": "node ops/capture-remediation-baseline.mjs",
+    "supabase:version": "supabase --version",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset --local --no-seed",
+    "supabase:lint": "supabase db lint --local --schema public --level error --fail-on error",
+    "supabase:diff": "supabase db diff --local --schema public",
+    "supabase:migrations": "supabase migration list --local",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },
@@ -53,6 +60,7 @@
     "stripe": "17.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1"
+    "@playwright/test": "1.61.1",
+    "supabase": "2.111.0"
   }
 }
