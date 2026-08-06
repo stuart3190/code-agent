@@ -434,11 +434,24 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     await page.waitForTimeout(500);
   }
 
+  // A stepper-driven step is judged on the OBSERVABLE transition: the counter's page text
+  // changed (2 → 3 is a real state change) while the expectation words are usually meta-
+  // prose ("summary updates with counts") that exists statically. Live evidence: a working
+  // guest counter failed as "nothing changed" because every keyword was already on screen.
+  if (droveStepper && found.length / wanted.length >= 0.5) {
+    const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    if (textAfter !== textBefore) {
+      return { drove, status: "pass", detail: `counter changed the page (${found.join(", ")} present)` };
+    }
+  }
+
   // Some expectations are about FORM STATE, not visible text — "the fields accept the details",
   // "continue becomes enabled". Searching the page for the word "fields" will never satisfy those,
   // and reporting them as failures would blame the app for the driver's literalism. So when the
-  // step filled something, ask the page the question the step was really asking.
-  if (found.length / wanted.length < 0.5 && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
+  // step filled something, ask the page the question the step was really asking. Applies BOTH
+  // when the words are missing AND when they are all static (nothing fresh) — a live fill step
+  // failed as "nothing changed" purely because its meta-words pre-existed on the page.
+  if ((found.length / wanted.length < 0.5 || fresh.length === 0) && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
     const state = await page.evaluate(() => {
       const inputs = [...document.querySelectorAll("input, textarea, select")]
         .filter((el) => el.offsetParent !== null && !["hidden", "submit", "button"].includes(el.type));

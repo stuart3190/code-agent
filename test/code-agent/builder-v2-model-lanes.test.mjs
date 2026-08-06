@@ -211,3 +211,28 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
   assert.match(edit, /VisitPage\.jsx — will be modified by this step/);
   assert.equal(edit, renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" }));
 });
+
+test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors never do", async () => {
+  let calls = 0;
+  const flaky = {
+    model: "gpt-5.5",
+    runTurn: async () => {
+      calls += 1;
+      if (calls === 1) { const e = new Error("terminated"); throw e; }
+      return { text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }], usage: { input: 10, output: 5, cached: 0, reasoning: 0, total: 15 } };
+    },
+  };
+  const lanes = createModelLanes({ provider: flaky, ceilingCredits: 5, diag: null, log: () => {} });
+  const patches = await lanes.patchesFn({ step: "core", contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [] });
+  assert.deepEqual(patches, []);
+  assert.equal(calls, 2, "one retry, then success");
+
+  let modelErrCalls = 0;
+  const badModel = {
+    model: "gpt-5.5",
+    runTurn: async () => { modelErrCalls += 1; throw new Error("Codex responses HTTP 400: bad tool schema"); },
+  };
+  const lanes2 = createModelLanes({ provider: badModel, ceilingCredits: 5, diag: null, log: () => {} });
+  await assert.rejects(() => lanes2.patchesFn({ step: "core", contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [] }), /HTTP 400/);
+  assert.equal(modelErrCalls, 1, "a real API error never retries");
+});

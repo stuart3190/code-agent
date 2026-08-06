@@ -246,7 +246,9 @@ export function createModelLanes({
       const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems, editRequest });
       const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
       const startedAt = Date.now();
-      const turn = await provider.runTurn({
+      // ONE retry on transport-shaped failures: a dropped SSE stream ("terminated") killed
+      // a live booking attempt 24 minutes in. Model/tool errors never retry — only the wire.
+      const callOnce = () => provider.runTurn({
         systemPrompt,
         messages: [{ role: "user", content: prompt }],
         tools: [EMIT_PATCHES_SCHEMA],
@@ -255,6 +257,15 @@ export function createModelLanes({
         // call still needs thinking room — how much is the per-step routing table's call.
         reasoningEffort: routeForStep(step).reasoningEffort,
       });
+      let turn;
+      try {
+        turn = await callOnce();
+      } catch (error) {
+        if (!/terminated|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed|network|aborted|other side closed/i.test(error.message || "")) throw error;
+        log(`${step}: transport dropped (${String(error.message).slice(0, 60)}) — one retry`);
+        await new Promise((r) => setTimeout(r, 2_000));
+        turn = await callOnce();
+      }
       const call = (turn.toolCalls || []).find((c) => c.name === EMIT_PATCHES_SCHEMA.name);
       // Record BEFORE the guard can throw — the ceiling stopping a build never hides spend.
       record(step, {
