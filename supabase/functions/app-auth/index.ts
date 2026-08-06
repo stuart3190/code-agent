@@ -1,7 +1,7 @@
 // app-auth — per-app end-user authentication for generated/published apps.
 // (PLAN-per-app-auth default lane; deployed to the shared project via the Supabase MCP.)
 //
-// Published apps are static and cannot reach the Buildr101 shell, so this runs where they CAN
+// Published apps are static and cannot reach the shell, so this runs where they CAN
 // reach: a Supabase Edge Function on the shared project. Mechanism: each (app_id, email) pair maps
 // to a REAL Supabase auth user under an app-scoped synthetic address, so the same person can sign
 // up with the same email in ten different apps without collisions — while sessions, refresh
@@ -11,7 +11,7 @@
 //
 //   POST { action: "signup" | "signin", appId, email, password }
 //     -> 200 { user: { id, email }, session: { access_token, refresh_token } }
-//     -> 409 already registered (signup) · 401 invalid login (signin) · 400 bad input
+//     -> 409 already registered w/ different password (signup) · 401 invalid login (signin) · 400 bad input
 //   POST { action: "reset", appId, email }
 //     -> 200 { ok: true } ALWAYS (no account enumeration). If the account exists, a 6-digit
 //        code is emailed to the REAL address via Resend (RESEND_API_KEY secret; 503 when unset).
@@ -19,9 +19,20 @@
 //   POST { action: "reset-confirm", appId, email, code, newPassword }
 //     -> 200 { user, session } (password updated AND signed in) · 400 invalid/expired code
 //
-// Abuse guards (2026-07-15, DB-backed — edge functions are stateless): signup max 10/h per IP and
+// Abuse guards (2026-07-15, DB-backed — edge functions are stateless): signup max 30/h per IP and
 // 30/h per app (counted from app_auth_events / app_users); reset max 5/h per (app,email) and 20/h
 // per IP. Over-limit -> 429. Event rows self-prune (>24h, same key) at check time.
+//
+// v3 (2026-08-06, from Builder v2 live evidence — diag 1e682279):
+//   - SIGNUP IS IDEMPOTENT UNDER RACES: two parallel first-visit signups for the same visitor
+//     used to 500 the loser ("already registered" from createUser / a mapping-row conflict);
+//     losers now converge on the shared sign-in path and return the same session.
+//   - createUser gets ONE retry on transient auth-schema errors ("Database error…").
+//   - Retrying your OWN signup (the browser's saved visitor identity) is a sign-in, not a 409;
+//     a DIFFERENT password for an existing account still 409s.
+//   - The platform's own egress (preview journey verification drives real signups from one
+//     VPS IP) skips ONLY the per-IP signup cap (PLATFORM_EGRESS_IPS env, VPS fallback).
+//   - Per-IP signup cap raised 10 -> 30/h: one NAT'd family venue legitimately exceeds 10.
 //
 // Callers authenticate with the project anon key (Authorization: Bearer <anon>), which satisfies
 // the platform's verify_jwt gate; per-user auth is what this function IS, so there is no user JWT yet.
@@ -37,10 +48,14 @@ const SYNTH_DOMAIN = "apps.thrallo.com";
 
 const RESET_TTL_MIN = 15;
 const RESET_MAX_ATTEMPTS = 5;
-const LIMIT_SIGNUP_PER_IP_H = 10;
+const LIMIT_SIGNUP_PER_IP_H = 30;
 const LIMIT_SIGNUP_PER_APP_H = 30;
 const LIMIT_RESET_PER_TARGET_H = 5;
 const LIMIT_RESET_PER_IP_H = 20;
+// The platform's own egress addresses (preview verification traffic). Overridable via env;
+// the fallback is the Thrallo VPS. Exempts ONLY the per-IP signup cap.
+const PLATFORM_IPS = (Deno.env.get("PLATFORM_EGRESS_IPS") || "51.195.136.189")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 
 const svc = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
@@ -109,7 +124,7 @@ async function sendResetEmail(to: string, code: string, appId: string): Promise<
       text:
         `Your password reset code for ${appName} is: ${code}\n\n` +
         `It expires in ${RESET_TTL_MIN} minutes. If you didn't ask for this, you can ignore this email.\n\n` +
-        `— sent by Buildr101 on behalf of ${appName}`,
+        `— sent by Thrallo on behalf of ${appName}`,
     }),
   }).catch(() => null);
   if (!res?.ok) {
@@ -130,6 +145,7 @@ Deno.serve(async (req: Request) => {
   const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
   const ip = callerIp(req);
+  const platformCaller = PLATFORM_IPS.includes(ip);
 
   if (!["signup", "signin", "reset", "reset-confirm"].includes(action)) {
     return json(400, { error: "action must be signup, signin, reset or reset-confirm" });
@@ -218,11 +234,10 @@ Deno.serve(async (req: Request) => {
     .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
   if (lookupErr) return json(500, { error: `lookup failed: ${lookupErr.message}` });
 
-  if (action === "signup") {
-    if (existing) return json(409, { error: "An account with this email already exists for this app — sign in instead." });
-
-    // Abuse guards: a promo spike is fine; a signup script is not.
-    if (await eventCount("signup", ip) >= LIMIT_SIGNUP_PER_IP_H) {
+  if (action === "signup" && !existing) {
+    // Abuse guards: a promo spike is fine; a signup script is not. The platform's own
+    // egress (preview verification) skips ONLY the per-IP cap; every other guard applies.
+    if (!platformCaller && await eventCount("signup", ip) >= LIMIT_SIGNUP_PER_IP_H) {
       return json(429, { error: "Too many signups from this network — try again later." });
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
@@ -233,25 +248,48 @@ Deno.serve(async (req: Request) => {
       return json(429, { error: "This app is getting a lot of signups right now — try again in a bit." });
     }
 
-    const { data: created, error: createErr } = await svc.auth.admin.createUser({
-      email: synth,
-      password,
-      email_confirm: true, // app end-users are confirmed by construction; reset is the code flow above
-      user_metadata: { app_id: appId, app_email: email },
-    });
-    if (createErr) return json(500, { error: `signup failed: ${createErr.message}` });
-    const { error: mapErr } = await svc.from("app_users").insert({
-      app_id: appId, email, auth_user_id: created.user.id,
-    });
-    if (mapErr) { // roll back the auth user so a retry works
-      await svc.auth.admin.deleteUser(created.user.id).catch(() => {});
-      return json(500, { error: `signup failed: ${mapErr.message}` });
+    // createUser with ONE retry on transient auth-schema errors. Losing a parallel race
+    // ("already registered") is NOT an error — the winner made exactly the user we wanted;
+    // the shared sign-in below resolves the session.
+    let created: { user: { id: string } } | null = null;
+    let createErr: { message: string } | null = null;
+    for (let attempt = 0; attempt < 2 && !created; attempt += 1) {
+      const res = await svc.auth.admin.createUser({
+        email: synth,
+        password,
+        email_confirm: true, // app end-users are confirmed by construction; reset is the code flow above
+        user_metadata: { app_id: appId, app_email: email },
+      });
+      created = res.data?.user ? (res.data as { user: { id: string } }) : null;
+      createErr = res.error;
+      if (createErr && /already.*(regist|exist)/i.test(createErr.message)) { createErr = null; break; }
+      if (createErr && attempt === 0) await new Promise((r) => setTimeout(r, 400));
     }
-    await logEvent("signup", ip, appId);
-    // Real event integration 1: the first thing a new end user sees in the app's notification
-    // surface, and proof the surface works from the moment they arrive.
-    await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
-      "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
+    if (createErr) return json(500, { error: `signup failed: ${createErr.message}` });
+
+    if (created) {
+      const { error: mapErr } = await svc.from("app_users").insert({
+        app_id: appId, email, auth_user_id: created.user.id,
+      });
+      if (mapErr && !/duplicate|unique|conflict|23505/i.test(mapErr.message)) {
+        // A real mapping failure: roll back the auth user so a retry works.
+        await svc.auth.admin.deleteUser(created.user.id).catch(() => {});
+        return json(500, { error: `signup failed: ${mapErr.message}` });
+      }
+      // A duplicate mapping row = we lost the race after user creation; the winner's rows
+      // stand and the sign-in below resolves the session either way.
+      await logEvent("signup", ip, appId);
+      // Real event integration 1: the first thing a new end user sees in the app's notification
+      // surface, and proof the surface works from the moment they arrive.
+      await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
+        "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
+    }
+  } else if (action === "signup" && existing) {
+    // A visitor retrying their OWN signup (the browser's saved identity) is a sign-in, not
+    // an error; a DIFFERENT password for an existing account still gets the explicit 409.
+    const probe = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
+    const { error: probeErr } = await probe.auth.signInWithPassword({ email: synth, password });
+    if (probeErr) return json(409, { error: "An account with this email already exists for this app — sign in instead." });
   } else if (!existing) {
     return json(401, { error: "Invalid email or password." });
   } else if (existing.status !== "active") {

@@ -57,20 +57,27 @@ export function expectationKeywords(expect) {
   return keywords(expect, 5);
 }
 
-/** Every locator worth trying for one described control, best guess first. */
+/**
+ * Every locator worth trying for one described control — REAL CONTROLS for every word
+ * before prose for any word. The old per-word ordering let getByText("number") (the
+ * "Phone number" label) shadow the real "Increase adults" button on a live booking run:
+ * clicking static text drove nothing and the step failed a working counter.
+ */
 function candidatesFor(page, description) {
   const words = keywords(description, 4);
-  const out = [];
+  const roles = [];
+  const labels = [];
+  const prose = [];
   for (const word of words) {
     const pattern = new RegExp(word, "i");
-    out.push(page.getByRole("button", { name: pattern }));
-    out.push(page.getByRole("link", { name: pattern }));
-    out.push(page.getByRole("tab", { name: pattern }));
-    out.push(page.getByLabel(pattern));
-    out.push(page.getByPlaceholder(pattern));
-    out.push(page.getByText(pattern));
+    roles.push(page.getByRole("button", { name: pattern }));
+    roles.push(page.getByRole("link", { name: pattern }));
+    roles.push(page.getByRole("tab", { name: pattern }));
+    labels.push(page.getByLabel(pattern));
+    labels.push(page.getByPlaceholder(pattern));
+    prose.push(page.getByText(pattern));
   }
-  return out;
+  return [...roles, ...labels, ...prose];
 }
 
 async function firstVisible(locators, deadline) {
@@ -340,9 +347,35 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     if (outcome) return outcome;
   }
 
+  // Counter/stepper steps ("select number of adults and children"): drive the increment
+  // control for each noun the step names — these are +/− buttons or spinbuttons, which no
+  // keyword locator reliably finds (a live booking run clicked the "Phone number" label
+  // instead). Falls through to expectation sampling; the generic click path is skipped.
+  let droveStepper = false;
+  if (!navigated && /\bnumbers? of\b|\bhow many\b|party size|adults|children|guests/i.test(`${action} ${step.target || ""}`)) {
+    const scope = `${action} ${step.target || ""}`;
+    const nouns = ["adults", "children", "guests", "people"].filter((n) => new RegExp(n, "i").test(scope));
+    for (const noun of nouns.length ? nouns : ["guest"]) {
+      const inc = page.getByRole("button", { name: new RegExp(`(increase|add|more)\\s+${noun}|${noun}\\s*\\+`, "i") }).first();
+      if (await inc.count().catch(() => 0)) {
+        await inc.click({ timeout: 3_000 }).catch(() => {});
+        drove = true;
+        droveStepper = true;
+      }
+    }
+    if (!droveStepper) {
+      const spin = page.getByRole("spinbutton").first();
+      if (await spin.count().catch(() => 0)) {
+        await spin.fill("2").catch(() => {});
+        drove = true;
+        droveStepper = true;
+      }
+    }
+  }
+
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
-  if (!navigated && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book|use/i.test(action)) {
+  if (!navigated && !droveStepper && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book|use/i.test(action)) {
     // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
     // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
     // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"
@@ -381,7 +414,10 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   // passes; undriven/static checks still resolve on the first sample.
   let found = [];
   let fresh = [];
-  const pollDeadline = Date.now() + (drove ? 10_000 : 0);
+  // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
+  // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
+  const pollBudget = !drove ? 0 : /submit|send|confirm|book|reserve|pay/i.test(action) ? 20_000 : 10_000;
+  const pollDeadline = Date.now() + pollBudget;
   for (;;) {
     found = [];
     fresh = [];
