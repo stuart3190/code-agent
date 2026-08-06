@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { shadowIndexBuild } from "../../shell/server/lib/builderV2/shadow.mjs";
 import { __resetFlagCacheForTests } from "../../shell/server/lib/builderV2/featureFlags.mjs";
+import { createFakeBv2Supabase } from "./helpers/fake-bv2-supabase.mjs";
 
 const TREE = {
   "src/App.jsx": 'import React from "react";\nexport default function App() { return null; }\n',
@@ -14,27 +15,7 @@ const TREE = {
 const flagClient = (rows) => ({ from: () => ({ select: async () => ({ data: rows, error: null }) }) });
 const flagsOn = () => ({ client: flagClient([{ key: "bv2.shadow", value: true }]), env: {}, now: Date.now });
 
-function fakeStoreClient() {
-  const writes = [];
-  let n = 0;
-  const chain = (table) => {
-    const api = {
-      upsert: (payload) => { writes.push({ table, kind: "upsert", payload: Array.isArray(payload) ? payload.length : payload }); return api; },
-      insert: (payload) => { writes.push({ table, kind: "insert", payload: Array.isArray(payload) ? payload.length : payload }); return api; },
-      select: () => api,
-      eq: () => api,
-      delete: () => api,
-      in: () => api,
-      order: () => api,
-      limit: () => api,
-      single: () => Promise.resolve({ data: { id: `row-${++n}` }, error: null }),
-      maybeSingle: () => Promise.resolve({ data: null, error: null }),
-      then: (r) => Promise.resolve({ data: [], error: null }).then(r),
-    };
-    return api;
-  };
-  return { writes, from: chain };
-}
+const fakeStoreClient = () => createFakeBv2Supabase();
 
 test("WP14 — flag off (or kill switch) means ZERO writes", async () => {
   __resetFlagCacheForTests();
@@ -81,6 +62,7 @@ test("WP14 — FAULT INJECTION: a shadow-store outage never throws and never tou
   // Every table write explodes — the worst possible shadow-store day.
   const broken = {
     from: () => { throw new Error("shadow store is down"); },
+    rpc: () => { throw new Error("shadow store is down"); },
   };
   const result = await shadowIndexBuild({
     owner: "o", projectId: "p", tree: TREE, client: broken,
