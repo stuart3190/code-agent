@@ -44,7 +44,7 @@ values.
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
-| PR-08 Diagnostics/erasure | Pending | Audit evidence confirmed/partially confirmed | None |
+| PR-08 Diagnostics/erasure | Diagnostics redaction unit local-complete; full cross-store erasure pending | Secret-pattern/environment redaction and prompt/source retention controls proven; erasure proof still pending | None |
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
 | PR-10 Durable build leases | Pending | Audit evidence confirmed | None |
 | PR-11 Build worker | Pending | Audit evidence confirmed | None |
@@ -106,3 +106,10 @@ and corresponding live objects have been compared.
   photo-page and provider metadata are persisted with the dated licence snapshot, exposed through
   `ASSET_CREDITS`, and enforced by a deterministic orchestration lint requiring generated UI to
   consume the credits, link Pexels, and link photographer credit to `photoUrl`.
+- Diagnostics redact bearer credentials, API keys, common provider tokens, JWTs, private keys,
+  credential-bearing URLs, sensitive fields, and configured secret environment values before
+  any run, step, plan, contract, compressed output or request-context write. The raw value is not
+  recoverable from diagnostics storage. `DIAG_CAPTURE_PROMPTS=0` disables persisted run/step
+  prompts, plans and contracts; `DIAG_CAPTURE_SOURCE_DIFFS=0` retains changed-path audit metadata
+  without source diff bodies. Runtime contracts remain in memory so disabling persistence does
+  not silently cripple repair. Cross-store project/account erasure is not yet claimed complete.

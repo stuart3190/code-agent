@@ -12,6 +12,7 @@ import {
   createDiagSession, nullDiagSession, simpleLineDiff, treeChanges, unpackOutput,
   listDiagRuns, getDiagRun, getDiagStepOutput, explainBuildFailure,
   getDiagPrefs, setDiagPrefs, sweepDiagnostics, DIAG_DEFAULT_RETENTION_DAYS,
+  diagnosticCapturePolicy, redactDiagnosticText, redactDiagnosticValue,
 } from "../../shell/server/lib/appBuild/buildDiagnostics.mjs";
 
 const OWNER = "owner-1";
@@ -79,6 +80,59 @@ test("simpleLineDiff and treeChanges report created/modified/deleted with diffs"
   assert.deepEqual(changes.modified, ["mod.js"]);
   assert.deepEqual(changes.deleted, ["gone.js"]);
   assert.match(changes.diffs["mod.js"], /- old/);
+});
+
+test("H13 — secrets are redacted before diagnostics persistence", async () => {
+  const secret = "sk-live-super-secret-value-123456789";
+  const pem = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----";
+  const env = { OPENAI_API_KEY: secret };
+  const text = redactDiagnosticText(
+    `Authorization: Bearer ${secret}\nDATABASE_URL=postgres://user:password@db.example/x\n${pem}`,
+    { env },
+  );
+  assert.doesNotMatch(text, /super-secret|:password@|abc123/);
+  assert.match(text, /\[REDACTED/);
+  assert.deepEqual(redactDiagnosticValue({ password: "hunter2", totalTokens: 42, nested: { token: secret } }, { env }), {
+    password: "[REDACTED]", totalTokens: 42, nested: { token: "[REDACTED]" },
+  });
+
+  const db = fakeDb();
+  const session = await createDiagSession({
+    owner: OWNER, kind: "app_build", prompt: `build with ${secret}`, client: db, redactionEnv: env,
+  });
+  session.step({ kind: "terminal", label: "provider", prompt: `key=${secret}`, output: `Bearer ${secret}\n${pem}` });
+  session.setPlan(`call provider with ${secret}`);
+  session.setContract({ auth: { password: "hunter2" }, note: secret });
+  session.finish("failed");
+  await settle(session);
+  const persisted = JSON.stringify(db.rows);
+  assert.doesNotMatch(persisted, /super-secret|hunter2|abc123/, "raw credentials never reach the fake database");
+  assert.match(persisted, /REDACTED/);
+});
+
+test("H13 — prompt and source-diff persistence can be disabled without losing runtime state", async () => {
+  assert.deepEqual(diagnosticCapturePolicy({ DIAG_CAPTURE_PROMPTS: "0", DIAG_CAPTURE_SOURCE_DIFFS: "0" }), {
+    prompts: false, sourceDiffs: false,
+  });
+  const db = fakeDb();
+  const session = await createDiagSession({
+    owner: OWNER, kind: "app_build", prompt: "private request", client: db,
+    capturePolicy: { prompts: false, sourceDiffs: false }, redactionEnv: {},
+  });
+  session.setPlan("private plan");
+  session.setContract({ summary: "private contract" });
+  const recorder = session.recorderForJob();
+  recorder.files({ "src/a.js": "old private source" }, { "src/a.js": "new private source" });
+  session.finish("passed");
+  await settle(session);
+
+  assert.equal(session.contract.summary, "private contract", "runtime repair context remains available in memory");
+  assert.equal(db.rows.diag_runs[0].prompt, null);
+  assert.equal(db.rows.diag_runs[0].plan, null);
+  assert.equal(db.rows.diag_runs[0].contract, null);
+  const files = JSON.parse(unpackOutput(db.rows.diag_steps.find((row) => row.kind === "files")));
+  assert.deepEqual(files.diffs, {});
+  assert.deepEqual(files.modified, ["src/a.js"], "non-content audit metadata remains useful");
 });
 
 test("a session records the full trail: steps, rounds, usage, cost, terminal, files", async () => {
