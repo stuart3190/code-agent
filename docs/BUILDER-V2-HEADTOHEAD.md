@@ -16,10 +16,12 @@ interim report the gate requires).
 | 1e682279 | v2 attempt 1 | 6.02 | blocked | 2 verifier driving gaps + auth-lane 500 |
 | d1d33ff5 | v2 attempt 2 | 3.88 | blocked | blind compile brief + unpatchable CSS |
 | b4d2b704 | v2 attempt 3 | 3.68 | blocked | import-as-symbol + duplicate default |
+| 3e0e318a | v2 attempt 4 | 3.69 | aborted | infrastructure: provider stream terminated mid-repair |
+| 580f4477 | v2 attempt 5 | 9.29 | ceiling stop | repair regressed working selection state, thrashed to the 9cr guard |
 
 v1 three attempts: **102.9 credits, zero green, zero page-level progress between runs.**
-v2 three attempts: **13.58 credits (7.6× less), each failure a NEW class, each class now a
-free deterministic rejection or a calibrated driver behaviour.** Attempt 1 reached 5/7
+v2 five attempts: **26.56 credits (3.9× less than v1 for 5 runs vs 3), the platform-defect
+classes all closed, the guard proven live (attempt 5 is the first ceiling stop in v2 history).** Attempt 1 reached 5/7
 essential journey steps (date+slot selection passing semantically) and its recovered tree
 drives END-TO-END green by hand (wizard → counters → submit → visitor auth → entities 201
 → confirmation) — the app was buildable; the platform's eyes and hands were the gap.
@@ -53,7 +55,18 @@ two green gates plus three progressively-deeper booking attempts — cost about 
 9. app-auth v3: visitor signup idempotent under races (the 500 class), transient-retry,
    platform egress exempt from the per-IP cap, cap 10→30/h (broke NAT'd venues too).
 
-## Why attempt 4 waits for WP-12
+## The gate's conclusion (2026-08-06, after 5 attempts)
+
+Every remaining booking failure is MODEL-SIDE: hand-rolled multi-step wizard selection
+state (aria/data-state wiring) breaking under repair pressure — attempt 5's repair
+regressed a passing date selector. No platform defect has surfaced since attempt 3. The
+verifier calibrations demonstrably work (form fill, terms, counters, date/slot selection
+all pass when the app wires state correctly). RECOMMENDATION: roll v2 out for the SIMPLE
+profile on the strength of the green WP-9/10 gates (that is WP-16's plan anyway); close
+the booking gap with a composable booking-wizard piece in the scaffold's ui/ library so
+selection-state wiring is assembly, not invention — then re-run this gate once, cheaply.
+
+## Why attempt 4 waited for WP-12
 
 Attempt cost is now dominated by context (14-15k in/run, ≤52% cached) and taught rounds.
 WP-12 lands retrieval-sliced repair/edit context and better prefix reuse — the same fixes
