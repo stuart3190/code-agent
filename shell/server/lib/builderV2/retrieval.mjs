@@ -90,7 +90,7 @@ export function retrieve({
       full.push({ ...entry, form: "full", tokens: bodyTokens });
       used += bodyTokens;
     } else if (wantedForm !== "summary" && used + ifaceTokens <= budgetTokens) {
-      interfaces.push({ ...entry, form: "interface", tokens: ifaceTokens, demoted: wantedForm === "full" });
+      interfaces.push({ ...entry, form: "interface", tokens: ifaceTokens, demoted: wantedForm === "full", iface: interfaceOf(fileIndex) });
       used += ifaceTokens;
     } else {
       const line = summaryOf(fileIndex);

@@ -214,6 +214,6 @@ test("WP10 — editTargets ranks generated files by request keywords, determinis
   });
   assert.match(prompt, /Apply EXACTLY this change/);
   assert.match(prompt, /reword the newsletter confirmation message/);
-  assert.match(prompt, /NewsletterPanel\.jsx \(current content\)/, "the targeted file rides along in full");
+  assert.match(prompt, /NewsletterPanel\.jsx — will be modified by this step/, "the targeted file rides along in full via retrieval");
   assert.match(prompt, /smallest correct patch wins/);
 });

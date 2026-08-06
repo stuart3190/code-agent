@@ -10,6 +10,9 @@ import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
 import { capabilityBrief } from "./capabilityRegistry.mjs";
+import { indexTree } from "./indexerV0.mjs";
+import { memoryGraph } from "./graphStore.mjs";
+import { retrieve, renderRetrieval } from "./retrieval.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -65,6 +68,26 @@ function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
     show("src/routes/HomePage.jsx"),
     show("src/lib/assetData.js"),
     ...extraFullPaths.map(show),
+  ].join("\n");
+}
+
+/**
+ * WP-12 cost work: edit and repair steps carry RETRIEVAL-SLICED context — the evidence's
+ * files in full, neighbours as interfaces, the rest as one-line summaries under a hard
+ * 9k-token budget — instead of whole files (the WP-10 edit paid ~8k tokens per round to
+ * re-send a monolith page it barely touched).
+ */
+export function renderScopedContext(tree, { step, editRequest = null, problems = [], journeys = [] } = {}) {
+  const graph = memoryGraph("ctx", "ctx", indexTree(tree));
+  const evidenceText = step === "edit" ? String(editRequest || "") : problems.join(" ");
+  const failureRefs = [...new Set(problems.join("\n").match(/src\/[\w/.-]+\.(?:jsx?|tsx?|css|mjs)/g) || [])];
+  const targets = editTargets(tree, evidenceText, { limit: 4 });
+  const result = retrieve({ graph, tree, targets, failureRefs, journeys, budgetTokens: 9_000 });
+  const paths = Object.keys(tree).sort().map((p) => `  ${p}`).join("\n");
+  return [
+    "FILE TREE (paths only — retrieval below carries the relevant content):", paths, "",
+    renderRetrieval(result, tree),
+    tree["src/lib/assetData.js"] ? `\n--- src/lib/assetData.js (current content) ---\n${tree["src/lib/assetData.js"]}` : "",
   ].join("\n");
 }
 
@@ -137,10 +160,9 @@ export function renderPatchPrompt({ step, contract, tiers, tree, journey, reject
     contractBrief(contract),
     "",
     renderJourneyBrief(scopedJourneys),
-    renderTreeContext(tree, {
-      extraFullPaths: isEdit ? editTargets(tree, editRequest)
-        : isRepair ? editTargets(tree, problems.join(" ")) : [],
-    }),
+    isEdit || isRepair
+      ? renderScopedContext(tree, { step, editRequest, problems, journeys: scopedJourneys })
+      : renderTreeContext(tree),
   ];
   if (rejections.length) {
     parts.push("", "YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact; fix and re-emit ALL patches:",

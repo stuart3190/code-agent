@@ -183,3 +183,31 @@ test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment corr
   assert.match(inc, /EXACTLY this one increment/);
   assert.match(inc, /"extra"/);
 });
+
+// ── WP-12: retrieval-sliced context for edit and repair steps ─────────────────────────────────
+
+test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not whole-tree dumps", async () => {
+  const { renderScopedContext } = await import("../../shell/server/lib/builderV2/modelLanes.mjs");
+  const big = (name, filler) => `export default function ${name}() {\n  return (<main>${`<p>${filler}</p>`.repeat(400)}</main>);\n}`;
+  const tree = {
+    "src/App.jsx": 'import React from "react";\nexport default function App() { return null; }',
+    "src/routes/BookPage.jsx": big("BookPage", "booking wizard slots"),
+    "src/routes/FarmPage.jsx": big("FarmPage", "farm story panels"),
+    "src/routes/VisitPage.jsx": big("VisitPage", "visit guidance"),
+  };
+
+  // Repair: the compiler named BookPage — its body must be IN, the unrelated pages must NOT be full.
+  const repair = renderScopedContext(tree, {
+    step: "repair",
+    problems: ["compiler output:\nsrc/routes/BookPage.jsx:13:7: ERROR: something"],
+  });
+  assert.match(repair, /BookPage\.jsx — a verifier pointed here/);
+  assert.match(repair, /booking wizard slots/, "the named file's BODY is present");
+  assert.ok(!/farm story panels/.test(repair), "unrelated page bodies stay out");
+  assert.match(repair, /FILE TREE \(paths only/, "the model still sees the full shape");
+
+  // Edit: keyword targeting picks the file; identical inputs render byte-identically.
+  const edit = renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" });
+  assert.match(edit, /VisitPage\.jsx — will be modified by this step/);
+  assert.equal(edit, renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" }));
+});
