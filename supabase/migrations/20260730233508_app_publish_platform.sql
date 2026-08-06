@@ -1,7 +1,7 @@
 -- Phase 22: publishing + notifications on Thrallo infrastructure. published_sites and
 -- custom_domains are recreated fresh in Thrallo's Supabase (the frozen Buildr101 tables are
 -- never touched); ca_push_subscriptions backs the web-push notification channel. All three
--- are service-role only with browser deny ??? every access is server-mediated.
+-- are service-role only with browser deny — every access is server-mediated.
 
 create table public.published_sites (
   id          uuid primary key default gen_random_uuid(),

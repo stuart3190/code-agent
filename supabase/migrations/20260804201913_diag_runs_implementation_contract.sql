@@ -1,6 +1,6 @@
 -- PR4: the implementation contract, stored against the build that was judged by it.
 --
--- `plan` is prose and stays as it is ??? it is what a human reads. `contract` is the machine-readable
+-- `plan` is prose and stays as it is — it is what a human reads. `contract` is the machine-readable
 -- form the generator, the repair agent and the journey verifier all work from, so that "did this
 -- build do what was agreed" has a single answer rather than three opinions.
 alter table public.diag_runs add column if not exists contract jsonb;

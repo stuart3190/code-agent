@@ -381,7 +381,7 @@ async function buildMigrationState(ledger) {
     const row = authoritative.get(match[1]);
     const fileSha256 = sha256(sql);
     const sqlSha256 = canonicalSqlHash(sql);
-    if (row && row.sqlSha256 !== sqlSha256) throw new Error(`applied migration hash diverged: ${filename}`);
+    if (row && (row.canonicalSqlSha256 || row.sqlSha256) !== sqlSha256) throw new Error(`applied migration hash diverged: ${filename}`);
     state.push({ version: match[1], name: match[2], filename, sqlSha256, fileSha256, applied: !!row, appliedOrder: row?.appliedOrder ?? null });
   }
   for (const migration of ledger.migrations) {

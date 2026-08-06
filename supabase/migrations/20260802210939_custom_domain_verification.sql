@@ -37,4 +37,4 @@ create index if not exists custom_domains_unsettled_idx
   on public.custom_domains (last_checked_at) where status <> 'failed';
 
 comment on column public.custom_domains.status is
-  'pending_dns ??? verifying ??? active | failed. Certificates are issued ONLY for active.';
+  'pending_dns → verifying → active | failed. Certificates are issued ONLY for active.';

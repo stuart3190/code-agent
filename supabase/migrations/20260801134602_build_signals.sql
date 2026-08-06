@@ -1,4 +1,4 @@
--- Anonymous behavioural signals per build. NO prompt text, NO user-identifiable data ???
+-- Anonymous behavioural signals per build. NO prompt text, NO user-identifiable data —
 -- owner is kept only to scope writes and is never exposed in analytics output.
 -- Everything else is derived server-side from durable records at read time.
 create table public.build_signals (

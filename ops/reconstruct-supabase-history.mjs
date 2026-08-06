@@ -193,6 +193,7 @@ async function reconstruct(rows) {
       filename,
       statementCount: row.statements.length,
       sqlSha256: expected,
+      canonicalSqlSha256: sha256(Buffer.from(content.replace(/\r\n/g, "\n"))),
     });
   }
   await writeFile(path.join(EVIDENCE, "authoritative-history-manifest.json"), `${JSON.stringify({

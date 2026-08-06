@@ -2,8 +2,8 @@
 --
 -- Deliberately NOT a copy of everything. Client-side runtime errors already live in
 -- analytics_events and build detail already lives in diag_steps; duplicating either would create
--- two versions of the truth that drift. This table holds the lifecycle events that had no home ???
--- publish started, deployment succeeded, unpublished, domain verified ??? and the reader merges the
+-- two versions of the truth that drift. This table holds the lifecycle events that had no home —
+-- publish started, deployment succeeded, unpublished, domain verified — and the reader merges the
 -- three sources into one stream.
 
 create table if not exists public.project_logs (

@@ -1,0 +1,1 @@
+alter table bv2_verification_cache alter column snapshot_id drop not null;

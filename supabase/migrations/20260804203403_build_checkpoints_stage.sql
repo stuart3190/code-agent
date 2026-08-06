@@ -1,6 +1,6 @@
 -- PR5: which generation stage a checkpoint belongs to, and what that stage changed.
 --
--- Checkpoints existed before this and were recorded but never restored from ??? a log, not a safety
+-- Checkpoints existed before this and were recorded but never restored from — a log, not a safety
 -- net. Staged generation makes them the thing a lost stage falls back to, which only works if a
 -- checkpoint can say which stage it is.
 alter table public.build_checkpoints add column if not exists stage text;

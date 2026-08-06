@@ -1,5 +1,5 @@
 -- Per-AI-request accounting for builds: provider, model, agent, token classes, duration,
--- exact cost, build + project linkage. Service-role only (RLS enabled, zero policies ???
+-- exact cost, build + project linkage. Service-role only (RLS enabled, zero policies —
 -- the browser can never read this table directly; every API path is owner-scoped).
 create table public.ai_requests (
   id uuid primary key,

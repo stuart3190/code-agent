@@ -1,6 +1,6 @@
 -- Phase 19 app-build platform: the Buildr generation pipeline re-pointed at Thrallo.
 -- Same table names the engine code already speaks (projects, build_jobs), created fresh in
--- Thrallo's own Supabase project ??? Buildr101's live project is never touched. Unlike the
+-- Thrallo's own Supabase project — Buildr101's live project is never touched. Unlike the
 -- legacy Buildr schema (client-side tree writes over RLS), Thrallo's conversation flow is
 -- fully server-mediated, so both tables are service-role only with browser deny.
 

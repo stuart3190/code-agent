@@ -2,7 +2,7 @@
 --
 -- No cookie, no persistent identifier, nothing that follows a person between days or between
 -- sites. A "visitor" is sha256(daily salt + ip + user agent + app), where the salt is random per
--- day and DELETED after two days ??? after which yesterday's hashes cannot be recomputed even by us,
+-- day and DELETED after two days — after which yesterday's hashes cannot be recomputed even by us,
 -- even holding the raw IP. That is what makes this lawful without a consent banner, and it is why
 -- the salt table has its own sweeper.
 --
@@ -84,6 +84,6 @@ grant all privileges on table public.analytics_salts, public.analytics_events, p
 grant usage, select on sequence public.analytics_events_id_seq to service_role;
 
 comment on table public.analytics_salts is
-  'Daily random salts for visitor hashing. Deleted after 2 days so historical hashes become uncorrelatable ??? this is what removes the need for a cookie banner.';
+  'Daily random salts for visitor hashing. Deleted after 2 days so historical hashes become uncorrelatable — this is what removes the need for a cookie banner.';
 comment on column public.analytics_events.visitor_hash is
   'sha256(daily salt + ip + user agent + app). No raw IP is ever stored.';

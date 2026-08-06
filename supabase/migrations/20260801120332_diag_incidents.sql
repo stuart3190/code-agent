@@ -1,6 +1,6 @@
 -- Private technical incidents: everything a user must never see (raw messages, stack
 -- traces, provider/DB codes, service, request ids). Owner-scoped reads only, service-role
--- only writes (RLS on, no policies ??? browser can never reach it).
+-- only writes (RLS on, no policies — browser can never reach it).
 create table public.diag_incidents (
   id uuid primary key,
   reference text not null,

@@ -2,7 +2,7 @@
 -- Conversations, turns, and a monotonic event stream (mirroring ca_run_events semantics so
 -- resumable SSE ports directly), plus the three-layer memory system: owner profile, named
 -- products (multi-project awareness), and episodic memories. Content is user-sensitive, so
--- every table is service-role only ??? the shell mediates all owner access.
+-- every table is service-role only — the shell mediates all owner access.
 
 create table public.ca_products (
   id uuid primary key default gen_random_uuid(),

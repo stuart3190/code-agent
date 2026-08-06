@@ -1,6 +1,6 @@
 -- The previous fix over-corrected. Pinning `source is null` in WITH CHECK evaluates the
 -- RESULTING row, so a user could no longer mark a platform notification (source='app_welcome')
--- as read ??? verified against production: PATCH returned 42501.
+-- as read — verified against production: PATCH returned 42501.
 --
 -- Column-level privileges are the right mechanism. A client may insert the app-authored fields
 -- and may only ever update `read_at`; `source` is simply not a column it can write, so RLS goes
