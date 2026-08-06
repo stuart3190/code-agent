@@ -144,7 +144,7 @@ create table public.bv2_shadow_run_files (
     references public.bv2_shadow_runs(id, owner, project_id) on delete cascade,
   foreign key (revision_id, owner, project_id, path, content_hash)
     references public.bv2_file_revisions(id, owner, project_id, path, content_hash)
-    on delete restrict
+    on delete no action deferrable initially deferred
 );
 create index bv2_shadow_run_files_revision on public.bv2_shadow_run_files (revision_id);
 

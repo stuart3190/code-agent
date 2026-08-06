@@ -58,6 +58,7 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   // makes those blobs unreferenced.
   { table: "bv2_migration_state", column: "project_id", ownerScoped: true, label: "builder migration state" },
   { table: "bv2_project_knowledge", column: "project_id", ownerScoped: true, label: "project knowledge" },
+  { table: "bv2_shadow_runs", column: "project_id", ownerScoped: true, label: "shadow evidence" },
   { table: "bv2_file_revisions", column: "project_id", ownerScoped: true, label: "code index" },
   { table: "bv2_project_pointers", column: "project_id", ownerScoped: true, label: "snapshot pointers" },
   { table: "bv2_snapshots", column: "project_id", ownerScoped: true, label: "snapshots" },
@@ -84,6 +85,8 @@ export const NOT_PURGED = Object.freeze(new Map([
   ["bv2_symbols", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
   ["bv2_symbol_refs", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
   ["bv2_dependency_edges", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
+  ["bv2_shadow_run_files", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
+  ["bv2_shadow_checks", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
   ["bv2_snapshot_files", "cascades from bv2_snapshots (FK ON DELETE CASCADE)"],
   ["bv2_retrieval_traces", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
   ["bv2_patches", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],

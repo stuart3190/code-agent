@@ -11,11 +11,13 @@ import { beginShadowRun, loadIndex, persistIndex } from "../shell/server/lib/bui
 if (process.env.BV2_GRAPH_PROOF !== "1") throw new Error("BV2_GRAPH_PROOF=1 is required");
 const url = process.env.API_URL;
 const serviceKey = process.env.SERVICE_ROLE_KEY;
-if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(url || "") || !serviceKey) {
+const anonKey = process.env.ANON_KEY;
+if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(url || "") || !serviceKey || !anonKey) {
   throw new Error("graph proof refuses any target except a loopback disposable Supabase stack");
 }
 
 const client = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+const browserClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
 const CONTAINER = "supabase_db_thrallo-migration-proof";
 const OWNER_A = "90000000-0000-4000-8000-000000000001";
 const OWNER_B = "90000000-0000-4000-8000-000000000002";
@@ -47,6 +49,7 @@ async function ensurePrincipal(owner, project, suffix) {
   const { error: userError } = await client.auth.admin.createUser({
     id: owner,
     email: `bv2-graph-proof-${suffix}@example.invalid`,
+    password: "Disposable-Bv2-Graph-Proof-Only!42",
     email_confirm: true,
   });
   if (userError && !/already/i.test(userError.message)) throw userError;
@@ -65,7 +68,7 @@ function installFaultHarness() {
         raise exception 'injected after revision';
       end if;
       if v_point = 'halfway_symbols' and tg_table_name = 'bv2_symbols' then
-        update public.bv2_test_fault_control set seen = seen + 1 returning seen into v_seen;
+        update public.bv2_test_fault_control set seen = seen + 1 where point = v_point returning seen into v_seen;
         if v_seen = 2 then raise exception 'injected halfway through symbols'; end if;
       end if;
       if v_point = 'refs' and tg_table_name = 'bv2_symbol_refs' then
@@ -151,7 +154,17 @@ try {
   await persistIndex(OWNER_A, PROJECT_A, sameIndex, { client });
   await persistIndex(OWNER_B, PROJECT_B, sameIndex, { client });
   await assert.rejects(loadIndex(OWNER_B, PROJECT_A, manifestOf(sameIndex), { client }), /does not belong to owner/i);
-  proof.ownerIsolation = "two_physical_tenants_cross_read_rejected";
+  unwrap(await browserClient.auth.signInWithPassword({
+    email: "bv2-graph-proof-a@example.invalid",
+    password: "Disposable-Bv2-Graph-Proof-Only!42",
+  }), "browser proof sign-in");
+  const browserTableRead = await browserClient.from("bv2_file_revisions").select("id");
+  assert.ok(browserTableRead.error, "authenticated browser role must not read graph rows");
+  const browserRpc = await browserClient.rpc("bv2_load_graph", {
+    p_owner: OWNER_A, p_project_id: PROJECT_A, p_manifest: manifestOf(sameIndex),
+  });
+  assert.ok(browserRpc.error, "authenticated browser role must not execute graph RPCs");
+  proof.ownerIsolation = "two_physical_tenants_cross_read_and_browser_access_rejected";
 
   const reloaded = await loadIndex(OWNER_A, PROJECT_A, manifestOf(sameIndex), { client });
   const parity = compareGraphIndexes(sameIndex, reloaded, { owner: OWNER_A, projectId: PROJECT_A });
@@ -189,11 +202,15 @@ try {
   if (harnessInstalled) {
     try { removeFaultHarness(); } catch {}
   }
-  await client.from("bv2_snapshot_files").delete().eq("snapshot_id", "92000000-0000-4000-8000-000000000001");
-  await client.from("bv2_snapshots").delete().eq("id", "92000000-0000-4000-8000-000000000001");
-  await client.from("bv2_migration_state").delete().eq("owner", OWNER_A);
-  await client.from("projects").delete().eq("id", PROJECT_A);
-  await client.from("projects").delete().eq("id", PROJECT_B);
+  unwrap(await client.from("bv2_snapshot_files").delete().eq("snapshot_id", "92000000-0000-4000-8000-000000000001"), "cleanup snapshot files");
+  unwrap(await client.from("bv2_snapshots").delete().eq("id", "92000000-0000-4000-8000-000000000001"), "cleanup snapshot");
+  unwrap(await client.from("bv2_shadow_runs").delete().eq("owner", OWNER_A), "cleanup shadow runs");
+  unwrap(await client.from("bv2_file_revisions").delete().eq("owner", OWNER_A), "cleanup owner A graph");
+  unwrap(await client.from("bv2_file_revisions").delete().eq("owner", OWNER_B), "cleanup owner B graph");
+  unwrap(await client.from("bv2_migration_state").delete().eq("owner", OWNER_A), "cleanup migration state");
+  unwrap(await client.from("projects").delete().eq("id", PROJECT_A), "cleanup project A");
+  unwrap(await client.from("projects").delete().eq("id", PROJECT_B), "cleanup project B");
   await client.auth.admin.deleteUser(OWNER_A);
   await client.auth.admin.deleteUser(OWNER_B);
+  await browserClient.auth.signOut();
 }

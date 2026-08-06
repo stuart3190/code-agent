@@ -49,7 +49,9 @@ jobs:
           test ! -s schema-diff.sql
       - name: Prove atomic graph transactions and tenant isolation
         run: |
+          set -a
           eval "$(npm exec -- supabase status -o env)"
+          set +a
           BV2_GRAPH_PROOF=1 npm run supabase:graph:proof
           npm exec -- supabase db diff --local --schema public > post-proof-diff.sql
           test ! -s post-proof-diff.sql
