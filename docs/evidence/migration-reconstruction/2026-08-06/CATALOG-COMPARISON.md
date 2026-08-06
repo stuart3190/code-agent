@@ -10,6 +10,14 @@
 - `supabase db diff --local --schema public`: zero bytes; no schema changes found.
 - Deployed Edge Function `app-auth` type-checks and all seven referenced public tables exist.
 
+The first local export was later found to have replaced non-ASCII punctuation with question marks
+in 13 historical SQL files. Although those changes were confined to comments/comment strings and
+did not alter the catalog, that reconstruction was invalid. The files were archived, the 60
+authoritative `statements` arrays were re-read through the Supabase plugin, and Git conversion was
+disabled for active migration SQL. The corrected 61-migration history independently passed reset,
+lint, zero schema diff, and this catalog comparison again. Evidence is prefixed
+`corrected-reconstruction-*` and `corrected-catalog-*`.
+
 ## Catalog counts
 
 | Object | Fresh local | Production | Structural differences |
