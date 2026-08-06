@@ -148,26 +148,29 @@ function strictBuildStore() {
   };
 }
 
-function harness({ failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore() } = {}) {
+function harness({ failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const journeyDrives = [];
   const plan = patchPlan || {
     core: () => CORE_PATCH,
+    // Default repair: a real but futile patch — persistent journey failures still block.
+    repair: () => [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// repair attempt\n" }] }],
     "increment:newsletter-signup": () => NEWSLETTER_PATCH,
     "increment:browse-info": () => BROWSE_PATCH,
   };
   const failSet = new Set(failJourneys);
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,
-    patchesFn: async (ctx) => { patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length }); return plan[ctx.step](ctx); },
+    patchesFn: async (ctx) => { patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length, problems: ctx.problems }); return plan[ctx.step](ctx); },
     assetService,
     snapshotStore,
     buildStore,
-    journeysFn: async ({ journeys }) => {
+    backendProbeFn,
+    journeysFn: journeysFn || (async ({ journeys }) => {
       journeyDrives.push(journeys.map((j) => j.id));
       return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: failSet.has(j.id) ? "fail" : "pass" })) };
-    },
+    }),
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
   });
@@ -405,6 +408,81 @@ export default function BookPage() {
   assert.equal(result.state, "green", "round 2 recovers with the taught interface");
   assert.ok(fedBack?.some((r) => r.signature === "capability-usage" && /\[submitContact\]/.test(r.reason)),
     `the rejection teaches the REAL interface: ${JSON.stringify(fedBack)}`);
+});
+
+test("WP11/V2-20 — the repair tier: a verified browser failure earns a targeted round briefed with the evidence, then green", async () => {
+  let bookingDrives = 0;
+  const REPAIRED_PATCH = [{
+    file: "src/routes/BookPage.jsx",
+    ops: [{ op: "replace_symbol", symbol: "BookPage", content: `export default function BookPage() {
+  const [state, setState] = useState("idle");
+  return (
+    <main>
+      <h1>Book a farm visit</h1>
+      {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-2 (repaired)</p> : null}
+      <button onClick={() => setState("confirmed")}>Submit booking</button>
+    </main>
+  );
+}` }],
+  }];
+  let sawRepairEvidence = null;
+  const h = harness({
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: ({ problems }) => { sawRepairEvidence = problems; return REPAIRED_PATCH; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys }) => ({
+      journeys: journeys.map((j) => {
+        if (j.id !== "book-a-visit") return { id: j.id, title: j.title, priority: j.priority, status: "pass" };
+        bookingDrives += 1;
+        // First drive fails with step evidence; the repaired tree passes.
+        return bookingDrives === 1
+          ? { id: j.id, title: j.title, priority: j.priority, status: "fail", steps: [{ action: "submit the booking form", status: "fail", detail: "confirmation never appeared" }] }
+          : { id: j.id, title: j.title, priority: j.priority, status: "pass" };
+      }),
+    }),
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.ok(sawRepairEvidence?.some((p) => /submit the booking form.*confirmation never appeared/.test(p)),
+    `the repair round is briefed with the EXACT browser evidence: ${JSON.stringify(sawRepairEvidence)}`);
+  const finalTree = await h.snapshotStore.materialize("o", await h.snapshotStore.pointer("o", "proj-1", "green"));
+  assert.match(finalTree["src/routes/BookPage.jsx"], /repaired/, "the repaired tree is what shipped");
+});
+
+test("WP11/V2-20 — repairs are BOUNDED: persistent failure blocks after maxJourneyRepairs rounds", async () => {
+  let repairCalls = 0;
+  const h = harness({
+    failJourneys: ["book-a-visit"],
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => { repairCalls += 1; return [{ file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: `\n// futile repair ${repairCalls}\n` }] }]; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.equal(repairCalls, 2, "exactly maxJourneyRepairs rounds, never more");
+  assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
+});
+
+test("WP11/D4 — a failing backend-row probe blocks eligibility even when the browser journey passed", async () => {
+  const h = harness({
+    backendProbeFn: async () => [{ journeyId: "book-a-visit", detail: "no booking row was created during verification" }],
+    patchPlan: {
+      core: () => CORE_PATCH,
+      // Repairs can't fix a missing database row that the browser can't see — rounds burn, then block.
+      repair: () => [{ file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: "\n// probe repair attempt\n" }] }],
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.match(result.error, /backend-row/i);
 });
 
 test("WP8 — renderAssetData is deterministic and placeholder-safe", () => {

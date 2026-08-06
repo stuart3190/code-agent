@@ -95,6 +95,8 @@ export function createOrchestrator({
   buildStore = memoryBuildStore(),
   verificationCache = memoryVerificationCache(),
   journeysFn = null,                // browser layer: async ({tree, journeys, graph}) → {journeys:[{id,title,status,priority}]}
+  backendProbeFn = null,            // D4 row check: async ({owner, projectId, contract, tiers}) → [{journeyId, detail}]
+  maxJourneyRepairs = 2,            // V2-20 repair tier: targeted rounds against verified browser failures
   compile = async () => ({ ok: true }),
   baseTree,                         // () → scaffold tree (injected so tests pin the real REACT_VITE)
   baseline = null,                  // protected-path baseline for the stage gate
@@ -134,10 +136,10 @@ export function createOrchestrator({
    * rejections fed straight back, the Part 4 stop rule on repeated identical failure.
    * Returns { ok, tree } or { ok:false, problems }.
    */
-  async function buildIncrement({ step, owner, contract, tiers, tree, assets, journeys, editRequest = null }) {
+  async function buildIncrement({ step, owner, contract, tiers, tree, assets, journeys, editRequest = null, initialProblems = [] }) {
     let working = tree;
     let rejections = [];
-    let problems = [];
+    let problems = initialProblems;
     let lastSignature = null;
     for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
       const patches = await patchesFn({ step, owner, contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null, editRequest });
@@ -239,10 +241,37 @@ export function createOrchestrator({
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems });
         tree = core.tree;
 
-        // 4. verify essential journeys (differential), then the C4 eligibility decision.
+        // 4. verify essential journeys (differential), then the C4 eligibility decision —
+        //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
+        //    to maxJourneyRepairs targeted rounds, each briefed with the exact step
+        //    evidence, each re-verified differentially (passing journeys reuse verdicts).
         await setState("verify_core");
-        const coreVerdicts = await verifyJourneySet({ owner, projectId, contract, journeys: essentialJourneys, tree, snapshotId: null });
-        const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys } });
+        let coreVerdicts = await verifyJourneySet({ owner, projectId, contract, journeys: essentialJourneys, tree, snapshotId: null });
+        let backendRowFailures = backendProbeFn ? await backendProbeFn({ owner, projectId, contract, tiers }) : [];
+        let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures });
+        for (let round = 1; !eligibility.eligible && round <= maxJourneyRepairs; round += 1) {
+          const evidence = [
+            ...coreVerdicts.journeys.filter((j) => j.status === "fail").flatMap((j) => {
+              const failedSteps = (j.steps || []).filter((s) => s.status === "fail");
+              return failedSteps.length
+                ? failedSteps.map((s) => `journey ${j.id} · step "${s.action}" FAILED in a real browser: ${s.detail || "expected outcome never appeared"}`)
+                : [`journey ${j.id} FAILED in a real browser (no per-step evidence recorded)`];
+            }),
+            ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
+          ];
+          if (!evidence.length) break; // nothing actionable to brief — blocked below
+          await setState(`repair:${round}`);
+          log(`repair ${round}/${maxJourneyRepairs}: ${evidence.length} verified failure(s)`);
+          const repair = await buildIncrement({
+            step: "repair", owner, contract, tiers, tree, assets: resolved,
+            journeys: essentialJourneys, initialProblems: evidence,
+          });
+          if (!repair.ok) break;
+          tree = repair.tree;
+          coreVerdicts = await verifyJourneySet({ owner, projectId, contract, journeys: essentialJourneys, tree, snapshotId: null });
+          backendRowFailures = backendProbeFn ? await backendProbeFn({ owner, projectId, contract, tiers }) : [];
+          eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures });
+        }
         if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; ") });
 
         // 5. GREEN: atomic snapshot + pointer promotion. Preview may ship NOW (C4).

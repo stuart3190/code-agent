@@ -117,29 +117,35 @@ function renderJourneyBrief(journeys) {
 
 export function renderPatchPrompt({ step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null }) {
   const isEdit = step === "edit";
-  const scopedJourneys = step === "core"
+  const isRepair = step === "repair";
+  const scopedJourneys = step === "core" || isRepair
     ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
   const parts = [
     `STEP: ${step}`,
     step === "core"
       ? `Build the ESSENTIAL scope only: journeys [${tiers.essential.journeys.join(", ")}], entities [${tiers.essential.entities.join(", ")}]. Secondary work is delivered later as increments — do NOT build it now.`
-      : isEdit
-        ? `Apply EXACTLY this change to the existing app, and nothing else:\n  ${editRequest}\nThe smallest correct patch wins: prefer symbol ops on existing files over rewrites. Every existing journey must KEEP working — do not remove or reword the outcomes they verify.`
-        : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
+      : isRepair
+        ? "REPAIR: a real browser drove the journeys below against your current tree and the listed steps FAILED with the exact evidence shown. Fix ONLY what the evidence names — the smallest correct patch wins, and everything currently passing must keep passing."
+        : isEdit
+          ? `Apply EXACTLY this change to the existing app, and nothing else:\n  ${editRequest}\nThe smallest correct patch wins: prefer symbol ops on existing files over rewrites. Every existing journey must KEEP working — do not remove or reword the outcomes they verify.`
+          : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
     "",
     "IMPLEMENTATION CONTRACT:",
     contractBrief(contract),
     "",
     renderJourneyBrief(scopedJourneys),
-    renderTreeContext(tree, { extraFullPaths: isEdit ? editTargets(tree, editRequest) : [] }),
+    renderTreeContext(tree, {
+      extraFullPaths: isEdit ? editTargets(tree, editRequest)
+        : isRepair ? editTargets(tree, problems.join(" ")) : [],
+    }),
   ];
   if (rejections.length) {
     parts.push("", "YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact; fix and re-emit ALL patches:",
       ...rejections.map((r) => `- ${r.reason}`));
   }
   if (problems.length) {
-    parts.push("", "THE VERIFICATION GATE FAILED on your last tree — fix these and re-emit patches:",
+    parts.push("", "VERIFICATION FAILED on your last tree — fix these and re-emit patches:",
       ...problems.map((p) => `- ${p}`));
   }
   parts.push("", "Call emit_patches now with the complete batch for this step.");
