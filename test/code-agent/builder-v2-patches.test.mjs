@@ -195,7 +195,7 @@ test("a second default export is rejected at APPLY time with the fix named — n
   const tree = { "src/routes/HomePage.jsx": "export default function HomePage() {\n  return null;\n}\n" };
   const dup = applyPatches(tree, [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", symbol: null, content: "export default function BetterHome() {\n  return 1;\n}" }] }]);
   assert.equal(dup.applied.length, 0);
-  assert.match(dup.rejected[0].reason, /2 default exports.*HomePage.*BetterHome/s);
+  assert.match(dup.rejected[0].reason, /2 default exports/);
   assert.match(dup.rejected[0].reason, /use replace_symbol on the existing default/);
 
   // The correct move still works.

@@ -6,7 +6,7 @@
 // the same op escalate that FILE to whole-file regeneration — never a silent partial write,
 // never a guessed anchor.
 
-import { indexFile } from "./indexerV0.mjs";
+import { indexFile } from "./indexer.mjs";
 import { modularityCheck } from "../appBuild/modularity.mjs";
 
 export const PROTECTED_PATHS = Object.freeze([
@@ -66,11 +66,12 @@ const isProtected = (path) => PROTECTED_PATHS.some((re) => re.test(path));
 
 // Two default exports compile-fail EVERY time — a live run burned a full gate round on
 // "Multiple exports with the same name 'default'" from an append that should have been a
-// replace_symbol. Caught here it costs a free rejection with the fix named.
-function duplicateDefault(probe) {
-  const defaults = (probe.symbols || []).filter((s) => s.isDefault);
-  if (defaults.length <= 1) return null;
-  return `this would leave ${defaults.length} default exports (${defaults.map((s) => s.name).join(", ")}) — `
+// replace_symbol. Checked on the candidate TEXT before the parse probe, because Indexer v1
+// correctly refuses to parse the file at all — and "does not parse" teaches nothing.
+function duplicateDefault(candidateText) {
+  const count = (String(candidateText).match(/export\s+default\b/g) || []).length;
+  if (count <= 1) return null;
+  return `this would leave ${count} default exports — `
     + `use replace_symbol on the existing default component instead of adding another`;
 }
 
@@ -163,10 +164,10 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
       if (op.op === "append") {
         const candidate = `${current}\n${op.content || ""}`;
+        const dupDefault = duplicateDefault(candidate);
+        if (dupDefault) { reject(patch, op, dupDefault); continue; }
         const probe = indexFile(file, candidate);
         if (probe.opaque) { reject(patch, op, "append: resulting file does not parse"); continue; }
-        const dupDefault = duplicateDefault(probe);
-        if (dupDefault) { reject(patch, op, dupDefault); continue; }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -196,10 +197,10 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         continue;
       }
 
+      const dupDefault = duplicateDefault(candidate);
+      if (dupDefault) { reject(patch, op, dupDefault); continue; }
       const probe = indexFile(file, candidate);
       if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`); continue; }
-      const dupDefault = duplicateDefault(probe);
-      if (dupDefault) { reject(patch, op, dupDefault); continue; }
       working[file] = candidate;
       applied.push({ signature: opSignature(patch, op), file, kind: op.op });
     }

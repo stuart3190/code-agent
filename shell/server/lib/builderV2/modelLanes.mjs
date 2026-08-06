@@ -10,7 +10,7 @@ import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
 import { capabilityBrief } from "./capabilityRegistry.mjs";
-import { indexTree } from "./indexerV0.mjs";
+import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
 

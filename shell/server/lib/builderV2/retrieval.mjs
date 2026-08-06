@@ -7,7 +7,7 @@
 // Over budget demotes by ascending score — body -> interface -> summary — and NEVER truncates
 // silently: every file lands in exactly one list with its reason and score in the trace.
 
-import { tokensOf } from "./indexerV0.mjs";
+import { tokensOf } from "./indexer.mjs";
 
 export const FORMS = Object.freeze(["full", "interface", "summary", "omitted"]);
 

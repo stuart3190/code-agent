@@ -348,7 +348,7 @@ test("WP9 regression — the REAL bv2_builds column set survives green AND block
 });
 
 test("WP9 regression — a byte-identical no-op batch is rejected deterministically, never gated", async () => {
-  const { indexFile } = await import("../../shell/server/lib/builderV2/indexerV0.mjs");
+  const { indexFile } = await import("../../shell/server/lib/builderV2/indexer.mjs");
   const scaffoldHome = clone(fromScaffold(REACT_VITE))["src/routes/HomePage.jsx"];
   const symbol = indexFile("src/routes/HomePage.jsx", scaffoldHome).symbols.find((s) => s.name === "HomePage");
   const identical = scaffoldHome.slice(symbol.start, symbol.end);

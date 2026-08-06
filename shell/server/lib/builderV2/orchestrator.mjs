@@ -12,7 +12,7 @@
 // gate. Everything else is the real machinery: the real patch engine, the real stage
 // gates via the verification facade, the real asset service, the real snapshot protocol.
 
-import { indexTree } from "./indexerV0.mjs";
+import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches } from "./patchEngine.mjs";
 import { tierContract, bindCapabilities, imageIntents, previewEligibility } from "./contractTiering.mjs";

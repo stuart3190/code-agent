@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../supabase.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { treeHashOf } from "./indexerV0.mjs";
+import { treeHashOf } from "./indexer.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 const INLINE_LIMIT = 64_000; // bytes; beyond this a blob lives in the bucket

@@ -44,6 +44,7 @@
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },
   "dependencies": {
+    "@babel/parser": "^8.0.4",
     "@daytona/sdk": "0.201.0",
     "@openai/codex": "0.146.0",
     "@supabase/supabase-js": "2.111.0",
