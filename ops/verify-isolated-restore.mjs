@@ -134,6 +134,41 @@ for (const entry of caches) {
   if (entry.snapshot_id && !snapshotById.has(entry.snapshot_id)) throw new Error("restored verification cache points to a missing snapshot");
 }
 
+const revisions = await loadRows("bv2_file_revisions");
+const symbols = await loadRows("bv2_symbols");
+const symbolRefs = await loadRows("bv2_symbol_refs");
+const dependencyEdges = await loadRows("bv2_dependency_edges");
+const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+for (const revision of revisions) {
+  const actual = {
+    symbols: symbols.filter((row) => row.revision_id === revision.id).length,
+    refs: symbolRefs.filter((row) => row.revision_id === revision.id).length,
+    edges: dependencyEdges.filter((row) => row.revision_id === revision.id).length,
+  };
+  const declared = { symbols: revision.symbol_count, refs: revision.ref_count, edges: revision.edge_count };
+  if (revision.state === "ready" && JSON.stringify(actual) !== JSON.stringify(declared)) {
+    throw new Error("restored ready graph revision has incomplete children");
+  }
+}
+const shadowRuns = await loadRows("bv2_shadow_runs");
+const shadowRunById = new Map(shadowRuns.map((run) => [run.id, run]));
+for (const file of await loadRows("bv2_shadow_run_files")) {
+  const run = shadowRunById.get(file.shadow_run_id);
+  const revision = revisionById.get(file.revision_id);
+  if (!run || !revision
+    || run.owner !== file.owner || run.project_id !== file.project_id
+    || revision.owner !== file.owner || revision.project_id !== file.project_id
+    || revision.path !== file.path || revision.content_hash !== file.content_hash) {
+    throw new Error("restored shadow manifest ownership/revision link does not resolve");
+  }
+}
+for (const check of await loadRows("bv2_shadow_checks")) {
+  const run = shadowRunById.get(check.shadow_run_id);
+  if (!run || run.owner !== check.owner || run.project_id !== check.project_id) {
+    throw new Error("restored shadow check ownership does not resolve");
+  }
+}
+
 const projects = await loadRows("projects");
 const owners = [...new Set(projects.map((project) => project.owner))];
 if (owners.length < 2) throw new Error("cross-owner proof requires at least two project owners");
@@ -162,6 +197,8 @@ console.log(JSON.stringify({
   blobs: blobs.length,
   snapshots: snapshots.length,
   verificationCacheRows: caches.length,
+  graphRevisions: revisions.length,
+  shadowRuns: shadowRuns.length,
   crossOwnerPrincipals: 2,
 }));
 

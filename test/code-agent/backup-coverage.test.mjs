@@ -81,6 +81,9 @@ test("the restore order covers exactly the backed-up tables", () => {
   assert.ok(RESTORE_ORDER.indexOf("ca_runs") < RESTORE_ORDER.indexOf("ca_artifacts"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_symbols"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_symbols") < RESTORE_ORDER.indexOf("bv2_symbol_refs"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_checks"));
 });
 
 test("a backup directory round-trips through validation and rejects tampering", async () => {
