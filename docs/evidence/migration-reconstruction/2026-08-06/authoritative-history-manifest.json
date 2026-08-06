@@ -1,0 +1,486 @@
+{
+  "source": "supabase_migrations.schema_migrations on zczgvcsokfafuyognvwx",
+  "capturedAt": "2026-08-06T20:49:35.031Z",
+  "migrations": [
+    {
+      "appliedOrder": 1,
+      "version": "20260729164522",
+      "name": "code_agent_control_plane",
+      "filename": "20260729164522_code_agent_control_plane.sql",
+      "statementCount": 1,
+      "sqlSha256": "d1c7610af56614a4af119897fd029bbca258d812cf0b6129185f5886a62db67d"
+    },
+    {
+      "appliedOrder": 2,
+      "version": "20260729164535",
+      "name": "github_app_installations",
+      "filename": "20260729164535_github_app_installations.sql",
+      "statementCount": 1,
+      "sqlSha256": "fd72ae8cc0b3293f58e6a1170bdaa03a6e74a3da1b403a9f89bbb8b59e4f5246"
+    },
+    {
+      "appliedOrder": 3,
+      "version": "20260729164721",
+      "name": "harden_code_agent_schema",
+      "filename": "20260729164721_harden_code_agent_schema.sql",
+      "statementCount": 1,
+      "sqlSha256": "d4f16d0161cef5ffa638ba80126bf2d7230eac26e5fccfc93e83556d9bc57fbe"
+    },
+    {
+      "appliedOrder": 4,
+      "version": "20260729165144",
+      "name": "lock_down_code_agent_anon_access",
+      "filename": "20260729165144_lock_down_code_agent_anon_access.sql",
+      "statementCount": 1,
+      "sqlSha256": "8df693b56afaf962c011719d015ddf0d449a3f55bfccd07981d895b0602e3528"
+    },
+    {
+      "appliedOrder": 5,
+      "version": "20260729231426",
+      "name": "github_webhook_ledger",
+      "filename": "20260729231426_github_webhook_ledger.sql",
+      "statementCount": 1,
+      "sqlSha256": "0b232c3bf3aa7c06b9d4346b7463ab823de7877111546f8e5081851b63aff0c6"
+    },
+    {
+      "appliedOrder": 6,
+      "version": "20260729232141",
+      "name": "restrict_code_agent_policy_roles",
+      "filename": "20260729232141_restrict_code_agent_policy_roles.sql",
+      "statementCount": 1,
+      "sqlSha256": "1e727160fa8e870add1bc54efa1ec044f8668d27de194c82987580e7ee5541bc"
+    },
+    {
+      "appliedOrder": 7,
+      "version": "20260729234551",
+      "name": "ai_provider_connections",
+      "filename": "20260729234551_ai_provider_connections.sql",
+      "statementCount": 1,
+      "sqlSha256": "b06ef6a571404e204f96abc082bf4e4030c5c954e3c21fbeb3ad051d3e05f9ed"
+    },
+    {
+      "appliedOrder": 8,
+      "version": "20260729234651",
+      "name": "reject_anonymous_code_agent_access",
+      "filename": "20260729234651_reject_anonymous_code_agent_access.sql",
+      "statementCount": 1,
+      "sqlSha256": "383e1b27d2fa79f575a04da02638eaf80b17ba8873670b20f252be232e85062d"
+    },
+    {
+      "appliedOrder": 9,
+      "version": "20260730001803",
+      "name": "repository_hybrid_index",
+      "filename": "20260730001803_repository_hybrid_index.sql",
+      "statementCount": 1,
+      "sqlSha256": "5a3aa3b7cea9e8baf09d529371832f28c17b3b470bd85ca50bd053076798a22f"
+    },
+    {
+      "appliedOrder": 10,
+      "version": "20260730063059",
+      "name": "repository_code_intelligence",
+      "filename": "20260730063059_repository_code_intelligence.sql",
+      "statementCount": 1,
+      "sqlSha256": "b322ea9f8a078531934ee02ed9c7089ad9bfd7040805e8fcc0d81b918e65c72f"
+    },
+    {
+      "appliedOrder": 11,
+      "version": "20260730083259",
+      "name": "model_routing_and_evaluations",
+      "filename": "20260730083259_model_routing_and_evaluations.sql",
+      "statementCount": 1,
+      "sqlSha256": "ef8d83d6475b8ebd3ff8b91e0b944064f7be877c2d65a22557a61b999cf43b44"
+    },
+    {
+      "appliedOrder": 12,
+      "version": "20260730091313",
+      "name": "subscriptions_budgets_telemetry",
+      "filename": "20260730091313_subscriptions_budgets_telemetry.sql",
+      "statementCount": 1,
+      "sqlSha256": "7f69704e0636371dcf8435a71bcbd59c4cd6ca1280be521743758af2bc8dd7d9"
+    },
+    {
+      "appliedOrder": 13,
+      "version": "20260730100937",
+      "name": "approval_policies_resume_artifacts",
+      "filename": "20260730100937_approval_policies_resume_artifacts.sql",
+      "statementCount": 1,
+      "sqlSha256": "b163faf27ee69d204e4560c83cfb4c9d35cb39de0c364784605823b79cc9b894"
+    },
+    {
+      "appliedOrder": 14,
+      "version": "20260730102731",
+      "name": "egress_command_policies_retention",
+      "filename": "20260730102731_egress_command_policies_retention.sql",
+      "statementCount": 1,
+      "sqlSha256": "4454f566385538f09b4c0f976846d03c149851e40b75e5f5649869aaa2ec6142"
+    },
+    {
+      "appliedOrder": 15,
+      "version": "20260730104416",
+      "name": "api_tokens",
+      "filename": "20260730104416_api_tokens.sql",
+      "statementCount": 1,
+      "sqlSha256": "7756c80e5f6e77f4f914698b81c31e91245a14d72d6f1cfc56de927cbc59279c"
+    },
+    {
+      "appliedOrder": 16,
+      "version": "20260730110931",
+      "name": "review_runs",
+      "filename": "20260730110931_review_runs.sql",
+      "statementCount": 1,
+      "sqlSha256": "d613611f1189ce5a6680b975db141f3f256bea39082724980d316d615fcc6393"
+    },
+    {
+      "appliedOrder": 17,
+      "version": "20260730114324",
+      "name": "automations",
+      "filename": "20260730114324_automations.sql",
+      "statementCount": 1,
+      "sqlSha256": "2d673707bdb9dd318f5ab966db0f0280924600d7056f1bb1e9a138126eb1b18f"
+    },
+    {
+      "appliedOrder": 18,
+      "version": "20260730203059",
+      "name": "conversation_platform",
+      "filename": "20260730203059_conversation_platform.sql",
+      "statementCount": 1,
+      "sqlSha256": "b476cc94ad6e07a9cb975de1a3282987d626f21b37f4d64e231ce96fc82b25a4"
+    },
+    {
+      "appliedOrder": 19,
+      "version": "20260730212120",
+      "name": "app_build_platform",
+      "filename": "20260730212120_app_build_platform.sql",
+      "statementCount": 1,
+      "sqlSha256": "25a8e6f9052a87159f9f90044046cff261ff79c5a2272b0db245785cae7c1371"
+    },
+    {
+      "appliedOrder": 20,
+      "version": "20260730233508",
+      "name": "app_publish_platform",
+      "filename": "20260730233508_app_publish_platform.sql",
+      "statementCount": 1,
+      "sqlSha256": "ae1e0a1288a4d1bb63eb0f53a6609868de361e33da12a14aa3ca9969a47690ad"
+    },
+    {
+      "appliedOrder": 21,
+      "version": "20260731100621",
+      "name": "owner_accounts",
+      "filename": "20260731100621_owner_accounts.sql",
+      "statementCount": 1,
+      "sqlSha256": "dcbce305ee442c389e7e12c2b9b41cefb6e6b18e2b7f951bf2d09f61e8e3ee1f"
+    },
+    {
+      "appliedOrder": 22,
+      "version": "20260731113457",
+      "name": "per_app_runtime",
+      "filename": "20260731113457_per_app_runtime.sql",
+      "statementCount": 1,
+      "sqlSha256": "23d116cb0bc9af7d914bb5502070f48c91280f292306e59c6428c3fa8b31bd04"
+    },
+    {
+      "appliedOrder": 23,
+      "version": "20260731113533",
+      "name": "app_auth_support_tables",
+      "filename": "20260731113533_app_auth_support_tables.sql",
+      "statementCount": 1,
+      "sqlSha256": "f6c785498279fea02a944dd7f4483879601ddaf66b8244424ca398848fee50c4"
+    },
+    {
+      "appliedOrder": 24,
+      "version": "20260731113608",
+      "name": "app_auth_schema_align",
+      "filename": "20260731113608_app_auth_schema_align.sql",
+      "statementCount": 1,
+      "sqlSha256": "99f4cd5ef06224c396bf0e5ff2b60d5f01a1a3f5e708d511f4082ce77ecc754b"
+    },
+    {
+      "appliedOrder": 25,
+      "version": "20260731151901",
+      "name": "soft_delete",
+      "filename": "20260731151901_soft_delete.sql",
+      "statementCount": 1,
+      "sqlSha256": "f4b141a78a1b4ec0a8263ba3ae7dd9792a9abe68e55b75786a7e97ee86f68e35"
+    },
+    {
+      "appliedOrder": 26,
+      "version": "20260801000408",
+      "name": "build_diagnostics",
+      "filename": "20260801000408_build_diagnostics.sql",
+      "statementCount": 1,
+      "sqlSha256": "648b52f82fbaa025c9284c602f8689a37c3ce193b9b8ad435f18c976ad2e809e"
+    },
+    {
+      "appliedOrder": 27,
+      "version": "20260801080238",
+      "name": "ai_requests",
+      "filename": "20260801080238_ai_requests.sql",
+      "statementCount": 1,
+      "sqlSha256": "315c6c210e96d7e4633d7637c371e13ece0a07946c98901d5a9f7dcf0917e4e6"
+    },
+    {
+      "appliedOrder": 28,
+      "version": "20260801082604",
+      "name": "ai_requests_context",
+      "filename": "20260801082604_ai_requests_context.sql",
+      "statementCount": 1,
+      "sqlSha256": "9a20825006f0cf7da88b16246cf5c79ed0559764dfa1511298bf71c9298f5823"
+    },
+    {
+      "appliedOrder": 29,
+      "version": "20260801090748",
+      "name": "conversation_model_pref",
+      "filename": "20260801090748_conversation_model_pref.sql",
+      "statementCount": 1,
+      "sqlSha256": "2233b151b77aa015be8cd7ba4a0e4b123549830aac521c8c3c04b7c44e0756ac"
+    },
+    {
+      "appliedOrder": 30,
+      "version": "20260801120332",
+      "name": "diag_incidents",
+      "filename": "20260801120332_diag_incidents.sql",
+      "statementCount": 1,
+      "sqlSha256": "9d826c01819d139bb1e92d58016b739fe82a3455d3c70b7dbc8ec7c53ab8fc23"
+    },
+    {
+      "appliedOrder": 31,
+      "version": "20260801134602",
+      "name": "build_signals",
+      "filename": "20260801134602_build_signals.sql",
+      "statementCount": 1,
+      "sqlSha256": "f24911c3b887170feafe05c491a97f1a4365f109c5f684693c6bf3facc9e8abb"
+    },
+    {
+      "appliedOrder": 32,
+      "version": "20260801140736",
+      "name": "ai_credentials_allow_xai",
+      "filename": "20260801140736_ai_credentials_allow_xai.sql",
+      "statementCount": 1,
+      "sqlSha256": "944d83d0a8c6185c01822f988ef75a5773bff945b4acdcc9ebcdc86c8a67c8ce"
+    },
+    {
+      "appliedOrder": 33,
+      "version": "20260801140806",
+      "name": "ai_preferences_allow_xai",
+      "filename": "20260801140806_ai_preferences_allow_xai.sql",
+      "statementCount": 1,
+      "sqlSha256": "73d5639f7f63ad479ed5f194cd50c75b3e4ef31ba933546b0da29cb9e6dd5dcc"
+    },
+    {
+      "appliedOrder": 34,
+      "version": "20260801160607",
+      "name": "repair_pipeline_hardening",
+      "filename": "20260801160607_repair_pipeline_hardening.sql",
+      "statementCount": 1,
+      "sqlSha256": "08fe2cb4cceb2538fad5b88e7aa1bf633ee3be689bdcd456a88180c1b721a214"
+    },
+    {
+      "appliedOrder": 35,
+      "version": "20260801162814",
+      "name": "persistent_build_checkpoints",
+      "filename": "20260801162814_persistent_build_checkpoints.sql",
+      "statementCount": 1,
+      "sqlSha256": "5e2748bb630a15b3a70b256aac72d2cb4e237a54281bc6c10ca582b7097b6d8e"
+    },
+    {
+      "appliedOrder": 36,
+      "version": "20260801180459",
+      "name": "provider_constraints_and_telemetry_grants",
+      "filename": "20260801180459_provider_constraints_and_telemetry_grants.sql",
+      "statementCount": 1,
+      "sqlSha256": "c42fd261d01c8e74050e111540ffc508279eda61368c756ce390563e3ae94dd8"
+    },
+    {
+      "appliedOrder": 37,
+      "version": "20260801195851",
+      "name": "qa_runs_thrallo",
+      "filename": "20260801195851_qa_runs_thrallo.sql",
+      "statementCount": 1,
+      "sqlSha256": "e99d2abd49718fd23d3631b8b05cee57d7a525d1cbeff41ed64e898b83e6a34c"
+    },
+    {
+      "appliedOrder": 38,
+      "version": "20260801202309",
+      "name": "app_notifications",
+      "filename": "20260801202309_app_notifications.sql",
+      "statementCount": 1,
+      "sqlSha256": "43ed915adcf992ee39bce0ecc32a1668aa4ae0f67cd4dfeb8afffa33d9392b2c"
+    },
+    {
+      "appliedOrder": 39,
+      "version": "20260801202626",
+      "name": "app_notifications_source_is_trusted_only",
+      "filename": "20260801202626_app_notifications_source_is_trusted_only.sql",
+      "statementCount": 1,
+      "sqlSha256": "edbfa548261976c5030e26bd143cdbd4fec2e21ae4de46cece184cb244d8f7f4"
+    },
+    {
+      "appliedOrder": 40,
+      "version": "20260801203017",
+      "name": "app_notifications_column_grants",
+      "filename": "20260801203017_app_notifications_column_grants.sql",
+      "statementCount": 1,
+      "sqlSha256": "9cccc97063f4558addcaf4643dcd139cca5bb51c6714f0c7ba23968085cb0a1f"
+    },
+    {
+      "appliedOrder": 41,
+      "version": "20260802150108",
+      "name": "subscription_plan_changes",
+      "filename": "20260802150108_subscription_plan_changes.sql",
+      "statementCount": 1,
+      "sqlSha256": "69bf1b12bc1b6466bc127b9122e7e336132af70193e7e2e88248a7ad9ddf0a74"
+    },
+    {
+      "appliedOrder": 42,
+      "version": "20260802185336",
+      "name": "publish_lifecycle_unpublish",
+      "filename": "20260802185336_publish_lifecycle_unpublish.sql",
+      "statementCount": 1,
+      "sqlSha256": "cef035877ad6be8f93dab18bb784ec609a4a88c9530508623f3f48f74f0a9760"
+    },
+    {
+      "appliedOrder": 43,
+      "version": "20260802210939",
+      "name": "custom_domain_verification",
+      "filename": "20260802210939_custom_domain_verification.sql",
+      "statementCount": 1,
+      "sqlSha256": "3bd14f59735ca324976a68327fe13c95a40288dfe66863e9f0332f93a46fe3f3"
+    },
+    {
+      "appliedOrder": 44,
+      "version": "20260802211118",
+      "name": "custom_domain_verification_started",
+      "filename": "20260802211118_custom_domain_verification_started.sql",
+      "statementCount": 1,
+      "sqlSha256": "c04171d05502adf85c9c68ae7bd4004e287d835bfd5d64c580e921acab8d71f9"
+    },
+    {
+      "appliedOrder": 45,
+      "version": "20260802220217",
+      "name": "thrallo_analytics_foundation",
+      "filename": "20260802220217_thrallo_analytics_foundation.sql",
+      "statementCount": 1,
+      "sqlSha256": "d3cf09b8dedb0b948aafb64b48f55beca3b8905908409f2e8159b92089d57950"
+    },
+    {
+      "appliedOrder": 46,
+      "version": "20260802223316",
+      "name": "health_monitoring",
+      "filename": "20260802223316_health_monitoring.sql",
+      "statementCount": 1,
+      "sqlSha256": "e82c32ca2adbd9919dc66abc3609ad86e5e570743c5d55251a9cd0cdfe26f2e3"
+    },
+    {
+      "appliedOrder": 47,
+      "version": "20260802234247",
+      "name": "project_logs",
+      "filename": "20260802234247_project_logs.sql",
+      "statementCount": 1,
+      "sqlSha256": "da887851e8f36c1cee499b097ee3c5f1abf2cae487c33b1bd8d7dce0e392481f"
+    },
+    {
+      "appliedOrder": 48,
+      "version": "20260803005550",
+      "name": "analytics_logs_health_tables_reconcile",
+      "filename": "20260803005550_analytics_logs_health_tables_reconcile.sql",
+      "statementCount": 1,
+      "sqlSha256": "0afb131c1da910adea62d4e371cc7b74ae45840a5a3b5e39f3924f25d94fe914"
+    },
+    {
+      "appliedOrder": 49,
+      "version": "20260803072805",
+      "name": "drift_helper_project_scoped",
+      "filename": "20260803072805_drift_helper_project_scoped.sql",
+      "statementCount": 1,
+      "sqlSha256": "85a4f5e3fe08592f9703d1df6d19cd09bd93e4ac5f52ddc1af4d09da65306e5b"
+    },
+    {
+      "appliedOrder": 50,
+      "version": "20260803124509",
+      "name": "one_live_site_per_product",
+      "filename": "20260803124509_one_live_site_per_product.sql",
+      "statementCount": 1,
+      "sqlSha256": "f4d32fcc679e72a370c764ec32337eba660d2b824a3101a07545114896a26ae1"
+    },
+    {
+      "appliedOrder": 51,
+      "version": "20260803150144",
+      "name": "deployments",
+      "filename": "20260803150144_deployments.sql",
+      "statementCount": 1,
+      "sqlSha256": "9a6457c9bafeee8a96ce5dd67a037de22937b875aff2c3e357f6ac5e56715750"
+    },
+    {
+      "appliedOrder": 52,
+      "version": "20260803205904",
+      "name": "conversation_favourites_archive",
+      "filename": "20260803205904_conversation_favourites_archive.sql",
+      "statementCount": 1,
+      "sqlSha256": "162e5a98bbbbdab12b42df99b5830e0aee96198301ad1842e9fadf743a04a340"
+    },
+    {
+      "appliedOrder": 53,
+      "version": "20260803233001",
+      "name": "account_notifications_cancellation",
+      "filename": "20260803233001_account_notifications_cancellation.sql",
+      "statementCount": 1,
+      "sqlSha256": "10a81ccfbad72ab877e93d85f9b81a61867db1238f3d01322adce51ddcf6db33"
+    },
+    {
+      "appliedOrder": 54,
+      "version": "20260804090105",
+      "name": "onboarding_state",
+      "filename": "20260804090105_onboarding_state.sql",
+      "statementCount": 1,
+      "sqlSha256": "1ada43ec1fa6f6ed4be977f962f0fcecaeb4d353889bff3aa9fceb2e06b6f344"
+    },
+    {
+      "appliedOrder": 55,
+      "version": "20260804103902",
+      "name": "analytics_country",
+      "filename": "20260804103902_analytics_country.sql",
+      "statementCount": 1,
+      "sqlSha256": "df5b96b8094e37b2809661bdacffc912c6203a78e7a09b55b445b43c11e366c7"
+    },
+    {
+      "appliedOrder": 56,
+      "version": "20260804201913",
+      "name": "diag_runs_implementation_contract",
+      "filename": "20260804201913_diag_runs_implementation_contract.sql",
+      "statementCount": 1,
+      "sqlSha256": "fce0469a7957060e757af77e3da5eda353cc034857d6a4cf89cbae47d956694e"
+    },
+    {
+      "appliedOrder": 57,
+      "version": "20260804203403",
+      "name": "build_checkpoints_stage",
+      "filename": "20260804203403_build_checkpoints_stage.sql",
+      "statementCount": 1,
+      "sqlSha256": "9a1928769eb44a7720bfa281e51e097d36dd6c4effccacf8bb00947bec232f70"
+    },
+    {
+      "appliedOrder": 58,
+      "version": "20260805072157",
+      "name": "ai_requests_provider_request_ids",
+      "filename": "20260805072157_ai_requests_provider_request_ids.sql",
+      "statementCount": 1,
+      "sqlSha256": "6abcd0c43fdfd7dec5f6f327ca603c8b4cb740a1b6349773793ea66c867f17a4"
+    },
+    {
+      "appliedOrder": 59,
+      "version": "20260805190622",
+      "name": "builder_v2_foundation",
+      "filename": "20260805190622_builder_v2_foundation.sql",
+      "statementCount": 1,
+      "sqlSha256": "cfbb5bb4bfb18e13a1a4f9b35c3d1edf7aee9fca24a3608df638b040cfe0bcbc"
+    },
+    {
+      "appliedOrder": 60,
+      "version": "20260805212028",
+      "name": "bv2_verification_cache_nullable_snapshot",
+      "filename": "20260805212028_bv2_verification_cache_nullable_snapshot.sql",
+      "statementCount": 1,
+      "sqlSha256": "a77592cc1e5b704726d9ba09184cf13597fc124aa0c2996cdfa9555bc61e6322"
+    }
+  ]
+}
