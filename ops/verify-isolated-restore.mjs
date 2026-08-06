@@ -152,6 +152,7 @@ for (const revision of revisions) {
 }
 const shadowRuns = await loadRows("bv2_shadow_runs");
 const shadowRunById = new Map(shadowRuns.map((run) => [run.id, run]));
+const restoredMigrationStates = await loadRows("bv2_migration_state");
 for (const file of await loadRows("bv2_shadow_run_files")) {
   const run = shadowRunById.get(file.shadow_run_id);
   const revision = revisionById.get(file.revision_id);
@@ -163,8 +164,11 @@ for (const file of await loadRows("bv2_shadow_run_files")) {
   }
 }
 for (const check of await loadRows("bv2_shadow_checks")) {
-  const run = shadowRunById.get(check.shadow_run_id);
-  if (!run || run.owner !== check.owner || run.project_id !== check.project_id) {
+  const run = check.shadow_run_id ? shadowRunById.get(check.shadow_run_id) : null;
+  const migrationState = check.shadow_run_id ? null : restoredMigrationStates
+    .find((row) => row.owner === check.owner && row.project_id === check.project_id && row.state === "shadow");
+  if ((check.shadow_run_id && (!run || run.owner !== check.owner || run.project_id !== check.project_id))
+    || (!check.shadow_run_id && !migrationState)) {
     throw new Error("restored shadow check ownership does not resolve");
   }
 }

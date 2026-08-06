@@ -150,7 +150,7 @@ create index bv2_shadow_run_files_revision on public.bv2_shadow_run_files (revis
 
 create table public.bv2_shadow_checks (
   id uuid primary key default gen_random_uuid(),
-  shadow_run_id uuid not null,
+  shadow_run_id uuid,
   owner uuid not null,
   project_id uuid not null,
   status text not null check (status in ('clean', 'drift', 'failed', 'stale')),
@@ -472,7 +472,14 @@ begin
     or jsonb_typeof(p_evidence) <> 'object' then
     raise exception 'invalid shadow check' using errcode = '22023';
   end if;
-  if not exists (
+  if p_shadow_run_id is null then
+    if not exists (
+      select 1 from public.bv2_migration_state
+      where owner = p_owner and project_id = p_project_id and state = 'shadow'
+    ) then
+      raise exception 'missing-run evidence does not belong to a shadow project' using errcode = '42501';
+    end if;
+  elsif not exists (
     select 1 from public.bv2_shadow_runs
     where id = p_shadow_run_id and owner = p_owner and project_id = p_project_id
   ) then
@@ -485,9 +492,11 @@ begin
     p_shadow_run_id, p_owner, p_project_id, p_status, p_evidence
   ) returning id into v_check_id;
 
-  update public.bv2_shadow_runs
-  set status = p_status, validated_at = pg_catalog.clock_timestamp()
-  where id = p_shadow_run_id and owner = p_owner and project_id = p_project_id;
+  if p_shadow_run_id is not null then
+    update public.bv2_shadow_runs
+    set status = p_status, validated_at = pg_catalog.clock_timestamp()
+    where id = p_shadow_run_id and owner = p_owner and project_id = p_project_id;
+  end if;
   update public.bv2_migration_state
   set notes = notes || jsonb_build_object(
     'shadowRunId', p_shadow_run_id, 'status', p_status,

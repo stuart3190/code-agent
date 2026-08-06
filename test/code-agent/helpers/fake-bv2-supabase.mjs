@@ -212,16 +212,20 @@ export function createFakeBv2Supabase() {
   }
 
   function recordCheck(args) {
-    const run = rowsOf("bv2_shadow_runs").find((row) => row.id === args.p_shadow_run_id
+    const run = args.p_shadow_run_id === null ? null : rowsOf("bv2_shadow_runs").find((row) => row.id === args.p_shadow_run_id
       && row.owner === args.p_owner && row.project_id === args.p_project_id);
-    if (!run) throw new Error("shadow run does not belong to owner/project");
+    const state = rowsOf("bv2_migration_state").find((row) => row.owner === args.p_owner
+      && row.project_id === args.p_project_id && row.state === "shadow");
+    if (!run && !state) throw new Error("shadow evidence does not belong to owner/project");
     const id = nextId();
     rowsOf("bv2_shadow_checks").push({
-      id, shadow_run_id: run.id, owner: run.owner, project_id: run.project_id,
+      id, shadow_run_id: run?.id || null, owner: args.p_owner, project_id: args.p_project_id,
       status: args.p_status, evidence: structuredClone(args.p_evidence), checked_at: new Date().toISOString(),
     });
-    run.status = args.p_status;
-    run.validated_at = new Date().toISOString();
+    if (run) {
+      run.status = args.p_status;
+      run.validated_at = new Date().toISOString();
+    }
     return id;
   }
 

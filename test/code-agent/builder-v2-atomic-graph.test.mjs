@@ -13,6 +13,7 @@ import {
   supabaseGraph,
 } from "../../shell/server/lib/builderV2/supabaseTwins.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
+import { runShadowDriftCheck } from "../../ops/bv2-shadow-drift.mjs";
 import { createFakeBv2Supabase } from "./helpers/fake-bv2-supabase.mjs";
 
 const OWNER_A = "00000000-0000-4000-8000-000000000001";
@@ -147,6 +148,23 @@ test("H3 — stale shadow age is blocking evidence", async () => {
   });
   assert.equal(proof.clean, false);
   assert.ok(proof.mismatches.some((mismatch) => mismatch.kind === "stale_shadow_run"));
+});
+
+test("H3 — a missing shadow run is persisted as exact gap evidence and fails ops", async () => {
+  const client = createFakeBv2Supabase();
+  client.table("bv2_migration_state").push({
+    owner: OWNER_A,
+    project_id: PROJECT,
+    state: "shadow",
+    last_shadow_at: "2026-08-06T00:00:00.000Z",
+    notes: { buildId: "missing-build" },
+  });
+  const result = await runShadowDriftCheck({ client, now: Date.parse("2026-08-06T22:00:00.000Z"), log: () => {} });
+  assert.equal(result.clean, false);
+  assert.equal(result.drift, 1);
+  const check = client.table("bv2_shadow_checks")[0];
+  assert.equal(check.shadow_run_id, null);
+  assert.equal(check.evidence.mismatches[0].kind, "missing_shadow_run");
 });
 
 test("C4/H3 — complete persisted production fixture reload equals every memory graph answer", async () => {

@@ -46,6 +46,7 @@ export async function runShadowDriftCheck({
         checkedAt: new Date(now).toISOString(),
         mismatches: [{ kind: "missing_shadow_run", lastShadowAt: state.last_shadow_at }],
       };
+      await recordShadowCheck(state.owner, state.project_id, null, "failed", failure, { client });
       evidence.push(failure);
       drift += 1;
       log(JSON.stringify(failure));
