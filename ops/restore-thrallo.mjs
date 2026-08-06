@@ -12,7 +12,8 @@
 // admin API; passwords cannot be restored — users reset them. Restored encrypted columns are
 // only readable when the server runs with the ORIGINAL PLATFORM_ENC_KEY.
 
-import { readFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -89,6 +90,10 @@ export const RESTORE_ORDER = [
   "bv2_feature_flags",
   "bv2_migration_state",
   "bv2_project_knowledge",
+  "bv2_file_revisions",
+  "bv2_symbols",
+  "bv2_symbol_refs",
+  "bv2_dependency_edges",
   "bv2_blobs",
   "bv2_snapshots",
   "bv2_snapshot_files",
@@ -98,6 +103,7 @@ export const RESTORE_ORDER = [
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",
+  "bv2_verification_cache",
 ];
 
 const BATCH = 500;
@@ -155,6 +161,7 @@ async function main() {
   console.log(`auth users: ${users.length} ensured (passwords must be reset)`);
 
   const automationPatches = [];
+  const snapshotPatches = [];
   for (const table of RESTORE_ORDER) {
     let rows = await loadRows(dir, table);
     if (table === "ca_automations") {
@@ -162,6 +169,12 @@ async function main() {
         if (row.last_run_id) automationPatches.push({ id: row.id, last_run_id: row.last_run_id });
       }
       rows = rows.map((row) => ({ ...row, last_run_id: null }));
+    }
+    if (table === "bv2_snapshots") {
+      for (const row of rows) {
+        if (row.parent_snapshot) snapshotPatches.push({ id: row.id, parent_snapshot: row.parent_snapshot });
+      }
+      rows = rows.map((row) => ({ ...row, parent_snapshot: null }));
     }
     await insertRows(svc, table, rows);
     console.log(`  ${table}: ${rows.length} restored`);
@@ -172,16 +185,41 @@ async function main() {
     if (error) throw new Error(`ca_automations patch ${patch.id}: ${error.message}`);
   }
   if (automationPatches.length) console.log(`  ca_automations: ${automationPatches.length} last_run_id links patched`);
+  for (const patch of snapshotPatches) {
+    const { error } = await svc.from("bv2_snapshots")
+      .update({ parent_snapshot: patch.parent_snapshot }).eq("id", patch.id);
+    if (error) throw new Error(`bv2_snapshots patch ${patch.id}: ${error.message}`);
+  }
+  if (snapshotPatches.length) console.log(`  bv2_snapshots: ${snapshotPatches.length} parent links patched`);
 
   const objects = await loadRows(dir, "storage_objects");
   for (const object of objects) {
     const gz = await readFile(path.join(dir, object.file));
     const bytes = gunzipSync(gz);
     const { error } = await svc.storage.from(ARTIFACT_BUCKET)
-      .upload(object.key, bytes, { upsert: true, contentType: "application/octet-stream" });
+      .upload(object.key, bytes, { upsert: true, contentType: object.contentType || "application/octet-stream" });
     if (error) throw new Error(`storage ${object.key}: ${error.message}`);
   }
   console.log(`storage: ${objects.length} objects restored to ${ARTIFACT_BUCKET}`);
+  const filesystemObjects = await loadRows(dir, "filesystem_objects");
+  const filesystemRoot = process.env.RESTORE_TARGET_FILESYSTEM_ROOT;
+  if (filesystemObjects.length && !filesystemRoot) {
+    throw new Error("filesystem restore requires RESTORE_TARGET_FILESYSTEM_ROOT (an isolated empty namespace)");
+  }
+  for (const object of filesystemObjects) {
+    const targetRoot = path.resolve(filesystemRoot, object.root);
+    const target = path.resolve(targetRoot, object.relativePath);
+    if (target !== targetRoot && !target.startsWith(`${targetRoot}${path.sep}`)) {
+      throw new Error(`filesystem restore path escapes target root: ${object.relativePath}`);
+    }
+    const bytes = gunzipSync(await readFile(path.join(dir, object.file)));
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (bytes.length !== object.bytes || digest !== object.sha256) throw new Error(`filesystem object corrupt: ${object.root}/${object.relativePath}`);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes, { flag: "wx" });
+    if (Number.isInteger(object.mode)) await chmod(target, object.mode);
+  }
+  console.log(`filesystem: ${filesystemObjects.length} files restored under ${filesystemRoot}`);
   console.log("restore complete — run the verification steps in docs/DISASTER-RECOVERY.md");
 }
 

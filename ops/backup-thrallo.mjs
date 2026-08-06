@@ -12,7 +12,7 @@
 // shell/.env — every credential, source excerpt, and evaluation is encrypted with it — so an
 // offline copy of shell/.env is part of the disaster-recovery kit.
 
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -94,14 +94,16 @@ export const CA_TABLES = [
   "project_logs",
   "health_checks",
   "health_status",
-  // Builder v2 foundation (2026-08-05, docs/BUILDER-V2-MASTER-PLAN.md). Snapshots and blobs
-  // are the projects themselves under v2; pointers are the promotion state; knowledge,
-  // contracts, builds, assets, retrieval traces and patches are the audit trail. The DERIVED
-  // index tables (file_revisions/symbols/symbol_refs/dependency_edges) and the verification
-  // cache are deliberately excluded below — rebuildable deterministically from snapshots.
+  // Builder v2 foundation. Back up every table, including graph rows and verification cache.
+  // Deterministic regeneration has not yet passed an isolated restore proof, and a restored cache
+  // may be invalidated rather than trusted, but neither is silently omitted from recovery evidence.
   "bv2_feature_flags",
   "bv2_migration_state",
   "bv2_project_knowledge",
+  "bv2_file_revisions",
+  "bv2_symbols",
+  "bv2_symbol_refs",
+  "bv2_dependency_edges",
   "bv2_blobs",
   "bv2_snapshots",
   "bv2_snapshot_files",
@@ -111,6 +113,7 @@ export const CA_TABLES = [
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",
+  "bv2_verification_cache",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
@@ -213,11 +216,15 @@ async function main() {
 
   const manifest = {
     product: "thrallo",
+    formatVersion: 2,
     url: new globalThis.URL(URL_).host,
+    sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await currentGitCommit(),
+    backupToolSha256: sha256(await readFile(new URL(import.meta.url))),
     startedAt: new Date().toISOString(),
     tables: {},
     files: {},
     storage: { bucket: ARTIFACT_BUCKET, objects: 0 },
+    filesystem: { roots: {}, objects: 0 },
     bytes: 0,
   };
 
@@ -248,7 +255,8 @@ async function main() {
     const gz = gzipSync(bytes);
     const file = `storage/${sha256(Buffer.from(key))}.bin.gz`;
     await writeFile(path.join(dir, file), gz);
-    objectIndex.push({ key, file, bytes: bytes.length, sha256: sha256(bytes) });
+    manifest.files[file] = { bytes: gz.length, sha256: sha256(gz) };
+    objectIndex.push({ key, file, bytes: bytes.length, sha256: sha256(bytes), contentType: data.type || "application/octet-stream" });
     manifest.bytes += gz.length;
   }
   const indexGz = gzipSync(JSON.stringify(objectIndex));
@@ -257,6 +265,56 @@ async function main() {
   manifest.files["storage_objects.json.gz"] = { bytes: indexGz.length, sha256: sha256(indexGz) };
   manifest.storage.objects = objectIndex.length;
   console.log(`  storage: ${objectIndex.length} objects from ${ARTIFACT_BUCKET}`);
+
+  const filesystemIndex = [];
+  const roots = [
+    { name: "publish", source: process.env.PUBLISH_DIR || path.join(os.homedir(), "publish") },
+    { name: "qa", source: process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") },
+  ];
+  for (const root of roots) {
+    const rootStat = await stat(root.source).catch(() => null);
+    if (!rootStat?.isDirectory()) throw new Error(`filesystem root missing or not a directory: ${root.source}`);
+    const files = await walkFiles(root.source);
+    let rootBytes = 0;
+    for (const item of files) {
+      const bytes = await readFile(item.absolute);
+      const gz = gzipSync(bytes);
+      const file = `filesystem/${root.name}/${sha256(Buffer.from(item.relative))}.bin.gz`;
+      await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+      await writeFile(path.join(dir, file), gz);
+      manifest.files[file] = { bytes: gz.length, sha256: sha256(gz) };
+      filesystemIndex.push({ root: root.name, relativePath: item.relative, file, bytes: bytes.length, sha256: sha256(bytes), mode: item.mode });
+      manifest.bytes += gz.length;
+      rootBytes += bytes.length;
+    }
+    manifest.filesystem.roots[root.name] = { source: root.source, objects: files.length, bytes: rootBytes };
+    manifest.filesystem.objects += files.length;
+    console.log(`  filesystem ${root.name}: ${files.length} files (${rootBytes} bytes)`);
+  }
+  const filesystemIndexGz = gzipSync(JSON.stringify(filesystemIndex));
+  await writeFile(path.join(dir, "filesystem_objects.json.gz"), filesystemIndexGz);
+  manifest.tables.filesystem_objects = filesystemIndex.length;
+  manifest.files["filesystem_objects.json.gz"] = { bytes: filesystemIndexGz.length, sha256: sha256(filesystemIndexGz) };
+  manifest.bytes += filesystemIndexGz.length;
+
+  const ledgerPath = await resolveMigrationLedgerFile();
+  const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
+  if (!Array.isArray(ledger.migrations) || ledger.migrations.length === 0) {
+    throw new Error(`migration ledger evidence is invalid: ${ledgerPath}`);
+  }
+  const ledgerGz = gzipSync(JSON.stringify(ledger));
+  await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);
+  manifest.files["migration_ledger.json.gz"] = { bytes: ledgerGz.length, sha256: sha256(ledgerGz) };
+  manifest.migrationLedger = { source: ledger.source, capturedAt: ledger.capturedAt, migrations: ledger.migrations.length };
+  manifest.bytes += ledgerGz.length;
+  const migrationState = await buildMigrationState(ledger);
+  const migrationStateGz = gzipSync(JSON.stringify(migrationState));
+  await writeFile(path.join(dir, "migration_state.json.gz"), migrationStateGz);
+  manifest.tables.migration_state = migrationState.length;
+  manifest.files["migration_state.json.gz"] = { bytes: migrationStateGz.length, sha256: sha256(migrationStateGz) };
+  manifest.migrationLedger.pendingLocal = migrationState.filter((migration) => !migration.applied).map((migration) => migration.version);
+  manifest.bytes += migrationStateGz.length;
+  console.log(`  migration ledger: ${ledger.migrations.length} authoritative rows captured ${ledger.capturedAt}`);
 
   manifest.finishedAt = new Date().toISOString();
   await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -278,6 +336,66 @@ async function main() {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function walkFiles(root) {
+  const files = [];
+  async function visit(relative = "") {
+    const current = path.join(root, relative);
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const child = path.join(relative, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`filesystem backup refuses symlink: ${path.join(root, child)}`);
+      if (entry.isDirectory()) await visit(child);
+      else if (entry.isFile()) {
+        const metadata = await stat(path.join(root, child));
+        files.push({ absolute: path.join(root, child), relative: child.split(path.sep).join("/"), mode: metadata.mode & 0o777 });
+      }
+    }
+  }
+  await visit();
+  return files.sort((a, b) => a.relative.localeCompare(b.relative));
+}
+
+async function resolveMigrationLedgerFile() {
+  if (process.env.THRALLO_MIGRATION_LEDGER_FILE) return path.resolve(process.env.THRALLO_MIGRATION_LEDGER_FILE);
+  const root = path.resolve("docs", "evidence", "migration-reconstruction");
+  const dates = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
+  for (const date of dates) {
+    const candidate = path.join(root, date, "authoritative-history-manifest.json");
+    if ((await stat(candidate).catch(() => null))?.isFile()) return candidate;
+  }
+  throw new Error("authoritative migration ledger evidence is missing; set THRALLO_MIGRATION_LEDGER_FILE");
+}
+
+async function buildMigrationState(ledger) {
+  const authoritative = new Map(ledger.migrations.map((migration) => [String(migration.version), migration]));
+  if (authoritative.size !== ledger.migrations.length) throw new Error("authoritative migration ledger contains duplicate versions");
+  const migrationsDir = path.resolve("supabase", "migrations");
+  const state = [];
+  for (const filename of (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort()) {
+    const match = /^(\d{14})_(.+)\.sql$/.exec(filename);
+    if (!match) throw new Error(`invalid active migration filename: ${filename}`);
+    const sql = await readFile(path.join(migrationsDir, filename));
+    const row = authoritative.get(match[1]);
+    const sqlSha256 = sha256(sql);
+    if (row && row.sqlSha256 !== sqlSha256) throw new Error(`applied migration hash diverged: ${filename}`);
+    state.push({ version: match[1], name: match[2], filename, sqlSha256, applied: !!row, appliedOrder: row?.appliedOrder ?? null });
+  }
+  for (const migration of ledger.migrations) {
+    if (!state.some((row) => row.version === String(migration.version))) {
+      throw new Error(`authoritative migration is absent from active history: ${migration.version}`);
+    }
+  }
+  return state;
+}
+
+async function currentGitCommit() {
+  const head = (await readFile(path.resolve(".git", "HEAD"), "utf8").catch(() => "")).trim();
+  if (/^[0-9a-f]{40}$/i.test(head)) return head;
+  const ref = /^ref: (.+)$/.exec(head)?.[1];
+  if (!ref) return null;
+  const value = (await readFile(path.resolve(".git", ref), "utf8").catch(() => "")).trim();
+  return /^[0-9a-f]{40}$/i.test(value) ? value : null;
 }
 
 if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1]))) {

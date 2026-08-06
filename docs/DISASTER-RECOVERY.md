@@ -5,14 +5,20 @@
 `ops/backup-thrallo.mjs` runs nightly on the VPS under `thrallo-backup.timer` (03:20 UTC,
 persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 
-- every `ca_*` control-plane table as gzipped JSON (the table list is drift-guarded by
-  `test/code-agent/backup-coverage.test.mjs`, which fails when a migration adds a table the
-  backup does not cover);
-- `auth_users.json.gz` — Supabase auth users (identities and metadata; passwords cannot be
-  exported, users reset them after a restore);
+- every migrated Thrallo application table as gzipped JSON, including all `bv2_*` graph,
+  snapshot, cache, asset, diagnostic, ownership, and feature-flag tables (the table list is
+  drift-guarded by `test/code-agent/backup-coverage.test.mjs`);
+- `auth_users.json.gz` — Supabase auth UUIDs, email addresses, and application/user metadata.
+  Password hashes, OAuth identities, MFA factors, and sessions are not exported by this logical
+  backup, so users re-establish credentials after a restore;
 - the private `thrallo-artifacts` storage bucket, one gzipped file per object plus a
-  `storage_objects.json.gz` index with original keys and content hashes;
-- `manifest.json` with per-file row counts, sizes, and SHA-256 checksums.
+  `storage_objects.json.gz` index with original keys, content types, and content hashes;
+- current publish and QA filesystem artifacts, stored by logical root with paths, modes, sizes,
+  and content hashes. VPS previews are deliberately not backed up: they are ephemeral containers
+  re-materialised from canonical project/snapshot data;
+- authoritative production migration-ledger evidence plus the active local/applied-state map;
+- `manifest.json` with per-file row counts, sizes, and SHA-256 checksums. Validation covers every
+  compressed dataset and every underlying storage/filesystem object, not only index files.
 
 Every run is validated immediately after writing (decode, count, checksum) and runs older
 than `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101's backups are separate and
@@ -43,8 +49,9 @@ untouched.
 3. `RESTORE_TARGET_URL=<new url> RESTORE_TARGET_SERVICE_KEY=<new service key> \
    node ops/restore-thrallo.mjs <backup-dir> --confirm`
    — recreates auth users (original UUIDs, no passwords), restores tables in
-   foreign-key-safe order (automation↔run cross-links patched in a second pass), and
-   re-uploads artifact objects.
+   foreign-key-safe order (automation/run and snapshot-parent cross-links patched in a second
+   pass), re-uploads artifact objects, and restores filesystem artifacts only beneath the explicit
+   `RESTORE_TARGET_FILESYSTEM_ROOT` isolated namespace.
 4. Update `shell/.env` on the VPS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; update
    `shell/web/.env` with the new URL and publishable key; **keep the original
    `PLATFORM_ENC_KEY`**. Rebuild the web app and restart `thrallo-shell`.
@@ -62,8 +69,9 @@ untouched.
 3. Install `ops/thrallo-shell.service`, `ops/thrallo-backup.service`, and
    `ops/thrallo-backup.timer`; reuse `ops/Caddyfile.thrallo` in the front proxy; point DNS
    at the new host.
-4. The control plane lives in Supabase, so no data restore is needed — verify as in
-   Scenario B step 6.
+4. Restore the backed-up `publish` and `qa` roots into an isolated directory, validate their
+   manifest hashes, then promote the recovered publish tree into the configured `PUBLISH_DIR`.
+   Preview containers are recreated on demand. Verify as in Scenario B step 6.
 
 ## Verification cadence
 

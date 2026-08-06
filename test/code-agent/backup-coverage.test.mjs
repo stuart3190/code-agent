@@ -35,13 +35,6 @@ const INTENTIONALLY_NOT_BACKED_UP = new Map([
   "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",
   "app_user_integrations", "app_connector_oauth_states",
 ].map((table) => [table, UNAPPLIED_LEGACY]).concat([
-  // Builder v2 DERIVED data: the indexer rebuilds all four deterministically from any snapshot
-  // (content-hash keyed), so backing them up doubles snapshot size for zero recovery value.
-  ["bv2_file_revisions", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_symbols", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_symbol_refs", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_dependency_edges", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_verification_cache", "a cache keyed by owners_hash; re-verification regenerates it and restoring stale verdicts would be worse than empty"],
 ]));
 
 // EVERY table any migration creates. This deliberately does NOT filter by name: the previous
@@ -85,6 +78,8 @@ test("the restore order covers exactly the backed-up tables", () => {
   assert.ok(RESTORE_ORDER.indexOf("ca_automations") < RESTORE_ORDER.indexOf("ca_runs"));
   assert.ok(RESTORE_ORDER.indexOf("ca_runs") < RESTORE_ORDER.indexOf("ca_run_events"));
   assert.ok(RESTORE_ORDER.indexOf("ca_runs") < RESTORE_ORDER.indexOf("ca_artifacts"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_symbols"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_symbols") < RESTORE_ORDER.indexOf("bv2_symbol_refs"));
 });
 
 test("a backup directory round-trips through validation and rejects tampering", async () => {
@@ -105,7 +100,43 @@ test("a backup directory round-trips through validation and rejects tampering", 
   assert.equal(result.tables.ca_runs, 2);
 
   await writeFile(path.join(dir, "ca_runs.json.gz"), gzipSync(JSON.stringify([{ id: "1" }])));
-  await assert.rejects(validateBackupDirectory(dir), /manifest says 2/);
+  await assert.rejects(validateBackupDirectory(dir), /manifest says|checksum mismatch/);
+});
+
+test("backup validation verifies storage, filesystem, and migration-ledger payload bytes", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "thrallo-backup-objects-"));
+  await mkdir(path.join(dir, "storage"), { recursive: true });
+  await mkdir(path.join(dir, "filesystem", "publish"), { recursive: true });
+  const raw = Buffer.from("immutable payload");
+  const objectGz = gzipSync(raw);
+  const storageFile = "storage/object.bin.gz";
+  const filesystemFile = "filesystem/publish/object.bin.gz";
+  await writeFile(path.join(dir, storageFile), objectGz);
+  await writeFile(path.join(dir, filesystemFile), objectGz);
+  const object = { file: storageFile, bytes: raw.length, sha256: createHash("sha256").update(raw).digest("hex") };
+  const storageIndex = gzipSync(JSON.stringify([object]));
+  const filesystemIndex = gzipSync(JSON.stringify([{ ...object, file: filesystemFile, root: "publish", relativePath: "index.html" }]));
+  const ledger = gzipSync(JSON.stringify({ migrations: [{ version: "1" }] }));
+  await writeFile(path.join(dir, "storage_objects.json.gz"), storageIndex);
+  await writeFile(path.join(dir, "filesystem_objects.json.gz"), filesystemIndex);
+  await writeFile(path.join(dir, "migration_ledger.json.gz"), ledger);
+  const files = Object.fromEntries([
+    [storageFile, objectGz],
+    [filesystemFile, objectGz],
+    ["storage_objects.json.gz", storageIndex],
+    ["filesystem_objects.json.gz", filesystemIndex],
+    ["migration_ledger.json.gz", ledger],
+  ].map(([file, bytes]) => [file, { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }]));
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify({
+    product: "thrallo",
+    tables: { storage_objects: 1, filesystem_objects: 1 },
+    files,
+    migrationLedger: { migrations: 1 },
+  }));
+
+  assert.equal((await validateBackupDirectory(dir)).ok, true);
+  await writeFile(path.join(dir, filesystemFile), gzipSync(Buffer.from("tampered")));
+  await assert.rejects(validateBackupDirectory(dir), /byte|checksum/i);
 });
 
 test("systemd units and the runbook ship with the repository", async () => {
