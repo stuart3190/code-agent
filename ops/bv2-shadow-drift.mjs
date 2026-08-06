@@ -1,48 +1,102 @@
-// WP-14 drift check — the shadow week's daily reading. For every project in shadow state:
-// re-index the LIVE projects.tree and compare against what the twins persisted. Zero model
-// credits; read-only except nothing. Exit 0 = clean, 1 = drift found.
-//
-//   node ops/bv2-shadow-drift.mjs
+// Complete Builder V2 shadow proof. For every project explicitly in shadow state, compare the
+// current in-memory index with the exact immutable revision set pinned by its latest shadow run.
+// Every check is appended to bv2_shadow_checks. Exit 0 means full equivalence; any missing run,
+// stale run, incomplete revision or graph/query mismatch exits 1 and never affects Builder V1.
 
+import { pathToFileURL } from "node:url";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
-import { indexTree } from "../shell/server/lib/builderV2/indexer.mjs";
+import { recordShadowCheck } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
+import { validateShadowRun } from "../shell/server/lib/builderV2/shadow.mjs";
 
-const client = serviceClient();
-const log = (line) => console.log(`[bv2-drift] ${line}`);
-
-const { data: shadows, error } = await client.from("bv2_migration_state")
-  .select("owner, project_id, state, last_shadow_at, notes").eq("state", "shadow");
-if (error) { console.error(`migration state unreadable: ${error.message}`); process.exit(1); }
-if (!shadows?.length) { log("no projects in shadow state yet"); process.exit(0); }
-
-let drift = 0;
-for (const row of shadows) {
-  const { data: project } = await client.from("projects")
-    .select("tree").eq("id", row.project_id).maybeSingle();
-  if (!project?.tree) { log(`${row.project_id.slice(0, 8)}: project tree missing — SKIP (deleted?)`); continue; }
-
-  const fresh = indexTree(project.tree);
-  const persistedHash = row.notes?.treeHash || null;
-
-  // The tree may legitimately have moved since the last shadow pass (user edits between
-  // builds); drift means the PERSISTED index disagrees with the tree it claims to describe.
-  const { data: revisions } = await client.from("bv2_file_revisions")
-    .select("path, content_hash").eq("owner", row.owner).eq("project_id", row.project_id);
-  const persisted = new Map((revisions || []).map((r) => [r.path, r.content_hash]));
-  const mismatches = [];
-  for (const [path, ix] of fresh.files) {
-    const have = persisted.get(path);
-    if (have && have !== ix.contentHash) mismatches.push(path);
+export async function runShadowDriftCheck({
+  client = serviceClient(),
+  now = Date.now(),
+  maxAgeMs = Number(process.env.BV2_SHADOW_MAX_AGE_HOURS || 36) * 60 * 60 * 1000,
+  log = (line) => console.log(`[bv2-drift] ${line}`),
+} = {}) {
+  const { data: states, error: stateError } = await client.from("bv2_migration_state")
+    .select("owner,project_id,last_shadow_at,notes").eq("state", "shadow");
+  if (stateError) throw new Error(`migration state unreadable: ${stateError.message}`);
+  if (!states?.length) {
+    log("no projects in shadow state; no rollout evidence is accruing");
+    return { clean: true, checked: 0, drift: 0, evidence: [] };
   }
 
-  if (fresh.treeHash === persistedHash && mismatches.length === 0) {
-    log(`${row.project_id.slice(0, 8)}: CLEAN (${fresh.files.size} files, shadowed ${row.last_shadow_at})`);
-  } else if (mismatches.length === 0) {
-    log(`${row.project_id.slice(0, 8)}: tree moved since last shadow (${row.last_shadow_at}) — no index disagreement, next build re-shadows`);
-  } else {
-    drift += 1;
-    log(`${row.project_id.slice(0, 8)}: DRIFT — ${mismatches.length} file(s) disagree with the persisted index: ${mismatches.slice(0, 5).join(", ")}`);
+  const { data: runs, error: runError } = await client.from("bv2_shadow_runs")
+    .select("id,owner,project_id,build_id,indexed_at,status").order("indexed_at", { ascending: false });
+  if (runError) throw new Error(`shadow runs unreadable: ${runError.message}`);
+  const latest = new Map();
+  for (const run of runs || []) {
+    const key = `${run.owner}:${run.project_id}`;
+    if (!latest.has(key)) latest.set(key, run);
   }
+
+  const evidence = [];
+  let drift = 0;
+  for (const state of states) {
+    const key = `${state.owner}:${state.project_id}`;
+    const run = latest.get(key);
+    if (!run) {
+      const failure = {
+        clean: false,
+        owner: state.owner,
+        projectId: state.project_id,
+        buildId: state.notes?.buildId || null,
+        shadowRunId: null,
+        checkedAt: new Date(now).toISOString(),
+        mismatches: [{ kind: "missing_shadow_run", lastShadowAt: state.last_shadow_at }],
+      };
+      evidence.push(failure);
+      drift += 1;
+      log(JSON.stringify(failure));
+      continue;
+    }
+
+    const { data: project, error: projectError } = await client.from("projects")
+      .select("tree").eq("id", state.project_id).eq("owner", state.owner).maybeSingle();
+    if (projectError || !project?.tree) {
+      const failure = {
+        clean: false,
+        owner: state.owner,
+        projectId: state.project_id,
+        buildId: run.build_id,
+        shadowRunId: run.id,
+        checkedAt: new Date(now).toISOString(),
+        mismatches: [{ kind: "missing_project_tree", message: projectError?.message || "tree absent" }],
+      };
+      await recordShadowCheck(state.owner, state.project_id, run.id, "failed", failure, { client });
+      evidence.push(failure);
+      drift += 1;
+      log(JSON.stringify(failure));
+      continue;
+    }
+
+    const result = await validateShadowRun({
+      owner: state.owner,
+      projectId: state.project_id,
+      tree: project.tree,
+      shadowRunId: run.id,
+      client,
+      now,
+      maxAgeMs,
+    });
+    evidence.push(result.evidence);
+    if (result.status !== "clean") drift += 1;
+    log(JSON.stringify({
+      owner: state.owner,
+      projectId: state.project_id,
+      buildId: run.build_id,
+      shadowRunId: run.id,
+      status: result.status,
+      mismatches: result.evidence.mismatches,
+    }));
+  }
+  log(`${states.length} shadow project(s), ${drift} with drift`);
+  return { clean: drift === 0, checked: states.length, drift, evidence };
 }
-log(`${shadows.length} shadow project(s), ${drift} with drift`);
-process.exit(drift ? 1 : 0);
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  runShadowDriftCheck()
+    .then((result) => { process.exitCode = result.clean ? 0 : 1; })
+    .catch((error) => { console.error(`[bv2-drift] ${error.message}`); process.exitCode = 1; });
+}

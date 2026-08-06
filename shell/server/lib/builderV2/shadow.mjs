@@ -12,8 +12,55 @@
 
 import { killSwitchActive, flagOn } from "./featureFlags.mjs";
 import { indexTree } from "./indexer.mjs";
-import { persistIndex } from "./supabaseTwins.mjs";
+import { compareGraphIndexes } from "./graphParity.mjs";
+import {
+  beginShadowRun,
+  loadShadowRunIndex,
+  persistIndex,
+  recordShadowCheck,
+} from "./supabaseTwins.mjs";
 import { serviceClient } from "../supabase.mjs";
+
+export async function validateShadowRun({
+  owner,
+  projectId,
+  tree,
+  shadowRunId,
+  client = serviceClient(),
+  now = Date.now(),
+  maxAgeMs = 36 * 60 * 60 * 1000,
+}) {
+  const fresh = indexTree(tree);
+  let loaded;
+  try {
+    loaded = await loadShadowRunIndex(owner, projectId, shadowRunId, { client });
+  } catch (error) {
+    const evidence = {
+      clean: false,
+      owner,
+      projectId,
+      shadowRunId,
+      checkedAt: new Date(now).toISOString(),
+      mismatches: [{ kind: "shadow_validation_error", message: error.message }],
+    };
+    await recordShadowCheck(owner, projectId, shadowRunId, "failed", evidence, { client });
+    return { status: "failed", evidence, run: null, fresh, persisted: null };
+  }
+  const { run, index: persisted } = loaded;
+  const evidence = compareGraphIndexes(fresh, persisted, {
+    owner,
+    projectId,
+    buildId: run.build_id,
+    shadowRunId,
+    shadowAt: run.indexed_at,
+    maxAgeMs,
+    now,
+  });
+  const stale = evidence.mismatches.some((mismatch) => mismatch.kind === "stale_shadow_run");
+  const status = evidence.clean ? "clean" : stale ? "stale" : "drift";
+  await recordShadowCheck(owner, projectId, shadowRunId, status, evidence, { client });
+  return { status, evidence, run, fresh, persisted };
+}
 
 /**
  * Fire-and-forget from the v1 completion path: `void shadowIndexBuild({...})`.
@@ -33,14 +80,20 @@ export async function shadowIndexBuild({
     const db = client || serviceClient();
     const treeIndex = indexTree(tree);
     await persistIndex(owner, projectId, treeIndex, { client: db });
-    const { error } = await db.from("bv2_migration_state").upsert({
-      owner, project_id: projectId, state: "shadow",
-      last_shadow_at: new Date().toISOString(),
-      notes: { buildId, treeHash: treeIndex.treeHash, files: treeIndex.files.size },
-    }, { onConflict: "owner,project_id" });
-    if (error) throw new Error(`migration state: ${error.message}`);
-    log(`indexed ${treeIndex.files.size} files for ${String(projectId).slice(0, 8)} (tree ${treeIndex.treeHash.slice(0, 12)})`);
-    return { shadowed: true, treeHash: treeIndex.treeHash };
+    const shadowRunId = await beginShadowRun(owner, projectId, buildId, treeIndex, { client: db });
+    const validation = await validateShadowRun({ owner, projectId, tree, shadowRunId, client: db });
+    if (validation.status !== "clean") {
+      const kinds = [...new Set(validation.evidence.mismatches.map((mismatch) => mismatch.kind))];
+      log(`DRIFT ${shadowRunId}: ${kinds.join(", ")} (v1 unaffected)`);
+      return {
+        shadowed: false,
+        reason: "persisted graph failed full parity",
+        shadowRunId,
+        evidence: validation.evidence,
+      };
+    }
+    log(`CLEAN ${shadowRunId}: indexed ${treeIndex.files.size} files and verified the full graph for ${String(projectId).slice(0, 8)} (tree ${treeIndex.treeHash.slice(0, 12)})`);
+    return { shadowed: true, treeHash: treeIndex.treeHash, shadowRunId, evidence: validation.evidence };
   } catch (error) {
     // Shadow trouble is SHADOW trouble: one loud line, zero effect on the build that fed it.
     log(`shadow failed (v1 unaffected): ${error.message}`);

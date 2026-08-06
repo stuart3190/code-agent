@@ -17,6 +17,7 @@ import {
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 const CODE_FILE = /\.(jsx?|tsx?|mjs|cjs)$/;
+export const INDEXER_VERSION = "babel-v1";
 
 export { tokensOf, treeHashOf, diffIndex };
 

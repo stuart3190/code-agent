@@ -14,7 +14,8 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../supabase.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { treeHashOf } from "./indexer.mjs";
+import { INDEXER_VERSION, treeHashOf } from "./indexer.mjs";
+import { fileGraphHash, fileGraphPayload, manifestOf } from "./graphParity.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 const INLINE_LIMIT = 64_000; // bytes; beyond this a blob lives in the bucket
@@ -34,50 +35,23 @@ function unwrap({ data, error }, what) {
  */
 export async function persistIndex(owner, projectId, treeIndex, { client = serviceClient() } = {}) {
   const written = [];
-  for (const [path, file] of treeIndex.files) {
-    const existing = unwrap(await client.from("bv2_file_revisions").select("id")
-      .eq("owner", owner).eq("project_id", projectId)
-      .eq("path", path).eq("content_hash", file.contentHash).maybeSingle(), "revision lookup");
-    if (existing) continue;
-
-    const revision = unwrap(await client.from("bv2_file_revisions").insert({
-      owner, project_id: projectId, path,
-      content_hash: file.contentHash, size_bytes: file.sizeBytes,
-      tokens: file.tokens, opaque: file.opaque,
-    }).select("id").single(), "revision insert");
-
-    const symbolIds = new Map();
-    for (const symbol of file.symbols) {
-      const row = unwrap(await client.from("bv2_symbols").insert({
-        owner, project_id: projectId, revision_id: revision.id, path,
-        name: symbol.name, kind: symbol.kind,
-        exported: symbol.exported, is_default: symbol.isDefault,
-        start_offset: symbol.start, end_offset: symbol.end,
-        block_hash: symbol.blockHash, meta: symbol.meta,
-      }).select("id").single(), "symbol insert");
-      symbolIds.set(symbol.name, row.id);
-    }
-
-    const refRows = treeIndex.refs
-      .filter((r) => r.fromPath === path && symbolIds.has(r.fromSymbol))
-      .map((r) => ({
-        owner, project_id: projectId, revision_id: revision.id,
-        from_symbol: symbolIds.get(r.fromSymbol),
-        ref_name: r.refName, resolved_path: r.resolvedPath,
-      }));
-    if (refRows.length) unwrap(await client.from("bv2_symbol_refs").insert(refRows), "refs insert");
-
-    const edgeRows = treeIndex.edges
-      .filter((e) => e.fromPath === path)
-      .map((e) => ({
-        owner, project_id: projectId, revision_id: revision.id,
-        from_path: e.fromPath, to_path: e.toPath, specifier: e.specifier,
-      }));
-    if (edgeRows.length) unwrap(await client.from("bv2_dependency_edges").insert(edgeRows), "edges insert");
-
-    written.push(path);
+  const repaired = [];
+  for (const [path] of treeIndex.files) {
+    const payload = fileGraphPayload(treeIndex, path);
+    const result = unwrap(await client.rpc("bv2_persist_file_revision", {
+      p_owner: owner,
+      p_project_id: projectId,
+      p_file: payload.file,
+      p_symbols: payload.symbols,
+      p_refs: payload.refs,
+      p_edges: payload.edges,
+      p_graph_hash: fileGraphHash(treeIndex, path),
+      p_indexer_version: INDEXER_VERSION,
+    }), `atomic revision persist (${path})`);
+    if (result?.written) written.push(path);
+    if (result?.repaired) repaired.push(path);
   }
-  return { written };
+  return { written, repaired, manifest: manifestOf(treeIndex) };
 }
 
 /**
@@ -90,60 +64,129 @@ export async function loadIndex(owner, projectId, manifest, { client = serviceCl
   const edges = [];
   const refs = [];
   const missing = [];
+  const incomplete = [];
+  const integrity = [];
+  const data = unwrap(await client.rpc("bv2_load_graph", {
+    p_owner: owner,
+    p_project_id: projectId,
+    p_manifest: manifest,
+  }), "graph batch load") || {};
+  const revisions = data.revisions || [];
+  const symbols = data.symbols || [];
+  const refRows = data.refs || [];
+  const edgeRows = data.edges || [];
+  const revisionByPath = new Map(revisions.map((revision) => [revision.path, revision]));
+  const childrenByRevision = (rows) => {
+    const grouped = new Map();
+    for (const row of rows) {
+      if (!grouped.has(row.revision_id)) grouped.set(row.revision_id, []);
+      grouped.get(row.revision_id).push(row);
+    }
+    return grouped;
+  };
+  const symbolsByRevision = childrenByRevision(symbols);
+  const refsByRevision = childrenByRevision(refRows);
+  const edgesByRevision = childrenByRevision(edgeRows);
 
   for (const [path, contentHash] of Object.entries(manifest)) {
-    const revision = unwrap(await client.from("bv2_file_revisions").select("*")
-      .eq("owner", owner).eq("project_id", projectId)
-      .eq("path", path).eq("content_hash", contentHash).maybeSingle(), "revision load");
-    if (!revision) { missing.push(path); continue; }
-
-    const symbols = unwrap(await client.from("bv2_symbols").select("*")
-      .eq("revision_id", revision.id).order("start_offset"), "symbols load");
-    const symbolNameById = new Map(symbols.map((s) => [s.id, s.name]));
-
-    files.set(path, {
+    const revision = revisionByPath.get(path);
+    if (!revision || revision.content_hash !== contentHash) { missing.push(path); continue; }
+    if (revision.state !== "ready") {
+      incomplete.push({ path, revisionId: revision.id, state: revision.state });
+      missing.push(path);
+      continue;
+    }
+    const revisionSymbols = (symbolsByRevision.get(revision.id) || []).sort((a, b) => a.ordinal - b.ordinal);
+    const revisionRefs = (refsByRevision.get(revision.id) || []).sort((a, b) => a.ordinal - b.ordinal);
+    const revisionEdges = (edgesByRevision.get(revision.id) || []).sort((a, b) => a.ordinal - b.ordinal);
+    const symbolNameById = new Map(revisionSymbols.map((symbol) => [symbol.id, symbol.name]));
+    const file = {
       path,
       contentHash: revision.content_hash,
       sizeBytes: revision.size_bytes,
       tokens: revision.tokens,
       opaque: revision.opaque,
-      symbols: symbols.map((s) => ({
-        name: s.name, kind: s.kind, exported: s.exported, isDefault: s.is_default,
-        start: s.start_offset, end: s.end_offset, blockHash: s.block_hash, meta: s.meta,
+      symbols: revisionSymbols.map((symbol) => ({
+        name: symbol.name, kind: symbol.kind, exported: symbol.exported, isDefault: symbol.is_default,
+        start: symbol.start_offset, end: symbol.end_offset, blockHash: symbol.block_hash, meta: symbol.meta,
       })),
-      imports: [], // reconstructed below from edges (specifier-level)
+      imports: revisionEdges.map((edge) => ({ specifier: edge.specifier })),
       refs: [],
-    });
-
-    const revEdges = unwrap(await client.from("bv2_dependency_edges").select("*")
-      .eq("revision_id", revision.id), "edges load");
-    for (const edge of revEdges) {
+    };
+    files.set(path, file);
+    for (const edge of revisionEdges) {
       edges.push({ fromPath: edge.from_path, toPath: edge.to_path, specifier: edge.specifier });
-      files.get(path).imports.push({ specifier: edge.specifier });
     }
-
-    const revRefs = unwrap(await client.from("bv2_symbol_refs").select("*")
-      .eq("revision_id", revision.id), "refs load");
-    for (const ref of revRefs) {
-      refs.push({
-        fromPath: path,
-        fromSymbol: symbolNameById.get(ref.from_symbol) || "?",
-        refName: ref.ref_name,
-        resolvedPath: ref.resolved_path,
-      });
+    for (const ref of revisionRefs) {
+      const fromSymbol = symbolNameById.get(ref.from_symbol);
+      if (!fromSymbol) {
+        integrity.push({ path, revisionId: revision.id, problem: "reference source symbol missing", refId: ref.id });
+        continue;
+      }
+      refs.push({ fromPath: path, fromSymbol, refName: ref.ref_name, resolvedPath: ref.resolved_path });
+      file.refs.push({ fromSymbol, refName: ref.ref_name });
+    }
+    const actualCounts = { symbols: revisionSymbols.length, refs: revisionRefs.length, edges: revisionEdges.length };
+    const declaredCounts = { symbols: revision.symbol_count, refs: revision.ref_count, edges: revision.edge_count };
+    if (JSON.stringify(actualCounts) !== JSON.stringify(declaredCounts)) {
+      integrity.push({ path, revisionId: revision.id, problem: "child counts differ", declaredCounts, actualCounts });
     }
   }
 
-  return { files, edges, refs, treeHash: treeHashOf(files), missing };
+  const loaded = { files, edges, refs, treeHash: treeHashOf(files), missing, incomplete, integrity };
+  for (const [path] of files) {
+    const revision = revisionByPath.get(path);
+    const computed = fileGraphHash(loaded, path);
+    if (computed !== revision.graph_hash) {
+      integrity.push({ path, revisionId: revision.id, problem: "graph hash differs", expected: revision.graph_hash, actual: computed });
+    }
+  }
+  return loaded;
 }
 
 /** The persisted graph: rows out of the database, answering through the SAME graph code. */
 export async function supabaseGraph(owner, projectId, manifest, { client = serviceClient() } = {}) {
   const loaded = await loadIndex(owner, projectId, manifest, { client });
-  if (loaded.missing.length) {
+  if (loaded.missing.length || loaded.incomplete.length || loaded.integrity.length) {
+    loaded.missing = [...new Set([
+      ...loaded.missing,
+      ...loaded.incomplete.map((row) => row.path),
+      ...loaded.integrity.map((row) => row.path),
+    ])];
     throw new Error(`graph store is stale — reindex needed for: ${loaded.missing.join(", ")}`);
   }
   return memoryGraph(owner, projectId, loaded);
+}
+
+export async function beginShadowRun(owner, projectId, buildId, treeIndex, { client = serviceClient() } = {}) {
+  return unwrap(await client.rpc("bv2_begin_shadow_run", {
+    p_owner: owner,
+    p_project_id: projectId,
+    p_build_id: buildId,
+    p_tree_hash: treeIndex.treeHash,
+    p_manifest: manifestOf(treeIndex),
+  }), "begin shadow run");
+}
+
+export async function recordShadowCheck(owner, projectId, shadowRunId, status, evidence, { client = serviceClient() } = {}) {
+  return unwrap(await client.rpc("bv2_record_shadow_check", {
+    p_owner: owner,
+    p_project_id: projectId,
+    p_shadow_run_id: shadowRunId,
+    p_status: status,
+    p_evidence: evidence,
+  }), "record shadow check");
+}
+
+export async function loadShadowRunIndex(owner, projectId, shadowRunId, { client = serviceClient() } = {}) {
+  const run = unwrap(await client.from("bv2_shadow_runs").select("*")
+    .eq("id", shadowRunId).eq("owner", owner).eq("project_id", projectId).maybeSingle(), "shadow run load");
+  if (!run) throw new Error("shadow run does not belong to owner/project");
+  const rows = unwrap(await client.from("bv2_shadow_run_files").select("path,content_hash")
+    .eq("shadow_run_id", shadowRunId).eq("owner", owner).eq("project_id", projectId), "shadow manifest load");
+  const manifest = Object.fromEntries(rows.map((row) => [row.path, row.content_hash]));
+  const index = await loadIndex(owner, projectId, manifest, { client });
+  return { run, manifest, index };
 }
 
 // ── snapshot persistence (commit J) ───────────────────────────────────────────────────────────
