@@ -9,13 +9,15 @@ if (!localPath || !productionPath || !outputPath) {
   throw new Error("usage: node ops/compare-catalogs.mjs <local.json> <production.json> <output.json>");
 }
 
-const local = JSON.parse(await readFile(localPath, "utf8"));
-const production = JSON.parse(await readFile(productionPath, "utf8"));
-const sections = ["schemas", "tables", "columns", "constraints", "indexes", "functions", "triggers", "policies", "grants", "extensions"];
+const parseJson = async (filePath) => JSON.parse((await readFile(filePath, "utf8")).replace(/^\uFEFF/, ""));
+const local = await parseJson(localPath);
+const production = await parseJson(productionPath);
+const sections = ["schemas", "tables", "sequences", "columns", "constraints", "indexes", "functions", "triggers", "policies", "grants", "default_privileges", "extensions"];
 
 const keys = {
   schemas: (r) => r.schema,
   tables: (r) => `${r.schema}.${r.table}`,
+  sequences: (r) => `${r.schema}.${r.sequence}`,
   columns: (r) => `${r.schema}.${r.table}.${String(r.ordinal).padStart(5, "0")}.${r.column}`,
   constraints: (r) => `${r.schema}.${r.table}.${r.constraint}`,
   indexes: (r) => `${r.schema}.${r.table}.${r.index}`,
@@ -23,6 +25,7 @@ const keys = {
   triggers: (r) => `${r.schema}.${r.table}.${r.trigger}`,
   policies: (r) => `${r.schema}.${r.table}.${r.policy}`,
   grants: (r) => `${r.object_type}.${r.schema}.${r.object}.${r.grantee}.${r.privilege}`,
+  default_privileges: (r) => `${r.role}.${r.schema}.${r.object_type}.${r.grantee}.${r.privilege}`,
   extensions: (r) => r.extension,
 };
 

@@ -21,6 +21,24 @@ tables as (
   join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')
 ),
+sequences as (
+  select jsonb_agg(jsonb_build_object(
+    'schema', n.nspname,
+    'sequence', c.relname,
+    'owner', pg_get_userbyid(c.relowner),
+    'data_type', format_type(s.seqtypid, null),
+    'start', s.seqstart,
+    'increment', s.seqincrement,
+    'minimum', s.seqmin,
+    'maximum', s.seqmax,
+    'cache', s.seqcache,
+    'cycle', s.seqcycle
+  ) order by n.nspname, c.relname) value
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_sequence s on s.seqrelid = c.oid
+  where n.nspname = 'public' and c.relkind = 'S'
+),
 columns as (
   select jsonb_agg(jsonb_build_object(
     'schema', n.nspname,
@@ -135,6 +153,54 @@ routine_grants as (
   from information_schema.routine_privileges
   where routine_schema = 'public'
 ),
+sequence_grants as (
+  select jsonb_agg(jsonb_build_object(
+    'object_type', 'sequence',
+    'schema', n.nspname,
+    'object', c.relname,
+    'grantee', case when acl.grantee = 0 then 'PUBLIC' else pg_get_userbyid(acl.grantee) end,
+    'privilege', acl.privilege_type,
+    'grantable', case when acl.is_grantable then 'YES' else 'NO' end
+  ) order by n.nspname, c.relname, acl.grantee, acl.privilege_type) value
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(coalesce(c.relacl, acldefault('S', c.relowner))) acl
+  where n.nspname = 'public' and c.relkind = 'S'
+),
+schema_grants as (
+  select jsonb_agg(jsonb_build_object(
+    'object_type', 'schema',
+    'schema', n.nspname,
+    'object', n.nspname,
+    'grantee', case when acl.grantee = 0 then 'PUBLIC' else pg_get_userbyid(acl.grantee) end,
+    'privilege', acl.privilege_type,
+    'grantable', case when acl.is_grantable then 'YES' else 'NO' end
+  ) order by n.nspname, acl.grantee, acl.privilege_type) value
+  from pg_namespace n
+  cross join lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) acl
+  where n.nspname = 'public'
+),
+default_privileges as (
+  select jsonb_agg(jsonb_build_object(
+    'role', pg_get_userbyid(d.defaclrole),
+    'schema', coalesce(n.nspname, '*'),
+    'object_type', case d.defaclobjtype
+      when 'r' then 'table'
+      when 'S' then 'sequence'
+      when 'f' then 'function'
+      when 'T' then 'type'
+      when 'n' then 'schema'
+      else d.defaclobjtype::text
+    end,
+    'grantee', case when acl.grantee = 0 then 'PUBLIC' else pg_get_userbyid(acl.grantee) end,
+    'privilege', acl.privilege_type,
+    'grantable', acl.is_grantable
+  ) order by pg_get_userbyid(d.defaclrole), coalesce(n.nspname, '*'), d.defaclobjtype, acl.grantee, acl.privilege_type) value
+  from pg_default_acl d
+  left join pg_namespace n on n.oid = d.defaclnamespace
+  cross join lateral aclexplode(d.defaclacl) acl
+  where d.defaclnamespace = 0 or n.nspname = 'public'
+),
 extensions as (
   select jsonb_agg(jsonb_build_object(
     'extension', e.extname,
@@ -146,12 +212,17 @@ extensions as (
 select jsonb_build_object(
   'schemas', coalesce((select value from schemas), '[]'::jsonb),
   'tables', coalesce((select value from tables), '[]'::jsonb),
+  'sequences', coalesce((select value from sequences), '[]'::jsonb),
   'columns', coalesce((select value from columns), '[]'::jsonb),
   'constraints', coalesce((select value from constraints), '[]'::jsonb),
   'indexes', coalesce((select value from indexes), '[]'::jsonb),
   'functions', coalesce((select value from functions), '[]'::jsonb),
   'triggers', coalesce((select value from triggers), '[]'::jsonb),
   'policies', coalesce((select value from policies), '[]'::jsonb),
-  'grants', coalesce((select value from table_grants), '[]'::jsonb) || coalesce((select value from routine_grants), '[]'::jsonb),
+  'grants', coalesce((select value from table_grants), '[]'::jsonb)
+    || coalesce((select value from routine_grants), '[]'::jsonb)
+    || coalesce((select value from sequence_grants), '[]'::jsonb)
+    || coalesce((select value from schema_grants), '[]'::jsonb),
+  'default_privileges', coalesce((select value from default_privileges), '[]'::jsonb),
   'extensions', coalesce((select value from extensions), '[]'::jsonb)
 ) as catalog;
