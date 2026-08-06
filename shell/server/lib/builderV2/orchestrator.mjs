@@ -134,13 +134,13 @@ export function createOrchestrator({
    * rejections fed straight back, the Part 4 stop rule on repeated identical failure.
    * Returns { ok, tree } or { ok:false, problems }.
    */
-  async function buildIncrement({ step, owner, contract, tiers, tree, assets, journeys }) {
+  async function buildIncrement({ step, owner, contract, tiers, tree, assets, journeys, editRequest = null }) {
     let working = tree;
     let rejections = [];
     let problems = [];
     let lastSignature = null;
     for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
-      const patches = await patchesFn({ step, owner, contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null });
+      const patches = await patchesFn({ step, owner, contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null, editRequest });
       const applied = applyPatches(working, patches, { contract });
       if (applied.rejected.length) {
         rejections = applied.rejected;
@@ -307,6 +307,66 @@ export function createOrchestrator({
       if (!pointer) return null;
       const tree = await snapshotStore.materialize(owner, pointer);
       return { snapshotId: pointer, tree, index: indexTree(tree) };
+    },
+
+    /**
+     * The EDIT path (finish plan WP-10 / V2-18): adopt the green snapshot → patch → gate →
+     * DIFFERENTIAL journey verification (unchanged owners reuse their cached PASS verdicts;
+     * only journeys whose owning modules changed are re-driven) → new snapshot promoted
+     * atomically. A failed edit promotes nothing — the prior green keeps serving. No
+     * contract call, no asset search: everything persistent is simply resumed.
+     */
+    async runEdit({ owner, projectId, request, contract, userCritical = [] }) {
+      const buildId = await buildStore.create({
+        owner, project_id: projectId, profile: "edit", request, state: "created",
+        started_at: new Date().toISOString(),
+      });
+      const finish = async (state, extra = {}) => {
+        const patch = { state, finished_at: new Date().toISOString() };
+        for (const key of ["error", "final_snapshot"]) if (key in extra) patch[key] = extra[key];
+        try { await buildStore.update(buildId, patch); } catch (error) { log(`edit row update failed (result unaffected): ${error.message}`); }
+        return { buildId, state, ...extra };
+      };
+      const setState = async (state) => {
+        try { await buildStore.update(buildId, { state }); } catch (error) { log(`state update failed: ${error.message}`); }
+      };
+
+      try {
+        const ctx = await this.resumeContext(owner, projectId);
+        if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
+        const tiers = tierContract(contract, { userCritical });
+        const journeys = contract.journeys || [];
+
+        await setState("editing");
+        const edit = await buildIncrement({
+          step: "edit", owner, contract, tiers, tree: ctx.tree, assets: [], journeys, editRequest: request,
+        });
+        if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
+
+        // Differential verification over EVERY contract journey: the cache decides what to
+        // actually drive. Unchanged owners reuse; changed owners (and prior fails) re-drive.
+        await setState("verify_edit");
+        const verdicts = await verifyJourneySet({ owner, projectId, contract, journeys, tree: edit.tree, snapshotId: ctx.snapshotId });
+        const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: verdicts.journeys } });
+        if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; ") });
+
+        const snapshot = await snapshotStore.createSnapshot(owner, projectId, edit.tree, {
+          buildId, parent: ctx.snapshotId, reason: "edit",
+          assetManifest: await assetService.assetManifestFor(owner, projectId),
+        });
+        await snapshotStore.promote(owner, projectId, "green", snapshot.id);
+        log(`edit green: snapshot ${snapshot.id} (drove ${verdicts.plan.drive.length}, reused ${verdicts.plan.reused.length})`);
+        return finish("green", {
+          final_snapshot: snapshot.id,
+          snapshotId: snapshot.id,
+          parentSnapshotId: ctx.snapshotId,
+          drove: verdicts.plan.drive.map((d) => d.journey.id),
+          reused: verdicts.plan.reused.map((r) => r.journeyId),
+          pendingIncrements: eligibility.pendingIncrements,
+        });
+      } catch (error) {
+        return finish("failed", { error: error.message });
+      }
     },
   };
 }

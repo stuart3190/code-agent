@@ -48,16 +48,37 @@ against a code index. Rules:
   the App.jsx registration. A batch that re-emits existing content, leaves scaffold stubs
   in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
 
-function renderTreeContext(tree) {
+function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
   const paths = Object.keys(tree).sort();
   const listed = paths.map((p) => `  ${p}`).join("\n");
-  const show = (path) => (tree[path] ? `\n--- ${path} (current content) ---\n${tree[path]}` : "");
+  const shown = new Set();
+  const show = (path) => {
+    if (!tree[path] || shown.has(path)) return "";
+    shown.add(path);
+    return `\n--- ${path} (current content) ---\n${tree[path]}`;
+  };
   return [
     "FILE TREE:", listed,
     show("src/App.jsx"),
     show("src/routes/HomePage.jsx"),
     show("src/lib/assetData.js"),
+    ...extraFullPaths.map(show),
   ].join("\n");
+}
+
+/** Deterministic edit-scope targeting: generated files ranked by request-keyword hits. */
+export function editTargets(tree, request, { limit = 3 } = {}) {
+  const words = [...new Set(String(request).toLowerCase().match(/[a-z]{4,}/g) || [])];
+  return Object.entries(tree)
+    .filter(([path]) => /^src\/(routes|components|data)\/.*\.(jsx?|tsx?)$/.test(path))
+    .map(([path, source]) => {
+      const body = String(source).toLowerCase();
+      return { path, hits: words.filter((w) => body.includes(w)).length };
+    })
+    .filter((f) => f.hits > 0)
+    .sort((a, b) => b.hits - a.hits || a.path.localeCompare(b.path))
+    .slice(0, limit)
+    .map((f) => f.path);
 }
 
 // The live-proven v1 transition brief (stagePlan.mjs): the verifier snapshots the page
@@ -94,21 +115,24 @@ function renderJourneyBrief(journeys) {
   return lines.join("\n");
 }
 
-export function renderPatchPrompt({ step, contract, tiers, tree, journey, rejections = [], problems = [] }) {
+export function renderPatchPrompt({ step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null }) {
+  const isEdit = step === "edit";
   const scopedJourneys = step === "core"
     ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
-    : [journey];
+    : isEdit ? (contract.journeys || []) : [journey];
   const parts = [
     `STEP: ${step}`,
     step === "core"
       ? `Build the ESSENTIAL scope only: journeys [${tiers.essential.journeys.join(", ")}], entities [${tiers.essential.entities.join(", ")}]. Secondary work is delivered later as increments — do NOT build it now.`
-      : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
+      : isEdit
+        ? `Apply EXACTLY this change to the existing app, and nothing else:\n  ${editRequest}\nThe smallest correct patch wins: prefer symbol ops on existing files over rewrites. Every existing journey must KEEP working — do not remove or reword the outcomes they verify.`
+        : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
     "",
     "IMPLEMENTATION CONTRACT:",
     contractBrief(contract),
     "",
     renderJourneyBrief(scopedJourneys),
-    renderTreeContext(tree),
+    renderTreeContext(tree, { extraFullPaths: isEdit ? editTargets(tree, editRequest) : [] }),
   ];
   if (rejections.length) {
     parts.push("", "YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact; fix and re-emit ALL patches:",
@@ -166,8 +190,8 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ step, contract, tiers, tree, journey, rejections, problems }) => {
-      const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems });
+    patchesFn: async ({ step, contract, tiers, tree, journey, rejections, problems, editRequest }) => {
+      const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems, editRequest });
       const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
       const startedAt = Date.now();
       const turn = await provider.runTurn({
