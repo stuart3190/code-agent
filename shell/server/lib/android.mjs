@@ -6,7 +6,6 @@
 //
 //   buildAndroid({ owner, projectId, slug, tree, log }) -> { zip: Buffer, filename }
 
-import { execFileSync } from "node:child_process";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -18,6 +17,7 @@ import { createStoredZip } from "./exportProject.mjs";
 import { packageIdFor } from "./androidLinks.mjs";
 import { ensureAppIdentity } from "./appIdentity.mjs";
 import { materializeAndPublish } from "../routes/publish.mjs";
+import { runProcess } from "../../../build-worker/processTree.mjs";
 
 const IMAGE = "buildr-android:latest";
 const APEX = "app.buildr101.com";
@@ -111,9 +111,12 @@ export async function buildAndroid({ owner, projectId, slug, tree, appName: rawN
     try {
       // Persist the gradle cache across runs (the container is --rm) so only the FIRST build
       // downloads gradle + deps; later builds reuse the named volume and finish faster.
-      execFileSync("docker", ["run", "--rm", "-v", `${work}:/work`, "-v", "buildr-gradle:/root/.gradle", IMAGE], {
-        stdio: "pipe", timeout: 12 * 60_000, maxBuffer: 64 * 1024 * 1024, // gradle is chatty; cold builds are slow
-      });
+      const built = await runProcess("docker", [
+        "run", "--rm", "--memory", "3g", "--cpus", "2", "--pids-limit", "512",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "-v", `${work}:/work`, "-v", "buildr-gradle:/root/.gradle", IMAGE,
+      ], { env: process.env, wallMs: 12 * 60_000, outputBytes: 64 * 1024 * 1024 });
+      if (!built.ok) throw Object.assign(new Error(built.stderr || "android container failed"), built);
     } catch (e) {
       const tail = String(e.stderr || e.stdout || e.message).split("\n").slice(-6).join("\n");
       console.error(`[android] docker build failed:\n${tail}`);

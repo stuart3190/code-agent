@@ -21,8 +21,7 @@
 // Selected by PREVIEW_MODE env (default "local"; "vps" = real provisiond, "vps-stub" = no-op).
 
 import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -70,11 +69,11 @@ function createLocalVite() {
     return changed;
   }
 
-  function junctionDeps(dir) {
+  async function junctionDeps(dir) {
     const nm = path.join(dir, "node_modules");
     if (!existsSync(nm)) {
       // Windows junction (same trick harness/workspace.mjs uses to share one install).
-      execFileSync("cmd", ["/c", "mklink", "/J", nm, DEPS_NM], { stdio: "ignore" });
+      await symlink(DEPS_NM, nm, process.platform === "win32" ? "junction" : "dir");
     }
   }
 
@@ -87,7 +86,7 @@ function createLocalVite() {
     const dir = path.join(PREVIEW_ROOT, String(id));
     await rm(dir, { recursive: true, force: true });
     await writeTree(dir, tree);
-    junctionDeps(dir);
+    await junctionDeps(dir);
 
     const port = allocPort();
     const viteBin = path.join(dir, "node_modules", "vite", "bin", "vite.js");
