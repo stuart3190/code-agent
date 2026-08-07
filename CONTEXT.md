@@ -1,5 +1,26 @@
 # Thrallo handoff
 
+## Builder V2-only launch direction (2026-08-07)
+
+The product no longer has a staged V1-to-V2 customer rollout requirement. The active objective is
+to finish and deterministically qualify Builder V2, cut production to V2, then remove V1 and launch.
+The current V1 route remains only as an engineering rollback mechanism until cutover proof.
+
+The shadow window below is preserved as operational/forensic evidence, but it is not a launch gate
+and Thrallo will not wait for seven elapsed days or artificial V1 traffic. The authoritative package
+order, deterministic gates, cutover procedure and V1 retirement boundary are in
+`docs/BUILDER-V2-V2-ONLY-CUTOVER.md`. Model spend, production mutation, managed-settlement unpause,
+destructive V1 deletion and final cutover still require separate explicit approvals.
+
+The zero-credit V2 composition package is now implemented locally: durable pre-dispatch model
+reservations, cache-aware settlement, per-step routing, strict diagnostics, persistent project
+knowledge/retrieval traces, atomic graph/snapshot promotion, C7 worker-only execution,
+snapshot-authoritative preview/export/QA, C8-only publishing guards, legacy adoption, and a headless
+wizard capability. Worker lease recovery restarts only before provider dispatch, recovers an
+already-durable completion, and fails closed as `provider_replay_unsafe` when dispatch may have
+occurred. Two additive migrations (`20260807213500`, `20260807221000`) are local and unapplied.
+They still require a full isolated reset/lint/diff/RPC proof before any production approval.
+
 ## Builder V2 shadow week restarted from zero (2026-08-07)
 
 The authoritative C4 full-graph observation window started at

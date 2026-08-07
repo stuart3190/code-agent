@@ -1,5 +1,11 @@
 # Builder V2 production remediation
 
+> Release strategy update, 2026-08-07: the calendar-based shadow/allowlist/broad-rollout gates are
+> retired. Shadow validation remains a production diagnostic, not a launch gate. The shortest safe
+> V2-only completion, cutover and V1-removal programme is
+> `docs/BUILDER-V2-V2-ONLY-CUTOVER.md`. Historical evidence below remains authoritative for defects
+> already proven; references to observation windows describe history and do not impose a release wait.
+
 This is the live implementation ledger for the approved Builder V2 production remediation
 programme. It records what the repository and production evidence prove; an unchecked item is not
 silently treated as complete.
@@ -42,7 +48,7 @@ values.
 | PR-01 Freeze and current-state baseline | Local implementation complete | Current main matched; local capture, 5 focused tests, full code-agent suite, web build, and 118 browser tests pass | Live read awaiting explicit approval |
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
-| PR-04 Atomic graph and shadow | Deployed dark; new seven-day window observing | Atomic production persistence/reload parity was exact across 45 paths, 144 symbols, 477 refs and 124 edges. The timer also blocks a completed V1 build whose shadow callback creates no state; production disposable CLEAN/drift/stale/missing proofs propagated exact exit codes | Window began `2026-08-07T20:51:22.594832Z`; customer V2 remains paused |
+| PR-04 Atomic graph and shadow | Deployed dark; operational diagnostic active | Atomic production persistence/reload parity was exact across 45 paths, 144 symbols, 477 refs and 124 edges. The timer also blocks a completed V1 build whose shadow callback creates no state; production disposable CLEAN/drift/stale/missing proofs propagated exact exit codes | Calendar age is no longer a launch gate; customer V2 remains paused |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
@@ -51,8 +57,8 @@ values.
 | PR-10 Durable build leases | Installed dark; customer dispatch off | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Queue is durable; no customer dispatch |
 | PR-11 Build worker | Deployed dark and production-canary green | Synthetic success, SIGKILL/lease recovery, zero duplicate results/orphan containers, responsive shell, and post-layout synthetic job pass | Service active dark; shell worker flag remains off |
 | PR-12 Atomic deployment | Deployed dark and production-canary green | Real immutable A/B activation, no-build rollback, unpublish/republish, CAS and post-pointer fault reconciliation pass; test state fully removed | Atomic publish flag off; shared Caddy unchanged |
-| PR-13 Cost/retrieval | Retrieval correctness local-complete; cost reservation pending | TS/TSX parser, opaque-context fail-closed, capability and project-knowledge integration proven | None |
-| PR-14 V2 composition | Pending | Placeholder confirmed | None |
+| PR-13 Cost/retrieval | Local implementation complete; database proof pending | TS/TSX retrieval, durable reservations, cached-token settlement, strict knowledge/traces and per-step router are implemented under unapplied migration `20260807213500` | No production apply or provider spend |
+| PR-14 V2 composition | Local implementation complete; qualification pending | Real worker-only new/edit/repair composition, snapshot authority, QA/export/publish guards, legacy adoption and safe crash-retry boundary are implemented under unapplied migration `20260807221000` | No production deploy; V1 remains default |
 | PR-15 Operational surfaces | Pending | Audit evidence confirmed | None |
 | PR-16 Release pipeline | Pending | Audit evidence confirmed | None |
 | PR-17 DR/SLO/final proof | Post-deploy backup/restore gate green; broader DR/SLO work pending | Backup `thrallo-2026-08-07T201226` and network-isolated restore match all canonical rows/objects/files/modes; worker artifact root restored exactly | Shadow restart awaits explicit approval; off-host/RTO/RPO work remains |
