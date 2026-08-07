@@ -48,7 +48,7 @@ values.
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
 | PR-10 Durable build leases | Local implementation and disposable Postgres proof complete; production approval pending | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Do not apply migration yet |
 | PR-11 Build worker | Local implementation and real sandbox proof complete; production approval pending | Valid/malformed compile, Playwright, timeout/tree cleanup, cgroup limits, OOM 137, shell latency and disabled-path regressions pass | Do not install/start service or enable shell flag yet |
-| PR-12 Atomic deployment | Pending | Audit evidence confirmed | None |
+| PR-12 Atomic deployment | Local implementation and disposable proof complete; production approval pending | Immutable release bytes, CAS/outbox, crash reconciliation, post-switch health rollback, no-build rollback, domain stability, retention and 23/23 Linux matrix; fresh reset/lint/zero diff | Do not apply migration, reload Caddy or enable flags yet |
 | PR-13 Cost/retrieval | Retrieval correctness local-complete; cost reservation pending | TS/TSX parser, opaque-context fail-closed, capability and project-knowledge integration proven | None |
 | PR-14 V2 composition | Pending | Placeholder confirmed | None |
 | PR-15 Operational surfaces | Pending | Audit evidence confirmed | None |
@@ -84,8 +84,12 @@ and corresponding live objects have been compared.
   preserved exact stderr/exit 23 without killing the supervisor, timeout removed the complete
   container tree, and the 256 MiB memory proof exited 137. Disposable Postgres reset/lint/diff and
   queue race/recovery proofs are green. See `docs/evidence/build-worker/2026-08-06/PROOF.md`.
-- This phase does not claim C8: rollback still rebuilds retained source and publish activation is
-  not yet atomic. The worker's trusted control process currently needs Docker-group access; customer
+- C8 is now locally implemented behind an independent default-off flag. Worker/package output is
+  finalised into byte-hashed read-only release directories; a versioned Postgres activation intent
+  and atomic site pointer make crashes replayable. Rollback activates retained bytes without a
+  build. Existing mutable live directories require the documented byte-identical adoption and Caddy
+  cutover before the flag can be enabled. See `docs/ATOMIC-PUBLISHING-ARCHITECTURE.md` and
+  `docs/evidence/atomic-publishing/2026-08-07/PROOF.md`. The worker's trusted control process currently needs Docker-group access; customer
   code never receives the socket, and rootless Docker remains the preferred host hardening before
   broader untrusted workload rollout.
 

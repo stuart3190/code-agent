@@ -947,6 +947,16 @@ pending migrations in order after production upgrade proof, deploy the matching 
 default/V2 paused/settlement paused, take and isolate-restore a post-migration backup, prove one
 real V1 completion writes an immediate CLEAN check, then record a new timestamp from zero.
 
+C8 atomic publishing is locally complete on the same remediation branch and remains undeployed.
+Pending migration `20260807072455_atomic_immutable_releases.sql` adds service-only immutable
+release and activation-intent state. Provisiond finalises read-only byte-hashed releases, switches a
+stable per-site symlink atomically, and exposes deterministic integrity/adoption operations. The
+shell uses CAS/outbox reconciliation; rollback activates retained bytes without compiling. Existing
+live directories require the paused, byte-identical adoption and Caddy cutover in
+`docs/PUBLISHING-OPERATIONS.md`; do not enable the shell flag before that proof. Fresh 64-migration
+reset, lint, zero diff, Postgres races and 23/23 Linux publishing proofs pass. Production migration,
+Caddy reload, flags, services, shadow state and customer traffic are unchanged.
+
 ## Next implementation slice
 
 Phase 24 completion: Stuart's steps 1-2 (Meta ad, Stripe audit — YOU_NEED_TO_DO.md), then
