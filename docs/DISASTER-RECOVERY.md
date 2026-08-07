@@ -13,7 +13,7 @@ persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
   backup, so users re-establish credentials after a restore;
 - the private `thrallo-artifacts` storage bucket, one gzipped file per object plus a
   `storage_objects.json.gz` index with original keys, content types, and content hashes;
-- current publish and QA filesystem artifacts, stored by logical root with paths, modes, sizes,
+- current publish, QA and durable build-worker filesystem artifacts, stored by logical root with paths, modes, sizes,
   and content hashes. VPS previews are deliberately not backed up: they are ephemeral containers
   re-materialised from canonical project/snapshot data;
 - authoritative production migration-ledger evidence plus the active local/applied-state map;
@@ -52,6 +52,11 @@ untouched.
    foreign-key-safe order (automation/run and snapshot-parent cross-links patched in a second
    pass), re-uploads artifact objects, and restores filesystem artifacts only beneath the explicit
    `RESTORE_TARGET_FILESYSTEM_ROOT` isolated namespace.
+   Durable work restores in payload -> job -> result/event/node order after projects and customer
+   `build_jobs`. `build_jobs.work_job_id` is a trace link rather than a reverse foreign key, which
+   avoids a restore cycle; `build_work_jobs.build_id` remains the authoritative FK. A restored
+   in-flight lease is allowed to expire and be reclaimed rather than being reported as successful
+   from filesystem state alone.
 4. Update `shell/.env` on the VPS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; update
    `shell/web/.env` with the new URL and publishable key; **keep the original
    `PLATFORM_ENC_KEY`**. Rebuild the web app and restart `thrallo-shell`.

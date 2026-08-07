@@ -46,8 +46,8 @@ values.
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
 | PR-08 Diagnostics/erasure | Diagnostics redaction unit local-complete; full cross-store erasure pending | Secret-pattern/environment redaction and prompt/source retention controls proven; erasure proof still pending | None |
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
-| PR-10 Durable build leases | Pending | Audit evidence confirmed | None |
-| PR-11 Build worker | Pending | Audit evidence confirmed | None |
+| PR-10 Durable build leases | Local implementation and disposable Postgres proof complete; production approval pending | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Do not apply migration yet |
+| PR-11 Build worker | Local implementation and real sandbox proof complete; production approval pending | Valid/malformed compile, Playwright, timeout/tree cleanup, cgroup limits, OOM 137, shell latency and disabled-path regressions pass | Do not install/start service or enable shell flag yet |
 | PR-12 Atomic deployment | Pending | Audit evidence confirmed | None |
 | PR-13 Cost/retrieval | Retrieval correctness local-complete; cost reservation pending | TS/TSX parser, opaque-context fail-closed, capability and project-knowledge integration proven | None |
 | PR-14 V2 composition | Pending | Placeholder confirmed | None |
@@ -69,6 +69,25 @@ not be renamed or repaired remotely until the real `supabase_migrations.schema_m
 and corresponding live objects have been compared.
 
 ## Implemented correctness units
+
+- C7 now uses an additive service-only durable queue with leased, retryable and idempotent jobs.
+  `build_jobs` remains the customer lifecycle record and links to the currently active worker job;
+  payload, result and event evidence survive shell/worker restarts. Completion persists its result
+  before acknowledgement in the same transaction, and a completion racing cancellation is
+  rejected. Atomic `SKIP LOCKED` leasing and lease tokens prevent two workers from owning a job.
+- The opt-in `thrallo-build-worker` process owns generated-app dependency installation, compilation,
+  Playwright verification, QA, publish packaging, Android packaging and Sharp optimisation. Leaf
+  generated-code work runs in one-job Docker sandboxes with read-only roots, dropped capabilities,
+  no-new-privileges, network denial where possible, bounded output, wall/CPU/memory/PID limits and
+  process-tree cleanup. The shell flag defaults off, preserving Builder V1 behavior until approved.
+- The actual sandbox image built successfully and compiled a real scaffold; a malformed project
+  preserved exact stderr/exit 23 without killing the supervisor, timeout removed the complete
+  container tree, and the 256 MiB memory proof exited 137. Disposable Postgres reset/lint/diff and
+  queue race/recovery proofs are green. See `docs/evidence/build-worker/2026-08-06/PROOF.md`.
+- This phase does not claim C8: rollback still rebuilds retained source and publish activation is
+  not yet atomic. The worker's trusted control process currently needs Docker-group access; customer
+  code never receives the socket, and rootless Docker remains the preferred host hardening before
+  broader untrusted workload rollout.
 
 - Atomic graph persistence is implemented by the pending additive migration
   `20260806221153_bv2_atomic_graph_and_full_shadow.sql`. One service-only RPC transaction owns the

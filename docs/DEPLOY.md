@@ -65,3 +65,8 @@ After a code or environment update, rebuild the web application and restart only
 
 Use the full root lockfile install (`npm ci`) before restart. The legacy shell still imports its QA
 runner at startup, so `npm ci --omit=dev` is not currently a valid production install.
+
+The durable C7 build worker has a separate, approval-gated deployment sequence in
+`docs/BUILD-WORKER-DEPLOYMENT.md`. Do not install/start that unit or set
+`THRALLO_BUILD_WORKER_ENABLED=1` as part of an ordinary shell deploy. The queue migration, sandbox
+image, dark worker proof and shell flag are intentionally ordered and independently reversible.

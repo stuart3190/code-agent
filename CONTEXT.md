@@ -2,13 +2,25 @@
 
 ## Builder V2 production remediation (2026-08-06)
 
-Work is active on branch `remediation/builder-v2-production` from audited main
-`92e4c9fe5c864799eee228f304849064bacb0190`. PR-01 baseline is commit `c4c530a`; the C2
+Work is active on branch `remediation/builder-v2-production`; C7 started from Phase B HEAD
+`9f05aa8310c066f96b1002d1cd436ae67beda318`. The durable build-worker phase is implemented
+locally but is not deployed or enabled. The additive migration is
+`20260806230625_durable_build_work_queue.sql`; disposable reset, lint, zero-diff, live RPC lease
+proof and an actual Playwright sandbox image proof pass. Expensive dependency install, compile,
+browser verification, generated-app packaging, Android packaging and image optimisation now have
+a separate worker boundary when `THRALLO_BUILD_WORKER_ENABLED=1`; with the flag absent/off the
+existing Builder V1 path is unchanged. Operations, incident and deployment procedures are in
+`docs/BUILD-WORKER-*.md`, and proof evidence is under
+`docs/evidence/build-worker/2026-08-06/`. Production has not been changed, the worker has not been
+started, Builder V2 and shadow remain paused, and managed settlement remains paused.
+
+Earlier remediation started from audited main `92e4c9fe5c864799eee228f304849064bacb0190`.
+PR-01 baseline is commit `c4c530a`; the C2
 essential-attribution fix is `a5be84a`; C3 cache hardening is `57cfbaa`; C5 snapshot integrity is
 `7ebceae`; C6 app-auth hardening is `1be62c2`; asset ingestion/Pexels hardening is `9d71704`;
-diagnostics redaction is `b6808ee`; the current local unit fixes typed retrieval, removes the
+diagnostics redaction is `b6808ee`; later units fix typed retrieval, remove the
 nonexistent `read_file` claim, and integrates capability/project-knowledge context. Sharp process
-isolation remains explicitly deferred to the build-worker PR. Builder V1
+isolation is now implemented behind the disabled build-worker flag. Builder V1
 remains the default, Builder V2 rollout remains paused, and no production action, model spend,
 provider call, Stripe action or migration has been performed. The full local code-agent suite is
 green at 1,186 tests; static and HTTP security checks and the web build also pass. Continue from
