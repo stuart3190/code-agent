@@ -262,6 +262,19 @@ test("C8-20 Builder V1 remains on legacy path while atomic flag is disabled", as
   assert.equal(normalizeArtifactPath("assets/app.js"), "assets/app.js");
 });
 
+test("C8 forward repair retires the scoped live deployment before clearing the site pointer", async () => {
+  const migration = await readFile(new URL("../../supabase/migrations/20260807174720_c8_atomic_unpublish_deployment_retirement.sql", import.meta.url), "utf8");
+  const unpublish = migration.slice(migration.indexOf("if v_intent.operation = 'unpublish'"), migration.indexOf("  else", migration.indexOf("if v_intent.operation = 'unpublish'")));
+  assert.match(unpublish, /deployment_scope\(product_id, project_id\)[\s\S]*deployment_scope\(v_site\.product_id, v_site\.project_id\)/);
+  assert.match(unpublish, /set status = 'superseded'/);
+  assert.ok(unpublish.indexOf("update public.deployments") < unpublish.indexOf("active_publish_release_id = null"));
+  const activation = migration.slice(migration.indexOf("  else", migration.indexOf("if v_intent.operation = 'unpublish'")));
+  assert.match(activation, /deployment_scope\(product_id, project_id\)[\s\S]*set status = v_retired/);
+  assert.match(migration, /if v_intent\.state = 'completed' then return v_intent/);
+  const deploymentSchema = await readFile(new URL("../../supabase/migrations/20260803150144_deployments.sql", import.meta.url), "utf8");
+  assert.match(deploymentSchema, /create unique index if not exists deployments_one_live_per_app/);
+});
+
 test("atomic publisher proves runtime identity and refuses an in-process build fallback", () => {
   const previousAtomic = process.env.THRALLO_ATOMIC_PUBLISH_ENABLED;
   const previousWorker = process.env.THRALLO_BUILD_WORKER_ENABLED;

@@ -1,5 +1,22 @@
 # Thrallo handoff
 
+## C8 atomic unpublish forward repair (2026-08-07)
+
+Production migration `20260807174720_c8_atomic_unpublish_deployment_retirement.sql` is applied as
+ledger row 65. It fixes the production-proven stale-live-deployment defect by retiring the one live
+deployment for the site's owner/canonical scope before unpublish clears the active release pointer.
+The expanded matrix also proved the same scoped retirement is required when replacing a release
+activated through a rollback deployment. Fresh 65-migration reset, lint, zero diff, 24/24 Linux C8
+tests, disposable transaction fault injection and the complete production test-owner matrix pass.
+All proof rows were removed and the existing publishing/deployment/domain counts and hashes match
+the pre-proof baseline exactly. See
+`docs/evidence/atomic-publishing/2026-08-07/FORWARD-REPAIR.md`.
+
+No C7/C8 application code was deployed. Builder V1 remains the default; Builder V2 remains paused;
+managed settlement is paused; worker and atomic publish flags are off; worker is inactive; Caddy is
+unchanged; the shadow week was not restarted. The next separately approved step is the combined
+C4/C7/C8 dark code deployment and production canary.
+
 ## Production isolation prerequisite (2026-08-07)
 
 Phase 0's failed disposable-restore isolation has been repaired without applying migrations or
