@@ -42,7 +42,11 @@ remains. Never delete an intent to clear it.
 
 7. Prove every live site has an active release, a current pointer, matching bytes, and no unfinished
    intent. Prove every Thrallo/custom hostname returns the same content hash as before adoption.
-8. Validate and reload the reviewed `ops/Caddyfile.unified`. Existing content is byte-identical.
+8. Copy the reviewed `ops/Caddyfile.unified` over both shared Caddy source files without replacing
+   their bind-mounted inode, run `caddy validate` inside `buildr-caddy`, then restart that container.
+   (`admin off` means an API reload is unavailable.) The restart preserves the container's preview
+   network attachments and certificate volume; expect a few seconds of shared ingress downtime.
+   Prove existing content remains byte-identical immediately afterward.
 9. Obtain separate approval to enable the already-deployed C7 worker, start
    `thrallo-build-worker`, set shell `THRALLO_BUILD_WORKER_ENABLED=1`, and prove one isolated
    zero-model packaging job. Atomic publishing fails closed before build work while this flag is
