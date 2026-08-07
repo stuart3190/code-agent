@@ -31,7 +31,32 @@ different:
 node ops/bv2-shadow-drift.mjs
 ```
 
-`BV2_SHADOW_MAX_AGE_HOURS` defaults to 36. A daily timer must run more frequently than that.
+The authoritative boundary is `bv2_feature_flags['bv2.shadow.window'].value.startedAt`. The daily
+checker ignores runs and migration-state rows older than that boundary. It also queries completed
+V1 `build_jobs` since the boundary: after the ten-minute completion grace, a build with no new
+shadow state is `missing_shadow_for_completed_build` and blocks the day. This prevents a failed
+shadow callback from disappearing before it creates its first graph row.
+
+Every invocation appends one `daily_shadow_summary` JSON record containing projects expected and
+checked, CLEAN/drift/missing/stale/parity counts, deferred builds, indexer and validator versions,
+duration and errors. Per-project checks remain append-only in `bv2_shadow_checks`; a completely
+missing callback is retained in the systemd append log because no project shadow row exists to own
+a database check yet. `BV2_SHADOW_MAX_AGE_HOURS` defaults to 36,
+`BV2_SHADOW_COMPLETION_GRACE_MINUTES` to 10 and `BV2_SHADOW_CLOCK_SKEW_SECONDS` to 60. The daily
+timer must run more frequently than the stale threshold.
+
+## Current observation window
+
+- Authoritative start: `2026-08-07T20:51:22.594832Z` (the JSON boundary is millisecond-normalised
+  to `2026-08-07T20:51:22.594Z`).
+- Earliest seven-day completion: `2026-08-14T20:51:22.594832Z`.
+- Timer: `bv2-drift.timer`, daily at `09:00:00 UTC`, persistent across downtime.
+- First scheduled check: `2026-08-08T09:00:00Z`.
+- The 2026-08-06 boundary is retained in `previousWindows` with status
+  `invalid_pre_remediation`; no old run can satisfy this window.
+- No natural V1 build had completed after the new boundary at restart time. Acceptance remains
+  contingent on the first natural build producing an atomic ready manifest and CLEAN full parity;
+  operators must not manufacture a model-powered build for this evidence.
 
 ## Operator response to drift
 
@@ -43,8 +68,9 @@ node ops/bv2-shadow-drift.mjs
    stale/missing build, or an operational outage. No class is downgraded to a warning.
 5. Repair and deploy through a new reviewed migration/code change. Re-run the disposable reset,
    atomic fault proof and stored-production-fixture parity proof.
-6. Restart the seven-day clock from zero after the repair is deployed and a new production run is
-   CLEAN. Preserve failed checks as evidence.
+6. Reset the seven-day clock only for a genuine platform defect affecting shadow trust. Preserve
+   failed checks as evidence. Customer-app defects do not reset the clock unless they expose an
+   indexing, persistence or validation defect.
 
 ## Exact restart criteria
 
@@ -57,13 +83,18 @@ The seven-day shadow week may restart only after all of the following are record
 - `THRALLO_MANAGED_SETTLEMENT_PAUSED=1` and the V2 kill/rollout controls are re-read as safe.
 - A post-migration backup includes all three shadow tables and the new graph columns; isolated
   restore verifies revision counts, ownership and shadow links.
-- One real completed V1 build produces a new `bv2_shadow_runs` row and an immediate CLEAN check.
+- At least one naturally occurring real V1 completion within the window produces a new
+  `bv2_shadow_runs` row and an immediate CLEAN check before the window can be accepted. A lack of
+  natural traffic does not authorise a paid/model build and does not manufacture evidence.
 - The daily timer invokes the complete drift command, non-zero exits alert, and the default stale
   threshold is compatible with the timer cadence.
 - The official restart timestamp is written only after those proofs. The old timestamp is not
   reused.
 
+The period qualifies only after seven continuous calendar days without unexplained graph drift,
+missing/stale evidence beyond tolerance, cross-owner violation, V1 regression caused by shadowing,
+shadow persistence failure or an unhandled timer/alert failure.
+
 Rollback does not rebuild or mutate Builder V1. Stop the shadow timer/call site, deploy the prior
 application artifact, and prefer forward-repairing quarantined graph revisions. Drop new RPCs and
 tables only if no newer code or retained evidence references them; do not edit migration history.
-

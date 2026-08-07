@@ -1,5 +1,28 @@
 # Thrallo handoff
 
+## Builder V2 shadow week restarted from zero (2026-08-07)
+
+The authoritative C4 full-graph observation window started at
+`2026-08-07T20:51:22.594832Z` and cannot complete before
+`2026-08-14T20:51:22.594832Z`. Production stores this in
+`bv2_feature_flags['bv2.shadow.window']`; the prior 2026-08-06 boundary is preserved there as
+`invalid_pre_remediation` for non-atomic persistence, incomplete graph validation and supersession
+by C4. It was not deleted and cannot count toward the replacement window.
+
+Commit `ab91a933297b436059296371d7e4386aa6e6157f` hardens the daily checker so a completed V1
+build whose shadow callback creates no migration-state row is blocking rather than silently absent.
+The `09:00 UTC` persistent timer records expected/checked/CLEAN/drift/missing/stale/parity counts,
+versions, duration and errors. Production disposable-owner proofs produced exit 0 for full parity
+and exit 1 for graph drift, stale evidence and a missing run; systemd exposed failures as
+`Result=exit-code`, `ExecMainStatus=1`, and the append log retained exact JSON. Cleanup returned all
+graph/shadow/proof-owner counts to zero. No natural V1 build has completed after the boundary yet,
+so the first real shadow record is awaiting ordinary traffic—do not manufacture a paid build.
+
+Builder V1 remains the customer default; `bv2.enabled` is absent/false, `bv2.owners` is
+absent/empty, managed settlement is paused, customer worker and atomic-publish dispatch remain off,
+and shared Caddy is unchanged. The next daily check is `2026-08-08T09:00:00Z`. The remaining
+hostname/certificate Caddy canary is independent and still needs separate approval.
+
 ## C8 atomic unpublish forward repair (2026-08-07)
 
 Production migration `20260807174720_c8_atomic_unpublish_deployment_retirement.sql` is applied as

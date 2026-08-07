@@ -10,8 +10,10 @@ silently treated as complete.
 - Implementation branch: `remediation/builder-v2-production`.
 - Customer Builder V2 rollout remains paused. Builder V1 remains the customer default.
 - `THRALLO_MANAGED_SETTLEMENT_PAUSED=1` is a mandatory release invariant.
-- `THRALLO_BV2_KILL=1`, `bv2.enabled=false`, and an empty `bv2.owners` allowlist are mandatory
-  until the internal-pilot gate is explicitly approved.
+- `bv2.enabled=false` and an empty `bv2.owners` allowlist are mandatory until the internal-pilot
+  gate is explicitly approved. The environment kill switch remains available; it cannot be armed
+  while the separately approved shadow callback is expected to run because it deliberately wins
+  over `bv2.shadow`.
 - No model-powered proof, provider spend, Stripe action, production mutation, or migration is
   authorised by repository work alone.
 - The shadow period that began on 2026-08-06 is diagnostic history, not valid rollout evidence.
@@ -40,7 +42,7 @@ values.
 | PR-01 Freeze and current-state baseline | Local implementation complete | Current main matched; local capture, 5 focused tests, full code-agent suite, web build, and 118 browser tests pass | Live read awaiting explicit approval |
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
-| PR-04 Atomic graph and shadow | Deployed dark and production-canary green | Atomic production persistence/reload parity was exact across 45 paths, 144 symbols, 477 refs and 124 edges; injected child-row drift exited non-zero and cleanup restored zero canary rows | Ready for a new shadow clock; customer V2 remains paused |
+| PR-04 Atomic graph and shadow | Deployed dark; new seven-day window observing | Atomic production persistence/reload parity was exact across 45 paths, 144 symbols, 477 refs and 124 edges. The timer also blocks a completed V1 build whose shadow callback creates no state; production disposable CLEAN/drift/stale/missing proofs propagated exact exit codes | Window began `2026-08-07T20:51:22.594832Z`; customer V2 remains paused |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
@@ -89,9 +91,14 @@ and corresponding live objects have been compared.
   pointers/cache, graph/shadow, queue/result/event, publishing and two-owner isolation checks.
   Independent monitoring recorded zero successful connections on all ports `55320-55327` during
   the full restore. The disposable containers, volumes and restored filesystem were destroyed.
-- Every technical shadow-restart criterion is now green. The seven-day clock has **not** been
-  restarted; that remains a separate explicit approval. The remaining real hostname/certificate
-  Caddy canary is independent and still requires its separately approved ingress window.
+- The authoritative replacement shadow window began at `2026-08-07T20:51:22.594832Z` and cannot
+  complete before `2026-08-14T20:51:22.594832Z`. The 2026-08-06 boundary is retained as
+  `invalid_pre_remediation`; it cannot contribute evidence. Daily `09:00 UTC` checks now record a
+  complete aggregate and fail when an eligible completed V1 build never creates shadow state.
+  CLEAN, graph drift, stale and missing-run exit behavior was production-proven on a disposable
+  owner, then all proof rows were removed. The first natural post-boundary V1 shadow record remains
+  pending. The hostname/certificate Caddy canary is independent and still requires its separately
+  approved ingress window.
 
 ## Implemented correctness units
 
@@ -127,7 +134,8 @@ and corresponding live objects have been compared.
 - Shadow results now pin an exact revision manifest and append every validation check. CLEAN means
   exact equivalence across paths, hashes, opaque state, symbols/spans/hashes/metadata, references,
   edges, callers/importers/imports and ownership answers. Missing, extra, incomplete, corrupt or
-  stale evidence exits non-zero. The old shadow week remains invalid and has not been restarted.
+  stale evidence exits non-zero. The old shadow week remains invalid. The replacement window
+  started `2026-08-07T20:51:22.594832Z`; only post-boundary evidence can count.
 - Fresh reset, lint, migration history and zero-diff checks passed on a disposable Supabase stack.
   Real Postgres fault triggers proved rollback at all four write stages, safe retry, concurrent
   convergence, tenant/browser isolation and snapshot/shadow-aware GC. See
