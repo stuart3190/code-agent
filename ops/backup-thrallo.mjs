@@ -59,6 +59,11 @@ export const CA_TABLES = [
   "ca_memories",
   "projects",
   "build_jobs",
+  "build_work_payloads",
+  "build_work_jobs",
+  "build_work_results",
+  "build_work_events",
+  "build_worker_nodes",
   "published_sites",
   // Deployment history. Permanent while a project lives, and the only copy of the source that was
   // actually published — losing it would make every rollback and every deployment download
@@ -274,6 +279,7 @@ async function main() {
   const roots = [
     { name: "publish", source: process.env.PUBLISH_DIR || path.join(os.homedir(), "publish") },
     { name: "qa", source: process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") },
+    { name: "build-worker", source: process.env.THRALLO_BUILD_ARTIFACT_ROOT || "/var/lib/thrallo-build-worker" },
   ];
   for (const root of roots) {
     const rootStat = await stat(root.source).catch(() => null);

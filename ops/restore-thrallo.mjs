@@ -57,6 +57,11 @@ export const RESTORE_ORDER = [
   "ca_memories",
   "projects",     // references ca_products -> restore after it
   "build_jobs",
+  "build_work_payloads",
+  "build_work_jobs",
+  "build_work_results",
+  "build_work_events",
+  "build_worker_nodes",
   "published_sites",
   // After published_sites: a deployment references the project and product those rows describe.
   "deployments",

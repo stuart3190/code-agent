@@ -43,6 +43,10 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "deployments", column: "project_id", ownerScoped: true, label: "deployment history" },
   { table: "build_checkpoints", column: "project_id", ownerScoped: true, label: "build checkpoints" },
   { table: "ai_requests", column: "project_id", ownerScoped: true, label: "usage records" },
+  { table: "build_work_events", column: "project_id", ownerScoped: true, label: "build worker events" },
+  { table: "build_work_results", column: "project_id", ownerScoped: true, label: "build worker results" },
+  { table: "build_work_jobs", column: "project_id", ownerScoped: true, label: "build worker jobs" },
+  { table: "build_work_payloads", column: "project_id", ownerScoped: true, label: "build worker payloads" },
   { table: "build_jobs", column: "project_id", ownerScoped: true, label: "build history" },
 
   // diag_runs holds the prompts the user actually typed. The build audit trail is deliberately
