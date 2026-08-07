@@ -330,10 +330,9 @@ async function main() {
   };
   manifest.bytes += filesystemDirectoriesGz.length;
 
-  const ledgerPath = await resolveMigrationLedgerFile();
-  const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
+  const ledger = await loadMigrationLedgerEvidence();
   if (!Array.isArray(ledger.migrations) || ledger.migrations.length === 0) {
-    throw new Error(`migration ledger evidence is invalid: ${ledgerPath}`);
+    throw new Error("migration ledger evidence is invalid");
   }
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);
@@ -383,6 +382,44 @@ async function resolveMigrationLedgerFile() {
   throw new Error("authoritative migration ledger evidence is missing; set THRALLO_MIGRATION_LEDGER_FILE");
 }
 
+export async function loadMigrationLedgerEvidence() {
+  const ledgerPath = await resolveMigrationLedgerFile();
+  const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
+  if (process.env.THRALLO_MIGRATION_LEDGER_FILE) return ledger;
+
+  const evidenceRoot = path.dirname(path.dirname(ledgerPath));
+  const overlays = [];
+  for (const date of (await readdir(evidenceRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()) {
+    const overlayPath = path.join(evidenceRoot, date, "applied-history-overlay.json");
+    const overlay = JSON.parse(await readFile(overlayPath, "utf8").catch(() => "null"));
+    if (overlay) overlays.push({ ...overlay, path: overlayPath });
+  }
+  const migrations = [...(ledger.migrations || [])];
+  const versions = new Set(migrations.map((migration) => String(migration.version)));
+  for (const overlay of overlays) {
+    for (const migration of overlay.migrations || []) {
+      if (versions.has(String(migration.version))) throw new Error(`migration ledger overlay duplicates version: ${migration.version}`);
+      versions.add(String(migration.version));
+      migrations.push(migration);
+    }
+  }
+  migrations.sort((a, b) => Number(a.appliedOrder) - Number(b.appliedOrder));
+  for (let index = 0; index < migrations.length; index += 1) {
+    if (Number(migrations[index].appliedOrder) !== index + 1) {
+      throw new Error(`migration ledger applied order is not contiguous at ${migrations[index].version}`);
+    }
+  }
+  const latest = overlays.at(-1);
+  return {
+    ...ledger,
+    source: latest ? `${ledger.source}; overlays through ${latest.source}` : ledger.source,
+    capturedAt: latest?.capturedAt || ledger.capturedAt,
+    migrations,
+    overlays: overlays.map((overlay) => path.relative(evidenceRoot, overlay.path).split(path.sep).join("/")),
+  };
+}
+
 async function buildMigrationState(ledger) {
   const authoritative = new Map(ledger.migrations.map((migration) => [String(migration.version), migration]));
   if (authoritative.size !== ledger.migrations.length) throw new Error("authoritative migration ledger contains duplicate versions");
@@ -395,7 +432,9 @@ async function buildMigrationState(ledger) {
     const row = authoritative.get(match[1]);
     const fileSha256 = sha256(sql);
     const sqlSha256 = canonicalSqlHash(sql);
-    if (row && (row.canonicalSqlSha256 || row.sqlSha256) !== sqlSha256) throw new Error(`applied migration hash diverged: ${filename}`);
+    if (row && (row.localCanonicalSqlSha256 || row.canonicalSqlSha256 || row.sqlSha256) !== sqlSha256) {
+      throw new Error(`applied migration hash diverged: ${filename}`);
+    }
     state.push({ version: match[1], name: match[2], filename, sqlSha256, fileSha256, applied: !!row, appliedOrder: row?.appliedOrder ?? null });
   }
   for (const migration of ledger.migrations) {

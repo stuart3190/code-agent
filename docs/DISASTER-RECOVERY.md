@@ -25,6 +25,11 @@ Every run is validated immediately after writing (decode, count, checksum) and r
 than `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101's backups are separate and
 untouched.
 
+The 60-row reconstructed authoritative history is immutable. Later production applications are
+captured as dated, read-only ledger overlays containing the remote statement hash and the local
+applied-file hash. A backup merges them, requires contiguous applied order, and refuses a local
+file whose recorded applied identity changes.
+
 The worker account home (`/var/lib/thrallo-build-worker-home`) is not backup input. Only the
 canonical artifact root (`/var/lib/thrallo-build-worker`) is included. Their separation is a
 recovery invariant: OS skeleton entries and caches must not contaminate durable data, while any

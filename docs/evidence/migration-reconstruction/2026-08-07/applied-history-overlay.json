@@ -1,0 +1,57 @@
+{
+  "source": "Supabase plugin read-only list_migrations and schema_migrations hashes on zczgvcsokfafuyognvwx",
+  "capturedAt": "2026-08-07T20:10:29.921Z",
+  "baseVersion": "20260805212028",
+  "migrations": [
+    {
+      "appliedOrder": 61,
+      "version": "20260806210321",
+      "name": "production_catalog_grants_reconciliation",
+      "filename": "20260806210321_production_catalog_grants_reconciliation.sql",
+      "statementCount": 17,
+      "sqlSha256": "84197991f01a601d88df23218217c107089a626aa403e726f756640e1ad6f435",
+      "canonicalSqlSha256": "84197991f01a601d88df23218217c107089a626aa403e726f756640e1ad6f435",
+      "localCanonicalSqlSha256": "e74102036b0456df4ee587dbdb175591542a2f32931c827aad49c6e6b349f328"
+    },
+    {
+      "appliedOrder": 62,
+      "version": "20260806221153",
+      "name": "bv2_atomic_graph_and_full_shadow",
+      "filename": "20260806221153_bv2_atomic_graph_and_full_shadow.sql",
+      "statementCount": 40,
+      "sqlSha256": "0609f4ce1c9323eff256022f49394ece032d52e5ac196e1909677f9f1f1a34c7",
+      "canonicalSqlSha256": "0609f4ce1c9323eff256022f49394ece032d52e5ac196e1909677f9f1f1a34c7",
+      "localCanonicalSqlSha256": "ad79f4a6eb705e588181986fa5f1b5202104fdaf47762e24fbbb79428100610b"
+    },
+    {
+      "appliedOrder": 63,
+      "version": "20260806230625",
+      "name": "durable_build_work_queue",
+      "filename": "20260806230625_durable_build_work_queue.sql",
+      "statementCount": 69,
+      "sqlSha256": "b744c8b2cd15361eb00ccc645b5269b38e3c8619271b801932a8179eec2d5489",
+      "canonicalSqlSha256": "b744c8b2cd15361eb00ccc645b5269b38e3c8619271b801932a8179eec2d5489",
+      "localCanonicalSqlSha256": "72c6cc16f4e4055d317713a3937f5652a26fe5530e7cedc0699ec147c0ce64f4"
+    },
+    {
+      "appliedOrder": 64,
+      "version": "20260807072455",
+      "name": "atomic_immutable_releases",
+      "filename": "20260807072455_atomic_immutable_releases.sql",
+      "statementCount": 50,
+      "sqlSha256": "f46e29bbaf02d7008f92144c198d129757c0d6ca706c6cdb87c4a0bcd9baa538",
+      "canonicalSqlSha256": "f46e29bbaf02d7008f92144c198d129757c0d6ca706c6cdb87c4a0bcd9baa538",
+      "localCanonicalSqlSha256": "2ec3060ea38960f300dca36630cd256dd16c8eadeda0920d045c202af819fb1b"
+    },
+    {
+      "appliedOrder": 65,
+      "version": "20260807174720",
+      "name": "c8_atomic_unpublish_deployment_retirement",
+      "filename": "20260807174720_c8_atomic_unpublish_deployment_retirement.sql",
+      "statementCount": 3,
+      "sqlSha256": "0ed2a4083d56586702101c62afcb20c88e6ca7c6aacca7002f166fb593ff2fdb",
+      "canonicalSqlSha256": "0ed2a4083d56586702101c62afcb20c88e6ca7c6aacca7002f166fb593ff2fdb",
+      "localCanonicalSqlSha256": "0a87cc0054a38c012466889d3479c42f8982b96fe81413276902f118afab5d69"
+    }
+  ]
+}

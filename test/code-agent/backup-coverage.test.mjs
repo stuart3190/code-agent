@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { CA_TABLES, canonicalSqlHash } from "../../ops/backup-thrallo.mjs";
+import { CA_TABLES, canonicalSqlHash, loadMigrationLedgerEvidence } from "../../ops/backup-thrallo.mjs";
 import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
@@ -251,6 +251,20 @@ test("authoritative migration identity is line-ending independent without changi
   const crlf = Buffer.from("select 1;\r\nselect 2;\r\n");
   assert.notEqual(createHash("sha256").update(lf).digest("hex"), createHash("sha256").update(crlf).digest("hex"));
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
+});
+
+test("backup migration evidence overlays the authoritative base through production ledger row 65", async () => {
+  const ledger = await loadMigrationLedgerEvidence();
+  assert.equal(ledger.migrations.length, 65);
+  assert.deepEqual(ledger.migrations.slice(-5).map((migration) => migration.version), [
+    "20260806210321",
+    "20260806221153",
+    "20260806230625",
+    "20260807072455",
+    "20260807174720",
+  ]);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 65);
+  assert.ok(ledger.migrations.slice(-5).every((migration) => migration.localCanonicalSqlSha256));
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
