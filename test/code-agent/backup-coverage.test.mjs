@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, writeFile, mkdir, symlink } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -9,6 +9,7 @@ import test from "node:test";
 import { CA_TABLES, canonicalSqlHash } from "../../ops/backup-thrallo.mjs";
 import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
+import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
 
 const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
 
@@ -143,6 +144,108 @@ test("backup validation verifies storage, filesystem, and migration-ledger paylo
   await assert.rejects(validateBackupDirectory(dir), /byte|checksum/i);
 });
 
+test("service-account home entries cannot contaminate the canonical worker artifact root", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-boundary-"));
+  const home = path.join(namespace, "worker-home");
+  const artifacts = path.join(namespace, "artifacts");
+  await mkdir(home);
+  await mkdir(artifacts);
+  await writeFile(path.join(home, ".face"), "os skeleton");
+  await symlink(".face", path.join(home, ".face.icon"), "file");
+
+  const inventory = await inventoryFilesystemRoot(artifacts);
+  assert.deepEqual(inventory.files, []);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), ["."]);
+});
+
+test("an unexpected symlink inside a canonical job directory aborts backup inventory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-symlink-"));
+  await mkdir(path.join(root, "job-1"));
+  await writeFile(path.join(root, "job-1", "artifact.zip"), "artifact");
+  await symlink("artifact.zip", path.join(root, "job-1", "latest.zip"), "file");
+  await assert.rejects(inventoryFilesystemRoot(root), /refuses symlink/);
+});
+
+test("a symlink pointing outside the canonical artifact root is rejected", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-outside-"));
+  const root = path.join(namespace, "artifacts");
+  const outside = path.join(namespace, "outside.txt");
+  await mkdir(root);
+  await writeFile(outside, "must not follow");
+  await symlink(outside, path.join(root, "escape"), "file");
+  await assert.rejects(inventoryFilesystemRoot(root), /refuses symlink/);
+});
+
+test("canonical worker files and directory modes are inventoried without silent skips", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-canonical-"));
+  const job = path.join(root, "job-1");
+  const artifact = path.join(job, "artifact");
+  await mkdir(artifact, { recursive: true });
+  await chmod(job, 0o750);
+  await chmod(artifact, 0o750);
+  await writeFile(path.join(job, "result.json"), "{\"ok\":true}");
+  await writeFile(path.join(artifact, "index.html"), "ready");
+
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.deepEqual(inventory.files.map((entry) => entry.relative), [
+    "job-1/artifact/index.html",
+    "job-1/result.json",
+  ]);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), [".", "job-1", "job-1/artifact"]);
+  const jobMode = (await import("node:fs/promises")).stat(job).then((entry) => entry.mode & 0o777);
+  assert.equal(inventory.directories.find((entry) => entry.relative === "job-1").mode, await jobMode);
+  assert.equal((await readInventoriedFile(inventory.files[0])).toString(), "ready");
+  assert.equal((await readInventoriedFile(inventory.files[1])).toString(), "{\"ok\":true}");
+
+  const target = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-restored-"));
+  const files = await Promise.all(inventory.files.map(async (entry) => {
+    const bytes = await readInventoriedFile(entry);
+    return {
+      root: "build-worker",
+      relativePath: entry.relative,
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      mode: entry.mode,
+      content: bytes,
+    };
+  }));
+  const directories = inventory.directories.map((entry) => ({
+    root: "build-worker",
+    relativePath: entry.relative,
+    mode: entry.mode,
+  }));
+  await restoreFilesystemLayout({
+    filesystemRoot: target,
+    directories,
+    files,
+    readObject: async (object) => object.content,
+  });
+  assert.equal(await readFile(path.join(target, "build-worker", "job-1", "artifact", "index.html"), "utf8"), "ready");
+  const restoredJobMode = (await (await import("node:fs/promises")).stat(path.join(target, "build-worker", "job-1"))).mode & 0o777;
+  assert.equal(restoredJobMode, await jobMode);
+});
+
+test("non-durable temp and workspace siblings are excluded from worker artifact inventory", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-nondurable-"));
+  const root = path.join(namespace, "artifacts");
+  await mkdir(root);
+  await mkdir(path.join(namespace, "workspace"));
+  await mkdir(path.join(namespace, "tmp"));
+  await writeFile(path.join(root, "result.json"), "canonical");
+  await writeFile(path.join(namespace, "workspace", "source.ts"), "temporary");
+  await writeFile(path.join(namespace, "tmp", "cache"), "temporary");
+
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.deepEqual(inventory.files.map((entry) => entry.relative), ["result.json"]);
+});
+
+test("an empty canonical worker artifact root inventories cleanly", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-empty-"));
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.equal(inventory.files.length, 0);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), ["."]);
+});
+
 test("authoritative migration identity is line-ending independent without changing file hashes", async () => {
   const lf = Buffer.from("select 1;\nselect 2;\n");
   const crlf = Buffer.from("select 1;\r\nselect 2;\r\n");
@@ -173,6 +276,11 @@ test("systemd units and the runbook ship with the repository", async () => {
   const runbook = await readFile(new URL("../../docs/DISASTER-RECOVERY.md", import.meta.url), "utf8");
   assert.match(runbook, /PLATFORM_ENC_KEY/);
   assert.match(runbook, /restore-thrallo\.mjs/);
+  const workerUnit = await readFile(new URL("../../build-worker/thrallo-build-worker.service", import.meta.url), "utf8");
+  assert.match(workerUnit, /Environment=HOME=\/var\/lib\/thrallo-build-worker-home/);
+  assert.match(workerUnit, /ReadWritePaths=\/var\/lib\/thrallo-build-worker(?:\r?\n|$)/);
+  assert.doesNotMatch(workerUnit, /ReadWritePaths=\/var\/lib\/thrallo-build-worker-home/);
+  for (const table of ["build_work_results", "build_work_events"]) assert.ok(CA_TABLES.includes(table));
 });
 
 // ── Migration drift: the half CI structurally cannot do ─────────────────────────────────

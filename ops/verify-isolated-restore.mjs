@@ -26,6 +26,11 @@ async function loadRows(name) {
   return JSON.parse(gunzipSync(await readFile(path.join(backupDir, `${name}.json.gz`))).toString("utf8"));
 }
 
+async function loadOptionalRows(name) {
+  if (!(await stat(path.join(backupDir, `${name}.json.gz`)).catch(() => null))?.isFile()) return [];
+  return loadRows(name);
+}
+
 async function fetchAll(table) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
@@ -90,6 +95,16 @@ for (const object of filesystemObjects) {
   const metadata = await stat(target);
   if (bytes.length !== object.bytes || sha256(bytes) !== object.sha256 || (metadata.mode & 0o777) !== object.mode) {
     throw new Error(`filesystem object differs: ${object.root}/${object.relativePath}`);
+  }
+}
+const filesystemDirectories = await loadOptionalRows("filesystem_directories");
+for (const directory of filesystemDirectories) {
+  const targetRoot = path.resolve(filesystemRoot, directory.root);
+  const target = directory.relativePath === "." ? targetRoot : path.resolve(targetRoot, directory.relativePath);
+  if (target !== targetRoot && !target.startsWith(`${targetRoot}${path.sep}`)) throw new Error(`filesystem directory path escapes root: ${directory.relativePath}`);
+  const metadata = await stat(target);
+  if (!metadata.isDirectory() || (metadata.mode & 0o777) !== directory.mode) {
+    throw new Error(`filesystem directory differs: ${directory.root}/${directory.relativePath}`);
   }
 }
 
@@ -198,6 +213,7 @@ console.log(JSON.stringify({
   authUsers: sourceUsers.length,
   storageObjects: storageObjects.length,
   filesystemObjects: filesystemObjects.length,
+  filesystemDirectories: filesystemDirectories.length,
   blobs: blobs.length,
   snapshots: snapshots.length,
   verificationCacheRows: caches.length,

@@ -20,6 +20,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 
 // Every control-plane table in supabase/migrations (ca_* plus the Phase-19 app-build tables) —
 // test/code-agent/backup-coverage.test.mjs fails the build if a new migration adds a table
@@ -278,6 +279,7 @@ async function main() {
   console.log(`  storage: ${objectIndex.length} objects from ${ARTIFACT_BUCKET}`);
 
   const filesystemIndex = [];
+  const filesystemDirectories = [];
   const roots = [
     { name: "publish", source: process.env.PUBLISH_DIR || path.join(os.homedir(), "publish") },
     { name: "qa", source: process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") },
@@ -286,10 +288,16 @@ async function main() {
   for (const root of roots) {
     const rootStat = await stat(root.source).catch(() => null);
     if (!rootStat?.isDirectory()) throw new Error(`filesystem root missing or not a directory: ${root.source}`);
-    const files = await walkFiles(root.source);
+    const inventory = await inventoryFilesystemRoot(root.source);
+    const files = inventory.files;
+    filesystemDirectories.push(...inventory.directories.map((directory) => ({
+      root: root.name,
+      relativePath: directory.relative,
+      mode: directory.mode,
+    })));
     let rootBytes = 0;
     for (const item of files) {
-      const bytes = await readFile(item.absolute);
+      const bytes = await readInventoriedFile(item);
       const gz = gzipSync(bytes);
       const file = `filesystem/${root.name}/${sha256(Buffer.from(item.relative))}.bin.gz`;
       await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
@@ -299,7 +307,12 @@ async function main() {
       manifest.bytes += gz.length;
       rootBytes += bytes.length;
     }
-    manifest.filesystem.roots[root.name] = { source: root.source, objects: files.length, bytes: rootBytes };
+    manifest.filesystem.roots[root.name] = {
+      source: root.source,
+      objects: files.length,
+      directories: inventory.directories.length,
+      bytes: rootBytes,
+    };
     manifest.filesystem.objects += files.length;
     console.log(`  filesystem ${root.name}: ${files.length} files (${rootBytes} bytes)`);
   }
@@ -308,6 +321,14 @@ async function main() {
   manifest.tables.filesystem_objects = filesystemIndex.length;
   manifest.files["filesystem_objects.json.gz"] = { bytes: filesystemIndexGz.length, sha256: sha256(filesystemIndexGz) };
   manifest.bytes += filesystemIndexGz.length;
+  const filesystemDirectoriesGz = gzipSync(JSON.stringify(filesystemDirectories));
+  await writeFile(path.join(dir, "filesystem_directories.json.gz"), filesystemDirectoriesGz);
+  manifest.tables.filesystem_directories = filesystemDirectories.length;
+  manifest.files["filesystem_directories.json.gz"] = {
+    bytes: filesystemDirectoriesGz.length,
+    sha256: sha256(filesystemDirectoriesGz),
+  };
+  manifest.bytes += filesystemDirectoriesGz.length;
 
   const ledgerPath = await resolveMigrationLedgerFile();
   const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
@@ -349,24 +370,6 @@ async function main() {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-async function walkFiles(root) {
-  const files = [];
-  async function visit(relative = "") {
-    const current = path.join(root, relative);
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const child = path.join(relative, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`filesystem backup refuses symlink: ${path.join(root, child)}`);
-      if (entry.isDirectory()) await visit(child);
-      else if (entry.isFile()) {
-        const metadata = await stat(path.join(root, child));
-        files.push({ absolute: path.join(root, child), relative: child.split(path.sep).join("/"), mode: metadata.mode & 0o777 });
-      }
-    }
-  }
-  await visit();
-  return files.sort((a, b) => a.relative.localeCompare(b.relative));
 }
 
 async function resolveMigrationLedgerFile() {

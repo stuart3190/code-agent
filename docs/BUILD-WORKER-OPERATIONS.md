@@ -46,6 +46,15 @@ host-hardening limitation, not a claim of container-as-a-security-boundary again
 code. Sharp executes in the worker service cgroup with one-job concurrency; its hardened fetch,
 decode, pixel and size limits remain active.
 
+## Filesystem invariant
+
+The service account home is `/var/lib/thrallo-build-worker-home` (private, mode `0700`). The
+canonical durable artifact root is `/var/lib/thrallo-build-worker` (mode `0750`) and contains only
+Thrallo-owned job result/artifact data. These paths must never overlap. Docker `/tmp` tmpfs state,
+job workspaces removed on terminal completion, caches, and OS account skeleton files are
+non-durable and must not enter the artifact root. The backup intentionally fails on every symlink
+or non-regular entry beneath a canonical filesystem root; do not add filename exceptions.
+
 ## Operator commands
 
 Run these from the checked-out release with the worker environment loaded:

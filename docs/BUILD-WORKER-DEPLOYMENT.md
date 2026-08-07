@@ -14,15 +14,21 @@ npm ci
 npm run worker:sandbox:build
 
 sudo groupadd --system thrallo 2>/dev/null || true
-sudo useradd --system --gid thrallo --home-dir /var/lib/thrallo-build-worker \
+sudo useradd --system --gid thrallo --home-dir /var/lib/thrallo-build-worker-home \
   --shell /usr/sbin/nologin thrallo-build-worker 2>/dev/null || true
 sudo usermod -aG docker thrallo-build-worker
+sudo install -d -o thrallo-build-worker -g thrallo -m 0700 /var/lib/thrallo-build-worker-home
 sudo install -d -o thrallo-build-worker -g thrallo -m 0750 /var/lib/thrallo-build-worker
 sudo install -d -o root -g thrallo -m 0750 /etc/thrallo
 sudo install -o root -g root -m 0644 build-worker/thrallo-build-worker.service \
   /etc/systemd/system/thrallo-build-worker.service
 sudo systemctl daemon-reload
 ```
+
+The account home and durable artifact root are deliberately different. The private home is
+`/var/lib/thrallo-build-worker-home`; `/var/lib/thrallo-build-worker` contains only canonical
+Thrallo job artifacts selected by the backup. Never use the artifact root as a login/service
+home, and never put package-manager caches, OS skeleton files, or temporary workspaces beneath it.
 
 Create `/etc/thrallo/build-worker.env` mode `0640`, root:thrallo, from the production secret store.
 It needs the existing Supabase server configuration plus:

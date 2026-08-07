@@ -12,13 +12,13 @@
 // admin API; passwords cannot be restored — users reset them. Restored encrypted columns are
 // only readable when the server runs with the ORIGINAL PLATFORM_ENC_KEY.
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
 
 // Foreign-key-safe insert order. ca_automations and ca_runs reference each other, so
 // automations insert first with last_run_id withheld and patched after runs exist.
@@ -130,6 +130,11 @@ async function insertRows(svc, table, rows) {
   }
 }
 
+async function loadOptionalRows(dir, name) {
+  if (!(await stat(path.join(dir, `${name}.json.gz`)).catch(() => null))?.isFile()) return [];
+  return loadRows(dir, name);
+}
+
 export function prepareRowsForRestore(table, rows) {
   if (table !== "ca_run_events" || rows.length === 0) return rows;
   const sorted = [...rows].sort((a, b) => Number(a.id) - Number(b.id));
@@ -224,24 +229,18 @@ async function main() {
   }
   console.log(`storage: ${objects.length} objects restored to ${ARTIFACT_BUCKET}`);
   const filesystemObjects = await loadRows(dir, "filesystem_objects");
+  const filesystemDirectories = await loadOptionalRows(dir, "filesystem_directories");
   const filesystemRoot = process.env.RESTORE_TARGET_FILESYSTEM_ROOT;
-  if (filesystemObjects.length && !filesystemRoot) {
+  if ((filesystemObjects.length || filesystemDirectories.length) && !filesystemRoot) {
     throw new Error("filesystem restore requires RESTORE_TARGET_FILESYSTEM_ROOT (an isolated empty namespace)");
   }
-  for (const object of filesystemObjects) {
-    const targetRoot = path.resolve(filesystemRoot, object.root);
-    const target = path.resolve(targetRoot, object.relativePath);
-    if (target !== targetRoot && !target.startsWith(`${targetRoot}${path.sep}`)) {
-      throw new Error(`filesystem restore path escapes target root: ${object.relativePath}`);
-    }
-    const bytes = gunzipSync(await readFile(path.join(dir, object.file)));
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    if (bytes.length !== object.bytes || digest !== object.sha256) throw new Error(`filesystem object corrupt: ${object.root}/${object.relativePath}`);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, bytes, { flag: "wx" });
-    if (Number.isInteger(object.mode)) await chmod(target, object.mode);
-  }
-  console.log(`filesystem: ${filesystemObjects.length} files restored under ${filesystemRoot}`);
+  await restoreFilesystemLayout({
+    filesystemRoot,
+    directories: filesystemDirectories,
+    files: filesystemObjects,
+    readObject: async (object) => gunzipSync(await readFile(path.join(dir, object.file))),
+  });
+  console.log(`filesystem: ${filesystemObjects.length} files and ${filesystemDirectories.length} directories restored under ${filesystemRoot}`);
   console.log("restore complete — run the verification steps in docs/DISASTER-RECOVERY.md");
 }
 

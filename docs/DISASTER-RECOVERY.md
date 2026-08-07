@@ -13,7 +13,8 @@ persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
   backup, so users re-establish credentials after a restore;
 - the private `thrallo-artifacts` storage bucket, one gzipped file per object plus a
   `storage_objects.json.gz` index with original keys, content types, and content hashes;
-- current publish, QA and durable build-worker filesystem artifacts, stored by logical root with paths, modes, sizes,
+- current publish, QA and durable build-worker filesystem artifacts, stored by logical root with
+  file and directory paths, modes, sizes,
   and content hashes. VPS previews are deliberately not backed up: they are ephemeral containers
   re-materialised from canonical project/snapshot data;
 - authoritative production migration-ledger evidence plus the active local/applied-state map;
@@ -23,6 +24,11 @@ persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 Every run is validated immediately after writing (decode, count, checksum) and runs older
 than `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101's backups are separate and
 untouched.
+
+The worker account home (`/var/lib/thrallo-build-worker-home`) is not backup input. Only the
+canonical artifact root (`/var/lib/thrallo-build-worker`) is included. Their separation is a
+recovery invariant: OS skeleton entries and caches must not contaminate durable data, while any
+unexpected symlink inside the canonical root must still abort the backup.
 
 ## The disaster-recovery kit — keep these OFF the VPS
 

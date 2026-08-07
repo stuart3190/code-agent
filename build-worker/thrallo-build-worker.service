@@ -13,6 +13,7 @@ WorkingDirectory=/home/ubuntu/code-agent
 EnvironmentFile=/etc/thrallo/build-worker.env
 Environment=THRALLO_PROCESS_ROLE=build-worker
 Environment=THRALLO_BUILD_SANDBOX=docker
+Environment=HOME=/var/lib/thrallo-build-worker-home
 ExecStart=/usr/bin/node build-worker/index.mjs
 Restart=on-failure
 RestartSec=5
@@ -29,6 +30,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/thrallo-build-worker
+ReadOnlyPaths=/var/lib/thrallo-build-worker-home
 ProtectProc=invisible
 ProcSubset=pid
 
