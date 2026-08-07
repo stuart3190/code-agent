@@ -22,6 +22,8 @@ jobs:
       - run: npm --prefix shell/web ci
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
+      - name: Builder V2 zero-credit qualification matrix
+        run: npm run test:bv2:qualification
 
   migration-validation:
     runs-on: ubuntu-latest
