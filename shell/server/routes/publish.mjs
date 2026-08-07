@@ -19,7 +19,7 @@ import { auditEvent, recordRelease } from "../lib/projectState.mjs";
 import { requireFeature } from "../lib/features.mjs";
 import { auditCapabilityTree } from "../lib/capabilityAudit.mjs";
 import { packagePublishTree } from "../lib/publishBuildWorker.mjs";
-import { atomicPublishEnabled, finalizeAndActivateRelease } from "../lib/publishing/atomicPublisher.mjs";
+import { assertPublishIntakeReady, atomicPublishEnabled, finalizeAndActivateRelease } from "../lib/publishing/atomicPublisher.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -151,6 +151,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   if (!PROVISIOND_URL() || !PROVISIOND_TOKEN()) {
     const e = new Error("publishing is not configured (PROVISIOND_URL/TOKEN)"); e.code = "not_configured"; throw e;
   }
+  assertPublishIntakeReady();
   if (!(await ownedProject(owner.id, projectId))) {
     const e = new Error("project not found"); e.code = "project_not_found"; throw e;
   }
@@ -212,6 +213,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   const atomic = atomicPublishEnabled() ? await finalizeAndActivateRelease({
     owner: owner.id, projectId, slug: slug || String(projectId),
     url: `https://${slug || projectId}.app.thrallo.com/`, files,
+    runtimeConfig: runtimeTree[".env"],
     metadata: { surface: "legacy-materialize", workerJobId: packaged?.workJobId || null },
   }) : null;
   const out = atomic ? { id: atomic.slug, url: atomic.url, files: atomic.files, bytes: atomic.bytes }
@@ -258,7 +260,7 @@ export async function handlePublish(req, res, body, owner) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
   } catch (e) {
-    if (e.code === "not_configured") {
+    if (e.code === "not_configured" || e.code === "publisher_paused" || e.code === "build_worker_required") {
       res.writeHead(503, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: e.message }));
     }

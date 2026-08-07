@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import os from "node:os";
+import path from "node:path";
 import { existsSync } from "node:fs";
 import { optionalEnv } from "../env.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -9,8 +10,17 @@ const workerId = `${os.hostname()}:${process.pid}:publisher`;
 let timer = null;
 
 export const atomicPublishEnabled = () => optionalEnv("THRALLO_ATOMIC_PUBLISH_ENABLED", "0") === "1";
-export const publisherPauseFile = () => optionalEnv("THRALLO_PUBLISHER_PAUSE_FILE", "/var/lib/thrallo/publisher.paused");
+export const publisherPauseFile = () => optionalEnv("THRALLO_PUBLISHER_PAUSE_FILE", path.join(os.homedir(), "thrallo-state", "publisher.paused"));
 export const publisherPaused = () => optionalEnv("THRALLO_PUBLISHER_PAUSED", "0") === "1" || existsSync(publisherPauseFile());
+
+export function assertPublishIntakeReady() {
+  if (publisherPaused()) {
+    throw Object.assign(new Error("Publishing is temporarily paused for maintenance."), { code: "publisher_paused" });
+  }
+  if (atomicPublishEnabled() && optionalEnv("THRALLO_BUILD_WORKER_ENABLED", "0") !== "1") {
+    throw Object.assign(new Error("Atomic publishing requires the isolated build worker."), { code: "build_worker_required" });
+  }
+}
 
 async function provisiond(route, { method = "POST", body } = {}) {
   const base = optionalEnv("PROVISIOND_URL"); const token = optionalEnv("PROVISIOND_TOKEN");
@@ -29,6 +39,83 @@ function rpcError(name, error) {
   const out = new Error(`${name}: ${error.message}`); out.code = error.code; throw out;
 }
 
+async function proveActivatedRelease(release) {
+  if (!release?.id) throw new Error("activated release identity is missing");
+  try {
+    const verified = await provisiond("/releases/verify", { body: {
+      owner: release.owner, projectId: release.project_id, releaseId: release.id,
+    } });
+    if (verified.artifactHash !== release.artifact_hash || verified.manifestHash !== release.manifest_hash) {
+      throw new Error("activated release bytes do not match the database manifest");
+    }
+    return verified;
+  } catch (cause) {
+    throw Object.assign(new Error(`post-activation health proof failed: ${cause.message}`), {
+      code: "post_activation_health_failed", cause,
+    });
+  }
+}
+
+async function revertFailedActivation(intent, reason, client) {
+  let observed = null;
+  if (intent.previous_release_id) {
+    const previous = await releaseLocation(client, intent.previous_release_id);
+    if (!previous) throw new Error("previous release needed for activation recovery is missing");
+    await proveActivatedRelease(previous);
+    const reverted = await provisiond("/releases/activate", { body: {
+      slug: intent.slug, owner: previous.owner, projectId: previous.project_id,
+      releaseId: previous.id, expectedPreviousReleaseId: intent.desired_release_id,
+    } });
+    observed = reverted.releaseId;
+  } else {
+    const reverted = await provisiond("/releases/unpublish", { body: {
+      slug: intent.slug, expectedPreviousReleaseId: intent.desired_release_id,
+    } });
+    observed = reverted.releaseId;
+  }
+  if (observed !== (intent.previous_release_id || null)) throw new Error("activation recovery pointer proof failed");
+  const rolled = await client.rpc("mark_publish_activation_rolled_back", {
+    p_intent_id: intent.id, p_observed_release_id: observed, p_reason: reason,
+  });
+  rpcError("record activation rollback", rolled.error);
+  return rolled.data;
+}
+
+async function recordActivationFailure(intent, error, client) {
+  // A lost response after COMMIT is indistinguishable from a failed COMMIT at the transport
+  // boundary. Read the durable intent before changing it so an acknowledged-late success is not
+  // converted into a retry or reported as a failed publish.
+  const observed = await client.from("publish_activation_intents").select("state")
+    .eq("id", intent.id).eq("owner", intent.owner).maybeSingle();
+  rpcError("inspect activation after failure", observed.error);
+  if (observed.data?.state === "completed") return "completed";
+  if (error.code === "post_activation_health_failed") {
+    try { await revertFailedActivation(intent, error.message, client); return "rolled_back"; }
+    catch (revertError) {
+      error.recoveryError = revertError;
+      error.message = `${error.message}; pointer recovery failed: ${revertError.message}`;
+    }
+  }
+  const failed = await client.rpc("fail_publish_activation", {
+    p_intent_id: intent.id, p_error: error.message, p_terminal: false,
+  });
+  rpcError("record activation failure", failed.error);
+  return "retrying";
+}
+
+export function proveRuntimeConfig(text, projectId) {
+  if (typeof text !== "string" || !text.trim()) throw Object.assign(new Error("publish runtime configuration is missing"), { code: "runtime_config_invalid" });
+  const values = new Map(text.split(/\r?\n/).filter((line) => line && !line.startsWith("#") && line.includes("="))
+    .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+  if (values.get("VITE_APP_ID") !== String(projectId)) throw Object.assign(new Error("publish runtime app identity does not match the project"), { code: "runtime_config_invalid" });
+  const backend = values.get("VITE_SUPABASE_URL"); const auth = values.get("VITE_AUTH_URL");
+  if (!/^https:\/\//.test(backend || "") || auth !== `${backend}/functions/v1/app-auth`
+      || !values.get("VITE_SUPABASE_ANON_KEY")) {
+    throw Object.assign(new Error("publish runtime backend configuration is incomplete"), { code: "runtime_config_invalid" });
+  }
+  return crypto.createHash("sha256").update(text).digest("hex");
+}
+
 export async function assertNoBlockingDeploymentDiagnostics(owner, buildRunId, client = serviceClient()) {
   if (!buildRunId) return;
   const { data, error } = await client.from("diag_runs").select("id,status")
@@ -41,11 +128,12 @@ export async function assertNoBlockingDeploymentDiagnostics(owner, buildRunId, c
 
 export async function finalizeAndActivateRelease({
   owner, projectId, productId = null, buildId = null, snapshotId = null, deploymentId = null,
-  slug, url, files, operation = "activate", metadata = {}, client = serviceClient(),
+  slug, url, files, operation = "activate", metadata = {}, runtimeConfig = null, client = serviceClient(),
 }) {
   if (!atomicPublishEnabled()) return null;
-  if (publisherPaused()) throw Object.assign(new Error("Atomic publisher intake is paused."), { code: "publisher_paused" });
+  assertPublishIntakeReady();
   await assertNoBlockingDeploymentDiagnostics(owner, buildId, client);
+  const runtimeConfigHash = proveRuntimeConfig(runtimeConfig, projectId);
   const releaseId = crypto.randomUUID();
   const proof = createArtifactManifest(files);
   const { data: domains, error: domainError } = await client.from("custom_domains")
@@ -64,7 +152,7 @@ export async function finalizeAndActivateRelease({
     p_deployment_id: deploymentId, p_artifact_hash: proof.artifactHash,
     p_manifest_hash: proof.manifestHash, p_artifact_path: finalized.artifactPath,
     p_artifact_bytes: proof.bytes, p_file_count: proof.fileCount, p_manifest: proof.manifest,
-    p_domains: domains || [], p_metadata: { ...metadata, health: finalized.health },
+    p_domains: domains || [], p_metadata: { ...metadata, health: finalized.health, runtimeConfigHash },
   });
   rpcError("register verified publish release", registerError);
 
@@ -80,6 +168,8 @@ export async function finalizeAndActivateRelease({
       expectedPreviousReleaseId: intent.previous_release_id || null,
     } });
     if (pointer.releaseId !== releaseId) throw new Error("provisiond did not observe the requested release");
+    await proveActivatedRelease({ id: releaseId, owner, project_id: String(projectId),
+      artifact_hash: proof.artifactHash, manifest_hash: proof.manifestHash });
     const switched = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: releaseId,
     });
@@ -89,7 +179,12 @@ export async function finalizeAndActivateRelease({
     return { releaseId, intentId: intent.id, artifactHash: proof.artifactHash, manifestHash: proof.manifestHash,
       files: proof.fileCount, bytes: proof.bytes, url, slug, activationVersion: registration.activation_version + 1 };
   } catch (error) {
-    await client.rpc("fail_publish_activation", { p_intent_id: intent.id, p_error: error.message, p_terminal: false });
+    const recovery = await recordActivationFailure(intent, error, client);
+    if (recovery === "completed") {
+      return { releaseId, intentId: intent.id, artifactHash: proof.artifactHash,
+        manifestHash: proof.manifestHash, files: proof.fileCount, bytes: proof.bytes,
+        url, slug, activationVersion: registration.activation_version + 1 };
+    }
     error.activationIntentId = intent.id;
     throw error;
   }
@@ -126,6 +221,7 @@ export async function activateRetainedRelease({
       expectedPreviousReleaseId: intent.previous_release_id,
     } });
     if (pointer.releaseId !== releaseId) throw new Error("rollback pointer was not switched");
+    await proveActivatedRelease(release);
     const marked = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: releaseId,
     });
@@ -134,7 +230,8 @@ export async function activateRetainedRelease({
     rpcError("complete rollback", completed.error);
     return { releaseId, intentId: intent.id, url: site.url, slug: site.slug };
   } catch (error) {
-    await client.rpc("fail_publish_activation", { p_intent_id: intent.id, p_error: error.message, p_terminal: false });
+    const recovery = await recordActivationFailure(intent, error, client);
+    if (recovery === "completed") return { releaseId, intentId: intent.id, url: site.url, slug: site.slug };
     error.activationIntentId = intent.id; throw error;
   }
 }
@@ -247,6 +344,7 @@ export async function reconcileActivation(intent, { client = serviceClient() } =
         releaseId: desired.id, expectedPreviousReleaseId: intent.previous_release_id,
       } });
     }
+    if (desired) await proveActivatedRelease(desired);
     const marked = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: intent.desired_release_id,
     });
@@ -256,24 +354,24 @@ export async function reconcileActivation(intent, { client = serviceClient() } =
     return { id: intent.id, state: "completed" };
   } catch (error) {
     if (error.code === "40001" && intent.previous_release_id) {
-      const previous = await releaseLocation(client, intent.previous_release_id);
-      await provisiond("/releases/activate", { body: {
-        slug: intent.slug, owner: previous.owner, projectId: previous.project_id,
-        releaseId: previous.id, expectedPreviousReleaseId: intent.desired_release_id,
-      } });
-      const rolled = await client.rpc("mark_publish_activation_rolled_back", {
-        p_intent_id: intent.id, p_observed_release_id: previous.id, p_reason: error.message,
-      });
-      rpcError("record activation rollback", rolled.error);
-      return { id: intent.id, state: "rolled_back" };
+      try {
+        await revertFailedActivation(intent, error.message, client);
+        return { id: intent.id, state: "rolled_back" };
+      } catch (revertError) {
+        error.message = `${error.message}; pointer recovery failed: ${revertError.message}`;
+      }
     }
-    await client.rpc("fail_publish_activation", { p_intent_id: intent.id, p_error: error.message, p_terminal: false });
+    const recovery = await recordActivationFailure(intent, error, client);
+    if (recovery === "completed") return { id: intent.id, state: "completed" };
+    if (recovery === "rolled_back") return { id: intent.id, state: "rolled_back" };
     throw error;
   }
 }
 
 export async function reconcilePendingActivations({ client = serviceClient(), limit = 10 } = {}) {
-  if (!atomicPublishEnabled() || publisherPaused()) return { leased: 0, completed: 0, failed: 0, disabled: !atomicPublishEnabled() };
+  // Intake pause must not pause recovery: draining/reconciling durable work is what makes a
+  // maintenance pause safe. Only the feature flag disables the state machine itself.
+  if (!atomicPublishEnabled()) return { leased: 0, completed: 0, failed: 0, disabled: true };
   const leased = await client.rpc("lease_publish_activation_intents", {
     p_worker: workerId, p_limit: limit, p_lease_seconds: 30,
   });

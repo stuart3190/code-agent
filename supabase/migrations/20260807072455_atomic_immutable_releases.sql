@@ -82,6 +82,10 @@ create index publish_activation_reconcile_idx
   where state in ('prepared','pointer_switched','retrying');
 create index publish_activation_owner_project_idx
   on public.publish_activation_intents (owner, project_id, created_at desc);
+create index publish_activation_desired_release_idx on public.publish_activation_intents (desired_release_id);
+create index publish_activation_previous_release_idx on public.publish_activation_intents (previous_release_id);
+create index publish_activation_deployment_idx on public.publish_activation_intents (activation_deployment_id);
+create index published_sites_active_release_idx on public.published_sites (active_publish_release_id);
 
 alter table public.publish_releases enable row level security;
 alter table public.publish_activation_intents enable row level security;

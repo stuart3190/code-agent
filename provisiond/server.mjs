@@ -286,10 +286,14 @@ async function attachDomain(domain, label) {
   if (!SLUG_RE.test(String(label)) && !/^p[a-z0-9]+$/.test(String(label))) throw new Error(`invalid label: ${label}`);
   const { d, link } = domainPath(domain);
   await mkdir(path.join(PUBLISH_ROOT, "_domains"), { recursive: true });
-  await rm(link, { force: true });
   const { symlink } = await import("node:fs/promises");
-  const target = ATOMIC_PUBLISH ? `../.thrallo/sites/${label}/current` : `../${label}`;
-  await symlink(target, link, "dir");
+  // During the paused adoption window provisiond supports both layouts. Binding a domain to an
+  // unadopted site must continue to resolve to its legacy bytes until that site's pointer exists.
+  const pointer = ATOMIC_PUBLISH ? await inspectPointer(label) : { kind: "absent" };
+  const target = pointer.kind === "release_pointer" ? `../.thrallo/sites/${label}/current` : `../${label}`;
+  const next = `${link}.next-${crypto.randomUUID()}`;
+  try { await symlink(target, next, "dir"); await rename(next, link); }
+  finally { await rm(next, { force: true }); }
   return { domain: d, label };
 }
 

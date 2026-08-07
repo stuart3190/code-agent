@@ -64,6 +64,18 @@ async function makeReadOnly(dir) {
   await chmod(dir, 0o555);
 }
 
+async function makeWritable(dir) {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  await chmod(dir, 0o700).catch(() => {});
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) await makeWritable(full);
+    else if (entry.isFile()) await chmod(full, 0o600).catch(() => {});
+    // A corrupt tree must not make cleanup chmod a symlink target outside the release root.
+    // rm() below unlinks the directory entry without needing to follow it.
+  }
+}
+
 async function localHttpHealth(dir, manifest) {
   const expected = new Set(manifest.files.map((row) => row.path));
   const index = await readFile(path.join(dir, "index.html"), "utf8");
@@ -110,9 +122,14 @@ export async function finalizeRelease({ releaseId, owner, projectId, files, proo
     assertManifest(proof, await filesFromDir(stage));
     await localHttpHealth(stage, computed.manifest);
     await mkdir(path.dirname(finalDir), { recursive: true, mode: 0o700 });
-    await makeReadOnly(stage);
     await rename(stage, finalDir);
-  } finally { await rm(stage, { recursive: true, force: true }); }
+    try {
+      await makeReadOnly(finalDir);
+      assertManifest(proof, await filesFromDir(finalDir));
+    } catch (error) {
+      await makeWritable(finalDir); await rm(finalDir, { recursive: true, force: true }); throw error;
+    }
+  } finally { await makeWritable(stage); await rm(stage, { recursive: true, force: true }); }
   return { releaseId, artifactPath: releaseRelativePath(owner, projectId, releaseId), ...computed, reused: false, health: "verified" };
 }
 
@@ -201,7 +218,7 @@ export async function cleanupReleases({ retained = [], olderThanMs = 30 * 24 * 6
       if (keep.has(release.name)) continue;
       const info = await lstat(path.join(dir, release.name));
       if (now - info.mtimeMs < olderThanMs) continue;
-      await chmod(path.join(dir, release.name), 0o700); // provisiond owns immutable storage
+      await makeWritable(path.join(dir, release.name)); // provisiond owns immutable storage
       await rm(path.join(dir, release.name), { recursive: true, force: true }); removed += 1;
     }
   }
@@ -213,7 +230,7 @@ export async function purgeProjectReleases({ owner, projectId }) {
   const projectDir = inside(ownerDir, path.join(ownerDir, safeReleaseSegment(projectId, "project id")));
   const existed = existsSync(projectDir);
   if (existed) {
-    await chmod(projectDir, 0o700);
+    await makeWritable(projectDir);
     await rm(projectDir, { recursive: true, force: true });
   }
   return { owner, projectId, purged: existed };

@@ -15,6 +15,7 @@
 #                                             # Thrallo publishing itself lands in Phase 22.
 #   CLOUDFLARE_API_TOKEN=<same as buildr's>   # only so a re-raise keeps buildr's DNS-01 certs
 #                                             # renewing; Thrallo's own blocks never use it.
+#   THRALLO_ATOMIC_PUBLISH_ENABLED=0          # keep dark until adoption/Caddy cutover is approved
 #
 # Install: sudo cp ops/thrallo-provisiond.service /etc/systemd/system/ &&
 #          sudo systemctl daemon-reload && sudo systemctl enable --now thrallo-provisiond

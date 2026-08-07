@@ -22,7 +22,7 @@ import {
   openDeployment, markBuilt, markLive, markFailed, getDeployment, assertBelongsTo, DEPLOY_STATUS,
 } from "../deployments/deploymentService.mjs";
 import {
-  activateRetainedRelease, atomicPublishEnabled, atomicUnpublish, finalizeAndActivateRelease,
+  activateRetainedRelease, assertPublishIntakeReady, atomicPublishEnabled, atomicUnpublish, finalizeAndActivateRelease,
 } from "../publishing/atomicPublisher.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
@@ -170,6 +170,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     error.code = "not_configured";
     throw error;
   }
+  assertPublishIntakeReady();
   // Scoped to THIS conversation's product. Publishing whatever happened to be newest is how
   // "publish it" could take a different app live.
   const { resolveConversationProject } = await import("./projectScope.mjs");
@@ -252,6 +253,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
       owner: ctx.owner, projectId: project.id, productId: project.product_id || null,
       buildId: deployment.build_run_id || null, deploymentId: deployment.id, slug,
       url: `https://${slug}.app.thrallo.com/`, files,
+      runtimeConfig: runtimeTree[".env"],
       metadata: { workerJobId: packaged?.workJobId || null, artifactRef: packaged?.artifactRef || null },
     }) : null;
     const out = atomic
