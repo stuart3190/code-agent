@@ -7,6 +7,7 @@
 // export ZIPs stay clean; a different backend later = republish, no code change.
 
 import path from "node:path";
+import crypto from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { buildTree, ensureDeps, workDirFor } from "../../../harness/workspace.mjs";
 import { withRuntimeEnv } from "../lib/runtimeEnv.mjs";
@@ -17,6 +18,7 @@ import { ensureAppIdentity } from "../lib/appIdentity.mjs";
 import { auditEvent, recordRelease } from "../lib/projectState.mjs";
 import { requireFeature } from "../lib/features.mjs";
 import { auditCapabilityTree } from "../lib/capabilityAudit.mjs";
+import { packagePublishTree } from "../lib/publishBuildWorker.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -164,7 +166,6 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
   const { slug, previousSlug } = await claimSlug(owner, projectId, name);
 
-  await ensureDeps(() => {});
   const caseName = `pub-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
   // PWA assets ride ONLY the publish materialization — previews stay service-worker-free.
   // Manifest/icon name: the dialog's site name, else the project's display name, else the slug.
@@ -187,13 +188,25 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   if (ks) {
     publishTree = { ...tree, "public/.well-known/assetlinks.json": assetlinksJson(ks.package_id, ks.fingerprint) };
   }
-  const build = await buildTree(withPwaAssets(withRuntimeEnv(publishTree, projectId), { appName }), caseName, () => {});
-  if (!build.ok) {
-    const e = new Error("build failed"); e.code = "build_failed"; e.stderr = (build.stderr || "").slice(-2000); throw e;
-  }
+  const runtimeTree = withPwaAssets(withRuntimeEnv(publishTree, projectId), { appName });
+  const packaged = await packagePublishTree({
+    owner: owner.id, projectId, tree: runtimeTree, appName, iconGlyph, renderIcons: true,
+    idempotencyKey: `publish-package:${projectId}:${crypto.createHash("sha256")
+      .update(JSON.stringify({ runtimeTree, appName, iconGlyph })).digest("hex")}`,
+  });
+  let files;
+  if (!packaged) {
+    await ensureDeps(() => {});
+    const build = await buildTree(runtimeTree, caseName, () => {});
+    if (!build.ok) {
+      const e = new Error("build failed"); e.code = "build_failed"; e.stderr = (build.stderr || "").slice(-2000); throw e;
+    }
   // Binary icons can't ride the UTF-8 tree — render them straight into the built dist.
-  await renderIcons({ appName, tree, iconGlyph, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
-  const files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    await renderIcons({ appName, tree, iconGlyph, distDir: path.join(workDirFor(caseName), "dist"), log: console.log });
+    files = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+  } else {
+    files = packaged.files;
+  }
   const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
   const release = await recordRelease({
     owner: owner.id, projectId, environment: "live", tree,

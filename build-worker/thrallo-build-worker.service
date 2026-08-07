@@ -1,0 +1,36 @@
+[Unit]
+Description=Thrallo durable build worker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=thrallo-build-worker
+Group=thrallo
+SupplementaryGroups=docker
+WorkingDirectory=/home/ubuntu/code-agent
+EnvironmentFile=/etc/thrallo/build-worker.env
+Environment=THRALLO_PROCESS_ROLE=build-worker
+Environment=THRALLO_BUILD_SANDBOX=docker
+ExecStart=/usr/bin/node build-worker/index.mjs
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=40
+CPUQuota=250%
+MemoryMax=3G
+MemorySwapMax=0
+TasksMax=512
+LimitNOFILE=8192
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/thrallo-build-worker
+ProtectProc=invisible
+ProcSubset=pid
+
+[Install]
+WantedBy=multi-user.target

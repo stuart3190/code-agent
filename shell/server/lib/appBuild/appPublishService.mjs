@@ -6,6 +6,7 @@
 // dist to Thrallo's provisiond, record it, and hand back https://<slug>.app.thrallo.com.
 
 import path from "node:path";
+import crypto from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { serviceClient } from "../supabase.mjs";
 import { optionalEnv } from "../env.mjs";
@@ -13,6 +14,7 @@ import { ensureDeps, buildTree, workDirFor } from "../../../../harness/workspace
 import { slugify } from "../../routes/publish.mjs";
 import { notifyOwner } from "../notifications/notificationService.mjs";
 import { logProject } from "../logs/projectLog.mjs";
+import { packagePublishTree } from "../publishBuildWorker.mjs";
 // The ONE domain implementation. Conversation and the Domains panel now call the same function,
 // so there is no second path that could skip verification.
 import { addDomain, normalizeDomain } from "../customDomains.mjs";
@@ -219,10 +221,15 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     }
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
-    await ensureDeps(() => {});
     const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
-    const build = await buildTree(withRuntimeEnv(project.tree, project.id), caseName, () => {});
+    const runtimeTree = withRuntimeEnv(project.tree, project.id);
+    const packaged = await packagePublishTree({
+      owner: ctx.owner, projectId: project.id, tree: runtimeTree, appName: project.name || slug,
+      idempotencyKey: `conversation-publish:${deployment.id}:${crypto.createHash("sha256").update(JSON.stringify(runtimeTree)).digest("hex")}`,
+    });
+    if (!packaged) await ensureDeps(() => {});
+    const build = packaged ? { ok: true, stderr: "" } : await buildTree(runtimeTree, caseName, () => {});
     if (!build.ok) {
       const error = new Error("The production build failed — I can fix the app and retry.");
       error.code = "build_failed";
@@ -235,7 +242,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     await markBuilt(deployment.id, { sourceTree: project.tree });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Uploading to the edge…" });
-    const built = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
     // The slug is the app id analytics reports under, and it is already claimed by this point.
     const files = slug ? await withAnalytics(built, slug) : built;
     const out = await provisiond("/publish", { body: { projectId: project.id, files, slug: slug || undefined } });
@@ -422,10 +429,15 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
 
   try {
     await emit?.("agent_status", { agent: "Publisher", status: `Restoring deployment #${target.number}…` });
-    await ensureDeps(() => {});
     const caseName = `rb-${deployment.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
-    const build = await buildTree(withRuntimeEnv(target.source_tree, projectId), caseName, () => {});
+    const runtimeTree = withRuntimeEnv(target.source_tree, projectId);
+    const packaged = await packagePublishTree({
+      owner, projectId, tree: runtimeTree, appName: project.name || site.slug,
+      idempotencyKey: `rollback-package:${deployment.id}:${crypto.createHash("sha256").update(JSON.stringify(runtimeTree)).digest("hex")}`,
+    });
+    if (!packaged) await ensureDeps(() => {});
+    const build = packaged ? { ok: true, stderr: "" } : await buildTree(runtimeTree, caseName, () => {});
     if (!build.ok) {
       throw Object.assign(new Error("That deployment's source no longer builds, so it was not restored."), {
         code: "build_failed", stderr: (build.stderr || "").slice(-2000),
@@ -433,7 +445,7 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
     }
     await markBuilt(deployment.id, { client, sourceTree: target.source_tree });
 
-    const built = await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
     // The same slug, so the address, the custom domains and the analytics app id all stay put.
     const files = await withAnalytics(built, site.slug);
     const out = await provisiond("/publish", { body: { projectId: String(projectId), files, slug: site.slug } });

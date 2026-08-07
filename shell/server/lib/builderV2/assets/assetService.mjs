@@ -90,7 +90,7 @@ export function createAssetService({ providers = [], client = serviceClient(), n
       // Best-effort (V2-A2): our own AVIF/WebP/blur copies in thrallo-artifacts. Any
       // failure leaves the asset serving its original provider URLs — never blocks.
       try {
-        const opt = await optimiser.optimise(owner, { url: row.original_url, alt: row.alt_text });
+        const opt = await optimiser.optimise(owner, { url: row.original_url, alt: row.alt_text, projectId });
         row.content_hash = opt.content_hash;
         row.storage_path = opt.storage_path;
         row.optimised_url = opt.optimised_url;

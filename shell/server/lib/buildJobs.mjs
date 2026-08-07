@@ -55,6 +55,8 @@ import { imagesConfigured, searchImages, SEARCH_IMAGES_SCHEMA, IMAGES_PROMPT_BLO
 import { serviceClient } from "./supabase.mjs";
 import { optionalEnv } from "./env.mjs";
 import { managedAffordableCreditLimit } from "./billingLimits.mjs";
+import { BUILD_WORK_TERMINAL, buildWorkerEnabled, enqueueBuildWork, getBuildWork, requestBuildWorkCancel } from "./buildWorkQueue.mjs";
+import { runSandboxJob } from "../../../build-worker/sandboxRunner.mjs";
 import { STOP_REASONS, providerCondition, isTransientText } from "./appBuild/endState.mjs";
 import { connectorToolsForProject } from "./connectors.mjs";
 import { auditCapabilityTree } from "./capabilityAudit.mjs";
@@ -110,6 +112,31 @@ function db() { return serviceClient().from("build_jobs"); }
 function serverLog(job, line) {
   console.log(`[job ${job.id.slice(0, 8)}] ${String(line)}`);
   job.diag?.terminal(line); // diagnostics: full terminal trail, never discarded
+  job.workEvent?.("stdout", String(line));
+}
+
+async function compileGeneratedTree(job, tree, caseName) {
+  if (process.env.THRALLO_PROCESS_ROLE === "build-worker" && process.env.THRALLO_BUILD_SANDBOX !== "process") {
+    const suffix = crypto.createHash("sha256").update(caseName).digest("hex").slice(0, 12);
+    const result = await runSandboxJob({
+      id: `${job.workJobId || job.id}-${suffix}`,
+      durable_job_id: job.workJobId || job.id,
+      job_type: "compile",
+      attempts: job.workAttempt || 1,
+      payload: { tree },
+      resource_limits: job.resourceLimits || { wallSeconds: 300, cpu: 2, memoryMb: 2048, pids: 256, outputBytes: 4 * 1024 * 1024 },
+    }, {
+      signal: job.abortSignal || null,
+      onStdout: (chunk) => job.workEvent?.("stdout", chunk),
+      onStderr: (chunk) => job.workEvent?.("stderr", chunk),
+    });
+    return { ok: result.ok, stderr: result.stderr || "", stdout: result.stdout || "", exitCode: result.exitCode, classification: result.classification };
+  }
+  return buildTree(tree, caseName, () => {}, {
+    signal: job.abortSignal || null,
+    onStdout: (chunk) => job.workEvent?.("stdout", chunk),
+    onStderr: (chunk) => job.workEvent?.("stderr", chunk),
+  });
 }
 
 // Ordered write-through: chain updates per job so a slow UPDATE can't land after a later one.
@@ -133,6 +160,19 @@ function publicResult(job) {
   if (!job.result) return null;
   const { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings } = job.result;
   return { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings };
+}
+
+function persistedResult(job) {
+  if (!job.result) return null;
+  return {
+    ...publicResult(job),
+    _worker: {
+      measurements: job.measurements || null,
+      honesty: job.honesty || null,
+      contract: job.generatedContract || null,
+      trigger: job.trigger || null,
+    },
+  };
 }
 
 export function isTerminal(job) { return TERMINAL.has(job.status); }
@@ -163,7 +203,7 @@ function finish(job, status, { error = null, stopReason = null } = {}) {
   try { job.diag?.jobEnd(status); } catch { /* diagnostics must never break a build */ }
   persist(job, {
     status, phase: status, error, stop_reason: stopReason,
-    result: job.result ? publicResult(job) : null,
+    result: persistedResult(job),
     build_stderr: job.buildStderr || null,
   });
   emit(job, "end", publicJob(job));
@@ -230,6 +270,31 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
   });
   if (error) throw new Error(`could not create build job: ${error.message}`);
   jobs.set(job.id, job);
+  if (buildWorkerEnabled()) {
+    try {
+      const work = await enqueueBuildWork({
+        owner: owner.id, projectId, buildId: job.id, jobType: "builder_pipeline",
+        payload: {
+          input: job.input, mode, trigger, taskHint, budgetAllowance, byokCostLimit, providerOverride,
+          diagSessionId: diag?.sessionId || null,
+        },
+        idempotencyKey: `builder-pipeline:${job.id}`,
+        priority: trigger === "user" ? 20 : 10,
+        // A worker crash after provider dispatch cannot safely replay the whole model pipeline.
+        // Fail closed; an operator can explicitly raise the attempt ceiling through build_work_retry.
+        maxAttempts: 1,
+      });
+      job.workJobId = work.id;
+      job.status = "queued";
+      return { job, existing: false };
+    } catch (error) {
+      jobs.delete(job.id);
+      const { error: markError } = await db().update({ status: "failed", phase: "failed", error: "Build work could not be queued.",
+        stop_reason: "worker_enqueue_failed", updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner", owner.id);
+      if (markError) throw new AggregateError([error, markError], "Build work enqueue and failure persistence both failed.");
+      throw error;
+    }
+  }
   waiting.push(job.id);
   schedule();
   return { job, existing: false };
@@ -264,15 +329,36 @@ function rowToJob(row) {
     id: row.id, owner: { id: row.owner }, projectId: row.project_id, mode: row.mode,
     status: row.status, phase: row.phase, error: row.error,
     result: row.result, buildStderr: row.build_stderr,
+    workJobId: row.work_job_id || null,
+    measurements: row.result?._worker?.measurements || null,
+    honesty: row.result?._worker?.honesty || null,
+    generatedContract: row.result?._worker?.contract || null,
+    trigger: row.result?._worker?.trigger || null,
     subscribers: new Set(), fromDb: true,
     createdAt: new Date(row.created_at).getTime(), finishedAt: null, _db: Promise.resolve(),
   };
 }
 
 export async function cancelJob(ownerId, jobId) {
-  const job = jobs.get(jobId);
+  let job = jobs.get(jobId);
+  if (!job) {
+    const { data } = await db().select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
+    if (data) job = rowToJob(data);
+  }
   if (!job || job.owner.id !== ownerId) return { ok: false, error: "not found" };
-  if (TERMINAL.has(job.status)) return { ok: false, error: "already finished" };
+  if (TERMINAL.has(job.status)) {
+    if (!job.workJobId) return { ok: false, error: "already finished" };
+    const work = await getBuildWork(ownerId, job.workJobId, { includeResult: false });
+    if (!work || BUILD_WORK_TERMINAL.has(work.state)) return { ok: false, error: "already finished" };
+    await requestBuildWorkCancel(ownerId, job.workJobId);
+    job.cancelled = true;
+    return { ok: true };
+  }
+  if (job.workJobId) {
+    await requestBuildWorkCancel(ownerId, job.workJobId);
+    job.cancelled = true;
+    return { ok: true };
+  }
   job.cancelled = true;
   if (job.status === "queued") {
     const i = waiting.indexOf(job.id);
@@ -287,6 +373,27 @@ export async function cancelJob(ownerId, jobId) {
 // snapshot itself via publicJob() — the snapshot IS the replay: phases are monotonic, so
 // current state supersedes any missed transitions (no ring buffer needed).
 export function subscribe(job, fn) {
+  if (job.workJobId) {
+    let previous = `${job.status}:${job.phase}`;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      const { data } = await db().select("*").eq("id", job.id).eq("owner", job.owner.id).maybeSingle();
+      const current = data ? rowToJob(data) : null;
+      if (!current) return;
+      Object.assign(job, current, { subscribers: job.subscribers });
+      const key = `${current.status}:${current.phase}`;
+      if (key !== previous) {
+        previous = key;
+        fn("phase", { jobId: job.id, status: current.status, phase: current.phase });
+      }
+      if (TERMINAL.has(current.status)) {
+        stopped = true; clearInterval(timer); fn("end", publicJob(current));
+      }
+    };
+    const timer = setInterval(tick, 750); timer.unref?.(); tick();
+    return () => { stopped = true; clearInterval(timer); };
+  }
   if (job.fromDb || TERMINAL.has(job.status)) return () => {};
   job.subscribers.add(fn);
   return () => job.subscribers.delete(fn);
@@ -310,7 +417,8 @@ export async function sweepInterrupted() {
     .update({ status: "interrupted", phase: "interrupted",
       error: "Build was interrupted by a server restart — please rebuild.",
       updated_at: new Date().toISOString() })
-    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID).select("id");
+    .in("status", ["queued", "running"]).eq("server_id", SERVER_ID)
+    .is("work_job_id", null).select("id");
   if (error) console.log(`[jobs] sweep WARN: ${error.message}`);
   else if (data?.length) console.log(`[jobs] swept ${data.length} interrupted job(s) from a previous run`);
 }
@@ -324,7 +432,8 @@ export async function sweepStaleJobs(maxAgeMs = 90 * 60 * 1000) {
     .update({ status: "interrupted", phase: "interrupted",
       error: "Build was interrupted before it could finish — please rebuild.",
       updated_at: new Date().toISOString() })
-    .in("status", ["queued", "running"]).lt("created_at", cutoff).select("id");
+    .in("status", ["queued", "running"]).is("work_job_id", null)
+    .lt("created_at", cutoff).select("id");
   if (error) console.log(`[jobs] stale sweep WARN: ${error.message}`);
   else if (data?.length) console.log(`[jobs] swept ${data.length} stale job(s)`);
 }
@@ -353,7 +462,7 @@ export function stopStaleJobSweeper() {
 }
 
 export async function interruptLiveJobs(reason = "Build was interrupted by a server restart — please rebuild.") {
-  const active = [...jobs.values()].filter((job) => !TERMINAL.has(job.status));
+  const active = [...jobs.values()].filter((job) => !job.workJobId && !TERMINAL.has(job.status));
   await Promise.all(active.map(async (job) => {
     job.cancelled = true;
     finish(job, "interrupted", { error: reason });
@@ -643,6 +752,7 @@ async function runJob(job) {
           provider: buildProvider("generate"), prompt, knowledge, log, onUsage,
         });
         contract = result.contract;
+        job.generatedContract = contract;
         combinedUsage.add(result.usage);
         job.diag?.step({
           agent: "Planner", kind: "contract", label: "Implementation contract",
@@ -944,8 +1054,8 @@ async function runJob(job) {
             nodeModules: depsNodeModules(),
             baseline: REACT_VITE,
             log: (line) => serverLog(job, line),
-            compile: async (candidate) => buildTree(
-              candidate, `stage-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {},
+            compile: async (candidate) => compileGeneratedTree(
+              job, candidate, `stage-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"),
             ),
             // R5: honesty scan + safe deterministic transforms + expectation presence run inside
             // the gate — a localStorage defect is caught by the stage that wrote it, not twenty
@@ -1094,8 +1204,10 @@ async function runJob(job) {
 
     // Prove it builds (same bar as the harness) before we serve/save it. Runtime tree carries
     // the injected backend .env — the SAVED tree stays clean.
-    await ensureDeps(() => {});
-    await ensureDeps(() => {});
+    if (process.env.THRALLO_PROCESS_ROLE !== "build-worker") {
+      await ensureDeps(() => {});
+      await ensureDeps(() => {});
+    }
     let runtimeTree = withRuntimeEnv(tree, projectId);
 
     // PREFLIGHT — resolve every import before spending a compile on it.
@@ -1135,7 +1247,7 @@ async function runJob(job) {
 
     serverLog(job, "build: npm run build ...");
     const compileStarted = Date.now();
-    let build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+    let build = await compileGeneratedTree(job, runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"));
     serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
     // The repair brief quotes this verbatim, so it keeps far more than the 2 000 characters a
     // status line needed. A rollup error names the file, symbol and importer across several lines;
@@ -1225,7 +1337,7 @@ async function runJob(job) {
         runtimeTree = withRuntimeEnv(tree, projectId);
         serverLog(job, "build: verifying polished result ...");
         const recompileStarted = Date.now();
-        build = await buildTree(runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"), () => {});
+        build = await compileGeneratedTree(job, runtimeTree, `shell-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_"));
         serverLog(job, `build: ${build.ok ? "PASS" : "FAIL"}`);
         if (!build.ok) job.buildStderr = (build.stderr || "").slice(-2000);
         job.diag?.step({
@@ -1361,5 +1473,64 @@ async function runJob(job) {
             : "The build hit an unexpected error — please try again.";
       finish(job, "failed", { error: message, stopReason });
     }
+  }
+}
+
+export async function executeBuildPipelineWork(workJob, {
+  signal = null,
+  onEvent = null,
+} = {}) {
+  const payload = workJob.payload || {};
+  const input = payload.input || {};
+  const abort = () => { job.cancelled = true; };
+  const job = {
+    id: workJob.build_id,
+    owner: { id: workJob.owner },
+    projectId: workJob.project_id,
+    mode: payload.mode || "build",
+    input,
+    status: "running", phase: "preparing", error: null,
+    result: null, buildStderr: null, stopReason: null,
+    measurements: null, honesty: null, generatedContract: null,
+    diag: {
+      sessionId: payload.diagSessionId || null,
+      setModel() {}, setByok() {}, setContract(value) { job.generatedContract = value; },
+      get contract() { return job.generatedContract; },
+      terminal(line) { onEvent?.("stdout", String(line)); },
+      step(spec) { onEvent?.(spec.status === "failed" ? "stderr" : "progress", JSON.stringify(spec)); },
+      files(_before, _after, spec) { onEvent?.("progress", JSON.stringify({ kind: "files", ...spec })); },
+      jobEnd(status) { onEvent?.("progress", JSON.stringify({ kind: "job_end", status })); },
+    },
+    trigger: payload.trigger || "user",
+    taskHint: payload.taskHint || null,
+    budgetAllowance: payload.budgetAllowance ?? null,
+    byokCostLimit: payload.byokCostLimit ?? null,
+    providerOverride: payload.providerOverride || null,
+    cancelled: signal?.aborted === true,
+    subscribers: new Set(), createdAt: Date.now(), finishedAt: null,
+    _db: Promise.resolve(),
+    workJobId: workJob.id,
+    workAttempt: workJob.attempts,
+    resourceLimits: workJob.resource_limits || {},
+    abortSignal: signal,
+    workEvent: onEvent,
+  };
+  signal?.addEventListener?.("abort", abort, { once: true });
+  jobs.set(job.id, job);
+  try {
+    await runJob(job);
+    await job._db;
+    return {
+      result: publicResult(job),
+      status: job.status,
+      stopReason: job.stopReason || null,
+      buildStderr: job.buildStderr || null,
+      measurements: job.measurements || null,
+      honesty: job.honesty || null,
+      contract: job.generatedContract || null,
+    };
+  } finally {
+    signal?.removeEventListener?.("abort", abort);
+    if (jobs.get(job.id) === job) jobs.delete(job.id);
   }
 }

@@ -51,6 +51,12 @@
     "supabase:history:verify": "node ops/validate-migration-history.mjs",
     "supabase:edge:check": "npx --yes deno@2.5.1 check supabase/functions/app-auth/index.ts",
     "supabase:graph:proof": "node ops/prove-bv2-graph-postgres.mjs",
+    "supabase:worker:proof": "node ops/prove-build-worker-postgres.mjs",
+    "worker:ops": "node ops/build-worker.mjs",
+    "worker:start": "node build-worker/index.mjs",
+    "worker:sandbox:build": "docker build -t thrallo-build-sandbox:latest -f build-worker/Dockerfile .",
+    "worker:sandbox:proof": "node ops/prove-build-worker-sandbox.mjs",
+    "worker:e2e:proof": "node ops/prove-build-worker-e2e.mjs",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },

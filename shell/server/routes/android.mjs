@@ -8,6 +8,8 @@
 import { serviceClient } from "../lib/supabase.mjs";
 import { publishedSlug } from "./publish.mjs";
 import { buildAndroid } from "../lib/android.mjs";
+import { buildWorkerEnabled, enqueueBuildWork, awaitBuildWork } from "../lib/buildWorkQueue.mjs";
+import { readWorkerArtifactFile } from "../lib/publishBuildWorker.mjs";
 
 function safeContentDisposition(filename) {
   const fallback = "buildr101-android.zip";
@@ -36,9 +38,21 @@ export async function handleAndroid(req, res, body, owner) {
       return res.end(JSON.stringify({ error: "Publish your app first — the Android app wraps your live site.", code: "not_published" }));
     }
 
-    const { zip, filename } = await buildAndroid({
-      owner, projectId, slug, tree, appName: proj.name, log: console.log,
-    });
+    let zip;
+    let filename;
+    if (buildWorkerEnabled()) {
+      const work = await enqueueBuildWork({
+        owner: owner.id, projectId, jobType: "android_package",
+        payload: { slug, tree, appName: proj.name },
+        idempotencyKey: `android-package:${projectId}:${Date.now()}`,
+        priority: 10, maxAttempts: 2,
+      });
+      const completed = await awaitBuildWork(owner.id, work.id, { timeoutMs: 22 * 60_000 });
+      zip = await readWorkerArtifactFile(completed.artifact_ref);
+      filename = completed.workResult?.result?.filename || `${slug}-android.zip`;
+    } else {
+      ({ zip, filename } = await buildAndroid({ owner, projectId, slug, tree, appName: proj.name, log: console.log }));
+    }
 
     res.writeHead(200, {
       "Content-Type": "application/zip",

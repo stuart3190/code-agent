@@ -8,6 +8,7 @@ import { serviceClient } from "../supabase.mjs";
 import { createJob, subscribe, getJob, isTerminal } from "../buildJobs.mjs";
 import { notifyOwnerIfAway } from "../notifications/notificationService.mjs";
 import { previewProvider } from "../../preview/index.mjs";
+import { buildWorkerEnabled, enqueueBuildWork, awaitBuildWork } from "../buildWorkQueue.mjs";
 import { startDiagSessionSafe } from "./buildDiagnostics.mjs";
 import { fingerprintFailure, fingerprintPrompt } from "./contextScope.mjs";
 import {
@@ -1159,6 +1160,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
   await ctx.emit("agent_spawned", { agent: "Verifier", status: "Verifying the app like a real user…" });
   const verifyStarted = Date.now();
   let verdict;
+  let workerJourneys = null;
   try {
     // The generic signup/login probe. On the 62-credit booking site it failed three times and drove
     // every repair round, on an app whose contract never mentioned accounts — so it is now run only
@@ -1172,7 +1174,24 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     if (!probeAuth) {
       console.log(`[app-build ${diag.id?.slice(0, 8)}] skipping the generic auth probe: ${complexity.level} build, contract requires no authentication`);
     }
-    verdict = await verifyApp({ previewUrl, usesBackend: probeAuth });
+    if (buildWorkerEnabled()) {
+      const work = await enqueueBuildWork({
+        owner: ctx.owner, projectId, buildId: jobId, jobType: "browser_verify",
+        payload: { previewUrl, usesBackend: probeAuth, contract: diag.contract || null, timeoutMs: 180_000 },
+        idempotencyKey: `browser-verify:${jobId}:${attempt}`,
+        priority: 15, maxAttempts: 2,
+      });
+      const { error: linkError } = await serviceClient().from("build_jobs")
+        .update({ work_job_id: work.id }).eq("id", jobId).eq("owner", ctx.owner);
+      if (linkError) throw new Error(`verification worker link: ${linkError.message}`);
+      if (job) job.workJobId = work.id;
+      const completed = await awaitBuildWork(ctx.owner, work.id, { timeoutMs: 5 * 60_000 });
+      const evidence = completed.workResult?.result || {};
+      verdict = evidence.app || { pass: false, failures: ["Worker returned no application verdict."], summary: "" };
+      workerJourneys = evidence.journeys || null;
+    } else {
+      verdict = await verifyApp({ previewUrl, usesBackend: probeAuth });
+    }
   } catch (error) {
     verdict = { pass: false, failures: [`Verification could not run: ${error.message}`], summary: "" };
   }
@@ -1194,7 +1213,7 @@ async function runVerificationGate(ctx, { projectId, jobId, previewUrl, result, 
     const journeyStarted = Date.now();
     let journeys;
     try {
-      journeys = await verifyJourneys({ previewUrl, contract });
+      journeys = workerJourneys || await verifyJourneys({ previewUrl, contract });
     } catch (error) {
       journeys = { unavailable: true, error: error.message, journeys: [] };
     }

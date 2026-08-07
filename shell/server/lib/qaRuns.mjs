@@ -3,6 +3,7 @@ import { previewProvider } from "../preview/index.mjs";
 import { runQaBrowser } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
 import { auditEvent } from "./projectState.mjs";
+import { buildWorkerEnabled, enqueueBuildWork } from "./buildWorkQueue.mjs";
 
 const active = new Set();
 
@@ -43,7 +44,18 @@ export async function createQaRun(owner, projectId, client = serviceClient()) {
   const row = { id: crypto.randomUUID(), owner: owner.id, project_id: projectId, status: "queued" };
   const { error } = await client.from("qa_runs").insert(row);
   if (error) throw new Error(`qa run create: ${error.message}`);
-  execute(row, project.tree, client);
+  if (buildWorkerEnabled()) {
+    const preview = await previewProvider().start(projectId, project.tree);
+    await client.from("qa_runs").update({ preview_url: preview.url }).eq("id", row.id);
+    const work = await enqueueBuildWork({
+      owner: owner.id, projectId, jobType: "qa_browser",
+      payload: { previewUrl: preview.url, runId: row.id },
+      idempotencyKey: `qa-browser:${row.id}`, priority: 10, maxAttempts: 2, client,
+    });
+    await client.from("qa_runs").update({ status: "queued", worker_job_id: work.id }).eq("id", row.id);
+  } else {
+    execute(row, project.tree, client);
+  }
   await auditEvent({ owner: owner.id, projectId, action: "project.qa.started", target: row.id }, client).catch(() => {});
   return { id: row.id, status: row.status };
 }

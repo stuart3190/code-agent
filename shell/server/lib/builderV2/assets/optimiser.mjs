@@ -10,6 +10,7 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../../supabase.mjs";
 import { fetchSafeImage } from "./safeImageFetch.mjs";
+import { buildWorkerEnabled, enqueueBuildWork, awaitBuildWork } from "../../buildWorkQueue.mjs";
 
 const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
 const ASSET_PREFIX = "bv2-assets";
@@ -46,7 +47,18 @@ export function createOptimiser({
      * upload everything under bv2-assets/<owner>/<contentHash>/, and return the fields
      * persistAsset merges onto the asset row.
      */
-    async optimise(owner, { url, alt = "" }) {
+    async optimise(owner, { url, alt = "", projectId = null }) {
+      if (buildWorkerEnabled() && process.env.THRALLO_PROCESS_ROLE !== "build-worker") {
+        if (!projectId) throw new Error("projectId is required for isolated image optimisation");
+        const work = await enqueueBuildWork({
+          owner, projectId, jobType: "image_optimise",
+          payload: { url, alt, projectId },
+          idempotencyKey: `image-optimise:${projectId}:${crypto.createHash("sha256").update(url).digest("hex")}`,
+          priority: 5, maxAttempts: 2,
+        });
+        const completed = await awaitBuildWork(owner, work.id, { timeoutMs: 2 * 60_000 });
+        return completed.workResult?.result || null;
+      }
       const sharp = await loadSharp();
       const { bytes: original } = await fetchSafeImage(url, { fetchImpl, ...(dnsLookup ? { dnsLookup } : {}) });
       const contentHash = crypto.createHash("sha256").update(original).digest("hex");
