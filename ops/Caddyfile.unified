@@ -55,8 +55,9 @@
 	reverse_proxy {http.request.host.labels.3}:5173
 }
 
-# Thrallo published apps (Phase 22). <slug>.app.thrallo.com serves the built SPA from the
-# read-only /publish/<slug> mount (shared publish root; Thrallo slugs are collision-checked
+# Thrallo published apps. <slug>.app.thrallo.com serves the active immutable release through the
+# stable /publish/.thrallo/sites/<slug>/current pointer. Legacy directories remain retained during
+# the dark migration but are not used after the C8 cutover. Thrallo slugs are collision-checked
 # against existing labels at claim time). Certs are per-label ON DEMAND, gated by the ask
 # endpoint (published dir must exist). The *.app.thrallo.com A record must be DNS-only.
 *.app.thrallo.com {
@@ -68,7 +69,7 @@
 	tls {
 		on_demand
 	}
-	root * /publish/{http.request.host.labels.3}
+	root * /publish/.thrallo/sites/{http.request.host.labels.3}/current
 	try_files {path} /index.html
 	file_server
 }

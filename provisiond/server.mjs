@@ -24,6 +24,10 @@ import {
   destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs, PUBLISH_ROOT,
   containerExists,
 } from "./docker.mjs";
+import {
+  activateRelease, adoptLegacyRelease, cleanupReleases, finalizeRelease, inspectPointer, listReleaseFiles,
+  purgeProjectReleases, unpublishPointer, verifyRelease,
+} from "./releases.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +68,7 @@ const PER_CONTAINER_MB = 118; // RUNTIME.md measured idle RSS
 const CAP = Number(process.env.PREVIEW_CAP || Math.floor(AVAILABLE_MB / PER_CONTAINER_MB)); // RAM-bound (~55)
 const REAP_IDLE_MS = Number(process.env.REAP_IDLE_MS || 10 * 60 * 1000);   // billing model: ~10 min idle
 const REAP_INTERVAL_MS = Number(process.env.REAP_INTERVAL_MS || 60 * 1000);
+const ATOMIC_PUBLISH = process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1";
 
 if (!TOKEN) { console.error("[provisiond] refusing to start: PROVISIOND_TOKEN is empty"); process.exit(1); }
 
@@ -283,7 +288,8 @@ async function attachDomain(domain, label) {
   await mkdir(path.join(PUBLISH_ROOT, "_domains"), { recursive: true });
   await rm(link, { force: true });
   const { symlink } = await import("node:fs/promises");
-  await symlink(`../${label}`, link, "dir");
+  const target = ATOMIC_PUBLISH ? `../.thrallo/sites/${label}/current` : `../${label}`;
+  await symlink(target, link, "dir");
   return { domain: d, label };
 }
 
@@ -348,6 +354,53 @@ const server = http.createServer(async (req, res) => {
       if (!projectId || !files || typeof files !== "object") return send(res, 400, { error: "projectId and files required" });
       return send(res, 200, await publishSite(projectId, files, slug));
     }
+    if (p.startsWith("/releases/") && !ATOMIC_PUBLISH) {
+      return send(res, 404, { error: "atomic publishing is disabled", code: "atomic_publish_disabled" });
+    }
+    if (p === "/releases/finalize" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.releaseId || !body.owner || !body.projectId || !body.files || !body.proof) {
+        return send(res, 400, { error: "releaseId, owner, projectId, files and proof required" });
+      }
+      return send(res, 200, await finalizeRelease(body));
+    }
+    if (p === "/releases/adopt-legacy" && req.method === "POST") {
+      const body = await readJson(req);
+      const adopted = await adoptLegacyRelease(body);
+      for (const domain of body.domains || []) await attachDomain(domain, body.slug);
+      return send(res, 200, adopted);
+    }
+    if (p === "/releases/activate" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.slug || !body.owner || !body.projectId || !body.releaseId) {
+        return send(res, 400, { error: "slug, owner, projectId and releaseId required" });
+      }
+      return send(res, 200, await activateRelease(body));
+    }
+    if (p === "/releases/unpublish" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.slug) return send(res, 400, { error: "slug required" });
+      return send(res, 200, await unpublishPointer(body));
+    }
+    if (p === "/releases/inspect" && req.method === "GET") {
+      const slug = url.searchParams.get("slug");
+      if (!slug) return send(res, 400, { error: "slug required" });
+      return send(res, 200, await inspectPointer(slug));
+    }
+    if (p === "/releases/verify" && req.method === "POST") {
+      const body = await readJson(req);
+      return send(res, 200, await verifyRelease(body));
+    }
+    if (p === "/releases/files" && req.method === "POST") {
+      const body = await readJson(req);
+      return send(res, 200, { files: await listReleaseFiles(body) });
+    }
+    if (p === "/releases/cleanup" && req.method === "POST") {
+      return send(res, 200, await cleanupReleases(await readJson(req)));
+    }
+    if (p === "/releases/purge-project" && req.method === "POST") {
+      return send(res, 200, await purgeProjectReleases(await readJson(req)));
+    }
     if (p === "/unpublish" && req.method === "POST") {
       const { projectId, slug } = await readJson(req);
       if (!projectId) return send(res, 400, { error: "projectId required" });
@@ -370,7 +423,8 @@ const server = http.createServer(async (req, res) => {
     if (p === "/exists" && req.method === "GET") {
       const label = String(url.searchParams.get("label") || "").toLowerCase();
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(label)) return send(res, 200, { exists: false });
-      const exists = (await containerExists(label)) || existsSync(path.join(PUBLISH_ROOT, label));
+      const atomicSite = await inspectPointer(label).catch(() => ({ kind: "absent" }));
+      const exists = (await containerExists(label)) || existsSync(path.join(PUBLISH_ROOT, label)) || atomicSite.kind !== "absent";
       return send(res, 200, { exists });
     }
     if (p === "/get" && req.method === "GET") {
