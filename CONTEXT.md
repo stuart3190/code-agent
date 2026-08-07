@@ -1,5 +1,20 @@
 # Thrallo handoff
 
+## Production isolation prerequisite (2026-08-07)
+
+Phase 0's failed disposable-restore isolation has been repaired without applying migrations or
+deploying C4/C7/C8. Supabase CLI `2.111.0` has no bind-address control, so the VPS now has a
+boot-enabled, reversible IPv4/IPv6 `DOCKER-USER` guard for original destination TCP `55320-55327`.
+An empty stack produced 0/72 successful external probes; the repeated restore of
+`thrallo-2026-08-07T090615` produced 0/472 while full parity passed (72 tables, 36,862 rows, Auth,
+Storage, filesystem, blobs, snapshots, pointers/cache and two-owner isolation). Disposable
+containers, volumes, restored files and plaintext evidence were destroyed; the encrypted evidence
+archive and source backup remain. Incident `SEC-20260807-DISPOSABLE-SUPABASE` records the prior
+107-second event as potential exposure, not confirmed breach, with notification assessment still
+requiring security/privacy ownership. Builder V1 remains default; V2, shadow restart, build worker,
+atomic publishing and managed settlement remain off/paused. Stop here: migration dry-run requires
+separate approval.
+
 ## Builder V2 production remediation (2026-08-06)
 
 Work is active on branch `remediation/builder-v2-production`; C7 started from Phase B HEAD

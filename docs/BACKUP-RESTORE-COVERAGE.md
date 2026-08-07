@@ -23,3 +23,10 @@ Project erasure calls provisiond release purge before database rows are deleted.
 deletion evidence records identifiers/counts, never artifact content. A missing release directory is
 acceptable only when no retained release row references it; otherwise deletion/restore is failed,
 not downgraded to a warning.
+
+The disposable target must also pass the network and logging prerequisites in
+`docs/DISPOSABLE-SUPABASE-RESTORE.md`. A loopback URL alone is not proof of isolation because the
+CLI publishes container ports independently. Production data must not enter the target until all
+ports `55320-55327` fail from an independent external host, and that probe must continue throughout
+the restore. Timestamped container/API/database logs are part of the restore evidence, not cleanup
+scratch data.

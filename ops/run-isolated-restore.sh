@@ -9,6 +9,12 @@ fi
 proof_dir=$(realpath "$1")
 backup_dir=$(realpath "$2")
 filesystem_root=$(realpath -m "$3")
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# A loopback API URL is not sufficient: the Supabase CLI publishes the same
+# container ports on every host interface. Require the Docker forwarding guard
+# before any production bytes enter the disposable environment.
+sudo "$repo_root/ops/disposable-supabase-isolation.sh" status >/dev/null
 
 if [[ ${4:-} != "--verify-only" && -e "$filesystem_root" ]]; then
   echo "restore filesystem namespace already exists: $filesystem_root" >&2
@@ -30,7 +36,7 @@ if [[ ${4:-} != "--verify-only" ]]; then
   RESTORE_TARGET_URL="$api_url" \
   RESTORE_TARGET_SERVICE_KEY="$service_key" \
   RESTORE_TARGET_FILESYSTEM_ROOT="$filesystem_root" \
-  node ops/restore-thrallo.mjs "$backup_dir" --confirm
+  node "$repo_root/ops/restore-thrallo.mjs" "$backup_dir" --confirm
 fi
 
 RESTORE_TARGET_URL="$api_url" \
@@ -38,4 +44,4 @@ RESTORE_TARGET_SERVICE_KEY="$service_key" \
 RESTORE_TARGET_ANON_KEY="$anon_key" \
 RESTORE_TARGET_JWT_SECRET="$jwt_secret" \
 RESTORE_TARGET_FILESYSTEM_ROOT="$filesystem_root" \
-node ops/verify-isolated-restore.mjs "$backup_dir"
+node "$repo_root/ops/verify-isolated-restore.mjs" "$backup_dir"

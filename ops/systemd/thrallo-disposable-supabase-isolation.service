@@ -1,0 +1,14 @@
+[Unit]
+Description=Block external access to disposable Supabase restore ports
+Documentation=file:///home/ubuntu/code-agent/docs/DISPOSABLE-SUPABASE-RESTORE.md
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/thrallo-disposable-supabase-isolation ensure
+ExecStop=/usr/local/sbin/thrallo-disposable-supabase-isolation remove
+
+[Install]
+WantedBy=multi-user.target
