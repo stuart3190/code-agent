@@ -57,6 +57,7 @@
     "worker:sandbox:build": "docker build -t thrallo-build-sandbox:latest -f build-worker/Dockerfile .",
     "worker:sandbox:proof": "node ops/prove-build-worker-sandbox.mjs",
     "worker:e2e:proof": "node ops/prove-build-worker-e2e.mjs",
+    "publish:ops": "node ops/publish-releases.mjs",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },

@@ -21,6 +21,9 @@ import { addDomain, normalizeDomain } from "../customDomains.mjs";
 import {
   openDeployment, markBuilt, markLive, markFailed, getDeployment, assertBelongsTo, DEPLOY_STATUS,
 } from "../deployments/deploymentService.mjs";
+import {
+  activateRetainedRelease, atomicPublishEnabled, atomicUnpublish, finalizeAndActivateRelease,
+} from "../publishing/atomicPublisher.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
 const PROVISIOND_TOKEN = () => optionalEnv("PROVISIOND_TOKEN");
@@ -204,7 +207,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     // A rebuild of this product inherits the live address. Move the record onto this project
     // BEFORE publishing, so the unique slug is never held by two rows and the site keeps its
     // first-published date.
-    if (claim.supersedes) await transferSite(ctx.owner, claim.supersedes, project.id);
+    if (claim.supersedes && !atomicPublishEnabled()) await transferSite(ctx.owner, claim.supersedes, project.id);
 
     // A tree with no package.json cannot be built, and npm's answer to that is a wall of ENOENT
     // naming a path inside Thrallo's own work directory. Observed in production: a project whose
@@ -245,10 +248,18 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
     // The slug is the app id analytics reports under, and it is already claimed by this point.
     const files = slug ? await withAnalytics(built, slug) : built;
-    const out = await provisiond("/publish", { body: { projectId: project.id, files, slug: slug || undefined } });
+    const atomic = atomicPublishEnabled() ? await finalizeAndActivateRelease({
+      owner: ctx.owner, projectId: project.id, productId: project.product_id || null,
+      buildId: deployment.build_run_id || null, deploymentId: deployment.id, slug,
+      url: `https://${slug}.app.thrallo.com/`, files,
+      metadata: { workerJobId: packaged?.workJobId || null, artifactRef: packaged?.artifactRef || null },
+    }) : null;
+    const out = atomic
+      ? { id: slug, url: atomic.url, files: atomic.files, bytes: atomic.bytes, releaseId: atomic.releaseId }
+      : await provisiond("/publish", { body: { projectId: project.id, files, slug: slug || undefined } });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Going live…" });
-    const { error: upsertError } = await serviceClient().from("published_sites").upsert({
+    const { error: upsertError } = atomic ? { error: null } : await serviceClient().from("published_sites").upsert({
       owner: ctx.owner, project_id: String(project.id), slug: out.id, url: out.url,
       // Carried onto the row so the database can hold "one live record per product" itself. A rule
       // that lives only in application code is a rule the next writer can forget.
@@ -262,7 +273,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
 
     // Live, and everything that was live for this app before it becomes history rather than being
     // overwritten. This is the step that gives "what was live last Tuesday" an answer.
-    await markLive(deployment.id, { url: out.url, slug: out.id });
+    if (!atomic) await markLive(deployment.id, { url: out.url, slug: out.id });
 
     // Outcome evidence: a site that went live is the strongest signal a build was kept.
     // Recorded after the site is actually serving, and never allowed to fail the publish.
@@ -400,7 +411,7 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
   // address by pasting an id.
   const project = await assertBelongsTo(owner, target, projectId, { client });
 
-  if (!target.source_tree) {
+  if (!target.source_tree && !atomicPublishEnabled()) {
     throw Object.assign(new Error("That deployment's source is no longer stored, so it cannot be restored."),
       { code: "source_unavailable", status: 409 });
   }
@@ -429,6 +440,29 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
 
   try {
     await emit?.("agent_status", { agent: "Publisher", status: `Restoring deployment #${target.number}…` });
+    if (atomicPublishEnabled()) {
+      const { data: retained, error: retainedError } = await client.from("publish_releases")
+        .select("id").eq("deployment_id", target.id).eq("owner", owner).maybeSingle();
+      if (retainedError) throw retainedError;
+      if (!retained) throw Object.assign(new Error("That deployment has no retained immutable artifact."), {
+        code: "artifact_unavailable", status: 409,
+      });
+      // No compilation and no dependency installation. The new deployment row records the
+      // activation event while the retained release keeps its original bytes and identity.
+      await markBuilt(deployment.id, { client, sourceTree: target.source_tree || null });
+      const restored = await activateRetainedRelease({
+        owner, projectId: String(projectId), releaseId: retained.id,
+        activationDeploymentId: deployment.id, client,
+      });
+      logProject({
+        owner, projectId, source: "deploy", level: "warning",
+        message: `Rolled back to deployment #${target.number}`,
+        detail: `Deployment #${deployment.number} activated retained release ${retained.id} without rebuilding.`,
+        refType: "deployment", refId: deployment.id,
+      });
+      return { deploymentNumber: deployment.number, restoredFrom: target.number,
+        releaseId: retained.id, url: restored.url, slug: restored.slug };
+    }
     const caseName = `rb-${deployment.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
     const runtimeTree = withRuntimeEnv(target.source_tree, projectId);
@@ -503,6 +537,12 @@ export async function unpublishApp(owner, projectId) {
     throw error;
   }
   const client = serviceClient();
+  if (atomicPublishEnabled()) {
+    const result = await atomicUnpublish({ owner, projectId, client });
+    logProject({ owner, projectId, source: "deploy", level: "warning",
+      message: "Site unpublished", detail: `${result.url} is no longer served; immutable releases were retained.` });
+    return result;
+  }
   const { data: site } = await client.from("published_sites")
     .select("project_id,slug,url,unpublished_at")
     .eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();

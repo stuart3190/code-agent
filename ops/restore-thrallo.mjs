@@ -65,6 +65,8 @@ export const RESTORE_ORDER = [
   "published_sites",
   // After published_sites: a deployment references the project and product those rows describe.
   "deployments",
+  "publish_releases",
+  "publish_activation_intents",
   "custom_domains",
   "ca_push_subscriptions",
   "entities",       // owner references auth.users -> after users are ensured

@@ -19,6 +19,7 @@ import { auditEvent, recordRelease } from "../lib/projectState.mjs";
 import { requireFeature } from "../lib/features.mjs";
 import { auditCapabilityTree } from "../lib/capabilityAudit.mjs";
 import { packagePublishTree } from "../lib/publishBuildWorker.mjs";
+import { atomicPublishEnabled, finalizeAndActivateRelease } from "../lib/publishing/atomicPublisher.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -43,7 +44,7 @@ export function slugify(name) {
 // Claim/renew the slug for this project (published_sites, service role — ownership is enforced
 // HERE, not in the browser). Returns the slug to publish under, or throws { code: "slug_taken" }.
 // A rename (new slug for an already-claimed project) frees + unpublishes the old label.
-async function claimSlug(owner, projectId, requestedName) {
+async function claimSlug(owner, projectId, requestedName, { persist = true } = {}) {
   const svc = serviceClient();
   const { data: existing, error: exErr } = await svc
     .from("published_sites").select("slug, owner").eq("project_id", projectId).maybeSingle();
@@ -76,6 +77,7 @@ async function claimSlug(owner, projectId, requestedName) {
   // A project holds exactly ONE row (unique project_id index), so a rename must MOVE the existing
   // row's slug in place — inserting a second row for the same project violates that index (the old
   // upsert-on-slug-then-delete did exactly that and 500'd on every rename).
+  if (!persist) return { slug: existing?.slug || requested, previousSlug: null };
   if (existing) {
     const { error: updErr } = await svc.from("published_sites")
       .update({ slug: requested }).eq("project_id", projectId);
@@ -164,7 +166,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
     throw e;
   }
   // Claim (or renew) the site name FIRST — a taken name should fail before the build spend.
-  const { slug, previousSlug } = await claimSlug(owner, projectId, name);
+  const { slug, previousSlug } = await claimSlug(owner, projectId, name, { persist: !atomicPublishEnabled() });
 
   const caseName = `pub-${projectId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
   // PWA assets ride ONLY the publish materialization — previews stay service-worker-free.
@@ -207,7 +209,13 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   } else {
     files = packaged.files;
   }
-  const out = await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
+  const atomic = atomicPublishEnabled() ? await finalizeAndActivateRelease({
+    owner: owner.id, projectId, slug: slug || String(projectId),
+    url: `https://${slug || projectId}.app.thrallo.com/`, files,
+    metadata: { surface: "legacy-materialize", workerJobId: packaged?.workJobId || null },
+  }) : null;
+  const out = atomic ? { id: atomic.slug, url: atomic.url, files: atomic.files, bytes: atomic.bytes }
+    : await provisiondPost("/publish", { projectId, files, slug: slug || undefined });
   const release = await recordRelease({
     owner: owner.id, projectId, environment: "live", tree,
     config: { slug: slug || out.id, url: out.url, files: out.files, bytes: out.bytes },
@@ -227,7 +235,7 @@ export async function materializeAndPublish({ owner, projectId, tree, name }) {
   }).catch((error) => console.error(`[publish] audit failed: ${error.message}`));
   // A rename retires the old address so stale URLs stop serving; naming a legacy-published
   // project likewise retires its old UUID label (no-op when that dir never existed).
-  if (slug) {
+  if (slug && !atomic) {
     if (previousSlug && previousSlug !== slug) {
       await provisiondPost("/unpublish", { projectId, slug: previousSlug }).catch(() => {});
     } else if (!previousSlug) {

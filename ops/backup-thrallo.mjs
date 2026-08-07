@@ -69,6 +69,8 @@ export const CA_TABLES = [
   // actually published — losing it would make every rollback and every deployment download
   // unrecoverable.
   "deployments",
+  "publish_releases",
+  "publish_activation_intents",
   "custom_domains",
   "ca_push_subscriptions",
   "entities",

@@ -36,6 +36,8 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "health_checks", column: "project_id", ownerScoped: true, label: "health history" },
   { table: "health_status", column: "project_id", ownerScoped: true, label: "health" },
   { table: "custom_domains", column: "project_id", ownerScoped: true, label: "custom domains" },
+  { table: "publish_activation_intents", column: "project_id", ownerScoped: true, label: "publish activations" },
+  { table: "publish_releases", column: "project_id", ownerScoped: true, label: "published releases" },
   { table: "published_sites", column: "project_id", ownerScoped: true, label: "published site" },
   // Deployment history is permanent while the project LIVES — it is the answer to "what was live
   // last Tuesday" — but a deleted project must not leave its published source behind, and
@@ -197,6 +199,14 @@ export async function purgeProjectResources(ownerId, projectId, { client = servi
 
   report.site = await takeSiteOffline({ client, provisiond, ownerId, projectId });
   report.domains = await detachDomains({ client, provisiond, ownerId, projectId });
+  if (provisiond && process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1") {
+    report.releases = await provisiond("/releases/purge-project", { owner: ownerId, projectId: String(projectId) });
+    if (!report.releases?.purged) {
+      // No directory is valid for a never-atomically-published project. The DB deletion below is
+      // still authoritative; restore/erasure verification proves no release rows or files remain.
+      report.releases = { ...(report.releases || {}), verifiedAbsent: true };
+    }
+  }
   if (provisiond) await provisiond("/stop", { projectId }).catch(() => {});  // preview container
 
   // The end users of a generated app have their own auth identities; deleting the app must not

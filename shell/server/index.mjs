@@ -78,6 +78,7 @@ import {
   handleDomainAdd, handleCustomDomainRemove, handleDomainRetry, handleDomainVerify, handleDomainsList,
 } from "./routes/customDomains.mjs";
 import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
+import { startPublishReconciler, stopPublishReconciler } from "./lib/publishing/atomicPublisher.mjs";
 import {
   handleAnalyticsCollect, handleAnalyticsPreflight, handleAnalyticsOverview,
   handleAnalyticsLive, handleAnalyticsExport,
@@ -1041,6 +1042,7 @@ server.listen(PORT, HOST, () => {
   startRetentionSweeper();
   // DNS propagates on its own schedule; without this a user would have to sit pressing Retry.
   startDomainVerifier();
+  startPublishReconciler();
   // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
   // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.
   startAnalyticsRollup();
@@ -1072,6 +1074,7 @@ async function shutdown(signal) {
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
   stopDomainVerifier();
+  stopPublishReconciler();
   stopAnalyticsRollup();
   stopGeoipUpdater();
   stopHealthMonitor();
