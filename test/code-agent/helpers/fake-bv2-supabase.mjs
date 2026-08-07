@@ -18,7 +18,12 @@ export function createFakeBv2Supabase() {
       order: null, ascending: true, limit: null, from: null, to: null,
       onConflict: null, selectAfter: false,
     };
-    const matches = (row) => state.filters.every(([col, val]) => row[col] === val);
+    const matches = (row) => state.filters.every(([kind, col, val]) => {
+      if (kind === "eq") return row[col] === val;
+      if (kind === "gte") return row[col] >= val;
+      if (kind === "lte") return row[col] <= val;
+      return false;
+    });
     const runQuery = () => {
       const rows = rowsOf(tableName);
       if (state.op === "select") {
@@ -73,7 +78,9 @@ export function createFakeBv2Supabase() {
       upsert(payload, options = {}) { state.op = "upsert"; state.payload = payload; state.onConflict = options.onConflict; return api; },
       update(payload) { state.op = "update"; state.payload = payload; return api; },
       delete() { state.op = "delete"; return api; },
-      eq(column, value) { state.filters.push([column, value]); return api; },
+      eq(column, value) { state.filters.push(["eq", column, value]); return api; },
+      gte(column, value) { state.filters.push(["gte", column, value]); return api; },
+      lte(column, value) { state.filters.push(["lte", column, value]); return api; },
       order(column, options = {}) { state.order = column; state.ascending = options.ascending !== false; return api; },
       limit(value) { state.limit = value; return api; },
       range(from, to) { state.from = from; state.to = to; return api; },
