@@ -40,20 +40,20 @@ values.
 | PR-01 Freeze and current-state baseline | Local implementation complete | Current main matched; local capture, 5 focused tests, full code-agent suite, web build, and 118 browser tests pass | Live read awaiting explicit approval |
 | PR-02 Reproducible Supabase history | Pending | Duplicate versions `20260801200000` and `20260801220000` are detected by PR-01 | No history repair or migration run |
 | PR-03 Essential verdicts and cache | Local implementation complete | C2/C3 focused proofs, all 107 Builder V2 tests, and all 1,172 code-agent tests pass | None; deploy only after normal review |
-| PR-04 Atomic graph and shadow | Migration installed dark; application path not deployed | Atomic failure/retry/concurrency, owner/browser isolation, stored-fixture parity, complete drift matrix, fresh reset/lint/zero diff | Do not restart shadow before approved dark deployment/canary |
+| PR-04 Atomic graph and shadow | Deployed dark and production-canary green | Atomic production persistence/reload parity was exact across 45 paths, 144 symbols, 477 refs and 124 edges; injected child-row drift exited non-zero and cleanup restored zero canary rows | Ready for a new shadow clock; customer V2 remains paused |
 | PR-05 Immutable snapshots | Local implementation complete | Stored-byte corruption, materialisation, concurrent promotion, memory/Supabase parity, and Builder V2 regressions pass | None; deploy only after normal review |
 | PR-06 App eligibility/reset | Local implementation complete | UUID registry, origin policy, HMAC, atomic reset-claim, Deno check, and all 1,179 code-agent tests pass | Edge deploy and secret require explicit approval |
 | PR-07 Assets | Local security/compliance unit complete; worker isolation pending PR-11 | H5/H6 hostile fetch, MIME/size/dimension, immutable replacement and licensing proofs; all 1,182 code-agent tests pass | None; deploy only with the later isolated worker boundary |
 | PR-08 Diagnostics/erasure | Diagnostics redaction unit local-complete; full cross-store erasure pending | Secret-pattern/environment redaction and prompt/source retention controls proven; erasure proof still pending | None |
 | PR-09 Shared limits | Pending | Audit evidence confirmed | None |
-| PR-10 Durable build leases | Migration installed dark; application path not deployed | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Worker service and flag remain off |
-| PR-11 Build worker | Local implementation and real sandbox proof complete; production approval pending | Valid/malformed compile, Playwright, timeout/tree cleanup, cgroup limits, OOM 137, shell latency and disabled-path regressions pass | Do not install/start service or enable shell flag yet |
-| PR-12 Atomic deployment | Base migration plus forward repair installed dark; application path not deployed | Immutable release bytes, CAS/outbox, no-build rollback, scoped live-deployment retirement, transaction fault rollback, complete production test-owner matrix and 24/24 Linux tests | Do not deploy code, reload Caddy or enable flags without separate approval |
+| PR-10 Durable build leases | Installed dark; customer dispatch off | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Queue is durable; no customer dispatch |
+| PR-11 Build worker | Deployed dark and production-canary green | Synthetic success, SIGKILL/lease recovery, zero duplicate results/orphan containers, responsive shell, and post-layout synthetic job pass | Service active dark; shell worker flag remains off |
+| PR-12 Atomic deployment | Deployed dark and production-canary green | Real immutable A/B activation, no-build rollback, unpublish/republish, CAS and post-pointer fault reconciliation pass; test state fully removed | Atomic publish flag off; shared Caddy unchanged |
 | PR-13 Cost/retrieval | Retrieval correctness local-complete; cost reservation pending | TS/TSX parser, opaque-context fail-closed, capability and project-knowledge integration proven | None |
 | PR-14 V2 composition | Pending | Placeholder confirmed | None |
 | PR-15 Operational surfaces | Pending | Audit evidence confirmed | None |
 | PR-16 Release pipeline | Pending | Audit evidence confirmed | None |
-| PR-17 DR/SLO/final proof | Pending | Existing DR base partially confirmed | None |
+| PR-17 DR/SLO/final proof | Post-deploy backup/restore gate green; broader DR/SLO work pending | Backup `thrallo-2026-08-07T201226` and network-isolated restore match all canonical rows/objects/files/modes; worker artifact root restored exactly | Shadow restart awaits explicit approval; off-host/RTO/RPO work remains |
 
 ## Evidence still requiring approved production read access
 
@@ -67,6 +67,31 @@ values.
 PR-02 must not guess any of these values. In particular, duplicate local migration filenames must
 not be renamed or repaired remotely until the real `supabase_migrations.schema_migrations` history
 and corresponding live objects have been compared.
+
+## 2026-08-07 dark-deployment and backup gate
+
+- Production code is dark at `4fa3087f8e53a4cd63dd8e4b605c5d8725a05bff`; the worker itself reports
+  `7d4ce3a464c20dcd99f3610e6f93d2dd47f2c522-dark` because the later commits change only backup
+  evidence/tool permissions. Builder V1, disabled customer-worker/atomic-publish flags, paused
+  settlement and unchanged shared Caddy remain hard invariants.
+- The worker account home moved from the canonical artifact root to
+  `/var/lib/thrallo-build-worker-home` (`0700`). `/var/lib/thrallo-build-worker` remains `0750`
+  and contains only intentional durable Thrallo artifacts. The backup still rejects every symlink;
+  it records and restores directory modes as well as regular-file bytes/modes.
+- The first post-repair backup exposed stale 60-row migration evidence and was quarantined rather
+  than accepted. Read-only Supabase evidence now overlays the immutable 60-row reconstruction
+  through production row 65 with zero pending local migrations.
+- Final backup `/home/ubuntu/thrallo-backups/thrallo-2026-08-07T201226` contains 82 application
+  tables / 36,862 table rows, 31 auth identities, 2 Storage objects, 163 filesystem files and 46
+  directory records. Manifest SHA-256 is
+  `703c984882963e360f21faff71365f98c14864cb5005e4e667c47f6eb7f9efd0`.
+- The isolated restore passed byte/hash/mode, snapshot materialisation, blob declarations,
+  pointers/cache, graph/shadow, queue/result/event, publishing and two-owner isolation checks.
+  Independent monitoring recorded zero successful connections on all ports `55320-55327` during
+  the full restore. The disposable containers, volumes and restored filesystem were destroyed.
+- Every technical shadow-restart criterion is now green. The seven-day clock has **not** been
+  restarted; that remains a separate explicit approval. The remaining real hostname/certificate
+  Caddy canary is independent and still requires its separately approved ingress window.
 
 ## Implemented correctness units
 

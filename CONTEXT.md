@@ -979,6 +979,20 @@ pending migrations in order after production upgrade proof, deploy the matching 
 default/V2 paused/settlement paused, take and isolate-restore a post-migration backup, prove one
 real V1 completion writes an immediate CLEAN check, then record a new timestamp from zero.
 
+Update 2026-08-07: C4/C7/C8 code is now deployed dark and its production canaries are green.
+The worker account-home/artifact-root overlap was repaired: private home is
+`/var/lib/thrallo-build-worker-home`, canonical backup data remains
+`/var/lib/thrallo-build-worker`, and symlink rejection remains fail-closed. One zero-model job
+passed after the move and cleaned its DB/workspace/container state. Final backup
+`thrallo-2026-08-07T201226` embeds the current 65-row migration ledger and passed a fully isolated
+restore (82 tables / 36,862 rows, 31 auth users, 2 Storage objects, 163 files, 46 directory modes,
+blob/snapshot/cache/graph/queue/publish and two-owner checks). External ports `55320-55327` had
+zero successful probes throughout; disposable data was destroyed. Customer hashes and Caddy are
+unchanged; V1 is healthy; settlement is paused; worker dispatch and atomic publishing remain off.
+All technical gates say the shadow week is ready to restart, but it has NOT been restarted because
+that requires the next explicit approval. The real hostname/certificate Caddy canary remains an
+independent ingress approval, not a shadow prerequisite.
+
 C8 atomic publishing is locally complete on the same remediation branch and remains undeployed.
 Pending migration `20260807072455_atomic_immutable_releases.sql` adds service-only immutable
 release and activation-intent state. Provisiond finalises read-only byte-hashed releases, switches a

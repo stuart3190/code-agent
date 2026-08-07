@@ -55,6 +55,11 @@ job workspaces removed on terminal completion, caches, and OS account skeleton f
 non-durable and must not enter the artifact root. The backup intentionally fails on every symlink
 or non-regular entry beneath a canonical filesystem root; do not add filename exceptions.
 
+Production was repaired to this layout on 2026-08-07. The inherited `/etc/skel` files were first
+matched byte-for-byte, moved into the new private home without following `.face.icon`, and the
+empty canonical root then passed a full backup and isolated restore. Any future account recreation
+must preserve this split before the worker is started.
+
 ## Operator commands
 
 Run these from the checked-out release with the worker environment loaded:
