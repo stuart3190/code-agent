@@ -266,7 +266,7 @@ export async function getDeployment(owner, deploymentId, { client = serviceClien
 export async function assertBelongsTo(owner, deployment, projectId, { client = serviceClient() } = {}) {
   if (!deployment) throw fail("That deployment could not be found.", 404, "deployment_missing");
   const { data: project } = await client.from("projects")
-    .select("id,product_id").eq("id", String(projectId)).eq("owner", owner).maybeSingle();
+    .select("id,product_id,builder_version,bv2_green_snapshot_id").eq("id", String(projectId)).eq("owner", owner).maybeSingle();
   if (!project) throw fail("That project could not be found.", 404, "project_missing");
 
   const sameApp = project.product_id

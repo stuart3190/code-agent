@@ -61,6 +61,12 @@ export function bindCapabilities(contract) {
 
   if (entityNames.has("booking") || vocabulary.has("booking") || vocabulary.has("reservation")) {
     bindings.push({ name: "booking", version: CAPABILITIES.booking.version });
+    bindings.push({ name: "wizard", version: CAPABILITIES.wizard.version });
+  }
+  if (vocabulary.has("wizard") || vocabulary.has("onboarding") || vocabulary.has("checkout")) {
+    if (!bindings.some((binding) => binding.name === "wizard")) {
+      bindings.push({ name: "wizard", version: CAPABILITIES.wizard.version });
+    }
   }
   if (entityNames.has("newslettersignup") || vocabulary.has("newsletter")) {
     bindings.push({ name: "newsletter", version: CAPABILITIES.newsletter.version });

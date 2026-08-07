@@ -43,5 +43,8 @@ export function createRoutingProvider({ config, turnMeta, makeProvider = default
     return underlying.runTurn(args);
   }
 
-  return { runTurn, model: decision.model, rates: decision.rates, decision };
+  return {
+    runTurn, model: decision.model, rates: decision.rates,
+    provider: decision.provider, providerId: decision.provider, decision,
+  };
 }

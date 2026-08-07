@@ -61,7 +61,8 @@ test("the Anthropic call is bounded, like every other provider's", async () => {
   // A connection that opened and then went silent hung forever: the turn neither threw nor
   // returned, so no error path ran and nothing recovered it.
   assert.match(provider, /AbortController/, "the request must be abortable");
-  assert.match(provider, /signal: controller\.signal/, "and the signal must actually be passed");
+  assert.match(provider, /signal:\s*signal\s*\?\s*AbortSignal\.any\(\[controller\.signal, signal\]\)\s*:\s*controller\.signal/,
+    "the internal stall guard and caller cancellation signal must both reach fetch");
   assert.match(provider, /anthropic_timeout/, "a stall must be reported as a stall");
 
   // A stall timeout rather than a deadline: a long generation is healthy, silence is not.

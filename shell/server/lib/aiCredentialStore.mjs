@@ -148,7 +148,9 @@ export async function activeAiCredential(owner, { store = aiCredentialStore() } 
   const preference = await store.getPreference(owner);
   const provider = preference?.active_provider || "managed";
   const routing = publicRoutingPreference(preference);
-  if (provider === "managed") return { provider, authMode: "managed", secret: null, routing };
+  if (provider === "managed") return {
+    provider, authMode: "managed", secret: null, routing, byokSafety: preference?.byok_safety || null,
+  };
   const credential = await store.getCredential(owner, provider);
   if (!credential || credential.status !== "connected") {
     const error = new Error(`The selected ${providerLabel(provider)} connection is unavailable.`);
@@ -161,6 +163,7 @@ export async function activeAiCredential(owner, { store = aiCredentialStore() } 
     secret: decryptSecret(credential.secret_encrypted),
     metadata: credential.metadata || {},
     routing,
+    byokSafety: preference?.byok_safety || null,
   };
 }
 

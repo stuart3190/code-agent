@@ -53,7 +53,8 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
   // fetchImpl/tokenProvider are injectable so the identifier plumbing is provable without a
   // ChatGPT account; production always uses the defaults.
-  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort }) {
+  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort,
+    signal = null, maxOutputTokens = null }) {
     const { accessToken, accountId } = await tokenProvider();
 
     const body = {
@@ -62,6 +63,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       input: toInputItems(messages),
       stream: true,
       store: false, // backend rejects store:true/stream:false; no `metadata` (would 400)
+      ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
     };
     if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
     // Optional reasoning-effort override (codex_cli_rs sends the same field shape). Omitted
@@ -87,6 +89,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
         Accept: "text/event-stream",
       },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
 
     // The strongest STABLE identifiers this transport actually exposes, typed so a billing row
@@ -161,7 +164,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // Codex usage row price at the default rate and classify by guesswork. `model` is the REAL wire
   // model (the ChatGPT-account backend rejects "-codex"-suffixed names), and `providerId` names
   // the lane so billing rows are attributable without inference.
-  return { runTurn, model: MODEL, providerId: "codex" };
+  return { runTurn, model: MODEL, provider: "codex", providerId: "codex" };
 }
 
 // Codex usage shape -> neutral blended shape a BYOK adapter could also fill.

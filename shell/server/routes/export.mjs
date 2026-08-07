@@ -1,6 +1,7 @@
 import { serviceClient } from "../lib/supabase.mjs";
 import { assertNoPlatformSecrets, buildProjectZip } from "../lib/exportProject.mjs";
 import { auditEvent } from "../lib/projectState.mjs";
+import { resolveVerifiedProjectTree } from "../lib/builderV2/projectSource.mjs";
 
 function safeContentDisposition(filename) {
   const fallback = "thrallo-app.zip";
@@ -18,7 +19,7 @@ export async function handleExport(req, res, body, owner) {
 
   const { data, error } = await serviceClient()
     .from("projects")
-    .select("id,name,tree,history")
+    .select("id,name,tree,history,builder_version,bv2_green_snapshot_id")
     .eq("id", projectId)
     .eq("owner", owner.id)
     .maybeSingle();
@@ -33,7 +34,8 @@ export async function handleExport(req, res, body, owner) {
   let zip;
   let filename;
   try {
-    const built = buildProjectZip(data);
+    const source = await resolveVerifiedProjectTree(owner.id, data);
+    const built = buildProjectZip({ ...data, tree: source.tree });
     assertNoPlatformSecrets(built.files);
     zip = built.zip;
     filename = built.filename;

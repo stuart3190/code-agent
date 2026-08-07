@@ -44,12 +44,13 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
   if (!key) throw new Error("OPENAI_API_KEY is required for managed app builds.");
   const resolvedModel = model || optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra");
 
-  async function runTurn({ systemPrompt, messages, tools }) {
+  async function runTurn({ systemPrompt, messages, tools, signal = null, maxOutputTokens = null }) {
     const body = {
       model: resolvedModel,
       instructions: systemPrompt,
       input: toInputItems(messages),
       store: false,
+      ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
     };
     const wireTools = toWireTools(tools);
     if (wireTools) {
@@ -62,11 +63,13 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
     });
     if (!res.ok) {
       const errBody = await res.text();
       const error = new Error(`OpenAI responses HTTP ${res.status}: ${errBody.slice(0, 400)}`);
       error.status = res.status;
+      error.providerRequestId = res.headers?.get?.("x-request-id") || null;
       throw error;
     }
     const data = await res.json();
@@ -96,7 +99,7 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
     };
   }
 
-  return { runTurn, model: resolvedModel };
+  return { runTurn, model: resolvedModel, provider: "openai" };
 }
 
 function normalizeUsage(u) {

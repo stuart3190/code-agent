@@ -257,8 +257,10 @@ test("C8-19 cleanup preserves every retained release", { skip: !linux }, async (
 
 test("C8-20 Builder V1 remains on legacy path while atomic flag is disabled", async () => {
   const publish = await readFile(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url), "utf8");
-  assert.match(publish, /atomicPublishEnabled\(\) \? await finalizeAndActivateRelease/);
+  assert.match(publish, /const useAtomic = atomicPublishEnabled\(\)/);
+  assert.match(publish, /useAtomic \? await finalizeAndActivateRelease/);
   assert.match(publish, /: await provisiond\("\/publish"/);
+  assert.match(publish, /project\.builder_version === "v2" && !useAtomic/);
   assert.equal(normalizeArtifactPath("assets/app.js"), "assets/app.js");
 });
 

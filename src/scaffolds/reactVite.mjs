@@ -323,6 +323,7 @@ export default function HomePage() {
   "src/lib/capabilities/session.js": sdk("lib/capabilities/session.js"),
   "src/lib/capabilities/roles.js": sdk("lib/capabilities/roles.js"),
   "src/lib/capabilities/booking.js": sdk("lib/capabilities/booking.js"),
+  "src/lib/capabilities/wizard.js": sdk("lib/capabilities/wizard.js"),
   "src/lib/capabilities/forms.js": sdk("lib/capabilities/forms.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering

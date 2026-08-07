@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import { optionalEnv } from "./env.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { newId, TERMINAL_RUN_STATES } from "./codeAgentContracts.mjs";
+import { creditsForUsage } from "../../../src/billing/costModel.mjs";
+import { TOKENS_PER_CREDIT } from "../../../src/cost.mjs";
 
 const now = () => new Date().toISOString();
 
@@ -700,9 +702,23 @@ export class SupabaseCodeAgentStore {
   }
 
   async usageTotalsSince(owner, sinceIso) {
-    const rows = unwrap(await this.client.from("ca_usage_records")
-      .select("billing_source,input_tokens,cached_tokens,output_tokens,reasoning_tokens,compute_seconds")
-      .eq("owner", owner).gte("created_at", sinceIso).limit(5_000));
+    const rows = [];
+    const pageSize = 1_000;
+    let cursor = null;
+    for (;;) {
+      let query = this.client.from("ca_usage_records")
+        .select("id,billing_source,model,input_tokens,cached_tokens,output_tokens,reasoning_tokens,compute_seconds,created_at")
+        .eq("owner", owner).gte("created_at", sinceIso)
+        .order("created_at", { ascending: true }).order("id", { ascending: true })
+        .limit(pageSize);
+      if (cursor) {
+        query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+      }
+      const page = unwrap(await query);
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      cursor = page[page.length - 1];
+    }
     return sumBudgetUsage(rows);
   }
 
@@ -788,7 +804,19 @@ function sumBudgetUsage(rows) {
     const tokens = Number(row.input_tokens || 0) + Number(row.output_tokens || 0);
     totals.totalTokens += tokens;
     totals.computeSeconds += Number(row.compute_seconds || 0);
-    if ((row.billing_source || "unknown") === "managed") totals.managedTokens += tokens;
+    if ((row.billing_source || "unknown") === "managed") {
+      // Managed allowances are denominated in credit-equivalent tokens. Price every stored call
+      // with the same cache- and model-aware function used by reservation settlement; otherwise
+      // cached prompt bytes consume a full fresh-token allowance and recreate incident 83883309.
+      totals.managedTokens += creditsForUsage({
+        usage: {
+          input: Number(row.input_tokens || 0), cached: Number(row.cached_tokens || 0),
+          output: Number(row.output_tokens || 0), reasoning: Number(row.reasoning_tokens || 0),
+          total: tokens,
+        },
+        model: row.model,
+      }) * TOKENS_PER_CREDIT;
+    }
   }
   return totals;
 }

@@ -8,6 +8,7 @@ import { capabilityBrief } from "../../shell/server/lib/builderV2/capabilityRegi
 import { makeContactForm, makeNewsletter } from "../../src/scaffolds/reactVite/lib/capabilities/forms.js";
 import { makeBookingSystem } from "../../src/scaffolds/reactVite/lib/capabilities/booking.js";
 import { makeEntityStore } from "../../src/scaffolds/reactVite/lib/capabilities/crud.js";
+import { makeWizardMachine } from "../../src/scaffolds/reactVite/lib/capabilities/wizard.js";
 
 test("D1 lint — the pinned method table cannot drift from the REAL scaffold factories", () => {
   const methodsOf = (instance) => Object.keys(instance).filter((k) => typeof instance[k] === "function").sort();
@@ -15,6 +16,7 @@ test("D1 lint — the pinned method table cannot drift from the REAL scaffold fa
   assert.deepEqual([...FACTORY_METHODS.makeNewsletter].sort(), methodsOf(makeNewsletter()));
   assert.deepEqual([...FACTORY_METHODS.makeBookingSystem].sort(), methodsOf(makeBookingSystem()));
   assert.deepEqual([...FACTORY_METHODS.makeEntityStore].sort(), methodsOf(makeEntityStore("x")));
+  assert.deepEqual([...FACTORY_METHODS.makeWizardMachine].sort(), methodsOf(makeWizardMachine({ steps: ["a", "b"] })));
 });
 
 test("D1 lint — catches live run 3's exact defect and teaches the real interface", () => {

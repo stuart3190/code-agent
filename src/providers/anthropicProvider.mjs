@@ -183,7 +183,7 @@ export function createAccumulator() {
 export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL, cache = false, maxTokens = DEFAULT_MAX_TOKENS, apiKey = null } = {}) {
   const rates = anthropicRatesFor(model);
 
-  async function runTurn({ systemPrompt, messages, tools }) {
+  async function runTurn({ systemPrompt, messages, tools, signal = null, maxOutputTokens = null }) {
     const key = apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!key) {
       throw new Error(
@@ -192,7 +192,8 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
       );
     }
 
-    const body = buildRequestBody({ systemPrompt, messages, tools, model, maxTokens, cache });
+    const boundedOutput = maxOutputTokens ? Math.min(maxTokens, Math.max(1, Math.floor(maxOutputTokens))) : maxTokens;
+    const body = buildRequestBody({ systemPrompt, messages, tools, model, maxTokens: boundedOutput, cache });
 
     /**
      * A stall timeout, not a deadline.
@@ -245,7 +246,7 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
           accept: "text/event-stream",
         },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       });
     } catch (error) {
       clearTimeout(stallTimer); clearTimeout(ceiling);
@@ -258,6 +259,7 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
       const error = new Error(`Anthropic messages HTTP ${res.status}: ${errBody}`);
       error.status = res.status;
       error.code = res.status === 429 ? "anthropic_rate_limit" : "anthropic_request_failed";
+      error.providerRequestId = res.headers?.get?.("request-id") || res.headers?.get?.("x-request-id") || null;
       throw error;
     }
 
@@ -294,13 +296,17 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
     }
 
     const { text, toolCalls, usage, stopReason } = acc.result();
+    const usageWithId = {
+      ...usage,
+      providerRequestId: res.headers?.get?.("request-id") || res.headers?.get?.("x-request-id") || null,
+    };
     // A safety-classifier decline returns HTTP 200 with stop_reason "refusal": surface a note, no
     // tool calls, so the engine loop ends cleanly instead of crashing on missing content.
     if (stopReason === "refusal") {
-      return { text: text || "[anthropic safety refusal — request declined]", toolCalls: [], usage };
+      return { text: text || "[anthropic safety refusal — request declined]", toolCalls: [], usage: usageWithId };
     }
-    return { text, toolCalls, usage };
+    return { text, toolCalls, usage: usageWithId };
   }
 
-  return { runTurn, rates, model };
+  return { runTurn, rates, model, provider: "anthropic" };
 }

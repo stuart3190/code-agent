@@ -1513,7 +1513,8 @@ export async function repairApp(ctx, { issue, productName = null }) {
   // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
   // could act on an app from a different conversation entirely.
   const { resolveConversationProject } = await import("./projectScope.mjs");
-  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, product_id, updated_at", client });
+  const { project } = await resolveConversationProject(ctx, { productName,
+    columns: "id, name, tree, product_id, updated_at, builder_version, bv2_green_snapshot_id", client });
   if (!project) {
     const error = new Error("There's no existing app to repair — describe what you want built instead.");
     error.code = "nothing_to_repair";
@@ -1564,7 +1565,15 @@ export async function showPreview(ctx, { productName = null } = {}) {
   await ctx.emit("agent_spawned", { agent: "Publisher", status: "Bringing the preview up…" });
   try {
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
-    const preview = await previewProvider().start(project.id, withRuntimeEnv(project.tree, project.id));
+    const { resolveVerifiedProjectTree } = await import("../builderV2/projectSource.mjs");
+    const source = await resolveVerifiedProjectTree(ctx.owner, project, { client });
+    const previews = previewProvider();
+    if (source.project.builder_version === "v2" && previews.mode !== "vps") {
+      throw Object.assign(new Error("Builder V2 previews require the isolated production provisioner."), {
+        code: "preview_isolation_required",
+      });
+    }
+    const preview = await previews.start(project.id, withRuntimeEnv(source.tree, project.id));
     if (!preview?.url) throw new Error("The preview service returned no address.");
     await client.from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
       .eq("id", project.id).eq("owner", ctx.owner);
@@ -1622,7 +1631,8 @@ export async function exportProject(ctx, { productName = null } = {}) {
   // Scoped to this conversation's product. Resolving by "the owner's newest project" meant this
   // could act on an app from a different conversation entirely.
   const { resolveConversationProject } = await import("./projectScope.mjs");
-  const { project } = await resolveConversationProject(ctx, { productName, columns: "id, name, tree, history, product_id, updated_at", client });
+  const { project } = await resolveConversationProject(ctx, { productName,
+    columns: "id, name, tree, history, product_id, updated_at, builder_version, bv2_green_snapshot_id", client });
   if (!project) {
     const error = new Error("There's no built app to export yet — ask me to build something first.");
     error.code = "nothing_to_export";
@@ -1634,7 +1644,9 @@ export async function exportProject(ctx, { productName = null } = {}) {
 
   await ctx.emit("agent_spawned", { agent: "Publisher", status: "Packaging the source…" });
   try {
-    const cleaned = stripExportNoise(project.tree);
+    const { resolveVerifiedProjectTree } = await import("../builderV2/projectSource.mjs");
+    const source = await resolveVerifiedProjectTree(ctx.owner, project, { client });
+    const cleaned = stripExportNoise(source.tree);
     const built = buildProjectZip({ ...project, tree: cleaned.files });
     assertNoPlatformSecrets(built.files);
 

@@ -136,6 +136,7 @@ function editHarness() {
   const verificationCache = memoryVerificationCache();
   const assetService = recordedAssetService();
   const journeyDrives = [];
+  const knowledgeFacts = [];
   let editPatches = EDIT_PATCH;
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,
@@ -152,8 +153,9 @@ function editHarness() {
     },
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
+    events: { knowledge: async (fact) => { knowledgeFacts.push(fact); } },
   });
-  return { orchestrator, snapshotStore, journeyDrives, assetService, setEditPatches: (p) => { editPatches = p; } };
+  return { orchestrator, snapshotStore, journeyDrives, knowledgeFacts, assetService, setEditPatches: (p) => { editPatches = p; } };
 }
 
 test("WP10/C3 — an edit re-drives the touched journey and every zero-owner journey", async () => {
@@ -178,6 +180,9 @@ test("WP10/C3 — an edit re-drives the touched journey and every zero-owner jou
   const tree = await h.snapshotStore.materialize("o", pointer);
   assert.match(tree["src/routes/NewsletterPanel.jsx"], /welcome aboard/);
   assert.equal(edit.providerCalls, undefined, "no asset resolution ran at all");
+  assert.equal(h.knowledgeFacts.length, 1);
+  assert.equal(h.knowledgeFacts[0].value.text, "reword the newsletter confirmation");
+  assert.equal(h.knowledgeFacts[0].value.verifiedSnapshot, edit.snapshotId);
 });
 
 test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", async () => {
@@ -198,6 +203,7 @@ test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", a
   const tree = await h.snapshotStore.materialize("o", before);
   assert.match(tree["src/routes/BookPage.jsx"], /Booking confirmed/, "the served tree still works");
   assert.equal(build.state, "green");
+  assert.equal(h.knowledgeFacts.length, 0, "a failed edit must not become project knowledge");
 });
 
 test("WP10 — editTargets ranks generated files by request keywords, deterministically", () => {

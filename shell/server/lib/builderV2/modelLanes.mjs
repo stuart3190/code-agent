@@ -15,6 +15,8 @@ import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
 import { bindCapabilities } from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
+import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
+import { modelCallKey } from "./modelReservations.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -82,7 +84,7 @@ function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
  * re-send a monolith page it barely touched).
  */
 export function renderScopedContext(tree, {
-  step, editRequest = null, problems = [], journeys = [], capabilityPaths = [],
+  step, editRequest = null, problems = [], journeys = [], capabilityPaths = [], onRetrieval = null,
 } = {}) {
   const graph = memoryGraph("ctx", "ctx", indexTree(tree));
   const evidenceText = step === "edit" ? String(editRequest || "") : problems.join(" ");
@@ -92,6 +94,12 @@ export function renderScopedContext(tree, {
   if (result.requiredUnavailable.length) {
     throw new Error(`retrieval cannot provide complete required context: ${result.requiredUnavailable.map((row) => row.path).join(", ")}`);
   }
+  onRetrieval?.({
+    query: { step, editRequest, problems, targets, failureRefs, journeys: journeys.map((journey) => journey?.id).filter(Boolean), capabilityPaths },
+    included: result.trace.included,
+    omittedCount: result.trace.omittedCount,
+    tokens: result.tokens,
+  });
   const paths = Object.keys(tree).sort().map((p) => `  ${p}`).join("\n");
   return [
     "FILE TREE (paths only — retrieval below carries the relevant content):", paths, "",
@@ -151,7 +159,7 @@ function renderJourneyBrief(journeys) {
 
 export function renderPatchPrompt({
   step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
-  projectKnowledge = null,
+  projectKnowledge = null, onRetrieval = null,
 }) {
   const isEdit = step === "edit";
   const isRepair = step === "repair";
@@ -178,6 +186,7 @@ export function renderPatchPrompt({
       ? renderScopedContext(tree, {
         step, editRequest, problems, journeys: scopedJourneys,
         capabilityPaths: bindCapabilities(contract).map((binding) => binding.package),
+        onRetrieval,
       })
       : renderTreeContext(tree),
   ];
@@ -216,64 +225,185 @@ export function routeForStep(step) {
   return STEP_ROUTING[kind] || STEP_ROUTING.core;
 }
 
+export function conservativeCallReservation(options, model, {
+  maxOutputTokens = 16_000, minimumCredits = 0,
+} = {}) {
+  // UTF-8 bytes are a deliberately conservative upper bound for prompt tokens. Include the tool
+  // schemas and fixed wire overhead, then assume zero cache discount. The provider is given the
+  // same output cap, so the reserved amount bounds the call instead of merely guessing its cost.
+  const wireBytes = Buffer.byteLength(JSON.stringify({
+    systemPrompt: options?.systemPrompt || "", messages: options?.messages || [], tools: options?.tools || [],
+  }), "utf8");
+  const inputUpper = wireBytes + 512;
+  const calculated = creditsForUsage({
+    usage: { input: inputUpper, cached: 0, output: maxOutputTokens, total: inputUpper + maxOutputTokens },
+    model,
+  });
+  return Math.ceil(Math.max(calculated, Number(minimumCredits || 0)) * 10_000) / 10_000;
+}
+
 export function createModelLanes({
-  provider, ceilingCredits, diag = null, log = () => {},
-  bucket = jobUsageBucket(), knowledgeStore = null,
+  provider, providerForStep = null, ceilingCredits, diag = null, log = () => {},
+  bucket = jobUsageBucket(), knowledgeStore = null, reservations = null,
+  billingLane = "connected_allowance", recordRetrieval = null, accountCreditResolver = null,
+  strictKnowledge = false,
+  maxOutputTokens = 16_000,
 }) {
-  if (!provider || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
-  const guard = managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
+  if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
+  const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
+  let callSequence = 0;
+  const choose = async (step, context) => {
+    const selected = providerForStep ? await providerForStep({ step, ...context }) : { provider, decision: null };
+    const selectedProvider = selected?.provider?.runTurn ? selected.provider : selected;
+    if (!selectedProvider?.runTurn || !selectedProvider.model) throw new Error(`no executable provider for Builder V2 step ${step}`);
+    return { provider: selectedProvider, decision: selected?.decision || null };
+  };
+  const requestIds = (usage, extras = []) => [...new Set([
+    ...(Array.isArray(usage?.providerRequestIds) ? usage.providerRequestIds : []),
+    usage?.providerRequestId, ...extras,
+  ].filter(Boolean).map(String))].sort();
+  const reservedProvider = async (step, context) => {
+    const selected = await choose(step, context);
+    if (!reservations) return selected;
+    return {
+      ...selected,
+      provider: {
+        ...selected.provider,
+        runTurn: async (options) => {
+          // Each network dispatch gets its own durable identity. A transport retry is a real
+          // second provider attempt and must never reuse/overwrite the first attempt's usage.
+          const sequence = ++callSequence;
+          const estimate = conservativeCallReservation(options, selected.provider.model, {
+            maxOutputTokens, minimumCredits: selected.decision?.estimatedCredits || 0,
+          });
+          const callKey = modelCallKey({ buildId: context.buildId, step, sequence });
+          const accountAvailableCredits = (selected.decision?.billingLane || billingLane) === "managed"
+            ? Number(await accountCreditResolver?.(context.owner)) : null;
+          const hold = await reservations.reserve({
+            owner: context.owner, projectId: context.projectId, buildId: context.buildId,
+            callKey, step,
+            provider: selected.provider.provider || selected.provider.providerId || selected.decision?.provider || selected.provider.model,
+            model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
+            reservedCredits: estimate, ceilingCredits: Number(ceilingCredits),
+            accountAvailableCredits,
+            metadata: { routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence },
+          });
+          let turn;
+          try {
+            turn = await selected.provider.runTurn.call(selected.provider, {
+              ...options, signal: context.signal || options.signal, maxOutputTokens,
+              // V2 owns retries outside transports so every network dispatch receives its own
+              // reservation and telemetry identity. Provider-internal retries would be invisible.
+              maxProviderRetries: 0,
+            });
+          } catch (error) {
+            const usage = error?.usage || {};
+            const actualCredits = creditsForUsage({ usage, model: selected.provider.model });
+            try {
+              await reservations.settle(context.owner, hold.id, {
+                actualCredits, usage, providerRequestIds: requestIds(usage, [error?.providerRequestId]),
+              });
+            } catch (settlementError) {
+              throw Object.assign(new AggregateError(
+                [error, settlementError],
+                `Provider call failed and its usage could not be settled: ${settlementError.message}`,
+              ), { code: "billing_settlement_failed", providerError: error });
+            }
+            throw error;
+          }
+          // Settlement is part of successful dispatch. If its acknowledgement fails, stop here;
+          // do not reinterpret that database failure as a provider failure or invoke settlement a
+          // second time with empty telemetry. The reservation remains the reconciliation authority.
+          const actualCredits = creditsForUsage({ usage: turn.usage || {}, model: selected.provider.model });
+          await reservations.settle(context.owner, hold.id, {
+            actualCredits, usage: turn.usage || {}, providerRequestIds: requestIds(turn.usage),
+          });
+          return turn;
+        },
+      },
+    };
+  };
+  const accountUsage = async (usage) => {
+    if (legacyGuard) return legacyGuard(usage);
+    bucket.add({ ...usage, turns: 1 });
+  };
   // WP-12 trace hierarchy: root = the diag run (the build); every model call is a child
   // span named by its pipeline step. Verification spans join from the runners.
-  const record = (step, { label, prompt, output, usage, durationMs }) => {
-    try {
-      diag?.step({
-        agent: "BuilderV2", kind: "agent", label: `${step}: ${label}`, status: "info",
-        prompt, output, usage, model: provider.model, durationMs,
-        trace: { traceId: diag?.id || null, parentId: diag?.id || null, step },
-      });
-    } catch { /* diagnostics never block a build */ }
+  const record = async (step, { label, prompt, output, usage, durationMs, providerUsed, decision = null }) => {
+    diag?.step({
+      agent: "BuilderV2", kind: "agent", label: `${step}: ${label}`, status: "info",
+      prompt, output, usage, model: providerUsed?.model || provider?.model, durationMs,
+      contextMeta: decision ? { routing: decision } : null,
+      trace: { traceId: diag?.id || null, parentId: diag?.id || null, step },
+    });
+    await diag?.flush?.();
   };
   const loadKnowledge = async (owner, projectId) => {
     if (!owner || !projectId) return "PROJECT KNOWLEDGE: not loaded for this request.";
-    const facts = await getKnowledge(owner, projectId, knowledgeStore ? { store: knowledgeStore } : {});
+    const facts = await getKnowledge(owner, projectId, {
+      ...(knowledgeStore ? { store: knowledgeStore } : {}), failClosed: strictKnowledge,
+    });
     return knowledgeBrief(facts);
   };
 
   return {
     bucket,
 
-    contractFn: async ({ owner, projectId, request }) => {
+    contractFn: async ({ owner, projectId, buildId, request, signal = null }) => {
       const startedAt = Date.now();
       const before = bucket.summary();
       const projectKnowledge = await loadKnowledge(owner, projectId);
       const contractRequest = `${projectKnowledge}\n\nUSER REQUEST:\n${request}`;
+      const selected = await reservedProvider("contract", {
+        owner, projectId, buildId, request, signal,
+        taskClass: "contract",
+        retrievalTokens: Math.ceil(Buffer.byteLength(projectKnowledge, "utf8") / 4),
+        affectedModules: 1,
+      });
       let outcome;
       try {
-        outcome = await generateContract({ provider, prompt: contractRequest, log, onUsage: guard });
+        outcome = await generateContract({ provider: selected.provider, prompt: contractRequest, log, onUsage: accountUsage });
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
         // `usage` reports only its last attempt). Recorded even when the guard throws —
         // paid work always reaches the diagnostics.
         const after = bucket.summary();
         const delta = Object.fromEntries(Object.keys(after).map((k) => [k, after[k] - (before[k] || 0)]));
-        record("contract", {
+        await record("contract", {
           label: outcome?.degraded ? "implementation contract (degraded)" : "implementation contract",
           prompt: contractRequest, output: outcome ? JSON.stringify(outcome.contract) : null,
-          usage: delta, durationMs: Date.now() - startedAt,
+          usage: delta, durationMs: Date.now() - startedAt, providerUsed: selected.provider,
+          decision: selected.decision,
         });
       }
       if (!outcome.contract) throw new Error(`contract generation failed: ${(outcome.problems || []).join("; ")}`);
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, step, contract, tiers, tree, journey, rejections, problems, editRequest }) => {
+    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest, signal = null }) => {
       const projectKnowledge = await loadKnowledge(owner, projectId);
-      const prompt = renderPatchPrompt({ step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge });
+      let retrievalTrace = null;
+      const prompt = renderPatchPrompt({
+        step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge,
+        onRetrieval: (trace) => { retrievalTrace = trace; },
+      });
+      if (retrievalTrace && recordRetrieval) {
+        await recordRetrieval({ owner, projectId, buildId, step, ...retrievalTrace });
+      }
       const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
       const startedAt = Date.now();
+      const selected = await reservedProvider(step, {
+        owner, projectId, buildId, contract, tree, problems, editRequest, signal,
+        taskClass: `${String(step).startsWith("increment:") ? "increment" : step}`,
+        retrievalTokens: Number(retrievalTrace?.tokens || 0),
+        affectedModules: Math.max(1, new Set([
+          ...(retrievalTrace?.included || []).map((entry) => entry.path).filter(Boolean),
+          ...Object.keys(tree || {}).filter((path) => (problems || []).some((problem) => String(problem).includes(path))),
+        ]).size),
+      });
       // ONE retry on transport-shaped failures: a dropped SSE stream ("terminated") killed
       // a live booking attempt 24 minutes in. Model/tool errors never retry — only the wire.
-      const callOnce = () => provider.runTurn({
+      const callOnce = () => selected.provider.runTurn({
         systemPrompt,
         messages: [{ role: "user", content: prompt }],
         tools: [EMIT_PATCHES_SCHEMA],
@@ -293,12 +423,13 @@ export function createModelLanes({
       }
       const call = (turn.toolCalls || []).find((c) => c.name === EMIT_PATCHES_SCHEMA.name);
       // Record BEFORE the guard can throw — the ceiling stopping a build never hides spend.
-      record(step, {
+      await record(step, {
         label: `patches (${call?.arguments?.patches?.length ?? 0})`,
         prompt, output: call ? JSON.stringify(call.arguments) : turn.text,
         usage: { ...turn.usage, turns: 1 }, durationMs: Date.now() - startedAt,
+        providerUsed: selected.provider, decision: selected.decision,
       });
-      await guard({ ...turn.usage, turns: 1 });
+      await accountUsage(turn.usage || {});
       if (!call || !Array.isArray(call.arguments?.patches)) {
         throw new Error(`the model did not call emit_patches at step ${step}: ${String(turn.text).slice(0, 300)}`);
       }

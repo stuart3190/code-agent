@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { creditsForUsage } from "../../src/billing/costModel.mjs";
+import { MemoryCodeAgentStore } from "../../shell/server/lib/codeAgentStore.mjs";
 
 // The seven real provider calls, verbatim from ai_requests for build 83883309.
 export const RUN_83883309 = [
@@ -87,6 +88,22 @@ test("the 28-credit ceiling now admits the repair it wrongly refused", () => {
   assert.ok(projectedWithInflatedTotal > ceiling, "the inflated total is why it was refused");
 });
 
+test("managed allowance totals use the canonical cache-aware price", async () => {
+  const store = new MemoryCodeAgentStore();
+  const owner = "owner";
+  for (const event of RUN_83883309) {
+    await store.recordStandaloneUsage(owner, {
+      provider: "openai", model: event.model, billing_source: "managed",
+      input_tokens: event.input, cached_tokens: event.cached, output_tokens: event.output,
+      reasoning_tokens: event.reasoning, compute_seconds: 0,
+    });
+  }
+  const totals = await store.usageTotalsSince(owner, "2000-01-01T00:00:00.000Z");
+  assert.ok(Math.abs(totals.managedTokens / 10_000 - 19.25) < 0.01,
+    `managed allowance must consume 19.25 credits, got ${(totals.managedTokens / 10_000).toFixed(2)}`);
+  assert.equal(totals.totalTokens, 513_291, "raw usage telemetry remains truthful and separate from billed usage");
+});
+
 test("provider request ids survive normalisation into the recorded row", async () => {
   // Without this the column exists and is never written: normalizeTelemetry stripped everything
   // non-numeric, so norm.providerRequestIds was always undefined and storage silently never ran.
@@ -98,4 +115,6 @@ test("provider request ids survive normalisation into the recorded row", async (
   assert.deepEqual(norm.providerRequestIds, ["resp_abc123", "resp_def456"]);
   assert.equal(normalizeTelemetry({ input: 1, output: 1 }).providerRequestIds, null,
     "absent ids stay null rather than an empty array");
+  assert.deepEqual(normalizeTelemetry({ input: 1, output: 1, providerRequestId: "resp_single" }).providerRequestIds,
+    ["resp_single"], "single provider response ids are not lost before diagnostics persistence");
 });

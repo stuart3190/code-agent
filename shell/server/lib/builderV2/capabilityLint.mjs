@@ -13,6 +13,7 @@
 export const FACTORY_METHODS = Object.freeze({
   makeEntityStore: ["list", "get", "create", "update", "remove", "count", "subscribe"],
   makeBookingSystem: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
+  makeWizardMachine: ["getState", "subscribe", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
   makeContactForm: ["submitContact"],
   makeNewsletter: ["subscribe"],
 });
@@ -20,6 +21,7 @@ export const FACTORY_METHODS = Object.freeze({
 // Non-method properties an instance legitimately exposes (enums; never called).
 const FACTORY_PROPERTIES = Object.freeze({
   makeBookingSystem: ["BOOKING_STATUS", "CREATE_RESULT"],
+  makeWizardMachine: ["WIZARD_STATUS"],
 });
 
 const GENERATED_FILE = /^src\/.*\.(jsx?|tsx?)$/;

@@ -37,6 +37,9 @@ export function memoryKnowledgeStore() {
     async upsert(row) {
       rows.set(`${row.owner}:${row.project_id}:${row.kind}:${row.key}`, { ...row, updated_at: new Date().toISOString() });
     },
+    async upsertMany(input) {
+      for (const row of input) await this.upsert(row);
+    },
     async list(owner, projectId) {
       return [...rows.values()].filter((r) => r.owner === owner && r.project_id === projectId);
     },
@@ -52,6 +55,14 @@ export function supabaseKnowledgeStore(client = serviceClient()) {
       const { error } = await client.from("bv2_project_knowledge")
         .upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: "owner,project_id,kind,key" });
       if (error) throw new Error(`knowledge upsert: ${error.message}`);
+    },
+    async upsertMany(rows) {
+      if (!rows.length) return;
+      const { error } = await client.from("bv2_project_knowledge")
+        .upsert(rows.map((row) => ({ ...row, updated_at: new Date().toISOString() })), {
+          onConflict: "owner,project_id,kind,key",
+        });
+      if (error) throw new Error(`knowledge batch upsert: ${error.message}`);
     },
     async list(owner, projectId) {
       const { data, error } = await client.from("bv2_project_knowledge")
@@ -73,8 +84,21 @@ export async function recordFact(owner, projectId, { kind, key, value, sourceBui
   await store.upsert({ owner, project_id: projectId, kind, key, value, source_build: sourceBuild });
 }
 
-export async function getKnowledge(owner, projectId, { store = supabaseKnowledgeStore() } = {}) {
+export async function recordFacts(owner, projectId, facts, { store = supabaseKnowledgeStore() } = {}) {
+  const rows = facts.map(({ kind, key, value, sourceBuild = null }) => {
+    const check = validateFact({ kind, key, value });
+    if (!check.ok) throw new Error(`invalid knowledge fact: ${check.problems.join("; ")}`);
+    return { owner, project_id: projectId, kind, key, value, source_build: sourceBuild };
+  });
+  if (store.upsertMany) return store.upsertMany(rows);
+  for (const row of rows) await store.upsert(row);
+}
+
+export async function getKnowledge(owner, projectId, {
+  store = supabaseKnowledgeStore(), failClosed = false,
+} = {}) {
   const rows = await store.list(owner, projectId).catch((error) => {
+    if (failClosed) throw error;
     // Read-miss/failure NEVER blocks a build — empty knowledge is a slower build, not a dead one.
     console.error(`[bv2] knowledge unreadable for ${String(projectId).slice(0, 8)}: ${error.message}`);
     return [];

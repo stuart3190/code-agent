@@ -9,6 +9,7 @@ export { makeEntityStore } from "./crud.js";
 export { ensureSession, ensureVisitorSession, currentUser, signOut } from "./session.js";
 export { isOwner, requireOwner } from "./roles.js";
 export { makeBookingSystem, BOOKING_STATUS, CREATE_RESULT } from "./booking.js";
+export { makeWizardMachine, WIZARD_STATUS } from "./wizard.js";
 export { makeContactForm, makeNewsletter, CONTACT_RESULT, NEWSLETTER_RESULT } from "./forms.js";
 
 export const CAPABILITY_VERSIONS = Object.freeze({
@@ -16,5 +17,6 @@ export const CAPABILITY_VERSIONS = Object.freeze({
   session: "1.0.0",
   roles: "1.0.0",
   booking: "1.0.0",
+  wizard: "1.0.0",
   forms: "1.0.0",
 });

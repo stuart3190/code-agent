@@ -105,6 +105,18 @@ test("RESERVATIONS — a non-managed lane creates none and debits nothing", asyn
     "the BYOK settle path bills the owner's provider, not managed credits");
 });
 
+test("FAIL CLOSED — credential lookup failure cannot silently select managed", async () => {
+  await assert.rejects(resolveBuildContext("owner-1", {
+    credentialResolver: async () => { throw Object.assign(new Error("credential store unavailable"), { code: "store_down" }); },
+  }), (error) => error.code === "store_down");
+});
+
+test("FAIL CLOSED — an unsupported connected provider cannot silently select managed", async () => {
+  await assert.rejects(resolveBuildContext("owner-1", {
+    credentialResolver: async () => ({ provider: "future-provider", secret: "owner-key" }),
+  }), (error) => error.code === "provider_unavailable");
+});
+
 test("PREFLIGHT — the summary states the lane before any live spend", () => {
   const summary = preflightSummary(resolveProviderPolicy({ provider: "codex" }));
   assert.match(summary, /Provider: Codex/);

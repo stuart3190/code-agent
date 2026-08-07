@@ -295,6 +295,25 @@ test("recording failures never propagate into the pipeline (fire-and-forget)", a
   assert.ok(true);
 });
 
+test("Builder V2 strict diagnostics fail closed when required evidence cannot persist", async () => {
+  const base = fakeDb();
+  const client = {
+    from(name) {
+      if (name === "diag_steps" || name === "ai_requests") {
+        return {
+          insert: () => Promise.resolve({ data: null, error: { message: "diagnostic storage down" } }),
+        };
+      }
+      return base.from(name);
+    },
+  };
+  const session = await createDiagSession({
+    owner: OWNER, kind: "app_build_v2", prompt: "x", client, strictWrites: true,
+  });
+  session.step({ kind: "compiler", label: "required V2 evidence", output: "failed" });
+  await assert.rejects(session.flush(), /diagnostic storage down/);
+});
+
 test("unpackOutput survives corrupt compressed data honestly", () => {
   assert.match(unpackOutput({ output: null, output_gz: "not-base64-gzip!!" }), /could not be decompressed/);
   assert.equal(unpackOutput({ output: "plain" }), "plain");

@@ -130,6 +130,10 @@ export function normalizeTelemetry(usage) {
   if (!usage) return null;
   const input = Number(usage.input ?? usage.inputTokens ?? 0);
   const output = Number(usage.output ?? usage.outputTokens ?? 0);
+  const requestIds = [...new Set([
+    ...(Array.isArray(usage.providerRequestIds) ? usage.providerRequestIds : []),
+    usage.providerRequestId,
+  ].filter(Boolean).map(String))].sort();
   return {
     input,
     output,
@@ -139,9 +143,7 @@ export function normalizeTelemetry(usage) {
     // Provider response ids, when the provider surfaced them. Not numeric, deliberately carried:
     // normalisation used to strip them, which made the storage below silently never happen — the
     // 2026-08-05 incident could only be reconciled against tariff tables for exactly this reason.
-    providerRequestIds: Array.isArray(usage.providerRequestIds) && usage.providerRequestIds.length
-      ? usage.providerRequestIds.map(String)
-      : null,
+    providerRequestIds: requestIds.length ? requestIds : null,
   };
 }
 
@@ -159,12 +161,13 @@ export function providerForModel(model = "") {
 export async function createDiagSession({
   owner, projectId = null, conversationId = null, kind, prompt, model = null,
   client = null, capturePolicy = diagnosticCapturePolicy(), redactionEnv = process.env,
+  existingRunId = null, strictWrites = false,
 }) {
   const db = client || serviceClient();
   const redactText = (value) => redactDiagnosticText(value, { env: redactionEnv });
   const redactValue = (value) => redactDiagnosticValue(value, { env: redactionEnv });
   const session = {
-    id: randomUUID(),
+    id: existingRunId || randomUUID(),
     db,
     owner,
     seq: 0,
@@ -178,15 +181,37 @@ export async function createDiagSession({
     _chain: Promise.resolve(),
   };
   const write = (fn) => {
-    session._chain = session._chain.then(fn).catch((error) =>
-      console.error(`[diag ${session.id.slice(0, 8)}]`, error.message));
+    session._chain = session._chain.then(async () => {
+      const result = await fn();
+      if (result?.error) throw new Error(result.error.message || "diagnostic persistence failed");
+      return result;
+    });
+    if (!strictWrites) {
+      session._chain = session._chain.catch((error) =>
+        console.error(`[diag ${session.id.slice(0, 8)}]`, error.message));
+    }
     return session._chain;
   };
-  write(() => db.from("diag_runs").insert({
-    id: session.id, owner, project_id: projectId, conversation_id: conversationId,
-    kind, status: "running", prompt: capturePolicy.prompts ? redactText(prompt || "") : null, model,
-    started_at: now(),
-  }));
+  session.flush = () => session._chain;
+  if (existingRunId) {
+    const { data: existing, error: existingError } = await db.from("diag_runs")
+      .select("id,owner,project_id,started_at").eq("id", existingRunId).eq("owner", owner).maybeSingle();
+    if (existingError || !existing || (projectId && existing.project_id !== projectId)) {
+      throw new Error(`diagnostics run ${existingRunId} is not owned by this project`);
+    }
+    const { data: lastStep, error: stepError } = await db.from("diag_steps")
+      .select("seq").eq("run_id", existingRunId).order("seq", { ascending: false }).limit(1).maybeSingle();
+    if (stepError) throw new Error(`diagnostics sequence resume failed: ${stepError.message}`);
+    session.seq = Number(lastStep?.seq || 0);
+    session.startedAt = new Date(existing.started_at).getTime() || Date.now();
+  } else {
+    const { error: insertError } = await db.from("diag_runs").insert({
+      id: session.id, owner, project_id: projectId, conversation_id: conversationId,
+      kind, status: "running", prompt: capturePolicy.prompts ? redactText(prompt || "") : null, model,
+      started_at: now(),
+    });
+    if (insertError) throw new Error(`diagnostics run create failed: ${insertError.message}`);
+  }
 
   // trace: optional { traceId, parentId, step } — the Builder v2 hierarchy (trace root =
   // the build; every model call/verification names its pipeline step). Columns exist since
@@ -348,6 +373,7 @@ export function nullDiagSession() {
     setModel: noop, finish: noop, contract: null,
     failureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     rawFailureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
+    flush: async () => {},
     recorderForJob: () => ({ sessionId: null, setModel: noop, setByok: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),
   };
 }

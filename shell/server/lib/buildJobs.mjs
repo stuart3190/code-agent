@@ -158,8 +158,10 @@ function emit(job, name, data) {
 // are the user's own deliverable; everything else is scalars.
 function publicResult(job) {
   if (!job.result) return null;
-  const { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings } = job.result;
-  return { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings };
+  const { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings,
+    snapshotId, pipelineVersion } = job.result;
+  return { finalText, tree, buildOk, previewUrl, need, balance, designProfile, qualityWarnings,
+    snapshotId, pipelineVersion };
 }
 
 function persistedResult(job) {
@@ -179,7 +181,7 @@ export function isTerminal(job) { return TERMINAL.has(job.status); }
 
 export function publicJob(job) {
   return {
-    jobId: job.id, projectId: job.projectId, mode: job.mode,
+    jobId: job.id, projectId: job.projectId, mode: job.mode, pipelineVersion: job.pipelineVersion || "v1",
     status: job.status, phase: job.phase, error: job.error || null,
     // Why the job stopped, recorded where the truth was known. Status alone cannot tell a
     // user cancellation from a crash, and treating the two alike was retrying cancellations.
@@ -241,13 +243,40 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null }) {
+  if (!["v1", "v2"].includes(pipelineVersion)) throw new Error(`unknown builder pipeline ${pipelineVersion}`);
+  if (pipelineVersion === "v2" && !buildWorkerEnabled()) {
+    throw Object.assign(new Error("Builder V2 requires the durable build worker; dispatch is disabled."), {
+      code: "worker_required",
+    });
+  }
   const existing = activeJobFor(owner.id, projectId);
-  if (existing) return { job: existing, existing: true };
+  if (existing) {
+    if ((existing.pipelineVersion || "v1") !== pipelineVersion) {
+      throw Object.assign(new Error(
+        `project already has an active Builder ${existing.pipelineVersion === "v2" ? "V2" : "V1"} job; cross-pipeline overlap is forbidden`,
+      ), { code: "builder_pipeline_conflict" });
+    }
+    return { job: existing, existing: true };
+  }
+  if (pipelineVersion === "v2") {
+    const { data: durableExisting, error: existingError } = await db().select("*")
+      .eq("owner", owner.id).eq("project_id", projectId)
+      .in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (existingError) throw new Error(`could not inspect active Builder V2 jobs: ${existingError.message}`);
+    if (durableExisting) {
+      if ((durableExisting.pipeline_version || "v1") !== pipelineVersion) {
+        throw Object.assign(new Error(
+          `project already has an active Builder ${durableExisting.pipeline_version === "v2" ? "V2" : "V1"} job; cross-pipeline overlap is forbidden`,
+        ), { code: "builder_pipeline_conflict" });
+      }
+      return { job: rowToJob(durableExisting), existing: true };
+    }
+  }
 
   const job = {
     id: crypto.randomUUID(),
-    owner, projectId, mode,
+    owner, projectId, mode, pipelineVersion, diagSessionId: diag?.sessionId || null,
     input: { prompt, tree, plan, knowledge, style, designProfile, redesign }, // in-memory only; restart sweeps the job
     status: "queued", phase: "queued", error: null,
     result: null, buildStderr: null,
@@ -256,6 +285,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     taskHint,                              // the USER's own words, for task classification
     budgetAllowance,                       // managed: what the LIFECYCLE budget has left for this job
     byokCostLimit,                         // BYOK: only set when the user enabled a per-build limit
+    manualModel, providerSelection,
     providerOverride,                      // set by a fallback switch — continue on a different provider
     stopReason: null,                      // set at finish() — why this job stopped
     measurements: null,                    // server-side only: what the relay compares between rounds
@@ -266,9 +296,20 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
   };
   const { error } = await db().insert({
     id: job.id, owner: owner.id, project_id: projectId, mode,
-    status: "queued", phase: "queued", server_id: SERVER_ID,
+    status: "queued", phase: "queued", server_id: SERVER_ID, pipeline_version: pipelineVersion,
+    diag_run_id: diag?.sessionId || null,
   });
-  if (error) throw new Error(`could not create build job: ${error.message}`);
+  if (error) {
+    if (pipelineVersion === "v2" && error.code === "23505") {
+      const { data: winner } = await db().select("*").eq("owner", owner.id).eq("project_id", projectId)
+        .in("status", ["queued", "running"])
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (winner && (winner.pipeline_version || "v1") === pipelineVersion) {
+        return { job: rowToJob(winner), existing: true };
+      }
+    }
+    throw new Error(`could not create build job: ${error.message}`);
+  }
   jobs.set(job.id, job);
   if (buildWorkerEnabled()) {
     try {
@@ -276,13 +317,14 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
         owner: owner.id, projectId, buildId: job.id, jobType: "builder_pipeline",
         payload: {
           input: job.input, mode, trigger, taskHint, budgetAllowance, byokCostLimit, providerOverride,
-          diagSessionId: diag?.sessionId || null,
+          diagSessionId: diag?.sessionId || null, pipelineVersion, manualModel, providerSelection,
         },
         idempotencyKey: `builder-pipeline:${job.id}`,
         priority: trigger === "user" ? 20 : 10,
-        // A worker crash after provider dispatch cannot safely replay the whole model pipeline.
-        // Fail closed; an operator can explicitly raise the attempt ceiling through build_work_retry.
-        maxAttempts: 1,
+        // Attempt two is guarded by prepare_bv2_pipeline_retry. It may resume an already-persisted
+        // result or restart work only when no model reservation exists. Provider-dispatch ambiguity
+        // fails closed, so crash recovery cannot duplicate provider spend.
+        maxAttempts: 2,
       });
       job.workJobId = work.id;
       job.status = "queued";
@@ -294,6 +336,9 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
       if (markError) throw new AggregateError([error, markError], "Build work enqueue and failure persistence both failed.");
       throw error;
     }
+  }
+  if (pipelineVersion === "v2") {
+    throw Object.assign(new Error("Builder V2 cannot execute in the shell process."), { code: "worker_required" });
   }
   waiting.push(job.id);
   schedule();
@@ -327,6 +372,7 @@ export async function activeBuildFor(ownerId, projectId) {
 function rowToJob(row) {
   return {
     id: row.id, owner: { id: row.owner }, projectId: row.project_id, mode: row.mode,
+    pipelineVersion: row.pipeline_version || "v1", diagSessionId: row.diag_run_id || null,
     status: row.status, phase: row.phase, error: row.error,
     result: row.result, buildStderr: row.build_stderr,
     workJobId: row.work_job_id || null,
@@ -1481,6 +1527,24 @@ export async function executeBuildPipelineWork(workJob, {
   onEvent = null,
 } = {}) {
   const payload = workJob.payload || {};
+  if (payload.pipelineVersion === "v2") {
+    const { executeBuilderV2PipelineWork } = await import("./builderV2/runtimeComposition.mjs");
+    const outcome = await executeBuilderV2PipelineWork(workJob, { signal, onEvent });
+    const publicOutcome = outcome.result || null;
+    const terminal = outcome.status === "complete" ? "complete" : "failed";
+    const { error } = await db().update({
+      status: terminal, phase: terminal,
+      error: terminal === "complete" ? null : publicOutcome?.finalText || "Builder V2 failed.",
+      stop_reason: outcome.stopReason || null,
+      result: publicOutcome ? {
+        ...publicOutcome,
+        _worker: { pipelineVersion: "v2", bv2: outcome.bv2 || null },
+      } : null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", workJob.build_id).eq("owner", workJob.owner);
+    if (error) throw new Error(`Builder V2 public job persistence: ${error.message}`);
+    return outcome;
+  }
   const input = payload.input || {};
   const abort = () => { job.cancelled = true; };
   const job = {

@@ -45,14 +45,10 @@ test("SPLIT-BRAIN — Codex classifies as not-managed everywhere the policy is a
   // provider-policy suite), settle() short-circuits BYOK, and the managed ceiling does not apply.
 });
 
-test("SPLIT-BRAIN — an API key with no secret still classifies managed, mirroring buildContext", async () => {
-  // The subtlety the one-liner had right: anthropic-with-no-secret RESOLVES to managed in
-  // buildContext, so the lifecycle must classify it managed too — only Codex needs no secret.
-  const context = await resolveBuildContext("o", {
+test("SPLIT-BRAIN — an API key with no secret fails closed without changing billing lane", async () => {
+  await assert.rejects(resolveBuildContext("o", {
     credentialResolver: async () => ({ provider: "anthropic", secret: null }),
-  });
-  assert.equal(context.byok, false, "no usable secret resolves to the managed lane");
-  assert.equal(usesManagedCredits(context.policy), true);
+  }), (error) => error.code === "provider_unavailable");
 });
 
 // ── 2. the lead agent lane ────────────────────────────────────────────────────────────────────

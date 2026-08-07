@@ -70,6 +70,7 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "bv2_snapshots", column: "project_id", ownerScoped: true, label: "snapshots" },
   { table: "bv2_contracts", column: "project_id", ownerScoped: true, label: "build contracts" },
   { table: "bv2_verification_cache", column: "project_id", ownerScoped: true, label: "verification cache" },
+  { table: "bv2_model_reservations", column: "project_id", ownerScoped: true, label: "model reservations" },
   { table: "bv2_builds", column: "project_id", ownerScoped: true, label: "builds" },
   { table: "bv2_assets", column: "project_id", ownerScoped: true, label: "project imagery" },
 

@@ -201,6 +201,7 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
       });
       if (!response.ok) {
         const error = normalizeXaiError(await safeJson(response), response.status);
+        error.providerRequestId = response.headers?.get?.("x-request-id") || null;
         // Self-correcting capability discovery: strip the rejected parameter and retry
         // immediately (this attempt doesn't count against the retry budget).
         const unsupported = unsupportedParameter(error);
@@ -332,9 +333,11 @@ export function createXaiEngineProvider({
   const effort = reasoningEffort || xaiPolicy().defaultReasoning;
   const maxRetries = xaiPolicy().maxRetries;
 
-  async function runTurn({ systemPrompt, messages, tools }) {
+  async function runTurn({ systemPrompt, messages, tools, signal: callSignal = null, maxOutputTokens = null,
+    maxProviderRetries = maxRetries }) {
     const { payload, retries } = await xaiResponsesCall({
-      apiKey: key, fetchImpl, signal, timeoutMs, maxRetries,
+      apiKey: key, fetchImpl, signal: callSignal || signal, timeoutMs,
+      maxRetries: Math.max(0, Math.min(maxRetries, Number(maxProviderRetries) || 0)),
       body: {
         model,
         instructions: systemPrompt,
@@ -345,6 +348,7 @@ export function createXaiEngineProvider({
         ...(supportsReasoning(model) ? { reasoning: { effort } } : {}),
         parallel_tool_calls: false,
         store: false,
+        ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
       },
     });
     const toolCalls = (payload.output || [])
@@ -362,6 +366,7 @@ export function createXaiEngineProvider({
         input: usage.inputTokens, output: usage.outputTokens,
         reasoning: usage.reasoningTokens, cached: usage.cachedTokens,
         cacheWrite: 0, total: usage.totalTokens, retries,
+        providerRequestId: payload.id || null,
       },
     };
   }

@@ -24,6 +24,7 @@ import {
 import {
   activateRetainedRelease, assertPublishIntakeReady, atomicPublishEnabled, atomicUnpublish, finalizeAndActivateRelease,
 } from "../publishing/atomicPublisher.mjs";
+import { resolveVerifiedProjectTree } from "../builderV2/projectSource.mjs";
 
 const PROVISIOND_URL = () => optionalEnv("PROVISIOND_URL");
 const PROVISIOND_TOKEN = () => optionalEnv("PROVISIOND_TOKEN");
@@ -174,7 +175,10 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   // Scoped to THIS conversation's product. Publishing whatever happened to be newest is how
   // "publish it" could take a different app live.
   const { resolveConversationProject } = await import("./projectScope.mjs");
-  const { project, productId, scope } = await resolveConversationProject(ctx, { projectId, productName });
+  const { project, productId, scope } = await resolveConversationProject(ctx, {
+    projectId, productName,
+    columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
+  });
   if (!project) {
     const error = new Error(scope === "unknown_product"
       ? `I couldn't find an app called "${productName}". Which one did you mean?`
@@ -182,6 +186,13 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     error.code = "nothing_to_publish";
     throw error;
   }
+  const useAtomic = atomicPublishEnabled();
+  if (project.builder_version === "v2" && !useAtomic) {
+    throw Object.assign(new Error("Builder V2 publishing requires immutable atomic releases; the cutover path is disabled."), {
+      code: "atomic_publish_required",
+    });
+  }
+  const source = await resolveVerifiedProjectTree(ctx.owner, project);
 
   await ctx.emit("agent_spawned", { agent: "Publisher", status: `Publishing ${project.name || "your app"}…` });
   const startedAt = Date.now();
@@ -208,14 +219,14 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     // A rebuild of this product inherits the live address. Move the record onto this project
     // BEFORE publishing, so the unique slug is never held by two rows and the site keeps its
     // first-published date.
-    if (claim.supersedes && !atomicPublishEnabled()) await transferSite(ctx.owner, claim.supersedes, project.id);
+    if (claim.supersedes && !useAtomic) await transferSite(ctx.owner, claim.supersedes, project.id);
 
     // A tree with no package.json cannot be built, and npm's answer to that is a wall of ENOENT
     // naming a path inside Thrallo's own work directory. Observed in production: a project whose
     // tree held two stray files failed twice with that dump as its failure reason, which is now
     // shown to the customer on the publish panel. Refusing early costs nothing and says something
     // a person can act on.
-    if (!project.tree || !project.tree["package.json"]) {
+    if (!source.tree || !source.tree["package.json"]) {
       const error = new Error(
         "There's no complete app here to publish yet — the project is missing its package.json. "
         + "Ask me to build or repair it and I'll take it live.",
@@ -227,11 +238,14 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
     const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
-    const runtimeTree = withRuntimeEnv(project.tree, project.id);
+    const runtimeTree = withRuntimeEnv(source.tree, project.id);
     const packaged = await packagePublishTree({
       owner: ctx.owner, projectId: project.id, tree: runtimeTree, appName: project.name || slug,
       idempotencyKey: `conversation-publish:${deployment.id}:${crypto.createHash("sha256").update(JSON.stringify(runtimeTree)).digest("hex")}`,
     });
+    if (!packaged && project.builder_version === "v2") {
+      throw Object.assign(new Error("Builder V2 publish packaging did not run in the durable worker."), { code: "worker_required" });
+    }
     if (!packaged) await ensureDeps(() => {});
     const build = packaged ? { ok: true, stderr: "" } : await buildTree(runtimeTree, caseName, () => {});
     if (!build.ok) {
@@ -243,13 +257,13 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     // The build is done and the deploy begins here, so the two durations are measured rather than
     // one total split by guesswork. The tree is stored as it was built: the project moves on, and
     // an older deployment must never hand back today's source.
-    await markBuilt(deployment.id, { sourceTree: project.tree });
+    await markBuilt(deployment.id, { sourceTree: source.tree });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Uploading to the edge…" });
     const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
     // The slug is the app id analytics reports under, and it is already claimed by this point.
     const files = slug ? await withAnalytics(built, slug) : built;
-    const atomic = atomicPublishEnabled() ? await finalizeAndActivateRelease({
+    const atomic = useAtomic ? await finalizeAndActivateRelease({
       owner: ctx.owner, projectId: project.id, productId: project.product_id || null,
       buildId: deployment.build_run_id || null, deploymentId: deployment.id, slug,
       url: `https://${slug}.app.thrallo.com/`, files,
@@ -412,8 +426,14 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
   // Owner scoping alone would still let someone roll one of their apps back onto another's
   // address by pasting an id.
   const project = await assertBelongsTo(owner, target, projectId, { client });
+  const useAtomic = atomicPublishEnabled();
+  if (project.builder_version === "v2" && !useAtomic) {
+    throw Object.assign(new Error("Builder V2 rollback requires a retained immutable release; the atomic path is disabled."), {
+      code: "atomic_publish_required", status: 503,
+    });
+  }
 
-  if (!target.source_tree && !atomicPublishEnabled()) {
+  if (!target.source_tree && !useAtomic) {
     throw Object.assign(new Error("That deployment's source is no longer stored, so it cannot be restored."),
       { code: "source_unavailable", status: 409 });
   }
@@ -442,7 +462,7 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
 
   try {
     await emit?.("agent_status", { agent: "Publisher", status: `Restoring deployment #${target.number}…` });
-    if (atomicPublishEnabled()) {
+    if (useAtomic) {
       const { data: retained, error: retainedError } = await client.from("publish_releases")
         .select("id").eq("deployment_id", target.id).eq("owner", owner).maybeSingle();
       if (retainedError) throw retainedError;
@@ -539,7 +559,17 @@ export async function unpublishApp(owner, projectId) {
     throw error;
   }
   const client = serviceClient();
-  if (atomicPublishEnabled()) {
+  const { data: project, error: projectError } = await client.from("projects")
+    .select("id,builder_version").eq("id", String(projectId)).eq("owner", owner).maybeSingle();
+  if (projectError) throw new Error(`unpublish project lookup: ${projectError.message}`);
+  if (!project) throw Object.assign(new Error("That project could not be found."), { code: "project_missing" });
+  const useAtomic = atomicPublishEnabled();
+  if (project.builder_version === "v2" && !useAtomic) {
+    throw Object.assign(new Error("Builder V2 unpublish requires the atomic deployment state machine; the path is disabled."), {
+      code: "atomic_publish_required", status: 503,
+    });
+  }
+  if (useAtomic) {
     const result = await atomicUnpublish({ owner, projectId, client });
     logProject({ owner, projectId, source: "deploy", level: "warning",
       message: "Site unpublished", detail: `${result.url} is no longer served; immutable releases were retained.` });

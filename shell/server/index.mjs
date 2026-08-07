@@ -4,8 +4,6 @@
 //
 //   GET  /api/health                      liveness + which capabilities are env-configured
 //   GET  /api/config                      public pricing/config, sourced from costModel (no hardcoding)
-//   POST /api/generate      (auth, SSE)   the gated engine call + live ledger debit
-//   POST /api/preview       (auth)        (re)start a live preview for a saved tree (no Codex spend)
 //   POST /api/export        (auth)        download a ready-to-run project ZIP
 //   POST /api/billing/checkout (auth)     Stripe Checkout (subscription tier | top-up)
 //   GET  /api/billing/balance  (auth)     server-side balance read (convenience; UI reads via RLS too)
@@ -147,11 +145,6 @@ function clientIp(req) {
 
 function ratePolicy(pathname, method) {
   if (pathname === "/api/domain-check") return { limit: 120, windowMs: 60_000 };
-  if (pathname === "/api/generate") return { limit: 40, windowMs: 10 * 60_000 };
-  if (pathname === "/api/preview") return { limit: 60, windowMs: 5 * 60_000 };
-  if (["/api/publish", "/api/unpublish", "/api/android"].includes(pathname)) {
-    return { limit: 15, windowMs: 10 * 60_000 };
-  }
   if (method === "POST" || method === "DELETE") return { limit: 120, windowMs: 60_000 };
   return null;
 }

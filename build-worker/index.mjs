@@ -37,10 +37,19 @@ const tail = (value, max = 16_384) => redactDiagnosticText(String(value || "")).
 async function runJob(job) {
   current = job;
   currentAbort = new AbortController();
-  await queue.start(job, WORKER_ID);
+  try {
+    await queue.start(job, WORKER_ID);
+  } catch (error) {
+    // A start acknowledgement failure leaves the durable lease to expire/recover. Never leave
+    // the supervisor's process-local `current` latch stuck, which would stop all future leasing.
+    current = null;
+    currentAbort = null;
+    throw error;
+  }
   let lastHeartbeat = Date.now();
   let outputBytes = 0;
   let eventChain = Promise.resolve();
+  let eventFailure = null;
   const event = (type, value) => {
     const text = tail(value);
     outputBytes += Buffer.byteLength(text);
@@ -48,8 +57,17 @@ async function runJob(job) {
       currentAbort.abort(Object.assign(new Error("worker diagnostic output limit exceeded"), { code: "output_limit" }));
       return eventChain;
     }
-    eventChain = eventChain.then(() => queue.event(job, WORKER_ID, type, { text }))
-      .catch((error) => console.error(`[build-worker] event: ${error.message}`));
+    eventChain = eventChain.then(async () => {
+      if (eventFailure) return;
+      try {
+        await queue.event(job, WORKER_ID, type, { text });
+      } catch (error) {
+        eventFailure = Object.assign(new Error(`worker evidence persistence failed: ${error.message}`), {
+          code: "worker_evidence_failed", cause: error,
+        });
+        currentAbort.abort(eventFailure);
+      }
+    });
     return eventChain;
   };
   const heartbeat = setInterval(async () => {
@@ -67,6 +85,11 @@ async function runJob(job) {
   try {
     let outcome;
     if (job.job_type === "builder_pipeline") {
+      const { error } = await client.from("build_jobs").update({
+        status: "running", phase: "running", updated_at: new Date().toISOString(),
+      }).eq("id", job.build_id).eq("owner", job.owner)
+        .in("status", ["queued", "running"]);
+      if (error) throw new Error(`public build start persistence: ${error.message}`);
       outcome = await executeBuildPipelineWork(job, { signal: currentAbort.signal, onEvent: event });
       outcome = { ok: true, exitCode: 0, result: outcome, stdout: "", stderr: "" };
     } else if (job.job_type === "image_optimise") {
@@ -120,6 +143,7 @@ async function runJob(job) {
       .update(`${job.id}:${job.attempts}:${JSON.stringify(result)}`).digest("hex");
     // Do not acknowledge completion until every stdout/stderr event accepted by this attempt is durable.
     await eventChain;
+    if (eventFailure) throw eventFailure;
     // build_work_complete inserts the result and moves the job to succeeded in one transaction.
     await queue.complete(job, WORKER_ID, {
       completionKey, result, artifactRef: outcome.artifactRef || null,
@@ -139,6 +163,9 @@ async function runJob(job) {
     console.log(`[build-worker] succeeded ${job.id} ${job.job_type} (${Date.now() - lastHeartbeat}ms since heartbeat)`);
   } catch (error) {
     await eventChain;
+    if (eventFailure && error !== eventFailure) error = Object.assign(new AggregateError(
+      [error, eventFailure], "build work failed and its worker evidence could not persist",
+    ), { code: "worker_evidence_failed", retryable: false });
     const classification = currentAbort.signal.aborted
       ? (error.code === "lease_lost" ? "worker_crash" : "cancelled")
       : error.classification || error.code || "worker_error";
@@ -150,10 +177,32 @@ async function runJob(job) {
         }).eq("id", job.payload?.runId).eq("owner", job.owner);
       } catch {}
     }
-    await queue.fail(job, WORKER_ID, {
+    const failedWork = await queue.fail(job, WORKER_ID, {
       ...error, classification,
       retryable: error.retryable === true || ["worker_crash", "spawn_error"].includes(classification),
-    }).catch((failure) => console.error(`[build-worker] fail persistence ${job.id}: ${failure.message}`));
+    }).catch((failure) => {
+      console.error(`[build-worker] fail persistence ${job.id}: ${failure.message}`);
+      return null;
+    });
+    if (job.job_type === "builder_pipeline" && failedWork && failedWork.state !== "queued") {
+      const { data: publicJob, error: publicError } = await client.from("build_jobs").update({
+        status: "failed", phase: "failed", stop_reason: classification,
+        error: classification === "cancelled" ? "Cancelled by user." : "The isolated build worker stopped before completion.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", job.build_id).eq("owner", job.owner)
+        .not("status", "in", "(complete,failed,interrupted)").select("bv2_build_id").maybeSingle();
+      if (publicError) console.error(`[build-worker] public job failure ${job.id}: ${publicError.message}`);
+      if (publicJob?.bv2_build_id) {
+        await client.from("bv2_builds").update({
+          state: classification === "cancelled" ? "cancelled" : "failed",
+          error: `worker:${classification}`, finished_at: new Date().toISOString(),
+        }).eq("id", publicJob.bv2_build_id).eq("owner", job.owner)
+          .not("state", "in", "(green,failed,cancelled,blocked)")
+          .then(({ error: v2Error }) => {
+            if (v2Error) console.error(`[build-worker] V2 build failure ${job.id}: ${v2Error.message}`);
+          });
+      }
+    }
     console.error(`[build-worker] ${classification} ${job.id}: ${error.message}`);
   } finally {
     clearInterval(heartbeat);

@@ -320,8 +320,8 @@ test("WP8 — rebuilds are cache-warm: second build makes ZERO provider calls an
     "the index rebuilds deterministically from the snapshot");
 });
 
-test("WP8 — the shadow entry is triple-gated and fails closed in every direction", async () => {
-  const { v2BuildEligible, startAppBuildV2 } = await import("../../shell/server/lib/builderV2/entry.mjs");
+test("WP8 — the pre-cutover V2 entry is triple-gated and fails closed in every direction", async () => {
+  const { v2BuildEligible } = await import("../../shell/server/lib/builderV2/entry.mjs");
   const { __resetFlagCacheForTests } = await import("../../shell/server/lib/builderV2/featureFlags.mjs");
   const flagClient = (rows) => ({ from: () => ({ select: async () => ({ data: rows, error: null }) }) });
   const brokenClient = { from: () => ({ select: async () => ({ data: null, error: { message: "db down" } }) }) };
@@ -356,10 +356,8 @@ test("WP8 — the shadow entry is triple-gated and fails closed in every directi
   const broken = await v2BuildEligible("owner-1", opts(brokenClient));
   assert.equal(broken.eligible, false);
 
-  // And until WP-9, even an eligible owner falls through to v1 — loudly.
-  const shadow = await startAppBuildV2();
-  assert.equal(shadow.handled, false);
-  assert.match(shadow.reason, /WP-9/);
+  // Dispatch itself is covered separately. This gate remains only as a temporary engineering
+  // rollback control; an accepted V2 request no longer has a handled:false V1 fallback.
   __resetFlagCacheForTests();
 });
 

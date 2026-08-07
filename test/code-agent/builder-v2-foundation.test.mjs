@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { flagValue, flagOn, flagOnFor, setFlag, killSwitchActive, __resetFlagCacheForTests } from "../../shell/server/lib/builderV2/featureFlags.mjs";
-import { validateFact, recordFact, getKnowledge, knowledgeBrief, memoryKnowledgeStore, FACT_KINDS } from "../../shell/server/lib/builderV2/knowledge.mjs";
+import { validateFact, recordFact, recordFacts, getKnowledge, knowledgeBrief, memoryKnowledgeStore, FACT_KINDS } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { indexFile, indexTree, diffIndex, treeHashOf } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import { createSnapshotStore, memorySnapshotStorage, PROMOTABLE_LABELS } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
@@ -65,6 +65,10 @@ test("D — knowledge: validated facts, deterministic byte-stable brief, bounded
   await recordFact("o-1", "p-1", { kind: "entity", key: "booking", value: { owned: true, fields: ["date", "slot"] } }, { store });
   await recordFact("o-1", "p-1", { kind: "route", key: "/book", value: { name: "Book a slot" } }, { store });
   await recordFact("o-1", "p-1", { kind: "capability", key: "booking", value: { version: "1.0.0", pinnedMajor: 1 } }, { store });
+  await recordFacts("o-1", "p-1", [
+    { kind: "contract_ref", key: "current", value: { contractId: "c-1", version: 1 } },
+    { kind: "decision", key: "edit:b-1", value: { text: "keep the farm name" } },
+  ], { store });
 
   assert.equal(validateFact({ kind: "nonsense", key: "x", value: 1 }).ok, false);
   await assert.rejects(recordFact("o-1", "p-1", { kind: "entity", key: "", value: 1 }, { store }), /invalid knowledge fact/);
@@ -80,6 +84,8 @@ test("D — knowledge: validated facts, deterministic byte-stable brief, bounded
   const failing = { list: async () => { throw new Error("db down"); } };
   const empty = await getKnowledge("o-1", "p-1", { store: failing });
   assert.equal(knowledgeBrief(empty), "PROJECT KNOWLEDGE: none recorded yet.");
+  await assert.rejects(getKnowledge("o-1", "p-1", { store: failing, failClosed: true }), /db down/,
+    "production V2 cannot silently omit durable project knowledge");
 });
 
 // ── E: indexer v0 ─────────────────────────────────────────────────────────────────────────────

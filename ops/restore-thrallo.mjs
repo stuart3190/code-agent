@@ -110,6 +110,7 @@ export const RESTORE_ORDER = [
   "bv2_project_pointers",
   "bv2_contracts",
   "bv2_builds",
+  "bv2_model_reservations", // references projects + bv2_builds
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",

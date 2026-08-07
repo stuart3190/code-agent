@@ -9,6 +9,7 @@ import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import { createModelLanes, jobUsageBucket, renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
+import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
 
@@ -212,9 +213,11 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
   assert.match(repair, /FILE TREE \(paths only/, "the model still sees the full shape");
 
   // Edit: keyword targeting picks the file; identical inputs render byte-identically.
+  let trace = null;
   const edit = renderScopedContext(tree, {
     step: "edit", editRequest: "update the visit guidance opening hours",
     capabilityPaths: ["src/lib/capabilities/crud.js"],
+    onRetrieval: (value) => { trace = value; },
   });
   assert.match(edit, /VisitPage\.jsx — will be modified by this step/);
   assert.match(edit, /makeEntityStore/, "bound capability interfaces are integrated into retrieval");
@@ -222,6 +225,10 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
     step: "edit", editRequest: "update the visit guidance opening hours",
     capabilityPaths: ["src/lib/capabilities/crud.js"],
   }));
+  assert.ok(Array.isArray(trace.included) && trace.included.length > 0,
+    "the NOT NULL persisted trace receives the retrieval engine's complete included manifest");
+  assert.ok(Number.isInteger(trace.omittedCount));
+  assert.ok(trace.included.some((row) => row.path === "src/routes/VisitPage.jsx"));
 });
 
 test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors never do", async () => {
@@ -247,4 +254,64 @@ test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors n
   const lanes2 = createModelLanes({ provider: badModel, ceilingCredits: 5, diag: null, log: () => {} });
   await assert.rejects(() => lanes2.patchesFn({ step: "core", contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [] }), /HTTP 400/);
   assert.equal(modelErrCalls, 1, "a real API error never retries");
+});
+
+test("V2 transport retry gets a distinct durable reservation for each provider dispatch", async () => {
+  let calls = 0;
+  const seenOptions = [];
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    async runTurn(options) {
+      seenOptions.push(options);
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error("terminated"), {
+        usage: { input: 8, output: 0, total: 8 }, providerRequestId: "req-failed",
+      });
+      return {
+        text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+        usage: { input: 10, output: 5, total: 15, providerRequestId: "req-ok" },
+      };
+    },
+  };
+  const reservations = memoryModelReservations();
+  const controller = new AbortController();
+  const lanes = createModelLanes({
+    provider, providerForStep: async () => ({ provider, decision: { estimatedCredits: 1, provider: "openai" } }),
+    ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(), log: () => {},
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [], signal: controller.signal,
+  });
+  assert.equal(calls, 2);
+  const rows = reservations.rows();
+  assert.equal(rows.length, 2, "one reservation per network dispatch");
+  assert.equal(new Set(rows.map((row) => row.callKey)).size, 2);
+  assert.deepEqual(rows.map((row) => row.providerRequestIds), [["req-failed"], ["req-ok"]]);
+  assert.ok(rows.every((row) => row.reservedCredits >= 1));
+  assert.ok(seenOptions.every((options) => options.maxOutputTokens === 16_000));
+  assert.ok(seenOptions.every((options) => options.signal === controller.signal));
+});
+
+test("a successful provider response with failed settlement stops without rewriting telemetry", async () => {
+  let settles = 0;
+  const reservations = {
+    reserve: async () => ({ id: "hold-1" }),
+    settle: async () => { settles += 1; throw new Error("settlement unavailable"); },
+  };
+  const provider = {
+    model: "gpt-5.5",
+    runTurn: async () => ({
+      text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+      usage: { input: 10, output: 5, total: 15, providerRequestId: "req-success" },
+    }),
+  };
+  const lanes = createModelLanes({
+    provider, ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await assert.rejects(lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  }), /settlement unavailable/);
+  assert.equal(settles, 1, "a settlement acknowledgement failure is not settled again as empty provider telemetry");
 });

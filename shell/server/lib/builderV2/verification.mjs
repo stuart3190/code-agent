@@ -302,6 +302,7 @@ export async function recordJourneyVerdicts({ owner, projectId, cache, plan, res
         status: outcome.status,
         failedSteps: outcome.failedSteps || 0,
         steps: outcome.steps || [],
+        backendEvidence: outcome.backendEvidence || null,
         cacheIdentity: identity.components,
       }, snapshotId);
   }

@@ -17,6 +17,7 @@ import { createRoutingProvider } from "../../../../src/providers/routingProvider
 import { resolveProviderPolicy } from "./providerPolicy.mjs";
 
 function managedModelForIntent(intent) {
+  if (intent === "fast") return optionalEnv("OPENAI_FAST_MODEL", optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra"));
   return intent === "edit"
     ? optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra")
     : optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"));
@@ -29,12 +30,9 @@ export async function resolveBuildContext(ownerId, {
   credentialResolver = activeAiCredential,
   preferProvider = null,
 } = {}) {
-  let credential;
-  try {
-    credential = await credentialResolver(ownerId);
-  } catch {
-    credential = { provider: "managed", secret: null };
-  }
+  // A credential lookup failure is not evidence that the owner selected managed billing. Falling
+  // back here silently changes both provider and payer, so resolution fails closed without a call.
+  let credential = await credentialResolver(ownerId);
 
   if (preferProvider && preferProvider !== credential.provider) {
     // A fallback may not widen the billing lane. Switching TO managed is a billing decision made
@@ -62,6 +60,8 @@ export async function resolveBuildContext(ownerId, {
       byok: true,
       providerLabel: "anthropic",
       strongModel: strong,
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: (intent) => createRoutingProvider({ config, turnMeta: { intent } }),
     };
@@ -77,15 +77,19 @@ export async function resolveBuildContext(ownerId, {
         byok: true,
         providerLabel: "xai",
         strongModel: strong,
+        routing: credential.routing || null,
+        byokSafety: credential.byokSafety || null,
         policy: resolveProviderPolicy(credential),
         buildProvider: (intent) => createXaiEngineProvider({
-          model: intent === "edit" ? editModel : strong,
+          model: intent === "fast" ? "grok-4.3" : intent === "edit" ? editModel : strong,
           apiKey: credential.secret,
           reasoningEffort: xaiReasoningForTask(intent === "edit" ? "component_edit" : "full_build", policy),
         }),
       };
     }
-    // Grok connected but admin-disabled for builds — fall through to managed.
+    throw Object.assign(new Error("The selected xAI connection is not enabled for application builds."), {
+      code: "provider_unavailable",
+    });
   }
 
   if (credential.provider === "openai" && credential.secret) {
@@ -93,6 +97,8 @@ export async function resolveBuildContext(ownerId, {
       byok: true,
       providerLabel: "openai",
       strongModel: managedModelForIntent("generate"),
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: (intent) =>
         createOpenAIEngineProvider({ model: managedModelForIntent(intent), apiKey: credential.secret }),
@@ -114,15 +120,25 @@ export async function resolveBuildContext(ownerId, {
       byok: true, // never reserves or debits managed credits
       providerLabel: "codex",
       strongModel: strong,
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: () => createCodexProvider(),
     };
+  }
+
+  if (credential.provider !== "managed") {
+    throw Object.assign(new Error(`The selected ${credential.provider} connection cannot run application builds.`), {
+      code: "provider_unavailable",
+    });
   }
 
   return {
     byok: false,
     providerLabel: "openai-managed",
     strongModel: managedModelForIntent("generate"),
+    routing: credential.routing || null,
+    byokSafety: credential.byokSafety || null,
     policy: resolveProviderPolicy({ provider: "managed" }),
     buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
   };
