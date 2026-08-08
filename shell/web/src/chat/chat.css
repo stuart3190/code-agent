@@ -1062,7 +1062,32 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 .ct-project { padding-right: 58px; }
 
 @media (max-width: 560px) {
-  .ct-ws-selectall { margin-left: 0; }
+  .ct-begin { padding-bottom: 2vh; }
+  .ct-hello { margin-top: 24px !important; }
+  .ct-question { margin: 7px 0 20px; }
+  .ct-workspace { width: calc(100% - 24px); margin-top: 20px; padding-bottom: 32px; }
+
+  /* Project views stay one compact row instead of wrapping into a tall filter wall. */
+  .ct-ws-tabs {
+    flex-wrap: nowrap; overflow-x: auto; max-width: 100%; padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+  .ct-ws-tab { flex: 0 0 auto; min-height: 40px; }
+  .ct-ws-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .ct-ws-controls > button { min-width: 0; min-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ct-ws-sort { grid-column: 1 / -1; width: 100%; justify-content: space-between; }
+  .ct-ws-sort select { flex: 1; min-width: 0; min-height: 40px; }
+  .ct-ws-selectall { grid-column: 1 / -1; margin-left: 0; text-align: left; }
+
+  /* Card actions retain touch targets without competing with the title and two-line status. */
+  .ct-project { gap: 8px; padding-top: 11px; padding-bottom: 11px; }
+  .ct-popen { display: none; }
+  .ct-pname { line-height: 1.35; }
+  .ct-pactivity {
+    white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  }
+  .ct-badge { margin-left: 5px; padding-inline: 5px; letter-spacing: 0.04em; }
   .ct-bulkbar-actions { margin-left: 0; width: 100%; }
 }
 /* Width is the wrong question — a touch tablet is wide and still has no hover. Ask about hover. */

@@ -161,10 +161,12 @@ test("background navigation: leave a running build, start another, return — st
     [1, "message", { role: "user", text: "Build me a big CRM called Atlas" }],
     [2, "agent_spawned", { agent: "Lead Agent", status: "Understanding request…" }],
     [3, "plan.created", { title: "Build Atlas", steps: ["Schema", "UI", "Verify"] }],
-    [4, "agent_spawned", { agent: "Builder", status: "Writing the schema…" }],
+    [4, "build_started", { jobId: "job-atlas", projectId: "p9" }],
+    [5, "agent_spawned", { agent: "Builder", status: "Writing the schema…" }],
   ];
   const afters = [];
   let created = false;
+  let atlasRunning = true;
   await page.unroute("**/api/v1/conversations");
   await page.route("**/api/v1/conversations", (route) => {
     if (route.request().method() === "POST") {
@@ -172,7 +174,7 @@ test("background navigation: leave a running build, start another, return — st
       return route.fulfill({ json: { conversation: { id: "c2", title: "Second Project", state: "thinking" } } });
     }
     return route.fulfill({ json: { conversations: [
-      { id: "c9", title: "Atlas", activity: { agent: "Builder", status: "Writing the schema…" } },
+      { id: "c9", title: "Atlas", activity: { agent: "Builder", status: "Writing the schema…", projectId: "p9" } },
       ...(created ? [{ id: "c2", title: "Second Project" }] : []),
     ] } });
   });
@@ -186,6 +188,15 @@ test("background navigation: leave a running build, start another, return — st
     return route.fulfill({ contentType: "text/event-stream", body: sse(
       [[1, "message", { role: "user", text: "Start the second project" }]].filter(([s]) => s > after)) });
   });
+  await page.route("**/api/projects/p9/active-build", (route) => route.fulfill({ json: { job: atlasRunning
+    ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+    : { jobId: "job-atlas", projectId: "p9", status: "complete", phase: "complete" } } }));
+  await page.route("**/api/builds/job-atlas/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify(atlasRunning
+      ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+      : { jobId: "job-atlas", projectId: "p9", status: "complete", phase: "complete" })}\n\n`,
+  }));
   await page.goto("/");
 
   // 1. Open the long-running build. The back affordance is plainly visible mid-build.
@@ -198,12 +209,13 @@ test("background navigation: leave a running build, start another, return — st
   // 2. Press ← Projects. 3. Home shows the project's LIVE status while the build keeps
   // going server-side (its event log grows while we're away).
   await back.click();
-  await expect(page.getByText("Builder · Writing the schema…")).toBeVisible();
+  await expect(page.getByText("Builder · Building…")).toBeVisible();
   buildEvents.push(
-    [5, "message", { role: "lead", text: "Schema is in — wiring the UI now." }],
-    [6, "agent_status", { agent: "Builder", status: "Wiring the UI…" }],
-    [7, "preview_ready", { url: "https://demo.preview.thrallo.com/", projectId: "p9" }],
+    [6, "message", { role: "lead", text: "Schema is in — wiring the UI now." }],
+    [7, "agent_status", { agent: "Builder", status: "Wiring the UI…" }],
+    [8, "preview_ready", { url: "https://demo.preview.thrallo.com/", projectId: "p9" }],
   );
+  atlasRunning = false;
 
   // 4. Start another project immediately — the first build never pauses.
   await page.getByPlaceholder(/Describe anything/).fill("Start the second project");
@@ -221,9 +233,9 @@ test("background navigation: leave a running build, start another, return — st
   await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
   await expect(page.getByText("Schema is in — wiring the UI now.")).toBeVisible();
   if (isNarrow(page)) {
-    await expect(page.getByText("Builder — Wiring the UI…")).toBeVisible(); // team strip
+    await expect(page.getByText("The team is with you.")).toBeVisible(); // terminal team strip
   } else {
-    await expect(page.locator('.ct-agent[title="Builder — Wiring the UI…"]')).toBeVisible(); // compact rail
+    await expect(page.locator('.ct-agent[title="Builder — Finished"]')).toBeVisible(); // compact rail
   }
   await expect(page.locator(".ct-preview-thumb").first()).toBeVisible();
   await expect(back).toBeVisible();
@@ -588,6 +600,10 @@ test("Stop build: contextual control, reaches the mounted cancel route, dispatch
     const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
     return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
   });
+  await page.route("**/api/builds/job-77/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ jobId: "job-77", projectId: "p-77", status: "running", phase: "running" })}\n\n`,
+  }));
   await page.route("**/api/builds/*/cancel", (route) => {
     cancelCalls.push(route.request().url());
     return route.fulfill({ json: { ok: true } });
@@ -628,6 +644,10 @@ test("Stop build is absent when no build is running, and a completion race is no
     const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
     return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
   });
+  await page.route("**/api/builds/job-88/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ jobId: "job-88", projectId: "p-88", status: "complete", phase: "complete" })}\n\n`,
+  }));
   await page.goto("/");
   await page.getByRole("button", { name: /Open Chat/ }).click();
   await expect(page.getByText("Just chatting")).toBeVisible();

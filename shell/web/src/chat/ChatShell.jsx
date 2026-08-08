@@ -13,13 +13,16 @@ import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
   listConversations, bulkConversations, startConversation, sendConversationMessage,
-  streamConversationEvents, deleteConversation,
+  streamConversationEvents, streamBuildEvents, projectBuildStatus, deleteConversation,
   listDeletedConversations, restoreConversation, incidentDetails,
 } from "../lib/codeAgentApi.js";
 import {
-  applyEvent, emptyConversationView, replayEvents, railState,
+  applyEvent, applyBuildUpdate, emptyConversationView, replayEvents, railState,
   SPECIALIST_HUES, agentInitials, beginChips,
 } from "./conversationState.js";
+import {
+  ACTIVITY_STATE, activityLabel, isActiveActivity, projectActivity, reconstructProjectActivities,
+} from "./activityState.js";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
@@ -195,6 +198,7 @@ function Workspace({ user }) {
   const [openDomainsFor, setOpenDomainsFor] = useState(null);
   const scrollMemory = useRef(new Map()); // conversationId -> {top, atBottom}
   const streamAbort = useRef(null);
+  const buildStreamAbort = useRef(null);
   const toastTimer = useRef(null);
   // What opened the overlay that is showing. WebKit does not focus a button on click, so
   // document.activeElement is <body> by the time the overlay mounts and focus cannot be returned.
@@ -223,14 +227,17 @@ function Workspace({ user }) {
 
   const loadConversations = useCallback(async ({
     tab = listTab, q = listSearch, sort = listSort, favourites = listFavourites,
-    archived = listArchived, offset = 0, append = false, limit = 0,
+    archived = listArchived, offset = 0, append = false, limit = 0, silent = false,
   } = {}) => {
-    setListBusy(true);
+    if (!silent) setListBusy(true);
     try {
       const result = await listConversations({ tab, q, sort, favourites, archived, offset, limit });
+      // The list's progress copy is historical. Confirm each claimed activity against the durable
+      // owner-scoped job before allowing it to animate, badge, or enter the In progress group.
+      const reconstructed = await reconstructProjectActivities(result.conversations || [], projectBuildStatus);
       setConversations((current) => (append
-        ? [...current, ...(result.conversations || [])]
-        : (result.conversations || [])));
+        ? [...current, ...reconstructed]
+        : reconstructed));
       setListing({ counts: result.counts || {}, page: result.page || null, sorts: result.sorts || [] });
       setListError("");
     } catch (error) {
@@ -238,11 +245,21 @@ function Workspace({ user }) {
       // projects were gone.
       setListError(error?.message || "Your projects could not be loaded. Please try again.");
     } finally {
-      setListBusy(false);
+      if (!silent) setListBusy(false);
       setConvosLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listTab, listSearch, listSort, listFavourites, listArchived]);
+
+  // Only genuinely non-terminal jobs keep the dashboard fresh. A terminal snapshot removes the
+  // interval on the next render, so completed/cancelled/failed work cannot remain animated.
+  useEffect(() => {
+    if (!conversations.some((conversation) => isActiveActivity(projectActivity(conversation).state))) return undefined;
+    const timer = setInterval(() => loadConversations({
+      offset: 0, limit: conversationsRef.current.length, silent: true,
+    }), 5_000);
+    return () => clearInterval(timer);
+  }, [conversations, loadConversations]);
 
   useEffect(() => {
     // The selection belonged to the previous list; keeping it would let a bulk action apply to a
@@ -272,9 +289,22 @@ function Workspace({ user }) {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  const watchBuild = useCallback((build) => {
+    if (!build?.jobId) return;
+    buildStreamAbort.current?.abort();
+    const controller = new AbortController();
+    buildStreamAbort.current = controller;
+    streamBuildEvents(build.jobId, (_name, data) => {
+      setView((current) => applyBuildUpdate(current, data));
+    }, { signal: controller.signal }).catch(() => {
+      // No snapshot means no proof of live work. The reducer deliberately remains idle.
+    });
+  }, []);
+
   // Live channel: replay history from seq 0, then keep streaming with `after` resume.
   const openConversation = useCallback((conversation) => {
     streamAbort.current?.abort();
+    buildStreamAbort.current?.abort();
     setActive(conversation);
     setView(emptyConversationView());
     setPending(null);
@@ -319,6 +349,7 @@ function Workspace({ user }) {
               setOpenDomainsFor(event.payload?.projectId || null);
             }
             setView((v) => applyEvent(v, event));
+            if (event.type === "build_started") watchBuild(event.payload || {});
           }, { signal: controller.signal, after });
         } catch {
           if (controller.signal.aborted) return;
@@ -326,8 +357,11 @@ function Workspace({ user }) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     })();
+  }, [watchBuild]);
+  useEffect(() => () => {
+    streamAbort.current?.abort();
+    buildStreamAbort.current?.abort();
   }, []);
-  useEffect(() => () => streamAbort.current?.abort(), []);
 
   // Returns false on failure so the composer can restore the draft instead of losing it.
   const sendingRef = useRef(false);
@@ -385,9 +419,17 @@ function Workspace({ user }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const rail = railState(view);
+  // Historical roster rows stay useful as a record, but only confirmed work may shimmer or read as
+  // current. A missing terminal specialist event therefore settles visually after reconstruction.
+  const displayRoster = view.roster.map((row) => {
+    if (row.state !== "working") return row;
+    if (row.agent === "Lead Agent") return view.thinking ? row : { ...row, state: "done" };
+    return view.activeBuild ? row : { ...row, state: "done" };
+  });
+  const visibleView = { ...view, roster: displayRoster };
+  const rail = railState(visibleView);
   const initial = (user.email || "?")[0].toUpperCase();
-  const workingAgent = [...view.roster].reverse().find((r) => r.state === "working");
+  const workingAgent = [...displayRoster].reverse().find((r) => r.state === "working");
 
   // Publish state now travels with the conversation rows, so re-reading them IS the dashboard
   // refresh. Called after publish and unpublish so a card never shows a state the user has
@@ -642,6 +684,7 @@ function Workspace({ user }) {
   // closed here and resumed (with `after`) when the conversation reopens.
   const goHome = useCallback(() => {
     streamAbort.current?.abort();
+    buildStreamAbort.current?.abort();
     setActive(null); setView(emptyConversationView()); setMobilePreview(false);
     navigate("/");
     loadConversations({ offset: 0 });
@@ -672,8 +715,9 @@ function Workspace({ user }) {
       </header>
 
       <DesktopUpdateNotice />
-      {active && view.roster.length > 0 && (
-        <MobileStrip roster={view.roster} working={workingAgent} build={view.activeBuild} onPreview={() => view.previewUrl && setMobilePreview(true)} />
+      {active && displayRoster.length > 0 && (
+        <MobileStrip roster={displayRoster} working={workingAgent} build={view.activeBuild}
+          progress={activityLabel(view.buildActivity)} onPreview={() => view.previewUrl && setMobilePreview(true)} />
       )}
 
       {billingReturn === "success" ? (
@@ -745,7 +789,7 @@ function Workspace({ user }) {
               // Opens Deployments focused on this deployment rather than leaving someone to find it.
               onDeployments={(deploymentId) =>
                 openDashboard(publish.byProduct(active.productId), "deployments", null, deploymentId)} />
-            <Thread view={view} pending={pending} onOpenPreview={() => setMobilePreview(true)}
+            <Thread view={visibleView} pending={pending} onOpenPreview={() => setMobilePreview(true)}
               onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
               <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
@@ -764,9 +808,10 @@ function Workspace({ user }) {
                 </div>
               )}
               <div className="ct-rows">
-                {view.roster.map((r) => <AgentRow key={r.agent} row={r} compact={rail === "preview"} />)}
+                {displayRoster.map((r) => <AgentRow key={r.agent} row={r} compact={rail === "preview"}
+                  progress={r.agent === "Lead Agent" && !view.activeBuild ? "Thinking…" : activityLabel(view.buildActivity)} />)}
               </div>
-              <CancelBuild build={view.activeBuild} working={view.roster.some((r) => r.state === "working")} />
+              <CancelBuild build={view.activeBuild} working={displayRoster.some((r) => r.state === "working")} />
             </div>
             {rail === "preview" && <PreviewPane url={view.previewUrl} onPublish={() => send("Publish this, please.")} />}
           </aside>
@@ -945,11 +990,14 @@ function Workspace({ user }) {
 // Home is the workspace: what the team is doing right now, per project — switching away
 // never interrupts anything, because builds run entirely server-side.
 function projectState(c) {
-  if (c.activity) return { label: c.activity.status || `${c.activity.agent} working…`, tone: "active", agent: c.activity.agent };
+  const resolved = projectActivity(c);
+  if (isActiveActivity(resolved.state)) {
+    return { label: resolved.label, tone: "active", agent: c.activity?.agent || null };
+  }
   if (c.state === "waiting_user") return { label: "Waiting for your input", tone: "waiting" };
-  if (c.failed && !c.verified && !c.hasPreview) return { label: "Needs attention", tone: "failed" };
-  if (c.verified) return { label: "Verified & complete", tone: "done" };
-  if (c.hasPreview) return { label: "Preview live", tone: "done" };
+  if (resolved.state === ACTIVITY_STATE.ready) return { label: "Ready", tone: "done" };
+  if (resolved.state === ACTIVITY_STATE.failed) return { label: "Needs attention", tone: "failed" };
+  if (resolved.state === ACTIVITY_STATE.cancelled) return { label: "Cancelled", tone: "idle" };
   return { label: "Idle", tone: "idle" };
 }
 
@@ -1618,18 +1666,19 @@ function CancelBuild({ build, working, compact = false }) {
   );
 }
 
-function AgentRow({ row, compact }) {
+function AgentRow({ row, compact, progress = "Building…" }) {
   const hue = SPECIALIST_HUES[row.agent] || "var(--accent)";
   const lead = row.agent === "Lead Agent";
   const cls = row.state === "working" ? "working" : row.state === "failed" ? "done failed" : lead ? "done" : "done settled";
+  const status = row.state === "working" ? progress : row.state === "failed" ? "Stopped" : "Finished";
   return (
-    <div className={`ct-agent ${cls}`} title={compact ? `${row.agent} — ${row.status}` : undefined}>
+    <div className={`ct-agent ${cls}`} title={compact ? `${row.agent} — ${status}` : undefined}>
       <span className="ct-adot" style={{ background: hue, color: hue }}>
         <span style={{ color: "#fff" }}>{agentInitials(row.agent)}</span>
       </span>
       <span className="ct-ameta">
         <span className="ct-aname">{row.agent}{lead && <span className="ct-pin">ALWAYS HERE</span>}</span>
-        <span className="ct-astatus">{row.status}</span>
+        <span className="ct-astatus">{status}</span>
       </span>
       <span className="ct-acheck">{row.state === "failed" ? "✕" : "✓"}</span>
     </div>
@@ -1652,7 +1701,7 @@ function PreviewPane({ url, onPublish, bare = false }) {
   );
 }
 
-function MobileStrip({ roster, working, onPreview, build }) {
+function MobileStrip({ roster, working, onPreview, build, progress = "Building…" }) {
   return (
     <div className="ct-strip" style={{ marginTop: 62 }} onClick={onPreview}>
       {roster.slice(0, 5).map((r) => {
@@ -1664,7 +1713,7 @@ function MobileStrip({ roster, working, onPreview, build }) {
         );
       })}
       <span className="ct-strip-status">
-        {working ? `${working.agent} — ${working.status}` : "The team is with you."}
+        {working ? `${working.agent} — ${working.agent === "Lead Agent" && !build ? "Thinking…" : progress}` : "The team is with you."}
       </span>
       {/* The team rail is desktop-only, so without this a phone user cannot stop a build at all.
           Mobile is first-class; the control belongs wherever the roster is shown. */}

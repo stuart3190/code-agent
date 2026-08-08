@@ -3,6 +3,8 @@
 // replay the Lead Agent itself recovers from). Pure functions, unit-tested in
 // test/code-agent/chat-shell.test.mjs.
 
+import { ACTIVITY_STATE, activityFromJob, isActiveActivity } from "./activityState.js";
+
 export const SPECIALIST_HUES = {
   "Lead Agent": "var(--agent-lead)",
   Planner: "var(--agent-planner)",
@@ -27,7 +29,10 @@ export function emptyConversationView() {
     waiting: false,     // paused on a business question
     recovery: null,     // {state: recovering|repairing|verifying|continuing, message}
     badge: null,        // {icon, text} — which model is building right now
-    activeBuild: null,  // {jobId, projectId} while a build runs — what Cancel addresses
+    buildReference: null, // last build_started identity; historical until the job endpoint confirms it
+    buildJob: null,     // durable public job snapshot
+    buildActivity: ACTIVITY_STATE.idle,
+    activeBuild: null,  // {jobId, projectId} only after a non-terminal job is confirmed
     lastSeq: 0,
   };
 }
@@ -89,12 +94,25 @@ export function applyEvent(view, event) {
       push({ kind: "receipt", text: payload.message || `Run started on ${payload.repository || "the repository"}` });
       break;
     case "build_started":
-      // The roster carries the progress; the thread stays sparse. The job id is retained so the
-      // user can stop the work — without it the Cancel control has nothing to address.
-      next.activeBuild = { jobId: payload.jobId || null, projectId: payload.projectId || null };
+      // An event log is history, not liveness. Retain the identity so the client can read the
+      // owner-scoped durable job, but do not show/cancel work until that read proves non-terminal.
+      next.buildReference = { jobId: payload.jobId || null, projectId: payload.projectId || null };
+      next.buildJob = null;
+      next.buildActivity = ACTIVITY_STATE.idle;
+      next.activeBuild = null;
+      break;
+    case "verification_pending":
+    case "verification_failed":
+      // Ordinary repair churn stays one calm customer-facing checking phase.
+      if (next.activeBuild) next.buildActivity = ACTIVITY_STATE.checking;
       break;
     case "preview_ready":
       next.previewUrl = payload.url || next.previewUrl;
+      next.buildActivity = ACTIVITY_STATE.ready;
+      next.activeBuild = null;
+      next.roster = next.roster.map((agent) => (
+        agent.state === "working" && agent.agent !== "Lead Agent" ? { ...agent, state: "done" } : agent
+      ));
       push({ kind: "preview", url: payload.url, projectId: payload.projectId || null });
       break;
     case "published":
@@ -152,6 +170,8 @@ export function applyEvent(view, event) {
       next.thinking = false;
       next.waiting = false;
       next.recovery = null;
+      next.activeBuild = null;
+      next.buildActivity = ACTIVITY_STATE.failed;
       push({
         kind: "failure",
         text: payload.message
@@ -170,9 +190,41 @@ export function applyEvent(view, event) {
       });
       next.recovery = null;
       next.thinking = false;
+      next.activeBuild = null;
+      next.buildActivity = ACTIVITY_STATE.failed;
       break;
     default:
       break; // unknown events are future vocabulary — ignore, never crash
+  }
+  return next;
+}
+
+// Merge a snapshot/phase/end frame from /api/builds/:jobId/events into the conversation view.
+// This is the authoritative liveness check used on first open, refresh, and reconnect.
+export function applyBuildUpdate(view, update) {
+  const incomingId = update?.jobId || view.buildJob?.jobId || null;
+  if (view.buildReference?.jobId && incomingId && String(incomingId) !== String(view.buildReference.jobId)) {
+    return view; // a superseded watcher finished after a newer build_started event
+  }
+  const job = { ...(view.buildJob || {}), ...(update || {}) };
+  const resolved = activityFromJob(job);
+  const active = isActiveActivity(resolved.state);
+  const next = {
+    ...view,
+    buildJob: job,
+    buildActivity: resolved.state,
+    activeBuild: active ? {
+      jobId: job.jobId || view.buildReference?.jobId || null,
+      projectId: job.projectId || view.buildReference?.projectId || null,
+    } : null,
+  };
+  if (!active) {
+    const failed = [ACTIVITY_STATE.failed, ACTIVITY_STATE.cancelled].includes(resolved.state);
+    next.roster = next.roster.map((agent) => (
+      agent.state === "working" && agent.agent !== "Lead Agent"
+        ? { ...agent, state: failed ? "failed" : "done" }
+        : agent
+    ));
   }
   return next;
 }

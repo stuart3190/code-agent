@@ -234,6 +234,36 @@ export async function streamConversationEvents(conversationId, onEvent, { signal
   }
   return after;
 }
+
+// Durable build truth used to reconstruct activity after refresh/reconnect. Unlike conversation
+// progress events, this stream starts with the job's current snapshot and ends at a terminal state.
+export async function streamBuildEvents(jobId, onEvent, { signal } = {}) {
+  const token = await accessToken();
+  const response = await fetch(`${apiBase()}/api/builds/${encodeURIComponent(jobId)}/events`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+    signal,
+  });
+  if (!response.ok) throw new Error(`Build stream failed (${response.status})`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const name = block.split("\n").find((line) => line.startsWith("event: "))?.slice(7) || "message";
+      const data = block.split("\n").find((line) => line.startsWith("data: "));
+      if (data) onEvent(name, JSON.parse(data.slice(6)));
+    }
+  }
+}
+
+export const projectBuildStatus = (projectId) =>
+  request(`/api/projects/${encodeURIComponent(projectId)}/active-build`);
 export const listAutomations = () => request("/api/v1/automations");
 export const createAutomation = (body) => request("/api/v1/automations", {
   method: "POST", body: JSON.stringify(body),
