@@ -163,6 +163,24 @@ async function runPipeline({ state, stage, project, mode, prompt, ceiling, kind 
   return state.stages[stage];
 }
 
+async function recoverInterruptedStage(state, stage) {
+  const row = state.stages[stage];
+  if (!row || row.terminal) throw new Error(`${stage} has no interrupted runner state`);
+  const evidence = await stageEvidence({ owner: state.owner, projectId: row.projectId,
+    publicBuildId: row.publicBuildId, diagId: row.diagId, startedAt: row.startedAt });
+  const credits = round(evidence.reservations.filter((reservation) => reservation.state === "settled")
+    .reduce((sum, reservation) => sum + Number(reservation.actual_credits || 0), 0));
+  const publicTerminal = ["complete", "failed", "cancelled", "interrupted"].includes(evidence.publicBuild?.status);
+  if (!publicTerminal) throw new Error(`${stage} work remains active; refusing to recover it as terminal`);
+  Object.assign(row, { terminal: true, finishedAt: new Date().toISOString(), stageCredits: credits,
+    result: evidence.publicBuild.status === "complete" ? "pass" : "fail", evidence });
+  state.stages[`${stage}_preflight_1`] = row;
+  delete state.stages[stage];
+  await save(state);
+  await event(`${stage}_preflight_recovered`, { result: row.result, credits,
+    stopReason: evidence.publicBuild.stop_reason, reservations: evidence.reservations.length });
+}
+
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
 const state = await load();
 const codex = await resolveCodexOwner();
@@ -184,6 +202,8 @@ if (STAGE === "preflight") {
   await save(state);
   await runPipeline({ state, stage: "simple", project, mode: "build", prompt: SIMPLE_REQUEST,
     ceiling: 3, kind: "app_build_v2_package14" });
+} else if (STAGE === "recover-simple") {
+  await recoverInterruptedStage(state, "simple");
 } else if (STAGE === "report") {
   const spend = await spendForProjects(Object.values(state.projects).map((row) => row.id));
   await event("report", { ownerHash: state.ownerHash, credits: spend.credits, calls: spend.calls,
