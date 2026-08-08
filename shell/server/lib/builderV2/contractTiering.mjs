@@ -12,6 +12,42 @@ const words = (text) => new Set(String(text || "").toLowerCase().match(/[a-z]{4,
 const journeyText = (j) => `${j.id} ${j.title} ${(j.steps || []).map((s) => `${s.action} ${s.expect}`).join(" ")}`;
 const overlaps = (setA, setB) => [...setA].some((w) => setB.has(w));
 
+const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const featureText = (contract) => [
+  ...(contract?.journeys || []).map((journey) => `${journey.id} ${journey.title}`),
+  ...(contract?.routes || []).map((route) => `${route.path} ${route.name}`),
+].join(" ");
+
+function entityFor(contract, pattern) {
+  return (contract?.entities || []).find((entity) => pattern.test(normalized(entity?.name)))?.name || null;
+}
+
+/**
+ * A wizard is a behavioural requirement, not a synonym for every booking. A one-step booking
+ * button can use the booking system alone; a journey that selects several values and then
+ * reviews/confirms them needs the durable wizard state machine as well.
+ */
+export function requiresWizard(contract) {
+  const explicit = words(featureText(contract));
+  if (["wizard", "onboarding", "checkout", "multistep"].some((word) => explicit.has(word))) return true;
+  return (contract?.journeys || []).some((journey) => {
+    const steps = journey?.steps || [];
+    const text = steps.map((step) => `${step.action} ${step.expect}`).join(" ").toLowerCase();
+    const chooses = /(choose|select|date|slot|party|quantity|details|guest)/.test(text);
+    const finishes = /(review|summary|confirm|confirmation|reference)/.test(text);
+    return steps.length >= 4 && chooses && finishes;
+  });
+}
+
+function capabilityBinding(name, configuration = null, methods = []) {
+  return {
+    name,
+    version: CAPABILITIES[name].version,
+    ...(configuration ? { configuration } : {}),
+    ...(methods.length ? { requiredMethods: [...new Set(methods)] } : {}),
+  };
+}
+
 /**
  * ESSENTIAL = the one primary journey, the entities it touches, the operations it invokes,
  * and its states. SECONDARY = everything else, unless the user's own words marked it
@@ -49,8 +85,7 @@ export function tierContract(contract, { userCritical = [] } = {}) {
 
 /** Which registry capabilities this contract binds — from entities and journey vocabulary. */
 export function bindCapabilities(contract) {
-  const bindings = [{ name: "crud", version: CAPABILITIES.crud.version },
-    { name: "session", version: CAPABILITIES.session.version }];
+  const bindings = [capabilityBinding("crud"), capabilityBinding("session")];
   const entityNames = new Set((contract?.entities || []).map((e) => String(e.name).toLowerCase()));
   // FEATURE vocabulary only — journey ids/titles and route names, never step prose: "enter
   // your contact details" inside a booking form must not bind the contact-form capability.
@@ -59,26 +94,71 @@ export function bindCapabilities(contract) {
     ...(contract?.routes || []).map((r) => `${r.path} ${r.name}`),
   ].join(" "));
 
-  if (entityNames.has("booking") || vocabulary.has("booking") || vocabulary.has("reservation")) {
-    bindings.push({ name: "booking", version: CAPABILITIES.booking.version });
-    bindings.push({ name: "wizard", version: CAPABILITIES.wizard.version });
+  const bookingEntity = entityFor(contract, /^(booking|reservation)/) || "booking";
+  const bookingRequired = entityNames.has("booking") || vocabulary.has("booking") || vocabulary.has("reservation")
+    || (contract?.operations || []).some((operation) => /booking|reservation/.test(normalized(operation?.entity)));
+  const allJourneyText = (contract?.journeys || []).map(journeyText).join(" ").toLowerCase();
+  if (bookingRequired) {
+    const bookingMethods = ["createBooking"];
+    if (/cancel/.test(allJourneyText)) bookingMethods.push("cancelBooking", "getBooking");
+    bindings.push(capabilityBinding("booking", { entity: bookingEntity }, bookingMethods));
+    if (requiresWizard(contract)) {
+      bindings.push(capabilityBinding("wizard", { persistence: "platform" }, [
+        "getState", "subscribe", "restore", "select", "next", "confirm", "cancel",
+      ]));
+    }
   }
   if (vocabulary.has("wizard") || vocabulary.has("onboarding") || vocabulary.has("checkout")) {
     if (!bindings.some((binding) => binding.name === "wizard")) {
-      bindings.push({ name: "wizard", version: CAPABILITIES.wizard.version });
+      bindings.push(capabilityBinding("wizard", { persistence: "platform" }, [
+        "getState", "subscribe", "restore", "select", "next", "confirm", "cancel",
+      ]));
     }
   }
   if (entityNames.has("newslettersignup") || vocabulary.has("newsletter")) {
-    bindings.push({ name: "newsletter", version: CAPABILITIES.newsletter.version });
+    const entity = entityFor(contract, /newsletter.*signup/) || "newsletterSignup";
+    bindings.push(capabilityBinding("newsletter", { entity }, ["subscribe"]));
   }
   if (entityNames.has("contactmessage") || vocabulary.has("contact")) {
-    bindings.push({ name: "contact", version: CAPABILITIES.contact.version });
+    const entity = entityFor(contract, /(contact.*(?:message|enquiry)|enquiry)/) || "contactMessage";
+    bindings.push(capabilityBinding("contact", { entity }, ["submitContact"]));
   }
-  if (contract?.auth?.required) bindings.push({ name: "roles", version: CAPABILITIES.roles.version });
+  if (contract?.auth?.required) bindings.push(capabilityBinding("roles"));
 
   const check = validateBindings(bindings);
   if (!check.ok) throw new Error(`capability binding failed: ${check.problems.join("; ")}`);
   return bindings;
+}
+
+/** Exact, machine-derived capability requirements carried by every generation/repair prompt. */
+export function capabilityRequirementsBrief(contract) {
+  const required = bindCapabilities(contract).filter((binding) => binding.requiredMethods?.length);
+  if (!required.length) return "REQUIRED CAPABILITY BINDINGS: none for this contract.";
+  return [
+    "REQUIRED CAPABILITY BINDINGS (structurally checked after every patch; headless behaviour only):",
+    ...required.map((binding) => {
+      const factory = CAPABILITIES[binding.name].interface[0];
+      const configuration = binding.configuration?.entity
+        ? `{ entity: ${JSON.stringify(binding.configuration.entity)} }`
+        : binding.configuration?.persistence === "platform" ? "{ id: <stable flow id>, steps: [...] } (platform persistence is automatic)" : "{}";
+      return `- ${binding.name}: instantiate ${factory}(${configuration}); use [${binding.requiredMethods.join(", ")}].`;
+    }),
+    "These capabilities render no JSX and impose no layout, colour, typography or visual design.",
+  ].join("\n");
+}
+
+/** Restrict structural enforcement to the journeys implemented by this increment. */
+export function bindingsForJourneys(contract, bindings, journeys = []) {
+  const text = journeys.map(journeyText).join(" ").toLowerCase();
+  const scopedContract = { ...contract, journeys };
+  return (bindings || []).filter((binding) => {
+    if (!binding.requiredMethods?.length) return false;
+    if (binding.name === "wizard") return requiresWizard(scopedContract);
+    if (binding.name === "booking") return /booking|reservation/.test(text);
+    if (binding.name === "newsletter") return /newsletter|mailing list|subscribe/.test(text);
+    if (binding.name === "contact") return /contact|enquiry|inquiry|message/.test(text);
+    return true;
+  });
 }
 
 /** Image intents per route — the Asset Service's input; the model never searches (Part 18). */

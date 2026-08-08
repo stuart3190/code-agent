@@ -37,6 +37,9 @@ const CORE_PATCH = [{
   newFile: "src/routes/BookPage.jsx",
   content: `import React, { useState } from "react";
 import { ASSET_CREDITS } from "../lib/assetData.js";
+import { makeBookingSystem } from "../lib/capabilities/index.js";
+
+const booking = makeBookingSystem({ entity: "booking" });
 
 export default function BookPage() {
   const [state, setState] = useState("idle");
@@ -44,7 +47,7 @@ export default function BookPage() {
     <main>
       <h1>Book a farm visit</h1>
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-1</p> : null}
-      <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <button onClick={async () => { await booking.createBooking({ date: "2026-08-10", slot: "10:00", partySize: 2 }); setState("confirmed"); }}>Submit booking</button>
       <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
@@ -54,13 +57,16 @@ export default function BookPage() {
 const NEWSLETTER_PATCH = [{
   newFile: "src/routes/NewsletterPanel.jsx",
   content: `import React, { useState } from "react";
+import { makeNewsletter } from "../lib/capabilities/index.js";
+
+const newsletter = makeNewsletter({ entity: "newslettersignup" });
 
 export default function NewsletterPanel() {
   const [state, setState] = useState("idle");
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed</p> : null}
-      <button onClick={() => setState("done")}>Subscribe</button>
+      <button onClick={async () => { await newsletter.subscribe("reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }
@@ -86,7 +92,7 @@ const EDIT_PATCH = [{
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed — welcome aboard</p> : null}
-      <button onClick={() => setState("done")}>Subscribe</button>
+      <button onClick={async () => { await newsletter.subscribe("reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }`,
@@ -175,7 +181,7 @@ test("WP10/C3 — an edit re-drives the touched journey and every zero-owner jou
   const pointer = await h.snapshotStore.pointer("o", "p1", "green");
   assert.equal(pointer, edit.snapshotId);
   const snap = await h.snapshotStore.getSnapshot(edit.snapshotId);
-  assert.equal(snap.reason, "edit");
+  assert.equal(snap.reason, "working:edit");
   assert.equal(snap.parent_snapshot, edit.parentSnapshotId);
   const tree = await h.snapshotStore.materialize("o", pointer);
   assert.match(tree["src/routes/NewsletterPanel.jsx"], /welcome aboard/);

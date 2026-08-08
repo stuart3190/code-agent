@@ -9,7 +9,7 @@ export { makeEntityStore } from "./crud.js";
 export { ensureSession, ensureVisitorSession, currentUser, signOut } from "./session.js";
 export { isOwner, requireOwner } from "./roles.js";
 export { makeBookingSystem, BOOKING_STATUS, CREATE_RESULT } from "./booking.js";
-export { makeWizardMachine, WIZARD_STATUS } from "./wizard.js";
+export { makeWizardMachine, makeWizardPersistence, WIZARD_STATUS } from "./wizard.js";
 export { makeContactForm, makeNewsletter, CONTACT_RESULT, NEWSLETTER_RESULT } from "./forms.js";
 
 export const CAPABILITY_VERSIONS = Object.freeze({

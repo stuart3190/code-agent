@@ -36,6 +36,9 @@ const CORE_PATCH = [{
   content: `import React, { useState } from "react";
 import { ASSETS, ASSET_CREDITS } from "../lib/assetData.js";
 import { imageProps, isPlaceholder, placeholderStyle } from "../lib/assets.js";
+import { makeBookingSystem } from "../lib/capabilities/index.js";
+
+const booking = makeBookingSystem({ entity: "booking" });
 
 export default function BookPage() {
   const [state, setState] = useState("idle");
@@ -45,7 +48,7 @@ export default function BookPage() {
       <h1>Book a farm visit</h1>
       {isPlaceholder(hero) ? <div style={placeholderStyle(hero)} /> : <img {...imageProps(hero)} />}
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-1</p> : null}
-      <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <button onClick={async () => { await booking.createBooking({ date: "2026-08-10", slot: "10:00", partySize: 2 }); setState("confirmed"); }}>Submit booking</button>
       <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
@@ -56,13 +59,16 @@ export default function BookPage() {
 const NEWSLETTER_PATCH = [{
   newFile: "src/routes/NewsletterPanel.jsx",
   content: `import React, { useState } from "react";
+import { makeNewsletter } from "../lib/capabilities/index.js";
+
+const newsletter = makeNewsletter({ entity: "newslettersignup" });
 
 export default function NewsletterPanel() {
   const [state, setState] = useState("idle");
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed</p> : null}
-      <button onClick={() => setState("done")}>Subscribe</button>
+      <button onClick={async () => { await newsletter.subscribe("reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }
@@ -210,7 +216,7 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
   assert.equal(finalSnap.reason, "increment:browse-info");
   const mid = await snapshotStore.getSnapshot(finalSnap.parent_snapshot);
   assert.equal(mid.reason, "increment:newsletter-signup");
-  assert.equal((await snapshotStore.getSnapshot(mid.parent_snapshot)).reason, "core");
+  assert.equal((await snapshotStore.getSnapshot(mid.parent_snapshot)).reason, "working:core");
   assert.ok(finalSnap.asset_manifest.length >= 2, "the asset manifest versions with the snapshot");
 });
 
@@ -287,12 +293,18 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
 
 test("WP8 — stop rule: the same defect surviving a repair round blocks instead of burning attempts", async () => {
   const { orchestrator } = harness({
+    contract: {
+      summary: "deterministic stop-rule fixture", entities: [], operations: [],
+      routes: [{ path: "/", name: "Home" }], auth: { required: false },
+      journeys: [{ id: "book-a-visit", title: "Complete fixture", priority: "primary",
+        steps: [{ action: "complete the flow", expect: "zzqx-final-outcome" }] }],
+    },
     patchPlan: {
       // Compiles and parses, but never renders the expected outcome → the expectations
       // gate fails identically every round.
       core: () => [{
         newFile: "src/routes/BookPage.jsx",
-        content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\n\nexport default function BookPage() {\n  return <main><h1>Placeholder</h1><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
+        content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\nimport { makeBookingSystem } from \"../lib/capabilities/index.js\";\nconst booking = makeBookingSystem({ entity: \"booking\" });\n\nexport default function BookPage() {\n  return <main><h1>Placeholder</h1><button onClick={() => booking.createBooking({ date: \"2026-08-10\", slot: \"10:00\", partySize: 2 })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
       }],
     },
   });
@@ -447,7 +459,7 @@ test("WP11/V2-20 — the repair tier: a verified browser failure earns a targete
     <main>
       <h1>Book a farm visit</h1>
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-2 (repaired)</p> : null}
-      <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <button onClick={async () => { await booking.createBooking({ date: "2026-08-10", slot: "10:00", partySize: 2 }); setState("confirmed"); }}>Submit booking</button>
       <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );

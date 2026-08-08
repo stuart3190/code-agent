@@ -16,10 +16,37 @@ export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) 
   return `${step}:${sequence}:${crypto.createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
 }
 
+const total = (rows, state, field) => rows.filter((row) => row.state === state)
+  .reduce((sum, row) => sum + Number(row[field] || 0), 0);
+
+/**
+ * Read-only planning view. The reserve RPC remains the atomic authority; this view lets a caller
+ * size its next call to actual remaining build headroom instead of treating a stage target as a
+ * second build ceiling.
+ */
+export function reservationBudget(rows, { owner, buildId, ceilingCredits }) {
+  const siblings = (rows || []).filter((row) => row.owner === owner
+    && (row.buildId || row.build_id) === buildId);
+  const consumedCredits = total(siblings, "settled", "actualCredits")
+    + total(siblings.filter((row) => row.actualCredits == null), "settled", "actual_credits");
+  const reservedCredits = total(siblings, "held", "reservedCredits")
+    + total(siblings.filter((row) => row.reservedCredits == null), "held", "reserved_credits");
+  const approvedCeilingCredits = Number(ceilingCredits);
+  return {
+    approvedCeilingCredits,
+    consumedCredits,
+    reservedCredits,
+    remainingCredits: Math.max(0, approvedCeilingCredits - consumedCredits - reservedCredits),
+  };
+}
+
 export function memoryModelReservations() {
   const rows = new Map();
   let serial = 0;
   return {
+    async budget(owner, buildId, ceilingCredits) {
+      return reservationBudget([...rows.values()], { owner, buildId, ceilingCredits });
+    },
     async reserve(input) {
       const key = `${input.owner}:${input.buildId}:${input.callKey}`;
       const existing = rows.get(key);
@@ -91,6 +118,13 @@ export function supabaseModelReservations(client = serviceClient()) {
     return data;
   };
   return {
+    async budget(owner, buildId, ceilingCredits) {
+      const result = await client.from("bv2_model_reservations")
+        .select("owner,build_id,state,reserved_credits,actual_credits")
+        .eq("owner", owner).eq("build_id", buildId);
+      const rows = unwrap(result, "read Builder V2 reservation budget");
+      return reservationBudget(rows, { owner, buildId, ceilingCredits });
+    },
     async reserve(input) {
       const row = unwrap(await client.rpc("reserve_bv2_model_call", {
         p_owner: input.owner, p_project_id: input.projectId, p_build_id: input.buildId,

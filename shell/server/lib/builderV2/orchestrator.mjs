@@ -15,8 +15,8 @@
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches } from "./patchEngine.mjs";
-import { tierContract, bindCapabilities, imageIntents, previewEligibility } from "./contractTiering.mjs";
-import { lintCapabilityUsage } from "./capabilityLint.mjs";
+import { tierContract, bindCapabilities, bindingsForJourneys, imageIntents, previewEligibility } from "./contractTiering.mjs";
+import { lintCapabilityUsage, lintRequiredCapabilityBindings } from "./capabilityLint.mjs";
 import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
@@ -160,6 +160,10 @@ export function createOrchestrator({
       await recordJourneyVerdicts({ owner, projectId, cache: verificationCache, plan, results: driven, snapshotId });
     }
     const platformDefects = driven.journeys.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
+    const blockingErrors = [
+      ...(driven.consoleErrors || []).map((detail) => `browser console: ${detail}`),
+      ...(driven.failedRequests || []).map((detail) => `network request: ${detail}`),
+    ];
     for (const defect of platformDefects) log(JSON.stringify({ event: "bv2.platform_defect", ...defect }));
     const merged = [
       ...driven.journeys,
@@ -168,7 +172,8 @@ export function createOrchestrator({
         return { id: r.journeyId, title: journey?.title, priority: journey?.priority, ...r.verdict, reused: true };
       }),
     ];
-    return { journeys: merged, plan, platformDefects };
+    return { journeys: merged, plan, platformDefects, blockingErrors,
+      consoleErrors: driven.consoleErrors || [], failedRequests: driven.failedRequests || [] };
   }
 
   /**
@@ -176,7 +181,7 @@ export function createOrchestrator({
    * rejections fed straight back, the Part 4 stop rule on repeated identical failure.
    * Returns { ok, tree } or { ok:false, problems }.
    */
-  async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, tree, assets, journeys,
+  async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
     editRequest = null, initialProblems = [], signal = null }) {
     let working = tree;
     let rejections = [];
@@ -222,6 +227,12 @@ export function createOrchestrator({
       if (!usage.ok) {
         rejections = usage.problems.map((reason) => ({ signature: "capability-usage", reason }));
         log(`${step}: ${usage.problems.length} capability-usage defect(s) rejected deterministically`);
+        continue;
+      }
+      const required = lintRequiredCapabilityBindings(applied.tree, bindingsForJourneys(contract, bindings, journeys));
+      if (!required.ok) {
+        rejections = required.problems.map((reason) => ({ signature: "required-capability", reason }));
+        log(`${step}: ${required.problems.length} required capability binding defect(s) rejected deterministically`);
         continue;
       }
       const assetCompliance = lintAssetAttribution(applied.tree, assets);
@@ -276,16 +287,17 @@ export function createOrchestrator({
         try { await buildStore.update(buildId, { state }); } catch (error) { log(`state update failed: ${error.message}`); }
       };
 
+      let workingSnapshot = null;
       try {
         abortIfRequested(signal);
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
         await setState("contracting");
         const contract = await contractFn({ owner, projectId, buildId, request, profile, signal });
         const tiers = tierContract(contract, { userCritical });
-        bindCapabilities(contract); // throws on an unknown/invalid binding — fail before spending anything
+        const bindings = bindCapabilities(contract); // structural authority before implementation dispatch
         const intents = imageIntents(contract);
         const persistedContract = await events.contract?.({ owner, projectId, buildId, contract, tiers,
-          bindings: bindCapabilities(contract), intents });
+          bindings, intents });
         if (persistedContract?.id) {
           try { await buildStore.update(buildId, { contract_id: persistedContract.id }); }
           catch (error) { log(`contract id update failed: ${error.message}`); }
@@ -307,11 +319,15 @@ export function createOrchestrator({
         let tree = baseTree();
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
-          step: "core", owner, projectId, buildId, contract, tiers, tree, assets: resolved,
+          step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
           journeys: essentialJourneys, signal,
         });
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems });
         tree = core.tree;
+        workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
+          buildId, reason: "working:core", assetManifest: await assetService.assetManifestFor(owner, projectId),
+        });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree, reason: "working:core" });
 
         // 4. verify essential journeys (differential), then the C4 eligibility decision —
         //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
@@ -323,7 +339,8 @@ export function createOrchestrator({
         let backendRowFailures = backendProbeFn ? await backendProbeFn({
           owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
         }) : [];
-        let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures });
+        let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
+          backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
         for (let round = 1; !eligibility.eligible && round <= maxJourneyRepairs; round += 1) {
           const evidence = [
             ...coreVerdicts.journeys.filter((j) => j.status === "fail").flatMap((j) => {
@@ -337,32 +354,40 @@ export function createOrchestrator({
               return [...journeyEvidence, ...attributionEvidence];
             }),
             ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
+            ...coreVerdicts.blockingErrors,
           ];
           if (!evidence.length) break; // nothing actionable to brief — blocked below
           await setState(`repair:${round}`);
           log(`repair ${round}/${maxJourneyRepairs}: ${evidence.length} verified failure(s)`);
           const repair = await buildIncrement({
-            step: "repair", owner, projectId, buildId, contract, tiers, tree, assets: resolved,
+            step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
             journeys: essentialJourneys, initialProblems: evidence, signal,
           });
           if (!repair.ok) break;
           tree = repair.tree;
+          workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
+            buildId, parent: workingSnapshot?.id || null, reason: `working:repair:${round}`,
+            assetManifest: await assetService.assetManifestFor(owner, projectId),
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree,
+            reason: `working:repair:${round}` });
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
             journeys: essentialJourneys, tree, snapshotId: null, signal });
           backendRowFailures = backendProbeFn ? await backendProbeFn({
             owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
           }) : [];
-          eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures });
+          eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
+            backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
         }
         if (!eligibility.eligible) return finish("blocked", {
           error: eligibility.failures.join("; "),
           platformDefects: coreVerdicts.platformDefects,
+          workingSnapshotId: workingSnapshot?.id || null,
         });
 
         // 5. GREEN: atomic snapshot + pointer promotion. Preview may ship NOW (C4).
-        const coreSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
-          buildId, reason: "core", assetManifest: await assetService.assetManifestFor(owner, projectId),
-        });
+        const coreSnapshot = workingSnapshot;
+        if (!coreSnapshot) throw new Error("verified core has no durable working checkpoint");
         await events.snapshot?.({ owner, projectId, buildId, snapshot: coreSnapshot, tree, reason: "core" });
         await snapshotStore.promote(owner, projectId, "green", coreSnapshot.id);
         try { await buildStore.update(buildId, { state: "green", final_snapshot: coreSnapshot.id }); } catch (error) { log(`green state update failed: ${error.message}`); }
@@ -377,7 +402,7 @@ export function createOrchestrator({
           await setState(step);
           const startTree = await snapshotStore.materialize(owner, lastGreen.id);
           const increment = await buildIncrement({
-            step, owner, projectId, buildId, contract, tiers, tree: startTree, assets: resolved,
+            step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
             journeys: [journey], signal,
           });
           let verdicts = null;
@@ -385,7 +410,8 @@ export function createOrchestrator({
             verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
               journeys: [journey], tree: increment.tree, snapshotId: lastGreen.id, signal });
           }
-          const passed = increment.ok && !verdicts.journeys.some((j) => j.status === "fail");
+          const passed = increment.ok && !verdicts.journeys.some((j) => j.status === "fail")
+            && !(verdicts.blockingErrors || []).length;
           if (!passed) {
             // Rollback = simply not promoting; the green pointer still names lastGreen.
             pendingIncrements.push({ journeyId: journey.id, title: journey.title, reason: increment.ok ? "journey verification failed" : increment.reason });
@@ -412,7 +438,14 @@ export function createOrchestrator({
           providerCalls,
         });
       } catch (error) {
-        return finish(error?.code === "cancelled" || error?.name === "AbortError" ? "cancelled" : "failed", { error: error.message });
+        const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
+        if (cancelled) {
+          try { await snapshotStore.discardWorking(owner, projectId, buildId); }
+          catch (cleanupError) { log(`cancelled checkpoint cleanup failed: ${cleanupError.message}`); }
+        }
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: error.message, workingSnapshotId: workingSnapshot?.id || null,
+        });
       }
     },
 
@@ -425,6 +458,74 @@ export function createOrchestrator({
       if (!pointer) return null;
       const tree = await snapshotStore.materialize(owner, pointer);
       return { snapshotId: pointer, tree, index: indexTree(tree) };
+    },
+
+    /** Resume a failed/pre-green build from byte-verified immutable source, never projects.tree. */
+    async resumeWorkingContext(owner, projectId, buildId) {
+      const snapshot = await snapshotStore.latestForBuild(owner, projectId, buildId, { reasonPrefix: "working:" });
+      if (!snapshot) return null;
+      const tree = await snapshotStore.materialize(owner, snapshot.id);
+      return { snapshotId: snapshot.id, tree, index: indexTree(tree), reason: snapshot.reason };
+    },
+
+    /**
+     * Targeted recovery for a failed first-green build. It starts from the exact compiled
+     * checkpoint and the already-persisted contract, so contract/core provider calls are never
+     * replayed. The checkpoint remains unpromoted unless the repaired journeys become green.
+     */
+    async runRepairFromCheckpoint({ owner, projectId, sourceBuildId, request, contract,
+      initialProblems = [], userCritical = [], signal = null }) {
+      const buildId = await buildStore.create({
+        owner, project_id: projectId, profile: "repair", request, state: "created",
+        started_at: new Date().toISOString(),
+      });
+      await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_repair", sourceBuildId });
+      const finish = async (state, extra = {}) => {
+        const patch = { state, finished_at: new Date().toISOString() };
+        for (const key of ["error", "final_snapshot"]) if (key in extra) patch[key] = extra[key];
+        try { await buildStore.update(buildId, patch); } catch (error) { log(`repair row update failed: ${error.message}`); }
+        return { buildId, state, sourceBuildId, ...extra };
+      };
+      try {
+        abortIfRequested(signal);
+        const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
+        if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
+        const tiers = tierContract(contract, { userCritical });
+        const bindings = bindCapabilities(contract);
+        const journeysById = new Map((contract.journeys || []).map((journey) => [journey.id, journey]));
+        const essentialJourneys = tiers.essential.journeys.map((id) => journeysById.get(id)).filter(Boolean);
+        const repair = await buildIncrement({
+          step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
+          assets: [], journeys: essentialJourneys, initialProblems, editRequest: request, signal,
+        });
+        if (!repair.ok) return finish("blocked", { error: repair.reason, problems: repair.problems,
+          workingSnapshotId: source.snapshotId });
+        const checkpoint = await snapshotStore.createSnapshot(owner, projectId, repair.tree, {
+          buildId, parent: source.snapshotId, reason: "working:resumed-repair",
+          assetManifest: await assetService.assetManifestFor(owner, projectId),
+        });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: repair.tree, reason: "working:resumed-repair" });
+        const verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+          journeys: essentialJourneys, tree: repair.tree, snapshotId: checkpoint.id, signal });
+        const eligibility = previewEligibility({ tiers, gates: { ok: true },
+          journeyResults: { journeys: verdicts.journeys }, blockingErrors: verdicts.blockingErrors });
+        if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; "),
+          workingSnapshotId: checkpoint.id });
+        await events.snapshot?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: repair.tree, reason: "resumed-repair" });
+        await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
+        return finish("green", { final_snapshot: checkpoint.id, snapshotId: checkpoint.id,
+          parentSnapshotId: source.snapshotId });
+      } catch (error) {
+        const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
+        if (cancelled) {
+          try { await snapshotStore.discardWorking(owner, projectId, buildId); }
+          catch (cleanupError) { log(`cancelled repair checkpoint cleanup failed: ${cleanupError.message}`); }
+        }
+        return finish(cancelled ? "cancelled" : "failed",
+          { error: error.message });
+      }
     },
 
     /**
@@ -463,30 +564,37 @@ export function createOrchestrator({
           }
         }
         const tiers = tierContract(contract, { userCritical });
+        const bindings = bindCapabilities(contract);
         const journeys = contract.journeys || [];
 
         await setState("editing");
         const edit = await buildIncrement({
-          step: "edit", owner, projectId, buildId, contract, tiers, tree: ctx.tree, assets: [],
+          step: "edit", owner, projectId, buildId, contract, tiers, bindings, tree: ctx.tree, assets: [],
           journeys, editRequest: request, signal,
         });
         if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
+
+        const workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, edit.tree, {
+          buildId, parent: ctx.snapshotId, reason: "working:edit",
+          assetManifest: await assetService.assetManifestFor(owner, projectId),
+        });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree: edit.tree,
+          reason: "working:edit" });
 
         // Differential verification over EVERY contract journey: the cache decides what to
         // actually drive. Unchanged owners reuse; changed owners (and prior fails) re-drive.
         await setState("verify_edit");
         const verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
           journeys, tree: edit.tree, snapshotId: ctx.snapshotId, signal });
-        const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: verdicts.journeys } });
+        const eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: verdicts.journeys },
+          blockingErrors: verdicts.blockingErrors });
         if (!eligibility.eligible) return finish("blocked", {
           error: eligibility.failures.join("; "),
           platformDefects: verdicts.platformDefects,
+          workingSnapshotId: workingSnapshot.id,
         });
 
-        const snapshot = await snapshotStore.createSnapshot(owner, projectId, edit.tree, {
-          buildId, parent: ctx.snapshotId, reason: "edit",
-          assetManifest: await assetService.assetManifestFor(owner, projectId),
-        });
+        const snapshot = workingSnapshot;
         await events.snapshot?.({ owner, projectId, buildId, snapshot, tree: edit.tree, reason: "edit" });
         await events.knowledge?.({
           owner, projectId, buildId, kind: "decision", key: `edit:${buildId}`,
@@ -503,7 +611,12 @@ export function createOrchestrator({
           pendingIncrements: eligibility.pendingIncrements,
         });
       } catch (error) {
-        return finish(error?.code === "cancelled" || error?.name === "AbortError" ? "cancelled" : "failed", { error: error.message });
+        const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
+        if (cancelled) {
+          try { await snapshotStore.discardWorking(owner, projectId, buildId); }
+          catch (cleanupError) { log(`cancelled edit checkpoint cleanup failed: ${cleanupError.message}`); }
+        }
+        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
       }
     },
   };

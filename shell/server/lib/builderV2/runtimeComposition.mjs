@@ -64,7 +64,7 @@ export function stepOutputPolicy(step) {
   return {
     contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
     core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
-    repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6 },
+    repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6, repairAllowanceCredits: 2.5 },
     edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
     increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
   }[step] || { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 };
@@ -333,8 +333,12 @@ export function createBuilderV2Runtime({
           retrievalTokens: Number(stepContext.retrievalTokens || 0),
           repairRound: Number(stepContext.attempt || 0), candidates, history,
           policy: context.policy,
-          manualModel: workJob.payload.manualModel
-            || (context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
+          // A job may pin automatic routing without mutating the owner's durable preference.
+          // This is useful for bounded qualification and for future per-build AUTO selection.
+          // Explicit manualModel still wins; all identities remain catalogue-validated below.
+          manualModel: workJob.payload.manualModel || (workJob.payload.routingMode === "auto"
+            ? null
+            : context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
         const outputPolicy = stepOutputPolicy(routedStep);
         Object.assign(decision, outputPolicy);
@@ -378,6 +382,10 @@ export function createBuilderV2Runtime({
           const { error } = await client.from("bv2_patches").insert(rows);
           if (error) throw new Error(`Builder V2 patch trace: ${error.message}`);
         },
+        checkpoint: async ({ snapshot, reason }) => {
+          emit("progress", { kind: "working_checkpoint", snapshotId: snapshot.id,
+            treeHash: snapshot.tree_hash, reason, promotable: false });
+        },
         snapshot: persistAndProveGraph,
         knowledge: async ({ owner: eventOwner, projectId: eventProject, buildId, kind, key, value }) => {
           await recordFacts(eventOwner, eventProject, [{ kind, key, value, sourceBuild: buildId }]);
@@ -407,6 +415,8 @@ export function createBuilderV2Runtime({
         previewResult = await preview.start(projectId, withRuntimeEnv(tree, projectId));
         if (!previewResult?.url) throw new Error("verification preview returned no URL");
         const results = [];
+        const consoleErrors = [];
+        const failedRequests = [];
         for (const journey of journeys) {
           const before = journeyRequiresPersistentMutation(journey)
             ? await backendFingerprint(client, projectId) : null;
@@ -420,6 +430,8 @@ export function createBuilderV2Runtime({
             onStdout: (chunk) => emit("stdout", chunk), onStderr: (chunk) => emit("stderr", chunk),
           });
           if (!outcome.journeys) throw new Error(`browser verification produced no journey evidence (${outcome.classification || outcome.stderr || "unknown"})`);
+          consoleErrors.push(...(outcome.journeys.consoleErrors || []));
+          failedRequests.push(...(outcome.journeys.failedRequests || []));
           const after = before ? await backendFingerprint(client, projectId) : null;
           for (const verdict of outcome.journeys.journeys || []) {
             results.push({
@@ -432,7 +444,11 @@ export function createBuilderV2Runtime({
             });
           }
         }
-        const journeyResult = { pass: results.every((row) => row.status === "pass"), journeys: results };
+        const journeyResult = {
+          pass: results.every((row) => row.status === "pass") && !consoleErrors.length && !failedRequests.length,
+          journeys: results,
+          consoleErrors: [...new Set(consoleErrors)], failedRequests: [...new Set(failedRequests)],
+        };
         diag.step?.({ agent: "Verifier", kind: "browser", label: "Builder V2 journeys",
           status: journeyResult.pass ? "ok" : "failed", output: JSON.stringify(journeyResult, null, 2) });
         await diag.flush?.();
@@ -465,11 +481,16 @@ export function createBuilderV2Runtime({
       if (contract) tierContract(contract); // reject malformed legacy diagnostics before spend
       // Validate the adoption contract before creating/promoting any snapshot. An unsupported
       // legacy project must remain byte-for-byte V1 until its explicit qualification build.
-      if (mode !== "build") await adoptLegacyTree(owner, projectId, workJob, events);
+      if (mode !== "build" && mode !== "resume_repair") await adoptLegacyTree(owner, projectId, workJob, events);
       const result = mode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
           budgetCredits: ceilingCredits, signal })
-        : await orchestrator.runEdit({ owner, projectId, request, contract, signal });
+        : mode === "resume_repair"
+          ? await orchestrator.runRepairFromCheckpoint({
+            owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract,
+            initialProblems: Array.isArray(input.problems) ? input.problems : [], signal,
+          })
+          : await orchestrator.runEdit({ owner, projectId, request, contract, signal });
 
       if (result.state !== "green") {
         await diag.finish?.(result.state === "cancelled" ? "cancelled" : "failed");
@@ -490,7 +511,11 @@ export function createBuilderV2Runtime({
       return {
         status: "complete", stopReason: null,
         result: {
-          finalText: mode === "build" ? "Builder V2 created and verified the application." : "Builder V2 applied and verified the change.",
+          finalText: mode === "build"
+            ? "Builder V2 created and verified the application."
+            : mode === "resume_repair"
+              ? "Builder V2 resumed the failed build and verified the targeted repair."
+              : "Builder V2 applied and verified the change.",
           tree, buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],
         },

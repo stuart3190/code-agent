@@ -134,6 +134,34 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
 
     async getSnapshot(id) { return storage.getSnapshot(id); },
 
+    /** Locate the newest immutable checkpoint for one owner/project/build. */
+    async latestForBuild(owner, projectId, buildId, { reasonPrefix = null } = {}) {
+      return (await storage.listSnapshots(owner, projectId))
+        .filter((snapshot) => snapshot.owner === owner && snapshot.project_id === projectId
+          && snapshot.build_id === buildId && snapshot.state === "ready"
+          && (!reasonPrefix || String(snapshot.reason || "").startsWith(reasonPrefix)))
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+    },
+
+    /**
+     * Cancellation discards unpromoted checkpoints for exactly one build. Failed/blocked builds
+     * deliberately retain their newest checkpoint for targeted resume; ordinary GC bounds them.
+     */
+    async discardWorking(owner, projectId, buildId) {
+      const pointed = new Set();
+      for (const label of PROMOTABLE_LABELS) {
+        const target = await storage.getPointer(owner, projectId, label);
+        if (target) pointed.add(target);
+      }
+      const matches = (await storage.listSnapshots(owner, projectId)).filter((snapshot) => (
+        snapshot.owner === owner && snapshot.project_id === projectId && snapshot.build_id === buildId
+        && String(snapshot.reason || "").startsWith("working:") && !pointed.has(snapshot.id)
+      ));
+      for (const snapshot of matches) await storage.deleteSnapshot(snapshot.id);
+      if (matches.length) await this.gc(owner, projectId, { keepLatest: 20 });
+      return { removed: matches.map((snapshot) => snapshot.id).sort() };
+    },
+
     /** Owner-checked materialisation of a READY snapshot back into a tree. */
     async materialize(owner, id) {
       const snapshot = await storage.getSnapshot(id);

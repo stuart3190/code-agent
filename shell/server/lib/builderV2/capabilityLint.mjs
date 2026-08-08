@@ -25,7 +25,9 @@ const FACTORY_PROPERTIES = Object.freeze({
 });
 
 const GENERATED_FILE = /^src\/.*\.(jsx?|tsx?)$/;
-const PLATFORM_PATH = /^src\/lib\//;
+// Only immutable scaffold/runtime modules are exempt. Generated helper modules commonly live in
+// src/lib and must still be inspected; exempting the whole directory created a trivial bypass.
+const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 
 // The monolith tax (WP-10 variance): a whole-app-in-one-file page makes every future edit
 // carry the whole app as context (~8k tokens/round measured live). Generous cap — real
@@ -106,6 +108,65 @@ export function lintCapabilityUsage(tree) {
           );
         }
       }
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+function generatedSource(tree) {
+  return Object.entries(tree || {})
+    .filter(([path]) => GENERATED_FILE.test(path) && !PLATFORM_PATH.test(path))
+    .map(([path, source]) => `\n/* ${path} */\n${String(source)}`)
+    .join("\n");
+}
+
+function factoryInstances(source, factory) {
+  const instances = [];
+  const bindingRe = new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=[^;\\n]*\\b${factory}\\s*\\(`, "g");
+  for (const match of source.matchAll(bindingRe)) instances.push(match[1]);
+  return instances;
+}
+
+/**
+ * Contract-required capabilities must exist in the produced tree and be used through their
+ * actual interface. This is deliberately visual-style agnostic: it inspects behaviour calls,
+ * never JSX structure or CSS.
+ */
+export function lintRequiredCapabilityBindings(tree, bindings = []) {
+  const source = generatedSource(tree);
+  const problems = [];
+  for (const binding of bindings.filter((row) => row.requiredMethods?.length)) {
+    const factory = {
+      booking: "makeBookingSystem", wizard: "makeWizardMachine", contact: "makeContactForm",
+      newsletter: "makeNewsletter",
+    }[binding.name];
+    if (!factory) continue;
+    const instances = factoryInstances(source, factory);
+    if (!instances.length) {
+      problems.push(`required capability ${binding.name} is missing: instantiate ${factory}(...) before verification`);
+      continue;
+    }
+    const entity = binding.configuration?.entity;
+    if (entity) {
+      const escaped = String(entity).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const configured = new RegExp(`\\b${factory}\\s*\\(\\s*\\{[\\s\\S]{0,600}?\\bentity\\s*:\\s*["'\\x60]${escaped}["'\\x60]`, "m");
+      if (!configured.test(source)) {
+        problems.push(`required capability ${binding.name} must be configured with entity: ${JSON.stringify(entity)}; unsupported option names are rejected`);
+      }
+    }
+    if (binding.name === "wizard" && binding.configuration?.persistence === "platform") {
+      const disabledPersistence = /\bmakeWizardMachine\s*\(\s*\{[\s\S]{0,1000}?\bpersistence\s*:\s*(?:null|false|undefined)\b/m;
+      if (disabledPersistence.test(source)) {
+        problems.push("required capability wizard must use platform persistence; persistence: null/false/undefined is forbidden");
+      }
+    }
+    const calls = new Set();
+    for (const instance of instances) {
+      const callRe = new RegExp(`\\b${instance}\\.(\\w+)\\s*\\(`, "g");
+      for (const call of source.matchAll(callRe)) calls.add(call[1]);
+    }
+    for (const method of binding.requiredMethods) {
+      if (!calls.has(method)) problems.push(`required capability ${binding.name} is not bound to ${method}(...)`);
     }
   }
   return { ok: problems.length === 0, problems };

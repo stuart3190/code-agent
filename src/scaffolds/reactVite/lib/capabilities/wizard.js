@@ -1,6 +1,9 @@
 // Headless multi-step workflow capability v1 — platform infrastructure, do not edit.
 // It owns behaviour only. Generated components decide all markup, layout, animation and styling.
 
+import { db as defaultDb } from "../backend/index.js";
+import { ensureSession as defaultEnsureSession } from "./session.js";
+
 export const WIZARD_STATUS = Object.freeze({
   ACTIVE: "active", INVALID: "invalid", CONFIRMING: "confirming",
   CONFIRMED: "confirmed", CANCELLED: "cancelled",
@@ -8,12 +11,50 @@ export const WIZARD_STATUS = Object.freeze({
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+const flatten = (row) => (row ? { id: row.id, ...(row.data || {}) } : null);
+
+/** Durable app-scoped persistence. No browser storage and no visual opinions. */
+export function makeWizardPersistence({ key, entity = "wizardState", deps = {} } = {}) {
+  const stableKey = String(key || "").trim();
+  if (!stableKey) throw new Error("wizard persistence needs a stable key");
+  const db = deps.db || defaultDb;
+  const ensureSession = deps.ensureSession || defaultEnsureSession;
+  const store = () => db.entity(entity);
+  const existing = async () => flatten((await store().list({ filters: { key: stableKey }, limit: 1 }))[0]);
+  return {
+    async save(state) {
+      await ensureSession();
+      const current = await existing();
+      const value = { key: stableKey, state: clone(state), updatedAt: new Date().toISOString() };
+      if (current) {
+        const { id, ...prior } = current;
+        await store().update(id, { ...prior, ...value });
+      } else {
+        await store().create(value);
+      }
+    },
+    async load() {
+      await ensureSession();
+      return clone((await existing())?.state || null);
+    },
+    async clear() {
+      await ensureSession();
+      const current = await existing();
+      if (current) await store().delete(current.id);
+    },
+  };
+}
+
 export function makeWizardMachine({
-  steps = [], initialValues = {}, validate = () => ({}), persistence = null, onConfirm = null,
+  id = null, steps = [], initialValues = {}, validate = () => ({}), persistence,
+  onConfirm = null, deps = {},
 } = {}) {
   if (!Array.isArray(steps) || steps.length < 2) throw new Error("a wizard needs at least two steps");
   const ids = steps.map((step) => String(typeof step === "string" ? step : step?.id || "").trim());
   if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new Error("wizard step ids must be non-empty and unique");
+  const durable = persistence === undefined
+    ? makeWizardPersistence({ key: String(id || `wizard:${ids.join(":")}`), deps })
+    : persistence;
   const listeners = new Set();
   let state = {
     status: WIZARD_STATUS.ACTIVE, stepIndex: 0, stepId: ids[0], values: clone(initialValues),
@@ -30,7 +71,7 @@ export function makeWizardMachine({
     for (const listener of listeners) listener(next);
     return next;
   };
-  const save = async () => { if (persistence?.save) await persistence.save(snapshot()); };
+  const save = async () => { if (durable?.save) await durable.save(snapshot()); };
   const active = () => {
     if ([WIZARD_STATUS.CANCELLED, WIZARD_STATUS.CONFIRMED].includes(state.status)) {
       throw new Error(`wizard is ${state.status}`);
@@ -56,12 +97,16 @@ export function makeWizardMachine({
     getState: snapshot,
     subscribe(listener) { listeners.add(listener); listener(snapshot()); return () => listeners.delete(listener); },
     async restore() {
-      if (!persistence?.load) return snapshot();
-      const saved = await persistence.load();
+      if (!durable?.load) return snapshot();
+      const saved = await durable.load();
       if (!saved || !ids.includes(saved.stepId) || !Number.isInteger(saved.stepIndex)) return snapshot();
+      const restoredStatus = Object.values(WIZARD_STATUS).includes(saved.status)
+        ? saved.status : WIZARD_STATUS.ACTIVE;
       state = {
         ...state, stepIndex: ids.indexOf(saved.stepId), stepId: saved.stepId,
-        values: clone(saved.values || {}), status: WIZARD_STATUS.ACTIVE,
+        values: clone(saved.values || {}), status: restoredStatus,
+        errors: clone(saved.errors || {}), confirmation: clone(saved.confirmation || null),
+        cancelledAt: saved.cancelledAt || null,
         revision: Math.max(state.revision, Number(saved.revision || 0)),
       };
       return emit();
@@ -96,7 +141,7 @@ export function makeWizardMachine({
       try {
         const confirmation = onConfirm ? await onConfirm(clone(state.values)) : { ok: true };
         state = { ...state, status: WIZARD_STATUS.CONFIRMED, confirmation: clone(confirmation), errors: {} };
-        await persistence?.clear?.();
+        await save();
         return { ok: true, confirmation: clone(confirmation), state: emit() };
       } catch (error) {
         state = { ...state, status: WIZARD_STATUS.INVALID, errors: { submit: error.message || "Confirmation failed" } };
@@ -107,12 +152,12 @@ export function makeWizardMachine({
       if (state.status === WIZARD_STATUS.CANCELLED) return snapshot();
       if (state.status === WIZARD_STATUS.CONFIRMED) throw new Error("a confirmed wizard cannot be cancelled");
       state = { ...state, status: WIZARD_STATUS.CANCELLED, cancelledAt: new Date().toISOString(), revision: state.revision + 1 };
-      await persistence?.clear?.(); return emit();
+      await save(); return emit();
     },
     async reset() {
       state = { status: WIZARD_STATUS.ACTIVE, stepIndex: 0, stepId: ids[0], values: clone(initialValues),
         errors: {}, confirmation: null, cancelledAt: null, revision: state.revision + 1 };
-      await persistence?.clear?.(); return emit();
+      await durable?.clear?.(); return emit();
     },
   };
 }

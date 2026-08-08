@@ -13,7 +13,7 @@ import { capabilityBrief } from "./capabilityRegistry.mjs";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
-import { bindCapabilities } from "./contractTiering.mjs";
+import { bindCapabilities, capabilityRequirementsBrief } from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
@@ -185,6 +185,8 @@ export function renderPatchPrompt({
     "IMPLEMENTATION CONTRACT:",
     contractBrief(contract),
     "",
+    capabilityRequirementsBrief(contract),
+    "",
     projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
     renderJourneyBrief(scopedJourneys),
@@ -248,6 +250,67 @@ export function conservativeCallReservation(options, model, {
   return Math.ceil(Math.max(calculated, Number(minimumCredits || 0)) * 10_000) / 10_000;
 }
 
+/**
+ * Fit a provider call into both its per-call limit and the live build headroom. For repairs an
+ * explicit allowance bounds the internal fix turn, but unused build headroom remains reusable.
+ * Reducing maxOutputTokens makes the reservation a real upper bound rather than an optimistic
+ * estimate. The durable reserve RPC is still the final concurrency guard.
+ */
+export function planCallReservation(options, model, {
+  requestedMaxOutputTokens = 16_000,
+  minimumCredits = 0,
+  callCeilingCredits,
+  repairAllowanceCredits = null,
+  fundingPolicy = "request_owner",
+  budget,
+} = {}) {
+  const remaining = Number(budget?.remainingCredits || 0);
+  const perCall = Number(callCeilingCredits || 0);
+  const allowance = repairAllowanceCredits == null ? Infinity : Number(repairAllowanceCredits);
+  const creditLimit = Math.min(remaining, perCall, allowance);
+  const limitingCode = perCall <= remaining && perCall <= allowance
+    ? "step_budget_ceiling" : "budget_ceiling";
+  if (!(creditLimit > 0) || creditLimit + 1e-9 < Number(minimumCredits || 0)) {
+    throw Object.assign(new Error("Builder V2 model call has insufficient approved build headroom"), {
+      code: limitingCode, retryable: false, dispatchState: "before_dispatch",
+      remaining, callCeiling: perCall, repairAllowance: Number.isFinite(allowance) ? allowance : null,
+      minimumCredits: Number(minimumCredits || 0),
+    });
+  }
+  const requested = Math.max(0, Math.floor(Number(requestedMaxOutputTokens || 0)));
+  let low = 0;
+  let high = requested;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const estimate = conservativeCallReservation(options, model, {
+      maxOutputTokens: middle, minimumCredits,
+    });
+    if (estimate <= creditLimit + 1e-9) low = middle;
+    else high = middle - 1;
+  }
+  const reservedCredits = conservativeCallReservation(options, model, {
+    maxOutputTokens: low, minimumCredits,
+  });
+  if (reservedCredits > creditLimit + 1e-9 || low < 1) {
+    throw Object.assign(new Error("Builder V2 call cannot fit a useful response inside approved headroom"), {
+      code: limitingCode, retryable: false, dispatchState: "before_dispatch",
+      remaining, callCeiling: perCall, repairAllowance: Number.isFinite(allowance) ? allowance : null,
+      minimumCredits: Number(minimumCredits || 0),
+    });
+  }
+  return {
+    reservedCredits,
+    maxOutputTokens: low,
+    approvedCeilingCredits: Number(budget.approvedCeilingCredits),
+    consumedCredits: Number(budget.consumedCredits || 0),
+    alreadyReservedCredits: Number(budget.reservedCredits || 0),
+    remainingCredits: remaining,
+    repairAllowanceCredits: Number.isFinite(allowance) ? allowance : null,
+    callCeilingCredits: perCall,
+    fundingPolicy,
+  };
+}
+
 export function createModelLanes({
   provider, providerForStep = null, ceilingCredits, diag = null, log = () => {},
   bucket = jobUsageBucket(), knowledgeStore = null, reservations = null,
@@ -280,16 +343,21 @@ export function createModelLanes({
           // second provider attempt and must never reuse/overwrite the first attempt's usage.
           const sequence = ++callSequence;
           const selectedMaxOutputTokens = Number(selected.decision?.maxOutputTokens || maxOutputTokens);
-          const estimate = conservativeCallReservation(options, selected.provider.model, {
-            maxOutputTokens: selectedMaxOutputTokens, minimumCredits: selected.decision?.estimatedCredits || 0,
-          });
           const callCeiling = Number(selected.decision?.callCeilingCredits || ceilingCredits);
-          if (!(callCeiling > 0) || estimate > callCeiling) {
-            throw Object.assign(new Error(`Builder V2 ${step} call reservation exceeds its step ceiling`), {
-              code: "step_budget_ceiling", step, estimate, ceiling: callCeiling, retryable: false,
-              dispatchState: "before_dispatch",
-            });
-          }
+          const budget = reservations.budget
+            ? await reservations.budget(context.owner, context.buildId, Number(ceilingCredits))
+            : {
+              approvedCeilingCredits: Number(ceilingCredits), consumedCredits: 0,
+              reservedCredits: 0, remainingCredits: Number(ceilingCredits),
+            };
+          const plan = planCallReservation(options, selected.provider.model, {
+            requestedMaxOutputTokens: selectedMaxOutputTokens,
+            minimumCredits: selected.decision?.estimatedCredits || 0,
+            callCeilingCredits: callCeiling,
+            repairAllowanceCredits: selected.decision?.repairAllowanceCredits,
+            fundingPolicy: selected.decision?.fundingPolicy || "request_owner",
+            budget,
+          });
           const callKey = modelCallKey({ buildId: context.buildId, step, sequence });
           const accountAvailableCredits = (selected.decision?.billingLane || billingLane) === "managed"
             ? Number(await accountCreditResolver?.(context.owner)) : null;
@@ -298,14 +366,17 @@ export function createModelLanes({
             callKey, step,
             provider: selected.provider.provider || selected.provider.providerId || selected.decision?.provider || selected.provider.model,
             model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
-            reservedCredits: estimate, ceilingCredits: Number(ceilingCredits),
+            reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
             accountAvailableCredits,
-            metadata: { routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence },
+            metadata: {
+              routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
+              budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
+            },
           });
           let turn;
           try {
             turn = await selected.provider.runTurn.call(selected.provider, {
-              ...options, signal: context.signal || options.signal, maxOutputTokens: selectedMaxOutputTokens,
+              ...options, signal: context.signal || options.signal, maxOutputTokens: plan.maxOutputTokens,
               // V2 owns retries outside transports so every network dispatch receives its own
               // reservation and telemetry identity. Provider-internal retries would be invisible.
               maxProviderRetries: 0,

@@ -7,6 +7,7 @@ import { bindCapabilities } from "../../shell/server/lib/builderV2/contractTieri
 test("wizard navigation, validation, progress and confirmation are deterministic", async () => {
   const confirmed = [];
   const machine = makeWizardMachine({
+    persistence: null,
     steps: ["service", "details", "confirm"],
     validate: ({ stepId, values }) => stepId === "service" && !values.service ? { service: "Choose a service" }
       : stepId === "details" && !values.email ? { email: "Email is required" } : {},
@@ -43,12 +44,25 @@ test("wizard persistence restores state and cancellation is idempotent", async (
   const cancelled = await resumed.cancel();
   assert.equal(cancelled.status, WIZARD_STATUS.CANCELLED);
   assert.equal((await resumed.cancel()).status, WIZARD_STATUS.CANCELLED);
-  assert.equal(clears, 1);
+  assert.equal(clears, 0, "cancelled state remains durable until an explicit reset");
 });
 
-test("booking and explicit wizard contracts bind the headless wizard capability", () => {
+test("booking-only contracts bind booking without imposing a wizard", () => {
   const booking = bindCapabilities({
-    entities: [{ name: "booking" }], journeys: [{ id: "book", title: "Booking wizard" }], routes: [], auth: {},
+    entities: [{ name: "booking" }], journeys: [{ id: "book", title: "Book a visit",
+      steps: [{ action: "submit booking", expect: "confirmed" }] }], routes: [], auth: {},
+  });
+  assert.ok(booking.some((binding) => binding.name === "booking"));
+  assert.ok(!booking.some((binding) => binding.name === "wizard"));
+});
+
+test("true multi-step booking and explicit checkout bind the headless wizard", () => {
+  const booking = bindCapabilities({
+    entities: [{ name: "booking" }], journeys: [{ id: "book", title: "Booking flow", steps: [
+      { action: "choose date", expect: "date selected" }, { action: "select slot", expect: "slot selected" },
+      { action: "enter guest details", expect: "details saved" }, { action: "review", expect: "summary" },
+      { action: "confirm", expect: "confirmation reference" },
+    ] }], routes: [], auth: {},
   });
   assert.ok(booking.some((binding) => binding.name === "booking"));
   assert.ok(booking.some((binding) => binding.name === "wizard"));

@@ -28,7 +28,9 @@ export function makeContactForm({ entity = "contactMessage", deps = {} } = {}) {
         name: String(fields.name).trim(),
         email: String(fields.email).trim().toLowerCase(),
         message: String(fields.message).trim(),
-        createdAt: new Date().toISOString(),
+        source: fields.source ? String(fields.source) : undefined,
+        reference: fields.reference ? String(fields.reference) : undefined,
+        createdAt: fields.createdAt ? String(fields.createdAt) : new Date().toISOString(),
       });
       return { result: CONTACT_RESULT.OK, message: flatten(row) };
     },

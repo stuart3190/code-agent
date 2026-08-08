@@ -111,6 +111,7 @@ function productionDeps(overrides = {}) {
 
 async function dispatch(ctx, {
   project, mode, prompt, kind, trigger = "user", taskHint = null, deps: overrides = {}, preflight = null,
+  v2Input = null,
 }) {
   const deps = productionDeps(overrides);
   if (!deps.workerEnabled()) {
@@ -139,6 +140,7 @@ async function dispatch(ctx, {
       budgetAllowance: ceiling, pipelineVersion: "v2",
       providerSelection: checked.providerSelection,
       manualModel: checked.providerSelection?.manualModel || null,
+      v2Input,
     }));
   } catch (error) {
     await diag.finish?.("failed");
@@ -153,6 +155,23 @@ async function dispatch(ctx, {
     message: mode === "build" ? "Builder V2 is assembling the app." : "Builder V2 is applying a verified change.",
   });
   return { jobId: job.id, projectId: project.id, buildId: job.diagSessionId || diag.id, pipelineVersion: "v2" };
+}
+
+async function resumableBuild(client, owner, projectId) {
+  const { data: builds, error: buildError } = await client.from("bv2_builds")
+    .select("id,state,error,created_at").eq("owner", owner).eq("project_id", projectId)
+    .in("state", ["blocked", "failed"]).order("created_at", { ascending: false }).limit(10);
+  if (buildError) throw new Error(`Builder V2 resumable build lookup failed: ${buildError.message}`);
+  const ids = (builds || []).map((row) => row.id);
+  if (!ids.length) return null;
+  const { data: snapshots, error: snapshotError } = await client.from("bv2_snapshots")
+    .select("id,build_id,reason,created_at").eq("owner", owner).eq("project_id", projectId)
+    .eq("state", "ready").in("build_id", ids).like("reason", "working:%")
+    .order("created_at", { ascending: false });
+  if (snapshotError) throw new Error(`Builder V2 checkpoint lookup failed: ${snapshotError.message}`);
+  const available = new Set((snapshots || []).map((row) => row.build_id));
+  const build = (builds || []).find((row) => available.has(row.id));
+  return build ? { buildId: build.id, problems: build.error ? [String(build.error)] : [] } : null;
 }
 
 /** Accept a new application build. An exception remains a V2 failure; callers must not fallback. */
@@ -205,9 +224,22 @@ export async function startExistingAppWorkV2(ctx, {
   project, request, kind = "edit", trigger = "user", taskHint = null,
 }, options = {}) {
   if (!project?.id) throw new Error("Builder V2 needs an owner-scoped project");
+  const deps = productionDeps(options.deps);
+  let mode = "iterate";
+  let v2Input = null;
+  if (kind === "repair" && !project.bv2_green_snapshot_id) {
+    const resumable = await resumableBuild(deps.client, ctx.owner, project.id);
+    if (!resumable) {
+      throw Object.assign(new Error("This project has no green snapshot or resumable Builder V2 checkpoint."), {
+        code: "no_resumable_checkpoint",
+      });
+    }
+    mode = "resume_repair";
+    v2Input = { sourceBuildId: resumable.buildId, problems: resumable.problems };
+  }
   const result = await dispatch(ctx, {
-    project, mode: "iterate", prompt: String(request), kind: `${kind}_v2`, trigger, taskHint,
-    deps: options.deps,
+    project, mode, prompt: String(request), kind: `${kind}_v2`, trigger, taskHint,
+    deps: options.deps, v2Input,
   });
   return { handled: true, result: { ...result, note: `Builder V2 ${kind} dispatched to the isolated worker.` } };
 }

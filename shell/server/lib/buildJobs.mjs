@@ -243,7 +243,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null, routingMode = null, v2Input = null }) {
   if (!["v1", "v2"].includes(pipelineVersion)) throw new Error(`unknown builder pipeline ${pipelineVersion}`);
   if (pipelineVersion === "v2" && !buildWorkerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the durable build worker; dispatch is disabled."), {
@@ -277,7 +277,8 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
   const job = {
     id: crypto.randomUUID(),
     owner, projectId, mode, pipelineVersion, diagSessionId: diag?.sessionId || null,
-    input: { prompt, tree, plan, knowledge, style, designProfile, redesign }, // in-memory only; restart sweeps the job
+    input: { prompt, tree, plan, knowledge, style, designProfile, redesign,
+      ...(pipelineVersion === "v2" && v2Input ? v2Input : {}) }, // durable worker payload below
     status: "queued", phase: "queued", error: null,
     result: null, buildStderr: null,
     diag,                                  // diagnostics recorder (nullable, never throws)
@@ -285,7 +286,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     taskHint,                              // the USER's own words, for task classification
     budgetAllowance,                       // managed: what the LIFECYCLE budget has left for this job
     byokCostLimit,                         // BYOK: only set when the user enabled a per-build limit
-    manualModel, providerSelection,
+    manualModel, providerSelection, routingMode,
     providerOverride,                      // set by a fallback switch — continue on a different provider
     stopReason: null,                      // set at finish() — why this job stopped
     measurements: null,                    // server-side only: what the relay compares between rounds
@@ -317,7 +318,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
         owner: owner.id, projectId, buildId: job.id, jobType: "builder_pipeline",
         payload: {
           input: job.input, mode, trigger, taskHint, budgetAllowance, byokCostLimit, providerOverride,
-          diagSessionId: diag?.sessionId || null, pipelineVersion, manualModel, providerSelection,
+          diagSessionId: diag?.sessionId || null, pipelineVersion, manualModel, providerSelection, routingMode,
         },
         idempotencyKey: `builder-pipeline:${job.id}`,
         priority: trigger === "user" ? 20 : 10,
