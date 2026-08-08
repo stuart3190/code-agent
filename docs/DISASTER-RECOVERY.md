@@ -125,6 +125,12 @@ not qualify. Missing probe configuration makes the drill fail before production 
 them. See `BUILD-WORKER-INCIDENT-RECOVERY.md`, `PUBLISHING-OPERATIONS.md`,
 `PUBLISHING-ROLLBACK.md` and `DEPLOYMENT-RECONCILIATION.md` for subsystem recovery.
 
+Install `/etc/thrallo/dr-health.env` from `ops/systemd/dr-health.env.example` with the latest
+checksummed restore-evidence path and approved deployment manifest hash. These anchors are not
+secrets. Keep an optional alert webhook in the operator secret store. Enable the five-minute
+health timer immediately; keep the off-site and monthly-restore timers disabled until their
+independent credentials/probe configuration has been supplied and tested.
+
 ## Verification cadence
 
 - Every nightly backup validates its own manifest and data.

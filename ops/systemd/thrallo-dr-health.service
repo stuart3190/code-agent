@@ -7,6 +7,7 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/code-agent
 EnvironmentFile=/home/ubuntu/code-agent/shell/.env
+EnvironmentFile=-/etc/thrallo/dr-health.env
 ExecStart=/usr/bin/node /home/ubuntu/code-agent/ops/dr-health.mjs --notify
 NoNewPrivileges=true
 PrivateTmp=true
