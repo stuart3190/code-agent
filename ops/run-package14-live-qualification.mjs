@@ -12,12 +12,15 @@ import { createJob } from "../shell/server/lib/buildJobs.mjs";
 import { awaitBuildWork } from "../shell/server/lib/buildWorkQueue.mjs";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
+import { canonicalModelIdentity, selectionValue } from "../shell/server/lib/modelCatalogue.mjs";
 
 loadEnv();
 process.env.THRALLO_BUILD_WORKER_ENABLED = "1"; // this operator process only
 
 const TOTAL_CEILING = 15;
-const MANUAL_MODEL = "connected_allowance:codex:gpt-5.5#medium";
+const MANUAL_MODEL = selectionValue(canonicalModelIdentity({
+  provider: "codex", model: "gpt-5.5", lane: "connected_allowance", reasoningProfile: "medium",
+}));
 const STAGE = String(process.argv[2] || "preflight").toLowerCase();
 const evidenceDir = path.resolve(process.env.PACKAGE14_EVIDENCE_DIR
   || "/home/ubuntu/thrallo-deploy-evidence/package14-live-20260808");
@@ -185,8 +188,12 @@ async function archiveZeroSpendFailure(state, stage) {
   const row = state.stages[stage];
   if (!row?.terminal || row.result !== "fail") throw new Error(`${stage} is not a terminal failed stage`);
   const evidence = row.evidence || {};
-  const allowed = new Set(["preview_isolation_required", "provider_selection_changed"]);
-  if (!allowed.has(evidence.publicBuild?.stop_reason)
+  const allowedStop = new Set(["preview_isolation_required", "provider_selection_changed"]);
+  const allowedV2Error = new Set(["manual model is unavailable or forbidden by provider policy"]);
+  const safePreDispatchFailure = allowedStop.has(evidence.publicBuild?.stop_reason)
+    || ((evidence.v2Builds || []).length > 0
+      && evidence.v2Builds.every((build) => allowedV2Error.has(build.error)));
+  if (!safePreDispatchFailure
       || (evidence.reservations || []).length !== 0
       || (evidence.aiRequests || []).length !== 0
       || Number(row.stageCredits || 0) !== 0) {

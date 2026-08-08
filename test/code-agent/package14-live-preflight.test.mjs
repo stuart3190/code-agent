@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createStoredAccessTokenProvider } from "../../src/providers/auth.mjs";
+import { canonicalModelIdentity, selectionValue } from "../../shell/server/lib/modelCatalogue.mjs";
 import { conservativeCallReservation, createModelLanes } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 
@@ -25,6 +26,13 @@ test("Package 14 Codex auth refreshes owner-scoped stored state without filesyst
   assert.equal(token.accessToken, stored.tokens.access_token);
   assert.equal(stored.tokens.refresh_token, "refresh-rotated");
   assert.equal(persisted, 1);
+});
+
+test("Package 14 manual model uses the canonical selectable identity", () => {
+  const identity = canonicalModelIdentity({
+    provider: "codex", model: "gpt-5.5", lane: "connected_allowance", reasoningProfile: "medium",
+  });
+  assert.equal(selectionValue(identity), "connected_allowance:codex:gpt-5.5");
 });
 
 test("Package 14 step output policy bounds the network request and reservation", async () => {
