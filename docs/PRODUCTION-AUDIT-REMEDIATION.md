@@ -244,3 +244,12 @@ reservation/dispatch, and ambiguous provider outcomes become `provider_replay_un
 Codex settlements retain usage evidence without managed availability reads/debits; managed
 settlement remains paused. The exact catalogue is in `docs/PROVIDER-MODEL-CATALOGUE.md`; the deferred
 legacy Edge Function credential transition is in `docs/LEGACY-SERVICE-KEY-MIGRATION.md`.
+
+Package 13 is **PASS**. Production is deployed dark at
+`3c0164ddfe5fdbc26ec199f09267342addfbd358`; the fixed-owner zero-model canary proved exact BYOK,
+Codex and managed identities, reservation-before-dispatch, cancellation/release, idempotent
+synthetic usage settlement and the managed-settlement pause with zero provider or Stripe calls.
+All disposable rows were removed and the canonical customer hashes were unchanged. Production
+remains at 70 migrations with zero V2 builds/reservations, disabled V2 customer flags and Builder
+V1 as the default. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-13-PROVIDER-BILLING-CLOSURE.md`.

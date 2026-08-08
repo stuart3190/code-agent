@@ -1201,3 +1201,11 @@ retry, partial usage settles once, and ambiguous dispatch is held as `provider_r
 Per-step ceilings fail before dispatch. Managed settlement remains paused. The five Edge Functions
 still use the legacy service-role environment variable; their new-secret-key transition is planned
 but not executed in `docs/LEGACY-SERVICE-KEY-MIGRATION.md`.
+
+Package 13 is **PASS** and deployed dark at
+`3c0164ddfe5fdbc26ec199f09267342addfbd358`. Its production zero-model canary made no provider or
+Stripe request, proved BYOK/Codex/managed lane pinning and idempotent accounting, cleaned all test
+state and preserved every customer hash. Production remains at 70 migrations; V1 is the customer
+default, V2 customer flags are off and managed settlement is paused. The next package is Package
+14, the minimum live generation/edit/repair/provider-failure/booking matrix, and requires explicit
+model-spend approval.
