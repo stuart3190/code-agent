@@ -4,6 +4,7 @@
 // data, other projects, and global settings are never touched.
 
 import { conversationStore } from "./conversationStore.mjs";
+import { buildProjectErasureManifest, eraseProjectPermanently } from "./erasureService.mjs";
 import { purgeProjectResources } from "./projectTeardown.mjs";
 
 function step(name, error) {
@@ -53,7 +54,16 @@ export async function deleteConversationCascade(ownerId, conversationId, {
       // One authoritative teardown. This used to be a hand-written list here that covered seven
       // tables and left ten, and unpublished without the slug — which removed nothing and left the
       // site serving forever.
-      const report = await purgeProjectResources(ownerId, projectId, { client, provisiond });
+      // Production Supabase clients always expose RPC. Lightweight test/store adapters predating
+      // the durable erasure authority do not; retain their old teardown seam so unit fixtures do
+      // not pretend to implement the database transaction.
+      const report = typeof client.rpc === "function"
+        ? (await eraseProjectPermanently(ownerId, projectId, {
+            client,
+            provisiond,
+            approvedManifestSha256: (await buildProjectErasureManifest(ownerId, projectId, { client })).manifestSha256,
+          })).report
+        : await purgeProjectResources(ownerId, projectId, { client, provisiond });
       if (report.site?.attempted && report.site.slug && !report.site.removed) {
         // The record is about to be deleted, taking the slug with it. If the files are still
         // there, stopping now keeps the project visible and recoverable instead of stranding a

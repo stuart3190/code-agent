@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import net from "node:net";
+
 const KIB = 1024;
 const MIB = 1024 * KIB;
 
@@ -90,7 +93,7 @@ function isDesktopWebviewOrigin(origin) {
 
 export function applyCors(res, origin, origins) {
   res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
   res.setHeader("Access-Control-Max-Age", "86400");
   if (!origin) return true;
@@ -135,22 +138,117 @@ export function staticCacheControl(pathname) {
     : "no-cache";
 }
 
-export function createRateLimiter({ now = () => Date.now() } = {}) {
-  const buckets = new Map();
-  let calls = 0;
-  return function consume(key, limit, windowMs) {
-    const time = now();
-    let bucket = buckets.get(key);
-    if (!bucket || bucket.resetAt <= time) bucket = { count: 0, resetAt: time + windowMs };
-    bucket.count += 1;
-    buckets.set(key, bucket);
-    if ((++calls % 500) === 0) {
-      for (const [k, value] of buckets) if (value.resetAt <= time) buckets.delete(k);
-    }
+function normalizedAddress(value) {
+  const raw = String(value || "").trim().replace(/^\[|\]$/g, "");
+  return raw.startsWith("::ffff:") && net.isIP(raw.slice(7)) === 4 ? raw.slice(7) : raw;
+}
+
+function ipv4Number(value) {
+  if (net.isIP(value) !== 4) return null;
+  return value.split(".").reduce((n, part) => ((n << 8) | Number(part)) >>> 0, 0);
+}
+
+export function addressMatchesRule(address, rule) {
+  const target = normalizedAddress(address);
+  const value = String(rule || "").trim();
+  if (!value) return false;
+  if (!value.includes("/")) return target === normalizedAddress(value);
+  const [network, rawBits] = value.split("/");
+  const bits = Number(rawBits);
+  const targetNumber = ipv4Number(target); const networkNumber = ipv4Number(network);
+  if (targetNumber === null || networkNumber === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (targetNumber & mask) === (networkNumber & mask);
+}
+
+export function trustedProxyRules(value = process.env.THRALLO_TRUSTED_PROXIES || "") {
+  return String(value).split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+/**
+ * Resolve the client address without trusting a caller-supplied X-Forwarded-For header.
+ * Starting at the socket, walk the chain right-to-left only while each hop is explicitly trusted.
+ */
+export function resolveClientNetwork(req, { trustedProxies = trustedProxyRules() } = {}) {
+  const remote = normalizedAddress(req.socket?.remoteAddress || "unknown");
+  const isTrusted = (address) => trustedProxies.some((rule) => addressMatchesRule(address, rule));
+  if (!isTrusted(remote)) return remote;
+  const forwarded = String(req.headers?.["x-forwarded-for"] || "")
+    .split(",").map(normalizedAddress).filter((value) => net.isIP(value));
+  let client = remote;
+  for (let index = forwarded.length - 1; index >= 0; index -= 1) {
+    client = forwarded[index];
+    if (!isTrusted(client)) break;
+  }
+  return client;
+}
+
+function tokenSubject(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return /^[0-9a-f-]{36}$/i.test(String(payload.sub || "")) ? String(payload.sub).toLowerCase() : null;
+  } catch { return null; }
+}
+
+export function requestRateIdentity(req, network = resolveClientNetwork(req)) {
+  const authorization = String(req.headers?.authorization || "");
+  const token = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] || "";
+  const subject = tokenSubject(token);
+  const tokenRef = token ? crypto.createHash("sha256").update(token).digest("hex") : null;
+  return {
+    network,
+    actor: subject ? `account:${subject}` : tokenRef ? `token:${tokenRef}` : `network:${network}`,
+  };
+}
+
+export function sharedRatePolicy(pathname, method) {
+  const write = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+  if (pathname === "/api/analytics/collect") {
+    return { routeClass: "public_analytics", limit: 120, networkLimit: 240, windowMs: 60_000, failClosed: true };
+  }
+  if (pathname === "/api/domain-check") {
+    return { routeClass: "tls_ask", limit: 120, networkLimit: 240, windowMs: 60_000, failClosed: true };
+  }
+  if ((/^\/api\/(?:v1\/)?(?:ai|agents|runs|conversations|completions|builds|runtime|qa|generate|preview|publish)(?:\/|$)/.test(pathname)
+    || /^\/api\/v1\/(?:repositories|diagnostics)(?:\/|$)/.test(pathname)) && write) {
+    return { routeClass: "expensive", limit: 30, networkLimit: 120, windowMs: 60_000, failClosed: true };
+  }
+  if (/^\/api\/v1\/(?:tokens|github|billing|account)(?:\/|$)/.test(pathname) && write) {
+    return { routeClass: "security", limit: 20, networkLimit: 80, windowMs: 60_000, failClosed: true };
+  }
+  if (write) {
+    return { routeClass: "mutation", limit: 120, networkLimit: 480, windowMs: 60_000, failClosed: false };
+  }
+  return null; // cheap reads do not touch the shared limiter
+}
+
+export function createSharedRateLimiter({ clientFactory, now = () => Date.now() } = {}) {
+  if (typeof clientFactory !== "function") throw new Error("shared rate limiter requires a database client factory");
+  const hash = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
+  async function one(key, routeClass, limit, windowMs) {
+    const { data, error } = await clientFactory().rpc("consume_http_rate_limit", {
+      p_key_hash: hash(key), p_route_class: routeClass, p_limit: limit,
+      p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+    });
+    if (error) throw Object.assign(new Error(`shared rate limiter unavailable: ${error.message}`), { code: "rate_limit_backend" });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row.allowed !== "boolean") throw Object.assign(new Error("shared rate limiter returned no verdict"), { code: "rate_limit_backend" });
     return {
-      allowed: bucket.count <= limit,
-      remaining: Math.max(0, limit - bucket.count),
-      retryAfter: Math.max(1, Math.ceil((bucket.resetAt - time) / 1000)),
+      allowed: row.allowed,
+      remaining: Number(row.remaining || 0),
+      retryAfter: Number(row.retry_after_seconds || 1),
+      count: Number(row.current_count || 0),
+      at: now(),
     };
+  }
+  return async function consume(req, policy) {
+    const identity = requestRateIdentity(req);
+    // A generous network ceiling stops attackers rotating invented bearer values, while the actor
+    // bucket prevents authenticated users behind the same NAT from consuming one another's quota.
+    const network = await one(`network:${identity.network}`, `${policy.routeClass}_network`, policy.networkLimit, policy.windowMs);
+    if (!network.allowed) return network;
+    return one(identity.actor, policy.routeClass, policy.limit, policy.windowMs);
   };
 }

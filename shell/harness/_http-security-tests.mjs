@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
-  BODY_LIMITS, allowedOrigins, applyCors, createRateLimiter, parseJson, readBody, staticCacheControl,
+  BODY_LIMITS, allowedOrigins, applyCors, parseJson, readBody, staticCacheControl,
 } from "../server/lib/httpSecurity.mjs";
 
 class Request extends EventEmitter {
@@ -31,14 +31,6 @@ const allowed = new Response();
 assert.equal(applyCors(allowed, "https://buildr101.com", origins), true);
 assert.equal(allowed.headers.get("Access-Control-Allow-Origin"), "https://buildr101.com");
 assert.equal(applyCors(new Response(), "https://evil.example", origins), false);
-
-let time = 1_000;
-const consume = createRateLimiter({ now: () => time });
-assert.equal(consume("ip:route", 2, 1_000).allowed, true);
-assert.equal(consume("ip:route", 2, 1_000).allowed, true);
-assert.equal(consume("ip:route", 2, 1_000).allowed, false);
-time += 1_001;
-assert.equal(consume("ip:route", 2, 1_000).allowed, true);
 
 assert.match(staticCacheControl("/assets/app-abc.js"), /immutable/);
 assert.equal(staticCacheControl("/index.html"), "no-cache");

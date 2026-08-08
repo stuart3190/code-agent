@@ -7,7 +7,6 @@
 // cannot serve single-shot completions; those owners fall back to managed keys when
 // configured.
 
-import { optionalEnv } from "./env.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { activeAiCredential } from "./aiCredentialStore.mjs";
 import { modelCatalog, createProviderForCandidate } from "./modelRouting.mjs";
@@ -21,25 +20,6 @@ const CONTEXT_LIMIT = 3;
 const INSTRUCTIONS = `You are a code completion engine. You receive the file path, code before the cursor (PREFIX), and code after the cursor (SUFFIX), plus optional repository excerpts.
 Output ONLY the code to insert at the cursor: no markdown fences, no explanation, no repetition of the prefix or suffix.
 Stop at a natural boundary within roughly ten lines. If no useful completion exists, output nothing.`;
-
-const buckets = new Map();
-
-export function completionRateAllowed(owner, now = Date.now()) {
-  const perMinute = boundedEnv("CODE_AGENT_COMPLETIONS_PER_MINUTE", 30);
-  const windowStart = now - 60_000;
-  const entries = (buckets.get(owner) || []).filter((stamp) => stamp > windowStart);
-  if (entries.length >= perMinute) {
-    buckets.set(owner, entries);
-    return false;
-  }
-  entries.push(now);
-  buckets.set(owner, entries);
-  return true;
-}
-
-export function resetCompletionRateForTests() {
-  buckets.clear();
-}
 
 export function parseCompletionInput(body = {}) {
   const path = String(body.path || "").slice(0, 500);
@@ -72,14 +52,7 @@ export async function completeCode(owner, input, {
   providerFactory = createProviderForCandidate,
   contextRetriever = retrieveRepositoryContext,
   overviewResolver = budgetOverview,
-  now = Date.now(),
 } = {}) {
-  const { isOwnerAccount } = await import("./ownerAccounts.mjs");
-  const ownerAccount = await isOwnerAccount(owner);
-  if (!ownerAccount && !completionRateAllowed(owner, now)) {
-    throw serviceError("Completion rate limit reached; slow down.", 429, "rate_limited");
-  }
-
   let credential = await credentialResolver(owner).catch(() => ({ provider: "managed", secret: null }));
   if (credential.provider === "codex") {
     // Same rule as the lead agent: a Codex-selected account is never silently rebilled to managed.
@@ -214,11 +187,6 @@ function extractText(response) {
     }
   }
   return "";
-}
-
-function boundedEnv(name, fallback) {
-  const value = Number(optionalEnv(name, ""));
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 function inputError(message) {

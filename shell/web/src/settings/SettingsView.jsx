@@ -122,7 +122,7 @@ export default function SettingsView({
       case "preferences":
         return (
           <PreferencesTab user={user} theme={theme} setTheme={setTheme} data={data}
-            onSection={onSection}
+            onSection={onSection} onConfirm={setConfirm} showToast={showToast}
             onPreviewPlan={(plan) => setPreviewPlan(plan).then(load).catch(() => {})} />
         );
       default:

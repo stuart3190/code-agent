@@ -16,7 +16,7 @@ import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { resolveStaticPath } from "./lib/staticPath.mjs";
 import {
   BODY_LIMITS, HttpInputError, allowedOrigins, applyCors, applySecurityHeaders,
-  createRateLimiter, parseJson, readBody, staticCacheControl,
+  createSharedRateLimiter, parseJson, readBody, resolveClientNetwork, sharedRatePolicy, staticCacheControl,
 } from "./lib/httpSecurity.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
 import {
@@ -55,6 +55,8 @@ import {
 import { startDiagnosticsSweeper, stopDiagnosticsSweeper } from "./lib/appBuild/buildDiagnostics.mjs";
 import { usageInsights, buildCostSummary, adminAnalytics } from "./lib/usageInsights.mjs";
 import { isAdmin } from "./lib/admin.mjs";
+import { readDeploymentIdentity } from "./lib/deploymentIdentity.mjs";
+import { buildAccountErasureManifest, eraseAccountPermanently } from "./lib/erasureService.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -122,7 +124,7 @@ const WEB_DIST = path.join(SHELL_DIR, "web", "dist");
 const CORS_ORIGINS = allowedOrigins(optionalEnv("APP_URL", "http://localhost:5173"));
 CORS_ORIGINS.add(`http://127.0.0.1:${PORT}`);
 CORS_ORIGINS.add(`http://localhost:${PORT}`);
-const consumeRate = createRateLimiter();
+const consumeRate = createSharedRateLimiter({ clientFactory: serviceClient });
 
 function applyRuntimeCors(res, origin) {
   try {
@@ -137,17 +139,6 @@ function applyRuntimeCors(res, origin) {
 }
 
 const readJson = async (req, limit = BODY_LIMITS.standard) => parseJson(await readBody(req, limit));
-
-function clientIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket?.remoteAddress || "unknown";
-}
-
-function ratePolicy(pathname, method) {
-  if (pathname === "/api/domain-check") return { limit: 120, windowMs: 60_000 };
-  if (method === "POST" || method === "DELETE") return { limit: 120, windowMs: 60_000 };
-  return null;
-}
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -272,6 +263,35 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
   const method = req.method || "GET";
+
+  // Public analytics is intentionally cross-origin. Route it before the workspace CORS policy,
+  // but keep the exemption narrow: HTTPS Origin, POST/OPTIONS only, a 32 KiB text/plain body,
+  // registered site identity and the shared network limiter.
+  if (p === "/api/analytics/collect") {
+    const policy = sharedRatePolicy(p, method);
+    try {
+      if (policy) {
+        const rate = await consumeRate(req, policy);
+        res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+        if (!rate.allowed) {
+          res.setHeader("Retry-After", String(rate.retryAfter));
+          return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+        }
+      }
+    } catch (error) {
+      console.error(`[rate-limit] public_analytics: ${error?.message || error}`);
+      return sendJson(res, 503, { error: "Request admission is temporarily unavailable." });
+    }
+    if (method === "OPTIONS") return await handleAnalyticsPreflight(req, res, origin);
+    if (method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+    try {
+      const raw = await readBody(req, 32 * 1024);
+      return await handleAnalyticsCollect(req, res, raw, resolveClientNetwork(req), origin);
+    } catch (error) {
+      if (error instanceof HttpInputError) return sendJson(res, error.status, { error: error.message, code: error.code });
+      throw error;
+    }
+  }
   const runtimeCors = ["/api/runtime/checkout", "/api/runtime/connectors"].includes(p);
   const corsOk = runtimeCors ? applyRuntimeCors(res, origin) : applyCors(res, origin, CORS_ORIGINS);
 
@@ -281,13 +301,18 @@ const server = http.createServer(async (req, res) => {
   }
   if (!corsOk) return sendJson(res, 403, { error: "origin not allowed" });
 
-  const policy = ratePolicy(p, method);
+  const policy = sharedRatePolicy(p, method);
   if (policy) {
-    const rate = consumeRate(`${clientIp(req)}:${method}:${p}`, policy.limit, policy.windowMs);
-    res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
-    if (!rate.allowed) {
-      res.setHeader("Retry-After", String(rate.retryAfter));
-      return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+    try {
+      const rate = await consumeRate(req, policy);
+      res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+      if (!rate.allowed) {
+        res.setHeader("Retry-After", String(rate.retryAfter));
+        return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+      }
+    } catch (error) {
+      console.error(`[rate-limit] ${policy.routeClass}: ${error?.message || error}`);
+      if (policy.failClosed) return sendJson(res, 503, { error: "Request admission is temporarily unavailable." });
     }
   }
 
@@ -717,6 +742,37 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
       return sendJson(res, 200, await adminAnalytics());
     }
+    if (p === "/api/v1/admin/deployment" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
+      try { return sendJson(res, 200, await readDeploymentIdentity()); }
+      catch (error) {
+        console.error(`[deployment-identity] ${error?.message || error}`);
+        return sendJson(res, 503, { error: "Deployment identity is unavailable.", code: "deployment_identity_invalid" });
+      }
+    }
+    if (p === "/api/v1/account/erasure-manifest" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const manifest = await buildAccountErasureManifest(owner.id);
+      return sendJson(res, 200, {
+        manifestSha256: manifest.manifestSha256,
+        projectCount: manifest.projectIds.length,
+        directCounts: Object.fromEntries(Object.entries(manifest.direct).map(([table, value]) => [table, value.count])),
+        storageObjectCount: manifest.storageObjectPaths.length,
+      });
+    }
+    if (p === "/api/v1/account" && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      if (body?.confirm !== true || !/^[0-9a-f]{64}$/.test(body?.manifestSha256 || "")) {
+        return sendJson(res, 400, { error: "A current erasure manifest and explicit confirmation are required.", code: "erasure_confirmation_required" });
+      }
+      const result = await eraseAccountPermanently(owner.id, {
+        approvedManifestSha256: body.manifestSha256,
+        provisiond: provisiondCall(),
+      });
+      return sendJson(res, 200, { deleted: true, jobId: result.jobId, manifestSha256: result.manifestSha256 });
+    }
     // Advanced Diagnostics: the private technical detail behind a support reference.
     // Owner-scoped by query; admins additionally pass isAdmin for cross-account support.
     if (p === "/api/v1/diagnostics/incidents" && method === "GET") {
@@ -805,15 +861,7 @@ const server = http.createServer(async (req, res) => {
       return await handleTokenRename(req, res, owner, tokenMatch[1], await readJson(req));
     }
     // The analytics beacon: public by necessity — it is called by every visitor to every published
-    // site, on hostnames Thrallo does not control. The project is resolved from the app id
-    // server-side, so a forged body cannot write into someone else's project.
-    if (p === "/api/analytics/collect") {
-      if (method === "OPTIONS") return await handleAnalyticsPreflight(req, res);
-      if (method === "POST") {
-        const raw = await readBody(req, BODY_LIMITS.standard);
-        return await handleAnalyticsCollect(req, res, raw, clientIp(req));
-      }
-    }
+    // Owner-scoped analytics dashboard reads. Public collection was handled before workspace CORS.
     const analyticsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/analytics(\/live|\/export)?$/i);
     if (analyticsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;

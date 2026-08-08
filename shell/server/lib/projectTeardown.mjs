@@ -95,9 +95,10 @@ export const NOT_PURGED = Object.freeze(new Map([
   ["bv2_shadow_run_files", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
   ["bv2_shadow_checks", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
   ["bv2_snapshot_files", "cascades from bv2_snapshots (FK ON DELETE CASCADE)"],
-  ["bv2_retrieval_traces", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
-  ["bv2_patches", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
+  ["bv2_retrieval_traces", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_patches", "cascades from bv2_builds through the build/owner FK"],
   ["bv2_blobs", "per-owner content-addressed store; GC removes hashes no retained snapshot references once manifests are purged above"],
+  ["data_erasure_jobs", "pseudonymous content-free erasure evidence is intentionally retained after owner_id is cleared on successful deletion"],
   ["bv2_feature_flags", "platform-global flags — carries no project or app column, listed for the guard only"],
   ...[
     "project_secrets", "project_integrations", "project_environments", "project_releases",
@@ -177,14 +178,18 @@ export async function takeSiteOffline({ client, provisiond, ownerId, projectId }
 
 // Detach every custom domain from Caddy before the rows are deleted. Deleting the rows first
 // loses the hostnames, and Caddy would keep serving them with nothing in Thrallo aware of it.
-export async function detachDomains({ client, provisiond, ownerId, projectId }) {
+export async function detachDomains({ client, provisiond, ownerId, projectId, strictExternal = false }) {
   const { data: domains } = await client.from("custom_domains")
     .select("domain").eq("project_id", String(projectId)).eq("owner", ownerId);
   const names = (domains || []).map((d) => d.domain);
   if (!provisiond) return { detached: [], skipped: names };
   for (const domain of names) {
-    await provisiond("/domain-detach", { domain })
-      .catch((error) => console.error(`[teardown] detach ${domain}: ${error?.message || error}`));
+    try {
+      await provisiond("/domain-detach", { domain });
+    } catch (error) {
+      if (strictExternal) throw failure("custom domain teardown", error);
+      console.error(`[teardown] detach ${domain}: ${error?.message || error}`);
+    }
   }
   return { detached: names, skipped: [] };
 }
@@ -195,11 +200,13 @@ export async function detachDomains({ client, provisiond, ownerId, projectId }) 
  * Infrastructure first — while the records that describe it still exist — then the rows. Reversing
  * that order is what left orphans.
  */
-export async function purgeProjectResources(ownerId, projectId, { client = serviceClient(), provisiond = null } = {}) {
+export async function purgeProjectResources(ownerId, projectId, {
+  client = serviceClient(), provisiond = null, strictExternal = false, atomicDatabase = false,
+} = {}) {
   const report = { projectId: String(projectId) };
 
   report.site = await takeSiteOffline({ client, provisiond, ownerId, projectId });
-  report.domains = await detachDomains({ client, provisiond, ownerId, projectId });
+  report.domains = await detachDomains({ client, provisiond, ownerId, projectId, strictExternal });
   if (provisiond && process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1") {
     report.releases = await provisiond("/releases/purge-project", { owner: ownerId, projectId: String(projectId) });
     if (!report.releases?.purged) {
@@ -208,7 +215,10 @@ export async function purgeProjectResources(ownerId, projectId, { client = servi
       report.releases = { ...(report.releases || {}), verifiedAbsent: true };
     }
   }
-  if (provisiond) await provisiond("/stop", { projectId }).catch(() => {});  // preview container
+  if (provisiond) {
+    try { await provisiond("/stop", { projectId }); }
+    catch (error) { if (strictExternal) throw failure("preview teardown", error); }
+  }
 
   // The end users of a generated app have their own auth identities; deleting the app must not
   // leave them able to sign in to nothing.
@@ -220,9 +230,24 @@ export async function purgeProjectResources(ownerId, projectId, { client = servi
   report.appUsers = 0;
   for await (const rows of pagedRows(client, "app_users", "auth_user_id", { app_id: String(projectId) })) {
     for (const user of rows) {
-      await client.auth.admin.deleteUser(user.auth_user_id).catch(() => {});
+      try {
+        const { error } = await client.auth.admin.deleteUser(user.auth_user_id);
+        if (error) throw error;
+      } catch (error) {
+        if (strictExternal) throw failure("generated-app user deletion", error);
+        console.error(`[teardown] app user ${user.auth_user_id} deletion failed: ${error?.message || error}`);
+      }
       report.appUsers += 1;
     }
+  }
+
+  if (atomicDatabase) {
+    const { data, error } = await client.rpc("erase_project_runtime_rows", {
+      p_owner: ownerId, p_project: String(projectId),
+    });
+    if (error) throw failure("transactional project data deletion", error);
+    report.database = data;
+    return report;
   }
 
   // build_signals is keyed by build, so collect the run ids before diag_runs is removed. Paged for

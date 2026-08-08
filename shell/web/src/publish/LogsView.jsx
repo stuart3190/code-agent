@@ -6,7 +6,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { projectLogs, logStreamUrl, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
+import { projectLogs, streamProjectLogs, exportLogs, projectBuildRuns } from "../lib/codeAgentApi.js";
 import { TabSkeleton, TabError } from "./TabStates.jsx";
 import { useDebounced } from "../lib/useDebounced.js";
 import { LOG_LEVELS as LEVELS, LOG_SOURCES as SOURCES } from "../../../shared/logSources.mjs";
@@ -122,20 +122,15 @@ export default function LogsView({ site, buildRef = null, onSelectBuild = null }
   // the scenes and jumps in when you resume.
   useEffect(() => {
     if (!live || !projectId) return undefined;
-    const source = new EventSource(logStreamUrl(projectId, params()));
-    source.addEventListener("log", (event) => {
-      try {
-        const entry = JSON.parse(event.data);
-        if (seen.current.has(entry.id)) return;
-        seen.current.add(entry.id);
-        // Bounded. Both the rendered list and the dedupe Set grew without limit while Live was on,
-        // so a busy site left on this tab rendered an ever-longer list and held every id it had
-        // ever seen. "Load older" is how you reach what falls off the end.
-        setEntries((current) => trimEntries([entry, ...current], seen.current, LIVE_LIMIT));
-      } catch { /* a malformed frame is not worth surfacing */ }
+    const controller = new AbortController();
+    streamProjectLogs(projectId, params(), (entry) => {
+      if (seen.current.has(entry.id)) return;
+      seen.current.add(entry.id);
+      setEntries((current) => trimEntries([entry, ...current], seen.current, LIVE_LIMIT));
+    }, { signal: controller.signal }).catch((streamError) => {
+      if (!controller.signal.aborted) setError(streamError.message || "Live logs disconnected.");
     });
-    source.onerror = () => { /* EventSource reconnects on its own */ };
-    return () => source.close();
+    return () => controller.abort();
   }, [live, projectId, params]);
 
   const toggle = (list, setList, id) =>

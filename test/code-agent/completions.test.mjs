@@ -5,8 +5,7 @@ process.env.CODE_AGENT_STORE = "memory";
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-openai";
 
 const {
-  buildCompletionPrompt, cleanCompletion, completeCode, completionRateAllowed,
-  parseCompletionInput, resetCompletionRateForTests,
+  buildCompletionPrompt, cleanCompletion, completeCode, parseCompletionInput,
 } = await import("../../shell/server/lib/completions.mjs");
 const { MemoryCodeAgentStore } = await import("../../shell/server/lib/codeAgentStore.mjs");
 
@@ -38,7 +37,6 @@ test("completion cleaning strips fences, trailing space, and runaway length", ()
 });
 
 test("a completion call meters standalone usage and injects index context", async () => {
-  resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
   const repository = await store.createRepository(OWNER, {
     provider: "github", full_name: "o/r", clone_url: "https://github.com/o/r.git",
@@ -69,7 +67,6 @@ test("a completion call meters standalone usage and injects index context", asyn
 });
 
 test("managed completions are blocked when the token budget is spent; BYOK is not", async () => {
-  resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
   await store.upsertSubscription(OWNER, { managed_token_limit_override: 10 });
   await store.recordStandaloneUsage(OWNER, {
@@ -98,7 +95,6 @@ test("codex credentials do NOT fall back to managed models for completions", asy
   // ran four managed lead-agent turns during a Codex-only build. The policy forbids it: a
   // Codex-selected account is never quietly rebilled to managed, so inline completion is
   // unavailable rather than mis-billed.
-  resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
   let providerCalled = false;
   await assert.rejects(
@@ -110,19 +106,6 @@ test("codex credentials do NOT fall back to managed models for completions", asy
     (error) => error.code === "completion_unavailable",
   );
   assert.equal(providerCalled, false, "no model is dispatched on any lane");
-});
-
-test("the per-owner completion limiter rolls over a one-minute window", () => {
-  resetCompletionRateForTests();
-  process.env.CODE_AGENT_COMPLETIONS_PER_MINUTE = "2";
-  const t0 = 1_000_000;
-  assert.equal(completionRateAllowed("o1", t0), true);
-  assert.equal(completionRateAllowed("o1", t0 + 1), true);
-  assert.equal(completionRateAllowed("o1", t0 + 2), false);
-  assert.equal(completionRateAllowed("o2", t0 + 3), true);
-  assert.equal(completionRateAllowed("o1", t0 + 61_000), true);
-  delete process.env.CODE_AGENT_COMPLETIONS_PER_MINUTE;
-  resetCompletionRateForTests();
 });
 
 test("prompt building survives missing repository context", () => {

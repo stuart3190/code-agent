@@ -199,14 +199,13 @@ test("a swallowed failure still says why", async () => {
 // ── Legacy that is NOT dead ─────────────────────────────────────────────────────────────
 
 test("the buildr101 preview origin stays in the CSP, because production still serves it", async () => {
-  const security = await readCode("../../shell/server/lib/httpSecurity.mjs");
-  const withComments = await read("../../shell/server/lib/httpSecurity.mjs");
+  const security = await read("../../shell/server/lib/httpSecurity.mjs");
   // Proven, not assumed: provisiond on the VPS runs with PREVIEW_PUBLIC_SUFFIX=preview.buildr101.com,
   // so every live preview iframe is on that origin. Removing it from frame-src would break every
   // preview in the product. It is documented rather than deleted.
   assert.match(security, /frame-src[^;]*\*\.preview\.buildr101\.com/,
     "removing this breaks every live preview until the suffix is migrated");
-  assert.match(withComments, /PREVIEW_PUBLIC_SUFFIX/,
+  assert.match(security, /PREVIEW_PUBLIC_SUFFIX/,
     "and the reason it is still here must be written down where someone would delete it");
 });
 

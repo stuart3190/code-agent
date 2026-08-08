@@ -5,6 +5,7 @@
 
 import { serviceClient } from "../lib/supabase.mjs";
 import { previewProvider } from "../preview/index.mjs";
+import { eraseProjectPermanently } from "../lib/erasureService.mjs";
 
 const PROVISIOND_URL = () => process.env.PROVISIOND_URL;
 const PROVISIOND_TOKEN = () => process.env.PROVISIOND_TOKEN;
@@ -77,7 +78,21 @@ export async function handleProjectDelete(req, res, body, owner) {
       return res.end(JSON.stringify({ error: "Project not found." }));
     }
 
-    const cleaned = await deleteProjectCascade(svc, projectId);
+    const cleaned = await eraseProjectPermanently(owner.id, projectId, {
+      client: svc,
+      provisiond: async (route, payload, method = "POST") => {
+        if (method !== "POST") {
+          const response = await fetch(`${PROVISIOND_URL()}${route}`, {
+            method, headers: { Authorization: `Bearer ${PROVISIOND_TOKEN()}` },
+          });
+          if (!response.ok) throw new Error(`provisiond ${route}: ${response.status}`);
+          return response.json();
+        }
+        const result = await provisiondPost(route, payload);
+        if (!result) throw new Error(`provisiond ${route} failed`);
+        return result;
+      },
+    });
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ deleted: projectId, cleaned }));

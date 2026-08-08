@@ -10,7 +10,8 @@
 // This is NOT the retired routes/analytics.mjs, which is the Buildr101 connector reading a table
 // Thrallo has never had. Nothing was carried over from it.
 
-import { recordBeacon } from "../lib/analytics/ingest.mjs";
+import { recordBeacon, resolveSite } from "../lib/analytics/ingest.mjs";
+import { serviceClient } from "../lib/supabase.mjs";
 import { overview, liveVisitors } from "../lib/analytics/reports.mjs";
 import { buildAnalyticsExport } from "../lib/analytics/export.mjs";
 
@@ -26,27 +27,61 @@ function sendJson(res, code, value) {
  * It always answers 204, whatever happened. A visitor's browser must never see an error caused by
  * analytics, and telling a caller whether an app id exists would be a way to enumerate them.
  */
-export async function handleAnalyticsCollect(req, res, rawBody, clientIp) {
-  // Sent as text/plain to stay CORS-safelisted, so the content type header says nothing useful.
+export async function validateAnalyticsOrigin(origin, appId, client = serviceClient()) {
+  let parsed;
+  try { parsed = new URL(String(origin || "")); } catch { return { allowed: false, reason: "bad_origin" }; }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) {
+    return { allowed: false, reason: "bad_origin" };
+  }
+  const site = await resolveSite(String(appId || "").trim().toLowerCase(), client, { fresh: true });
+  if (!site) return { allowed: false, reason: "unknown_site" };
+  const suffix = String(process.env.PUBLISH_PUBLIC_SUFFIX || "app.thrallo.com").toLowerCase().replace(/^\.+/, "");
+  if (parsed.hostname.toLowerCase() === `${site.slug}.${suffix}`) return { allowed: true, site, kind: "thrallo" };
+  const { data, error } = await client.from("custom_domains").select("domain")
+    .eq("owner", site.owner).eq("project_id", String(site.project_id))
+    .eq("domain", parsed.hostname.toLowerCase()).eq("status", "active").maybeSingle();
+  if (error) throw new Error(`analytics origin lookup: ${error.message}`);
+  return data ? { allowed: true, site, kind: "custom" } : { allowed: false, reason: "origin_not_bound" };
+}
+
+export async function handleAnalyticsCollect(req, res, rawBody, clientIp, origin, {
+  client = serviceClient(), record = recordBeacon,
+} = {}) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!/^text\/plain(?:;\s*charset=utf-8)?$/.test(contentType)) {
+    return sendJson(res, 415, { error: "unsupported media type" });
+  }
   let body = {};
-  try { body = JSON.parse(String(rawBody || "{}")); } catch { body = {}; }
+  try { body = JSON.parse(String(rawBody || "{}")); }
+  catch { return sendJson(res, 400, { error: "invalid analytics beacon" }); }
+  const originProof = await validateAnalyticsOrigin(origin, body.appId, client).catch((error) => {
+    console.error(`[analytics-origin] ${error?.message || error}`); return { allowed: false, reason: "unavailable" };
+  });
+  if (!originProof.allowed) return sendJson(res, 403, { error: "analytics origin is not registered" });
   try {
-    await recordBeacon({ body, ip: clientIp, userAgent: req.headers["user-agent"] || "" });
+    await record({ body, ip: clientIp, userAgent: req.headers["user-agent"] || "" });
   } catch (error) {
     console.error(`[analytics-collect] ${error?.message || error}`);
   }
   res.writeHead(204, {
     // Published sites live on their own hostnames and on custom domains, so the beacon is always
     // cross-origin. No credentials are involved and the body carries nothing private.
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": origin,
+    Vary: "Origin",
     "Cache-Control": "no-store",
   });
   res.end();
 }
 
-export function handleAnalyticsPreflight(_req, res) {
+export function handleAnalyticsPreflight(_req, res, origin) {
+  let parsed = null;
+  try { parsed = new URL(String(origin || "")); } catch { /* invalid */ }
+  if (!parsed || parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) {
+    return sendJson(res, 403, { error: "analytics origin is not allowed" });
+  }
   res.writeHead(204, {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": origin,
+    Vary: "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",

@@ -96,7 +96,9 @@ export async function handleLogsExport(_req, res, owner, projectId, url) {
   }
 }
 
-export async function handleLogsStream(req, res, owner, projectId, url) {
+export async function handleLogsStream(req, res, owner, projectId, url, {
+  readSinceFn = readSince, tickMs = STREAM_TICK_MS,
+} = {}) {
   const filters = filtersFrom(url);
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -107,14 +109,16 @@ export async function handleLogsStream(req, res, owner, projectId, url) {
     "X-Accel-Buffering": "no",
   });
 
-  let cursor = new Date().toISOString();
+  // Reconnects pass the last fully received timestamp. Starting at `now` would create a silent gap
+  // between a dropped connection and the replacement fetch.
+  let cursor = filters.since || new Date().toISOString();
   let closed = false;
   const stop = () => { closed = true; clearInterval(timer); clearInterval(ping); };
 
   const tick = async () => {
     if (closed) return;
     try {
-      const { entries } = await readSince(owner.id, projectId, cursor, filters);
+      const { entries } = await readSinceFn(owner.id, projectId, cursor, filters);
       if (entries.length) {
         cursor = entries[entries.length - 1].at;
         for (const entry of entries) {
@@ -126,7 +130,7 @@ export async function handleLogsStream(req, res, owner, projectId, url) {
     }
   };
 
-  const timer = setInterval(tick, STREAM_TICK_MS);
+  const timer = setInterval(tick, tickMs);
   // A comment keeps proxies and browsers from closing an idle connection; a quiet log is normal.
   const ping = setInterval(() => { if (!closed) res.write(": ping\n\n"); }, 25_000);
 
