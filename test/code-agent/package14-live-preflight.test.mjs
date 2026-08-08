@@ -52,6 +52,7 @@ test("opaque expired Codex token refreshes only after an explicit token_expired 
     tokenProvider,
     fetchImpl: async (_url, options) => {
       calls.push(options.headers.Authorization);
+      assert.equal(JSON.parse(options.body).max_output_tokens, undefined);
       if (calls.length === 1) {
         return new Response(JSON.stringify({ error: { code: "token_expired", message: "Provided authentication token is expired." } }), { status: 401 });
       }

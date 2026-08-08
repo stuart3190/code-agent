@@ -64,8 +64,11 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       input: toInputItems(messages),
       stream: true,
       store: false, // backend rejects store:true/stream:false; no `metadata` (would 400)
-      ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
     };
+    // The ChatGPT Codex backend rejects `max_output_tokens` even though the public Responses API
+    // accepts it. V2 still reserves against the bounded output policy before dispatch and stops at
+    // its shared usage ceiling after each turn; do not lie by sending an unsupported wire field.
+    void maxOutputTokens;
     if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
     // Optional reasoning-effort override (codex_cli_rs sends the same field shape). Omitted
     // entirely when unset — existing callers' wire bodies are byte-identical.
