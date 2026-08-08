@@ -6,7 +6,9 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { CA_TABLES, listBucketObjects } from "./backup-thrallo.mjs";
-import { eraseProjectPermanently } from "../shell/server/lib/erasureService.mjs";
+import {
+  buildAccountErasureManifest, eraseAccountPermanently, eraseProjectPermanently,
+} from "../shell/server/lib/erasureService.mjs";
 
 loadEnv();
 if (process.env.PACKAGE12_PROOF !== "1") throw new Error("set PACKAGE12_PROOF=1 for disposable/test-owner proof");
@@ -100,12 +102,26 @@ try {
   const replay = await eraseProjectPermanently(OWNER, PROJECT, { client: db, workerRoot: path.join(temp, "worker"), qaRoot: path.join(temp, "qa") });
   assert.equal(replay.replay, true); checks.push("cross-store erasure and idempotent replay");
 
-  for (const [owner, project] of [[OWNER, OTHER_PROJECT], [OTHER_OWNER, CROSS_PROJECT]]) {
-    await eraseProjectPermanently(owner, project, { client: db, workerRoot: path.join(temp, "worker"), qaRoot: path.join(temp, "qa") });
-  }
-  await db.auth.admin.deleteUser(OWNER); await db.auth.admin.deleteUser(OTHER_OWNER);
+  await unwrap(db.from("diag_prefs").insert({ owner: OWNER, retention_days: 7 }), "diagnostic preferences");
+  await unwrap(db.from("ai_requests").insert({ id: uuid(), owner: OWNER, provider: "proof", project_id: OTHER_PROJECT }), "account AI request");
+  const accountManifest = await buildAccountErasureManifest(OWNER, { client: db });
+  const accountResult = await eraseAccountPermanently(OWNER, { client: db,
+    approvedManifestSha256: accountManifest.manifestSha256,
+    workerRoot: path.join(temp, "worker"), qaRoot: path.join(temp, "qa") });
+  assert.equal((await db.from("projects").select("id").eq("owner", OWNER)).data.length, 0);
+  assert.equal((await db.from("diag_prefs").select("owner").eq("owner", OWNER)).data.length, 0);
+  assert.equal((await db.from("ai_requests").select("id").eq("owner", OWNER)).data.length, 0);
+  assert.ok((await db.auth.admin.getUserById(OWNER)).error);
+  const accountReplay = await eraseAccountPermanently(OWNER, { client: db,
+    approvedManifestSha256: accountManifest.manifestSha256,
+    workerRoot: path.join(temp, "worker"), qaRoot: path.join(temp, "qa") });
+  assert.equal(accountReplay.replay, true); checks.push("account erasure and idempotent replay");
+
+  await eraseProjectPermanently(OTHER_OWNER, CROSS_PROJECT, { client: db, workerRoot: path.join(temp, "worker"), qaRoot: path.join(temp, "qa") });
+  await db.auth.admin.deleteUser(OTHER_OWNER);
   const after = await snapshot(); assert.deepEqual(after, before); checks.push("unaffected canonical hashes exact");
-  console.log(JSON.stringify({ ok: true, checks, erasureJob: result.jobId, manifestSha256: result.manifestSha256 }));
+  console.log(JSON.stringify({ ok: true, checks, erasureJob: result.jobId, accountErasureJob: accountResult.jobId,
+    manifestSha256: result.manifestSha256, accountManifestSha256: accountManifest.manifestSha256 }));
 } finally {
   await db.from("http_rate_limit_buckets").delete().in("key_hash", [hash("package12-rate"), hash("anon")]);
   for (const object of [targetBlobPath, otherBlobPath, sharedAssetPath]) await db.storage.from(BUCKET).remove([object]).catch(() => {});
