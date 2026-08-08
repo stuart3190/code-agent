@@ -61,6 +61,8 @@
     "worker:e2e:proof": "node ops/prove-build-worker-e2e.mjs",
     "publish:ops": "node ops/publish-releases.mjs",
     "publish:db:proof": "node ops/prove-atomic-publishing-postgres.mjs",
+    "security:secrets": "node ops/scan-secrets.mjs",
+    "release:verify": "node ops/verify-release-artifacts.mjs",
     "build:web": "npm --prefix shell/web run build",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },

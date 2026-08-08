@@ -5,106 +5,131 @@
 `ops/backup-thrallo.mjs` runs nightly on the VPS under `thrallo-backup.timer` (03:20 UTC,
 persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 
-- every migrated Thrallo application table as gzipped JSON, including `bv2_model_reservations`
-  and all `bv2_*` graph, snapshot, cache, asset, diagnostic, ownership, and feature-flag tables.
-  Before it reads production rows, the backup compares its manifest with the live
-  `thrallo_public_tables()` catalog and aborts on either an omitted or unknown canonical table;
-- `auth_users.json.gz` — Supabase auth UUIDs, email addresses, and application/user metadata.
-  Password hashes, OAuth identities, MFA factors, and sessions are not exported by this logical
+- every migrated Thrallo application table as gzipped JSON, including
+  `bv2_model_reservations`, the erasure audit, and all `bv2_*` graph, snapshot, cache,
+  asset, diagnostic, ownership, feature-flag and runtime tables. Before reading production,
+  the backup compares its manifest with the live `thrallo_public_tables()` catalog and
+  aborts on an omitted or unknown canonical table. The ephemeral fixed-window rate-limit
+  bucket is deliberately excluded because it is not recovery state;
+- `auth_users.json.gz` — Supabase Auth UUIDs, email addresses and application/user metadata.
+  Password hashes, OAuth identities, MFA factors and sessions are not exported by this logical
   backup, so users re-establish credentials after a restore;
-- the private `thrallo-artifacts` storage bucket, one gzipped file per object plus a
-  `storage_objects.json.gz` index with original keys, content types, and content hashes;
-- current publish, QA and durable build-worker filesystem artifacts, stored by logical root with
-  file and directory paths, modes, sizes,
-  and content hashes. VPS previews are deliberately not backed up: they are ephemeral containers
+- the private `thrallo-artifacts` Storage bucket, one gzipped file per object plus an index
+  with original keys, content types and content hashes;
+- current publish, QA and durable build-worker filesystem artifacts, stored by logical root
+  with file/directory paths, modes, sizes and content hashes. VPS previews are ephemeral and
   re-materialised from canonical project/snapshot data;
-- authoritative production migration-ledger evidence plus the active local/applied-state map;
-- `manifest.json` with per-file row counts, sizes, and SHA-256 checksums. Validation covers every
-  compressed dataset and every underlying storage/filesystem object, not only index files.
+- authoritative production migration-ledger evidence plus the local/applied-state map; and
+- `manifest.json` with per-file row counts, sizes and SHA-256 checksums.
 
-Every run is validated immediately after writing (decode, count, checksum) and runs older
-than `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101's backups are separate and
-untouched.
+Every run is validated immediately after writing. Runs older than
+`THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101 backups are separate and untouched.
 
-The 60-row reconstructed authoritative history is immutable. Later production applications are
-captured as dated, read-only ledger overlays containing the remote statement hash and the local
-applied-file hash. A backup merges them, requires contiguous applied order, and refuses a local
-file whose recorded applied identity changes. The current evidence is exactly 67 rows; backup
-creation fails if that count or the active/pending state differs.
+The reconstructed authoritative history is immutable. Later production migrations are captured
+as dated, read-only ledger overlays containing the remote statement hash and local applied-file
+hash. Backup creation requires contiguous order and refuses a changed applied identity.
 
-`bv2_builds.project_id_text` and `diag_runs.project_id_text` are stored generated columns. They
-are not authoritative backup fields and are never included in restore writes. PostgreSQL
-regenerates them from `project_id`; the isolated verifier checks every regenerated value and
-canonicalises those two columns before comparing source and restored row hashes.
+`bv2_builds.project_id_text` and `diag_runs.project_id_text` are generated columns. They are
+never included in restore writes; PostgreSQL regenerates them and the isolated verifier compares
+every regenerated value with its source UUID.
 
 The worker account home (`/var/lib/thrallo-build-worker-home`) is not backup input. Only the
-canonical artifact root (`/var/lib/thrallo-build-worker`) is included. Their separation is a
-recovery invariant: OS skeleton entries and caches must not contaminate durable data, while any
-unexpected symlink inside the canonical root must still abort the backup.
+canonical artifact root (`/var/lib/thrallo-build-worker`) is included. Any unexpected symlink
+inside that root aborts the backup.
 
-## The disaster-recovery kit — keep these OFF the VPS
+## Recovery objectives and retention
 
-1. **`shell/.env`** — above all `PLATFORM_ENC_KEY`. Every AI credential, repository source
-   excerpt, symbol, and evaluation is AES-256-GCM encrypted with it. A backup without this
-   key restores rows whose sensitive columns are permanently unreadable. Also contains the
-   GitHub App private key, Daytona and OpenAI keys, and the Supabase secret.
-2. A recent `thrallo-<stamp>/` backup directory, copied off-host periodically.
+- RPO: 24 hours for canonical database, Auth, Storage and filesystem state.
+- RTO: 4 hours to provision an isolated target, restore, verify and perform an approved cutover.
+- Local complete backups: 14 daily copies.
+- Off-host encrypted backups: 30 daily and 12 monthly copies.
+- Restore drill: monthly in the externally blocked disposable Supabase stack.
 
-## Scenario A — bad data in the live project (rows deleted or corrupted)
+The current scale does not justify a multi-region hot standby. These objectives are intentionally
+modest and measurable. A missed backup or restore drill is an incident, not a warning.
 
-1. `node ops/restore-thrallo.mjs ~/thrallo-backups/<run>` — dry-run prints validated counts.
-2. Surgical repair is preferred: extract the affected table's `.json.gz`, re-insert the
-   needed rows with the service role (`upsert` on the primary key). A full-table upsert of
-   every table against the LIVE project is possible with
-   `RESTORE_TARGET_URL`/`RESTORE_TARGET_SERVICE_KEY` + `--confirm`, but it overwrites newer
-   rows — prefer the surgical path.
+## The disaster-recovery kit — keep these off the VPS
+
+1. **`shell/.env`** — above all `PLATFORM_ENC_KEY`. Every encrypted credential and diagnostic
+   payload is unusable without it. It also contains provider and Supabase secrets and must never
+   be copied into a backup archive.
+2. A recent completed `thrallo-<stamp>/` backup directory.
+3. The approved immutable release/deployment manifest and artifact hashes.
+
+## Encrypted off-host copy
+
+No storage vendor is purchased or configured by this repository. Install `age` and `rclone`,
+create a remote with write-only credentials where supported, and store
+`THRALLO_OFFSITE_AGE_RECIPIENT` and `THRALLO_OFFSITE_RCLONE_REMOTE` in the operator secret store.
+The age private identity stays offline and is tested during the monthly drill.
+
+Run `node ops/offsite-backup.mjs` to validate configuration. Run it with `--upload` only after a
+complete local backup. It encrypts before transfer and uses immutable remote writes; it never
+uploads plaintext or replaces an existing object.
+
+Put only `THRALLO_OFFSITE_AGE_RECIPIENT` and `THRALLO_OFFSITE_RCLONE_REMOTE` in
+`/etc/thrallo/offsite-backup.env` (root-owned, mode 0600). The off-site unit deliberately does not
+load the shell environment, so provider, database and billing secrets are unavailable to it.
+
+The monthly drill additionally requires `/etc/thrallo/restore-drill.env` with
+`THRALLO_RESTORE_PUBLIC_HOST` and `THRALLO_EXTERNAL_PROBE_COMMAND`. The probe command must be an
+absolute executable which delegates every 55320–55327 check to an independent host and implements
+the documented `--host`, `--ports`, `--until-file` and `--output` contract. A local curl loop does
+not qualify. Missing probe configuration makes the drill fail before production bytes are restored.
+
+## Scenario A — bad data in a live project
+
+1. `node ops/restore-thrallo.mjs ~/thrallo-backups/<run>` validates without writing.
+2. Prefer a manifest-bounded, owner-scoped surgical repair. A full-table restore against live
+   production can overwrite newer rows and requires separate approval.
 
 ## Scenario B — the Supabase project is lost
 
-1. Create a fresh Supabase project (same region), note its URL, service key, anon key.
-2. Apply every migration in `supabase/migrations/` in filename order (this also recreates
-   the `thrallo-artifacts` bucket and all RLS lockdowns).
-3. `RESTORE_TARGET_URL=<new url> RESTORE_TARGET_SERVICE_KEY=<new service key> \
-   node ops/restore-thrallo.mjs <backup-dir> --confirm`
-   — recreates auth users (original UUIDs, no passwords), restores tables in
-   foreign-key-safe order. The order is checked against the complete 83-pair public FK graph from
-   the 67-migration production catalog. Nullable cyclic/forward links are withheld only for the
-   initial insert and patched after every parent exists; no FK is disabled or weakened. The restore
-   then re-uploads artifact objects, and restores filesystem artifacts only beneath the explicit
-   `RESTORE_TARGET_FILESYSTEM_ROOT` isolated namespace.
-   Durable work restores in payload -> job -> result/event/node order after projects and customer
-   `build_jobs`. `build_jobs.work_job_id` is a trace link rather than a reverse foreign key, which
-   avoids a restore cycle; `build_work_jobs.build_id` remains the authoritative FK. A restored
-   in-flight lease is allowed to expire and be reclaimed rather than being reported as successful
-   from filesystem state alone.
-   Model reservations restore after projects and V2 builds; the verifier checks reservation
-   owner/project/build identity, terminal state, provider/model/billing lane, usage evidence,
-   public-build runtime links, diagnostics links, and green-snapshot links.
-4. Update `shell/.env` on the VPS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; update
-   `shell/web/.env` with the new URL and publishable key; **keep the original
-   `PLATFORM_ENC_KEY`**. Rebuild the web app and restart `thrallo-shell`.
-5. Supabase Auth → URL configuration: set Site URL and redirect to
-   `https://app.thrallo.com`.
-6. Verify: `/api/health`, `/api/v1/capabilities`, sign-in, one full agent run, and one
-   GitHub webhook redelivery from the App's Advanced tab.
-7. Tell users to reset passwords (restored accounts have none).
+1. Create a fresh Supabase project in the approved region and capture its URL and new keys.
+2. Apply every migration in filename order.
+3. Start the disposable restore target with ports 55320–55327 externally blocked and continuous
+   independent probing.
+4. Run `RESTORE_TARGET_URL=<url> RESTORE_TARGET_SERVICE_KEY=<key> node ops/restore-thrallo.mjs
+   <backup-dir> --confirm`. The restore order is validated against the complete public FK graph;
+   no constraint is disabled or weakened.
+5. Verify row hashes, Auth ownership, Storage bytes, snapshots/blobs, worker data, graph,
+   publishing, reservations, erasure evidence, generated columns and owner isolation.
+6. Update service secret stores while preserving the original `PLATFORM_ENC_KEY`; rebuild and
+   restart only required services.
+7. Verify health, authentication, one deterministic agent fixture and webhook delivery. Users
+   must reset passwords because logical Auth backups do not contain password credentials.
 
 ## Scenario C — the VPS is lost
 
-1. Provision a host, install Node 22+, clone the repository at the last deployed main
-   commit, `npm ci` and build `shell/web`.
-2. Restore `shell/.env` and `shell/web/.env` from the offline kit.
-3. Install `ops/thrallo-shell.service`, `ops/thrallo-backup.service`, and
-   `ops/thrallo-backup.timer`; reuse `ops/Caddyfile.thrallo` in the front proxy; point DNS
-   at the new host.
-4. Restore the backed-up `publish` and `qa` roots into an isolated directory, validate their
-   manifest hashes, then promote the recovered publish tree into the configured `PUBLISH_DIR`.
-   Preview containers are recreated on demand. Verify as in Scenario B step 6.
+1. Provision a host, install Node 22+, and check out the exact immutable deployment commit.
+2. Restore environment secrets from the offline kit.
+3. Install shell, worker, backup and monitoring units. Restore ingress only from its separately
+   approved production configuration.
+4. Restore publish, QA and worker roots into an isolated directory, validate every hash and mode,
+   then promote them. Reconcile expired worker leases and publishing intents before traffic.
+5. Prove the running deployment identity matches the approved manifest.
+
+## Operational SLOs and alerts
+
+- Shell availability: 99.5% monthly, excluding approved maintenance.
+- 95% of queued builds leased within 2 minutes; alert when oldest queue age exceeds 10 minutes.
+- Active worker heartbeat no older than 3 minutes.
+- Publishing reconciliation backlog: zero intents older than 5 minutes.
+- PostgREST read probe succeeds on every five-minute check.
+- Nightly backup completed within 26 hours; isolated restore evidence no older than 31 days.
+- Running deployment manifest matches the approved immutable manifest.
+- Alert when backup/storage size grows by more than 25% between successive snapshots.
+
+`thrallo-dr-health.timer` evaluates these signals and optionally sends a secret-free JSON alert to
+`THRALLO_OPS_ALERT_WEBHOOK`. Failed backup/restore units remain failed so systemd monitoring sees
+them. See `BUILD-WORKER-INCIDENT-RECOVERY.md`, `PUBLISHING-OPERATIONS.md`,
+`PUBLISHING-ROLLBACK.md` and `DEPLOYMENT-RECONCILIATION.md` for subsystem recovery.
 
 ## Verification cadence
 
-- The nightly unit validates every backup it writes; check `systemctl status
-  thrallo-backup` after changes.
-- `node ops/restore-thrallo.mjs <latest>` (dry run) is safe anywhere and re-validates a
-  backup end to end.
-- After any schema change, `npm run verify` runs the coverage drift-guard.
+- Every nightly backup validates its own manifest and data.
+- `node ops/restore-thrallo.mjs <latest>` revalidates a backup without writing.
+- `ops/run-latest-isolated-restore-drill.sh` runs the monthly isolated restore gate.
+- After every schema change, the release pipeline runs fresh reset, lint, schema diff, catalog
+  coverage and backup compatibility proofs.
+- Quarterly, rehearse the four-hour RTO from a clean host or namespace and record actual timing.

@@ -20,6 +20,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm --prefix shell/web ci
+      - name: Static syntax checks
+        run: find shell/server build-worker ops -name '*.mjs' -print0 | xargs -0 -n1 node --check
+      - name: Secret scan
+        run: npm run security:secrets
+      - name: Production dependency scan
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm --prefix shell/web audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
       - name: Builder V2 zero-credit qualification matrix

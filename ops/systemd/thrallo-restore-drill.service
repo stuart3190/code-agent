@@ -1,0 +1,15 @@
+[Unit]
+Description=Thrallo monthly network-isolated restore drill
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/code-agent
+EnvironmentFile=/etc/thrallo/restore-drill.env
+ExecStart=/home/ubuntu/code-agent/ops/run-latest-isolated-restore-drill.sh
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
