@@ -1209,3 +1209,18 @@ state and preserved every customer hash. Production remains at 70 migrations; V1
 default, V2 customer flags are off and managed settlement is paused. The next package is Package
 14, the minimum live generation/edit/repair/provider-failure/booking matrix, and requires explicit
 model-spend approval.
+
+## Package 14 live quality qualification failed (2026-08-08)
+
+Package 14 stopped at 6.6273 of the approved 15-credit ceiling. Provider failure handling passed,
+but the simple build never reached a green snapshot, so its required edit was blocked. The booking
+attempt used `makeBookingSystem` but bypassed `makeWizardMachine`; one retrieval-scoped repair
+improved selection behaviour but review, confirmation and refresh recovery stayed red. No repeat
+booking attempt ran.
+
+The package fixed live-only worker credential authority, opaque Codex token refresh, unsupported
+Codex wire parameters, canonical model selection, provider request-id diagnostics and bounded
+repair headroom. Full tests are green (1,337 pass, 17 intentional skips). The worker is restored to
+dark `proof_slow,publish_package` mode; V1 remains the default, V2 flags are off, settlement is
+paused, and there are zero active worker jobs. Package 15 is blocked. Next is separately approved
+Package 14R; see `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.

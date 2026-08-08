@@ -253,3 +253,18 @@ All disposable rows were removed and the canonical customer hashes were unchange
 remains at 70 migrations with zero V2 builds/reservations, disabled V2 customer flags and Builder
 V1 as the default. Evidence is in
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-13-PROVIDER-BILLING-CLOSURE.md`.
+
+## Package 14 live quality qualification (2026-08-08)
+
+Package 14 is **FAIL**, not a production-readiness claim. It spent 6.6273 of the approved 15-credit
+ceiling on the connected Codex allowance. The real lane exposed and bounded worker credential
+authority, opaque-token refresh, Codex wire-parameter, provider-identity telemetry and reservation
+headroom defects. Provider rejection accounting passed, but the simple build did not reach a green
+snapshot and the booking benchmark bypassed the required wizard capability. One targeted booking
+repair improved selection state but review, confirmation and refresh recovery stayed red.
+
+Customer routing and customer worker/publishing flags remained off, V1 remained default, managed
+settlement remained paused and no Stripe/Caddy/provisiond operation occurred. The dark worker is
+restored to `proof_slow,publish_package`, with zero active jobs. Package 15 is blocked pending a
+separately approved Package 14R. Evidence and exact accounting are in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.

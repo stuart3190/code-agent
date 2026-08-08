@@ -119,7 +119,8 @@ or Package 12 completion claim.
 | 11. Dark V2 composition deploy and zero-model production canary | complete 2026-08-08; Package 10E/10E-F green | installed through migration 68 | no | yes, test-owner only |
 | 12. Platform launch blockers | complete 2026-08-08; all 12A-12G production proofs and post-migration isolated restore green | `20260808180841`, `20260808180845` | no | yes, test-owner only |
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
-| 14. Minimum live generation/edit/repair/booking matrix | pending explicit approval | no | yes | internal projects/provider calls |
+| 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
+| 14R. Deterministic quality repair and bounded requalification | pending explicit approval; blocks Package 15 | none expected | separately approved ceiling required | internal projects/provider calls |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -128,6 +129,12 @@ or Package 12 completion claim.
 
 Packages 1-13 are zero-credit engineering. Package 14 is the first required provider-spend gate.
 No local migration is production-approved merely because its unit tests pass.
+
+Package 14 did not qualify generation quality. The real Codex lane exposed and bounded worker
+credential authority, opaque-token refresh, Codex wire-parameter, request-identity and reservation
+headroom defects, but the simple build remained red and the booking model bypassed
+`makeWizardMachine`. Package 15 is therefore blocked by Package 14R. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.
 
 ## Deterministic qualification gate
 
