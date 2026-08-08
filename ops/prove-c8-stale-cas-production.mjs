@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
+import { loadEnv } from "../shell/server/lib/env.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 
 const PROJECT_REF = "zczgvcsokfafuyognvwx";
@@ -18,6 +19,7 @@ const RELEASE_A = "10f30000-0000-4000-8000-000000000001";
 const RELEASE_B = "10f30000-0000-4000-8000-000000000002";
 const ATTEMPTS = 80;
 
+loadEnv();
 if (process.env.THRALLO_C8_CAS_STRESS !== "1") throw new Error("THRALLO_C8_CAS_STRESS=1 is required");
 if (process.env.THRALLO_PROCESS_ROLE !== "package10ef-cas-stress") throw new Error("isolated stress process role is required");
 if (process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED !== "1") throw new Error("managed settlement must remain paused");

@@ -1,5 +1,15 @@
+param(
+  [Parameter(Mandatory = $true)][string]$StartUtc,
+  [Parameter(Mandatory = $true)][string]$EndUtc,
+  [string]$PathPattern = "request_publish_activation"
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$start = [DateTimeOffset]::Parse($StartUtc).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$end = [DateTimeOffset]::Parse($EndUtc).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$safePattern = $PathPattern.Replace("'", "''")
 
 Add-Type @"
 using System;
@@ -40,12 +50,12 @@ from edge_logs
 cross join unnest(metadata) as metadata
 cross join unnest(response) as response
 cross join unnest(request) as request
-where regexp_contains(path, 'request_publish_activation')
+where regexp_contains(path, '$safePattern')
 order by timestamp asc
-limit 100
+limit 1000
 "@
   $encoded = [Uri]::EscapeDataString($sql)
-  $uri = "https://api.supabase.com/v1/projects/zczgvcsokfafuyognvwx/analytics/endpoints/logs.all?sql=$encoded&iso_timestamp_start=2026-08-08T16%3A10%3A30Z&iso_timestamp_end=2026-08-08T16%3A13%3A30Z"
+  $uri = "https://api.supabase.com/v1/projects/zczgvcsokfafuyognvwx/analytics/endpoints/logs.all?sql=$encoded&iso_timestamp_start=$([Uri]::EscapeDataString($start))&iso_timestamp_end=$([Uri]::EscapeDataString($end))"
   Invoke-RestMethod -Method Get -Uri $uri -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 10
 } finally {
   if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }

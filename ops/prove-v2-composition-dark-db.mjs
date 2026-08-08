@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
+import { loadEnv } from "../shell/server/lib/env.mjs";
 import { buildProjectZip } from "../shell/server/lib/exportProject.mjs";
 import {
   awaitBuildWork, enqueueBuildWork, getBuildWork, listBuildWorkEvents, requestBuildWorkCancel,
@@ -26,6 +27,7 @@ import {
 } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
 
 const EXPECTED_PROJECT_REF = "zczgvcsokfafuyognvwx";
+loadEnv();
 if (process.env.THRALLO_PACKAGE10E_CANARY !== "1") throw new Error("THRALLO_PACKAGE10E_CANARY=1 is required");
 if (process.env.THRALLO_PROCESS_ROLE !== "package10e-canary") throw new Error("isolated package10e-canary process role is required");
 if (process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED !== "1") throw new Error("managed settlement must remain paused");
