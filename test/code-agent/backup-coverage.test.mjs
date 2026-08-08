@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readdir, readFile, writeFile, mkdir, symlink } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { CA_TABLES, canonicalSqlHash, loadMigrationLedgerEvidence } from "../../ops/backup-thrallo.mjs";
 import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
@@ -265,6 +267,17 @@ test("backup migration evidence overlays the authoritative base through producti
   ]);
   assert.equal(ledger.migrations.at(-1).appliedOrder, 65);
   assert.ok(ledger.migrations.slice(-5).every((migration) => migration.localCanonicalSqlSha256));
+});
+
+test("migration history validation reports the effective applied ledger, not the 60-row base as remote", () => {
+  const result = JSON.parse(execFileSync(process.execPath, [
+    fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
+  ], { encoding: "utf8" }));
+  assert.equal(result.authoritativeBase, 60);
+  assert.equal(result.appliedOverlay, 5);
+  assert.equal(result.effectiveApplied, 65);
+  assert.equal(result.active, 67);
+  assert.deepEqual(result.pending.map(({ version }) => version), ["20260807213500", "20260807221000"]);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {

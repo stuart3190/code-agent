@@ -10,12 +10,18 @@ const evidenceRoot = path.join(root, "docs", "evidence", "migration-reconstructi
 const evidenceDates = (await readdir(evidenceRoot, { withFileTypes: true }))
   .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
 let manifestText = null;
+let overlayText = null;
 for (const date of evidenceDates) {
   manifestText = await readFile(path.join(evidenceRoot, date, "authoritative-history-manifest.json"), "utf8").catch(() => null);
   if (manifestText) break;
 }
 if (!manifestText) throw new Error("authoritative migration manifest is missing");
 const manifest = JSON.parse(manifestText);
+for (const date of evidenceDates) {
+  overlayText = await readFile(path.join(evidenceRoot, date, "applied-history-overlay.json"), "utf8").catch(() => null);
+  if (overlayText) break;
+}
+const overlay = overlayText ? JSON.parse(overlayText) : { migrations: [] };
 
 const filenames = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
 const active = filenames.map((filename) => {
@@ -42,13 +48,34 @@ for (const migration of manifest.migrations) {
 }
 
 const lastApplied = String(manifest.migrations.at(-1).version);
-const pending = active.filter((migration) => !authoritative.has(migration.version));
+const applied = new Map(authoritative);
+let expectedOrder = manifest.migrations.length + 1;
+for (const migration of overlay.migrations || []) {
+  const version = String(migration.version);
+  const local = active.find((candidate) => candidate.version === version);
+  if (!local || local.name !== migration.name || local.filename !== migration.filename) {
+    throw new Error(`applied overlay migration identity diverged: ${version}`);
+  }
+  if (migration.appliedOrder !== expectedOrder) {
+    throw new Error(`applied overlay order diverged: ${version}`);
+  }
+  const bytes = await readFile(path.join(migrationsDir, local.filename));
+  const canonical = sha256(Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n")));
+  if (canonical !== migration.localCanonicalSqlSha256) {
+    throw new Error(`applied overlay local SQL diverged: ${local.filename}`);
+  }
+  applied.set(version, migration);
+  expectedOrder += 1;
+}
+const pending = active.filter((migration) => !applied.has(migration.version));
 if (pending.some((migration) => migration.version <= lastApplied)) {
   throw new Error("a local-only migration was inserted into authoritative production history");
 }
 
 console.log(JSON.stringify({
-  authoritative: manifest.migrations.length,
+  authoritativeBase: manifest.migrations.length,
+  appliedOverlay: (overlay.migrations || []).length,
+  effectiveApplied: applied.size,
   active: active.length,
   pending: pending.map(({ version, name }) => ({ version, name })),
   duplicates: 0,
