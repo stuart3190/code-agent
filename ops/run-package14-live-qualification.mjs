@@ -89,9 +89,9 @@ async function stageEvidence({ owner, projectId, publicBuildId, diagId, startedA
       .eq("owner", owner).eq("project_id", projectId).gte("started_at", startedAt).order("started_at"),
     client.from("bv2_model_reservations").select("id,build_id,call_key,step,provider,model,billing_lane,state,reserved_credits,actual_credits,usage,provider_request_ids,metadata,created_at,settled_at,released_at")
       .eq("owner", owner).eq("project_id", projectId).gte("created_at", startedAt).order("created_at"),
-    client.from("ai_requests").select("id,provider,model,agent,input_tokens,cached_tokens,output_tokens,reasoning_tokens,cost,duration_ms,provider_request_id,created_at")
+    client.from("ai_requests").select("id,provider,model,agent,input_tokens,cached_tokens,output_tokens,reasoning_tokens,cost,duration_ms,provider_request_ids,created_at")
       .eq("owner", owner).eq("build_id", diagId).order("created_at"),
-    client.from("diag_steps").select("id,kind,label,status,model,usage,duration_ms,context_meta,started_at")
+    client.from("diag_steps").select("id,kind,label,status,agent,usage,cost,duration_ms,started_at")
       .eq("run_id", diagId).order("started_at"),
     client.from("bv2_patches").select("id,build_id,step,outcome,reject_reason,files_changed,created_at")
       .eq("owner", owner).gte("created_at", startedAt).order("created_at"),
