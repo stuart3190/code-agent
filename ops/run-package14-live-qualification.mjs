@@ -85,8 +85,8 @@ async function stageEvidence({ owner, projectId, publicBuildId, diagId, startedA
   const [publicBuild, v2Builds, reservations, ai, steps, patches, retrieval] = await Promise.all([
     client.from("build_jobs").select("id,status,phase,pipeline_version,bv2_build_id,result,error,stop_reason,created_at,updated_at")
       .eq("id", publicBuildId).eq("owner", owner).single(),
-    client.from("bv2_builds").select("id,state,profile,parent_snapshot_id,green_snapshot_id,error,created_at,finished_at")
-      .eq("owner", owner).eq("project_id", projectId).gte("created_at", startedAt).order("created_at"),
+    client.from("bv2_builds").select("id,state,profile,contract_id,final_snapshot,error,started_at,finished_at")
+      .eq("owner", owner).eq("project_id", projectId).gte("started_at", startedAt).order("started_at"),
     client.from("bv2_model_reservations").select("id,build_id,call_key,step,provider,model,billing_lane,state,reserved_credits,actual_credits,usage,provider_request_ids,metadata,created_at,settled_at,released_at")
       .eq("owner", owner).eq("project_id", projectId).gte("created_at", startedAt).order("created_at"),
     client.from("ai_requests").select("id,provider,model,agent,input_tokens,cached_tokens,output_tokens,reasoning_tokens,cost,duration_ms,provider_request_id,created_at")
