@@ -303,14 +303,14 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 68", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 70", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 68);
+  assert.equal(ledger.migrations.length, 70);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260807221000",
-    "20260808164259",
+    "20260808180841",
+    "20260808180845",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 68);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 70);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
 });
 
@@ -319,10 +319,10 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 8);
-  assert.equal(result.effectiveApplied, 68);
+  assert.equal(result.appliedOverlay, 10);
+  assert.equal(result.effectiveApplied, 70);
   assert.equal(result.active, 70);
-  assert.deepEqual(result.pending.map((migration) => migration.version), ["20260808180841", "20260808180845"]);
+  assert.deepEqual(result.pending, []);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
@@ -335,6 +335,19 @@ test("generated-always run-event ids restore exactly only when the backup is con
     { event_type: "queued" },
   ]);
   assert.throws(() => prepareRowsForRestore("build_work_events", [{ seq: 2 }]), /identity has gaps/);
+});
+
+test("append-only erasure event identities are regenerated only from a contiguous backup", () => {
+  assert.deepEqual(prepareRowsForRestore("data_erasure_events", [
+    { seq: 1, job_id: "a", event_type: "planned" },
+    { seq: 2, job_id: "a", event_type: "completed" },
+  ]), [
+    { job_id: "a", event_type: "planned" },
+    { job_id: "a", event_type: "completed" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("data_erasure_events", [
+    { seq: 1, job_id: "a" }, { seq: 3, job_id: "a" },
+  ]), /identity has gaps/);
 });
 
 test("generated runtime project ids are omitted from backup and restore writes", () => {

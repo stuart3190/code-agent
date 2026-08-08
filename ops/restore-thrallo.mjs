@@ -147,7 +147,8 @@ async function loadOptionalRows(dir, name) {
 
 export function prepareRowsForRestore(table, rows, deferredPatches = []) {
   let prepared = canonicalRowsForRestoreComparison(table, rows);
-  const identity = table === "ca_run_events" ? "id" : table === "build_work_events" ? "seq" : null;
+  const identity = table === "ca_run_events" ? "id"
+    : ["build_work_events", "data_erasure_events"].includes(table) ? "seq" : null;
   if (identity && prepared.length > 0) {
     const sorted = [...prepared].sort((a, b) => Number(a[identity]) - Number(b[identity]));
     for (let index = 0; index < sorted.length; index += 1) {
