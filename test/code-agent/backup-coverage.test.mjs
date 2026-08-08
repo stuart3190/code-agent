@@ -470,6 +470,25 @@ test("a fully reconciled database reports nothing, and Supabase's own tables are
   }), [], "schema_migrations is Supabase's, not ours to migrate or back up");
 });
 
+test("the production reservation FK cascade satisfies erasure even before composition code is deployed", async () => {
+  const { DATABASE_CASCADE_PURGED, findDrift } = await import("../../ops/migration-drift.mjs");
+  assert.ok(DATABASE_CASCADE_PURGED.has("bv2_model_reservations"));
+  const problems = findDrift({
+    live: new Set(["bv2_model_reservations"]),
+    migrated: new Set(["bv2_model_reservations"]),
+    backedUp: new Set(["bv2_model_reservations"]),
+    projectScoped: new Set(["bv2_model_reservations"]),
+    purged: new Set(["bv2_builds"]),
+    purgeExcluded: new Map(),
+    databaseCascadePurged: DATABASE_CASCADE_PURGED,
+  });
+  assert.deepEqual(problems, []);
+  const reservationSql = await readFile(new URL("../../supabase/migrations/20260807213500_bv2_runtime_model_reservations.sql", import.meta.url), "utf8");
+  const runtimeSql = await readFile(new URL("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql", import.meta.url), "utf8");
+  assert.match(reservationSql, /references public\.bv2_builds\(id, owner, project_id\) on delete cascade/i);
+  assert.match(runtimeSql, /foreign key \(project_id, owner\) references public\.projects\(id, owner\) on delete cascade/i);
+});
+
 test("every table this session added to production is now migrated AND backed up", async () => {
   const migrated = await tablesFromMigrations();
   for (const table of [

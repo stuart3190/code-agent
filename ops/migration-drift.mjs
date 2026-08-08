@@ -28,6 +28,13 @@ const migrationsDir = new URL("../supabase/migrations/", import.meta.url);
 // Supabase's own bookkeeping and PostGIS-style extension tables are not ours to migrate or back up.
 const NOT_OURS = new Set(["schema_migrations", "supabase_migrations"]);
 
+// The reservation table was installed before the composition application was deployed. Its
+// erasure is already enforced by production FKs (project -> bv2_builds -> reservations), even on
+// a host whose loaded projectTeardown manifest predates the explicit reservation entry. Keep this
+// in the operational drift guard so a backup-tool-only deployment does not report a false leak.
+// The guard test also proves the ON DELETE CASCADE chain remains in the migrations.
+export const DATABASE_CASCADE_PURGED = new Set(["bv2_model_reservations"]);
+
 async function tablesFromMigrations() {
   const tables = new Set();
   for (const name of await readdir(migrationsDir)) {
@@ -65,7 +72,10 @@ async function liveTables(svc) {
  * means the database cannot be rebuilt, and a table not backed up means its data is lost on
  * restore. A table can be either, or both — which is what happened.
  */
-export function findDrift({ live, migrated, backedUp, purged = null, purgeExcluded = null, projectScoped = null }) {
+export function findDrift({
+  live, migrated, backedUp, purged = null, purgeExcluded = null, projectScoped = null,
+  databaseCascadePurged = new Set(),
+}) {
   const problems = [];
   for (const table of live) {
     if (NOT_OURS.has(table)) continue;
@@ -78,7 +88,8 @@ export function findDrift({ live, migrated, backedUp, purged = null, purgeExclud
     // Teardown coverage. CI checks this against migrations, which cannot tell whether a legacy
     // table excluded as "never applied" has since BEEN applied — at which point it starts holding
     // real project data that deletion would leave behind.
-    if (purged && projectScoped?.has(table) && !purged.has(table) && !purgeExcluded?.has(table)) {
+    if (purged && projectScoped?.has(table) && !purged.has(table)
+      && !databaseCascadePurged.has(table) && !purgeExcluded?.has(table)) {
       problems.push(`${table}: exists in production, holds project data, and is NOT removed when a project is deleted`);
     }
   }
@@ -117,6 +128,7 @@ async function main() {
       projectScoped: catalog.projectScoped,
       purged: new Set(PROJECT_SCOPED_TABLES.map((t) => t.table)),
       purgeExcluded: NOT_PURGED,
+      databaseCascadePurged: DATABASE_CASCADE_PURGED,
     }));
   } else {
     problems.push("could not enumerate live tables (thrallo_public_tables RPC missing) — deploy it, or this check only verifies reachability below");

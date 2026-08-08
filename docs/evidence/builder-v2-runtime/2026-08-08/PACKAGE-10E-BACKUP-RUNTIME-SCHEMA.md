@@ -56,6 +56,13 @@ was not edited.
 
 ## Production gate record
 
+The first post-deployment backup completed and validated its data, but systemd correctly surfaced
+a failing `ExecStartPost` drift check. The deployed teardown manifest predated the explicit
+`bv2_model_reservations` entry, while the installed schema already guarantees erasure through the
+`projects -> bv2_builds -> bv2_model_reservations` `ON DELETE CASCADE` chain. Package 10E records
+that database-enforced cascade in the backup drift guard; it does not deploy or activate the V2
+composition.
+
 To be completed after backup-tool-only deployment:
 
 - deployed tooling commit/hash:
