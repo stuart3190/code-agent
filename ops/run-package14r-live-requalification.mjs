@@ -277,7 +277,9 @@ if (STAGE === "preflight") {
   const seed = await seedControlledRepair(state);
   await runPipeline(state, { stage: "repair", project: state.projects.simple, mode: "resume_repair",
     prompt: "Repair the controlled contact-capability regression from the retained working checkpoint.",
-    ceiling: 2.5, v2Input: { sourceBuildId: seed.sourceBuildId, problems: seed.problems } });
+    ceiling: 4, v2Input: { sourceBuildId: seed.sourceBuildId, problems: seed.problems } });
+} else if (STAGE === "archive-repair-predispatch") {
+  await archiveZeroSpendPreDispatch(state, "repair");
 } else if (STAGE === "booking") {
   if (state.stages.booking) throw new Error("booking already exists; exactly one attempt is authorized");
   const project = state.projects.booking || await createProject(state.owner, "Package 14R - Ember Table booking");

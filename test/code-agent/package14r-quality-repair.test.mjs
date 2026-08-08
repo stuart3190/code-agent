@@ -143,10 +143,11 @@ test("14R repair reservations reuse remaining build headroom without exceeding t
   assert.equal(budget.remainingCredits, 3.7329);
   const plan = planCallReservation({ systemPrompt: "x".repeat(20_000), messages: [{ role: "user", content: "bounded defect" }] }, "gpt-5.5", {
     requestedMaxOutputTokens: 10_000, minimumCredits: 1, callCeilingCredits: 6,
-    repairAllowanceCredits: 2.5, budget,
+    repairAllowanceCredits: 4, budget,
   });
-  assert.ok(plan.reservedCredits <= 2.5);
-  assert.ok(plan.maxOutputTokens < 10_000, "output is bounded so the hold is a real upper bound");
+  assert.ok(plan.reservedCredits <= budget.remainingCredits);
+  assert.equal(plan.repairAllowanceCredits, 4);
+  assert.ok(plan.maxOutputTokens <= 10_000, "the provider output cap never exceeds the reserved bound");
   assert.equal(plan.fundingPolicy, "request_owner");
   const repair = await reservations.reserve({ ...common, callKey: "repair:1", step: "repair",
     reservedCredits: plan.reservedCredits });
@@ -351,7 +352,9 @@ test("14R live runner hard-caps aggregate spend and cannot force a manual model"
   assert.match(runner, /booking already exists; exactly one attempt is authorized/);
   assert.match(runner, /approved zero-spend pre-dispatch failure/);
   assert.match(runner, /archive-edit-predispatch/);
+  assert.match(runner, /archive-repair-predispatch/);
   assert.match(runner, /EDIT_REQUEST, ceiling: 4/);
+  assert.match(runner, /sourceBuildId: seed\.sourceBuildId, problems: seed\.problems/);
   assert.match(runner, /bounded pre-dispatch correction limit/);
 });
 

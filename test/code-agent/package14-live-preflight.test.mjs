@@ -113,7 +113,7 @@ test("Package 14 conservative reservation remains above the bounded worst-case u
 test("repair and edit reservations have production headroom without widening build ceilings", () => {
   assert.deepEqual(stepOutputPolicy("repair"), {
     estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6,
-    repairAllowanceCredits: 2.5,
+    repairAllowanceCredits: 4,
   });
   assert.equal(stepOutputPolicy("edit").callCeilingCredits, 4);
   assert.equal(stepOutputPolicy("increment").callCeilingCredits, 4);

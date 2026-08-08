@@ -59,7 +59,9 @@ confirmed/reference and cancelled state, and never uses browser storage or impos
 4. A repair cannot delete or disable a contract-required binding.
 5. Repair reservations fit the live durable budget:
    `actual + held + new reservation <= approved build ceiling`.
-6. The per-call ceiling and 2.5-credit repair allowance remain independent hard limits.
+6. The per-call ceiling and 4-credit repair allowance remain independent hard limits. The live
+   checkpoint preflight proved 2.5 could not safely cover its conservative zero-cache input bound;
+   no provider call occurred during that failed preflight.
 7. Core/repair/edit produce byte-verified immutable `working:*` snapshots after compilation and
    deterministic gates, before browser verification.
 8. Working snapshots are not promoted to green/preview/published. Failed/blocked checkpoints are
