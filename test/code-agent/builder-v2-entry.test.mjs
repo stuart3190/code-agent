@@ -89,11 +89,14 @@ test("the accepted V2 capability path has no handled:false fallback", async () =
 test("runtime composition migration preserves V1 defaults and adds explicit V2 links", async () => {
   const sql = await readFile(new URL("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql", import.meta.url), "utf8");
   assert.match(sql, /pipeline_version text not null default 'v1'/i);
+  assert.match(sql, /project_id_text text generated always as \(project_id::text\) stored/i);
   assert.match(sql, /builder_version text not null default 'v1'/i);
   assert.match(sql, /bv2_green_snapshot_id uuid/i);
   assert.match(sql, /bv2_builds_project_owner_fkey/i);
   assert.match(sql, /build_jobs_bv2_build_owner_project_fkey/i);
   assert.match(sql, /build_jobs_diag_run_owner_project_fkey/i);
+  assert.match(sql, /foreign key \(bv2_build_id, owner, project_id\)[\s\S]*references public\.bv2_builds\(id, owner, project_id_text\)/i);
+  assert.match(sql, /foreign key \(diag_run_id, owner, project_id\)[\s\S]*references public\.diag_runs\(id, owner, project_id_text\)/i);
   assert.match(sql, /projects_bv2_green_snapshot_owner_fkey/i);
   assert.match(sql, /bv2_retrieval_traces_build_owner_fkey/i);
   assert.match(sql, /bv2_verification_cache_snapshot_owner_project_fkey/i);

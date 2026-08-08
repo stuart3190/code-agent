@@ -10,8 +10,9 @@
 -- V1. A project marked v2 must have a ready, owner-matching green snapshot before preview/export.
 --
 -- Rollback (only before V2 cutover): disable V2 dispatch, wait for V2 jobs to reach a terminal
--- state, drop the two indexes and FKs below, then drop the added columns. Existing V1 rows retain
--- their default pipeline_version='v1' and are otherwise byte-identical.
+-- state, drop the indexes and FKs below, then drop the added columns including the generated
+-- project_id_text compatibility keys. Existing V1 rows retain their default
+-- pipeline_version='v1' and their build_jobs.project_id text value.
 
 alter table public.build_jobs
   add column pipeline_version text not null default 'v1'
@@ -39,18 +40,24 @@ alter table public.bv2_contracts
   add constraint bv2_contracts_owner_project_version_unique unique (owner, project_id, version);
 
 alter table public.bv2_builds
-  add constraint bv2_builds_id_owner_unique unique (id, owner);
+  -- build_jobs.project_id is legacy text. A generated parent key preserves that API while allowing
+  -- an exact owner/project FK without changing or casting V1 rows.
+  add column project_id_text text generated always as (project_id::text) stored,
+  add constraint bv2_builds_id_owner_unique unique (id, owner),
+  add constraint bv2_builds_id_owner_project_text_unique unique (id, owner, project_id_text);
 
 alter table public.diag_runs
-  add constraint diag_runs_id_owner_project_unique unique (id, owner, project_id);
+  add column project_id_text text generated always as (project_id::text) stored,
+  add constraint diag_runs_id_owner_project_unique unique (id, owner, project_id),
+  add constraint diag_runs_id_owner_project_text_unique unique (id, owner, project_id_text);
 
 alter table public.build_jobs
   add constraint build_jobs_bv2_build_owner_project_fkey
     foreign key (bv2_build_id, owner, project_id)
-    references public.bv2_builds(id, owner, project_id) on delete set null (bv2_build_id),
+    references public.bv2_builds(id, owner, project_id_text) on delete set null (bv2_build_id),
   add constraint build_jobs_diag_run_owner_project_fkey
     foreign key (diag_run_id, owner, project_id)
-    references public.diag_runs(id, owner, project_id) on delete set null (diag_run_id);
+    references public.diag_runs(id, owner, project_id_text) on delete set null (diag_run_id);
 
 alter table public.projects
   add constraint projects_bv2_green_snapshot_owner_fkey
@@ -152,6 +159,10 @@ create index bv2_verification_cache_snapshot_idx
 
 comment on column public.build_jobs.pipeline_version is
   'Immutable orchestration identity. V2 jobs fail closed unless leased by the durable worker.';
+comment on column public.bv2_builds.project_id_text is
+  'Generated compatibility key for legacy build_jobs.project_id text; never written directly.';
+comment on column public.diag_runs.project_id_text is
+  'Generated compatibility key for legacy build_jobs.project_id text; never written directly.';
 comment on column public.projects.bv2_green_snapshot_id is
   'Authoritative verified Builder V2 snapshot; projects.tree is only a compatibility projection.';
 

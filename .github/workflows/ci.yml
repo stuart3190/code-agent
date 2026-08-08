@@ -55,6 +55,7 @@ jobs:
           eval "$(npm exec -- supabase status -o env)"
           set +a
           BV2_GRAPH_PROOF=1 npm run supabase:graph:proof
+          BV2_RUNTIME_PROOF=1 npm run supabase:runtime:proof
           npm exec -- supabase db diff --local --schema public > post-proof-diff.sql
           test ! -s post-proof-diff.sql
       - name: Type-check Edge Function dependencies

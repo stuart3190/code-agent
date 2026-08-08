@@ -53,6 +53,7 @@
     "supabase:edge:check": "npx --yes deno@2.5.1 check supabase/functions/app-auth/index.ts",
     "supabase:graph:proof": "node ops/prove-bv2-graph-postgres.mjs",
     "supabase:worker:proof": "node ops/prove-build-worker-postgres.mjs",
+    "supabase:runtime:proof": "node ops/prove-bv2-runtime-postgres.mjs",
     "worker:ops": "node ops/build-worker.mjs",
     "worker:start": "node build-worker/index.mjs",
     "worker:sandbox:build": "docker build -t thrallo-build-sandbox:latest -f build-worker/Dockerfile .",
