@@ -56,7 +56,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // ChatGPT account; production always uses the defaults.
   async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort,
     signal = null, maxOutputTokens = null }) {
-    const { accessToken, accountId } = await tokenProvider();
+    let auth = await tokenProvider();
 
     const body = {
       model: MODEL,
@@ -79,8 +79,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       body.parallel_tool_calls = toolChoice ? false : true;
     }
 
-    let res;
-    try { res = await fetchImpl(CODEX_RESPONSES_URL, {
+    const dispatch = async ({ accessToken, accountId }) => fetchImpl(CODEX_RESPONSES_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -92,7 +91,25 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       },
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
-    }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }
+    });
+    let res;
+    let preReadErrorBody = null;
+    try { res = await dispatch(auth); } catch (error) {
+      throw providerFailure(error, { state: DISPATCH_STATES.ambiguous });
+    }
+    if (res.status === 401) {
+      preReadErrorBody = await res.text();
+      if (/token_expired|authentication token is expired/i.test(preReadErrorBody)) {
+        // The rejected request did not execute a model turn. Opaque ChatGPT access tokens do not
+        // expose a JWT expiry, so refresh only on this explicit rejection and retry once. No other
+        // response or ambiguous transport failure is replayed here.
+        auth = await tokenProvider({ forceRefresh: true });
+        try { res = await dispatch(auth); } catch (error) {
+          throw providerFailure(error, { state: DISPATCH_STATES.ambiguous });
+        }
+        preReadErrorBody = null;
+      }
+    }
 
     // The strongest STABLE identifiers this transport actually exposes, typed so a billing row
     // can never be mistaken for an OpenAI-platform request id:
@@ -103,7 +120,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
     let providerRequestId = headerRequestId ? `codex:request:${headerRequestId}` : null;
 
     if (!res.ok) {
-      const errBody = await res.text();
+      const errBody = preReadErrorBody ?? await res.text();
       const error = new Error(`Codex responses HTTP ${res.status}${providerRequestId ? ` (${providerRequestId})` : ""}: ${errBody}`);
       // A failed call that the backend received still has an identity — keep it for incident logs.
       error.providerRequestId = providerRequestId;

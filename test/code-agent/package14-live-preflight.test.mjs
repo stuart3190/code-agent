@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createStoredAccessTokenProvider } from "../../src/providers/auth.mjs";
+import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import { canonicalModelIdentity, selectionValue } from "../../shell/server/lib/modelCatalogue.mjs";
 import { conservativeCallReservation, createModelLanes } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
@@ -33,6 +34,38 @@ test("Package 14 manual model uses the canonical selectable identity", () => {
     provider: "codex", model: "gpt-5.5", lane: "connected_allowance", reasoningProfile: "medium",
   });
   assert.equal(selectionValue(identity), "connected_allowance:codex:gpt-5.5");
+});
+
+test("opaque expired Codex token refreshes only after an explicit token_expired rejection", async () => {
+  let stored = { tokens: { access_token: "opaque-old", refresh_token: "refresh-old", account_id: "account-1" } };
+  let refreshes = 0;
+  const tokenProvider = createStoredAccessTokenProvider({
+    loadAuth: async () => stored,
+    persistAuth: async (next) => { stored = structuredClone(next); },
+    fetchImpl: async () => {
+      refreshes += 1;
+      return new Response(JSON.stringify({ access_token: jwt(9_999_999), refresh_token: "refresh-new" }), { status: 200 });
+    },
+  });
+  const calls = [];
+  const provider = createCodexProvider({
+    tokenProvider,
+    fetchImpl: async (_url, options) => {
+      calls.push(options.headers.Authorization);
+      if (calls.length === 1) {
+        return new Response(JSON.stringify({ error: { code: "token_expired", message: "Provided authentication token is expired." } }), { status: 401 });
+      }
+      return new Response('data: {"type":"response.completed","response":{"id":"ok","usage":{"input_tokens":1,"output_tokens":1}}}\n\n', {
+        status: 200, headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  const result = await provider.runTurn({ systemPrompt: "s", messages: [{ role: "user", content: "x" }] });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0], calls[1]);
+  assert.equal(result.usage.input, 1);
+  assert.equal(stored.tokens.refresh_token, "refresh-new");
 });
 
 test("Package 14 step output policy bounds the network request and reservation", async () => {

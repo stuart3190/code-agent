@@ -208,6 +208,30 @@ async function archiveZeroSpendFailure(state, stage) {
   });
 }
 
+async function archiveAuthRejection(state, stage) {
+  const row = state.stages[stage];
+  const evidence = row?.evidence || {};
+  const reservation = evidence.reservations?.[0];
+  const ai = evidence.aiRequests?.[0];
+  const tokenExpired = /token_expired|authentication token is expired/i.test(
+    evidence.publicBuild?.error || evidence.v2Builds?.[0]?.error || "",
+  );
+  const zeroUsage = ai && ["input_tokens", "cached_tokens", "output_tokens", "reasoning_tokens", "cost"]
+    .every((key) => Number(ai[key] || 0) === 0);
+  if (!row?.terminal || row.result !== "fail" || !tokenExpired
+      || evidence.reservations?.length !== 1 || reservation.state !== "released"
+      || reservation.usage != null || reservation.actual_credits != null
+      || evidence.aiRequests?.length !== 1 || !zeroUsage || Number(row.stageCredits || 0) !== 0) {
+    throw new Error(`${stage} is not a zero-usage Codex authentication rejection`);
+  }
+  const key = `${stage}_auth_rejection_1`;
+  if (state.stages[key]) throw new Error(`${key} already exists; refusing another authentication retry`);
+  state.stages[key] = row;
+  delete state.stages[stage];
+  await save(state);
+  await event(`${stage}_auth_rejection_archived`, { credits: 0, usageTokens: 0, reservationState: "released" });
+}
+
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
 const state = await load();
 const codex = await resolveCodexOwner();
@@ -233,6 +257,8 @@ if (STAGE === "preflight") {
   await recoverInterruptedStage(state, "simple");
 } else if (STAGE === "archive-simple-preflight") {
   await archiveZeroSpendFailure(state, "simple");
+} else if (STAGE === "archive-simple-auth-rejection") {
+  await archiveAuthRejection(state, "simple");
 } else if (STAGE === "report") {
   const spend = await spendForProjects(Object.values(state.projects).map((row) => row.id));
   await event("report", { ownerHash: state.ownerHash, credits: spend.credits, calls: spend.calls,

@@ -62,13 +62,13 @@ export function createStoredAccessTokenProvider({
     if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("stored Codex auth is invalid");
     return auth;
   };
-  return async () => {
+  return async ({ forceRefresh = false } = {}) => {
     let auth = await read();
     let accessToken = auth.tokens?.access_token;
     const accountId = auth.tokens?.account_id;
     if (!accessToken || !accountId) throw new Error("stored Codex auth is missing access_token / account_id");
     const exp = jwtExp(accessToken);
-    if (exp && exp - Math.floor(now() / 1000) <= EXPIRY_SKEW_S) {
+    if (forceRefresh || (exp && exp - Math.floor(now() / 1000) <= EXPIRY_SKEW_S)) {
       if (!auth.tokens?.refresh_token) throw new Error("stored Codex access token expired without a refresh token");
       refreshing ||= (async () => {
         // Reload inside the single-flight section: another call may already have persisted a
@@ -77,7 +77,7 @@ export function createStoredAccessTokenProvider({
         const currentAccess = current.tokens?.access_token;
         const currentExp = jwtExp(currentAccess);
         if (!currentAccess || !current.tokens?.account_id) throw new Error("stored Codex auth is incomplete");
-        if (!currentExp || currentExp - Math.floor(now() / 1000) > EXPIRY_SKEW_S) return current;
+        if (!forceRefresh && currentExp && currentExp - Math.floor(now() / 1000) > EXPIRY_SKEW_S) return current;
         if (!current.tokens?.refresh_token) throw new Error("stored Codex access token expired without a refresh token");
         const fresh = await refreshTokens(current.tokens.refresh_token, fetchImpl);
         current.tokens.access_token = fresh.access_token;
