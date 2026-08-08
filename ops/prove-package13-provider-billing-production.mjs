@@ -68,7 +68,9 @@ async function scopedCount(table) {
 function candidate(provider, model, billingLane, tier, estimatedCredits) {
   const identity = canonicalModelIdentity({ provider, model, lane: billingLane });
   return {
-    provider, model, billingLane, tier, estimatedCredits, callCeilingCredits: estimatedCredits,
+    provider, model, billingLane,
+    laneProvider: billingLane === MODEL_LANES.managed ? "managed" : provider,
+    tier, estimatedCredits, callCeilingCredits: estimatedCredits,
     canonicalKey: identity.key, reasoningProfile: identity.reasoningProfile,
   };
 }
@@ -77,7 +79,10 @@ function routeExact(selected, candidates) {
   return routeV2Step({
     step: "core", taskClass: "package13:synthetic", complexity: "medium",
     affectedModules: 2, retrievalTokens: 600, requiredReasoning: false,
-    candidates, history: [], policy: {}, manualModel: selectionValue(selected),
+    candidates, history: [],
+    policy: { primaryProvider: candidates[0].laneProvider, billingLane: selected.lane,
+      allowManagedFallback: false, allowedFallbackProviders: [] },
+    manualModel: selectionValue(selected),
   });
 }
 
