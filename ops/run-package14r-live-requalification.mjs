@@ -201,6 +201,24 @@ async function seedControlledRepair(state) {
   return state.controlledRepair;
 }
 
+async function archiveZeroSpendPreDispatch(state, stage) {
+  const row = state.stages[stage];
+  const evidence = row?.evidence || {};
+  if (!row?.terminal || row.result !== "fail" || Number(row.stageCredits || 0) !== 0
+      || (evidence.v2Builds || []).length || (evidence.reservations || []).length
+      || (evidence.aiRequests || []).length
+      || !["preview_isolation_required", "provider_selection_changed"].includes(evidence.publicBuild?.stop_reason)) {
+    throw new Error(`${stage} is not an approved zero-spend pre-dispatch failure`);
+  }
+  const key = `${stage}_predispatch_1`;
+  if (state.stages[key]) throw new Error(`${key} already exists`);
+  state.stages[key] = row;
+  delete state.stages[stage];
+  await save(state);
+  await emit(`${stage}_predispatch_archived`, { stopReason: evidence.publicBuild.stop_reason,
+    credits: 0, calls: 0, v2Builds: 0 });
+}
+
 async function cleanup(state) {
   const reports = [];
   for (const project of Object.values(state.projects)) {
@@ -237,6 +255,8 @@ if (STAGE === "preflight") {
   const project = state.projects.simple || await createProject(state.owner, "Package 14R - Northlight Bicycle Repair");
   state.projects.simple = project; await save(state);
   await runPipeline(state, { stage: "simple", project, mode: "build", prompt: SIMPLE_REQUEST, ceiling: 4.5 });
+} else if (STAGE === "archive-simple-predispatch") {
+  await archiveZeroSpendPreDispatch(state, "simple");
 } else if (STAGE === "edit") {
   if (state.stages.simple?.result !== "pass") throw new Error("edit requires a green simple build");
   await runPipeline(state, { stage: "edit", project: state.projects.simple, mode: "iterate",

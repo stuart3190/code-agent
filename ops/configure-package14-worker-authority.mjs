@@ -32,6 +32,13 @@ const updates = new Map([
   ["CODE_AGENT_STORE", "supabase"],
   [encryptionName, source.values.get(encryptionName)],
 ]);
+// The worker's private EnvironmentFile is bind-mounted over shell/.env. Builder-pipeline work
+// therefore needs its own preview authority as well as credential authority; otherwise the
+// production runtime safely resolves to local preview and stops before dispatch. Copy only the
+// established preview fields and never print their values.
+for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
+  if (source.values.get(name)) updates.set(name, source.values.get(name));
+}
 const seen = new Set();
 const output = target.rows.map((line) => {
   if (!line || line.trimStart().startsWith("#") || !line.includes("=")) return line;
@@ -49,4 +56,6 @@ await writeFile(temporary, `${output.filter((line, index, rows) => index < rows.
 await chown(temporary, targetStat.uid, targetStat.gid);
 await chmod(temporary, 0o640);
 await rename(temporary, targetPath);
-console.log(JSON.stringify({ configured: true, store: "supabase", encryptionKeyPresent: true }));
+console.log(JSON.stringify({ configured: true, store: "supabase", encryptionKeyPresent: true,
+  previewAuthorityPresent: ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]
+    .every((name) => updates.has(name)) }));

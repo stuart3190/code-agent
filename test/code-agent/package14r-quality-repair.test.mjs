@@ -349,4 +349,14 @@ test("14R live runner hard-caps aggregate spend and cannot force a manual model"
   assert.match(runner, /manualModel: null, routingMode: "auto"/);
   assert.doesNotMatch(runner, /selectionValue|MANUAL_MODEL/);
   assert.match(runner, /booking already exists; exactly one attempt is authorized/);
+  assert.match(runner, /approved zero-spend pre-dispatch failure/);
+});
+
+test("14R worker authority carries preview configuration without logging secret values", async () => {
+  const authority = await readFile(new URL("../../ops/configure-package14-worker-authority.mjs", import.meta.url), "utf8");
+  for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
+    assert.match(authority, new RegExp(`\\"${name}\\"`));
+  }
+  assert.match(authority, /previewAuthorityPresent/);
+  assert.doesNotMatch(authority, /console\.log\([^\n]*(?:PROVISIOND_TOKEN|source\.values)/);
 });
