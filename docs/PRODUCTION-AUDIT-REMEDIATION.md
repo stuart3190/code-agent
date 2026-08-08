@@ -5,6 +5,8 @@
 > V2-only completion, cutover and V1-removal programme is
 > `docs/BUILDER-V2-V2-ONLY-CUTOVER.md`. Historical evidence below remains authoritative for defects
 > already proven; references to observation windows describe history and do not impose a release wait.
+> This ledger records proof status only; it does not define an independent package order or launch
+> verdict.
 
 This is the live implementation ledger for the approved Builder V2 production remediation
 programme. It records what the repository and production evidence prove; an unchecked item is not
@@ -57,8 +59,8 @@ values.
 | PR-10 Durable build leases | Installed dark; customer dispatch off | Atomic race, expiry/reclaim, cancellation race, idempotent completion, owner isolation and restart durability pass | Queue is durable; no customer dispatch |
 | PR-11 Build worker | Deployed dark and production-canary green | Synthetic success, SIGKILL/lease recovery, zero duplicate results/orphan containers, responsive shell, and post-layout synthetic job pass | Service active dark; shell worker flag remains off |
 | PR-12 Atomic deployment | Deployed dark and production-canary green | Real immutable A/B activation, no-build rollback, unpublish/republish, CAS and post-pointer fault reconciliation pass; test state fully removed | Atomic publish flag off; shared Caddy unchanged |
-| PR-13 Cost/retrieval | Local implementation complete; database proof pending | TS/TSX retrieval, durable reservations, cached-token settlement, strict knowledge/traces and per-step router are implemented under unapplied migration `20260807213500` | No production apply or provider spend |
-| PR-14 V2 composition | Local implementation complete; qualification pending | Real worker-only new/edit/repair composition, snapshot authority, QA/export/publish guards, legacy adoption and safe crash-retry boundary are implemented under unapplied migration `20260807221000` | No production deploy; V1 remains default |
+| PR-13 Cost/retrieval | Local implementation and disposable database proof complete; production apply blocked | TS/TSX retrieval, durable reservations, cached-token settlement, strict knowledge/traces and per-step router are implemented under unapplied migration `20260807213500`; concurrency/idempotency/security proof passed on 2026-08-08 | No production apply or provider spend; reconcile historical orphan V2 rows first |
+| PR-14 V2 composition | Local implementation, deterministic qualification and disposable database proof complete; production apply blocked | Real worker-only new/edit/repair composition, snapshot authority, QA/export/publish guards, legacy adoption and safe crash-retry boundary are implemented under unapplied migration `20260807221000`; 67-file reset/lint/diff passed | No production deploy; production FK preflight found historical V2 rows with deleted project parents |
 | PR-15 Operational surfaces | Pending | Audit evidence confirmed | None |
 | PR-16 Release pipeline | Pending | Audit evidence confirmed | None |
 | PR-17 DR/SLO/final proof | Post-deploy backup/restore gate green; broader DR/SLO work pending | Backup `thrallo-2026-08-07T201226` and network-isolated restore match all canonical rows/objects/files/modes; worker artifact root restored exactly | Shadow restart awaits explicit approval; off-host/RTO/RPO work remains |

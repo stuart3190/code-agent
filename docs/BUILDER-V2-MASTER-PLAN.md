@@ -1,5 +1,10 @@
 # BUILDER V2 — MASTER EXECUTION PLAN
 
+> **Historical architecture/execution plan — scheduling superseded 2026-08-08.** Preserve this file
+> for design rationale and forensic evidence. Its shadow, dual-run, allowlisted, broad-rollout and
+> elapsed-time V1 retirement phases are not launch requirements. The only active package order and
+> release authority is `docs/BUILDER-V2-V2-ONLY-CUTOVER.md`.
+
 Status: approved 2026-08-05 with owner corrections C1-C8 (applied throughout; listed in
 §CORRECTIONS). Managed settlement is PAUSED until Phase 12 exit. Builder v1 remains
 untouched; all v2 work is additive and feature-flagged. Every cost figure is labelled

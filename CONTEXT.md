@@ -1,5 +1,26 @@
 # Thrallo handoff
 
+## V2-only plan consolidation and database proof (2026-08-08)
+
+`docs/BUILDER-V2-V2-ONLY-CUTOVER.md` is now the sole active finish plan. The old master plan,
+finish plan and v1.0 release verdict are explicitly historical; calendar shadow, allowlist, broad
+rollout and elapsed-time V1 retirement gates are obsolete. No model spend, production migration,
+deployment, flag change or service restart occurred in this package.
+
+The two pending migrations were rebuilt from zero on the network-isolated VPS disposable Supabase
+17 stack with CLI `2.111.0`. The first reset exposed an incompatible `build_jobs.project_id text`
+to V2 `project_id uuid` composite FK. The unapplied runtime migration now preserves the V1 text API
+and uses generated parent `project_id_text` compatibility keys; the final 67-migration reset, DB
+lint, zero schema diff and database-level reservation/retry proof pass. The linked dry-run proposes
+only `20260807213500` and `20260807221000`; production remains at 65 migrations.
+
+Production application is NOT approved or currently safe. Read-only preflight found 13 V2 builds,
+12 verification-cache rows, two snapshots and one green pointer whose project parents no longer
+exist. They belong to one still-existing owner and predate relational cascade enforcement. Do not
+delete them, restore invented parents, use `NOT VALID`, or weaken owner/project FKs. The exact next
+phase is an approval-gated provenance and reconciliation pass using backup/history evidence,
+followed by the same preflight and a new backup/restore before any migration application.
+
 ## Builder V2-only launch direction (2026-08-07)
 
 The product no longer has a staged V1-to-V2 customer rollout requirement. The active objective is
