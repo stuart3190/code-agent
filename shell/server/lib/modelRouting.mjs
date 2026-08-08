@@ -1,41 +1,27 @@
 import { aiRoutingStore } from "./aiRoutingStore.mjs";
 import { anthropicConfigured, createAnthropicCodingProvider } from "./anthropicCodingProvider.mjs";
-import { optionalEnv } from "./env.mjs";
 import { createGeminiCodingProvider, geminiConfigured } from "./geminiCodingProvider.mjs";
-import { resolveModelSelection } from "./modelGateway.mjs";
 import { createOpenAIProvider, openAIConfigured } from "./openAIProvider.mjs";
-import { createXaiProvider, xaiConfigured, xaiPolicy, XAI_MODELS } from "./xaiProvider.mjs";
+import { createCodingModelForCredential } from "./modelGateway.mjs";
+import { createXaiProvider, xaiConfigured, xaiPolicy } from "./xaiProvider.mjs";
+import {
+  MODEL_LANES, canonicalModelIdentity, executableModelCatalogue,
+  modelEntriesFor, parseSelection,
+} from "./modelCatalogue.mjs";
 
 export const ROUTING_MODES = Object.freeze(["balanced", "quality", "fast", "economy", "manual"]);
 
 export function modelCatalog() {
-  return [
-    model("openai", "quality", optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol")), openAIConfigured()),
-    model("openai", "balanced", optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra"), openAIConfigured()),
-    model("openai", "fast", optionalEnv("OPENAI_FAST_MODEL", "gpt-5.6-luna"), openAIConfigured()),
-    model("anthropic", "quality", optionalEnv("ANTHROPIC_QUALITY_MODEL", "claude-opus-5"), anthropicConfigured()),
-    model("anthropic", "balanced", optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5"), anthropicConfigured()),
-    model("anthropic", "fast", optionalEnv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5"), anthropicConfigured()),
-    model("gemini", "quality", optionalEnv("GEMINI_QUALITY_MODEL", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash")), geminiConfigured()),
-    model("gemini", "balanced", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash"), geminiConfigured()),
-    model("gemini", "fast", optionalEnv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite"), geminiConfigured()),
-    // xAI/Grok: eligible only when configured AND the admin policy enables it; model ids
-    // and permission come from the xAI adapter's central catalog + policy.
-    ...xaiCatalogEntries(),
-  ];
-}
-
-function xaiCatalogEntries() {
-  const policy = xaiPolicy();
-  if (!policy.enabled) return [];
-  const configured = xaiConfigured();
-  const entries = [
-    model("xai", "quality", optionalEnv("XAI_QUALITY_MODEL", "grok-4.5"), configured),
-    model("xai", "balanced", optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1"), configured),
-    model("xai", "fast", optionalEnv("XAI_FAST_MODEL", "grok-4.3"), configured),
-  ];
-  // Admin model allowlist applies to known catalog models; custom env overrides pass through.
-  return entries.filter((entry) => !(entry.model in XAI_MODELS) || policy.permittedModels.has(entry.model));
+  const configured = { openai: openAIConfigured(), anthropic: anthropicConfigured(), gemini: geminiConfigured(), xai: xaiConfigured() };
+  return executableModelCatalogue()
+    .filter((row) => row.provider !== "codex")
+    .filter((row) => row.visibility === "public")
+    .filter((row) => row.provider !== "xai" || (xaiPolicy().enabled && xaiPolicy().permittedModels.has(row.model)))
+    .flatMap((row) => row.tiers.map((tier) => ({
+      provider: row.provider, tier, model: row.model, id: row.model,
+      configured: Boolean(configured[row.provider]),
+      lanes: row.lanes, key: `${row.provider}:${row.model}`,
+    })));
 }
 
 export async function createRoutedCodingModel({
@@ -132,25 +118,28 @@ export async function createRoutedCodingModel({
 }
 
 export function routeCandidates({ credential = { provider: "managed" }, requested = "auto", policy = {}, prompt = "", health = [] }) {
+  const lane = laneForCredential(credential);
   if (requested !== "auto") {
-    const selection = resolveModelSelection(requested);
-    if (credential.provider !== "managed" && credential.provider !== selection.provider) {
-      return [credentialCandidate(credential, selectionTier(policy, prompt))];
+    const selection = parseSelection(requested, { defaultLane: lane });
+    const identity = canonicalModelIdentity({ ...selection, lane: selection.lane || lane, reasoningProfile: reasoningForMode(policy.mode) });
+    const expectedProvider = credential.provider === "managed" ? identity.provider : credential.provider;
+    if (identity.lane !== lane || identity.provider !== expectedProvider) {
+      throw Object.assign(new Error("The selected model is not executable with the selected provider and billing lane."), {
+        code: "model_lane_unavailable", status: 400, retryable: false,
+      });
     }
-    return [{ ...selection, tier: "manual", key: `${selection.provider}:${selection.model}` }];
+    return [{ ...identity, billingLane: identity.lane, tier: "manual", key: `${identity.provider}:${identity.model}` }];
   }
 
   if (policy.routingMode === "manual" && policy.preferredModel) {
-    const selection = resolveModelSelection(policy.preferredModel);
-    if (credential.provider === "managed" || credential.provider === selection.provider) {
-      return [{ ...selection, tier: "manual", key: `${selection.provider}:${selection.model}` }];
-    }
+    return routeCandidates({ credential, requested: policy.preferredModel, policy: { ...policy, routingMode: "balanced" }, prompt, health });
   }
 
   const tier = selectionTier(policy, prompt);
   if (credential.provider !== "managed") return [credentialCandidate(credential, tier)];
 
-  const configured = modelCatalog().filter((entry) => entry.configured);
+  const configured = modelCatalog().filter((entry) => entry.configured && entry.lanes.includes(MODEL_LANES.managed))
+    .map((entry) => withIdentity(entry, MODEL_LANES.managed, policy.mode));
   const providerOrder = preferredProviderOrder();
   const primary = configured.filter((entry) => entry.tier === tier);
   const balancedFallback = tier === "balanced" ? [] : configured.filter((entry) => entry.tier === "balanced");
@@ -164,10 +153,7 @@ export function routeCandidates({ credential = { provider: "managed" }, requeste
 }
 
 export function isRetryableProviderError(error) {
-  const status = Number(error?.status || 0);
-  if ([408, 409, 425, 429].includes(status) || status >= 500) return true;
-  return /(timeout|timed_out|rate.?limit|overload|unavailable|connection|econn|reset|temporar)/i
-    .test(`${error?.code || ""} ${error?.message || ""}`);
+  return error?.retrySafe === true;
 }
 
 function selectionTier(policy, prompt) {
@@ -187,16 +173,13 @@ function selectionTier(policy, prompt) {
 }
 
 function credentialCandidate(credential, tier) {
-  const entry = modelCatalog().find((item) => item.provider === credential.provider && item.tier === tier)
-    || modelCatalog().find((item) => item.provider === credential.provider && item.tier === "balanced");
-  return entry || {
-    provider: credential.provider,
-    model: credential.provider === "gemini" ? "gemini-3.6-flash"
-      : credential.provider === "anthropic" ? "claude-sonnet-5"
-        : credential.provider === "xai" ? "grok-4.5" : "gpt-5.6-terra",
-    tier,
-    key: `${credential.provider}:default`,
-  };
+  const lane = laneForCredential(credential);
+  const entry = modelEntriesFor({ provider: credential.provider, lane, tier })[0]
+    || modelEntriesFor({ provider: credential.provider, lane, tier: "balanced" })[0];
+  if (!entry) throw Object.assign(new Error(`No executable ${credential.provider} model is available for ${lane}.`), {
+    code: "model_provider_unavailable", status: 400, retryable: false,
+  });
+  return withIdentity({ ...entry, tier }, lane, credential.routing?.mode);
 }
 
 // Execution-mode knobs per provider, resolved through each adapter's own modeMap — no
@@ -218,7 +201,20 @@ export function providerOptionsForMode(providerId, mode) {
 }
 
 export function createProviderForCandidate(candidate, credential, options = {}) {
+  const identity = canonicalModelIdentity({
+    provider: candidate.provider, model: candidate.model,
+    lane: candidate.billingLane || candidate.lane,
+    reasoningProfile: options.reasoningEffort || candidate.reasoningProfile || "default",
+  });
+  if (identity.lane === MODEL_LANES.byok && (!credential?.secret || credential.provider !== identity.provider)) {
+    throw Object.assign(new Error("The selected BYOK model requires that provider's connected credential."), {
+      code: "byok_credential_unavailable", status: 400, retryable: false,
+    });
+  }
   const apiKey = credential?.provider === candidate.provider ? credential.secret : undefined;
+  if (candidate.provider === "codex") {
+    return createCodingModelForCredential(credential, `${MODEL_LANES.codex}:codex:${candidate.model}`);
+  }
   if (candidate.provider === "anthropic") {
     return createAnthropicCodingProvider({ apiKey, model: candidate.model, ...options });
   }
@@ -285,7 +281,7 @@ export function applyIntelligence(candidates, recommendation) {
 function preferredProviderOrder() {
   // Grok is never the platform default: it joins the candidate pool and earns priority
   // through the health/latency scoring, not by assumption.
-  const preferred = optionalEnv("CODE_AGENT_DEFAULT_PROVIDER", "openai").toLowerCase();
+  const preferred = String(process.env.CODE_AGENT_DEFAULT_PROVIDER || "openai").toLowerCase();
   return [preferred, ...["openai", "anthropic", "gemini", "xai"].filter((provider) => provider !== preferred)];
 }
 
@@ -293,6 +289,17 @@ function uniqueModels(entries) {
   return [...new Map(entries.map((entry) => [entry.key, entry])).values()];
 }
 
-function model(provider, tier, id, configured) {
-  return { provider, tier, model: id, id, configured, key: `${provider}:${id}` };
+function laneForCredential(credential) {
+  if (credential?.provider === "managed") return MODEL_LANES.managed;
+  if (credential?.provider === "codex") return MODEL_LANES.codex;
+  return MODEL_LANES.byok;
+}
+
+function reasoningForMode(mode) {
+  return ({ fast: "low", cheapest: "low", balanced: "medium", deep: "high", max_quality: "high" })[mode] || "default";
+}
+
+function withIdentity(entry, lane, mode = null) {
+  const identity = canonicalModelIdentity({ provider: entry.provider, model: entry.model, lane, reasoningProfile: reasoningForMode(mode) });
+  return { ...entry, ...identity, billingLane: lane, key: `${entry.provider}:${entry.model}` };
 }

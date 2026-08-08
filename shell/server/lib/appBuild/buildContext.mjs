@@ -10,17 +10,18 @@
 // a Codex-connected owner seven managed gpt-5.6 calls. Every lane carries its provider
 // POLICY (providerPolicy.mjs), and a lane change is a policy decision, never a fallback.
 
-import { optionalEnv } from "../env.mjs";
 import { activeAiCredential } from "../aiCredentialStore.mjs";
 import { createOpenAIEngineProvider } from "./openaiEngineProvider.mjs";
 import { createRoutingProvider } from "../../../../src/providers/routingProvider.mjs";
 import { resolveProviderPolicy } from "./providerPolicy.mjs";
+import { approvedConfiguredModel } from "../modelCatalogue.mjs";
+import { createGeminiEngineProvider } from "./geminiEngineProvider.mjs";
 
 function managedModelForIntent(intent) {
-  if (intent === "fast") return optionalEnv("OPENAI_FAST_MODEL", optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra"));
+  if (intent === "fast") return approvedConfiguredModel("OPENAI_FAST_MODEL", "gpt-5.6-luna", { provider: "openai", tier: "fast" });
   return intent === "edit"
-    ? optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra")
-    : optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"));
+    ? approvedConfiguredModel("OPENAI_BALANCED_MODEL", "gpt-5.6-terra", { provider: "openai", tier: "balanced" })
+    : approvedConfiguredModel("OPENAI_QUALITY_MODEL", "gpt-5.6-sol", { provider: "openai", tier: "quality" });
 }
 
 // `preferProvider` is set only by an automatic provider fallback: the build continues on a
@@ -54,7 +55,7 @@ export async function resolveBuildContext(ownerId, {
   }
 
   if (credential.provider === "anthropic" && credential.secret) {
-    const strong = optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5");
+    const strong = approvedConfiguredModel("ANTHROPIC_MODEL", "claude-sonnet-5", { provider: "anthropic", tier: "balanced" });
     const config = { provider: "anthropic", strong, apiKey: credential.secret };
     return {
       byok: true,
@@ -71,8 +72,8 @@ export async function resolveBuildContext(ownerId, {
     const { createXaiEngineProvider, xaiPolicy, xaiEligibleForAgent, xaiReasoningForTask } = await import("../xaiProvider.mjs");
     const policy = xaiPolicy();
     if (policy.enabled && xaiEligibleForAgent("build", policy)) {
-      const strong = optionalEnv("XAI_QUALITY_MODEL", "grok-4.5");
-      const editModel = optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1");
+      const strong = approvedConfiguredModel("XAI_QUALITY_MODEL", "grok-4.5", { provider: "xai", tier: "quality" });
+      const editModel = approvedConfiguredModel("XAI_BALANCED_MODEL", "grok-build-0.1", { provider: "xai", tier: "balanced" });
       return {
         byok: true,
         providerLabel: "xai",
@@ -81,7 +82,7 @@ export async function resolveBuildContext(ownerId, {
         byokSafety: credential.byokSafety || null,
         policy: resolveProviderPolicy(credential),
         buildProvider: (intent) => createXaiEngineProvider({
-          model: intent === "fast" ? "grok-4.3" : intent === "edit" ? editModel : strong,
+          model: intent === "fast" ? approvedConfiguredModel("XAI_FAST_MODEL", "grok-4.3", { provider: "xai", tier: "fast" }) : intent === "edit" ? editModel : strong,
           apiKey: credential.secret,
           reasoningEffort: xaiReasoningForTask(intent === "edit" ? "component_edit" : "full_build", policy),
         }),
@@ -124,6 +125,19 @@ export async function resolveBuildContext(ownerId, {
       byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: () => createCodexProvider(),
+    };
+  }
+
+  if (credential.provider === "gemini" && credential.secret) {
+    const strong = approvedConfiguredModel("GEMINI_QUALITY_MODEL", "gemini-3.6-flash", { provider: "gemini", tier: "quality" });
+    const fast = approvedConfiguredModel("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite", { provider: "gemini", tier: "fast" });
+    return {
+      byok: true, providerLabel: "gemini", strongModel: strong,
+      routing: credential.routing || null, byokSafety: credential.byokSafety || null,
+      policy: resolveProviderPolicy(credential),
+      buildProvider: (intent) => createGeminiEngineProvider({
+        apiKey: credential.secret, model: intent === "fast" ? fast : strong,
+      }),
     };
   }
 

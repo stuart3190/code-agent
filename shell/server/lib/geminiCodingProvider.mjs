@@ -1,4 +1,6 @@
 import { optionalEnv } from "./env.mjs";
+import { approvedConfiguredModel, assertProviderModel } from "./modelCatalogue.mjs";
+import { DISPATCH_STATES, providerFailure } from "./providerOutcome.mjs";
 
 // Provider self-description for the model selector (see openAIProviderMeta). Gemini
 // exposes no per-request reasoning control in this adapter, so intensity modes map to
@@ -7,9 +9,9 @@ export const geminiProviderMeta = () => ({
   id: "gemini",
   name: "Gemini",
   models: [
-    { id: optionalEnv("GEMINI_QUALITY_MODEL", optionalEnv("GEMINI_MODEL", "gemini-3.6-flash")), tier: "quality" },
-    { id: optionalEnv("GEMINI_MODEL", "gemini-3.6-flash"), tier: "balanced" },
-    { id: optionalEnv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite"), tier: "fast" },
+    { id: approvedConfiguredModel("GEMINI_QUALITY_MODEL", "gemini-3.6-flash", { provider: "gemini", tier: "quality" }), tier: "quality" },
+    { id: approvedConfiguredModel("GEMINI_MODEL", "gemini-3.6-flash", { provider: "gemini", tier: "balanced" }), tier: "balanced" },
+    { id: approvedConfiguredModel("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite", { provider: "gemini", tier: "fast" }), tier: "fast" },
   ],
   supportedModes: ["fast", "balanced", "cheapest", "max_quality"],
   modeMap: { fast: {}, balanced: {}, cheapest: { tierHint: "fast" }, max_quality: { tierHint: "quality" } },
@@ -23,7 +25,7 @@ export function geminiConfigured() {
 
 export function createGeminiCodingProvider({
   apiKey = optionalEnv("GEMINI_API_KEY"),
-  model = optionalEnv("GEMINI_MODEL", "gemini-3.6-flash"),
+  model = approvedConfiguredModel("GEMINI_MODEL", "gemini-3.6-flash", { provider: "gemini" }),
   fetchImpl = fetch,
   maxOutputTokens = null,
 } = {}) {
@@ -32,13 +34,14 @@ export function createGeminiCodingProvider({
     error.code = "gemini_setup_required";
     throw error;
   }
+  const executableModel = assertProviderModel({ provider: "gemini", model }).model;
 
   return {
     id: "gemini",
-    model,
+    model: executableModel,
     async turn({ instructions, input, tools = [] }) {
       const body = {
-        model,
+        model: executableModel,
         input: toGeminiInput(input),
         system_instruction: instructions,
         tools: toGeminiTools(tools),
@@ -47,12 +50,13 @@ export function createGeminiCodingProvider({
       if (!body.tools.length) delete body.tools;
       if (maxOutputTokens) body.generation_config = { max_output_tokens: maxOutputTokens };
 
-      const response = await fetchImpl(endpoint, {
+      let response;
+      try { response = await fetchImpl(endpoint, {
         method: "POST",
         signal: AbortSignal.timeout(300_000),
         headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+      }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.status === "failed") {
         const error = new Error(
@@ -60,7 +64,8 @@ export function createGeminiCodingProvider({
         );
         error.code = payload?.error?.code || payload?.code || "gemini_request_failed";
         error.status = response.status;
-        throw error;
+        throw providerFailure(error, { state: response.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+          retrySafe: [408, 409, 425, 429].includes(response.status) });
       }
 
       const output = normalizeGeminiSteps(payload.steps || []);
@@ -68,7 +73,7 @@ export function createGeminiCodingProvider({
         id: payload.id,
         output,
         text: outputText(output),
-        usage: normalizeGeminiUsage(payload.usage),
+        usage: { ...normalizeGeminiUsage(payload.usage), providerRequestId: payload.id || null },
         raw: payload,
       };
     },

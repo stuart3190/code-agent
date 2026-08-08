@@ -35,6 +35,7 @@ import {
   loadIndex, persistIndex, supabaseSnapshotStorage,
 } from "./supabaseTwins.mjs";
 import { supabaseVerificationCache } from "./verification.mjs";
+import { assertExecutableCandidate } from "../modelCatalogue.mjs";
 
 const uuid = () => crypto.randomUUID();
 const numberEnv = (name, fallback) => {
@@ -82,7 +83,10 @@ function candidateSet(context) {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).map((row) => assertExecutableCandidate({
+    ...row,
+    reasoningProfile: row.executable?.reasoningEffort || (row.provider === "codex" ? "medium" : "default"),
+  }));
 }
 
 async function routingHistory(client, owner) {
@@ -322,7 +326,8 @@ export function createBuilderV2Runtime({
           manualModel: workJob.payload.manualModel
             || (context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
-        const chosen = candidates.find((candidate) => candidate.provider === decision.provider && candidate.model === decision.model);
+        const chosen = candidates.find((candidate) => candidate.provider === decision.provider
+          && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
         if (!chosen) throw new Error(`routing selected unavailable model ${decision.model}`);
         emit("progress", { kind: "routing", decision });
         return { provider: chosen.executable, decision };

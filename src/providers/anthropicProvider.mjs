@@ -12,10 +12,12 @@
 // sent solely as the `x-api-key` header, and never logged, written to a file, or committed.
 
 import { anthropicRatesFor } from "../cost.mjs";
+import { DISPATCH_STATES, providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
+import { assertProviderModel } from "../../shell/server/lib/modelCatalogue.mjs";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-sonnet-4-6"; // Preserve the existing site-generation lane; Code Agent passes its own current model.
+const DEFAULT_MODEL = "claude-sonnet-5";
 const DEFAULT_MAX_TOKENS = 16000; // a generous cap (billed only for tokens actually emitted)
 
 // ---- neutral -> Messages API translation (pure; exported for offline tests) ----
@@ -181,7 +183,8 @@ export function createAccumulator() {
 // (the platform key). This is the ONLY change for per-user BYOK — the runTurn signature and every
 // wire-translation function above are unchanged. The key is never logged, written, or committed.
 export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL, cache = false, maxTokens = DEFAULT_MAX_TOKENS, apiKey = null } = {}) {
-  const rates = anthropicRatesFor(model);
+  const executableModel = assertProviderModel({ provider: "anthropic", model }).model;
+  const rates = anthropicRatesFor(executableModel);
 
   async function runTurn({ systemPrompt, messages, tools, signal = null, maxOutputTokens = null }) {
     const key = apiKey ?? process.env.ANTHROPIC_API_KEY;
@@ -193,7 +196,7 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
     }
 
     const boundedOutput = maxOutputTokens ? Math.min(maxTokens, Math.max(1, Math.floor(maxOutputTokens))) : maxTokens;
-    const body = buildRequestBody({ systemPrompt, messages, tools, model, maxTokens: boundedOutput, cache });
+    const body = buildRequestBody({ systemPrompt, messages, tools, model: executableModel, maxTokens: boundedOutput, cache });
 
     /**
      * A stall timeout, not a deadline.
@@ -250,7 +253,7 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
       });
     } catch (error) {
       clearTimeout(stallTimer); clearTimeout(ceiling);
-      throw stalled ? asStall(error) : error;
+      throw providerFailure(stalled ? asStall(error) : error, { state: DISPATCH_STATES.ambiguous });
     }
 
     if (!res.ok) {
@@ -260,7 +263,8 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
       error.status = res.status;
       error.code = res.status === 429 ? "anthropic_rate_limit" : "anthropic_request_failed";
       error.providerRequestId = res.headers?.get?.("request-id") || res.headers?.get?.("x-request-id") || null;
-      throw error;
+      throw providerFailure(error, { state: res.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+        providerRequestId: error.providerRequestId, retrySafe: [408, 409, 425, 429].includes(res.status) });
     }
 
     // Parse the SSE stream line by line, feeding each `data:` event to the accumulator.
@@ -289,7 +293,8 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
         }
       }
     } catch (error) {
-      throw stalled ? asStall(error) : error;
+      throw providerFailure(stalled ? asStall(error) : error, { state: DISPATCH_STATES.ambiguous,
+        providerRequestId: res.headers?.get?.("request-id") || res.headers?.get?.("x-request-id") || null });
     } finally {
       clearTimeout(stallTimer);
       clearTimeout(ceiling);
@@ -308,5 +313,5 @@ export function createAnthropicProvider({ model = process.env.ANTHROPIC_MODEL ||
     return { text, toolCalls, usage: usageWithId };
   }
 
-  return { runTurn, rates, model, provider: "anthropic" };
+  return { runTurn, rates, model: executableModel, provider: "anthropic" };
 }

@@ -28,7 +28,8 @@ export function displayName(pref, catalog = null) {
   const { value, mode } = parsePref(pref);
   const modeName = catalog?.modes?.find((m) => m.id === mode)?.name || (mode === "balanced" ? null : mode);
   if (value === "auto") return modeName && mode !== "balanced" ? `Auto • ${modeName}` : "Auto";
-  const [provider, model] = value.split(":");
+  const parts = value.split(":");
+  const [provider, model] = parts.length >= 3 ? [parts[1], parts.slice(2).join(":")] : parts;
   const base = `${PROVIDER_SHORT[provider] || provider} · ${model || value}`;
   return mode !== "balanced" && modeName ? `${base} • ${modeName}` : base;
 }
@@ -174,7 +175,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
                 p.available ? (
                   <button data-row key={p.id} className="ct-model-row" onClick={() => { setPickedProvider(p.id); setLevel("models"); }}>
                     <span className="ct-model-main" style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <Monogram provider={p.id} />
+                      <Monogram provider={p.providerId || p.id} />
                       <span>
                         <span className="ct-model-name">{p.name}</span>
                         <span className="ct-model-sub">{p.source} · {p.models.length} model{p.models.length === 1 ? "" : "s"}</span>
@@ -186,7 +187,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
                   <button data-row key={p.id} className="ct-model-row ct-model-configure"
                     onClick={() => { setOpen(false); onOpenSettings?.(); }}>
                     <span className="ct-model-main" style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <Monogram provider={p.id} />
+                      <Monogram provider={p.providerId || p.id} />
                       <span>
                         <span className="ct-model-name" style={{ color: "var(--accent)" }}>Configure {p.name}</span>
                         <span className="ct-model-sub">Connect a key in Settings to unlock these models</span>
@@ -215,7 +216,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
               ) : (
                 <div className="ct-model-sub">Benchmark confidence: collecting — figures appear as builds accumulate.</div>
               )}
-              <button data-row className="ct-model-config" onClick={() => choose(`${auto.provider}:${auto.model}`, "balanced")}>
+              <button data-row className="ct-model-config" onClick={() => choose(auto.value, "balanced")} disabled={!auto.value}>
                 Pin this exact model instead of Auto →
               </button>
             </div>
@@ -226,7 +227,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
             <button data-row key={m.id} role="option" aria-selected={currentValue === m.value}
               className={`ct-model-row ${currentValue === m.value ? "on" : ""}`}
               onClick={() => {
-                if (provider.id === "codex") { choose(m.value, "balanced"); return; }
+                if ((provider.providerId || provider.id) === "codex") { choose(m.value, "balanced"); return; }
                 setPickedModel(m); setLevel("modes");
               }}>
               <span className="ct-model-main">

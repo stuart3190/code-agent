@@ -1,15 +1,14 @@
 // Builder V2 per-step routing. This module decides; transports execute elsewhere.
 // Decisions are deterministic for identical inputs and are suitable for ai_requests.context.
 
+import { assertExecutableCandidate, parseSelection } from "../modelCatalogue.mjs";
+
 const TIER_STRENGTH = Object.freeze({ fast: 1, balanced: 2, quality: 3 });
 
 const normalProvider = (value) => value === "openai-managed" ? "managed" : String(value || "");
 
 function manualSelection(value) {
-  const raw = String(value || "").trim();
-  const separator = raw.indexOf(":");
-  if (separator <= 0) return { provider: null, model: raw };
-  return { provider: normalProvider(raw.slice(0, separator)), model: raw.slice(separator + 1) };
+  return parseSelection(value);
 }
 
 export function requiredTier({
@@ -63,7 +62,8 @@ export function routeV2Step({
   }
 
   const tier = requiredTier({ step, complexity, affectedModules, retrievalTokens, repairRound, requiredReasoning });
-  const eligible = candidates
+  const canonical = candidates.map((candidate) => assertExecutableCandidate(candidate));
+  const eligible = canonical
     .filter((candidate) => candidate.available !== false && providerAllowed(policy, candidate))
     .filter((candidate) => (TIER_STRENGTH[candidate.tier] || 0) >= TIER_STRENGTH[tier])
     .map((candidate) => ({ ...candidate, evidence: evidenceFor(history, candidate, taskClass) }));
@@ -71,7 +71,8 @@ export function routeV2Step({
   if (manualModel) {
     const requested = manualSelection(manualModel);
     const chosen = eligible.find((candidate) => candidate.model === requested.model
-      && (!requested.provider || normalProvider(candidate.provider) === requested.provider));
+      && normalProvider(candidate.provider) === normalProvider(requested.provider)
+      && candidate.billingLane === requested.lane);
     if (!chosen) throw Object.assign(new Error("manual model is unavailable or forbidden by provider policy"), { code: "model_unavailable" });
     return decision(chosen, { step, taskClass, tier, reason: "manual model selection" });
   }
@@ -103,6 +104,8 @@ function decision(candidate, { step, taskClass, tier, reason }) {
     kind: "model", step, taskClass, requiredTier: tier,
     provider: candidate.provider, model: candidate.model, tier: candidate.tier,
     billingLane: candidate.billingLane, estimatedCredits: Number(candidate.estimatedCredits || 0),
+    callCeilingCredits: Number(candidate.callCeilingCredits || candidate.estimatedCredits || 0),
+    canonicalModelIdentity: candidate.canonicalKey, reasoningProfile: candidate.identity?.reasoningProfile,
     evidence: candidate.evidence, reason,
   };
 }

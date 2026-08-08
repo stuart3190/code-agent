@@ -17,6 +17,7 @@ import { bindCapabilities } from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
+import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -276,6 +277,13 @@ export function createModelLanes({
           const estimate = conservativeCallReservation(options, selected.provider.model, {
             maxOutputTokens, minimumCredits: selected.decision?.estimatedCredits || 0,
           });
+          const callCeiling = Number(selected.decision?.callCeilingCredits || ceilingCredits);
+          if (!(callCeiling > 0) || estimate > callCeiling) {
+            throw Object.assign(new Error(`Builder V2 ${step} call reservation exceeds its step ceiling`), {
+              code: "step_budget_ceiling", step, estimate, ceiling: callCeiling, retryable: false,
+              dispatchState: "before_dispatch",
+            });
+          }
           const callKey = modelCallKey({ buildId: context.buildId, step, sequence });
           const accountAvailableCredits = (selected.decision?.billingLane || billingLane) === "managed"
             ? Number(await accountCreditResolver?.(context.owner)) : null;
@@ -298,18 +306,24 @@ export function createModelLanes({
             });
           } catch (error) {
             const usage = error?.usage || {};
+            const failure = classifyProviderFailure(error);
             const actualCredits = creditsForUsage({ usage, model: selected.provider.model });
             try {
-              await reservations.settle(context.owner, hold.id, {
-                actualCredits, usage, providerRequestIds: requestIds(usage, [error?.providerRequestId]),
-              });
+              if (failure.hasUsage) {
+                await reservations.settle(context.owner, hold.id, {
+                  actualCredits, usage, providerRequestIds: requestIds(usage, [error?.providerRequestId]),
+                });
+              } else if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
+                await reservations.release(context.owner, hold.id);
+              }
             } catch (settlementError) {
               throw Object.assign(new AggregateError(
                 [error, settlementError],
                 `Provider call failed and its usage could not be settled: ${settlementError.message}`,
               ), { code: "billing_settlement_failed", providerError: error });
             }
-            throw error;
+            if (failure.state === "before_dispatch" || failure.state === "provider_rejected") throw error;
+            throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
           }
           // Settlement is part of successful dispatch. If its acknowledgement fails, stop here;
           // do not reinterpret that database failure as a provider failure or invoke settlement a
@@ -416,8 +430,8 @@ export function createModelLanes({
       try {
         turn = await callOnce();
       } catch (error) {
-        if (!/terminated|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed|network|aborted|other side closed/i.test(error.message || "")) throw error;
-        log(`${step}: transport dropped (${String(error.message).slice(0, 60)}) — one retry`);
+        if (error?.retrySafe !== true) throw error;
+        log(`${step}: provider rejected before billable dispatch (${String(error.message).slice(0, 60)}) — one retry`);
         await new Promise((r) => setTimeout(r, 2_000));
         turn = await callOnce();
       }

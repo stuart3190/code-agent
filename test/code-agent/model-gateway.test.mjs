@@ -4,17 +4,15 @@ import { toNeutralMessages } from "../../shell/server/lib/anthropicCodingProvide
 import { resolveModelSelection } from "../../shell/server/lib/modelGateway.mjs";
 
 test("model gateway resolves explicit commercial providers", () => {
-  assert.deepEqual(resolveModelSelection("openai:gpt-5.6-sol"), { provider: "openai", model: "gpt-5.6-sol" });
-  assert.deepEqual(resolveModelSelection("anthropic:claude-sonnet-4-6"), {
-    provider: "anthropic", model: "claude-sonnet-4-6",
+  assert.deepEqual(resolveModelSelection("managed:openai:gpt-5.6-sol"), { provider: "openai", model: "gpt-5.6-sol" });
+  assert.deepEqual(resolveModelSelection("byok_api:anthropic:claude-sonnet-5", { defaultLane: "byok_api" }), {
+    provider: "anthropic", model: "claude-sonnet-5",
   });
-  assert.deepEqual(resolveModelSelection("gemini:gemini-3.6-flash"), {
+  assert.deepEqual(resolveModelSelection("byok_api:gemini:gemini-3.6-flash", { defaultLane: "byok_api" }), {
     provider: "gemini", model: "gemini-3.6-flash",
   });
-  assert.deepEqual(resolveModelSelection("gemini-3.5-flash-lite"), {
-    provider: "gemini", model: "gemini-3.5-flash-lite",
-  });
-  assert.deepEqual(resolveModelSelection("claude-opus-4-1"), { provider: "anthropic", model: "claude-opus-4-1" });
+  assert.throws(() => resolveModelSelection("gemini-3.5-flash-lite"), /must include lane/);
+  assert.throws(() => resolveModelSelection("byok_api:anthropic:claude-opus-4-1", { defaultLane: "byok_api" }), /not executable/);
 });
 test("Anthropic adapter preserves user, tool call, and tool output history", () => {
   assert.deepEqual(toNeutralMessages([

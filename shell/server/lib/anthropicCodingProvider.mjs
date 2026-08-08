@@ -1,5 +1,6 @@
 import { createAnthropicProvider } from "../../../src/providers/anthropicProvider.mjs";
 import { optionalEnv } from "./env.mjs";
+import { approvedConfiguredModel } from "./modelCatalogue.mjs";
 
 // Provider self-description for the model selector (see openAIProviderMeta). Anthropic's
 // adapter has no reasoning-effort knob here, so deep/max-quality map to the quality tier.
@@ -7,9 +8,9 @@ export const anthropicProviderMeta = () => ({
   id: "anthropic",
   name: "Anthropic",
   models: [
-    { id: optionalEnv("ANTHROPIC_QUALITY_MODEL", "claude-opus-5"), tier: "quality" },
-    { id: optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5"), tier: "balanced" },
-    { id: optionalEnv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5"), tier: "fast" },
+    { id: approvedConfiguredModel("ANTHROPIC_QUALITY_MODEL", "claude-opus-5", { provider: "anthropic", tier: "quality" }), tier: "quality" },
+    { id: approvedConfiguredModel("ANTHROPIC_MODEL", "claude-sonnet-5", { provider: "anthropic", tier: "balanced" }), tier: "balanced" },
+    { id: approvedConfiguredModel("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5-20251001", { provider: "anthropic", tier: "fast" }), tier: "fast" },
   ],
   supportedModes: ["fast", "balanced", "deep", "cheapest", "max_quality"],
   modeMap: { fast: {}, balanced: {}, deep: { tierHint: "quality" }, cheapest: { tierHint: "fast" }, max_quality: { tierHint: "quality" } },
@@ -20,7 +21,7 @@ export function anthropicConfigured() {
 }
 export function createAnthropicCodingProvider({
   apiKey = optionalEnv("ANTHROPIC_API_KEY"),
-  model = optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+  model = approvedConfiguredModel("ANTHROPIC_MODEL", "claude-sonnet-5", { provider: "anthropic" }),
 } = {}) {
   if (!apiKey) {
     const error = new Error("Anthropic is not connected. Set ANTHROPIC_API_KEY on the server.");

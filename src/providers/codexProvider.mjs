@@ -11,6 +11,7 @@
 //   { name, description, parameters }   // parameters = JSON schema object
 
 import { getAccessToken } from "./auth.mjs";
+import { DISPATCH_STATES, providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const MODEL = "gpt-5.5"; // proven working for ChatGPT-account auth ("-codex" is rejected)
@@ -78,7 +79,8 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       body.parallel_tool_calls = toolChoice ? false : true;
     }
 
-    const res = await fetchImpl(CODEX_RESPONSES_URL, {
+    let res;
+    try { res = await fetchImpl(CODEX_RESPONSES_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -90,7 +92,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       },
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
-    });
+    }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }
 
     // The strongest STABLE identifiers this transport actually exposes, typed so a billing row
     // can never be mistaken for an OpenAI-platform request id:
@@ -105,7 +107,8 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       const error = new Error(`Codex responses HTTP ${res.status}${providerRequestId ? ` (${providerRequestId})` : ""}: ${errBody}`);
       // A failed call that the backend received still has an identity — keep it for incident logs.
       error.providerRequestId = providerRequestId;
-      throw error;
+      throw providerFailure(error, { state: res.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+        providerRequestId, retrySafe: [408, 409, 425, 429].includes(res.status) });
     }
 
     // Parse SSE. Accumulate text from deltas (final output[] can be empty); collect
@@ -154,7 +157,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       // The backend opened a response and the stream died mid-flight: the turn happened, tokens
       // may have been consumed, and its identifier is the only handle support has. Retain it.
       streamError.providerRequestId = providerRequestId;
-      throw streamError;
+      throw providerFailure(streamError, { state: DISPATCH_STATES.ambiguous, providerRequestId });
     }
 
     return { text: text.trim(), toolCalls, usage: { ...normalizeUsage(usage), providerRequestId } };

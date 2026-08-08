@@ -48,8 +48,8 @@ test("every option carries provider, source, label and relative cost; no secrets
 
 test("unavailable models cannot be selected", () => {
   const catalog = selectableModels({ credentials: [] });
-  assert.throws(() => validateModelChoice(catalog, "anthropic:claude-opus-5"), /isn't available/);
-  assert.throws(() => validateModelChoice(catalog, "xai:grok-4.5"), /isn't available/);
+  assert.throws(() => validateModelChoice(catalog, "byok_api:anthropic:claude-opus-5"), /isn't available/);
+  assert.throws(() => validateModelChoice(catalog, "byok_api:xai:grok-4.5"), /isn't available/);
   assert.equal(validateModelChoice(catalog, "auto"), "auto");
   const openai = catalog.options.find((o) => o.provider === "openai");
   assert.equal(validateModelChoice(catalog, openai.value), openai.value);
@@ -58,11 +58,11 @@ test("unavailable models cannot be selected", () => {
 test("the selected model is stored against the project at creation", async () => {
   const store = new MemoryConversationStore();
   const { conversation } = await postUserMessage("owner-1", {
-    text: "Build me a store", modelPref: `openai:${selectableModels({ credentials: [] }).options[1].model}`,
+    text: "Build me a store", modelPref: selectableModels({ credentials: [] }).options[1].value,
   }, { store, processOptions: { modelFactory: async () => ({ turn: async () => ({ text: "ok", output: [], usage: {} }) }) } });
   await new Promise((resolve) => setTimeout(resolve, 50));
   const stored = await store.getConversationIncludingDeleted("owner-1", conversation.id);
-  assert.match(String(stored.model_pref || ""), /^openai:/, "preference stored on the conversation row");
+  assert.match(String(stored.model_pref || ""), /^managed:openai:/, "canonical lane preference stored on the conversation row");
 });
 
 test("switching models affects future requests only — history, events and state untouched", async () => {
@@ -72,38 +72,38 @@ test("switching models affects future requests only — history, events and stat
   await store.appendEvent(conversation, "message", { role: "user", text: "hello" });
   const turnsBefore = (await store.listTurns("owner-1", conversation.id, { limit: 50 })).length;
   const eventsBefore = (await store.listEvents("owner-1", conversation.id, 0)).length;
-  await store.updateConversation(conversation, { model_pref: "openai:gpt-5.6-terra" });
+  await store.updateConversation(conversation, { model_pref: "managed:openai:gpt-5.6-terra" });
   assert.equal((await store.listTurns("owner-1", conversation.id, { limit: 50 })).length, turnsBefore, "no turns added or removed");
   assert.equal((await store.listEvents("owner-1", conversation.id, 0)).length, eventsBefore, "no events replayed or reset");
   const row = await store.getConversation("owner-1", conversation.id);
-  assert.equal(row.model_pref, "openai:gpt-5.6-terra");
+  assert.equal(row.model_pref, "managed:openai:gpt-5.6-terra");
   assert.notEqual(row.state, "thinking", "no build or processing was triggered");
 });
 
-test("automatic fallback only occurs when enabled — never silently", () => {
+test("invalid manual selections never substitute lanes even when automatic routing fallback is enabled", () => {
   const catalog = { options: [{ value: "auto", available: true }], allowFallback: false };
   const blocked = resolveConversationModel({ model_pref: "xai:grok-4.5" }, catalog);
   assert.equal(blocked.requested, null, "no silent switch");
-  assert.match(blocked.warning, /fallback is off/i);
+  assert.match(blocked.warning, /not executable/i);
   assert.match(blocked.warning, /Auto/, "offers the escape hatches");
 
-  const withFallback = resolveConversationModel({ model_pref: "xai:grok-4.5" }, { ...catalog, allowFallback: true });
-  assert.equal(withFallback.requested, "auto", "falls back when the user enabled it");
-  assert.match(withFallback.notice, /automatic fallback is enabled/i, "and says so visibly");
+  const withFallback = resolveConversationModel({ model_pref: "byok_api:xai:grok-4.5" }, { ...catalog, allowFallback: true });
+  assert.equal(withFallback.requested, null, "manual lane selection never silently becomes Auto");
+  assert.match(withFallback.warning, /not executable/i);
 
-  const healthy = resolveConversationModel({ model_pref: "openai:gpt-5.6-terra" }, {
-    options: [{ value: "openai:gpt-5.6-terra", available: true }], allowFallback: false,
+  const healthy = resolveConversationModel({ model_pref: "managed:openai:gpt-5.6-terra" }, {
+    options: [{ value: "managed:openai:gpt-5.6-terra", available: true }], allowFallback: false,
   });
-  assert.equal(healthy.requested, "openai:gpt-5.6-terra");
+  assert.equal(healthy.requested, "managed:openai:gpt-5.6-terra");
   assert.equal(healthy.warning, null);
 });
 
 test("providers and models load dynamically from adapter metadata (no hardcoded UI list)", () => {
   const catalog = selectableModels({ credentials: [{ provider: "anthropic" }] });
-  const ids = catalog.providers.map((p) => p.id);
+  const ids = catalog.providers.map((p) => p.providerId || p.id);
   assert.deepEqual(ids.slice(0, 1), ["auto"], "Auto first");
   for (const id of ["openai", "anthropic", "gemini", "xai"]) assert.ok(ids.includes(id), `${id} present`);
-  const anthropic = catalog.providers.find((p) => p.id === "anthropic");
+  const anthropic = catalog.providers.find((p) => p.providerId === "anthropic");
   assert.equal(anthropic.available, true);
   assert.ok(anthropic.models.length >= 2, "models come from the adapter meta");
   const gemini = catalog.providers.find((p) => p.id === "gemini");
@@ -111,8 +111,7 @@ test("providers and models load dynamically from adapter metadata (no hardcoded 
   assert.equal(gemini.configure, true, "unconfigured -> Configure provider, never selectable");
   // Env-config change flows straight into the catalog — no code change for new models.
   process.env.OPENAI_BALANCED_MODEL = "gpt-9.9-nova";
-  const updated = selectableModels({ credentials: [] });
-  assert.ok(updated.providers.find((p) => p.id === "openai").models.some((m) => m.id === "gpt-9.9-nova"));
+  assert.throws(() => selectableModels({ credentials: [] }), /not approved/);
   delete process.env.OPENAI_BALANCED_MODEL;
 });
 
@@ -137,9 +136,9 @@ test("modes: full vocabulary, per-provider support, unsupported modes map to clo
 
 test("preference format round-trips provider, model and mode", () => {
   assert.deepEqual(parseModelPref("auto"), { value: "auto", mode: "balanced" });
-  assert.deepEqual(parseModelPref("openai:gpt-5.6-terra#deep"), { value: "openai:gpt-5.6-terra", mode: "deep" });
-  assert.equal(formatModelPref("openai:gpt-5.6-terra", "deep"), "openai:gpt-5.6-terra#deep");
-  assert.equal(formatModelPref("openai:gpt-5.6-terra", "balanced"), "openai:gpt-5.6-terra");
+  assert.deepEqual(parseModelPref("managed:openai:gpt-5.6-terra#deep"), { value: "managed:openai:gpt-5.6-terra", mode: "deep" });
+  assert.equal(formatModelPref("managed:openai:gpt-5.6-terra", "deep"), "managed:openai:gpt-5.6-terra#deep");
+  assert.equal(formatModelPref("managed:openai:gpt-5.6-terra", "balanced"), "managed:openai:gpt-5.6-terra");
   const catalog = selectableModels({ credentials: [] });
   const openai = catalog.options.find((o) => o.provider === "openai");
   assert.equal(validateModelChoice(catalog, `${openai.value}#deep`), `${openai.value}#deep`);
@@ -182,7 +181,7 @@ test("model usage flows into routing accounting with the requested model", async
   // createRoutedCodingModel with requested != auto pins the exact candidate — the same
   // model string that lands in ai_requests / routing attempts.
   const { routeCandidates } = await import("../../shell/server/lib/modelRouting.mjs");
-  const pinned = routeCandidates({ credential: { provider: "managed" }, requested: "openai:gpt-5.6-terra", policy: {} });
+  const pinned = routeCandidates({ credential: { provider: "managed" }, requested: "managed:openai:gpt-5.6-terra", policy: {} });
   assert.equal(pinned.length, 1);
   assert.equal(pinned[0].model, "gpt-5.6-terra");
 });

@@ -48,7 +48,7 @@ export function resolveProviderPolicy(credential = { provider: "managed" }, { no
   return {
     ...base,
     billingLane: BILLING_LANES.byokApi,
-    allowedFallbackProviders: ["anthropic", "openai", "xai"].filter((p) => p !== provider),
+    allowedFallbackProviders: ["anthropic", "gemini", "openai", "xai"].filter((p) => p !== provider),
   };
 }
 

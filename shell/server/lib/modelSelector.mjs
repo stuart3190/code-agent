@@ -11,6 +11,7 @@ import { anthropicProviderMeta } from "./anthropicCodingProvider.mjs";
 import { geminiProviderMeta } from "./geminiCodingProvider.mjs";
 import { xaiProviderMeta } from "./xaiProvider.mjs";
 import { serviceClient } from "./supabase.mjs";
+import { MODEL_LANES, canonicalModelIdentity, selectionValue } from "./modelCatalogue.mjs";
 
 // ── Provider registry: adding a provider = registering its adapter meta here. The
 // selector UI populates entirely from this — no provider-specific UI anywhere else. ──
@@ -98,6 +99,8 @@ export function autoStrategy({ credential = { provider: "managed" }, routing = {
   return {
     provider: first.provider,
     model: first.model,
+    lane: first.billingLane || first.lane,
+    value: first.billingLane || first.lane ? `${first.billingLane || first.lane}:${first.provider}:${first.model}` : null,
     mode: "balanced",
     reason,
     confidence: first.intelligence?.confidence || null,
@@ -131,33 +134,32 @@ export function selectableModels({ credentials = [], routing = {} } = {}) {
   }];
 
   for (const entry of modelCatalog()) {
-    const byok = connected.has(entry.provider);
-    // A model is selectable when the platform runs it managed, or the user's own key
-    // covers that provider. Never list a provider with neither.
-    const available = entry.configured || byok;
-    if (!available) continue;
-    options.push({
-      value: `${entry.provider}:${entry.model}`,
-      provider: entry.provider,
-      model: entry.model,
-      source: byok ? "Your API key" : "Thrallo managed",
-      label: TIER_LABEL[entry.tier] || entry.tier,
-      relCost: relCost(entry.model),
-      available: true,
-      detail: null,
-    });
+    const lanes = [];
+    if (entry.configured && entry.lanes.includes(MODEL_LANES.managed)) lanes.push(MODEL_LANES.managed);
+    if (connected.has(entry.provider) && entry.lanes.includes(MODEL_LANES.byok)) lanes.push(MODEL_LANES.byok);
+    for (const lane of lanes) {
+      const identity = canonicalModelIdentity({ provider: entry.provider, model: entry.model, lane });
+      options.push({
+        value: selectionValue(identity), lane, provider: entry.provider, model: entry.model,
+        identity: identity.key,
+        source: lane === MODEL_LANES.byok ? "Your API key" : "Thrallo managed",
+        label: TIER_LABEL[entry.tier] || entry.tier,
+        relCost: relCost(entry.model), available: true, detail: null,
+      });
+    }
   }
 
   if (connected.has("codex")) {
+    const identity = canonicalModelIdentity({ provider: "codex", model: "gpt-5.5", lane: MODEL_LANES.codex });
     options.push({
-      value: "codex",
+      value: selectionValue(identity), lane: MODEL_LANES.codex, identity: identity.key,
       provider: "codex",
-      model: "ChatGPT Codex",
+      model: "gpt-5.5",
       source: "Included plan",
       label: "Your ChatGPT plan",
       relCost: "included",
       available: true,
-      detail: "Repo runs use your Codex allowance; conversation and app builds route to managed models.",
+      detail: "Conversation and Builder V2 work use your connected ChatGPT Codex allowance. There is no managed fallback.",
     });
   }
 
@@ -171,23 +173,28 @@ export function selectableModels({ credentials = [], routing = {} } = {}) {
   for (const meta of PROVIDER_METAS()) {
     const providerOptions = options.filter((o) => o.provider === meta.id);
     if (providerOptions.length) {
-      const seen = new Set();
-      providers.push({
-        id: meta.id, name: meta.name, available: true,
-        source: providerOptions[0].source,
-        models: providerOptions.filter((o) => !seen.has(o.model) && seen.add(o.model)).map((o) => ({
-          id: o.model, name: o.model, tier: o.label, relCost: o.relCost, value: o.value,
-        })),
-        modes: modesForProvider(meta.id).map((m) => ({ ...m })),
-      });
+      for (const lane of [...new Set(providerOptions.map((o) => o.lane))]) {
+        const laneOptions = providerOptions.filter((o) => o.lane === lane);
+        const seen = new Set();
+        providers.push({
+          id: `${lane}:${meta.id}`, providerId: meta.id,
+          name: `${meta.name} (${lane === MODEL_LANES.byok ? "Your API key" : "Thrallo managed"})`,
+          available: true, source: laneOptions[0].source, lane,
+          models: laneOptions.filter((o) => !seen.has(o.value) && seen.add(o.value)).map((o) => ({
+            id: o.value, name: o.model, tier: o.label, relCost: o.relCost, value: o.value,
+          })),
+          modes: modesForProvider(meta.id).map((m) => ({ ...m })),
+        });
+      }
     } else {
       providers.push({ id: meta.id, name: meta.name, available: false, configure: true, models: [], modes: [] });
     }
   }
   if (connected.has("codex")) {
+    const option = options.find((o) => o.provider === "codex");
     providers.push({
-      id: "codex", name: "ChatGPT Codex", available: true, source: "Included plan",
-      models: [{ id: "codex", name: "ChatGPT Codex", tier: "Your ChatGPT plan", relCost: "included", value: "codex" }],
+      id: `${MODEL_LANES.codex}:codex`, providerId: "codex", name: "ChatGPT Codex", available: true, source: "Included plan",
+      models: [{ id: "gpt-5.5", name: "gpt-5.5", tier: "Your ChatGPT plan", relCost: "included", value: option.value }],
       modes: modesForProvider("codex").map((m) => ({ ...m })),
     });
   }
@@ -223,7 +230,7 @@ export async function modelSelectorPayload(owner, { store = aiCredentialStore(),
   }
   // Codex maps to managed in the conversation loop — the Auto explanation mirrors the
   // TRUE routing decision, not the raw credential label.
-  const effectiveProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
+  const effectiveProvider = credential.provider || "managed";
   const intelligence = await import("./providerIntelligence.mjs")
     .then((m) => m.recommendModel({ client: statsClient }))
     .catch(() => null);
@@ -261,21 +268,13 @@ export function resolveConversationModel(conversation, catalog) {
   const parsed = parseModelPref(conversation?.model_pref);
   const pref = parsed.value;
   const mode = parsed.mode;
-  if (pref === "auto" || pref === "codex") return { requested: "auto", mode, notice: null, warning: null };
+  if (pref === "auto") return { requested: "auto", mode, notice: null, warning: null };
   const option = catalog.options.find((o) => o.value === pref);
   if (option?.available) return { requested: pref, mode, notice: null, warning: null };
-  if (catalog.allowFallback) {
-    return {
-      requested: "auto",
-      mode,
-      notice: `Your selected model (${pref.replace(":", " · ")}) isn't available right now, so I'm using smart routing for this request — automatic fallback is enabled in your settings.`,
-      warning: null,
-    };
-  }
   return {
     requested: null,
     mode,
     notice: null,
-    warning: `Your selected model (${pref.replace(":", " · ")}) isn't available right now and automatic fallback is off. Pick another model from the selector, switch to Auto, or enable fallback in Settings.`,
+    warning: `Your selected model (${pref.replaceAll(":", " · ")}) is not executable with the active provider and billing lane. Pick a valid listed model or explicitly switch to Auto.`,
   };
 }

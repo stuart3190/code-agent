@@ -7,6 +7,8 @@
 //   runTurn({ systemPrompt, messages, tools }) -> { text, toolCalls, usage }
 
 import { optionalEnv } from "../env.mjs";
+import { approvedConfiguredModel, assertProviderModel } from "../modelCatalogue.mjs";
+import { DISPATCH_STATES, providerFailure } from "../providerOutcome.mjs";
 
 const RESPONSES_URL = "https://api.openai.com/v1/responses";
 
@@ -42,7 +44,10 @@ function toWireTools(tools) {
 export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = fetch } = {}) {
   const key = apiKey || optionalEnv("OPENAI_API_KEY");
   if (!key) throw new Error("OPENAI_API_KEY is required for managed app builds.");
-  const resolvedModel = model || optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra");
+  const resolvedModel = assertProviderModel({
+    provider: "openai",
+    model: model || approvedConfiguredModel("OPENAI_BALANCED_MODEL", "gpt-5.6-terra", { provider: "openai", tier: "balanced" }),
+  }).model;
 
   async function runTurn({ systemPrompt, messages, tools, signal = null, maxOutputTokens = null }) {
     const body = {
@@ -59,18 +64,20 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
       body.parallel_tool_calls = true;
     }
 
-    const res = await fetchImpl(RESPONSES_URL, {
+    let res;
+    try { res = await fetchImpl(RESPONSES_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
-    });
+    }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }
     if (!res.ok) {
       const errBody = await res.text();
       const error = new Error(`OpenAI responses HTTP ${res.status}: ${errBody.slice(0, 400)}`);
       error.status = res.status;
       error.providerRequestId = res.headers?.get?.("x-request-id") || null;
-      throw error;
+      throw providerFailure(error, { state: res.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+        providerRequestId: error.providerRequestId, retrySafe: [408, 409, 425, 429].includes(res.status) });
     }
     const data = await res.json();
 

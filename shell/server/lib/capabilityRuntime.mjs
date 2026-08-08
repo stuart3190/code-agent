@@ -9,6 +9,8 @@ import { getProjectSecret } from "./projectSecrets.mjs";
 import { serviceClient } from "./supabase.mjs";
 import { metaJson, metaPageToken, metaRuntimeConnection } from "./metaConnector.mjs";
 import { trueCostPerCredit } from "../../../src/billing/costModel.mjs";
+import { managedSettlementPaused } from "./appBuild/providerPolicy.mjs";
+import { MODEL_LANES, assertCapabilityModel } from "./modelCatalogue.mjs";
 
 const MAX_HTTP_BYTES = 1_000_000;
 const MAX_ASSET_BYTES = 500 * 1024 * 1024;
@@ -123,11 +125,13 @@ async function runOpenAI(action, job, client) {
   const key = await secretFor(action, client);
   if (!key) throw new Error(action.execution_mode === "managed" ? "Managed OpenAI is not configured." : "Add an OpenAI runtime key in Capabilities.");
   const config = action.config || {};
+  const lane = action.execution_mode === "managed" ? MODEL_LANES.managed : MODEL_LANES.byok;
   if (action.operation === "embeddings") {
+    const identity = assertCapabilityModel({ provider: "openai", model: config.model || "text-embedding-3-small", lane, operation: "embeddings" });
     const response = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST", signal: AbortSignal.timeout(action.timeout_seconds * 1000),
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: config.model || "text-embedding-3-small", input: job.input.text || job.input.input }),
+      body: JSON.stringify({ model: identity.model, input: job.input.text || job.input.input }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error?.message || `OpenAI embeddings failed (${response.status}).`);
@@ -143,7 +147,9 @@ async function runOpenAI(action, job, client) {
     if (data?.signedUrl) content.push({ type: "input_image", image_url: data.signedUrl, detail: config.image_detail || "auto" });
   }
   const body = {
-    model: config.model || "gpt-5.4-mini", store: false,
+    model: assertCapabilityModel({
+      provider: "openai", model: config.model || "gpt-5.4-mini", lane, operation: action.operation,
+    }).model, store: false,
     instructions: config.instructions || undefined,
     input: content.length ? [{ role: "user", content }] : String(prompt),
     max_output_tokens: Math.min(16_000, Number(config.max_output_tokens || 2000)),
@@ -176,8 +182,10 @@ async function runOpenAI(action, job, client) {
 async function runReplicate(action, job, client) {
   const token = await secretFor(action, client);
   if (!token) throw new Error(action.execution_mode === "managed" ? "Managed Replicate is not configured." : "Add a Replicate runtime token in Capabilities.");
-  const model = String(action.config?.model || "");
-  if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(model)) throw new Error("Choose a valid Replicate model preset.");
+  const lane = action.execution_mode === "managed" ? MODEL_LANES.managed : MODEL_LANES.byok;
+  const model = assertCapabilityModel({
+    provider: "replicate", model: String(action.config?.model || ""), lane, operation: "prediction",
+  }).model;
   const inputs = { ...(action.config?.input_defaults || {}), ...job.input };
   for (const [key, value] of Object.entries(inputs)) {
     if (typeof value === "string" && value.startsWith(`${job.project_id}/`)) {
@@ -349,11 +357,15 @@ async function embedTexts(key, values, model = "text-embedding-3-small") {
 async function runKnowledge(action, job, client) {
   const key = await secretFor({ ...action, provider: "openai" }, client);
   if (!key) throw new Error("OpenAI embeddings are not configured for this knowledge action.");
+  const lane = action.execution_mode === "managed" ? MODEL_LANES.managed : MODEL_LANES.byok;
+  const embeddingModel = assertCapabilityModel({
+    provider: "openai", model: action.config?.model || "text-embedding-3-small", lane, operation: "embeddings",
+  }).model;
   const { data: base } = await client.from("knowledge_bases").select("id").eq("project_id", job.project_id)
     .eq("key", job.input.knowledgeBaseKey || action.config?.knowledge_base_key).maybeSingle();
   if (!base) throw new Error("Knowledge base not found.");
   if (action.operation === "search") {
-    const [embedding] = await embedTexts(key, [String(job.input.query || "")]);
+    const [embedding] = await embedTexts(key, [String(job.input.query || "")], embeddingModel);
     const { data, error } = await client.rpc("match_knowledge_chunks", { p_project: job.project_id, p_base: base.id, p_embedding: embedding, p_limit: Number(job.input.limit || 8) });
     if (error) throw new Error(`Knowledge search failed: ${error.message}`);
     return { output: { matches: data || [] } };
@@ -364,7 +376,7 @@ async function runKnowledge(action, job, client) {
     project_id: job.project_id, owner: job.owner, name: String(job.input.name || "Document").slice(0, 200), status: "processing" }).select("id").single();
   if (error) throw new Error(`Knowledge document could not be created: ${error.message}`);
   const parts = chunks(value); const embeddings = [];
-  for (let index = 0; index < parts.length; index += 50) embeddings.push(...await embedTexts(key, parts.slice(index, index + 50)));
+  for (let index = 0; index < parts.length; index += 50) embeddings.push(...await embedTexts(key, parts.slice(index, index + 50), embeddingModel));
   const rows = parts.map((content, index) => ({ knowledge_base_id: base.id, document_id: document.id, project_id: job.project_id,
     content, metadata: { index }, embedding: embeddings[index] }));
   const inserted = await client.from("knowledge_chunks").insert(rows);
@@ -548,7 +560,14 @@ export async function processRuntimeTask(task, client = serviceClient()) {
   const { data: action } = await client.from("project_actions").select("*").eq("id", job.action_id).maybeSingle();
   if (!action?.enabled) { await failJob(client, job, new Error("This action is disabled.")); return { failed: true }; }
   await client.from("app_jobs").update({ status: "running", progress: 5, started_at: job.started_at || new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", job.id);
-  try { return await finishJob(client, job, action, await execute(action, job, client)); }
+  try {
+    if (action.execution_mode === "managed" && managedSettlementPaused()) {
+      throw Object.assign(new Error("Managed provider execution is paused; no provider call was made."), {
+        code: "settlement_paused", dispatchState: "before_dispatch", retryable: false,
+      });
+    }
+    return await finishJob(client, job, action, await execute(action, job, client));
+  }
   catch (error) { await failJob(client, job, error); throw error; }
 }
 

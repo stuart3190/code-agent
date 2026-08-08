@@ -117,7 +117,7 @@ test("'Configure provider' in the model selector lands on the AI connection scre
       { id: "xai", name: "xAI / Grok", available: false, configure: true, models: [], modes: [] },
     ],
     modes: [], unconfigured: ["xai"], allowFallback: true,
-    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "x", stats: null },
+    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", lane: "managed", value: "managed:openai:gpt-5.6-terra", mode: "balanced", reason: "x", stats: null },
   } }));
 
   await stubSettings(page);

@@ -34,8 +34,8 @@ test("model catalog carries full metadata and provider inference maps grok -> xa
     }
   }
   assert.equal(providerForModel("grok-4.5"), "xai");
-  assert.equal(resolveModelSelection("xai:grok-4.5").provider, "xai");
-  assert.equal(resolveModelSelection("grok-build-0.1").provider, "xai");
+  assert.equal(resolveModelSelection("byok_api:xai:grok-4.5", { defaultLane: "byok_api" }).provider, "xai");
+  assert.throws(() => resolveModelSelection("grok-build-0.1"), /must include lane/);
   assert.ok(modelWeight("grok-4.5") > modelWeight("grok-4.3"), "weights follow pricing");
   assert.ok(creditsForUsage({ usage: { input: 10_000, output: 1_000, cached: 0, total: 11_000 }, model: "grok-4.5" }) > 0);
 });
@@ -96,13 +96,9 @@ test("smart routing respects configuration and admin restrictions", () => withPl
   const disabled = routeCandidates({ credential: { provider: "managed" }, policy: { routingMode: "balanced" } });
   assert.equal(disabled.some((c) => c.provider === "xai"), false);
   delete process.env.THRALLO_XAI_ENABLED;
-  // Configured + enabled -> grok joins the pool without displacing the default.
+  // A platform xAI key does not silently make xAI part of the managed billing lane.
   const enabled = routeCandidates({ credential: { provider: "managed" }, policy: { routingMode: "balanced" } });
-  assert.equal(enabled.some((c) => c.provider === "xai"), true);
-  // The precondition, asserted rather than assumed: a rival provider is in the pool, so
-  // "grok is not first" is a statement about ranking and not about an empty catalog.
-  assert.ok(enabled.some((c) => c.provider !== "xai"), "another provider is configured to rank against");
-  assert.notEqual(enabled[0].provider, "xai", "grok is never the assumed default");
+  assert.equal(enabled.some((c) => c.provider === "xai"), false);
   // BYOK xai credential -> only their grok connection is used.
   const byok = routeCandidates({ credential: { provider: "xai", secret: "xai-k" }, policy: {} });
   assert.equal(byok.length, 1);
@@ -110,7 +106,7 @@ test("smart routing respects configuration and admin restrictions", () => withPl
   delete process.env.XAI_API_KEY;
 }));
 
-test("provider fallback works and failed requests record zero usage (no duplicate charges)", async () => {
+test("retry-safe managed fallback stays within its lane and records failed attempts at zero usage", async () => {
   const attempts = [];
   const fakeStore = { recordAttempt: async (_o, row) => { attempts.push(row); }, listRecentAttempts: async () => [] };
   process.env.XAI_API_KEY = "xai-test-key-000000000000";
@@ -119,9 +115,11 @@ test("provider fallback works and failed requests record zero usage (no duplicat
   process.env.OPENAI_API_KEY = "sk-test-platform-000000000000";
   const factory = (candidate) => ({
     turn: async () => {
-      if (candidate.provider === "openai") {
+      if (candidate.model === "gpt-5.6-sol") {
         const error = new Error("rate limited");
         error.status = 429;
+        error.dispatchState = "provider_rejected";
+        error.retrySafe = true;
         throw error;
       }
       return { text: "ok", output: [], usage: { inputTokens: 500, outputTokens: 50, totalTokens: 550 } };
@@ -129,11 +127,12 @@ test("provider fallback works and failed requests record zero usage (no duplicat
   });
   const model = await createRoutedCodingModel({
     owner: "o1", credential: { provider: "managed" }, requested: "auto",
-    policy: { routingMode: "balanced", allowFallback: true },
+    policy: { routingMode: "quality", allowFallback: true },
     store: fakeStore, providerFactory: factory,
   });
   const response = await model.turn({ instructions: "x", input: [], tools: [] });
-  assert.ok(response.routing.fallbackFrom, "fell back off the failing provider");
+  assert.equal(response.provider, "openai", "managed routing remains on the managed OpenAI lane");
+  assert.equal(response.routing.fallbackFrom.model, "gpt-5.6-sol", "fallback is a different executable model on the same lane");
   const failed = attempts.filter((a) => a.status === "error");
   assert.ok(failed.length >= 1);
   assert.ok(failed.every((a) => a.input_tokens === 0 && a.output_tokens === 0), "failed attempts meter nothing");
@@ -308,11 +307,11 @@ test("the adapter self-corrects when a model rejects a parameter it was told to 
     const body = JSON.parse(options.body);
     seen.push(Object.keys(body).includes("reasoning"));
     if (body.reasoning) {
-      return { ok: false, status: 400, json: async () => ({ code: "invalid-argument", error: { message: "Model probe-model does not support parameter reasoning." } }) };
+      return { ok: false, status: 400, json: async () => ({ code: "invalid-argument", error: { message: "Model grok-4.5 does not support parameter reasoning." } }) };
     }
     return { ok: true, json: async () => ({ output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }], usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 } }) };
   };
-  const provider = createXaiProvider({ apiKey: "xai-k-000000000000000000", model: "probe-model", reasoningEffort: "high", fetchImpl });
+  const provider = createXaiProvider({ apiKey: "xai-k-000000000000000000", model: "grok-4.5", reasoningEffort: "high", fetchImpl });
   const first = await provider.turn({ instructions: "i", input: [], tools: [] });
   assert.equal(first.text, "ok", "recovered on the same call");
   assert.deepEqual(seen, [true, false], "sent reasoning, then retried without it");

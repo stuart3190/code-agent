@@ -247,20 +247,20 @@ test("model selector: Begin choice rides with the first message; in-conversation
   await page.route("**/api/v1/models", (r) => r.fulfill({ json: {
     options: [
       { value: "auto", provider: "auto", model: "Smart routing", source: "Thrallo managed", label: "Recommended", available: true },
-      { value: "openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
-      { value: "anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
+      { value: "managed:openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
+      { value: "byok_api:anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
     ],
     providers: [
       { id: "auto", name: "Auto", recommended: true, available: true, models: [] },
       { id: "openai", name: "OpenAI", available: true, source: "Thrallo managed", modes: MODES_STUB,
-        models: [{ id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.00×", value: "openai:gpt-5.6-terra", stats: { successRate: 99.1, avgCostCredits: 1.1, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } }] },
+        models: [{ id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.00×", value: "managed:openai:gpt-5.6-terra", stats: { successRate: 99.1, avgCostCredits: 1.1, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } }] },
       { id: "anthropic", name: "Anthropic", available: true, source: "Your API key", modes: MODES_STUB,
-        models: [{ id: "claude-sonnet-5", name: "claude-sonnet-5", tier: "Best quality", relCost: "≈1.00×", value: "anthropic:claude-sonnet-5", stats: { collecting: true, samples: 2 } }] },
+        models: [{ id: "claude-sonnet-5", name: "claude-sonnet-5", tier: "Best quality", relCost: "≈1.00×", value: "byok_api:anthropic:claude-sonnet-5", stats: { collecting: true, samples: 2 } }] },
       { id: "gemini", name: "Gemini", available: false, configure: true, models: [], modes: [] },
       { id: "xai", name: "xAI / Grok", available: false, configure: true, models: [], modes: [] },
     ],
     modes: MODES_STUB,
-    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
+    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", lane: "managed", value: "managed:openai:gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
     unconfigured: ["gemini", "xai"], allowFallback: true,
   } }));
   let startBody = null;
@@ -338,7 +338,7 @@ test("model selector: Begin choice rides with the first message; in-conversation
   const box = page.getByPlaceholder(/Describe anything/);
   await box.fill("Build me a store");
   await box.press("Enter");
-  await expect.poll(() => startBody?.modelPref).toBe("anthropic:claude-sonnet-5#deep");
+  await expect.poll(() => startBody?.modelPref).toBe("byok_api:anthropic:claude-sonnet-5#deep");
 
   // Inside the conversation: switch to OpenAI · Balanced — POST fires + confirmation toast.
   const dockPill = page.locator(".ct-model-dock .ct-model-pill");
@@ -348,7 +348,7 @@ test("model selector: Begin choice rides with the first message; in-conversation
   await expect(page.getByText(/99\.1%/)).toBeVisible(); // measured stars/stats, not generic labels
   await page.getByRole("option", { name: /gpt-5.6-terra/ }).click();
   await page.getByRole("option", { name: /Balanced/ }).click();
-  await expect.poll(() => modelPost?.value).toBe("openai:gpt-5.6-terra");
+  await expect.poll(() => modelPost?.value).toBe("managed:openai:gpt-5.6-terra");
   await expect(page.getByText("Future requests will use OpenAI · gpt-5.6-terra.")).toBeVisible();
 });
 

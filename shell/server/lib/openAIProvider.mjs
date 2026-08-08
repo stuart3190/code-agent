@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { optionalEnv } from "./env.mjs";
+import { approvedConfiguredModel, assertProviderModel } from "./modelCatalogue.mjs";
+import { DISPATCH_STATES, providerFailure } from "./providerOutcome.mjs";
 
 // Provider self-description for the model selector: display name, the models this
 // deployment offers (synced from env config — new models appear by env change, no UI
@@ -8,9 +10,9 @@ export const openAIProviderMeta = () => ({
   id: "openai",
   name: "OpenAI",
   models: [
-    { id: optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol")), tier: "quality" },
-    { id: optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra"), tier: "balanced" },
-    { id: optionalEnv("OPENAI_FAST_MODEL", "gpt-5.6-luna"), tier: "fast" },
+    { id: approvedConfiguredModel("OPENAI_QUALITY_MODEL", "gpt-5.6-sol", { provider: "openai", tier: "quality" }), tier: "quality" },
+    { id: approvedConfiguredModel("OPENAI_BALANCED_MODEL", "gpt-5.6-terra", { provider: "openai", tier: "balanced" }), tier: "balanced" },
+    { id: approvedConfiguredModel("OPENAI_FAST_MODEL", "gpt-5.6-luna", { provider: "openai", tier: "fast" }), tier: "fast" },
   ],
   supportedModes: ["fast", "balanced", "deep", "cheapest", "max_quality"],
   modeMap: { fast: { reasoningEffort: "low" }, balanced: { reasoningEffort: "medium" }, deep: { reasoningEffort: "high" }, cheapest: { reasoningEffort: "low" }, max_quality: { reasoningEffort: "high" } },
@@ -25,7 +27,7 @@ export function openAIConfigured() {
 
 export function createOpenAIProvider({
   apiKey = optionalEnv("OPENAI_API_KEY"),
-  model = optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"),
+  model = approvedConfiguredModel("OPENAI_MODEL", "gpt-5.6-sol", { provider: "openai" }),
   reasoningEffort = optionalEnv("OPENAI_REASONING_EFFORT", "medium"),
   fetchImpl = fetch,
 } = {}) {
@@ -37,17 +39,19 @@ export function createOpenAIProvider({
   if (!REASONING_EFFORTS.has(reasoningEffort)) {
     throw new Error("OPENAI_REASONING_EFFORT must be one of none, low, medium, high, xhigh, or max.");
   }
+  const executableModel = assertProviderModel({ provider: "openai", model }).model;
 
   return {
     id: "openai",
-    model,
+    model: executableModel,
     async turn({ instructions, input, tools, safetyIdentifier }) {
-      const response = await fetchImpl(endpoint, {
+      let response;
+      try { response = await fetchImpl(endpoint, {
         method: "POST",
         signal: AbortSignal.timeout(300_000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model,
+          model: executableModel,
           instructions,
           input,
           tools,
@@ -57,19 +61,20 @@ export function createOpenAIProvider({
           truncation: "auto",
           safety_identifier: hashIdentifier(safetyIdentifier),
         }),
-      });
+      }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         const error = new Error(payload?.error?.message || `OpenAI request failed (${response.status})`);
         error.code = payload?.error?.code || "openai_request_failed";
         error.status = response.status;
-        throw error;
+        throw providerFailure(error, { state: response.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+          retrySafe: [408, 409, 425, 429].includes(response.status) });
       }
       return {
         id: payload.id,
         output: payload.output || [],
         text: outputText(payload.output || []),
-        usage: normalizeUsage(payload.usage),
+        usage: { ...normalizeUsage(payload.usage), providerRequestId: payload.id || response.headers?.get?.("x-request-id") || null },
         raw: payload,
       };
     },

@@ -4,6 +4,7 @@ import { deleteProjectSecret, getProjectSecret, setProjectSecret } from "./proje
 import { auditEvent } from "./projectState.mjs";
 import { safeBrowserUrl } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
+import { MODEL_LANES, assertCapabilityModel } from "./modelCatalogue.mjs";
 
 const objectSchema = (properties, required = []) => ({ type: "object", properties, required, additionalProperties: false });
 const string = (description, maxLength = 8000) => ({ type: "string", description, maxLength });
@@ -128,6 +129,16 @@ export async function saveCapability(owner, projectId, input, client = serviceCl
   if (!keyPattern.test(key)) throw Object.assign(new Error("Action key must start with a letter and use letters, numbers, dots, dashes, or underscores."), { code: "bad_capability" });
   if (!definition.modes.includes(mode)) throw Object.assign(new Error("That execution mode is not available for this capability."), { code: "bad_capability" });
   const config = { ...definition.config, ...(input.config && typeof input.config === "object" ? input.config : {}), max_credits: definition.maxCredits };
+  const catalogueLane = mode === "managed" ? MODEL_LANES.managed : MODEL_LANES.byok;
+  if (definition.provider === "openai") {
+    assertCapabilityModel({ provider: "openai", model: config.model, lane: catalogueLane, operation: definition.operation });
+  }
+  if (definition.provider === "knowledge") {
+    assertCapabilityModel({ provider: "openai", model: config.model, lane: catalogueLane, operation: "embeddings" });
+  }
+  if (definition.provider === "replicate") {
+    assertCapabilityModel({ provider: "replicate", model: config.model, lane: catalogueLane, operation: definition.operation });
+  }
   if (definition.provider === "http") {
     let url;
     try { url = new URL(String(config.base_url || "")); } catch { url = null; }

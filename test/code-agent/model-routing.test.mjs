@@ -18,7 +18,7 @@ test("balanced routing promotes complex production work to quality models", () =
   assert.equal(candidates[0].provider, "openai");
 });
 
-test("router falls back on retryable failures and records both attempts", async () => {
+test("managed router never widens its billing lane after a retry-safe provider rejection", async () => {
   const store = new MemoryAiRoutingStore();
   const model = await createRoutedCodingModel({
     owner: "owner",
@@ -35,6 +35,8 @@ test("router falls back on retryable failures and records both attempts", async 
           const error = new Error("rate limited");
           error.status = 429;
           error.code = "rate_limit_exceeded";
+          error.dispatchState = "provider_rejected";
+          error.retrySafe = true;
           throw error;
         }
         return {
@@ -46,13 +48,11 @@ test("router falls back on retryable failures and records both attempts", async 
     }),
   });
 
-  const result = await model.turn({ instructions: "test", input: [], tools: [] });
-  assert.equal(result.provider, "gemini");
-  assert.equal(result.routing.fallbackFrom.provider, "openai");
+  await assert.rejects(model.turn({ instructions: "test", input: [], tools: [] }), /rate limited/);
   const attempts = await store.listRecentAttempts("owner");
-  assert.equal(attempts.length, 2);
-  assert.equal(attempts[0].status, "success");
-  assert.equal(attempts[1].retryable, true);
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].status, "error");
+  assert.equal(attempts[0].retryable, true);
 });
 
 test("router does not mask authentication failures", async () => {

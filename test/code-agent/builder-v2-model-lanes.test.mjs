@@ -231,13 +231,13 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
   assert.ok(trace.included.some((row) => row.path === "src/routes/VisitPage.jsx"));
 });
 
-test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors never do", async () => {
+test("WP11 — only an explicitly retry-safe pre-dispatch failure gets one retry", async () => {
   let calls = 0;
   const flaky = {
     model: "gpt-5.5",
     runTurn: async () => {
       calls += 1;
-      if (calls === 1) { const e = new Error("terminated"); throw e; }
+      if (calls === 1) throw Object.assign(new Error("rejected before dispatch"), { retrySafe: true, dispatchState: "before_dispatch" });
       return { text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }], usage: { input: 10, output: 5, cached: 0, reasoning: 0, total: 15 } };
     },
   };
@@ -256,7 +256,7 @@ test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors n
   assert.equal(modelErrCalls, 1, "a real API error never retries");
 });
 
-test("V2 transport retry gets a distinct durable reservation for each provider dispatch", async () => {
+test("ambiguous V2 transport failure settles known usage and blocks replay", async () => {
   let calls = 0;
   const seenOptions = [];
   const provider = {
@@ -279,15 +279,14 @@ test("V2 transport retry gets a distinct durable reservation for each provider d
     provider, providerForStep: async () => ({ provider, decision: { estimatedCredits: 1, provider: "openai" } }),
     ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(), log: () => {},
   });
-  await lanes.patchesFn({
+  await assert.rejects(lanes.patchesFn({
     owner: "owner", projectId: "project", buildId: "build", step: "core",
     contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [], signal: controller.signal,
-  });
-  assert.equal(calls, 2);
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(calls, 1);
   const rows = reservations.rows();
-  assert.equal(rows.length, 2, "one reservation per network dispatch");
-  assert.equal(new Set(rows.map((row) => row.callKey)).size, 2);
-  assert.deepEqual(rows.map((row) => row.providerRequestIds), [["req-failed"], ["req-ok"]]);
+  assert.equal(rows.length, 1, "ambiguous dispatch is never replayed");
+  assert.deepEqual(rows.map((row) => row.providerRequestIds), [["req-failed"]]);
   assert.ok(rows.every((row) => row.reservedCredits >= 1));
   assert.ok(seenOptions.every((options) => options.maxOutputTokens === 16_000));
   assert.ok(seenOptions.every((options) => options.signal === controller.signal));
