@@ -429,8 +429,10 @@ try {
   });
 
   unwrap(await client.from("deployments").insert([
-    { id: ids.deploymentA, owner: ids.owner, project_id: ids.project, number: 1, status: "deploying" },
-    { id: ids.deploymentB, owner: ids.owner, project_id: ids.project, number: 2, status: "deploying" },
+    { id: ids.deploymentA, owner: ids.owner, project_id: ids.project, number: 1,
+      status: "deploying", triggered_by_kind: "user" },
+    { id: ids.deploymentB, owner: ids.owner, project_id: ids.project, number: 2,
+      status: "deploying", triggered_by_kind: "user" },
     { id: ids.deploymentRollback, owner: ids.owner, project_id: ids.project, number: 3,
       status: "deploying", triggered_by_kind: "rollback", rolled_back_from: ids.deploymentB },
   ]), "proof deployments");
@@ -448,10 +450,15 @@ try {
     p_owner: ids.owner, p_release_id: ids.releaseB, p_expected_version: 0,
     p_operation: "activate", p_activation_deployment_id: ids.deploymentB,
   });
-  assert.ok(stale.error);
+  assert.equal(stale.error?.code, "40001");
+  assert.match(stale.error?.message || "", /stale activation version/i);
   const activationB = await requestActivation(ids.releaseB, 1, "activate", ids.deploymentB);
   await completeIntent(activationB, ids.releaseB);
-  emit("c8_release_b_active", { ...(await stablePublishState(ids.releaseB, 2, ids.deploymentB)), staleCasRejected: true });
+  emit("c8_release_b_active", {
+    ...(await stablePublishState(ids.releaseB, 2, ids.deploymentB)),
+    staleCasRejected: true,
+    staleCasErrorCode: stale.error.code,
+  });
 
   const immutable = await client.from("publish_releases").update({ artifact_hash: hashB })
     .eq("id", ids.releaseA).eq("owner", ids.owner);

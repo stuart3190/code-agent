@@ -1,0 +1,22 @@
+{
+  "project_ref": "zczgvcsokfafuyognvwx",
+  "source": "Supabase Management API logs.all read-only query",
+  "window_start_utc": "2026-08-08T16:10:30Z",
+  "window_end_utc": "2026-08-08T16:13:30Z",
+  "filter": "/rest/v1/rpc/request_publish_activation",
+  "rows": [
+    {
+      "timestamp": "2026-08-08T16:11:07.180000Z",
+      "status_code": 200,
+      "method": "POST",
+      "path": "/rest/v1/rpc/request_publish_activation"
+    },
+    {
+      "timestamp": "2026-08-08T16:11:07.665000Z",
+      "status_code": 504,
+      "method": "POST",
+      "path": "/rest/v1/rpc/request_publish_activation"
+    }
+  ],
+  "contains_credentials": false
+}

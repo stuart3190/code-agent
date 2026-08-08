@@ -1,5 +1,30 @@
 # Thrallo handoff
 
+## Package 10E infrastructure recovery — FAIL (2026-08-08)
+
+The exposed new-format Supabase runtime secret used only by `thrallo-shell` and
+`thrallo-build-worker` was replaced through the supported Management API and revoked. The old key
+now returns 401 and the replacement returns 200. Four CAS-verified plaintext backup/transient copies
+were removed; full streamed scans of the two previously skipped large logs found zero matches.
+Shell and worker were the only restarted services. Provisiond/Caddy, routing, flags, migrations,
+customer state, model providers, and Stripe were untouched.
+
+Postgres itself was healthy, but the managed PostgREST pool had wedged with idle/aborted sessions.
+Terminating only nine stale PostgREST backends restored access; a 150-request/73-second mixed
+table/RPC proof then passed with zero 504s. The complete fixed-ID canary nevertheless reproduced a
+504 specifically on the stale `request_publish_activation` proof. Historical API logs show the
+immediately preceding activation at 200 and the stale request at 504. The RPC currently uses
+reserved serialization SQLSTATE `40001` for a business CAS conflict; the canary now requires the
+exact code/message and therefore fails closed instead of accepting a pool timeout.
+
+All proof data was removed, the eight customer hashes match, counts remain 11 projects / 31 build
+jobs / 1 published site / 5 deployments / 188 AI requests / 284 usage rows, ledger remains 67,
+and V2 flags/customer dispatch remain off. Package 10E is not complete. The exact next action is a
+separately approved additive C8 error-signaling forward repair followed by the same production
+canary; no later V2-only package may start first. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-INFRASTRUCTURE-RECOVERY.md` and incident
+`docs/incidents/2026-08-08-package10e-supabase-credential-and-data-api.md`.
+
 ## V2-only plan consolidation and database proof (2026-08-08)
 
 `docs/BUILDER-V2-V2-ONLY-CUTOVER.md` is now the sole active finish plan. The old master plan,
