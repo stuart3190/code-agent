@@ -33,7 +33,6 @@ async function beacon(origin, appId = slug, { contentType = "text/plain", body =
 try {
   await unwrap(db.auth.admin.createUser({ id: owner, email, password, email_confirm: true }), "auth fixture");
   await unwrap(db.from("projects").insert({ id: project, owner, name: "Package 12 HTTP proof", tree: {} }), "project fixture");
-  await unwrap(db.from("project_logs").insert({ owner, project_id: project, source: "system", level: "info", message: marker }), "log fixture");
   await unwrap(db.from("published_sites").insert({ owner, project_id: project, slug, url: `https://${slug}.app.thrallo.com/` }), "site fixture");
   await unwrap(db.from("custom_domains").insert({ domain, owner, project_id: project, slug, status: "active", verified_at: new Date().toISOString() }), "domain fixture");
   const session = await unwrap(browserClient.auth.signInWithPassword({ email, password }), "browser sign-in");
@@ -41,8 +40,9 @@ try {
 
   browser = await chromium.launch({ headless: true }); const page = await browser.newPage();
   await page.goto("https://app.thrallo.com", { waitUntil: "domcontentloaded" });
-  const streamed = await page.evaluate(async ({ projectId, token, expected }) => {
+  const streamPromise = page.evaluate(async ({ projectId, token, expected }) => {
     const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error("stream proof timed out")), 20_000);
     const response = await fetch(`/api/v1/projects/${projectId}/logs/stream`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" }, signal: controller.signal,
     });
@@ -53,10 +53,15 @@ try {
       buffer += decoder.decode(value, { stream: true });
       for (const match of buffer.matchAll(/event: log\ndata: (.+)\n\n/g)) {
         const row = JSON.parse(match[1]);
-        if (row.message === expected) { controller.abort(); await reader.cancel().catch(() => {}); return row; }
+        if (row.message === expected) { clearTimeout(timeout); controller.abort(); await reader.cancel().catch(() => {}); return row; }
       }
     }
   }, { projectId: project, token: accessToken, expected: marker });
+  // The production stream intentionally starts at connection time. Insert after it is open so
+  // this proves live delivery rather than depending on historical-list semantics.
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  await unwrap(db.from("project_logs").insert({ owner, project_id: project, source: "system", level: "info", message: marker }), "live log fixture");
+  const streamed = await streamPromise;
   assert.equal(streamed.message, marker);
 
   const thralloOrigin = `https://${slug}.app.thrallo.com`;
