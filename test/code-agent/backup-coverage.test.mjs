@@ -329,7 +329,7 @@ test("generated runtime project ids are omitted from backup and restore writes",
   assert.match(validateGeneratedProjectIds("diag_runs", [{ ...source[0], project_id_text: "wrong" }])[0], /mismatch/);
 });
 
-test("the 67-migration live catalog and backup manifest are exactly aligned", () => {
+test("the current runtime catalog and backup manifest are exactly aligned", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_67.length, 83);
   assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_67, CA_TABLES), {
     missingFromBackup: [], missingFromCatalog: [],

@@ -1,7 +1,7 @@
 # Builder V2-only launch programme
 
-Status: authoritative active finish plan, reviewed 2026-08-08. Zero-credit production composition
-is implemented locally and awaits database/tooling proof. This document supersedes every earlier
+Status: authoritative active finish plan, reviewed 2026-08-08. Builder V2 composition and its
+database runtime are deployed dark and Package 10E production proof is green. This document supersedes every earlier
 elapsed-time V1/V2 rollout or v1.0 launch-readiness gate. Approval to execute one package never
 authorises a later package, model spend, production mutation, managed settlement, Builder V1
 deletion, or final cutover.
@@ -20,15 +20,13 @@ production canaries replace calendar gates.
 
 ## Verified starting state
 
-- Production has 65 migrations through
-  `20260807174720_c8_atomic_unpublish_deployment_retirement`.
-- The active directory has 67 migrations. `20260807213500_bv2_runtime_model_reservations` and
-  `20260807221000_bv2_runtime_composition` are local and unapplied.
+- Production and the active directory have 68 migrations through
+  `20260808164259_c8_nonretryable_stale_cas`; pending migrations are zero.
 - C4 graph persistence, C7 durable workers and C8 immutable releases are deployed and proven dark.
 - Builder V1 is the active customer builder. `bv2.enabled` is false/absent, `bv2.owners` is empty,
   customer worker dispatch and atomic publishing are off, and managed settlement is paused.
-- The production V2 composition is not deployed. Local composition and deterministic qualification
-  are green, but they are not substitutes for disposable Postgres and production canary proof.
+- The production V2 composition is deployed dark. Its zero-model fixed-ID production canary,
+  Data API conflict stress proof, deterministic qualification and cleanup/customer parity are green.
 - Backup `thrallo-2026-08-07T201226` passed the network-isolated restore gate. A new backup and
   restore remain mandatory before cutover.
 
@@ -118,8 +116,8 @@ launch. Completing the V2 orchestrator does not close them.
 | 7. Headless wizard/state-machine capability | local complete | no | no | later deploy |
 | 8. Deterministic representative qualification | local complete: 145 qualification, 1,288 repository and 118 browser tests pass | no | no | no |
 | 9. Disposable Supabase reset/lint/diff and RPC fault/concurrency proof | complete 2026-08-08; 67 migrations, lint/diff and runtime proof green | no new migration | no | disposable only |
-| 10. Production V2 orphan reconciliation | blocked pending explicit data-repair approval; restore legitimate parents or erase proven historical fixtures, then validate every FK preflight | forward repair only if evidence requires it | no | yes |
-| 11. Dark V2 composition deploy and zero-model production canary | pending after package 10 | apply packages 2 and 4 separately | no | yes, test-owner only |
+| 10. Production V2 orphan reconciliation | complete 2026-08-08; bounded archive/cleanup and FK preflight green | no runtime-integrity bypass | no | yes |
+| 11. Dark V2 composition deploy and zero-model production canary | complete 2026-08-08; Package 10E/10E-F green | installed through migration 68 | no | yes, test-owner only |
 | 12. Platform launch blockers | pending: erasure, shared limits, logs, analytics, release provenance, CI/release and DR/SLO | additive repairs only where proven | no | later canaries |
 | 13. Provider/billing closure and executable model catalogue | pending | none expected beyond package 2 | no initially | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | pending explicit approval | no | yes | internal projects/provider calls |

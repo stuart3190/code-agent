@@ -1137,6 +1137,24 @@ Supabase service credential in captured tool output without writing it to the re
 that credential and restore/prove the Data API before retrying the canary. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-CANARY-RECOVERY.md`.
 
+## Package 10E-F complete (2026-08-08)
+
+Package 10E is now **PASS**. Production migration 68,
+`20260808164259_c8_nonretryable_stale_cas`, maps expected C8 stale/pending CAS conflicts to
+PostgREST `PT412` without weakening CAS or masking real `40001`/`40P01` failures. An 80-request
+production conflict stress returned 80 HTTP 412s, zero 504/PGRST003/5xx, p95 87.26 ms and no pool
+growth/persistent aborted session. The complete fixed-ID zero-model composition canary passed
+lifecycle through cleanup, including worker recovery/cancellation, snapshots, graph/retrieval,
+provider replay boundaries, C8 rollback/unpublish/republish and legacy adoption. All eight customer
+hashes were unchanged and proof residue is zero. Caddy/provisiond were untouched; V1 remains the
+customer default; V2/customer worker/customer atomic publish remain off; settlement remains paused.
+Evidence: `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-F-C8-CAS-REPAIR.md`.
+
+The exposed legacy JWT service-role key was assessed but not rotated: deployed `app-auth` v7 is the
+only confirmed active consumer and requires a separately approved Edge Function code/auth/deploy
+canary to migrate to `SUPABASE_SECRET_KEYS`. The next authoritative package is Package 12: close
+platform launch blockers at zero model cost; do not start it without approval.
+
 ## Important boundaries
 
 - Browser: publishable Supabase key only.

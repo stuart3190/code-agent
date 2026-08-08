@@ -1,0 +1,34 @@
+{
+  "package": "10E-F",
+  "productionProject": "zczgvcsokfafuyognvwx",
+  "baseDeployedCommit": "0b177e8a85a252744e3326e220647e68a105e6c4",
+  "repairCommits": [
+    "1ca9d6754f12cc8608593dc010b6ac65e5bd7469",
+    "9edbbece37edba5eafc3660cad43c2ed185a164f",
+    "2357e60efbe542a12577e8f75b75274c5d5ddeb0"
+  ],
+  "migration": {
+    "version": "20260808164259",
+    "name": "c8_nonretryable_stale_cas",
+    "localSha256": "3c5d0787efef399df308b653b5269beaff4ddd89cde59df60966ea7a7c4744c7",
+    "storedProductionSha256": "aed0b1c1fc37ca0756610ff674d650c380737307486ded632f4813367e9b6015"
+  },
+  "deployedFiles": {
+    "shell/server/lib/publishing/atomicPublisher.mjs": "27811421023688f8b86fcdbcb26418d0b51e1eb6a82aaf584fb636bc9f5337f1",
+    "ops/prove-v2-composition-dark-db.mjs": "4e0aeb61c5a18dd52a168d79dd46a500e3f184514d6999b0a98df5ed48226b99",
+    "ops/prove-c8-stale-cas-production.mjs": "74c8e7d02791898648deb8d27827144459f9261756a52098ef367114d105b0bc"
+  },
+  "rollback": "/home/ubuntu/thrallo-app-rollbacks/package10ef-pre-9edbbec-20260808T172500Z",
+  "caddySha256": "8d3b0a269e0310a559cd50cf960b9683efa306a02f5521ab6296c7158d2d2098",
+  "provisiondActiveSinceUtc": "2026-08-08T13:19:54Z",
+  "safety": {
+    "builderV1Default": true,
+    "bv2CustomerRouting": false,
+    "customerWorkerDispatch": false,
+    "atomicCustomerPublishing": false,
+    "managedSettlementPaused": true,
+    "providerCalls": 0,
+    "stripeTransactions": 0,
+    "caddyOrProvisiondOperations": 0
+  }
+}

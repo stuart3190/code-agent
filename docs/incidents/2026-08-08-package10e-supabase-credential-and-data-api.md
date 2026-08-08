@@ -1,6 +1,6 @@
 # SEC-20260808-PACKAGE10E-SUPABASE
 
-Status: contained credential; Data API blocker remains open  
+Status: contained credential; Data API blocker resolved
 Severity: high  
 Detected: 2026-08-08  
 Production project: `zczgvcsokfafuyognvwx`
@@ -70,3 +70,18 @@ Package 10E is **FAIL**. A new additive forward repair must replace the business
 with a non-retryable application error, preserve CAS semantics, and re-run the sustained Data API
 and full fixed-ID canary proofs. No V2 traffic or later finish-plan package may start first.
 
+## Resolution — Package 10E-F
+
+Migration `20260808164259_c8_nonretryable_stale_cas` replaced expected C8 business conflicts with
+PostgREST application code `PT412` while preserving real `40001`/`40P01` database failures. The
+production stress window returned 80/80 stale calls as HTTP 412 with zero 504, `PGRST003`, 5xx,
+connection growth or persistent aborted sessions. The complete fixed-ID Package 10E canary then
+passed and removed all proof state with unchanged customer hashes.
+
+The legacy service-role key revealed by the CLI remains active only because deployed `app-auth`
+version 7 reads the platform-provided `SUPABASE_SERVICE_ROLE_KEY`. It was not printed or rotated in
+10E-F. Migrating it requires an independently approved Edge Function code/deployment/auth proof;
+the bounded sequence is recorded in `PACKAGE-10E-F-C8-CAS-REPAIR.md`.
+
+Package 10E is now **PASS**. Builder V2 customer routing, customer worker dispatch, customer atomic
+publishing and managed settlement remain disabled.
