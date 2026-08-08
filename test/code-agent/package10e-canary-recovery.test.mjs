@@ -51,6 +51,8 @@ test("Package 10E recovery emits durable checkpoints and always verifies cleanup
   ]) assert.match(source, new RegExp(`emit\\(["']${checkpoint}["']`));
   assert.match(source, /await cleanup\(\)/);
   assert.match(source, /assert\.deepEqual\(after, baseline/);
+  assert.doesNotMatch(source, /Promise\.all\(CUSTOMER_DATASETS/);
+  assert.match(source, /for \(const table of CUSTOMER_DATASETS\)/);
 });
 
 test("Package 10E recovery never enables customer paths or dispatches a provider", () => {

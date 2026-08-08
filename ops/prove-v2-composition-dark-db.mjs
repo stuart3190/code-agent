@@ -111,7 +111,11 @@ async function datasetHash(table) {
 }
 
 async function customerBaseline() {
-  return Object.fromEntries(await Promise.all(CUSTOMER_DATASETS.map(async (table) => [table, await datasetHash(table)])));
+  // Keep production proof reads deliberately sequential. This avoids exhausting the
+  // managed PostgREST connection pool while preserving a deterministic table order.
+  const baseline = {};
+  for (const table of CUSTOMER_DATASETS) baseline[table] = await datasetHash(table);
+  return baseline;
 }
 
 async function count(table, filter = null) {
