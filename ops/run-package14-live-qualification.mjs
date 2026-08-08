@@ -181,6 +181,26 @@ async function recoverInterruptedStage(state, stage) {
     stopReason: evidence.publicBuild.stop_reason, reservations: evidence.reservations.length });
 }
 
+async function archiveZeroSpendFailure(state, stage) {
+  const row = state.stages[stage];
+  if (!row?.terminal || row.result !== "fail") throw new Error(`${stage} is not a terminal failed stage`);
+  const evidence = row.evidence || {};
+  const allowed = new Set(["preview_isolation_required", "provider_selection_changed"]);
+  if (!allowed.has(evidence.publicBuild?.stop_reason)
+      || (evidence.reservations || []).length !== 0
+      || (evidence.aiRequests || []).length !== 0
+      || Number(row.stageCredits || 0) !== 0) {
+    throw new Error(`${stage} is not an approved zero-dispatch preflight failure`);
+  }
+  const sequence = Object.keys(state.stages).filter((key) => key.startsWith(`${stage}_preflight_`)).length + 1;
+  state.stages[`${stage}_preflight_${sequence}`] = row;
+  delete state.stages[stage];
+  await save(state);
+  await event(`${stage}_zero_spend_failure_archived`, {
+    sequence, stopReason: evidence.publicBuild.stop_reason, credits: 0, calls: 0,
+  });
+}
+
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
 const state = await load();
 const codex = await resolveCodexOwner();
@@ -204,6 +224,8 @@ if (STAGE === "preflight") {
     ceiling: 3, kind: "app_build_v2_package14" });
 } else if (STAGE === "recover-simple") {
   await recoverInterruptedStage(state, "simple");
+} else if (STAGE === "archive-simple-preflight") {
+  await archiveZeroSpendFailure(state, "simple");
 } else if (STAGE === "report") {
   const spend = await spendForProjects(Object.values(state.projects).map((row) => row.id));
   await event("report", { ownerHash: state.ownerHash, credits: spend.credits, calls: spend.calls,
