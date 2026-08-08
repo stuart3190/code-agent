@@ -9,6 +9,7 @@ import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
 import { createWorkerQueue } from "./queue.mjs";
 import { reconcileOrphanSandboxes, runSandboxJob } from "./sandboxRunner.mjs";
+import { assertWorkerCredentialAuthority } from "./runtimeConfig.mjs";
 
 loadEnv();
 process.env.THRALLO_PROCESS_ROLE = "build-worker";
@@ -21,6 +22,7 @@ const JOB_TYPES = (process.env.THRALLO_BUILD_JOB_TYPES || [
   "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
   "image_optimise", "publish_package", "android_package", "proof_slow",
 ].join(",")).split(",").map((v) => v.trim()).filter(Boolean);
+assertWorkerCredentialAuthority(JOB_TYPES);
 
 const client = serviceClient();
 const queue = createWorkerQueue(client);
