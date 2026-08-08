@@ -19,6 +19,7 @@ import {
   PRODUCTION_PUBLIC_TABLES_68,
   PRODUCTION_PUBLIC_TABLES_69,
   PRODUCTION_PUBLIC_TABLES_70,
+  backupTablesToVerify,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
   findCatalogCoverageGaps,
@@ -104,6 +105,16 @@ test("the restore order covers exactly the backed-up tables", () => {
   assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_checks"));
+});
+
+test("a forward-deployed verifier only requires tables present in a historical backup", () => {
+  assert.deepEqual(
+    backupTablesToVerify(
+      ["projects", "data_erasure_jobs", "data_erasure_events"],
+      { projects: 11 },
+    ),
+    ["projects"],
+  );
 });
 
 test("a backup directory round-trips through validation and rejects tampering", async () => {

@@ -9,6 +9,7 @@ import { ARTIFACT_BUCKET, CA_TABLES } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import {
   canonicalRowsForRestoreComparison,
+  backupTablesToVerify,
   validateGeneratedProjectIds,
   validateRuntimeBackupLinks,
 } from "./lib/runtimeBackupSchema.mjs";
@@ -25,7 +26,7 @@ if (!process.argv[2] || !url || !serviceKey || !anonKey || !jwtSecret || !filesy
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(url)) throw new Error("restore proof refuses a non-loopback target");
 
 const svc = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-await validateBackupDirectory(backupDir);
+const validatedBackup = await validateBackupDirectory(backupDir);
 
 async function loadRows(name) {
   return JSON.parse(gunzipSync(await readFile(path.join(backupDir, `${name}.json.gz`))).toString("utf8"));
@@ -65,7 +66,7 @@ function sha256(bytes) {
 
 let tableRows = 0;
 const restoredTables = {};
-for (const table of CA_TABLES) {
+for (const table of backupTablesToVerify(CA_TABLES, validatedBackup.tables)) {
   const source = await loadRows(table);
   const restored = await fetchAll(table);
   const generatedProblems = validateGeneratedProjectIds(table, restored);

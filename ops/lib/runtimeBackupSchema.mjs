@@ -115,6 +115,15 @@ export function runtimeCatalogEvidence(migrationCount) {
   throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
 }
 
+// Restore tooling can be newer than the backup being verified. Only tables that
+// were canonical in the validated backup manifest may be queried or compared;
+// otherwise a forward-deployed verifier would demand files for migrations that
+// had not been applied when the backup was created.
+export function backupTablesToVerify(knownTables, validatedTables) {
+  const present = new Set(Object.keys(validatedTables || {}));
+  return knownTables.filter((table) => present.has(table));
+}
+
 // Nullable links which participate in a real cycle or point forward in RESTORE_ORDER. They are
 // restored as null and patched after all rows exist. No FK is disabled or weakened.
 export const DEFERRED_RESTORE_FIELDS = Object.freeze({
