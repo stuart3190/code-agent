@@ -6,6 +6,7 @@ import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import { canonicalModelIdentity, selectionValue } from "../../shell/server/lib/modelCatalogue.mjs";
 import { conservativeCallReservation, createModelLanes } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import { stepOutputPolicy } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
 
 const jwt = (exp) => `x.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.y`;
 
@@ -107,4 +108,12 @@ test("Package 14 conservative reservation remains above the bounded worst-case u
     maxOutputTokens: 2_000, minimumCredits: 0.2,
   });
   assert.ok(reserve >= 0.2 && reserve < 1);
+});
+
+test("repair and edit reservations have production headroom without widening build ceilings", () => {
+  assert.deepEqual(stepOutputPolicy("repair"), {
+    estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6,
+  });
+  assert.equal(stepOutputPolicy("edit").callCeilingCredits, 4);
+  assert.equal(stepOutputPolicy("increment").callCeilingCredits, 4);
 });

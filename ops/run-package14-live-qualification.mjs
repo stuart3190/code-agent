@@ -34,6 +34,17 @@ turnaround guidance, workshop story, opening hours, and a contact form with name
 Submitting the form must persist the enquiry through the platform contact capability and show a
 clear confirmation. Use the Builder V2 Asset Service for any imagery. Do not use localStorage.`;
 
+const BOOKING_REQUEST = `Build a polished multi-step booking application for Ember Table, a
+small chef-led supper club. The visual design should feel editorial, warm and distinctive. The
+flow must let a visitor choose a date, choose an available seating slot, select party size, enter
+and validate contact details, review the booking, confirm it, receive a durable booking reference,
+reload and recover the booking, cancel it, and see an explicit cancelled state. Capacity must be
+enforced with an over-capacity state and unavailable slots must be honest. Use the platform
+makeWizardMachine headless capability for step navigation, selection, validation, progress,
+confirmation, cancellation and restored state. Use makeBookingSystem for persistence,
+availability, capacity, references and cancellation. Import these capabilities; never reimplement
+them and never use localStorage. The model owns the UI and visual composition around them.`;
+
 const sha = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
 const round = (value) => Math.round(Number(value || 0) * 10_000) / 10_000;
 const safeOwner = (owner) => sha(owner).slice(0, 16);
@@ -310,6 +321,13 @@ if (STAGE === "preflight") {
   await archiveWireRejection(state, "simple");
 } else if (STAGE === "archive-simple-ceiling-failure") {
   await archiveQualificationCeilingFailure(state, "simple");
+} else if (STAGE === "booking") {
+  if (state.stages.booking) throw new Error("booking already has evidence; exactly one attempt is allowed");
+  const project = state.projects.booking || await createProject(state.owner, "Package 14 — Ember Table booking");
+  state.projects.booking = project;
+  await save(state);
+  await runPipeline({ state, stage: "booking", project, mode: "build", prompt: BOOKING_REQUEST,
+    ceiling: 9, kind: "app_build_v2_package14_booking" });
 } else if (STAGE === "report") {
   const spend = await spendForProjects(Object.values(state.projects).map((row) => row.id));
   await event("report", { ownerHash: state.ownerHash, credits: spend.credits, calls: spend.calls,

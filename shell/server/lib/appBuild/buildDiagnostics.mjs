@@ -250,7 +250,8 @@ export async function createDiagSession({
     if (norm) {
       const usedModel = stepModel || model || null;
       write(() => db.from("ai_requests").insert({
-        id: randomUUID(), owner, provider: providerForModel(usedModel), model: usedModel,
+        id: randomUUID(), owner,
+        provider: contextMeta?.routing?.provider || providerForModel(usedModel), model: usedModel,
         agent, input_tokens: norm.input, output_tokens: norm.output,
         provider_request_ids: norm.providerRequestIds?.length ? norm.providerRequestIds : null,
         cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,

@@ -60,6 +60,16 @@ export function assertQueuedProviderSelection(expected, context) {
   }
 }
 
+export function stepOutputPolicy(step) {
+  return {
+    contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
+    core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
+    repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6 },
+    edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
+    increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
+  }[step] || { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 };
+}
+
 function candidateSet(context) {
   const quality = context.buildProvider("generate");
   const balanced = context.buildProvider("edit");
@@ -326,13 +336,7 @@ export function createBuilderV2Runtime({
           manualModel: workJob.payload.manualModel
             || (context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
-        const outputPolicy = {
-          contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
-          core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
-          repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 4 },
-          edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 },
-          increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 },
-        }[routedStep] || { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 };
+        const outputPolicy = stepOutputPolicy(routedStep);
         Object.assign(decision, outputPolicy);
         const chosen = candidates.find((candidate) => candidate.provider === decision.provider
           && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
