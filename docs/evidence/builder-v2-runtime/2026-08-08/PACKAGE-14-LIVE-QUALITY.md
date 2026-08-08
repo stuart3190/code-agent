@@ -29,8 +29,10 @@ worker and `app.thrallo.com` were healthy at the stop point, with zero active wo
 
 ## Accounting and router evidence
 
-- Qualification window: 2026-08-08T21:54:34.033Z through 2026-08-08T22:35:15.175Z
+- Live qualification window: 2026-08-08T21:54:34.033Z through 2026-08-08T22:35:15.175Z
   (40 minutes 41.142 seconds, including bounded fixes and dark-worker restoration).
+- Complete Package 14 wall clock through tests, documentation and provenance verification:
+  2026-08-08T21:54:34.033Z through 2026-08-08T22:44:31.650Z (49 minutes 57.617 seconds).
 - Logical reserved calls: 10.
 - Usage-bearing model turns: 8.
 - Released, zero-usage provider rejections: 2.
@@ -76,6 +78,15 @@ Commits: `2cecf50`, `abd6ad4`, `a4e0656`, `0ee4f08`, `0a349bb`, `39aa291`,
 
 Focused provider/runtime tests passed. Full repository result after the final change:
 1,354 tests; 1,337 passed, 17 intentionally skipped, 0 failed.
+
+The final runtime provenance manifest identifies deployed commit
+`ae02c36f67ae22ee2a9f1f65f77ea95864befbd0`, migration ledger 70 and manifest identity
+`1568f3f19d04bca85b4649ea8ea234cee558274e82567ebc5527e1a378b5877b`. Immutable evidence is in
+`/home/ubuntu/thrallo-deploy-evidence/package14-live-20260808/artifacts`; source/shell/worker/web
+artifact SHA-256 values are respectively `1c032539967164c7a4962d4d4dadf59c213ace6b7a390c091d33c96968e1d519`,
+`ba169b613f0dffe34e08054d153f00a3473f1398530d066b1e549cc6e10f63f8`,
+`d180f0ece1ad03f1c0920f497782a55429040211fac4200492223d48b553b236` and
+`dab0e0ccc61df194ed2192bb9db1e9c1fc9853634443e012c7b3d86c86542ab9`.
 
 ## Booking failure evidence
 
