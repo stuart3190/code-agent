@@ -1155,6 +1155,32 @@ only confirmed active consumer and requires a separately approved Edge Function 
 canary to migrate to `SUPABASE_SECRET_KEYS`. The next authoritative package is Package 12: close
 platform launch blockers at zero model cost; do not start it without approval.
 
+## Package 12 complete (2026-08-08)
+
+Package 12A-12G is **PASS**. Production ledger is 70 with zero pending migrations. Cross-store
+project/account erasure, shared atomic rate limiting, authenticated browser log streaming, public
+analytics CORS/app validation, immutable release provenance, fast/release CI gates and practical
+DR/SLO automation are implemented and production-proven with disposable owners only.
+
+Production app identity remains the dark V2 composition artifact at commit
+`a702cf136fd1e25215b66561440795172995d591`, manifest identity
+`7692155a5231978f7fb698e3406b59b59de8bb2991634e6f0f064c0b6a4b1753`. Package 12 code is in the
+same deployed source artifact; later commits are proof, restore-compatibility and documentation
+only. Shell/worker/provisiond are healthy, Caddy hash is unchanged, V1 remains the default, V2
+customer flags remain absent/off, managed settlement remains paused and no model or Stripe call ran.
+
+The post-migration backup is `/home/ubuntu/thrallo-backups/thrallo-2026-08-08T194910`, manifest
+SHA-256 `88e436df7de0322869143cfda6c3b1ef2109721a49ae9a2f5c0c64439a2098e1`. Its isolated restore passed
+85 canonical application tables / 36,705 rows, 19 Auth users, two Storage objects, 170 files plus
+51 directory records, runtime links and owner isolation. A Windows-host monitor made 212 probes on
+55320-55327 with zero connections; the disposable stack/data were destroyed afterward.
+
+The five-minute DR health timer is active. The off-host backup and monthly restore timers are
+installed but intentionally disabled until external storage credentials and an independent probe
+command are supplied; the tooling fails closed and no paid provider was configured. The next
+authoritative package is Package 13, provider/billing closure and executable model catalogue. It
+starts with zero-model synthetic proofs and does not authorise managed settlement or live spend.
+
 ## Important boundaries
 
 - Browser: publishable Supabase key only.

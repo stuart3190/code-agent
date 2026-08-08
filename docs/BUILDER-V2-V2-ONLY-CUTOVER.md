@@ -20,15 +20,16 @@ production canaries replace calendar gates.
 
 ## Verified starting state
 
-- Production and the active directory have 68 migrations through
-  `20260808164259_c8_nonretryable_stale_cas`; pending migrations are zero.
+- Production and the active directory have 70 migrations through
+  `20260808180845_shared_atomic_rate_limits`; pending migrations are zero.
 - C4 graph persistence, C7 durable workers and C8 immutable releases are deployed and proven dark.
 - Builder V1 is the active customer builder. `bv2.enabled` is false/absent, `bv2.owners` is empty,
   customer worker dispatch and atomic publishing are off, and managed settlement is paused.
 - The production V2 composition is deployed dark. Its zero-model fixed-ID production canary,
   Data API conflict stress proof, deterministic qualification and cleanup/customer parity are green.
-- Backup `thrallo-2026-08-07T201226` passed the network-isolated restore gate. A new backup and
-  restore remain mandatory before cutover.
+- Post-Package-12 backup `thrallo-2026-08-08T194910` passed the network-isolated restore gate:
+  85 canonical application tables / 36,705 rows, 19 Auth users, two Storage objects and 170
+  filesystem objects. A new backup and restore remain mandatory immediately before cutover.
 
 ## Product target
 
@@ -57,51 +58,49 @@ migrations and forensic evidence are not V1 code and must remain.
 
 | Path | Current classification | Remaining gate |
 |---|---|---|
-| conversation new build | V2 COMPLETE locally, still behind the engineering eligibility gate | migrations, deployment, internal canary, cutover |
-| edit | V2 COMPLETE locally from the promoted green snapshot | deterministic/live qualification |
+| conversation new build | V2 COMPLETE and deployed dark behind the engineering eligibility gate | live qualification and cutover |
+| edit | V2 COMPLETE and deployed dark from the promoted green snapshot | live qualification |
 | user and verification repair | V2 COMPLETE locally through evidence-driven `runEdit`/repair rounds | live repair matrix |
 | retry/crash recovery | V2 COMPLETE with a safe boundary: retry before provider dispatch, recover a durable completion, fail closed on provider ambiguity | disposable Postgres proof and production kill canary |
-| cancellation | V2 COMPLETE through the durable C7 job | production canary |
-| provider policy/BYOK/Codex | V2 COMPLETE for executable canonical lanes; lane selection is pinned at enqueue | live provider proofs |
+| cancellation | V2 COMPLETE through the durable C7 job | final internal matrix |
+| provider policy/BYOK/Codex | V2 COMPLETE for currently executable canonical lanes; lane selection is pinned at enqueue | Package 13 catalogue/provider proofs |
 | managed cross-provider manual choice | V2 PARTIAL: a model configured in UI but unavailable through the resolved executable engine is rejected honestly | add/qualify adapters or constrain the advertised managed list |
-| reservation/settlement | V2 COMPLETE locally; managed calls reserve before dispatch and settle once from actual/cached usage | migration proof; settlement remains paused |
+| reservation/settlement | V2 COMPLETE and production schema/proofs are installed; managed calls reserve before dispatch and settle once from actual/cached usage | Package 13 synthetic proof; settlement remains paused |
 | cost-aware router | V2 COMPLETE locally per step with deterministic-first policy, history, complexity, retrieval, repairs and manual override | representative outcome data |
-| assets | V2 COMPLETE locally through Asset Service and isolated optimiser | internal production canary |
-| project knowledge/index/retrieval/capabilities | V2 COMPLETE locally and persistent; strict reads/writes in production composition | migration/deployment proof |
-| contracts/patches/traces/diagnostics | V2 COMPLETE locally with strict durable evidence | production trace proof |
-| snapshots/preview | V2 COMPLETE locally; promoted, byte-verified green snapshot is authoritative | canary |
+| assets | V2 COMPLETE through Asset Service and isolated optimiser | live representative qualification |
+| project knowledge/index/retrieval/capabilities | V2 COMPLETE, persistent and dark production-proven | live representative qualification |
+| contracts/patches/traces/diagnostics | V2 COMPLETE with strict durable evidence and dark production proof | live representative qualification |
+| snapshots/preview | V2 COMPLETE and dark production-proven; promoted, byte-verified green snapshot is authoritative | final internal matrix |
 | publish/unpublish/rollback | V2 COMPLETE dark in C8; V2 fails closed while atomic flag is off | enable only at cutover proof |
-| export/QA | V2 COMPLETE locally from green snapshot; browser work uses C7 | canary |
+| export/QA | V2 COMPLETE and dark production-proven from green snapshots; browser work uses C7 | final internal matrix |
 | repository and desktop/editor work | Separate control plane, not Builder V1 | generated-app actions must call the V2 product APIs |
 | direct `/api/generate` and old direct publish routes | LEGACY/DEAD (not mounted by the shell) | delete after route-consumer audit |
 
-## Confirmed launch blockers outside the composition root
+## Platform blocker closure
 
-These are launch blockers unless the affected product surface is deliberately removed before
-launch. Completing the V2 orchestrator does not close them.
+Package 12 closed the confirmed platform-wide blockers outside the composition root:
 
-1. Cross-store project/account erasure is not complete across PostgreSQL, Supabase Storage, VPS
-   artifacts, worker artifacts, snapshots, caches, assets and immutable releases.
-2. HTTP rate limiting is process-local and cannot enforce atomic limits across restarts or multiple
-   shell instances.
-3. Authenticated live logs use browser `EventSource` without an authentication-capable stream
-   transport; the current browser test stubs the stream.
-4. The public analytics collector is reached only after restrictive global CORS, so arbitrary
-   custom-domain beacons can be rejected before the collector's wildcard response is written.
-5. CI lacks the complete release pipeline: dependency/secret scanning, worker/container artifact
-   builds, deploy smoke and immutable release-artifact verification.
-6. Backup/restore is proven, but encrypted off-host guarantees, recurring restore drills, RTO/RPO,
-   alerts and practical service/blast-radius isolation remain incomplete.
-7. Production artifacts do not expose a durable manifest that proves their exact source commit and
-   component hashes.
-8. `editor/vscode` is an extension surface, not the approved genuine Code OSS Windows desktop
-   distribution. Desktop completion is a product-launch package, not proof of Builder V2 itself.
-9. Production contains historical V2 rows whose project parents were removed before relational
-   cascade constraints existed: 13 builds, 12 verification-cache rows, two snapshots and one green
-   pointer. They all belong to one still-existing owner but span deleted projects. Their provenance
-   must be classified and they must be restored or explicitly erased before the runtime-composition
-   foreign keys can be applied. The constraints must not be weakened or marked `NOT VALID` to hide
-   this drift.
+1. Project and account erasure is owner-scoped, manifest-CAS protected, idempotent and covers the
+   database, Auth, Storage, worker/QA files, snapshots/blobs, graph/cache, assets, diagnostics,
+   releases and compatibility projections. The content-free audit ledger is append-only.
+2. Security-sensitive and expensive HTTP paths use a shared atomic Postgres limiter keyed by the
+   best authenticated account/token identity plus a trusted-proxy-derived network identity.
+3. Browser logs use authenticated `fetch` plus `ReadableStream`; bearer credentials never enter a
+   URL and a real Chromium stream/reconnect/close proof is green.
+4. The public analytics collector is routed before global CORS with exact registered-origin,
+   app-identity, method, content-type, size and shared-rate-limit enforcement.
+5. Fast PR and non-production release workflows now include migration identity, static/unit,
+   dependency and secret scans, browser/E2E, fresh reset/lint/diff, worker image build, backup
+   compatibility, artifact hashing, deploy smoke and provenance verification.
+6. Production has a read-only immutable deployment manifest and admin-only endpoint that bind the
+   running source, web, shell, worker and migration ledger to exact hashes.
+7. Backup health, isolated restore drills, queue/build/verification/PostgREST/reconciliation/storage
+   and identity SLO checks are automated. The encrypted off-host and scheduled restore interfaces
+   are installed but deliberately disabled until an external storage target and independent probe
+   command are supplied; manual isolated restore remains proven.
+
+The genuine Code OSS Windows desktop remains Package 16 product work. It is not a hidden Builder V2
+or Package 12 completion claim.
 
 ## Ordered packages from current state to V2-only
 
@@ -118,7 +117,7 @@ launch. Completing the V2 orchestrator does not close them.
 | 9. Disposable Supabase reset/lint/diff and RPC fault/concurrency proof | complete 2026-08-08; 67 migrations, lint/diff and runtime proof green | no new migration | no | disposable only |
 | 10. Production V2 orphan reconciliation | complete 2026-08-08; bounded archive/cleanup and FK preflight green | no runtime-integrity bypass | no | yes |
 | 11. Dark V2 composition deploy and zero-model production canary | complete 2026-08-08; Package 10E/10E-F green | installed through migration 68 | no | yes, test-owner only |
-| 12. Platform launch blockers | pending: erasure, shared limits, logs, analytics, release provenance, CI/release and DR/SLO | additive repairs only where proven | no | later canaries |
+| 12. Platform launch blockers | complete 2026-08-08; all 12A-12G production proofs and post-migration isolated restore green | `20260808180841`, `20260808180845` | no | yes, test-owner only |
 | 13. Provider/billing closure and executable model catalogue | pending | none expected beyond package 2 | no initially | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | pending explicit approval | no | yes | internal projects/provider calls |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
@@ -147,29 +146,22 @@ Calendar duration, V1 customer traffic and cohort size are explicitly not gates.
 
 ## Exact cutover procedure
 
-1. Classify the historical orphan V2 rows against backup/build evidence. Restore only legitimate
-   parent projects or erase only proven disposable rows through an approved, audited transaction.
-2. Prove zero orphan/constraint conflicts, take a new backup/restore, repeat the linked dry-run and
-   apply the two pending migrations separately.
-3. Deploy the exact immutable application/worker artifacts with V2 customer routing and managed
-   settlement still disabled.
-4. Run the zero-model production composition, crash-boundary, snapshot, graph, QA and C8 canaries.
-5. Close and prove the cross-store erasure, shared-rate-limit, authenticated-log, public-analytics,
-   release-provenance, CI/release and DR/SLO blockers.
-6. Prove the executable provider catalogue, reservation/settlement path and manual-model behavior.
-7. Run only the separately approved minimum live build/edit/repair/provider-failure/booking matrix.
-8. Complete and qualify the genuine Code OSS Windows desktop distribution if it remains part of
+1. Prove the executable provider catalogue, reservation/settlement path and manual-model behavior
+   under Package 13 while managed settlement remains paused.
+2. Run only the separately approved minimum live build/edit/repair/provider-failure/booking matrix.
+3. Run the final internal V2 production matrix and a fresh complete backup/isolated restore.
+4. Complete and qualify the genuine Code OSS Windows desktop distribution if it remains part of
    the Thrallo launch definition.
-9. Take a complete backup and isolated restore; verify queue, reservations, snapshots, graph,
+5. Take the immediate pre-cutover complete backup and isolated restore; verify queue, reservations, snapshots, graph,
    diagnostics, releases and filesystem artifacts.
-10. Tag the deployed V1 source and artifacts `builder-v1-final`.
-11. Set the production composition to V2 and make C7/C8 mandatory. Keep one audited,
+6. Tag the deployed V1 source and artifacts `builder-v1-final`.
+7. Set the production composition to V2 and make C7/C8 mandatory. Keep one audited,
    engineering-only emergency V1 switch; do not expose it to users.
-12. Run health, internal build, edit, repair, cancel, preview, publish, rollback, unpublish/republish,
+8. Run health, internal build, edit, repair, cancel, preview, publish, rollback, unpublish/republish,
    restore and legacy-adoption smoke proofs.
-13. If any proof fails, disable V2 intake, drain/reconcile durable work and reactivate the retained
+9. If any proof fails, disable V2 intake, drain/reconcile durable work and reactivate the retained
    V1 artifact. Never mutate migration history or rebuild a rollback release.
-14. If green, declare V2 the production builder. V1 deletion is a separate approval.
+10. If green, declare V2 the production builder. V1 deletion is a separate approval.
 
 ## Exact V1 deletion list after cutover proof
 

@@ -43,6 +43,42 @@ Never paste the resulting service environment or credentials into this document.
 only interpreted booleans/counts for rollout controls and never emits owner ids or raw environment
 values.
 
+## Package 12 platform launch blockers (2026-08-08)
+
+**PASS — 12A through 12G.** Production now has 70 migrations and no pending migration. The two
+additive Package 12 migrations are `20260808180841_platform_erasure_audit` and
+`20260808180845_shared_atomic_rate_limits`; no history repair or revert occurred.
+
+- 12A: bounded project/account erasure covers active database state, Auth, Storage, worker and QA
+  files, snapshots/blobs, graph/cache, assets, diagnostics, runtime users, releases/intents and
+  compatibility projections. Production test-owner project and account deletions passed exact
+  manifest CAS, exclusive/shared-object handling, replay and unaffected-row hash parity.
+- 12B: the process-local `Map` is replaced for sensitive/expensive routes by a shared atomic
+  Postgres window. Two real shell processes could not exceed one limit; restarting one process did
+  not reset the bucket and authenticated identities behind one network remained independent.
+- 12C: browser logs use bearer-authenticated fetch streaming with reconnection, expiry and close
+  handling. The real browser/server SSE test passes without URL credentials.
+- 12D: public analytics is routed before global CORS and enforces registered app/origin, strict POST
+  and content type, 32 KiB body limit and shared rate limits. Thrallo and scoped custom origins pass;
+  malformed/unregistered identities fail.
+- 12E: production exposes an admin-only immutable deployment identity. The deployed app commit is
+  `a702cf136fd1e25215b66561440795172995d591`; source, web, shell and worker artifacts and the
+  70-row migration ledger verify against its read-only manifest.
+- 12F: fast PR and non-mutating release workflows cover tests/static checks, immutable migration
+  identity, dependency/secret scans, web build, critical E2E/browser engines, fresh reset/lint/diff,
+  worker image, backup compatibility, artifact hashes, deploy smoke and provenance.
+- 12G: realistic RPO/RTO/SLO checks and recovery runbooks are executable. The five-minute DR health
+  timer is active. Encrypted off-host and scheduled restore units are installed but remain disabled
+  until operator-supplied external storage credentials and an independent external-probe command
+  exist; no provider was purchased or configured without approval.
+
+Post-migration backup `/home/ubuntu/thrallo-backups/thrallo-2026-08-08T194910` (manifest SHA-256
+`88e436df7de0322869143cfda6c3b1ef2109721a49ae9a2f5c0c64439a2098e1`) restored in the isolated
+disposable environment with 85 canonical tables / 36,705 rows, 19 Auth users, two Storage objects
+and 170 filesystem objects. Independent monitoring made 212 connection attempts across ports
+55320-55327 with zero successes. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-12-PLATFORM-LAUNCH-BLOCKERS.md`.
+
 ## PR ledger
 
 | PR | State | Evidence | Production action |
