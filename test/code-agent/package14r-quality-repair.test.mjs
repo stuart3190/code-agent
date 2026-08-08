@@ -351,7 +351,8 @@ test("14R live runner hard-caps aggregate spend and cannot force a manual model"
   assert.match(runner, /booking already exists; exactly one attempt is authorized/);
   assert.match(runner, /approved zero-spend pre-dispatch failure/);
   assert.match(runner, /archive-edit-predispatch/);
-  assert.match(runner, /EDIT_REQUEST, ceiling: 2\.5/);
+  assert.match(runner, /EDIT_REQUEST, ceiling: 4/);
+  assert.match(runner, /bounded pre-dispatch correction limit/);
 });
 
 test("14R worker authority carries preview configuration without logging secret values", async () => {

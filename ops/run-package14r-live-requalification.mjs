@@ -216,8 +216,9 @@ async function archiveZeroSpendPreDispatch(state, stage) {
       || !(previewStop || budgetStop)) {
     throw new Error(`${stage} is not an approved zero-spend pre-dispatch failure`);
   }
-  const key = `${stage}_predispatch_1`;
-  if (state.stages[key]) throw new Error(`${key} already exists`);
+  const sequence = Object.keys(state.stages).filter((key) => key.startsWith(`${stage}_predispatch_`)).length + 1;
+  if (sequence > 2) throw new Error(`${stage} exceeded the bounded pre-dispatch correction limit`);
+  const key = `${stage}_predispatch_${sequence}`;
   state.stages[key] = row;
   delete state.stages[stage];
   await save(state);
@@ -266,7 +267,7 @@ if (STAGE === "preflight") {
 } else if (STAGE === "edit") {
   if (state.stages.simple?.result !== "pass") throw new Error("edit requires a green simple build");
   await runPipeline(state, { stage: "edit", project: state.projects.simple, mode: "iterate",
-    prompt: EDIT_REQUEST, ceiling: 2.5 });
+    prompt: EDIT_REQUEST, ceiling: 4 });
 } else if (STAGE === "archive-edit-predispatch") {
   await archiveZeroSpendPreDispatch(state, "edit");
 } else if (STAGE === "seed-repair") {
