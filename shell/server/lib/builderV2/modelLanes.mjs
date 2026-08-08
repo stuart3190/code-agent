@@ -274,8 +274,9 @@ export function createModelLanes({
           // Each network dispatch gets its own durable identity. A transport retry is a real
           // second provider attempt and must never reuse/overwrite the first attempt's usage.
           const sequence = ++callSequence;
+          const selectedMaxOutputTokens = Number(selected.decision?.maxOutputTokens || maxOutputTokens);
           const estimate = conservativeCallReservation(options, selected.provider.model, {
-            maxOutputTokens, minimumCredits: selected.decision?.estimatedCredits || 0,
+            maxOutputTokens: selectedMaxOutputTokens, minimumCredits: selected.decision?.estimatedCredits || 0,
           });
           const callCeiling = Number(selected.decision?.callCeilingCredits || ceilingCredits);
           if (!(callCeiling > 0) || estimate > callCeiling) {
@@ -299,7 +300,7 @@ export function createModelLanes({
           let turn;
           try {
             turn = await selected.provider.runTurn.call(selected.provider, {
-              ...options, signal: context.signal || options.signal, maxOutputTokens,
+              ...options, signal: context.signal || options.signal, maxOutputTokens: selectedMaxOutputTokens,
               // V2 owns retries outside transports so every network dispatch receives its own
               // reservation and telemetry identity. Provider-internal retries would be invisible.
               maxProviderRetries: 0,

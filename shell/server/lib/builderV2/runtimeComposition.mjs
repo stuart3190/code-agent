@@ -69,11 +69,11 @@ function candidateSet(context) {
     || provider.decision?.provider || context.providerLabel || laneProvider;
   const rows = [
     { provider: transport(quality), laneProvider, model: quality.model, tier: "quality", billingLane: context.policy.billingLane,
-      estimatedCredits: numberEnv("THRALLO_BV2_QUALITY_CALL_RESERVE", 12), executable: quality },
+      estimatedCredits: numberEnv("THRALLO_BV2_QUALITY_EXPECTED_CREDITS", 2), executable: quality },
     { provider: transport(balanced), laneProvider, model: balanced.model, tier: "balanced", billingLane: context.policy.billingLane,
-      estimatedCredits: numberEnv("THRALLO_BV2_BALANCED_CALL_RESERVE", 6), executable: balanced },
+      estimatedCredits: numberEnv("THRALLO_BV2_BALANCED_EXPECTED_CREDITS", 0.75), executable: balanced },
     { provider: transport(fast), laneProvider, model: fast.model, tier: "fast", billingLane: context.policy.billingLane,
-      estimatedCredits: numberEnv("THRALLO_BV2_FAST_CALL_RESERVE", 3), executable: fast },
+      estimatedCredits: numberEnv("THRALLO_BV2_FAST_EXPECTED_CREDITS", 0.35), executable: fast },
   ];
   // A transport may expose one model for every intent (Codex currently does). Keep the strongest
   // tier and one executable rather than pretending duplicate candidates create a choice.
@@ -326,6 +326,14 @@ export function createBuilderV2Runtime({
           manualModel: workJob.payload.manualModel
             || (context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
+        const outputPolicy = {
+          contract: { maxOutputTokens: 6_000, callCeilingCredits: 3 },
+          core: { maxOutputTokens: 16_000, callCeilingCredits: 6 },
+          repair: { maxOutputTokens: 10_000, callCeilingCredits: 4 },
+          edit: { maxOutputTokens: 8_000, callCeilingCredits: 3 },
+          increment: { maxOutputTokens: 8_000, callCeilingCredits: 3 },
+        }[routedStep] || { maxOutputTokens: 8_000, callCeilingCredits: 3 };
+        Object.assign(decision, outputPolicy);
         const chosen = candidates.find((candidate) => candidate.provider === decision.provider
           && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
         if (!chosen) throw new Error(`routing selected unavailable model ${decision.model}`);

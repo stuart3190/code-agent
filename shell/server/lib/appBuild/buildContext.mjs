@@ -10,12 +10,13 @@
 // a Codex-connected owner seven managed gpt-5.6 calls. Every lane carries its provider
 // POLICY (providerPolicy.mjs), and a lane change is a policy decision, never a fallback.
 
-import { activeAiCredential } from "../aiCredentialStore.mjs";
+import { activeAiCredential, refreshCodexAuth } from "../aiCredentialStore.mjs";
 import { createOpenAIEngineProvider } from "./openaiEngineProvider.mjs";
 import { createRoutingProvider } from "../../../../src/providers/routingProvider.mjs";
 import { resolveProviderPolicy } from "./providerPolicy.mjs";
 import { approvedConfiguredModel } from "../modelCatalogue.mjs";
 import { createGeminiEngineProvider } from "./geminiEngineProvider.mjs";
+import { createStoredAccessTokenProvider } from "../../../../src/providers/auth.mjs";
 
 function managedModelForIntent(intent) {
   if (intent === "fast") return approvedConfiguredModel("OPENAI_FAST_MODEL", "gpt-5.6-luna", { provider: "openai", tier: "fast" });
@@ -116,7 +117,18 @@ export async function resolveBuildContext(ownerId, {
     // The transport's REAL wire model, not a cosmetic label: the ChatGPT-account backend rejects
     // "-codex"-suffixed names, and telemetry recording a model the wire never used would be the
     // same class of lie as recording null.
-    const strong = createCodexProvider().model;
+    // Codex auth is owner-scoped encrypted database state. The worker service account must not
+    // depend on a shared ~/.codex/auth.json belonging to the VPS operator. Rotated refresh tokens
+    // are persisted back to the same owner credential atomically through the credential store.
+    let storedAuth = credential.secret;
+    const tokenProvider = createStoredAccessTokenProvider({
+      loadAuth: async () => storedAuth,
+      persistAuth: async (auth) => {
+        storedAuth = JSON.stringify(auth);
+        await refreshCodexAuth(ownerId, storedAuth, credential.metadata || {});
+      },
+    });
+    const strong = createCodexProvider({ tokenProvider }).model;
     return {
       byok: true, // never reserves or debits managed credits
       providerLabel: "codex",
@@ -124,7 +136,7 @@ export async function resolveBuildContext(ownerId, {
       routing: credential.routing || null,
       byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
-      buildProvider: () => createCodexProvider(),
+      buildProvider: () => createCodexProvider({ tokenProvider }),
     };
   }
 

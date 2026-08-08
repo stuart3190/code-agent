@@ -27,8 +27,8 @@ function jwtExp(token) {
   }
 }
 
-async function refreshTokens(refreshToken) {
-  const res = await fetch(TOKEN_URL, {
+async function refreshTokens(refreshToken, fetchImpl = fetch) {
+  const res = await fetchImpl(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -44,6 +44,54 @@ async function refreshTokens(refreshToken) {
   const json = await res.json();
   if (!json.access_token) throw new Error("token refresh returned no access_token");
   return json; // { access_token, refresh_token? (rotated), id_token?, ... }
+}
+
+/**
+ * Token provider for encrypted, owner-scoped Codex auth stored outside the filesystem.
+ * The caller owns persistence so a rotated refresh token can be written back to the
+ * canonical credential store. Secret values are never logged.
+ */
+export function createStoredAccessTokenProvider({
+  loadAuth, persistAuth = async () => {}, fetchImpl = fetch, now = () => Date.now(),
+} = {}) {
+  if (typeof loadAuth !== "function") throw new Error("stored Codex auth needs a loader");
+  let refreshing = null;
+  const read = async () => {
+    const value = await loadAuth();
+    const auth = typeof value === "string" ? JSON.parse(value) : structuredClone(value);
+    if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("stored Codex auth is invalid");
+    return auth;
+  };
+  return async () => {
+    let auth = await read();
+    let accessToken = auth.tokens?.access_token;
+    const accountId = auth.tokens?.account_id;
+    if (!accessToken || !accountId) throw new Error("stored Codex auth is missing access_token / account_id");
+    const exp = jwtExp(accessToken);
+    if (exp && exp - Math.floor(now() / 1000) <= EXPIRY_SKEW_S) {
+      if (!auth.tokens?.refresh_token) throw new Error("stored Codex access token expired without a refresh token");
+      refreshing ||= (async () => {
+        // Reload inside the single-flight section: another call may already have persisted a
+        // rotated token while this caller was waiting.
+        const current = await read();
+        const currentAccess = current.tokens?.access_token;
+        const currentExp = jwtExp(currentAccess);
+        if (!currentAccess || !current.tokens?.account_id) throw new Error("stored Codex auth is incomplete");
+        if (!currentExp || currentExp - Math.floor(now() / 1000) > EXPIRY_SKEW_S) return current;
+        if (!current.tokens?.refresh_token) throw new Error("stored Codex access token expired without a refresh token");
+        const fresh = await refreshTokens(current.tokens.refresh_token, fetchImpl);
+        current.tokens.access_token = fresh.access_token;
+        if (fresh.refresh_token) current.tokens.refresh_token = fresh.refresh_token;
+        if (fresh.id_token) current.tokens.id_token = fresh.id_token;
+        current.last_refresh = new Date(now()).toISOString();
+        await persistAuth(current);
+        return current;
+      })().finally(() => { refreshing = null; });
+      auth = await refreshing;
+      accessToken = auth.tokens.access_token;
+    }
+    return { accessToken, accountId: auth.tokens.account_id };
+  };
 }
 
 // Fold a refresh response into the auth blob and write it back ATOMICALLY (tmp + rename), so a
