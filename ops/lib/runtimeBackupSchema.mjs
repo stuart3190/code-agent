@@ -5,9 +5,10 @@ export const GENERATED_RUNTIME_COLUMNS = Object.freeze({
   diag_runs: Object.freeze(["project_id_text"]),
 });
 
-// Captured read-only from the 67-migration production catalog on 2026-08-08.
+// Approved catalog after Package 12 migrations. The backup compares this evidence with the live
+// thrallo_public_tables() RPC before reading any customer rows.
 // The backup also compares its manifest with the live thrallo_public_tables() RPC at runtime.
-export const PRODUCTION_PUBLIC_TABLES_67 = Object.freeze([
+export const PRODUCTION_PUBLIC_TABLES_70 = Object.freeze([
   "ai_requests", "analytics_daily", "analytics_events", "analytics_salts",
   "app_auth_events", "app_notifications", "app_password_resets", "app_users",
   "build_checkpoints", "build_jobs", "build_signals", "build_work_events",
@@ -26,19 +27,21 @@ export const PRODUCTION_PUBLIC_TABLES_67 = Object.freeze([
   "ca_push_subscriptions", "ca_repositories", "ca_repository_index_chunks",
   "ca_repository_index_files", "ca_repository_indexes", "ca_repository_relations",
   "ca_repository_symbols", "ca_run_events", "ca_runs", "ca_subscriptions",
-  "ca_tool_calls", "ca_usage_records", "custom_domains", "deployments", "diag_incidents",
+  "ca_tool_calls", "ca_usage_records", "custom_domains", "data_erasure_events",
+  "data_erasure_jobs", "deployments", "diag_incidents",
   "diag_prefs", "diag_runs", "diag_steps", "entities", "health_checks", "health_status",
-  "project_logs", "projects", "publish_activation_intents", "publish_releases",
+  "http_rate_limit_buckets", "project_logs", "projects", "publish_activation_intents", "publish_releases",
   "published_sites", "qa_runs",
 ]);
 
-export const PRODUCTION_PUBLIC_TABLES_67_SHA256 =
-  "aa975762e8d4c9dac1bb4da3f25c385025876ef541f5e3637c35b7148b451d73";
+export const PRODUCTION_PUBLIC_TABLES_70_SHA256 =
+  "ea98285c5aa1a7f0c8fcde38790c379aac4418d5f6f0250373a86635577ced5c";
+export const EPHEMERAL_RUNTIME_TABLES = Object.freeze(["http_rate_limit_buckets"]);
 
 // Distinct child->parent table pairs from pg_constraint. Composite constraints are represented
 // once because this list validates restore ordering, while PostgreSQL remains the authority for
 // the complete column-level constraints during the isolated restore.
-export const PRODUCTION_PUBLIC_FK_PAIRS_67 = Object.freeze([
+export const PRODUCTION_PUBLIC_FK_PAIRS_70 = Object.freeze([
   "build_jobs->bv2_builds", "build_jobs->diag_runs",
   "build_work_events->build_work_jobs", "build_work_events->projects",
   "build_work_jobs->build_jobs", "build_work_jobs->build_work_payloads",
@@ -73,7 +76,7 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_67 = Object.freeze([
   "ca_repository_symbols->ca_repository_index_files", "ca_run_events->ca_runs",
   "ca_runs->ca_agents", "ca_runs->ca_automations", "ca_runs->ca_repositories",
   "ca_runs->ca_runs", "ca_tool_calls->ca_runs", "ca_usage_records->ca_runs",
-  "deployments->deployments", "diag_steps->diag_runs", "projects->bv2_snapshots",
+  "data_erasure_events->data_erasure_jobs", "deployments->deployments", "diag_steps->diag_runs", "projects->bv2_snapshots",
   "projects->ca_products", "publish_activation_intents->deployments",
   "publish_activation_intents->publish_releases",
   "publish_activation_intents->published_sites", "publish_releases->deployments",
@@ -81,8 +84,8 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_67 = Object.freeze([
   "published_sites->publish_releases", "qa_runs->build_work_jobs", "qa_runs->projects",
 ]);
 
-export const PRODUCTION_PUBLIC_FK_PAIRS_67_SHA256 =
-  "2b9a0e622e191ace556179b2d6837ed158e6f5fa42b65ce3664a68f8fd3b3bc2";
+export const PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256 =
+  "5b3a759507cf89247e387ab08256ae0a6e230bde0866da7c37a946841f2c2f77";
 
 // Nullable links which participate in a real cycle or point forward in RESTORE_ORDER. They are
 // restored as null and patched after all rows exist. No FK is disabled or weakened.
@@ -127,16 +130,17 @@ export function canonicalRowsForRestoreComparison(table, rows) {
   return prepareRowsForBackup(table, rows);
 }
 
-export function findCatalogCoverageGaps(liveTables, backedUpTables) {
+export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = []) {
   const live = new Set(liveTables);
   const backed = new Set(backedUpTables);
+  const ignored = new Set(ignoredTables);
   return {
-    missingFromBackup: [...live].filter((table) => !backed.has(table)).sort(),
+    missingFromBackup: [...live].filter((table) => !backed.has(table) && !ignored.has(table)).sort(),
     missingFromCatalog: [...backed].filter((table) => !live.has(table)).sort(),
   };
 }
 
-export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_67) {
+export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_70) {
   const position = new Map(order.map((table, index) => [table, index]));
   const missingTables = [...new Set(pairs.flatMap((pair) => pair.split("->")))]
     .filter((table) => !position.has(table)).sort();

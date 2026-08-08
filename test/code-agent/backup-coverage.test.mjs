@@ -13,8 +13,9 @@ import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
 import {
-  PRODUCTION_PUBLIC_FK_PAIRS_67,
-  PRODUCTION_PUBLIC_TABLES_67,
+  EPHEMERAL_RUNTIME_TABLES,
+  PRODUCTION_PUBLIC_FK_PAIRS_70,
+  PRODUCTION_PUBLIC_TABLES_70,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
   findCatalogCoverageGaps,
@@ -49,6 +50,7 @@ const INTENTIONALLY_NOT_BACKED_UP = new Map([
   "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",
   "app_user_integrations", "app_connector_oauth_states",
 ].map((table) => [table, UNAPPLIED_LEGACY]).concat([
+  ["http_rate_limit_buckets", "short-lived admission-control counters are deliberately reset after restore; they contain no canonical customer state"],
 ]));
 
 // EVERY table any migration creates. This deliberately does NOT filter by name: the previous
@@ -304,8 +306,8 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 8);
   assert.equal(result.effectiveApplied, 68);
-  assert.equal(result.active, 68);
-  assert.deepEqual(result.pending, []);
+  assert.equal(result.active, 70);
+  assert.deepEqual(result.pending.map((migration) => migration.version), ["20260808180841", "20260808180845"]);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
@@ -330,16 +332,16 @@ test("generated runtime project ids are omitted from backup and restore writes",
 });
 
 test("the current runtime catalog and backup manifest are exactly aligned", () => {
-  assert.equal(PRODUCTION_PUBLIC_TABLES_67.length, 83);
-  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_67, CA_TABLES), {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_70.length, 86);
+  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_70, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
     missingFromBackup: [], missingFromCatalog: [],
   });
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_67, "forgotten_runtime_table"], CA_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_70, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
-  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_67.length, 83);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_70.length, 84);
   assert.deepEqual(validateRestoreOrder(RESTORE_ORDER), { missingTables: [], violations: [] });
   const broken = RESTORE_ORDER.filter((table) => table !== "bv2_model_reservations");
   assert.deepEqual(validateRestoreOrder(broken).missingTables, ["bv2_model_reservations"]);

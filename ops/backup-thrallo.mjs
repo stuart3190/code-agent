@@ -22,8 +22,9 @@ import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 import {
-  PRODUCTION_PUBLIC_TABLES_67,
-  PRODUCTION_PUBLIC_TABLES_67_SHA256,
+  EPHEMERAL_RUNTIME_TABLES,
+  PRODUCTION_PUBLIC_TABLES_70,
+  PRODUCTION_PUBLIC_TABLES_70_SHA256,
   findCatalogCoverageGaps,
   prepareRowsForBackup,
   sha256Lines,
@@ -135,6 +136,10 @@ export const CA_TABLES = [
   "bv2_retrieval_traces",
   "bv2_patches",
   "bv2_verification_cache",
+  // Permanent erasure evidence contains references, hashes and counts only. It is required to
+  // prove deletion without restoring the deleted content itself.
+  "data_erasure_jobs",
+  "data_erasure_events",
 ];
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
@@ -251,13 +256,13 @@ async function main() {
   };
 
   const catalog = await loadLiveCatalog(svc);
-  const coverage = findCatalogCoverageGaps(catalog, CA_TABLES);
+  const coverage = findCatalogCoverageGaps(catalog, CA_TABLES, EPHEMERAL_RUNTIME_TABLES);
   if (coverage.missingFromBackup.length || coverage.missingFromCatalog.length) {
     throw new Error(`live catalog / backup manifest mismatch: ${JSON.stringify(coverage)}`);
   }
   const catalogHash = sha256Lines(catalog);
-  if (catalog.length !== PRODUCTION_PUBLIC_TABLES_67.length || catalogHash !== PRODUCTION_PUBLIC_TABLES_67_SHA256) {
-    throw new Error(`live catalog differs from the approved 67-migration catalog: count=${catalog.length} sha256=${catalogHash}`);
+  if (catalog.length !== PRODUCTION_PUBLIC_TABLES_70.length || catalogHash !== PRODUCTION_PUBLIC_TABLES_70_SHA256) {
+    throw new Error(`live catalog differs from the approved 70-migration catalog: count=${catalog.length} sha256=${catalogHash}`);
   }
   manifest.catalogCoverage = {
     source: "thrallo_public_tables RPC",
@@ -360,8 +365,8 @@ async function main() {
   manifest.bytes += filesystemDirectoriesGz.length;
 
   const ledger = await loadMigrationLedgerEvidence();
-  if (!Array.isArray(ledger.migrations) || ledger.migrations.length !== 67) {
-    throw new Error(`migration ledger evidence must contain exactly 67 rows (found ${ledger.migrations?.length ?? "invalid"})`);
+  if (!Array.isArray(ledger.migrations) || ledger.migrations.length !== 70) {
+    throw new Error(`migration ledger evidence must contain exactly 70 rows (found ${ledger.migrations?.length ?? "invalid"})`);
   }
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);

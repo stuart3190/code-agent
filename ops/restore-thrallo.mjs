@@ -20,8 +20,10 @@ import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
 import {
-  PRODUCTION_PUBLIC_FK_PAIRS_67,
-  PRODUCTION_PUBLIC_FK_PAIRS_67_SHA256,
+  PRODUCTION_PUBLIC_FK_PAIRS_70,
+  PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  PRODUCTION_PUBLIC_TABLES_70,
+  PRODUCTION_PUBLIC_TABLES_70_SHA256,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
   sha256Lines,
@@ -123,6 +125,8 @@ export const RESTORE_ORDER = [
   "bv2_retrieval_traces",
   "bv2_patches",
   "bv2_verification_cache",
+  "data_erasure_jobs",
+  "data_erasure_events",
 ];
 
 const BATCH = 500;
@@ -166,15 +170,15 @@ export function prepareRowsForRestore(table, rows, deferredPatches = []) {
 }
 
 export function assertCurrentRestoreDependencyGraph() {
-  const graphHash = sha256Lines(PRODUCTION_PUBLIC_FK_PAIRS_67);
-  if (PRODUCTION_PUBLIC_FK_PAIRS_67.length !== 83 || graphHash !== PRODUCTION_PUBLIC_FK_PAIRS_67_SHA256) {
-    throw new Error(`67-migration FK evidence is corrupt: count=${PRODUCTION_PUBLIC_FK_PAIRS_67.length} sha256=${graphHash}`);
+  const graphHash = sha256Lines(PRODUCTION_PUBLIC_FK_PAIRS_70);
+  if (PRODUCTION_PUBLIC_FK_PAIRS_70.length !== 84 || graphHash !== PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256) {
+    throw new Error(`70-migration FK evidence is corrupt: count=${PRODUCTION_PUBLIC_FK_PAIRS_70.length} sha256=${graphHash}`);
   }
   const validation = validateRestoreOrder(RESTORE_ORDER);
   if (validation.missingTables.length || validation.violations.length) {
     throw new Error(`restore dependency order is invalid: ${JSON.stringify(validation)}`);
   }
-  return { pairs: PRODUCTION_PUBLIC_FK_PAIRS_67.length, sha256: graphHash };
+  return { pairs: PRODUCTION_PUBLIC_FK_PAIRS_70.length, sha256: graphHash };
 }
 
 async function main() {
@@ -191,9 +195,9 @@ async function main() {
   const validation = await validateBackupDirectory(dir);
   console.log(`backup validated: ${validation.files} files`);
   if (validation.catalogCoverage) {
-    if (validation.catalogCoverage.tables !== 83
-      || validation.catalogCoverage.sha256 !== "aa975762e8d4c9dac1bb4da3f25c385025876ef541f5e3637c35b7148b451d73") {
-      throw new Error("backup catalog evidence is not the approved 67-migration production catalog");
+    if (validation.catalogCoverage.tables !== PRODUCTION_PUBLIC_TABLES_70.length
+      || validation.catalogCoverage.sha256 !== PRODUCTION_PUBLIC_TABLES_70_SHA256) {
+      throw new Error("backup catalog evidence is not the approved 70-migration production catalog");
     }
     console.log(`backup catalog coverage: ${validation.catalogCoverage.tables} tables (${validation.catalogCoverage.sha256})`);
   }
