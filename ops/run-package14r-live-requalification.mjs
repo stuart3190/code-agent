@@ -204,10 +204,16 @@ async function seedControlledRepair(state) {
 async function archiveZeroSpendPreDispatch(state, stage) {
   const row = state.stages[stage];
   const evidence = row?.evidence || {};
+  const v2Builds = evidence.v2Builds || [];
+  const previewStop = ["preview_isolation_required", "provider_selection_changed"]
+    .includes(evidence.publicBuild?.stop_reason) && v2Builds.length === 0;
+  const budgetStop = /cannot fit a useful response inside approved headroom/i.test(
+    evidence.publicBuild?.error || "",
+  ) && v2Builds.length > 0 && v2Builds.every((build) => build.state === "failed");
   if (!row?.terminal || row.result !== "fail" || Number(row.stageCredits || 0) !== 0
-      || (evidence.v2Builds || []).length || (evidence.reservations || []).length
+      || (evidence.reservations || []).length
       || (evidence.aiRequests || []).length
-      || !["preview_isolation_required", "provider_selection_changed"].includes(evidence.publicBuild?.stop_reason)) {
+      || !(previewStop || budgetStop)) {
     throw new Error(`${stage} is not an approved zero-spend pre-dispatch failure`);
   }
   const key = `${stage}_predispatch_1`;
@@ -216,7 +222,7 @@ async function archiveZeroSpendPreDispatch(state, stage) {
   delete state.stages[stage];
   await save(state);
   await emit(`${stage}_predispatch_archived`, { stopReason: evidence.publicBuild.stop_reason,
-    credits: 0, calls: 0, v2Builds: 0 });
+    credits: 0, calls: 0, v2Builds: v2Builds.length });
 }
 
 async function cleanup(state) {
@@ -260,7 +266,9 @@ if (STAGE === "preflight") {
 } else if (STAGE === "edit") {
   if (state.stages.simple?.result !== "pass") throw new Error("edit requires a green simple build");
   await runPipeline(state, { stage: "edit", project: state.projects.simple, mode: "iterate",
-    prompt: EDIT_REQUEST, ceiling: 1.5 });
+    prompt: EDIT_REQUEST, ceiling: 2.5 });
+} else if (STAGE === "archive-edit-predispatch") {
+  await archiveZeroSpendPreDispatch(state, "edit");
 } else if (STAGE === "seed-repair") {
   if (state.stages.simple?.result !== "pass") throw new Error("repair requires a green simple build");
   await seedControlledRepair(state);
