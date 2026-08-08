@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
-import { CA_TABLES, listBucketObjects } from "./backup-thrallo.mjs";
+import { listBucketObjects } from "./backup-thrallo.mjs";
 import {
   buildAccountErasureManifest, eraseAccountPermanently, eraseProjectPermanently,
 } from "../shell/server/lib/erasureService.mjs";
@@ -26,17 +26,44 @@ const targetBlobPath = `package12/${OWNER}/${CONTENT_HASH}`; const otherBlobPath
 const sharedAssetPath = `package12/${OWNER}/shared-asset.bin`;
 const temp = await mkdtemp(path.join(os.tmpdir(), "thrallo-package12-"));
 
-function canonical(value) { return JSON.stringify(value, Object.keys(value || {}).sort()); }
+// Exact parity is required for every production table the bounded erasure RPCs can mutate.
+// Repository-index and agent-run tables are intentionally absent: neither erasure RPC can touch
+// them, and pulling their source payloads through PostgREST makes this safety proof itself an
+// unbounded production query.
+const PARITY_TABLES = Object.freeze([
+  "ai_requests", "analytics_daily", "analytics_events", "app_auth_events",
+  "app_notifications", "app_password_resets", "app_users", "build_checkpoints",
+  "build_jobs", "build_signals", "build_work_events", "build_work_jobs",
+  "build_work_payloads", "build_work_results", "bv2_assets", "bv2_blobs",
+  "bv2_builds", "bv2_contracts", "bv2_dependency_edges", "bv2_file_revisions",
+  "bv2_migration_state", "bv2_model_reservations", "bv2_patches",
+  "bv2_project_knowledge", "bv2_project_pointers", "bv2_retrieval_traces",
+  "bv2_shadow_checks", "bv2_shadow_run_files", "bv2_shadow_runs",
+  "bv2_snapshot_files", "bv2_snapshots", "bv2_symbol_refs", "bv2_symbols",
+  "bv2_verification_cache", "ca_github_webhook_deliveries", "custom_domains",
+  "deployments", "diag_incidents", "diag_prefs", "diag_runs", "diag_steps",
+  "entities", "health_checks", "health_status", "project_logs", "projects",
+  "publish_activation_intents", "publish_releases", "published_sites",
+]);
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value && typeof value === "object") return Object.fromEntries(
+    Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)]),
+  );
+  return value;
+}
+function canonicalRows(rows) { return rows.map((row) => JSON.stringify(stable(row))).sort().join("\n"); }
 async function unwrap(promise, label) { const { data, error } = await promise; if (error) throw new Error(`${label}: ${error.message}`); return data; }
 async function snapshot() {
   const output = {};
-  for (const table of CA_TABLES.filter((name) => !name.startsWith("data_erasure_"))) {
+  for (const table of PARITY_TABLES) {
     const rows = []; for (let from = 0; ; from += 1000) {
       const data = await unwrap(db.from(table).select("*").order("id", { ascending: true, nullsFirst: true }).range(from, from + 999), table)
         .catch(async () => unwrap(db.from(table).select("*").range(from, from + 999), table));
       rows.push(...(data || [])); if (!data?.length || data.length < 1000) break;
     }
-    output[table] = hash(canonical(rows));
+    output[table] = hash(canonicalRows(rows));
   }
   output.storage = hash((await listBucketObjects(db, BUCKET)).sort().join("\n"));
   return output;
