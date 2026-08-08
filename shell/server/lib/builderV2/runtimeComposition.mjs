@@ -327,12 +327,12 @@ export function createBuilderV2Runtime({
             || (context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
         const outputPolicy = {
-          contract: { maxOutputTokens: 6_000, callCeilingCredits: 3 },
-          core: { maxOutputTokens: 16_000, callCeilingCredits: 6 },
-          repair: { maxOutputTokens: 10_000, callCeilingCredits: 4 },
-          edit: { maxOutputTokens: 8_000, callCeilingCredits: 3 },
-          increment: { maxOutputTokens: 8_000, callCeilingCredits: 3 },
-        }[routedStep] || { maxOutputTokens: 8_000, callCeilingCredits: 3 };
+          contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
+          core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
+          repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 4 },
+          edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 },
+          increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 },
+        }[routedStep] || { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 3 };
         Object.assign(decision, outputPolicy);
         const chosen = candidates.find((candidate) => candidate.provider === decision.provider
           && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
