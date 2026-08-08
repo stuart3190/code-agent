@@ -10,18 +10,18 @@ const evidenceRoot = path.join(root, "docs", "evidence", "migration-reconstructi
 const evidenceDates = (await readdir(evidenceRoot, { withFileTypes: true }))
   .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
 let manifestText = null;
-let overlayText = null;
+const overlayTexts = [];
 for (const date of evidenceDates) {
   manifestText = await readFile(path.join(evidenceRoot, date, "authoritative-history-manifest.json"), "utf8").catch(() => null);
   if (manifestText) break;
 }
 if (!manifestText) throw new Error("authoritative migration manifest is missing");
 const manifest = JSON.parse(manifestText);
-for (const date of evidenceDates) {
-  overlayText = await readFile(path.join(evidenceRoot, date, "applied-history-overlay.json"), "utf8").catch(() => null);
-  if (overlayText) break;
+for (const date of [...evidenceDates].reverse()) {
+  const overlayText = await readFile(path.join(evidenceRoot, date, "applied-history-overlay.json"), "utf8").catch(() => null);
+  if (overlayText) overlayTexts.push(overlayText);
 }
-const overlay = overlayText ? JSON.parse(overlayText) : { migrations: [] };
+const overlays = overlayTexts.map((text) => JSON.parse(text));
 
 const filenames = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
 const active = filenames.map((filename) => {
@@ -50,7 +50,7 @@ for (const migration of manifest.migrations) {
 const lastApplied = String(manifest.migrations.at(-1).version);
 const applied = new Map(authoritative);
 let expectedOrder = manifest.migrations.length + 1;
-for (const migration of overlay.migrations || []) {
+for (const migration of overlays.flatMap((overlay) => overlay.migrations || [])) {
   const version = String(migration.version);
   const local = active.find((candidate) => candidate.version === version);
   if (!local || local.name !== migration.name || local.filename !== migration.filename) {
@@ -74,7 +74,7 @@ if (pending.some((migration) => migration.version <= lastApplied)) {
 
 console.log(JSON.stringify({
   authoritativeBase: manifest.migrations.length,
-  appliedOverlay: (overlay.migrations || []).length,
+  appliedOverlay: overlays.reduce((count, overlay) => count + (overlay.migrations || []).length, 0),
   effectiveApplied: applied.size,
   active: active.length,
   pending: pending.map(({ version, name }) => ({ version, name })),

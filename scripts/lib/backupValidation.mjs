@@ -42,7 +42,27 @@ export async function validateBackupDirectory(dir) {
     }
   }
 
-  return { ok: true, tables: checked, files: Object.keys(manifest.files || {}).length };
+  if (manifest.catalogCoverage) {
+    const names = manifest.catalogCoverage.names;
+    if (!Array.isArray(names) || new Set(names).size !== names.length) {
+      throw new Error("catalog coverage names are missing or duplicated");
+    }
+    if (names.length !== Number(manifest.catalogCoverage.tables)) {
+      throw new Error("catalog coverage table count mismatch");
+    }
+    const digest = createHash("sha256").update([...names].sort().join("\n")).digest("hex");
+    if (digest !== manifest.catalogCoverage.sha256) throw new Error("catalog coverage checksum mismatch");
+    const absent = names.filter((table) => !(table in tables));
+    if (absent.length) throw new Error(`catalog tables missing from backup manifest: ${absent.join(", ")}`);
+  }
+
+  return {
+    ok: true,
+    tables: checked,
+    files: Object.keys(manifest.files || {}).length,
+    catalogCoverage: manifest.catalogCoverage || null,
+    migrationLedger: manifest.migrationLedger || null,
+  };
 }
 
 async function validateObjectPayloads(dir, manifest, indexName) {

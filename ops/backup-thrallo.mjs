@@ -21,6 +21,13 @@ import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
+import {
+  PRODUCTION_PUBLIC_TABLES_67,
+  PRODUCTION_PUBLIC_TABLES_67_SHA256,
+  findCatalogCoverageGaps,
+  prepareRowsForBackup,
+  sha256Lines,
+} from "./lib/runtimeBackupSchema.mjs";
 
 // Every control-plane table in supabase/migrations (ca_* plus the Phase-19 app-build tables) —
 // test/code-agent/backup-coverage.test.mjs fails the build if a new migration adds a table
@@ -243,8 +250,27 @@ async function main() {
     bytes: 0,
   };
 
+  const catalog = await loadLiveCatalog(svc);
+  const coverage = findCatalogCoverageGaps(catalog, CA_TABLES);
+  if (coverage.missingFromBackup.length || coverage.missingFromCatalog.length) {
+    throw new Error(`live catalog / backup manifest mismatch: ${JSON.stringify(coverage)}`);
+  }
+  const catalogHash = sha256Lines(catalog);
+  if (catalog.length !== PRODUCTION_PUBLIC_TABLES_67.length || catalogHash !== PRODUCTION_PUBLIC_TABLES_67_SHA256) {
+    throw new Error(`live catalog differs from the approved 67-migration catalog: count=${catalog.length} sha256=${catalogHash}`);
+  }
+  manifest.catalogCoverage = {
+    source: "thrallo_public_tables RPC",
+    tables: catalog.length,
+    names: catalog,
+    sha256: catalogHash,
+    missingFromBackup: [],
+    missingFromCatalog: [],
+  };
+  console.log(`  live catalog: ${catalog.length} canonical tables, complete backup coverage (${catalogHash})`);
+
   for (const table of CA_TABLES) {
-    const rows = await dumpTable(svc, table);
+    const rows = prepareRowsForBackup(table, await dumpTable(svc, table));
     const gz = gzipSync(JSON.stringify(rows));
     await writeFile(path.join(dir, `${table}.json.gz`), gz);
     manifest.tables[table] = rows.length;
@@ -334,8 +360,8 @@ async function main() {
   manifest.bytes += filesystemDirectoriesGz.length;
 
   const ledger = await loadMigrationLedgerEvidence();
-  if (!Array.isArray(ledger.migrations) || ledger.migrations.length === 0) {
-    throw new Error("migration ledger evidence is invalid");
+  if (!Array.isArray(ledger.migrations) || ledger.migrations.length !== 67) {
+    throw new Error(`migration ledger evidence must contain exactly 67 rows (found ${ledger.migrations?.length ?? "invalid"})`);
   }
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);
@@ -348,6 +374,9 @@ async function main() {
   manifest.tables.migration_state = migrationState.length;
   manifest.files["migration_state.json.gz"] = { bytes: migrationStateGz.length, sha256: sha256(migrationStateGz) };
   manifest.migrationLedger.pendingLocal = migrationState.filter((migration) => !migration.applied).map((migration) => migration.version);
+  if (manifest.migrationLedger.pendingLocal.length) {
+    throw new Error(`backup source has migrations absent from production evidence: ${manifest.migrationLedger.pendingLocal.join(", ")}`);
+  }
   manifest.bytes += migrationStateGz.length;
   console.log(`  migration ledger: ${ledger.migrations.length} authoritative rows captured ${ledger.capturedAt}`);
 
@@ -368,6 +397,16 @@ async function main() {
     }
   }
   console.log(`backup OK -> ${finalDir} (${manifest.bytes} bytes gz total, pruned ${removed} old runs)`);
+}
+
+async function loadLiveCatalog(svc) {
+  const { data, error } = await svc.rpc("thrallo_public_tables");
+  if (error || !Array.isArray(data)) {
+    throw new Error(`cannot enumerate the live public catalog: ${error?.message || "invalid RPC result"}`);
+  }
+  const names = data.map((row) => row.table_name || row).filter(Boolean).sort();
+  if (new Set(names).size !== names.length) throw new Error("live catalog contains duplicate table names");
+  return names;
 }
 
 function sha256(bytes) {

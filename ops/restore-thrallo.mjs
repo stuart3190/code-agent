@@ -19,6 +19,14 @@ import { createClient } from "@supabase/supabase-js";
 import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
+import {
+  PRODUCTION_PUBLIC_FK_PAIRS_67,
+  PRODUCTION_PUBLIC_FK_PAIRS_67_SHA256,
+  canonicalRowsForRestoreComparison,
+  collectDeferredRestorePatches,
+  sha256Lines,
+  validateRestoreOrder,
+} from "./lib/runtimeBackupSchema.mjs";
 
 // Foreign-key-safe insert order. ca_automations and ca_runs reference each other, so
 // automations insert first with last_run_id withheld and patched after runs exist.
@@ -136,15 +144,37 @@ async function loadOptionalRows(dir, name) {
   return loadRows(dir, name);
 }
 
-export function prepareRowsForRestore(table, rows) {
-  if (table !== "ca_run_events" || rows.length === 0) return rows;
-  const sorted = [...rows].sort((a, b) => Number(a.id) - Number(b.id));
-  for (let index = 0; index < sorted.length; index += 1) {
-    if (Number(sorted[index].id) !== index + 1) {
-      throw new Error("ca_run_events identity has gaps; exact restore requires a database-native OVERRIDING SYSTEM VALUE path");
+export function prepareRowsForRestore(table, rows, deferredPatches = []) {
+  let prepared = canonicalRowsForRestoreComparison(table, rows);
+  const identity = table === "ca_run_events" ? "id" : table === "build_work_events" ? "seq" : null;
+  if (identity && prepared.length > 0) {
+    const sorted = [...prepared].sort((a, b) => Number(a[identity]) - Number(b[identity]));
+    for (let index = 0; index < sorted.length; index += 1) {
+      if (Number(sorted[index][identity]) !== index + 1) {
+        throw new Error(`${table} identity has gaps; exact restore requires a database-native OVERRIDING SYSTEM VALUE path`);
+      }
     }
+    prepared = sorted.map((source) => {
+      const row = { ...source };
+      delete row[identity];
+      return row;
+    });
   }
-  return sorted.map(({ id: _generatedIdentity, ...row }) => row);
+  const deferred = collectDeferredRestorePatches(table, prepared);
+  deferredPatches.push(...deferred.patches);
+  return deferred.rows;
+}
+
+export function assertCurrentRestoreDependencyGraph() {
+  const graphHash = sha256Lines(PRODUCTION_PUBLIC_FK_PAIRS_67);
+  if (PRODUCTION_PUBLIC_FK_PAIRS_67.length !== 83 || graphHash !== PRODUCTION_PUBLIC_FK_PAIRS_67_SHA256) {
+    throw new Error(`67-migration FK evidence is corrupt: count=${PRODUCTION_PUBLIC_FK_PAIRS_67.length} sha256=${graphHash}`);
+  }
+  const validation = validateRestoreOrder(RESTORE_ORDER);
+  if (validation.missingTables.length || validation.violations.length) {
+    throw new Error(`restore dependency order is invalid: ${JSON.stringify(validation)}`);
+  }
+  return { pairs: PRODUCTION_PUBLIC_FK_PAIRS_67.length, sha256: graphHash };
 }
 
 async function main() {
@@ -155,8 +185,18 @@ async function main() {
   }
   const confirm = process.argv.includes("--confirm");
 
+  const dependencyGraph = assertCurrentRestoreDependencyGraph();
+  console.log(`restore dependency graph: ${dependencyGraph.pairs} FK pairs (${dependencyGraph.sha256})`);
+
   const validation = await validateBackupDirectory(dir);
   console.log(`backup validated: ${validation.files} files`);
+  if (validation.catalogCoverage) {
+    if (validation.catalogCoverage.tables !== 83
+      || validation.catalogCoverage.sha256 !== "aa975762e8d4c9dac1bb4da3f25c385025876ef541f5e3637c35b7148b451d73") {
+      throw new Error("backup catalog evidence is not the approved 67-migration production catalog");
+    }
+    console.log(`backup catalog coverage: ${validation.catalogCoverage.tables} tables (${validation.catalogCoverage.sha256})`);
+  }
   for (const [table, count] of Object.entries(validation.tables)) {
     console.log(`  ${table}: ${count} rows`);
   }
@@ -187,38 +227,19 @@ async function main() {
   }
   console.log(`auth users: ${users.length} ensured (passwords must be reset)`);
 
-  const automationPatches = [];
-  const snapshotPatches = [];
+  const deferredPatches = [];
   for (const table of RESTORE_ORDER) {
     let rows = await loadRows(dir, table);
-    if (table === "ca_automations") {
-      for (const row of rows) {
-        if (row.last_run_id) automationPatches.push({ id: row.id, last_run_id: row.last_run_id });
-      }
-      rows = rows.map((row) => ({ ...row, last_run_id: null }));
-    }
-    if (table === "bv2_snapshots") {
-      for (const row of rows) {
-        if (row.parent_snapshot) snapshotPatches.push({ id: row.id, parent_snapshot: row.parent_snapshot });
-      }
-      rows = rows.map((row) => ({ ...row, parent_snapshot: null }));
-    }
-    rows = prepareRowsForRestore(table, rows);
+    rows = prepareRowsForRestore(table, rows, deferredPatches);
     await insertRows(svc, table, rows);
     console.log(`  ${table}: ${rows.length} restored`);
   }
-  for (const patch of automationPatches) {
-    const { error } = await svc.from("ca_automations")
-      .update({ last_run_id: patch.last_run_id }).eq("id", patch.id);
-    if (error) throw new Error(`ca_automations patch ${patch.id}: ${error.message}`);
+  for (const patch of deferredPatches) {
+    const { error } = await svc.from(patch.table)
+      .update({ [patch.field]: patch.value }).eq("id", patch.id);
+    if (error) throw new Error(`${patch.table} patch ${patch.id}.${patch.field}: ${error.message}`);
   }
-  if (automationPatches.length) console.log(`  ca_automations: ${automationPatches.length} last_run_id links patched`);
-  for (const patch of snapshotPatches) {
-    const { error } = await svc.from("bv2_snapshots")
-      .update({ parent_snapshot: patch.parent_snapshot }).eq("id", patch.id);
-    if (error) throw new Error(`bv2_snapshots patch ${patch.id}: ${error.message}`);
-  }
-  if (snapshotPatches.length) console.log(`  bv2_snapshots: ${snapshotPatches.length} parent links patched`);
+  if (deferredPatches.length) console.log(`  deferred FK links: ${deferredPatches.length} patched after parent restore`);
 
   const objects = await loadRows(dir, "storage_objects");
   for (const object of objects) {

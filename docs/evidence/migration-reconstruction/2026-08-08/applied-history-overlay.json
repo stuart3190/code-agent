@@ -1,0 +1,28 @@
+{
+  "source": "Supabase plugin read-only schema_migrations ledger on zczgvcsokfafuyognvwx",
+  "capturedAt": "2026-08-08T12:36:25.635Z",
+  "baseVersion": "20260807174720",
+  "ledgerCount": 67,
+  "migrations": [
+    {
+      "appliedOrder": 66,
+      "version": "20260807213500",
+      "name": "bv2_runtime_model_reservations",
+      "filename": "20260807213500_bv2_runtime_model_reservations.sql",
+      "statementCount": 21,
+      "sqlSha256": "8d068fdbf23238d3fe99c03749fb282a944f6f49927d675671ab938585f5a1b5",
+      "canonicalSqlSha256": "8d068fdbf23238d3fe99c03749fb282a944f6f49927d675671ab938585f5a1b5",
+      "localCanonicalSqlSha256": "71162d0be0c66c687ea28530b2dfd95b5e9c25ddd317b570122b333fe8e1b5b4"
+    },
+    {
+      "appliedOrder": 67,
+      "version": "20260807221000",
+      "name": "bv2_runtime_composition",
+      "filename": "20260807221000_bv2_runtime_composition.sql",
+      "statementCount": 39,
+      "sqlSha256": "f7658a77b1916722d54e0ffd76d3e1601f5c2d3906ce7a53d30ab74edcd45e15",
+      "canonicalSqlSha256": "f7658a77b1916722d54e0ffd76d3e1601f5c2d3906ce7a53d30ab74edcd45e15",
+      "localCanonicalSqlSha256": "94fbf975ef034cecafe88e9927b6d5aa74dbccb54d098b45387d57120d636016"
+    }
+  ]
+}

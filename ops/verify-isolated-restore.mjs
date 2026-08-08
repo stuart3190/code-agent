@@ -7,6 +7,11 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { ARTIFACT_BUCKET, CA_TABLES } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import {
+  canonicalRowsForRestoreComparison,
+  validateGeneratedProjectIds,
+  validateRuntimeBackupLinks,
+} from "./lib/runtimeBackupSchema.mjs";
 
 const backupDir = path.resolve(process.argv[2] || "");
 const url = process.env.RESTORE_TARGET_URL;
@@ -59,14 +64,22 @@ function sha256(bytes) {
 }
 
 let tableRows = 0;
+const restoredTables = {};
 for (const table of CA_TABLES) {
   const source = await loadRows(table);
   const restored = await fetchAll(table);
-  if (source.length !== restored.length || rowsHash(source) !== rowsHash(restored)) {
+  const generatedProblems = validateGeneratedProjectIds(table, restored);
+  if (generatedProblems.length) throw new Error(generatedProblems.join("; "));
+  const canonicalSource = canonicalRowsForRestoreComparison(table, source);
+  const canonicalRestored = canonicalRowsForRestoreComparison(table, restored);
+  if (source.length !== restored.length || rowsHash(canonicalSource) !== rowsHash(canonicalRestored)) {
     throw new Error(`${table}: restored rows differ from backup`);
   }
+  restoredTables[table] = restored;
   tableRows += source.length;
 }
+const runtimeLinkProblems = validateRuntimeBackupLinks(restoredTables);
+if (runtimeLinkProblems.length) throw new Error(`runtime restore links are invalid: ${runtimeLinkProblems.join("; ")}`);
 
 const sourceUsers = (await loadRows("auth_users")).map(projectAuthUser);
 const targetUsers = [];
@@ -219,6 +232,12 @@ console.log(JSON.stringify({
   verificationCacheRows: caches.length,
   graphRevisions: revisions.length,
   shadowRuns: shadowRuns.length,
+  modelReservations: restoredTables.bv2_model_reservations.length,
+  generatedProjectIds: {
+    bv2Builds: restoredTables.bv2_builds.length,
+    diagnosticRuns: restoredTables.diag_runs.length,
+  },
+  runtimeLinks: "valid",
   crossOwnerPrincipals: 2,
 }));
 

@@ -12,6 +12,17 @@ import { CA_TABLES, canonicalSqlHash, loadMigrationLedgerEvidence } from "../../
 import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
+import {
+  PRODUCTION_PUBLIC_FK_PAIRS_67,
+  PRODUCTION_PUBLIC_TABLES_67,
+  canonicalRowsForRestoreComparison,
+  collectDeferredRestorePatches,
+  findCatalogCoverageGaps,
+  prepareRowsForBackup,
+  validateGeneratedProjectIds,
+  validateRestoreOrder,
+  validateRuntimeBackupLinks,
+} from "../../ops/lib/runtimeBackupSchema.mjs";
 
 const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
 
@@ -108,6 +119,26 @@ test("a backup directory round-trips through validation and rejects tampering", 
 
   await writeFile(path.join(dir, "ca_runs.json.gz"), gzipSync(JSON.stringify([{ id: "1" }])));
   await assert.rejects(validateBackupDirectory(dir), /manifest says|checksum mismatch/);
+});
+
+test("backup validation proves the live catalog is wholly represented in the table manifest", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "thrallo-backup-catalog-"));
+  const rows = gzipSync("[]");
+  await writeFile(path.join(dir, "projects.json.gz"), rows);
+  const sha = createHash("sha256").update("projects").digest("hex");
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify({
+    product: "thrallo",
+    tables: { projects: 0 },
+    files: { "projects.json.gz": { bytes: rows.length, sha256: createHash("sha256").update(rows).digest("hex") } },
+    catalogCoverage: { tables: 1, names: ["projects"], sha256: sha },
+  }));
+  assert.equal((await validateBackupDirectory(dir)).catalogCoverage.tables, 1);
+  const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  manifest.catalogCoverage.names.push("bv2_model_reservations");
+  manifest.catalogCoverage.tables = 2;
+  manifest.catalogCoverage.sha256 = createHash("sha256").update("bv2_model_reservations\nprojects").digest("hex");
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest));
+  await assert.rejects(validateBackupDirectory(dir), /catalog tables missing/);
 });
 
 test("backup validation verifies storage, filesystem, and migration-ledger payload bytes", async () => {
@@ -255,18 +286,15 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 65", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 67", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 65);
-  assert.deepEqual(ledger.migrations.slice(-5).map((migration) => migration.version), [
-    "20260806210321",
-    "20260806221153",
-    "20260806230625",
-    "20260807072455",
-    "20260807174720",
+  assert.equal(ledger.migrations.length, 67);
+  assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
+    "20260807213500",
+    "20260807221000",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 65);
-  assert.ok(ledger.migrations.slice(-5).every((migration) => migration.localCanonicalSqlSha256));
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 67);
+  assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
 });
 
 test("migration history validation reports the effective applied ledger, not the 60-row base as remote", () => {
@@ -274,10 +302,10 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 5);
-  assert.equal(result.effectiveApplied, 65);
+  assert.equal(result.appliedOverlay, 7);
+  assert.equal(result.effectiveApplied, 67);
   assert.equal(result.active, 67);
-  assert.deepEqual(result.pending.map(({ version }) => version), ["20260807213500", "20260807221000"]);
+  assert.deepEqual(result.pending, []);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
@@ -286,6 +314,96 @@ test("generated-always run-event ids restore exactly only when the backup is con
     { value: "b" },
   ]);
   assert.throws(() => prepareRowsForRestore("ca_run_events", [{ id: 1 }, { id: 3 }]), /identity has gaps/);
+  assert.deepEqual(prepareRowsForRestore("build_work_events", [{ seq: 1, event_type: "queued" }]), [
+    { event_type: "queued" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("build_work_events", [{ seq: 2 }]), /identity has gaps/);
+});
+
+test("generated runtime project ids are omitted from backup and restore writes", () => {
+  const source = [{ id: "b1", project_id: "p1", project_id_text: "p1", state: "green" }];
+  assert.deepEqual(prepareRowsForBackup("bv2_builds", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(prepareRowsForRestore("diag_runs", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(canonicalRowsForRestoreComparison("bv2_builds", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(validateGeneratedProjectIds("bv2_builds", source), []);
+  assert.match(validateGeneratedProjectIds("diag_runs", [{ ...source[0], project_id_text: "wrong" }])[0], /mismatch/);
+});
+
+test("the 67-migration live catalog and backup manifest are exactly aligned", () => {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_67.length, 83);
+  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_67, CA_TABLES), {
+    missingFromBackup: [], missingFromCatalog: [],
+  });
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_67, "forgotten_runtime_table"], CA_TABLES).missingFromBackup,
+    ["forgotten_runtime_table"]);
+});
+
+test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_67.length, 83);
+  assert.deepEqual(validateRestoreOrder(RESTORE_ORDER), { missingTables: [], violations: [] });
+  const broken = RESTORE_ORDER.filter((table) => table !== "bv2_model_reservations");
+  assert.deepEqual(validateRestoreOrder(broken).missingTables, ["bv2_model_reservations"]);
+});
+
+test("all forward and cyclic runtime links are restored through bounded post-parent patches", () => {
+  const rows = [{
+    id: "job", bv2_build_id: "build", diag_run_id: "diag", project_id: "project",
+  }];
+  const deferred = collectDeferredRestorePatches("build_jobs", rows);
+  assert.deepEqual(deferred.rows, [{ id: "job", bv2_build_id: null, diag_run_id: null, project_id: "project" }]);
+  assert.deepEqual(deferred.patches.map(({ field, value }) => [field, value]), [
+    ["bv2_build_id", "build"], ["diag_run_id", "diag"],
+  ]);
+});
+
+test("empty and populated reservation tables validate with exact runtime ownership links", () => {
+  const owner = "00000000-0000-4000-8000-000000000001";
+  const project = { id: "00000000-0000-4000-8000-000000000002", owner, bv2_green_snapshot_id: "snapshot" };
+  const build = { id: "build", owner, project_id: project.id };
+  const diagnostic = { id: "diag", owner, project_id: project.id, project_id_text: project.id };
+  const snapshot = { id: "snapshot", owner, project_id: project.id };
+  const publicBuild = { id: "public", owner, project_id: project.id, bv2_build_id: build.id, diag_run_id: diagnostic.id };
+  const base = {
+    projects: [project], bv2_builds: [build], bv2_snapshots: [snapshot],
+    build_jobs: [publicBuild], diag_runs: [diagnostic], bv2_model_reservations: [],
+  };
+  assert.deepEqual(validateRuntimeBackupLinks(base), []);
+
+  const usage = { input: 100, cached: 25, output: 40, reasoning: 10 };
+  const reservations = [
+    { id: "held", owner, project_id: project.id, build_id: build.id, provider: "openai", model: "gpt-5", billing_lane: "managed", state: "held", actual_credits: null, settled_at: null, released_at: null, usage: null },
+    { id: "settled", owner, project_id: project.id, build_id: build.id, provider: "openai", model: "gpt-5", billing_lane: "managed", state: "settled", actual_credits: 12, settled_at: "2026-08-08T00:00:00Z", released_at: null, usage },
+    { id: "released", owner, project_id: project.id, build_id: build.id, provider: "anthropic", model: "claude", billing_lane: "byok_api", state: "released", actual_credits: null, settled_at: null, released_at: "2026-08-08T00:00:00Z", usage: null },
+  ];
+  assert.deepEqual(validateRuntimeBackupLinks({ ...base, bv2_model_reservations: reservations }), []);
+  assert.deepEqual(reservations[1].usage, usage, "input/cached/output/reasoning token evidence round-trips exactly");
+  assert.deepEqual(prepareRowsForBackup("bv2_model_reservations", reservations), reservations,
+    "provider/model/lane and terminal-state evidence are authoritative regular columns");
+});
+
+test("runtime link validation rejects cross-owner and missing diagnostic/build/snapshot references", () => {
+  const tables = {
+    projects: [{ id: "p", owner: "owner-a", bv2_green_snapshot_id: "missing-snapshot" }],
+    bv2_builds: [{ id: "b", owner: "owner-b", project_id: "p" }],
+    bv2_snapshots: [],
+    diag_runs: [],
+    build_jobs: [{ id: "job", owner: "owner-a", project_id: "p", bv2_build_id: "b", diag_run_id: "diag" }],
+    bv2_model_reservations: [{ id: "r", owner: "owner-a", project_id: "p", build_id: "b", provider: "p", model: "m", billing_lane: "managed", state: "held" }],
+  };
+  const errors = validateRuntimeBackupLinks(tables).join("\n");
+  assert.match(errors, /owner\/project differs|invalid V2 build link/);
+  assert.match(errors, /invalid diagnostic link/);
+  assert.match(errors, /invalid green snapshot link/);
+});
+
+test("runtime schema retains cascade and set-null behavior required after restore", async () => {
+  const reservations = await readFile(new URL("../../supabase/migrations/20260807213500_bv2_runtime_model_reservations.sql", import.meta.url), "utf8");
+  const runtime = await readFile(new URL("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql", import.meta.url), "utf8");
+  assert.match(reservations, /references public\.bv2_builds\(id, owner, project_id\) on delete cascade/i);
+  assert.match(runtime, /references public\.projects\(id, owner\) on delete cascade/i);
+  assert.match(runtime, /references public\.bv2_builds\(id, owner, project_id\) on delete set null \(build_id\)/i);
+  assert.match(runtime, /on delete set null \(bv2_build_id\)/i);
+  assert.match(runtime, /on delete set null \(diag_run_id\)/i);
 });
 
 test("systemd units and the runbook ship with the repository", async () => {

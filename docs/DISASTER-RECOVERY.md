@@ -5,9 +5,10 @@
 `ops/backup-thrallo.mjs` runs nightly on the VPS under `thrallo-backup.timer` (03:20 UTC,
 persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 
-- every migrated Thrallo application table as gzipped JSON, including all `bv2_*` graph,
-  snapshot, cache, asset, diagnostic, ownership, and feature-flag tables (the table list is
-  drift-guarded by `test/code-agent/backup-coverage.test.mjs`);
+- every migrated Thrallo application table as gzipped JSON, including `bv2_model_reservations`
+  and all `bv2_*` graph, snapshot, cache, asset, diagnostic, ownership, and feature-flag tables.
+  Before it reads production rows, the backup compares its manifest with the live
+  `thrallo_public_tables()` catalog and aborts on either an omitted or unknown canonical table;
 - `auth_users.json.gz` — Supabase auth UUIDs, email addresses, and application/user metadata.
   Password hashes, OAuth identities, MFA factors, and sessions are not exported by this logical
   backup, so users re-establish credentials after a restore;
@@ -28,7 +29,13 @@ untouched.
 The 60-row reconstructed authoritative history is immutable. Later production applications are
 captured as dated, read-only ledger overlays containing the remote statement hash and the local
 applied-file hash. A backup merges them, requires contiguous applied order, and refuses a local
-file whose recorded applied identity changes.
+file whose recorded applied identity changes. The current evidence is exactly 67 rows; backup
+creation fails if that count or the active/pending state differs.
+
+`bv2_builds.project_id_text` and `diag_runs.project_id_text` are stored generated columns. They
+are not authoritative backup fields and are never included in restore writes. PostgreSQL
+regenerates them from `project_id`; the isolated verifier checks every regenerated value and
+canonicalises those two columns before comparing source and restored row hashes.
 
 The worker account home (`/var/lib/thrallo-build-worker-home`) is not backup input. Only the
 canonical artifact root (`/var/lib/thrallo-build-worker`) is included. Their separation is a
@@ -60,14 +67,19 @@ unexpected symlink inside the canonical root must still abort the backup.
 3. `RESTORE_TARGET_URL=<new url> RESTORE_TARGET_SERVICE_KEY=<new service key> \
    node ops/restore-thrallo.mjs <backup-dir> --confirm`
    — recreates auth users (original UUIDs, no passwords), restores tables in
-   foreign-key-safe order (automation/run and snapshot-parent cross-links patched in a second
-   pass), re-uploads artifact objects, and restores filesystem artifacts only beneath the explicit
+   foreign-key-safe order. The order is checked against the complete 83-pair public FK graph from
+   the 67-migration production catalog. Nullable cyclic/forward links are withheld only for the
+   initial insert and patched after every parent exists; no FK is disabled or weakened. The restore
+   then re-uploads artifact objects, and restores filesystem artifacts only beneath the explicit
    `RESTORE_TARGET_FILESYSTEM_ROOT` isolated namespace.
    Durable work restores in payload -> job -> result/event/node order after projects and customer
    `build_jobs`. `build_jobs.work_job_id` is a trace link rather than a reverse foreign key, which
    avoids a restore cycle; `build_work_jobs.build_id` remains the authoritative FK. A restored
    in-flight lease is allowed to expire and be reclaimed rather than being reported as successful
    from filesystem state alone.
+   Model reservations restore after projects and V2 builds; the verifier checks reservation
+   owner/project/build identity, terminal state, provider/model/billing lane, usage evidence,
+   public-build runtime links, diagnostics links, and green-snapshot links.
 4. Update `shell/.env` on the VPS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; update
    `shell/web/.env` with the new URL and publishable key; **keep the original
    `PLATFORM_ENC_KEY`**. Rebuild the web app and restart `thrallo-shell`.
