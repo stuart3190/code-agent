@@ -256,6 +256,29 @@ async function archiveWireRejection(state, stage) {
   await event(`${stage}_wire_rejection_archived`, { credits: 0, usageTokens: 0, reservationState: "released" });
 }
 
+async function archiveQualificationCeilingFailure(state, stage) {
+  const row = state.stages[stage];
+  const evidence = row?.evidence || {};
+  const reservation = evidence.reservations?.[0];
+  const ceilingStopped = /model-call ceiling exceeded/i.test(
+    evidence.publicBuild?.error || evidence.v2Builds?.[0]?.error || "",
+  );
+  if (!row?.terminal || row.result !== "fail" || !ceilingStopped
+      || evidence.reservations?.length !== 1 || reservation.state !== "settled"
+      || !(Number(reservation.actual_credits || 0) > 0)
+      || Number(row.stageCredits || 0) !== Number(reservation.actual_credits)) {
+    throw new Error(`${stage} is not the approved qualification-ceiling failure`);
+  }
+  const key = `${stage}_ceiling_rejection_1`;
+  if (state.stages[key]) throw new Error(`${key} already exists; refusing another ceiling retry`);
+  state.stages[key] = row;
+  delete state.stages[stage];
+  await save(state);
+  await event(`${stage}_ceiling_failure_archived`, {
+    credits: row.stageCredits, calls: evidence.reservations.length, nextCeiling: 6,
+  });
+}
+
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
 const state = await load();
 const codex = await resolveCodexOwner();
@@ -276,7 +299,7 @@ if (STAGE === "preflight") {
   state.projects.simple = project;
   await save(state);
   await runPipeline({ state, stage: "simple", project, mode: "build", prompt: SIMPLE_REQUEST,
-    ceiling: 3, kind: "app_build_v2_package14" });
+    ceiling: 6, kind: "app_build_v2_package14" });
 } else if (STAGE === "recover-simple") {
   await recoverInterruptedStage(state, "simple");
 } else if (STAGE === "archive-simple-preflight") {
@@ -285,6 +308,8 @@ if (STAGE === "preflight") {
   await archiveAuthRejection(state, "simple");
 } else if (STAGE === "archive-simple-wire-rejection") {
   await archiveWireRejection(state, "simple");
+} else if (STAGE === "archive-simple-ceiling-failure") {
+  await archiveQualificationCeilingFailure(state, "simple");
 } else if (STAGE === "report") {
   const spend = await spendForProjects(Object.values(state.projects).map((row) => row.id));
   await event("report", { ownerHash: state.ownerHash, credits: spend.credits, calls: spend.calls,

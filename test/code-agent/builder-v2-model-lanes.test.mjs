@@ -155,7 +155,10 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
   });
   const provider = {
     model: "gpt-5.5",
-    runTurn: async () => ({ text: contractJson, toolCalls: [], usage: { input: 5000, output: 1500, cached: 0, reasoning: 0, total: 6500 } }),
+    runTurn: async () => ({ text: contractJson, toolCalls: [], usage: {
+      input: 5000, output: 1500, cached: 0, reasoning: 0, total: 6500,
+      providerRequestId: "codex:response:contract-1",
+    } }),
   };
   const diag = fakeDiag();
   const knowledgeStore = memoryKnowledgeStore();
@@ -168,6 +171,7 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
   assert.ok(step, "contract call recorded");
   assert.match(step.prompt, /keep the existing farm name/, "persistent project knowledge reaches contract generation");
   assert.ok(step.usage.input >= 5000, `usage delta captured (got ${JSON.stringify(step.usage)})`);
+  assert.deepEqual(step.usage.providerRequestIds, ["codex:response:contract-1"]);
 });
 
 test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment correctly", () => {

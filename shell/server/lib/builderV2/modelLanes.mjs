@@ -22,12 +22,17 @@ import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
   const total = { turns: 0, input: 0, output: 0, reasoning: 0, cached: 0, cacheWrite: 0, total: 0 };
+  const providerRequestIds = new Set();
   return {
     add(telemetry) {
       if (!telemetry) return;
       for (const key of Object.keys(total)) total[key] += Number(telemetry[key] || 0);
+      for (const id of [
+        ...(Array.isArray(telemetry.providerRequestIds) ? telemetry.providerRequestIds : []),
+        telemetry.providerRequestId,
+      ].filter(Boolean)) providerRequestIds.add(String(id));
     },
-    summary() { return { ...total }; },
+    summary() { return { ...total, providerRequestIds: [...providerRequestIds].sort() }; },
   };
 }
 
@@ -383,7 +388,10 @@ export function createModelLanes({
         // `usage` reports only its last attempt). Recorded even when the guard throws —
         // paid work always reaches the diagnostics.
         const after = bucket.summary();
-        const delta = Object.fromEntries(Object.keys(after).map((k) => [k, after[k] - (before[k] || 0)]));
+        const delta = Object.fromEntries(Object.keys(totalUsageShape(after))
+          .map((k) => [k, Number(after[k] || 0) - Number(before[k] || 0)]));
+        delta.providerRequestIds = (after.providerRequestIds || [])
+          .filter((id) => !(before.providerRequestIds || []).includes(id));
         await record("contract", {
           label: outcome?.degraded ? "implementation contract (degraded)" : "implementation contract",
           prompt: contractRequest, output: outcome ? JSON.stringify(outcome.contract) : null,
@@ -451,4 +459,8 @@ export function createModelLanes({
       return call.arguments.patches;
     },
   };
+}
+
+function totalUsageShape(usage) {
+  return Object.fromEntries(Object.entries(usage || {}).filter(([, value]) => typeof value === "number"));
 }
