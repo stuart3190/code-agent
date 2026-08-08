@@ -247,7 +247,7 @@ try {
     .in("key", ["bv2.enabled", "bv2.owners"]), "feature flags");
   assert.equal(flags.some((row) => row.key === "bv2.enabled" && row.value === true), false);
   assert.equal(flags.some((row) => row.key === "bv2.owners" && (row.value === true || row.value?.length)), false);
-  emit("baseline", { customer: baseline, ledgerExpected: 67, flags: { enabled: false, owners: 0 }, modelCallsAllowed: false });
+  emit("baseline", { customer: baseline, ledgerExpected: 68, flags: { enabled: false, owners: 0 }, modelCallsAllowed: false });
 
   await createPrincipal(ids.owner, "a");
   await createPrincipal(ids.otherOwner, "b");

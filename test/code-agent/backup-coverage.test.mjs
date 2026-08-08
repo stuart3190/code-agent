@@ -286,14 +286,14 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 67", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 68", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 67);
+  assert.equal(ledger.migrations.length, 68);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260807213500",
     "20260807221000",
+    "20260808164259",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 67);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 68);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
 });
 
@@ -302,13 +302,10 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 7);
-  assert.equal(result.effectiveApplied, 67);
+  assert.equal(result.appliedOverlay, 8);
+  assert.equal(result.effectiveApplied, 68);
   assert.equal(result.active, 68);
-  assert.deepEqual(result.pending, [{
-    version: "20260808164259",
-    name: "c8_nonretryable_stale_cas",
-  }]);
+  assert.deepEqual(result.pending, []);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {

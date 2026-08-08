@@ -1,8 +1,8 @@
 {
   "source": "Supabase plugin read-only schema_migrations ledger on zczgvcsokfafuyognvwx",
-  "capturedAt": "2026-08-08T12:36:25.635Z",
+  "capturedAt": "2026-08-08T17:18:00.000Z",
   "baseVersion": "20260807174720",
-  "ledgerCount": 67,
+  "ledgerCount": 68,
   "migrations": [
     {
       "appliedOrder": 66,
@@ -23,6 +23,16 @@
       "sqlSha256": "f7658a77b1916722d54e0ffd76d3e1601f5c2d3906ce7a53d30ab74edcd45e15",
       "canonicalSqlSha256": "f7658a77b1916722d54e0ffd76d3e1601f5c2d3906ce7a53d30ab74edcd45e15",
       "localCanonicalSqlSha256": "94fbf975ef034cecafe88e9927b6d5aa74dbccb54d098b45387d57120d636016"
+    },
+    {
+      "appliedOrder": 68,
+      "version": "20260808164259",
+      "name": "c8_nonretryable_stale_cas",
+      "filename": "20260808164259_c8_nonretryable_stale_cas.sql",
+      "statementCount": 15,
+      "sqlSha256": "aed0b1c1fc37ca0756610ff674d650c380737307486ded632f4813367e9b6015",
+      "canonicalSqlSha256": "aed0b1c1fc37ca0756610ff674d650c380737307486ded632f4813367e9b6015",
+      "localCanonicalSqlSha256": "3c5d0787efef399df308b653b5269beaff4ddd89cde59df60966ea7a7c4744c7"
     }
   ]
 }
