@@ -20,6 +20,10 @@ const R3 = "10000000-0000-4000-8000-000000000003"; const R4 = "10000000-0000-400
 const HASH = "a".repeat(64); const HASH2 = "b".repeat(64);
 const one = (value) => Array.isArray(value) ? value[0] : value;
 function unwrap(result, label) { if (result.error) throw new Error(`${label}: ${result.error.message}`); return result.data; }
+function assertStaleCas(result) {
+  assert.equal(result.error?.code, "PT412");
+  assert.match(result.error?.message || "", /stale activation version|publish activation already pending/i);
+}
 function sql(statement) {
   return execFileSync("docker", ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-At"],
     { input: statement, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
@@ -70,7 +74,9 @@ async function assertStable({ release, version, live }) {
 async function finishRace(results, observedByOperation) {
   const winners = results.filter((result) => !result.error);
   assert.equal(winners.length, 1);
-  assert.equal(results.filter((result) => result.error).length, 1);
+  const losers = results.filter((result) => result.error);
+  assert.equal(losers.length, 1);
+  assertStaleCas(losers[0]);
   const intent = one(winners[0].data);
   await complete(intent, observedByOperation[intent.operation]);
   return intent;
@@ -108,7 +114,29 @@ try {
   await register(R2, HASH2, D2);
   const stale = await db.rpc("request_publish_activation", { p_owner: A, p_release_id: R2,
     p_expected_version: 0, p_operation: "activate", p_activation_deployment_id: D2 });
-  assert.ok(stale.error); proof.staleCasRejected = true;
+  assertStaleCas(stale); proof.staleCasRejected = true;
+
+  const postgrestBefore = Number(sql("select count(*) from pg_stat_activity where application_name ilike '%postgrest%';"));
+  const staleLatencies = [];
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const started = performance.now();
+    const repeated = await db.rpc("request_publish_activation", { p_owner: A, p_release_id: R2,
+      p_expected_version: 0, p_operation: "activate", p_activation_deployment_id: D2 });
+    staleLatencies.push(performance.now() - started);
+    assertStaleCas(repeated);
+  }
+  const postgrestAfter = Number(sql("select count(*) from pg_stat_activity where application_name ilike '%postgrest%';"));
+  const abortedAfter = Number(sql("select count(*) from pg_stat_activity where application_name ilike '%postgrest%' and state like 'idle in transaction%';"));
+  assert.ok(postgrestAfter <= postgrestBefore + 1);
+  assert.equal(abortedAfter, 0);
+  staleLatencies.sort((a, b) => a - b);
+  proof.repeatedStaleCas = {
+    attempts: staleLatencies.length,
+    p50Ms: Number(staleLatencies[Math.floor(staleLatencies.length * 0.5)].toFixed(2)),
+    p95Ms: Number(staleLatencies[Math.floor(staleLatencies.length * 0.95)].toFixed(2)),
+    maxMs: Number(staleLatencies.at(-1).toFixed(2)),
+    postgrestBefore, postgrestAfter, abortedAfter,
+  };
 
   const intent2 = await request(R2, 1, "activate", D2);
   const leased = one(unwrap(await db.rpc("lease_publish_activation_intents", { p_worker: "proof-a", p_limit: 1, p_lease_seconds: 30 }), "lease"));
@@ -127,6 +155,12 @@ try {
   assert.equal(site.active_publish_release_id, R1); assert.equal(site.activation_version, 3);
   const rollbackDeployment = one(unwrap(await db.from("deployments").select("status").eq("id", D3).single(), "rollback deployment"));
   assert.equal(rollbackDeployment.status, "live"); proof.rollbackWithoutBuild = true;
+
+  const staleRollback = await db.rpc("request_publish_activation", {
+    p_owner: A, p_release_id: R2, p_expected_version: 2,
+    p_operation: "rollback", p_activation_deployment_id: D4,
+  });
+  assertStaleCas(staleRollback); proof.staleRollbackRejected = true;
 
   const unpublish = await requestUnpublish(3);
   await complete(unpublish, null);

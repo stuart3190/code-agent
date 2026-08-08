@@ -34,9 +34,32 @@ async function provisiond(route, { method = "POST", body } = {}) {
   return result;
 }
 
+export const PUBLISH_STALE_CAS_DATABASE_CODE = "PT412";
+
+export function classifyPublishRpcError(error) {
+  const code = String(error?.code || "");
+  if (!error) return "success";
+  if (code === PUBLISH_STALE_CAS_DATABASE_CODE) return "stale_cas";
+  if (code === "42501") return "ownership_rejected";
+  if (code === "22023") return "validation_error";
+  if (code === "PGRST003") return "postgrest_pool_failure";
+  if (/^40[A-Z0-9]{3}$/.test(code)) return "database_retryable_failure";
+  return "database_failure";
+}
+
+export function normalizePublishRpcError(name, error) {
+  if (!error) return null;
+  const classification = classifyPublishRpcError(error);
+  const out = new Error(`${name}: ${error.message}`);
+  out.code = classification === "stale_cas" ? "stale_publish_cas" : error.code;
+  out.databaseCode = error.code;
+  out.classification = classification;
+  return out;
+}
+
 function rpcError(name, error) {
-  if (!error) return;
-  const out = new Error(`${name}: ${error.message}`); out.code = error.code; throw out;
+  const out = normalizePublishRpcError(name, error);
+  if (out) throw out;
 }
 
 async function proveActivatedRelease(release) {
@@ -353,7 +376,7 @@ export async function reconcileActivation(intent, { client = serviceClient() } =
     rpcError("complete reconciled activation", completed.error);
     return { id: intent.id, state: "completed" };
   } catch (error) {
-    if (error.code === "40001" && intent.previous_release_id) {
+    if (error.code === "stale_publish_cas" && intent.previous_release_id) {
       try {
         await revertFailedActivation(intent, error.message, client);
         return { id: intent.id, state: "rolled_back" };

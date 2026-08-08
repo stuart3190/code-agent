@@ -304,8 +304,11 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 7);
   assert.equal(result.effectiveApplied, 67);
-  assert.equal(result.active, 67);
-  assert.deepEqual(result.pending, []);
+  assert.equal(result.active, 68);
+  assert.deepEqual(result.pending, [{
+    version: "20260808164259",
+    name: "c8_nonretryable_stale_cas",
+  }]);
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {

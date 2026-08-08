@@ -35,6 +35,8 @@ test("Package 10E recovery exercises C8 through database RPCs only", () => {
   ]) assert.match(source, new RegExp(`client\\.rpc\\(["']${rpc}["']`));
   assert.match(source, /filesystemMutationThisRun:\s*false/);
   assert.match(source, /filesystemProofReused/);
+  assert.match(source, /stale\.error\?\.code,\s*["']PT412["']/);
+  assert.doesNotMatch(source, /stale\.error\?\.code,\s*["']40001["']/);
 });
 
 test("Package 10E recovery emits durable checkpoints and always verifies cleanup", () => {

@@ -8,7 +8,13 @@ import { chmod, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:f
 import { existsSync } from "node:fs";
 
 import { createArtifactManifest, normalizeArtifactPath } from "../../shared/immutableRelease.mjs";
-import { assertPublishIntakeReady, proveRuntimeConfig, reconcileActivation } from "../../shell/server/lib/publishing/atomicPublisher.mjs";
+import {
+  assertPublishIntakeReady,
+  classifyPublishRpcError,
+  normalizePublishRpcError,
+  proveRuntimeConfig,
+  reconcileActivation,
+} from "../../shell/server/lib/publishing/atomicPublisher.mjs";
 
 const linux = process.platform !== "win32";
 const OWNER = "a0000000-0000-4000-8000-000000000001";
@@ -30,6 +36,26 @@ async function final(n, label = `r${n}`) {
 test.after(async () => {
   await releases.purgeProjectReleases({ owner: OWNER, projectId: PROJECT }).catch(() => {});
   await chmod(root, 0o700).catch(() => {}); await rm(root, { recursive: true, force: true });
+});
+
+test("C8-00 RPC errors preserve exact application, ownership, validation, database and pool classes", () => {
+  assert.equal(classifyPublishRpcError(null), "success");
+  assert.equal(classifyPublishRpcError({ code: "PT412" }), "stale_cas");
+  assert.equal(classifyPublishRpcError({ code: "42501" }), "ownership_rejected");
+  assert.equal(classifyPublishRpcError({ code: "22023" }), "validation_error");
+  assert.equal(classifyPublishRpcError({ code: "PGRST003" }), "postgrest_pool_failure");
+  assert.equal(classifyPublishRpcError({ code: "40001" }), "database_retryable_failure");
+  assert.equal(classifyPublishRpcError({ code: "40P01" }), "database_retryable_failure");
+  assert.equal(classifyPublishRpcError({ code: "23514" }), "database_failure");
+
+  const stale = normalizePublishRpcError("activate", { code: "PT412", message: "wording may change" });
+  assert.equal(stale.code, "stale_publish_cas");
+  assert.equal(stale.databaseCode, "PT412");
+  assert.equal(stale.classification, "stale_cas");
+
+  const pool = normalizePublishRpcError("activate", { code: "PGRST003", message: "pool unavailable" });
+  assert.equal(pool.code, "PGRST003");
+  assert.equal(pool.classification, "postgrest_pool_failure");
 });
 
 test("C8-01 build failure before finalisation creates no release", { skip: !linux }, async () => {

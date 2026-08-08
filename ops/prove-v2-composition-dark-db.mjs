@@ -450,7 +450,7 @@ try {
     p_owner: ids.owner, p_release_id: ids.releaseB, p_expected_version: 0,
     p_operation: "activate", p_activation_deployment_id: ids.deploymentB,
   });
-  assert.equal(stale.error?.code, "40001");
+  assert.equal(stale.error?.code, "PT412");
   assert.match(stale.error?.message || "", /stale activation version/i);
   const activationB = await requestActivation(ids.releaseB, 1, "activate", ids.deploymentB);
   await completeIntent(activationB, ids.releaseB);

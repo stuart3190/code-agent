@@ -17,7 +17,7 @@ import { resolveBuildState, BUILD_STATES, isShippable } from "../../shell/shared
 import { journeysToRerun } from "../../shell/server/lib/appBuild/verificationCache.mjs";
 import { RESERVATION_MODULE } from "./fixtures/realPersistenceModules.mjs";
 
-const SERVICE = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8");
+const SERVICE = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8").replaceAll("\r\n", "\n");
 
 // ── 1. ordering ───────────────────────────────────────────────────────────────────────────────
 
