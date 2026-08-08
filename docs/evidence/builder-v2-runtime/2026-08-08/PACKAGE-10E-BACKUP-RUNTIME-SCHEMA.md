@@ -72,3 +72,10 @@ To be completed after backup-tool-only deployment:
 - external probe result:
 - dark V2 composition deployment and artifact hashes (only if restore is green):
 - zero-model canary and cleanup parity:
+
+## Canary recovery status
+
+The backup/restore gate and dark composition deployment passed, but Package 10E remains incomplete.
+The scoped recovery on 2026-08-08 stopped before mutation because the production Supabase Data API
+was returning broad 504 connection-pool failures. Full evidence, zero-residue proof, and the
+credential-rotation prerequisite are recorded in `PACKAGE-10E-CANARY-RECOVERY.md`.

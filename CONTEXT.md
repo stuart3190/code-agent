@@ -1096,6 +1096,22 @@ off and the environment kill remains armed until the approved internal-pilot gat
 proof is PR-02 migration reproducibility; do not rename duplicate migration versions before a
 read-only comparison with the real production migration history and schema.
 
+## Package 10E recovery hard stop (2026-08-08)
+
+The 67-migration backup and isolated restore are green and the Builder V2 composition remains
+deployed dark, but Package 10E is **not complete**. Two fixed-ID recovery attempts stopped before
+creating any test data because production PostgREST returned connection-pool 504s; API and service
+logs show the outage also affects unrelated shell background paths and the dark worker. Final
+read-only proof found zero canary residue and unchanged counts (projects/build jobs/published
+sites/deployments `11/31/1/5`, AI requests/usage `188/284`, ledger `67`). All public origins and
+services were healthy at the HTTP/systemd layer, V2 flags remained off, and managed settlement
+remained paused.
+
+No provisiond or Caddy operation occurred during recovery. A diagnostic command exposed one
+Supabase service credential in captured tool output without writing it to the repo/evidence; rotate
+that credential and restore/prove the Data API before retrying the canary. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-CANARY-RECOVERY.md`.
+
 ## Important boundaries
 
 - Browser: publishable Supabase key only.
