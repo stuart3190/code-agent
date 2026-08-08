@@ -162,3 +162,11 @@ test("Package 13 capability runtime validates models and blocks managed dispatch
   const dispatch = runtime.indexOf("return await finishJob(client, job, action, await execute(action, job, client))");
   assert.ok(pauseGuard > 0 && dispatch > pauseGuard, "managed pause must be checked before capability provider dispatch");
 });
+
+test("a no-migration dark deploy inherits only validated immutable ledger provenance", () => {
+  const source = readFileSync(new URL("../../ops/create-deployment-manifest.mjs", import.meta.url), "utf8");
+  assert.match(source, /validateDeploymentIdentity/);
+  assert.match(source, /previous-manifest/);
+  assert.match(source, /previous\.migrationLedgerCount/);
+  assert.match(source, /previous\.migrationLedgerSha256/);
+});
