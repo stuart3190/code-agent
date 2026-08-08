@@ -235,3 +235,12 @@ and corresponding live objects have been compared.
   Bound capability packages are included in scoped retrieval, and persistent project knowledge
   is loaded into both contract generation and patch prompts through the existing knowledge-store
   seam. No model call or provider credit was used to prove these paths.
+## Package 13 provider and billing closure (2026-08-08)
+
+Package 13 replaces independent model strings with one executable `lane:provider:model` identity.
+Manual selections can no longer substitute credentials or billing lanes, Builder V2 routing rejects
+non-catalogue candidates, every dispatch remains reservation-first, per-step ceilings fail before
+reservation/dispatch, and ambiguous provider outcomes become `provider_replay_unsafe`. BYOK and
+Codex settlements retain usage evidence without managed availability reads/debits; managed
+settlement remains paused. The exact catalogue is in `docs/PROVIDER-MODEL-CATALOGUE.md`; the deferred
+legacy Edge Function credential transition is in `docs/LEGACY-SERVICE-KEY-MIGRATION.md`.

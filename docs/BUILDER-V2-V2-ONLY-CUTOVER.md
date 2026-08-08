@@ -118,7 +118,7 @@ or Package 12 completion claim.
 | 10. Production V2 orphan reconciliation | complete 2026-08-08; bounded archive/cleanup and FK preflight green | no runtime-integrity bypass | no | yes |
 | 11. Dark V2 composition deploy and zero-model production canary | complete 2026-08-08; Package 10E/10E-F green | installed through migration 68 | no | yes, test-owner only |
 | 12. Platform launch blockers | complete 2026-08-08; all 12A-12G production proofs and post-migration isolated restore green | `20260808180841`, `20260808180845` | no | yes, test-owner only |
-| 13. Provider/billing closure and executable model catalogue | pending | none expected beyond package 2 | no initially | synthetic/test-owner |
+| 13. Provider/billing closure and executable model catalogue | in progress 2026-08-08; deterministic catalogue/lane/reservation/failure proofs green, production canary pending | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | pending explicit approval | no | yes | internal projects/provider calls |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |

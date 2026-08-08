@@ -1191,3 +1191,13 @@ starts with zero-model synthetic proofs and does not authorise managed settlemen
   it never receives the platform service role or encryption key.
 - Imported Buildr generation routes remain in the server temporarily for compatibility but are not
   linked from the Thrallo UI. Remove them as the standalone control plane absorbs shared needs.
+## Package 13 provider/billing closure (2026-08-08)
+
+Builder V2 now has one executable model catalogue and canonical `lane:provider:model` identity.
+Managed OpenAI, provider-specific BYOK (OpenAI/Anthropic/Gemini/xAI), and connected Codex allowance
+are distinct lanes; manual selection cannot cross them and invalid environment model ids fail
+closed. Provider failures carry explicit dispatch state: only proven pre-dispatch/rejected work may
+retry, partial usage settles once, and ambiguous dispatch is held as `provider_replay_unsafe`.
+Per-step ceilings fail before dispatch. Managed settlement remains paused. The five Edge Functions
+still use the legacy service-role environment variable; their new-secret-key transition is planned
+but not executed in `docs/LEGACY-SERVICE-KEY-MIGRATION.md`.
