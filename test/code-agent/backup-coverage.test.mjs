@@ -445,6 +445,8 @@ test("systemd units and the runbook ship with the repository", async () => {
   const timer = await readFile(new URL("../../ops/thrallo-backup.timer", import.meta.url), "utf8");
   assert.match(timer, /OnCalendar=/);
   assert.match(timer, /Persistent=true/);
+  const restoreMode = execFileSync("git", ["ls-files", "-s", "ops/run-latest-isolated-restore-drill.sh"], { encoding: "utf8" });
+  assert.match(restoreMode, /^100755 /, "the systemd restore entrypoint must be executable in the release archive");
   const runbook = await readFile(new URL("../../docs/DISASTER-RECOVERY.md", import.meta.url), "utf8");
   assert.match(runbook, /PLATFORM_ENC_KEY/);
   assert.match(runbook, /restore-thrallo\.mjs/);
