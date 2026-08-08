@@ -23,10 +23,9 @@ import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 import {
   EPHEMERAL_RUNTIME_TABLES,
-  PRODUCTION_PUBLIC_TABLES_70,
-  PRODUCTION_PUBLIC_TABLES_70_SHA256,
   findCatalogCoverageGaps,
   prepareRowsForBackup,
+  runtimeCatalogEvidence,
   sha256Lines,
 } from "./lib/runtimeBackupSchema.mjs";
 
@@ -255,26 +254,30 @@ async function main() {
     bytes: 0,
   };
 
+  const ledger = await loadMigrationLedgerEvidence();
+  const evidence = runtimeCatalogEvidence(ledger.migrations?.length);
   const catalog = await loadLiveCatalog(svc);
-  const coverage = findCatalogCoverageGaps(catalog, CA_TABLES, EPHEMERAL_RUNTIME_TABLES);
+  const backupTables = CA_TABLES.filter((table) => catalog.includes(table));
+  const coverage = findCatalogCoverageGaps(catalog, backupTables, EPHEMERAL_RUNTIME_TABLES);
   if (coverage.missingFromBackup.length || coverage.missingFromCatalog.length) {
     throw new Error(`live catalog / backup manifest mismatch: ${JSON.stringify(coverage)}`);
   }
   const catalogHash = sha256Lines(catalog);
-  if (catalog.length !== PRODUCTION_PUBLIC_TABLES_70.length || catalogHash !== PRODUCTION_PUBLIC_TABLES_70_SHA256) {
-    throw new Error(`live catalog differs from the approved 70-migration catalog: count=${catalog.length} sha256=${catalogHash}`);
+  if (catalog.length !== evidence.tables.length || catalogHash !== evidence.tablesSha256) {
+    throw new Error(`live catalog differs from the approved ${evidence.migrationCount}-migration catalog: count=${catalog.length} sha256=${catalogHash}`);
   }
   manifest.catalogCoverage = {
     source: "thrallo_public_tables RPC",
     tables: catalog.length,
     names: catalog,
+    excluded: EPHEMERAL_RUNTIME_TABLES.filter((table) => catalog.includes(table)),
     sha256: catalogHash,
     missingFromBackup: [],
     missingFromCatalog: [],
   };
   console.log(`  live catalog: ${catalog.length} canonical tables, complete backup coverage (${catalogHash})`);
 
-  for (const table of CA_TABLES) {
+  for (const table of backupTables) {
     const rows = prepareRowsForBackup(table, await dumpTable(svc, table));
     const gz = gzipSync(JSON.stringify(rows));
     await writeFile(path.join(dir, `${table}.json.gz`), gz);
@@ -364,10 +367,6 @@ async function main() {
   };
   manifest.bytes += filesystemDirectoriesGz.length;
 
-  const ledger = await loadMigrationLedgerEvidence();
-  if (!Array.isArray(ledger.migrations) || ledger.migrations.length !== 70) {
-    throw new Error(`migration ledger evidence must contain exactly 70 rows (found ${ledger.migrations?.length ?? "invalid"})`);
-  }
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);
   manifest.files["migration_ledger.json.gz"] = { bytes: ledgerGz.length, sha256: sha256(ledgerGz) };

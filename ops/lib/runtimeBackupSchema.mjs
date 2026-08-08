@@ -37,6 +37,14 @@ export const PRODUCTION_PUBLIC_TABLES_70 = Object.freeze([
 export const PRODUCTION_PUBLIC_TABLES_70_SHA256 =
   "ea98285c5aa1a7f0c8fcde38790c379aac4418d5f6f0250373a86635577ced5c";
 export const EPHEMERAL_RUNTIME_TABLES = Object.freeze(["http_rate_limit_buckets"]);
+export const PRODUCTION_PUBLIC_TABLES_68 = Object.freeze(PRODUCTION_PUBLIC_TABLES_70.filter((table) =>
+  !["data_erasure_events", "data_erasure_jobs", "http_rate_limit_buckets"].includes(table)));
+export const PRODUCTION_PUBLIC_TABLES_68_SHA256 =
+  "aa975762e8d4c9dac1bb4da3f25c385025876ef541f5e3637c35b7148b451d73";
+export const PRODUCTION_PUBLIC_TABLES_69 = Object.freeze(PRODUCTION_PUBLIC_TABLES_70.filter((table) =>
+  table !== "http_rate_limit_buckets"));
+export const PRODUCTION_PUBLIC_TABLES_69_SHA256 =
+  "ef88486af70c561af24030058ce1d1392f90bf32e3bc614f8664767eadb6ef0d";
 
 // Distinct child->parent table pairs from pg_constraint. Composite constraints are represented
 // once because this list validates restore ordering, while PostgreSQL remains the authority for
@@ -86,6 +94,26 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_70 = Object.freeze([
 
 export const PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256 =
   "5b3a759507cf89247e387ab08256ae0a6e230bde0866da7c37a946841f2c2f77";
+export const PRODUCTION_PUBLIC_FK_PAIRS_68 = Object.freeze(PRODUCTION_PUBLIC_FK_PAIRS_70.filter((pair) =>
+  pair !== "data_erasure_events->data_erasure_jobs"));
+export const PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256 =
+  "2b9a0e622e191ace556179b2d6837ed158e6f5fa42b65ce3664a68f8fd3b3bc2";
+
+export function runtimeCatalogEvidence(migrationCount) {
+  if (Number(migrationCount) === 68) return {
+    migrationCount: 68, tables: PRODUCTION_PUBLIC_TABLES_68, tablesSha256: PRODUCTION_PUBLIC_TABLES_68_SHA256,
+    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_68, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256,
+  };
+  if (Number(migrationCount) === 69) return {
+    migrationCount: 69, tables: PRODUCTION_PUBLIC_TABLES_69, tablesSha256: PRODUCTION_PUBLIC_TABLES_69_SHA256,
+    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  };
+  if (Number(migrationCount) === 70) return {
+    migrationCount: 70, tables: PRODUCTION_PUBLIC_TABLES_70, tablesSha256: PRODUCTION_PUBLIC_TABLES_70_SHA256,
+    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  };
+  throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
+}
 
 // Nullable links which participate in a real cycle or point forward in RESTORE_ORDER. They are
 // restored as null and patched after all rows exist. No FK is disabled or weakened.

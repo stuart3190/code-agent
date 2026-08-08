@@ -14,12 +14,16 @@ import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs"
 import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
 import {
   EPHEMERAL_RUNTIME_TABLES,
+  PRODUCTION_PUBLIC_FK_PAIRS_68,
   PRODUCTION_PUBLIC_FK_PAIRS_70,
+  PRODUCTION_PUBLIC_TABLES_68,
+  PRODUCTION_PUBLIC_TABLES_69,
   PRODUCTION_PUBLIC_TABLES_70,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
   findCatalogCoverageGaps,
   prepareRowsForBackup,
+  runtimeCatalogEvidence,
   validateGeneratedProjectIds,
   validateRestoreOrder,
   validateRuntimeBackupLinks,
@@ -338,6 +342,16 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   });
   assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_70, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
+});
+
+test("backup/restore recognizes the pre-Package-12 ledger without weakening the 70-migration catalog", () => {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
+  assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
+  assert.equal(PRODUCTION_PUBLIC_TABLES_69.length, 85);
+  assert.equal(runtimeCatalogEvidence(69).tables.length, 85);
+  assert.equal(runtimeCatalogEvidence(70).tables.length, 86);
+  assert.throws(() => runtimeCatalogEvidence(71), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {

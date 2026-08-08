@@ -20,13 +20,10 @@ import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
 import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
 import {
-  PRODUCTION_PUBLIC_FK_PAIRS_70,
-  PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
-  PRODUCTION_PUBLIC_TABLES_70,
-  PRODUCTION_PUBLIC_TABLES_70_SHA256,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
   sha256Lines,
+  runtimeCatalogEvidence,
   validateRestoreOrder,
 } from "./lib/runtimeBackupSchema.mjs";
 
@@ -169,16 +166,17 @@ export function prepareRowsForRestore(table, rows, deferredPatches = []) {
   return deferred.rows;
 }
 
-export function assertCurrentRestoreDependencyGraph() {
-  const graphHash = sha256Lines(PRODUCTION_PUBLIC_FK_PAIRS_70);
-  if (PRODUCTION_PUBLIC_FK_PAIRS_70.length !== 84 || graphHash !== PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256) {
-    throw new Error(`70-migration FK evidence is corrupt: count=${PRODUCTION_PUBLIC_FK_PAIRS_70.length} sha256=${graphHash}`);
+export function assertCurrentRestoreDependencyGraph(migrationCount = 70, order = RESTORE_ORDER) {
+  const evidence = runtimeCatalogEvidence(migrationCount);
+  const graphHash = sha256Lines(evidence.fkPairs);
+  if (graphHash !== evidence.fkPairsSha256) {
+    throw new Error(`${migrationCount}-migration FK evidence is corrupt: count=${evidence.fkPairs.length} sha256=${graphHash}`);
   }
-  const validation = validateRestoreOrder(RESTORE_ORDER);
+  const validation = validateRestoreOrder(order, evidence.fkPairs);
   if (validation.missingTables.length || validation.violations.length) {
     throw new Error(`restore dependency order is invalid: ${JSON.stringify(validation)}`);
   }
-  return { pairs: PRODUCTION_PUBLIC_FK_PAIRS_70.length, sha256: graphHash };
+  return { pairs: evidence.fkPairs.length, sha256: graphHash };
 }
 
 async function main() {
@@ -189,22 +187,25 @@ async function main() {
   }
   const confirm = process.argv.includes("--confirm");
 
-  const dependencyGraph = assertCurrentRestoreDependencyGraph();
-  console.log(`restore dependency graph: ${dependencyGraph.pairs} FK pairs (${dependencyGraph.sha256})`);
-
   const validation = await validateBackupDirectory(dir);
+  const migrationCount = Number(validation.migrationLedger?.migrations);
+  const evidence = runtimeCatalogEvidence(migrationCount);
+  const activeOrder = RESTORE_ORDER.filter((table) => table in validation.tables);
+  const dependencyGraph = assertCurrentRestoreDependencyGraph(migrationCount, activeOrder);
+  console.log(`restore dependency graph: ${dependencyGraph.pairs} FK pairs (${dependencyGraph.sha256})`);
   console.log(`backup validated: ${validation.files} files`);
   if (validation.catalogCoverage) {
-    if (validation.catalogCoverage.tables !== PRODUCTION_PUBLIC_TABLES_70.length
-      || validation.catalogCoverage.sha256 !== PRODUCTION_PUBLIC_TABLES_70_SHA256) {
-      throw new Error("backup catalog evidence is not the approved 70-migration production catalog");
+    if (validation.catalogCoverage.tables !== evidence.tables.length
+      || validation.catalogCoverage.sha256 !== evidence.tablesSha256) {
+      throw new Error(`backup catalog evidence is not the approved ${migrationCount}-migration production catalog`);
     }
     console.log(`backup catalog coverage: ${validation.catalogCoverage.tables} tables (${validation.catalogCoverage.sha256})`);
   }
   for (const [table, count] of Object.entries(validation.tables)) {
     console.log(`  ${table}: ${count} rows`);
   }
-  const missing = RESTORE_ORDER.filter((table) => !(table in validation.tables));
+  const excluded = new Set(validation.catalogCoverage?.excluded || []);
+  const missing = evidence.tables.filter((table) => !excluded.has(table) && !(table in validation.tables));
   if (missing.length) throw new Error(`backup is missing tables: ${missing.join(", ")}`);
 
   if (!confirm) {
@@ -232,7 +233,7 @@ async function main() {
   console.log(`auth users: ${users.length} ensured (passwords must be reset)`);
 
   const deferredPatches = [];
-  for (const table of RESTORE_ORDER) {
+  for (const table of activeOrder) {
     let rows = await loadRows(dir, table);
     rows = prepareRowsForRestore(table, rows, deferredPatches);
     await insertRows(svc, table, rows);

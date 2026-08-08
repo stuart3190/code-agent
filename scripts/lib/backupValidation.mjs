@@ -52,7 +52,8 @@ export async function validateBackupDirectory(dir) {
     }
     const digest = createHash("sha256").update([...names].sort().join("\n")).digest("hex");
     if (digest !== manifest.catalogCoverage.sha256) throw new Error("catalog coverage checksum mismatch");
-    const absent = names.filter((table) => !(table in tables));
+    const excluded = new Set(manifest.catalogCoverage.excluded || []);
+    const absent = names.filter((table) => !excluded.has(table) && !(table in tables));
     if (absent.length) throw new Error(`catalog tables missing from backup manifest: ${absent.join(", ")}`);
   }
 
