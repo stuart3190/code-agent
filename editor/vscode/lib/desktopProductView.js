@@ -6,6 +6,7 @@
 const { renderPreview, previewStyles } = require("./previewView.js");
 const { renderDeployments, deploymentStyles } = require("./deploymentView.js");
 const { renderSettings, settingsStyles } = require("./settingsView.js");
+const { renderCompanion, companionStyles } = require("./companionView.js");
 
 function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
   if (!state || state.source !== "fixture") throw new TypeError("D9 view requires fixture-backed desktop state");
@@ -19,11 +20,12 @@ function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
             : current === "preview" ? renderPreview(state.preview, escapeHtml, escapeAttribute, humanize)
               : current === "deployments" || current === "domains" ? renderDeployments(state.deployment, escapeHtml, escapeAttribute, humanize)
               : ["settings", "database", "integrations"].includes(current) ? renderSettings(state.settings, current, escapeHtml, escapeAttribute, humanize)
+                : current === "companion" ? renderCompanion(state.companion, escapeHtml, escapeAttribute, humanize)
               : renderHome(state);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escapeAttribute(cspSource)} 'unsafe-inline'; script-src 'nonce-${escapeAttribute(nonce)}'; img-src data: ${escapeAttribute(cspSource)}; frame-src 'self' http://127.0.0.1:* http://localhost:*;">
-<style>${styles()}${previewStyles()}${deploymentStyles()}${settingsStyles()}</style></head>
+<style>${styles()}${previewStyles()}${deploymentStyles()}${settingsStyles()}${companionStyles()}</style></head>
 <body><a class="skip-link" href="#main">Skip to Thrallo content</a>
 <div class="shell">
   <aside class="sidebar" aria-label="Thrallo navigation">
@@ -204,7 +206,7 @@ function renderNotices(notices) {
 
 function emptyState(title, detail) { return `<div class="empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p></div>`; }
 
-function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget", preview: "Application preview", deployments: "Deployments and releases", domains: "Domains and health", settings: "Settings", database: "Database and Supabase", integrations: "External integrations" })[id] || "Thrallo"; }
+function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget", preview: "Application preview", deployments: "Deployments and releases", domains: "Domains and health", settings: "Settings", database: "Database and Supabase", integrations: "External integrations", companion: "Companion" })[id] || "Thrallo"; }
 function humanize(value) { return String(value ?? "unknown").replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : date.toISOString().slice(0, 10); }
 function formatDuration(seconds) { const minutes = Math.floor(seconds / 60); return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`; }
@@ -232,6 +234,14 @@ document.addEventListener('click',(event)=>{const button=event.target.closest('b
  else if(button.dataset.databasePreview)vscode.postMessage({type:'settingsAction',action:{type:'preview_database_change',changeId:button.dataset.databasePreview}});
  else if(button.dataset.integrationInspect)vscode.postMessage({type:'settingsAction',action:{type:'integration_action',integrationId:button.dataset.integrationInspect,actionId:'inspect'}});
  else if(button.dataset.settingsAction)vscode.postMessage({type:'settingsAction',action:{type:button.dataset.settingsAction}});
+ else if(button.dataset.companionNav)vscode.postMessage({type:'companionAction',action:{type:'navigate',destination:button.dataset.companionNav}});
+ else if(button.dataset.companionPlan)vscode.postMessage({type:'companionAction',action:{type:'plan_decision',decision:button.dataset.companionPlan,planId:button.dataset.planId,comment:document.getElementById('companion-plan-comment')?.value||'',confirmed:true}});
+ else if(button.dataset.companionAgent)vscode.postMessage({type:'companionAction',action:{type:'agent_control',agentId:button.dataset.companionAgent,control:button.dataset.companionControl}});
+ else if(button.dataset.companionAlert)vscode.postMessage({type:'companionAction',action:{type:'mark_alert_read',alertId:button.dataset.companionAlert}});
+ else if(button.dataset.companionCapability)vscode.postMessage({type:'companionAction',action:{type:'request_capability',capability:button.dataset.companionCapability}});
+ else if(button.dataset.companionDeployment)vscode.postMessage({type:'companionAction',action:{type:'deployment_action',operation:'review_action',actionId:button.dataset.companionDeployment}});
+ else if(button.dataset.companionConfirm)vscode.postMessage({type:'companionAction',action:{type:'deployment_action',operation:'confirm_action',actionId:button.dataset.companionConfirm,confirmed:true}});
+ else if(button.dataset.companionPortal)vscode.postMessage({type:'companionPortal',destination:button.dataset.companionPortal});
  else if(button.dataset.planDecision)vscode.postMessage({type:'planDecision',decision:button.dataset.planDecision,planId:button.dataset.planId,comment:document.getElementById('plan-comment')?.value||''});
  else if(button.dataset.agentControl)vscode.postMessage({type:'agentControl',agentId:button.dataset.agent,control:button.dataset.agentControl});
  else if(button.dataset.portal)vscode.postMessage({type:'portal',destination:button.dataset.portal});
@@ -249,8 +259,10 @@ document.getElementById('deployment-log-filter')?.addEventListener('submit',(eve
 document.getElementById('log-follow')?.addEventListener('change',(event)=>vscode.postMessage({type:'deploymentAction',action:{type:'toggle_log_follow',follow:event.target.checked}}));
 const deploymentDialog=document.querySelector('.deployment-review');if(deploymentDialog){deploymentDialog.close();deploymentDialog.showModal();deploymentDialog.querySelector('button')?.focus();}
 const settingsDialog=document.querySelector('.settings-dialog');if(settingsDialog){settingsDialog.close();settingsDialog.showModal();settingsDialog.querySelector('button')?.focus();}
+const companionDialog=document.querySelector('.companion-dialog');if(companionDialog){companionDialog.close();companionDialog.showModal();companionDialog.querySelector('button')?.focus();}
 document.getElementById('secret-form')?.addEventListener('submit',(event)=>{event.preventDefault();const form=new FormData(event.target);vscode.postMessage({type:'settingsAction',action:{type:form.get('operation')==='replace'?'replace_secret':'create_secret',name:form.get('name'),secretClass:form.get('secretClass'),value:form.get('value')}});event.target.reset();});
 document.getElementById('environment-preview-form')?.addEventListener('submit',(event)=>{event.preventDefault();const form=new FormData(event.target);vscode.postMessage({type:'settingsAction',action:{type:'preview_environment_variable',key:form.get('key'),environment:form.get('environment'),secret:form.get('secret')==='on'}});});
+document.getElementById('companion-instruction-form')?.addEventListener('submit',(event)=>{event.preventDefault();const field=document.getElementById('companion-instruction');const text=field?.value||'';vscode.postMessage({type:'companionAction',action:{type:'send_instruction',text}});if(field)field.value='';});
 document.querySelectorAll('[data-preference-id]').forEach((input)=>input.addEventListener('change',(event)=>vscode.postMessage({type:'settingsAction',action:{type:'update_preference',preferenceId:event.target.dataset.preferenceId,value:event.target.checked}})));
 function previewAction(action,command){return ({start:{type:'start_preview',commandId:command,userInitiated:true},restart:{type:'restart_preview',commandId:command,userInitiated:true},stop:{type:'stop_preview'},reload:{type:'reload_preview'},back:{type:'history_back'},forward:{type:'history_forward'},screenshot:{type:'capture_screenshot'},tests:{type:'run_tests'},'cancel-tests':{type:'cancel_tests'},rotate:{type:'rotate_viewport'},'reset-viewport':{type:'reset_viewport'},'clear-diagnostics':{type:'clear_diagnostics',kind:'all'},'copy-diagnostics':{type:'copy_diagnostics'},external:{type:'open_external'}})[action]||{type:'unsupported'};}
 function deploymentAction(action){return ({load_older_logs:{type:'load_older_logs'},cancel_review:{type:'cancel_review'},copy_dns_instructions:{type:'copy_dns_instructions'},export:{type:'export_fixture'}})[action]||{type:'unsupported'};}`;

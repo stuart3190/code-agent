@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "package": "D14-foundation",
+  "observedAt": "2026-08-09",
+  "classification": "fixture-companion-and-portal-handoff-foundation",
+  "items": [
+    {
+      "id": "portal-responsibility-model",
+      "category": "contract-verified",
+      "state": "machine-readable-fixed-boundary",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Portal authority and desktop workbench responsibilities are disjoint and machine-readable; portal-owned purchase, recovery, credential, and account workflows are not duplicated."
+    },
+    {
+      "id": "portal-handoff",
+      "category": "local-runtime-verified",
+      "state": "fixed-origin-allowlisted-system-browser",
+      "runtimeVerified": true,
+      "fixtureVerified": true,
+      "claim": "The native host opens only approved token-free app.thrallo.com destinations; devices, project status and cloud launch remain integration pending."
+    },
+    {
+      "id": "shared-companion-presentation",
+      "category": "fixture-verified",
+      "state": "D3-D9-D10-D11-D12-adapter",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Companion summaries adapt account, plan, agent, build, preview, deployment, usage and integration contracts from their existing owners without a second business model."
+    },
+    {
+      "id": "companion-controls",
+      "category": "fixture-verified",
+      "state": "explicit-typed-fixture-delegation",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Instructions, plan decisions, agent controls, alerts and high-impact reviews operate only through deterministic fixture delegates and require fresh state and explicit typed confirmation where applicable."
+    },
+    {
+      "id": "responsive-touch-presentation",
+      "category": "renderer-verified",
+      "state": "responsive-simulation-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "The shared renderer defines and tests mobile-small, mobile-large, tablet-portrait, tablet-landscape and narrow-desktop rules with 44px touch targets; browser-layout and real-device qualification remain unverified."
+    },
+    {
+      "id": "production-companion",
+      "category": "future-integration",
+      "state": "blocked",
+      "runtimeVerified": false,
+      "fixtureVerified": false,
+      "claim": "Production companion transport, mobile app, push notifications, portal return exchange, cloud launch and Builder V2 mutations remain unimplemented."
+    }
+  ],
+  "visualVerification": {
+    "renderer": "loopback-hosted-real-D9-D10-D11-D12-D14-controller-and-view",
+    "loopbackHttpStatus": 200,
+    "widths": [360, 430, 768, 1024, 600],
+    "scenarios": [
+      "companion-home",
+      "project-activity",
+      "plan-approval",
+      "active-build",
+      "failed-build",
+      "parallel-agents",
+      "preview",
+      "deployment",
+      "usage-warning",
+      "billing-recovery-account"
+    ],
+    "requiredSurfaceMarkersVerified": true,
+    "responsiveRulesVerified": true,
+    "responsiveReflowVerified": false,
+    "responsiveReflowBlocker": "The in-app Browser could not attach, so no browser-layout or screenshot proof is claimed.",
+    "inAppBrowserScreenshot": false,
+    "inAppBrowserBlocker": "The in-app Browser controller rejected the local inspection session because required sandbox policy metadata was unavailable.",
+    "actualElectronWorkbench": false,
+    "actualElectronBlocker": "The isolated compiled Code OSS/Electron development workbench checkout remains unavailable.",
+    "realDeviceVerified": false,
+    "productionAccessUsed": false,
+    "cleanup": "The owned loopback renderer is stopped and port 43124 is verified closed before commit."
+  },
+  "negativeClaims": {
+    "productionPortalRouteChange": false,
+    "productionMutation": false,
+    "mobileApplication": false,
+    "pushNotificationService": false,
+    "cloudWorkspaceLaunch": false,
+    "builderV2Mutation": false,
+    "duplicatedBusinessLogic": false,
+    "buildr101RuntimeReuse": false
+  }
+}

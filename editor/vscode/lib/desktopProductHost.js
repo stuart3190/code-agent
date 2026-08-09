@@ -13,6 +13,7 @@ const { createLocalPreviewRuntime } = require("./previewLocalRuntime.js");
 const { safeLocalPreviewUrl, safeRelativeFile } = require("./previewFoundation.js");
 const { createDeploymentLocalExportAdapter } = require("./deploymentLocalExport.js");
 const { HANDOFFS, redactSensitive } = require("./settingsFoundation.js");
+const { createCompanionPortalHandoff } = require("./companionFoundation.js");
 
 const HOST_ACTIONS = Object.freeze(["openLocalFolder", "openLocalGit", "importLocal"]);
 
@@ -25,6 +26,7 @@ function createDesktopProductHost({
   previewScenario = "preview-idle",
   deploymentScenario = "live-healthy",
   settingsScenario = "supabase-healthy",
+  companionScenario = "first-companion-launch",
   client: injectedClient = null,
 } = {}) {
   if (!vscode || !context || !localWorkspaceHost) throw new TypeError("D9 host requires Code OSS, extension context, and the D8 local workspace host");
@@ -32,6 +34,7 @@ function createDesktopProductHost({
   let controller = null;
   let client = injectedClient;
   let portal = null;
+  let companionPortal = null;
   let localPreviewRuntime = null;
 
   async function initialize() {
@@ -51,8 +54,12 @@ function createDesktopProductHost({
       deploymentScenario,
       deploymentExportAdapter,
       settingsScenario,
+      companionScenario,
     });
     portal ||= client.createPortalHandoff({
+      openExternal: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
+    });
+    companionPortal ||= createCompanionPortalHandoff({
       openExternal: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
     });
     return controller;
@@ -119,6 +126,12 @@ function createDesktopProductHost({
     }
     if (message.type === "settingsAction") return dispatchAndRender({ type: "settings_action", action: message.action });
     if (message.type === "settingsHandoff") return openSettingsHandoff(String(message.destination || ""));
+    if (message.type === "companionAction") return dispatchAndRender({ type: "companion_action", action: message.action });
+    if (message.type === "companionPortal") {
+      const result = await companionPortal.open(String(message.destination || ""));
+      if (!result.ok) { render(); return result; }
+      return Object.freeze({ ok: true, state: "system_browser_opened", destination: result.destination, pathname: result.pathname });
+    }
     if (message.type === "sendMessage") return dispatchAndRender({ type: "send_message", text: message.text });
     if (message.type === "planDecision") return dispatchAndRender({ type: "plan_decision", planId: message.planId, decision: message.decision, comment: message.comment });
     if (message.type === "agentControl") return dispatchAndRender({ type: "agent_control", agentId: message.agentId, control: message.control });
@@ -213,12 +226,13 @@ function createDesktopProductHost({
       vscode.commands.registerCommand("thrallo.openPreview", () => open("preview")),
       vscode.commands.registerCommand("thrallo.openDeployments", () => open("deployments")),
       vscode.commands.registerCommand("thrallo.openThralloSettings", () => open("settings")),
+      vscode.commands.registerCommand("thrallo.openCompanion", () => open("companion")),
       Object.freeze({ dispose: () => { localPreviewRuntime?.cleanup().catch(() => {}); } }),
     ];
   }
 
   function log(message) { output?.appendLine?.(`[desktop] ${message}`); }
-  return Object.freeze({ initialize, open, handleMessage, registerCommands, getController: () => controller, getPanel: () => panel, getLocalPreviewRuntime: () => localPreviewRuntime });
+  return Object.freeze({ initialize, open, handleMessage, registerCommands, getController: () => controller, getPanel: () => panel, getLocalPreviewRuntime: () => localPreviewRuntime, getCompanionPortal: () => companionPortal });
 }
 
 async function loadSharedClient(extensionRoot) {

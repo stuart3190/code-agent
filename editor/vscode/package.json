@@ -113,6 +113,10 @@
         "title": "Thrallo: Open Settings and Integrations"
       },
       {
+        "command": "thrallo.openCompanion",
+        "title": "Thrallo: Open Companion Foundation"
+      },
+      {
         "command": "thrallo.local.openFolder",
         "title": "Thrallo: Open Local Folder"
       },

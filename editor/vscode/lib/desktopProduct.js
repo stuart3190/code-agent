@@ -7,6 +7,7 @@ const { D9_FIXTURE_CLOCK, D9_FIXTURE_SEED, createD9FixtureActionProvider, getD9S
 const { createPreviewController } = require("./previewFoundation.js");
 const { createDeploymentController } = require("./deploymentFoundation.js");
 const { createSettingsController } = require("./settingsFoundation.js");
+const { createCompanionController } = require("./companionFoundation.js");
 
 const D9_STATE_KEY = "thrallo.desktopProduct.d9.v1";
 const NAVIGATION_ITEMS = Object.freeze([
@@ -26,6 +27,7 @@ const NAVIGATION_ITEMS = Object.freeze([
   Object.freeze({ id: "settings", label: "Settings", kind: "thrallo", enabled: true, package: "D12" }),
   Object.freeze({ id: "database", label: "Database", kind: "thrallo", enabled: true, package: "D12" }),
   Object.freeze({ id: "integrations", label: "Integrations", kind: "thrallo", enabled: true, package: "D12" }),
+  Object.freeze({ id: "companion", label: "Companion", kind: "thrallo", enabled: true, package: "D14" }),
   Object.freeze({ id: "visual_editor", label: "Visual Editor", kind: "future", enabled: false, state: "integration_pending", package: "D13" }),
 ]);
 
@@ -67,6 +69,7 @@ async function createDesktopProductController({
   deploymentScenario = "live-healthy",
   deploymentExportAdapter = null,
   settingsScenario = "supabase-healthy",
+  companionScenario = "first-companion-launch",
 } = {}) {
   assertDependencies(client, localRegistry);
   const definition = getD9Scenario(scenario);
@@ -139,6 +142,7 @@ async function createDesktopProductController({
     preview: previewController.snapshot(),
     deployment: deploymentController.snapshot(),
     settings: settingsController.snapshot(),
+    companion: null,
     notices: createNotices(definition, access),
     lastAction: null,
     integration: {
@@ -150,6 +154,20 @@ async function createDesktopProductController({
       providerSource: "deterministic_fixture",
     },
   };
+
+  const companionController = createCompanionController({
+    scenario: companionScenario,
+    seed: `${seed}:companion`,
+    getSharedState: () => state,
+    dispatchShared: async (action) => {
+      if (action.type === "send_message") return sendMessage(action.text);
+      if (action.type === "plan_decision") return decidePlan(action);
+      if (action.type === "agent_control") return controlAgent(action);
+      if (action.type === "deployment_action") return (await deploymentController.dispatch(action.action)).result;
+      return unavailable("capability_unavailable", action.type);
+    },
+  });
+  state.companion = companionController.snapshot();
 
   async function dispatch(action) {
     if (!action || typeof action.type !== "string") throw new TypeError("D9 action requires an explicit type");
@@ -167,11 +185,13 @@ async function createDesktopProductController({
     else if (action.type === "open_preview") result = await openPreview(action.projectId);
     else if (action.type === "deployment_action") result = (await deploymentController.dispatch(action.action)).result;
     else if (action.type === "settings_action") result = (await settingsController.dispatch(action.action)).result;
+    else if (action.type === "companion_action") result = (await companionController.dispatch(action.action)).result;
     else throw new TypeError(`Unsupported D9 action: ${action.type}`);
     state.preview = previewController.snapshot();
     state.deployment = deploymentController.snapshot();
     state.settings = settingsController.snapshot();
     state.projects = createProjectLauncher(unwrap(projectsResult, []), recentWorkspaces, state.deployment);
+    state.companion = companionController.snapshot();
     state.lastAction = Object.freeze({ sequence: actionSequence, type: action.type, result });
     await persist();
     return Object.freeze({ result, state: snapshot() });
@@ -295,6 +315,7 @@ async function createDesktopProductController({
       preview: previewController.getCalls(),
       deployment: deploymentController.getCalls(),
       settings: settingsController.getCalls(),
+      companion: companionController.getCalls(),
     });
   }
   async function persist() {
@@ -312,7 +333,7 @@ async function createDesktopProductController({
   }
 
   await persist();
-  return Object.freeze({ dispatch, snapshot, getCalls, providerSuite, accessFixture, previewController, deploymentController, settingsController });
+  return Object.freeze({ dispatch, snapshot, getCalls, providerSuite, accessFixture, previewController, deploymentController, settingsController, companionController });
 }
 
 function createProjectLauncher(fixtureProjects, recent, deploymentState) {
