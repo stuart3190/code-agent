@@ -397,3 +397,22 @@ test("14R worker authority carries preview configuration without logging secret 
   assert.match(authority, /previewAuthorityPresent/);
   assert.doesNotMatch(authority, /console\.log\([^\n]*(?:PROVISIOND_TOKEN|source\.values)/);
 });
+
+test("14R cleanup tears down isolated previews before erasing qualification projects", async () => {
+  const runner = await readFile(new URL("../../ops/run-package14r-live-requalification.mjs", import.meta.url), "utf8");
+  const stop = runner.indexOf("await previews.stop(project.id)");
+  const erase = runner.indexOf("await eraseProjectPermanently", stop);
+  assert.ok(stop > 0 && erase > stop);
+  assert.match(runner, /previewStops/);
+});
+
+test("14R dark-worker restore removes qualification authority and restores the narrow allowlist", async () => {
+  const restore = await readFile(new URL("../../ops/restore-package14-worker-dark.mjs", import.meta.url), "utf8");
+  for (const name of ["CODE_AGENT_STORE", "PLATFORM_ENC_KEY", "BYOK_ENC_KEY",
+    "PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
+    assert.match(restore, new RegExp(`\\"${name}\\"`));
+  }
+  assert.match(restore, /THRALLO_BUILD_JOB_TYPES=proof_slow,publish_package/);
+  assert.match(restore, /rename\(temporary, targetPath\)/);
+  assert.doesNotMatch(restore, /console\.log\([^\n]*(?:target|readFile)/);
+});

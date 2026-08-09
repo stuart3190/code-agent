@@ -14,6 +14,7 @@ import { buildProjectErasureManifest, eraseProjectPermanently } from "../shell/s
 import { createSnapshotStore } from "../shell/server/lib/builderV2/snapshotStore.mjs";
 import { supabaseSnapshotStorage } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
+import { previewProvider } from "../shell/server/preview/index.mjs";
 
 loadEnv();
 process.env.THRALLO_BUILD_WORKER_ENABLED = "1"; // this operator process only
@@ -249,7 +250,13 @@ async function archiveRepairedTreeIdentityFailure(state) {
 
 async function cleanup(state) {
   const reports = [];
+  const previewStops = [];
+  const previews = previewProvider();
   for (const project of Object.values(state.projects)) {
+    // Qualification temporarily grants the dark worker isolated-preview authority. Tear down
+    // that external runtime before deleting its database parent; the erasure manifest cannot
+    // prove a preview container that lives behind provisiond has disappeared.
+    previewStops.push({ projectId: project.id, ...(await previews.stop(project.id)) });
     const manifest = await buildProjectErasureManifest(state.owner, project.id, { client });
     reports.push(await eraseProjectPermanently(state.owner, project.id, {
       client, approvedManifestSha256: manifest.manifestSha256,
@@ -258,9 +265,9 @@ async function cleanup(state) {
   const surviving = unwrap(await client.from("projects").select("id").eq("owner", state.owner)
     .in("id", Object.values(state.projects).map((project) => project.id)), "cleanup verification") || [];
   if (surviving.length) throw new Error("Package 14R project cleanup left survivors");
-  state.cleanup = { at: new Date().toISOString(), reports, projectSurvivors: 0 };
+  state.cleanup = { at: new Date().toISOString(), reports, previewStops, projectSurvivors: 0 };
   await save(state);
-  await emit("cleanup_complete", { projects: reports.length, projectSurvivors: 0 });
+  await emit("cleanup_complete", { projects: reports.length, previewStops, projectSurvivors: 0 });
 }
 
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
