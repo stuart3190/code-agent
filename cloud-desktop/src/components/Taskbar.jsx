@@ -3,6 +3,15 @@ import { applicationRegistry } from "../apps/registry.js";
 import { storageFixtures } from "../fixtures/data.js";
 import { AppIcon } from "./AppIcon.jsx";
 
+const connectionLabels = {
+  connected: "Workspace connected",
+  reconnecting: "Workspace reconnecting",
+  offline: "Offline · layout preserved",
+  recovered: "Workspace recovered",
+  unavailable: "Workspace unavailable",
+  ready: "Workspace ready",
+};
+
 export function Taskbar({ state, actions, viewportMode }) {
   const storage = storageFixtures[state.storageState];
   const runningCount = Object.values(state.windows).filter((windowState) => windowState.isOpen).length;
@@ -39,9 +48,9 @@ export function Taskbar({ state, actions, viewportMode }) {
         </button>
         <div className="status-spacer" />
         <div className="system-status running-status"><AppWindow /><span>{runningCount} {runningCount === 1 ? "app" : "apps"} running</span></div>
-        <div className={`system-status connection-${state.connection}`}><CloudCheck /><span>{state.connection === "offline" ? "Offline · recovery ready" : "Workspace connected"}</span></div>
+        <div className={`system-status connection-${state.connection}`}><CloudCheck /><span>{connectionLabels[state.connection] ?? "Workspace status unavailable"}</span></div>
         <button className={`system-status storage-status tone-${storage.tone}`} onClick={() => actions.open("storage")}><HardDrive /><span>{storage.used} GB of {storage.total} GB</span></button>
-        <button className="account-status" onClick={() => actions.open("settings")}><UserCircle size={24} weight="duotone" /><span>Taylor</span></button>
+        <button className="account-status" aria-label="Open account settings for Taylor" onClick={() => actions.open("settings")}><UserCircle size={24} weight="duotone" /><span>Taylor</span></button>
       </footer>
     </>
   );

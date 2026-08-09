@@ -12,6 +12,7 @@ import { DesktopShortcuts } from "./components/DesktopShortcuts.jsx";
 import { ModalLayer } from "./components/ModalLayer.jsx";
 import { Taskbar } from "./components/Taskbar.jsx";
 import { WindowFrame } from "./components/WindowFrame.jsx";
+import { WorkspaceLifecycleOverlay } from "./components/WorkspaceLifecycleOverlay.jsx";
 import { useDesktop } from "./hooks/useDesktop.js";
 import { createFixtureProvider } from "./providers/fixtureProvider.js";
 
@@ -45,22 +46,22 @@ export default function App() {
         event.preventDefault();
         actions.close(state.focusedApplication);
       }
-      if (event.altKey && event.key === "ArrowLeft" && state.focusedApplication) {
+      if (viewportMode === "desktop" && event.altKey && event.key === "ArrowLeft" && state.focusedApplication) {
         event.preventDefault();
         actions.snap(state.focusedApplication, "left");
       }
-      if (event.altKey && event.key === "ArrowRight" && state.focusedApplication) {
+      if (viewportMode === "desktop" && event.altKey && event.key === "ArrowRight" && state.focusedApplication) {
         event.preventDefault();
         actions.snap(state.focusedApplication, "right");
       }
-      if (event.altKey && event.key === "ArrowUp" && state.focusedApplication) {
+      if (viewportMode === "desktop" && event.altKey && event.key === "ArrowUp" && state.focusedApplication) {
         event.preventDefault();
         actions.snap(state.focusedApplication, "maximize");
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [actions, state.focusedApplication]);
+  }, [actions, state.focusedApplication, viewportMode]);
 
   const notice = (title, message, tone = "info") => actions.setModal({ title, message, tone });
 
@@ -81,13 +82,15 @@ export default function App() {
           {Object.values(state.windows).sort((left, right) => left.zIndex - right.zIndex).map((windowState) => {
             const Component = applicationComponents[windowState.applicationId];
             return (
-              <WindowFrame key={windowState.applicationId} windowState={windowState} active={state.focusedApplication === windowState.applicationId} viewportMode={viewportMode} actions={actions}>
+              <WindowFrame key={windowState.applicationId} windowState={windowState} active={state.focusedApplication === windowState.applicationId} viewportMode={viewportMode} viewport={state.viewport} actions={actions}>
                 <Component state={state} actions={actions} storageState={state.storageState} onFixtureNotice={notice} />
               </WindowFrame>
             );
           })}
         </div>
+        {state.snapPreview && <div className={`snap-preview snap-${state.snapPreview}`} data-snap-preview={state.snapPreview} aria-hidden="true" />}
       </div>
+      <WorkspaceLifecycleOverlay lifecycle={state.lifecycle} actions={actions} />
       <Launcher open={state.launcherOpen} windows={state.windows} actions={actions} />
       <Taskbar state={state} actions={actions} viewportMode={viewportMode} />
       <ModalLayer modal={state.modal} onClose={() => actions.setModal(null)} />

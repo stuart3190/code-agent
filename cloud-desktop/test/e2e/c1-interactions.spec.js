@@ -104,10 +104,10 @@ test("window focus, minimize, restore, maximize, snap, close, drag and resize", 
   const titleBox = await titlebar.boundingBox();
   await page.mouse.move(titleBox.x + 180, titleBox.y + 20);
   await page.mouse.down();
-  await page.mouse.move(titleBox.x + 245, titleBox.y + 65);
+  await page.mouse.move(titleBox.x + 80, titleBox.y + 65);
   await page.mouse.up();
   const afterDrag = await browserWindow.boundingBox();
-  expect(afterDrag.x).toBeGreaterThan(beforeDrag.x + 30);
+  expect(afterDrag.x).toBeLessThan(beforeDrag.x - 30);
 
   const resizeHandle = page.getByTestId("resize-browser");
   const resizeBox = await resizeHandle.boundingBox();

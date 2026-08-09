@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer } from "react";
 import { createDesktopState, desktopReducer } from "../state/desktopReducer.js";
-import { clearDesktopState, loadPersistedDesktopState, saveDesktopState } from "../state/persistence.js";
+import { clearDesktopState, loadPersistedDesktopSession, saveDesktopState } from "../state/persistence.js";
 
 function currentViewport() {
   if (typeof window === "undefined") return { width: 1440, height: 900 };
@@ -14,11 +14,14 @@ export function getViewportMode(width) {
 }
 
 export function useDesktop({ storage = typeof window === "undefined" ? null : window.localStorage } = {}) {
-  const [state, dispatch] = useReducer(desktopReducer, null, () => createDesktopState({
-    scenarioId: new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("scenario") ?? "normal-active",
-    viewport: currentViewport(),
-    persisted: loadPersistedDesktopState(storage),
-  }));
+  const [state, dispatch] = useReducer(desktopReducer, null, () => {
+    const persisted = loadPersistedDesktopSession(storage);
+    return createDesktopState({
+      scenarioId: new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("scenario") ?? "normal-active",
+      viewport: currentViewport(),
+      persisted: persisted.state,
+    });
+  });
 
   useEffect(() => {
     const handleResize = () => dispatch({ type: "SET_VIEWPORT", viewport: currentViewport() });
@@ -39,6 +42,9 @@ export function useDesktop({ storage = typeof window === "undefined" ? null : wi
     close: (applicationId) => dispatch({ type: "CLOSE_APP", applicationId }),
     move: (applicationId, x, y) => dispatch({ type: "MOVE_APP", applicationId, x, y }),
     resize: (applicationId, width, height) => dispatch({ type: "RESIZE_APP", applicationId, width, height }),
+    resizeEdge: (applicationId, edge, deltaX, deltaY) => dispatch({ type: "RESIZE_APP", applicationId, edge, deltaX, deltaY }),
+    restoreForMove: (applicationId) => dispatch({ type: "RESTORE_FOR_MOVE", applicationId }),
+    setSnapPreview: (mode) => dispatch({ type: "SET_SNAP_PREVIEW", mode }),
     moveDesktopShortcut: (applicationId, x, y) => dispatch({ type: "MOVE_DESKTOP_SHORTCUT", applicationId, x, y }),
     toggleLauncher: (open) => dispatch({ type: "TOGGLE_LAUNCHER", open }),
     setModal: (modal) => dispatch({ type: "SET_MODAL", modal }),
@@ -47,6 +53,7 @@ export function useDesktop({ storage = typeof window === "undefined" ? null : wi
     setReduceMotion: (value) => dispatch({ type: "SET_REDUCE_MOTION", value }),
     setTaskbarLabels: (value) => dispatch({ type: "SET_TASKBAR_LABELS", value }),
     setWorkspaceName: (value) => dispatch({ type: "SET_WORKSPACE_NAME", value }),
+    setLifecycle: (lifecycle, connection, announcement) => dispatch({ type: "SET_LIFECYCLE", lifecycle, connection, announcement }),
     loadScenario: (scenarioId) => {
       clearDesktopState(storage);
       dispatch({ type: "LOAD_SCENARIO", scenarioId });

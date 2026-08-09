@@ -17,8 +17,16 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "c1-chromium",
+      name: "cloud-chromium",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1024 } },
+    },
+    {
+      name: "cloud-firefox",
+      use: { ...devices["Desktop Firefox"], viewport: { width: 1440, height: 1024 } },
+    },
+    {
+      name: "cloud-webkit",
+      use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 1024 } },
     },
   ],
   webServer: {

@@ -14,7 +14,8 @@ async function capture(page, name) {
   await page.screenshot({ path: path.join(evidenceDirectory, `${name}.png`), fullPage: true, animations: "disabled" });
 }
 
-test("@visual captures all required browser-rendered C1 review states", async ({ page }) => {
+test("@visual captures all required browser-rendered C1 review states", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.includes("chromium"), "C1 screenshots are captured once in Chromium");
   await page.goto("/");
 
   await setScenario(page, "first-launch");

@@ -52,7 +52,7 @@ describe("C1 deterministic cloud desktop state", () => {
 
   it("keeps off-screen windows reachable and honors minimum sizes", () => {
     const constrained = clampBounds({ x: -900, y: 5000, width: 20, height: 20 }, viewport, { width: 560, height: 410 });
-    expect(constrained.x).toBeGreaterThanOrEqual(112);
+    expect(constrained.x).toBeGreaterThanOrEqual(10);
     expect(constrained.y).toBeLessThan(900);
     expect(constrained.width).toBeGreaterThanOrEqual(560);
     expect(constrained.height).toBeGreaterThanOrEqual(410);

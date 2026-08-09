@@ -1,0 +1,40 @@
+{
+  "package": "C2",
+  "baselineCommit": "88471d842ef2809b0fbe41e7577956a35fa1d613",
+  "productBoundary": "fixture-only browser cloud desktop shell",
+  "verifiedAt": "2026-08-09",
+  "tests": {
+    "unit": { "passed": 17, "failed": 0 },
+    "chromium": { "passed": 23, "failed": 0, "skipped": 0 },
+    "firefox": { "passed": 21, "failed": 0, "skipped": 2, "skipReason": "Chromium-only screenshot capture" },
+    "webkit": { "passed": 21, "failed": 0, "skipped": 2, "skipReason": "Chromium-only screenshot capture" },
+    "accessibilityChromium": { "passed": 2, "failed": 0 },
+    "protectedPathGuard": "passed",
+    "importBoundaryGuard": "passed",
+    "noProductionNetworkGuard": "passed",
+    "productionBuild": "passed"
+  },
+  "performance": {
+    "focusTransitions": 10000,
+    "durationMs": 44.93,
+    "maximumObservedZIndex": 54,
+    "method": "Node reducer benchmark on the C2 implementation; transient pointer movement remains DOM-local until commit"
+  },
+  "visualEvidence": {
+    "renderer": "Playwright Chromium against the actual Vite application",
+    "directory": "evidence/c2/screenshots",
+    "count": 13,
+    "manuallyInspected": [
+      "01-normal-desktop.png",
+      "03-left-snap.png",
+      "09-tablet-portrait.png",
+      "11-mobile-app-switcher.png"
+    ],
+    "staticMockups": false
+  },
+  "network": {
+    "requiredOrigin": "http://127.0.0.1:4174",
+    "externalRequests": 0,
+    "backendProviders": []
+  }
+}
