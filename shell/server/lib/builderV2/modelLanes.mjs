@@ -454,6 +454,7 @@ export function createModelLanes({
   billingLane = "connected_allowance", recordRetrieval = null, accountCreditResolver = null,
   strictKnowledge = false,
   maxOutputTokens = 16_000,
+  maxRepairs = 2,
 }) {
   if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
@@ -512,11 +513,13 @@ export function createModelLanes({
             model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
             reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
             accountAvailableCredits,
+            maxRepairs,
             metadata: {
               routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
               budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
             },
           });
+          assertModelDispatchAcquired(hold);
           let turn;
           try {
             turn = await selected.provider.runTurn.call(selected.provider, {
@@ -675,6 +678,16 @@ export function createModelLanes({
       return call.arguments.patches;
     },
   };
+}
+
+/** Final provider boundary: only the process that atomically acquired this durable hold may call. */
+export function assertModelDispatchAcquired(hold) {
+  if (hold?.acquired === false) {
+    throw Object.assign(new Error("Builder V2 refused a replayed provider dispatch"), {
+      code: "provider_replay_unsafe", reservationId: hold.id,
+    });
+  }
+  return hold;
 }
 
 function totalUsageShape(usage) {

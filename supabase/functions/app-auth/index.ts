@@ -38,7 +38,9 @@
 // the platform's verify_jwt gate; per-user auth is what this function IS, so there is no user JWT yet.
 
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
-import { UUID_RE, requestOrigin, originIsEligible, hmacHex } from "./policy.mjs";
+import {
+  UUID_RE, requestOrigin, originIsEligible, projectPreviewOriginIsEligible, hmacHex,
+} from "./policy.mjs";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -85,6 +87,7 @@ async function eligibleApplication(appId: string, origin: string | null): Promis
   if (!UUID_RE.test(appId) || !origin) return false;
   const { data: project, error } = await svc.from("projects").select("id,preview_ref").eq("id", appId).maybeSingle();
   if (error || !project) return false;
+  if (projectPreviewOriginIsEligible(origin, appId)) return true;
   if (originIsEligible(origin, { previewRef: project.preview_ref })) return true;
   const { data: site } = await svc.from("published_sites").select("url,slug,unpublished_at")
     .eq("project_id", appId).maybeSingle();

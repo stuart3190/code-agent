@@ -138,7 +138,7 @@ function clientChain(rows, nextId) {
 // does. The first live run died on this gap between the permissive memory fake and prod.
 const BUILD_COLUMNS = new Set([
   "owner", "project_id", "profile", "request", "state", "budget_credits", "spent_credits",
-  "contract_id", "final_snapshot", "error", "started_at", "finished_at",
+  "contract_id", "final_snapshot", "error", "started_at", "finished_at", "max_repair_dispatches",
 ]);
 function strictBuildStore() {
   const rows = new Map();

@@ -35,6 +35,18 @@ export function originIsEligible(origin, { previewRef = null, site = null, domai
   return false;
 }
 
+/** Match provisiond's deterministic preview label without requiring preview_ref to exist yet. */
+export function projectPreviewOriginIsEligible(origin, projectId, {
+  suffixes = ["preview.thrallo.com", "preview.buildr101.com"],
+} = {}) {
+  if (!UUID_RE.test(String(projectId || ""))) return false;
+  try {
+    const hostname = new URL(origin).hostname.toLowerCase();
+    const label = `p${String(projectId).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 48)}`;
+    return suffixes.some((suffix) => hostname === `${label}.${String(suffix).toLowerCase()}`);
+  } catch { return false; }
+}
+
 export async function hmacHex(secret, message) {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);

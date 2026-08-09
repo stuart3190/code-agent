@@ -18,13 +18,47 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null } = {}) {
+/**
+ * Exact anonymous app-session state machine shared by generated browsers and the worker preflight.
+ * Fresh credentials go directly to signup: signin-first is a guaranteed 401 which verification
+ * correctly treats as a failed runtime request. Persisted credentials still recover by signin.
+ */
+export async function ensureAppVisitorSession({
+  auth,
+  appId,
+  storage = globalThis.localStorage,
+  randomUUID = () => globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+} = {}) {
+  if (!auth?.currentUser || !auth?.signIn || !auth?.signUp) {
+    throw new Error("ensureAppVisitorSession: app-scoped auth is required.");
+  }
+  const current = await auth.currentUser().catch(() => null);
+  if (current) return current;
+
+  const key = `visitor-session:${appId || "app"}`;
+  let saved = null;
+  let fresh = false;
+  try { saved = JSON.parse(storage?.getItem?.(key) || "null"); } catch { saved = null; }
+  if (!saved?.email || !saved?.password) {
+    const id = randomUUID();
+    saved = { email: `visitor-${id}@visitor.local`, password: `Visitor-${id}-key` };
+    fresh = true;
+    try { storage?.setItem?.(key, JSON.stringify(saved)); } catch { /* a per-load session still works */ }
+  }
+
+  if (fresh) return auth.signUp(saved);
+  try { return await auth.signIn(saved); } catch { return auth.signUp(saved); }
+}
+
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, fetchImpl = globalThis.fetch } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
     );
   }
-  const client = createClient(url, anonKey);
+  if (typeof fetchImpl !== "function") throw new Error("createSupabaseBackend: a fetch implementation is required.");
+  const client = createClient(url, anonKey, { global: { fetch: fetchImpl } });
 
   // Normalise a Supabase {data,error} reply into a value-or-throw, so app code can
   // `await` and use try/catch instead of threading error objects through the UI.
@@ -38,13 +72,15 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   // app-scoped auth user and returns a REAL session — same email can register in many apps without
   // collision. The session is installed on this client, so db/storage/RLS behave identically.
   const appAuthPost = async (action, payload = {}) => {
-    const res = await fetch(authUrl, {
+    const res = await fetchImpl(authUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}`, apikey: anonKey },
       body: JSON.stringify({ action, appId, ...payload }),
     });
     const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(out.error || `auth ${action} failed (${res.status})`);
+    if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
+      code: "app_auth_request_failed", status: res.status, action,
+    });
     return out;
   };
   // Session-returning actions install the session on this client so db/storage/RLS just work.

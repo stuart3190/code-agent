@@ -319,6 +319,8 @@ export function createBuilderV2Runtime({
       const owner = workJob.owner;
       const projectId = workJob.project_id;
       const input = workJob.payload.input || {};
+      const maxRepairs = Math.max(0, Math.min(10, Number.isInteger(input.maxRepairs)
+        ? input.maxRepairs : 2));
       const mode = workJob.payload.mode || "build";
       const request = String(input.prompt || workJob.payload.request || "");
       const emit = (kind, value) => onEvent?.(kind, typeof value === "string" ? value : JSON.stringify(value));
@@ -418,7 +420,7 @@ export function createBuilderV2Runtime({
       const lanes = createModelLanes({
         providerForStep, ceilingCredits, diag, log: (line) => emit("stdout", line),
         reservations: reservationStore, billingLane: context.policy.billingLane, strictKnowledge: true,
-        recordRetrieval, accountCreditResolver,
+        recordRetrieval, accountCreditResolver, maxRepairs,
       });
       const compile = async (tree, execution = {}) => isolated({
         id: `${workJob.id}-compile-${execution.step || "step"}-${execution.attempt || 0}`,
@@ -504,13 +506,13 @@ export function createBuilderV2Runtime({
       if (mode !== "build" && mode !== "resume_repair") await adoptLegacyTree(owner, projectId, workJob, events);
       const result = mode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
-          budgetCredits: ceilingCredits, signal })
+          budgetCredits: ceilingCredits, maxRepairs, signal })
         : mode === "resume_repair"
           ? await orchestrator.runRepairFromCheckpoint({
             owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract,
-            initialProblems: Array.isArray(input.problems) ? input.problems : [], signal,
+            initialProblems: Array.isArray(input.problems) ? input.problems : [], maxRepairs, signal,
           })
-          : await orchestrator.runEdit({ owner, projectId, request, contract, signal });
+          : await orchestrator.runEdit({ owner, projectId, request, contract, maxRepairs, signal });
 
       if (result.state !== "green") {
         await diag.finish?.(result.state === "cancelled" ? "cancelled" : "failed");

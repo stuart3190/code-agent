@@ -3,10 +3,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
-  UUID_RE, requestOrigin, originIsEligible, hmacHex,
+  UUID_RE, requestOrigin, originIsEligible, projectPreviewOriginIsEligible, hmacHex,
 } from "../../supabase/functions/app-auth/policy.mjs";
 
 const APP_ID = "11111111-1111-4111-8111-111111111111";
+
+test("generated preview identity matches provisiond before preview_ref is written", () => {
+  assert.equal(projectPreviewOriginIsEligible(
+    "https://p11111111111141118111111111111111.preview.thrallo.com", APP_ID,
+  ), true);
+  assert.equal(projectPreviewOriginIsEligible("https://pother.preview.thrallo.com", APP_ID), false);
+  assert.equal(projectPreviewOriginIsEligible("https://evil.example", APP_ID), false);
+});
 
 test("C6 — app ids are canonical UUIDs and request origins are normalized fail-closed", () => {
   assert.equal(UUID_RE.test(APP_ID), true);

@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
-  conservativeCallReservation, estimatePromptTokens, planCallReservation, repairOutputEnvelope,
+  assertModelDispatchAcquired, conservativeCallReservation, estimatePromptTokens,
+  planCallReservation, repairOutputEnvelope,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import {
-  memoryModelReservations, reservationBudget,
+  memoryModelReservations, reservationBudget, supabaseModelReservations,
 } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { creditsForUsage } from "../../src/billing/costModel.mjs";
 
@@ -132,4 +134,100 @@ test("14S only genuinely active holds reduce repair headroom", () => {
   assert.deepEqual(reservationBudget(rows, { owner: "owner", buildId: "build", ceilingCredits: 15 }), {
     approvedCeilingCredits: 15, consumedCredits: 1.991, reservedCredits: 1.5, remainingCredits: 11.509,
   });
+});
+
+const dispatchInput = (overrides = {}) => ({
+  owner: "owner", projectId: "project", buildId: "build", provider: "codex",
+  model: "gpt-5.5", billingLane: "connected_allowance", ceilingCredits: 15,
+  accountAvailableCredits: null, reservedCredits: 1, maxRepairs: 1,
+  ...overrides,
+});
+
+test("14S maxRepairs zero permits no repair provider hold", async () => {
+  const reservations = memoryModelReservations();
+  await assert.rejects(reservations.reserve(dispatchInput({
+    callKey: "repair-1", step: "repair", maxRepairs: 0,
+  })), (error) => error.code === "repair_limit_reached"
+    && error.repairsDispatched === 0 && error.maxRepairs === 0);
+});
+
+test("14S maxRepairs one atomically permits the first repair and rejects the second", async () => {
+  const reservations = memoryModelReservations();
+  const first = await reservations.reserve(dispatchInput({ callKey: "repair-1", step: "repair" }));
+  assert.equal(first.acquired, true);
+  assert.equal(first.repairDispatchCount, 1);
+  await assert.rejects(reservations.reserve(dispatchInput({
+    callKey: "repair-2", step: "repair",
+  })), (error) => error.code === "repair_limit_reached");
+});
+
+test("14S replay of an acquired repair cannot cross the final provider boundary", async () => {
+  const reservations = memoryModelReservations();
+  const input = dispatchInput({ callKey: "repair-replay", step: "repair" });
+  assertModelDispatchAcquired(await reservations.reserve(input));
+  const replay = await reservations.reserve(input);
+  assert.equal(replay.acquired, false);
+  assert.throws(() => assertModelDispatchAcquired(replay), (error) => error.code === "provider_replay_unsafe");
+});
+
+test("14S concurrent repair planners cannot both acquire the last repair slot", async () => {
+  const reservations = memoryModelReservations();
+  const outcomes = await Promise.allSettled([
+    reservations.reserve(dispatchInput({ callKey: "repair-a", step: "repair" })),
+    reservations.reserve(dispatchInput({ callKey: "repair-b", step: "repair" })),
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "rejected"
+    && outcome.reason.code === "repair_limit_reached").length, 1);
+});
+
+test("14S released pre-dispatch repair returns the slot while settled usage consumes it", async () => {
+  const reservations = memoryModelReservations();
+  const first = await reservations.reserve(dispatchInput({ callKey: "repair-first", step: "repair" }));
+  await reservations.release("owner", first.id);
+  const retry = await reservations.reserve(dispatchInput({ callKey: "repair-retry", step: "repair" }));
+  assert.equal(retry.acquired, true, "a proven before-dispatch release is retry-safe");
+  await reservations.settle("owner", retry.id, { actualCredits: 0.4, usage: { input: 1, output: 1 } });
+  await assert.rejects(reservations.reserve(dispatchInput({
+    callKey: "repair-after-settlement", step: "repair",
+  })), (error) => error.code === "repair_limit_reached");
+});
+
+test("14S contract and core calls never consume the canonical repair allowance", async () => {
+  const reservations = memoryModelReservations();
+  await reservations.reserve(dispatchInput({ callKey: "contract", step: "contract" }));
+  await reservations.reserve(dispatchInput({ callKey: "core", step: "core" }));
+  const repair = await reservations.reserve(dispatchInput({ callKey: "repair", step: "repair" }));
+  assert.equal(repair.repairDispatchCount, 1);
+});
+
+test("14S Supabase reservation adapter uses the atomic v2 dispatch authority", async () => {
+  const calls = [];
+  const client = { rpc: async (name, args) => {
+    calls.push({ name, args });
+    return { data: { acquired: true, repair_dispatch_count: 1, max_repairs: 1,
+      reservation: { id: "r1", owner: "owner", project_id: "project", build_id: "build",
+        call_key: "repair-key", step: "repair", provider: "codex", model: "gpt-5.5",
+        billing_lane: "connected_allowance", state: "held", reserved_credits: 1 } }, error: null };
+  } };
+  const row = await supabaseModelReservations(client).reserve(dispatchInput({
+    callKey: "repair-key", step: "repair",
+  }));
+  assert.equal(calls[0].name, "reserve_bv2_model_call_v2");
+  assert.equal(row.acquired, true);
+  assert.equal(row.repairDispatchCount, 1);
+  assert.equal(row.maxRepairs, 1);
+});
+
+test("14S additive migration pins and atomically enforces the durable repair count", async () => {
+  const sql = await readFile(new URL(
+    "../../supabase/migrations/20260809155622_bv2_repair_dispatch_limit.sql", import.meta.url,
+  ), "utf8");
+  assert.match(sql, /add column max_repair_dispatches integer not null default 2/i);
+  assert.match(sql, /pg_advisory_xact_lock/i);
+  assert.match(sql, /r\.step = 'repair'[\s\S]+r\.state in \('held', 'settled'\)/i);
+  assert.match(sql, /errcode = 'P14R1'/i);
+  assert.match(sql, /'code', 'repair_limit_reached'/i);
+  assert.match(sql, /revoke execute on function public\.reserve_bv2_model_call\([\s\S]+from service_role/i);
+  assert.match(sql, /grant execute on function public\.reserve_bv2_model_call_v2/i);
 });

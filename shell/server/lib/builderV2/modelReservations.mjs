@@ -42,6 +42,7 @@ export function reservationBudget(rows, { owner, buildId, ceilingCredits }) {
 
 export function memoryModelReservations() {
   const rows = new Map();
+  const repairLimits = new Map();
   let serial = 0;
   return {
     async budget(owner, buildId, ceilingCredits) {
@@ -49,14 +50,33 @@ export function memoryModelReservations() {
     },
     async reserve(input) {
       const key = `${input.owner}:${input.buildId}:${input.callKey}`;
+      const buildKey = `${input.owner}:${input.buildId}`;
+      const requestedLimit = Number.isInteger(input.maxRepairs) ? input.maxRepairs : 2;
+      if (!repairLimits.has(buildKey)) repairLimits.set(buildKey, requestedLimit);
+      const maxRepairs = repairLimits.get(buildKey);
+      if (maxRepairs !== requestedLimit) {
+        throw Object.assign(new Error("Builder V2 repair limit changed after build creation"), {
+          code: "repair_limit_identity_conflict", maxRepairs, requestedLimit,
+        });
+      }
       const existing = rows.get(key);
       if (existing) {
         const same = ["projectId", "step", "provider", "model", "billingLane", "reservedCredits"]
           .every((field) => existing[field] === input[field]);
         if (!same) throw new Error("Builder V2 call key was reused with different reservation identity");
-        return existing;
+        if (existing.state !== "released") return { ...existing, acquired: false,
+          repairDispatchCount: [...rows.values()].filter((row) => row.owner === input.owner
+            && row.buildId === input.buildId && row.step === "repair"
+            && ["held", "settled"].includes(row.state)).length, maxRepairs };
       }
       const siblings = [...rows.values()].filter((row) => row.owner === input.owner && row.buildId === input.buildId);
+      const repairDispatchCount = siblings.filter((row) => row.step === "repair"
+        && ["held", "settled"].includes(row.state)).length;
+      if (input.step === "repair" && repairDispatchCount >= maxRepairs) {
+        throw Object.assign(new Error("Builder V2 repair provider-call limit reached"), {
+          code: "repair_limit_reached", repairsDispatched: repairDispatchCount, maxRepairs,
+        });
+      }
       const spent = siblings.filter((row) => row.state === "settled").reduce((sum, row) => sum + row.actualCredits, 0);
       const held = siblings.filter((row) => row.state === "held").reduce((sum, row) => sum + row.reservedCredits, 0);
       if (spent + held + input.reservedCredits > input.ceilingCredits) {
@@ -76,9 +96,11 @@ export function memoryModelReservations() {
           });
         }
       }
-      const row = { id: `reservation-${++serial}`, state: "held", actualCredits: null, ...input };
+      const row = existing || { id: `reservation-${++serial}`, actualCredits: null, ...input };
+      Object.assign(row, { state: "held", releasedAt: null });
       rows.set(key, row);
-      return row;
+      return { ...row, acquired: true,
+        repairDispatchCount: repairDispatchCount + (input.step === "repair" ? 1 : 0), maxRepairs };
     },
     async settle(owner, id, { actualCredits, usage = {}, providerRequestIds = [] }) {
       const row = [...rows.values()].find((candidate) => candidate.id === id && candidate.owner === owner);
@@ -114,7 +136,10 @@ export function memoryModelReservations() {
 
 export function supabaseModelReservations(client = serviceClient()) {
   const unwrap = ({ data, error }, action) => {
-    if (error) throw Object.assign(new Error(`${action}: ${error.message}`), { code: error.code });
+    if (error) throw Object.assign(new Error(`${action}: ${error.message}`), {
+      code: error.code === "P14R1" ? "repair_limit_reached" : error.code,
+      databaseCode: error.code,
+    });
     return data;
   };
   return {
@@ -126,7 +151,7 @@ export function supabaseModelReservations(client = serviceClient()) {
       return reservationBudget(rows, { owner, buildId, ceilingCredits });
     },
     async reserve(input) {
-      const row = unwrap(await client.rpc("reserve_bv2_model_call", {
+      const result = unwrap(await client.rpc("reserve_bv2_model_call_v2", {
         p_owner: input.owner, p_project_id: input.projectId, p_build_id: input.buildId,
         p_call_key: input.callKey, p_step: input.step, p_provider: input.provider,
         p_model: input.model, p_billing_lane: input.billingLane,
@@ -134,10 +159,14 @@ export function supabaseModelReservations(client = serviceClient()) {
         p_account_available_credits: input.accountAvailableCredits ?? null,
         p_metadata: input.metadata || {},
       }), "reserve Builder V2 model call");
+      const row = result.reservation;
       return {
         ...row, buildId: row.build_id, projectId: row.project_id, callKey: row.call_key,
         billingLane: row.billing_lane, reservedCredits: Number(row.reserved_credits),
         actualCredits: row.actual_credits == null ? null : Number(row.actual_credits),
+        acquired: result.acquired === true,
+        repairDispatchCount: Number(result.repair_dispatch_count || 0),
+        maxRepairs: Number(result.max_repairs),
       };
     },
     async settle(owner, id, { actualCredits, usage = {}, providerRequestIds = [] }) {

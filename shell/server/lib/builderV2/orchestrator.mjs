@@ -333,10 +333,12 @@ export function createOrchestrator({
   }
 
   return {
-    async runBuild({ owner, projectId, request, profile = "simple", budgetCredits = null, userCritical = [], signal = null }) {
+    async runBuild({ owner, projectId, request, profile = "simple", budgetCredits = null,
+      maxRepairs = maxJourneyRepairs, userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile, request, state: "created",
-        budget_credits: budgetCredits, started_at: new Date().toISOString(),
+        budget_credits: budgetCredits, max_repair_dispatches: maxRepairs,
+        started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "build" });
       // Only REAL bv2_builds columns reach the store; everything else is return-value only
@@ -576,10 +578,10 @@ export function createOrchestrator({
      * replayed. The checkpoint remains unpromoted unless the repaired journeys become green.
      */
     async runRepairFromCheckpoint({ owner, projectId, sourceBuildId, request, contract,
-      initialProblems = [], userCritical = [], signal = null }) {
+      initialProblems = [], maxRepairs = 1, userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "repair", request, state: "created",
-        started_at: new Date().toISOString(),
+        max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_repair", sourceBuildId });
       const finish = async (state, extra = {}) => {
@@ -637,10 +639,11 @@ export function createOrchestrator({
      * atomically. A failed edit promotes nothing — the prior green keeps serving. No
      * contract call, no asset search: everything persistent is simply resumed.
      */
-    async runEdit({ owner, projectId, request, contract, userCritical = [], signal = null }) {
+    async runEdit({ owner, projectId, request, contract, maxRepairs = maxJourneyRepairs,
+      userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
-        started_at: new Date().toISOString(),
+        max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "edit" });
       const finish = async (state, extra = {}) => {

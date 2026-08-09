@@ -179,7 +179,7 @@ async function runLifecycle(state, { stage, mode, prompt, ceiling, v2Input = nul
     budgetAllowance: approved, byokCostLimit: approved, pipelineVersion: "v2",
     manualModel: null, routingMode: "auto",
     providerSelection: { provider: "codex", billingLane: "connected_allowance", manualModel: null },
-    v2Input,
+    v2Input: { maxRepairs: 1, ...(v2Input || {}) },
   });
   if (existing) throw new Error(`unexpected active build ${job.id}`);
   state.stages[stage] = { startedAt, publicBuildId: job.id, workJobId: job.workJobId,
