@@ -208,7 +208,7 @@ test("14R booking wizard persists review, confirmation and reload state without 
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
 });
 
-test("14R failed verification resumes the exact working tree without replaying contract/core", async () => {
+test("14R failed verification resumes the exact non-promotable candidate without replaying contract/core", async () => {
   const contract = {
     summary: "checkpoint fixture", entities: [], operations: [], routes: [{ path: "/", name: "Home" }], auth: {},
     journeys: [{ id: "headline", title: "Headline", priority: "primary",
@@ -260,7 +260,7 @@ test("14R failed verification resumes the exact working tree without replaying c
   assert.equal(coreCalls, 1, "core generation is never replayed");
   assert.equal(repairCalls, 1);
   assert.equal((await snapshotStore.pointer("owner", "project", "green")), repaired.snapshotId);
-  assert.equal((await snapshotStore.getSnapshot(source.snapshotId)).reason, "working:core");
+  assert.match((await snapshotStore.getSnapshot(source.snapshotId)).reason, /^candidate:core:/);
 });
 
 test("14R repair dispatch selects the durable checkpoint when a new project has no green snapshot", async () => {

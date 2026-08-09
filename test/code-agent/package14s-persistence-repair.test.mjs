@@ -168,6 +168,7 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
   const snapshots = createSnapshotStore();
   const patchCalls = [];
   const checkpoints = [];
+  const timeline = [];
   let contractCalls = 0;
   let compileCalls = 0;
   const orchestrator = createOrchestrator({
@@ -188,8 +189,11 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
     snapshotStore: snapshots, buildStore: memoryBuildStore(), baseTree: () => fromScaffold(REACT_VITE),
     baseline: REACT_VITE,
     compile: async () => { compileCalls += 1; return { ok: true }; },
-    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({ ...journey, status: "pass" })) }),
-    events: { checkpoint: async (event) => checkpoints.push(event) },
+    journeysFn: async ({ journeys }) => {
+      timeline.push("browser-verification");
+      return { journeys: journeys.map((journey) => ({ ...journey, status: "pass" })) };
+    },
+    events: { checkpoint: async (event) => { checkpoints.push(event); timeline.push(`checkpoint:${event.reason}`); } },
   });
   const result = await orchestrator.runBuild({ owner: "owner", projectId: "project", request: "durable booking" });
   assert.equal(result.state, "green", JSON.stringify(result));
@@ -200,6 +204,11 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
   assert.ok(invalid?.snapshot?.id);
   assert.match((await snapshots.getSnapshot(invalid.snapshot.id)).reason, /^candidate:/,
     "the rejected candidate remains immutable and resumable evidence");
+  const finalCandidate = timeline.findIndex((row) => row === "checkpoint:candidate:core:2");
+  const browser = timeline.findIndex((row) => row === "browser-verification");
+  const working = timeline.findIndex((row) => row === "checkpoint:working:core");
+  assert.ok(finalCandidate >= 0 && browser > finalCandidate && working > browser,
+    `candidate must remain non-promotable through browser verification: ${timeline.join(" -> ")}`);
   assert.doesNotMatch(result.state === "green" ? correctedBookingFlow : retainedBookingFlow,
     /localStorage|sessionStorage|indexedDB/);
 });

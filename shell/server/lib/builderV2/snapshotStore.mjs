@@ -187,7 +187,8 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
     },
 
     /**
-     * Advance an immutable candidate's metadata only after every deterministic/compile gate passes.
+     * Advance an immutable candidate's metadata only after deterministic, compile and browser
+     * verification gates pass.
      * Bytes and manifest never change. A candidate cannot be pointed at while this transition is
      * pending; a reused previously-qualified snapshot is returned unchanged.
      */

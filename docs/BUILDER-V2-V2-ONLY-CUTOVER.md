@@ -216,6 +216,8 @@ generation plan, rejects browser/process-local durable state with exact AST find
 compilation, and persists a non-promotable immutable `candidate:*` checkpoint after structural
 validation. One bounded repair can resume that candidate with only the offending file, relevant
 interfaces, journey contract and validator evidence; contract/core generation is not replayed.
+The candidate remains non-promotable through compile and browser verification and advances to
+`working:*` only after those gates pass.
 The retained two-`sessionStorage` booking shape is rejected, repaired and then passes a real Vite
 compile while the final persistence gate remains strict. Focused proof passed 7/7, stage/persistence
 compatibility passed 69/69, and the relevant V2 suite passed 357/357 with zero provider calls.

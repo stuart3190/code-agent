@@ -310,12 +310,8 @@ export function createOrchestrator({
           await events.checkpoint?.({ owner, projectId, buildId, snapshot: qualifiedCandidate,
             tree: gate.tree, reason: `candidate:${step}:${attempt}:corrected`, promotable: false });
         }
-        const snapshot = await snapshotStore.markCandidateValidated(owner, projectId, qualifiedCandidate.id,
-          { reason: checkpointReason });
-        await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: gate.tree,
-          reason: checkpointReason, promotable: false });
-        return { ok: true, tree: gate.tree, snapshot, candidateSnapshotId: latestCandidate.id,
-          repairUsed: !!repairScope };
+        return { ok: true, tree: gate.tree, snapshot: qualifiedCandidate,
+          candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope };
       }
       const gateProblems = gate.layers.d0d2.problems || [];
       const signature = problemSignature(gateProblems);
@@ -408,6 +404,7 @@ export function createOrchestrator({
           workingSnapshotId: core.candidateSnapshotId || null });
         tree = core.tree;
         workingSnapshot = core.snapshot;
+        let workingReason = "working:core";
 
         // 4. verify essential journeys (differential), then the C4 eligibility decision —
         //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
@@ -447,6 +444,7 @@ export function createOrchestrator({
           if (!repair.ok) break;
           tree = repair.tree;
           workingSnapshot = repair.snapshot;
+          workingReason = `working:repair:${round}`;
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
             journeys: essentialJourneys, tree, snapshotId: null, signal });
           backendRowFailures = backendProbeFn ? await backendProbeFn({
@@ -461,7 +459,12 @@ export function createOrchestrator({
           workingSnapshotId: workingSnapshot?.id || null,
         });
 
-        // 5. The verified core remains an immutable working checkpoint until the full contract passes.
+        // 5. Only browser-verified candidates advance to working:* metadata. Until here the
+        // immutable candidate remains explicitly non-promotable.
+        workingSnapshot = await snapshotStore.markCandidateValidated(owner, projectId, workingSnapshot.id,
+          { reason: workingReason });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree,
+          reason: workingReason, promotable: false });
         const coreSnapshot = workingSnapshot;
         if (!coreSnapshot) throw new Error("verified core has no durable working checkpoint");
         log(`core verified: working snapshot ${coreSnapshot.id}`);
@@ -495,12 +498,15 @@ export function createOrchestrator({
               workingSnapshot = increment.snapshot;
               candidate = workingSnapshot;
               await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot,
-                tree: increment.tree, reason: `working:${step}:red` });
+                tree: increment.tree, reason: workingSnapshot.reason, promotable: false });
             }
-            log(`${step}: required journey remains red; retained only as a working checkpoint`);
+            log(`${step}: required journey remains red; retained only as a candidate checkpoint`);
             continue;
           }
-          const snapshot = increment.snapshot;
+          const snapshot = await snapshotStore.markCandidateValidated(owner, projectId, increment.snapshot.id,
+            { reason: `working:${step}` });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: increment.tree,
+            reason: `working:${step}`, promotable: false });
           candidate = snapshot;
           workingSnapshot = snapshot;
           shipped.push(journey.id);
@@ -597,13 +603,17 @@ export function createOrchestrator({
         });
         if (!repair.ok) return finish("blocked", { error: repair.reason, problems: repair.problems,
           workingSnapshotId: source.snapshotId });
-        const checkpoint = repair.snapshot;
+        let checkpoint = repair.snapshot;
         const verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
           journeys: allJourneys, tree: repair.tree, snapshotId: checkpoint.id, signal });
         const eligibility = completionEligibility({ contract, gates: { ok: true },
           journeyResults: { journeys: verdicts.journeys }, blockingErrors: verdicts.blockingErrors });
         if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; "),
           workingSnapshotId: checkpoint.id });
+        checkpoint = await snapshotStore.markCandidateValidated(owner, projectId, checkpoint.id,
+          { reason: "working:resumed-repair" });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: repair.tree, reason: "working:resumed-repair", promotable: false });
         await events.snapshot?.({ owner, projectId, buildId, snapshot: checkpoint,
           tree: repair.tree, reason: "resumed-repair" });
         await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
@@ -667,7 +677,7 @@ export function createOrchestrator({
         });
         if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
 
-        const workingSnapshot = edit.snapshot;
+        let workingSnapshot = edit.snapshot;
 
         // Differential verification over EVERY contract journey: the cache decides what to
         // actually drive. Unchanged owners reuse; changed owners (and prior fails) re-drive.
@@ -682,6 +692,10 @@ export function createOrchestrator({
           workingSnapshotId: workingSnapshot.id,
         });
 
+        workingSnapshot = await snapshotStore.markCandidateValidated(owner, projectId, workingSnapshot.id,
+          { reason: "working:edit" });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot,
+          tree: edit.tree, reason: "working:edit", promotable: false });
         const snapshot = workingSnapshot;
         await events.snapshot?.({ owner, projectId, buildId, snapshot, tree: edit.tree, reason: "edit" });
         await events.knowledge?.({

@@ -1361,6 +1361,8 @@ with exact file/API/journey/owner evidence.
 A structurally valid tree is now stored as immutable, content-addressed, non-promotable
 `candidate:*` state. One narrow repair can resume it using only the offending file, relevant
 interfaces, journey contract and validator findings; contract/core generation is not replayed.
+The candidate stays non-promotable through compile and browser verification, advancing to
+`working:*` only after those gates pass.
 The retained two-`sessionStorage` booking failure is rejected, repaired and passes a real Vite
 compile. Focused proof passed 7/7, stage/persistence compatibility passed 69/69, and the relevant
 V2 suite passed 357/357. No provider call or production action occurred. Another single live

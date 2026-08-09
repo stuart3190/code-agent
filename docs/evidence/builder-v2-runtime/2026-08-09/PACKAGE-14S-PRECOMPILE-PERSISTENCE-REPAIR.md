@@ -62,10 +62,11 @@ After a tree passes structural checks it is stored as an immutable, content-addr
 materialisation-checked and explicitly non-promotable. Cancellation cleanup covers both
 `candidate:*` and `working:*` snapshots.
 
-If the narrow persistence gate passes, the same immutable snapshot is marked `working:*` and can
-continue through compile, browser verification and the separate atomic green promotion. If the
-worker crashes first, repair lookup can resume from the candidate. No mutable `projects.tree`
-authority was introduced.
+The snapshot remains `candidate:*` and non-promotable through persistence, compilation and browser
+verification. Only after those gates pass does its metadata advance to `working:*`; the bytes and
+manifest never change. Atomic green promotion remains a separate final action. If the worker
+crashes first, repair lookup can resume from the candidate. No mutable `projects.tree` authority
+was introduced.
 
 ## Targeted repair boundary
 
@@ -89,6 +90,8 @@ attempt; it does not trigger another full regeneration.
 - Its immutable candidate remains materialisable and cannot be promoted.
 - The orchestrator call sequence is exactly `core -> repair`; contract runs once and the invalid
   candidate never reaches compilation.
+- The repaired candidate remains non-promotable through browser verification and advances to
+  `working:*` only after that verification passes.
 - The repair changes only `BookingFlow.jsx`, removes browser persistence and delegates durable
   state to the existing booking capability.
 - The corrected candidate reaches the compiler and passes a real Vite build.
