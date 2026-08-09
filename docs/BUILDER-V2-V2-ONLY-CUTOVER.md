@@ -211,6 +211,17 @@ was ineligible and no additional call ran. Cleanup and canonical customer parity
 quality remains unqualified and Package 15 remains blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-GRAMMAR-LIVE-QUALIFICATION.md`.
 
+The zero-model pre-compile persistence repair now emits machine-readable storage ownership in the
+generation plan, rejects browser/process-local durable state with exact AST findings before
+compilation, and persists a non-promotable immutable `candidate:*` checkpoint after structural
+validation. One bounded repair can resume that candidate with only the offending file, relevant
+interfaces, journey contract and validator evidence; contract/core generation is not replayed.
+The retained two-`sessionStorage` booking shape is rejected, repaired and then passes a real Vite
+compile while the final persistence gate remains strict. Focused proof passed 7/7, stage/persistence
+compatibility passed 69/69, and the relevant V2 suite passed 357/357 with zero provider calls.
+Package 15 remains blocked pending a separately approved single live strict-quality proof. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-PRECOMPILE-PERSISTENCE-REPAIR.md`.
+
 ## Deterministic qualification gate
 
 The fixture matrix covers landing, contact, CRUD/data, booking, multiple routes, auth/session,

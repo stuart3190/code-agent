@@ -1349,3 +1349,21 @@ deployments, with zero active V2 builds/reservations/worker jobs. Worker authori
 V2 flags are off and managed settlement remains paused. Builder V2 quality is not qualified;
 Package 15 remains blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-GRAMMAR-LIVE-QUALIFICATION.md`.
+
+## Package 14S pre-compile persistence repair passed (2026-08-09)
+
+Durable booking generation now receives a machine-readable storage ownership plan:
+`makeBookingSystem` owns booking persistence, platform-backed `makeWizardMachine` owns recoverable
+wizard state, and UI modules own no durable business state. An AST verdict rejects
+`localStorage`, `sessionStorage`, IndexedDB and fake process-memory durability before compilation
+with exact file/API/journey/owner evidence.
+
+A structurally valid tree is now stored as immutable, content-addressed, non-promotable
+`candidate:*` state. One narrow repair can resume it using only the offending file, relevant
+interfaces, journey contract and validator findings; contract/core generation is not replayed.
+The retained two-`sessionStorage` booking failure is rejected, repaired and passes a real Vite
+compile. Focused proof passed 7/7, stage/persistence compatibility passed 69/69, and the relevant
+V2 suite passed 357/357. No provider call or production action occurred. Another single live
+booking proof is technically justified only under separate approval; Builder V2 quality is not
+yet qualified and Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-PRECOMPILE-PERSISTENCE-REPAIR.md`.
