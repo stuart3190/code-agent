@@ -158,6 +158,43 @@ export function ensureCopilotFreeScripts({ log = () => {} } = {}) {
   return changed;
 }
 
+export function restoreCopilotForDependencyInstall({ log = console.log } = {}) {
+  const workspace = path.join(CHECKOUT_DIR, "extensions", "copilot", "package.json");
+  if (existsSync(workspace)) return false;
+  // desktop/vscode is a disposable, exact-pin checkout. Restore only the
+  // upstream workspace needed by postinstall; no Thrallo source is touched.
+  execFileSync("git", ["restore", "--source=HEAD", "--worktree", "--", "extensions/copilot"], {
+    cwd: CHECKOUT_DIR,
+    stdio: "inherit",
+  });
+  if (!existsSync(workspace)) throw new Error("failed to restore the pinned Copilot workspace for dependency installation");
+  log("restored pinned upstream copilot workspace for dependency installation");
+  return true;
+}
+
+// Dependency restoration must run while every workspace named by upstream's
+// postinstall still exists. Removing extensions/copilot before `npm ci` makes
+// Node report the missing cwd as a misleading `cmd.exe ENOENT` on Windows.
+// Exclusion is therefore a separate, idempotent build-preparation step applied
+// only after dependency installation and immediately before compile/package.
+export function applyCopilotExclusion({ log = console.log } = {}) {
+  rmSync(path.join(CHECKOUT_DIR, "extensions", "copilot"), { recursive: true, force: true });
+  log("removed upstream copilot built-in extension after dependency restore");
+
+  const copilotLibPath = path.join(CHECKOUT_DIR, "build", "lib", "copilot.ts");
+  const copilotLib = readFileSync(copilotLibPath, "utf8");
+  const guard = "\n\tif (!fs.existsSync(builtInCopilotExtensionDir)) { return; } // thrallo: copilot builtin removed";
+  const shimSignature = "export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string, builtInCopilotExtensionDir: string, appNodeModulesDir: string): void {";
+  if (!copilotLib.includes("thrallo: copilot builtin removed")) {
+    if (!copilotLib.includes(shimSignature)) {
+      throw new Error("copilot.ts shim signature changed upstream; update the bootstrap patch");
+    }
+    writeFileSync(copilotLibPath, copilotLib.replace(shimSignature, shimSignature + guard));
+    log("patched build/lib/copilot.ts to tolerate the removed builtin");
+  }
+  ensureCopilotFreeScripts({ log });
+}
+
 export async function prepare({ log = console.log } = {}) {
   const markerPath = path.join(CHECKOUT_DIR, ".thrallo-prepared");
   const expected = overlayHash();
@@ -179,26 +216,8 @@ export async function prepare({ log = console.log } = {}) {
   cpSync(path.join(assets, "thrallo.icns"), path.join(CHECKOUT_DIR, "resources", "darwin", "code.icns"));
   log("icons replaced (win32/linux/darwin)");
 
-  // Thrallo ships its own agent; the upstream copilot built-in is a Microsoft service
-  // integration and its vendored cross-platform binaries also break win32 packaging
-  // (rcedit cannot patch the bundled Linux .node files).
-  rmSync(path.join(CHECKOUT_DIR, "extensions", "copilot"), { recursive: true, force: true });
-  log("removed upstream copilot built-in extension");
-
-  // The packaging pipeline hard-requires the copilot builtin in one place; make that step
-  // tolerate its removal. Idempotent text patch, applied only when the guard is absent.
-  const copilotLibPath = path.join(CHECKOUT_DIR, "build", "lib", "copilot.ts");
-  const copilotLib = readFileSync(copilotLibPath, "utf8");
-  const guard = "\n\tif (!fs.existsSync(builtInCopilotExtensionDir)) { return; } // thrallo: copilot builtin removed";
-  const shimSignature = "export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string, builtInCopilotExtensionDir: string, appNodeModulesDir: string): void {";
-  if (!copilotLib.includes("thrallo: copilot builtin removed")) {
-    if (!copilotLib.includes(shimSignature)) {
-      throw new Error("copilot.ts shim signature changed upstream; update the bootstrap patch");
-    }
-    writeFileSync(copilotLibPath, copilotLib.replace(shimSignature, shimSignature + guard));
-    log("patched build/lib/copilot.ts to tolerate the removed builtin");
-  }
-
+  // compile-copilot is removed now; the directory itself remains until after
+  // upstream dependency restore (applyCopilotExclusion).
   ensureCopilotFreeScripts({ log });
 
   syncBuiltin({ log });

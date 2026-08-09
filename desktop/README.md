@@ -35,7 +35,13 @@ node desktop/build.mjs install     # npm ci in the checkout (native modules comp
 node desktop/build.mjs compile
 node desktop/build.mjs dev         # launch the editor from sources
 node desktop/build.mjs package --platform win32-x64   # unsigned min build + archive
+node desktop/build.mjs installer                       # private unsigned Inno Setup artifact
 ```
+
+Dependency restore intentionally runs before the upstream Copilot built-in is excluded.
+Code OSS postinstall enumerates every upstream extension workspace; deleting Copilot first
+causes a misleading Windows `cmd.exe ENOENT`. Compile and package apply the exclusion after
+restore and sync the current Thrallo built-in immediately before building.
 
 ## Release packaging (Windows)
 
@@ -49,12 +55,13 @@ After `package`, two distributables are produced:
 - **Portable ZIP** — rename `desktop/out/thrallo-win32-x64.zip` to
   `Thrallo-Portable-x64.zip`; extract and run `Thrallo.exe`, no install needed.
 
-Publish: copy both into the VPS `/home/ubuntu/thrallo-releases` directory and run
-`node scripts/build-release-manifest.mjs <dir> <version> "<notes>"` there (or locally and
-scp the manifest). The shell serves them at `/downloads/<name>` (Range-capable) and the
-manifest at `/api/v1/downloads`; the in-app Downloads screen renders the buttons from it.
+Customer publication is not part of the private desktop foundation pipeline. D15 artifacts
+must not be copied to a release host or added to the public download manifest. Track C
+approval, signing, complete platform qualification, rollback evidence, and all machine-
+readable release gates are required before any customer-facing publication stage exists.
 
-Binaries are unsigned until a certificate exists; nothing is store-published.
+Binaries are unsigned until protected CI signing is configured; unsigned output is private
+and machine-classified as not release eligible.
 
 ## What the editor includes
 
@@ -71,8 +78,9 @@ repository index backfills.
 | Piece | Status |
 | --- | --- |
 | Bootstrap pin + overlay | Verified by unit tests and a real clone/prepare on Windows |
-| Windows x64 dev build + editor smoke test | See CONTEXT.md for the current proof state |
-| Windows unsigned package/archive | See CONTEXT.md for the current proof state |
+| Windows x64 source compile | D15: built from the exact pin with zero compile errors |
+| Windows unsigned package/archive | D15: privately built and hashed; not release eligible |
+| Windows packaged workbench smoke | D15: raw 5/13, visually substantiated 3/13; automation failures remain explicit blockers |
 | macOS (darwin) targets | **Configured, never built or run — "Coming soon to macOS" in all public copy** |
 | Linux targets | Configured, never built or run |
 

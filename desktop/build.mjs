@@ -12,12 +12,13 @@
 // Nothing here signs, notarises, or publishes anything.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHECKOUT_DIR, ensureCheckout, ensureCopilotFreeScripts, prepare, syncBuiltin, syncWebApp } from "./bootstrap.mjs";
+import { CHECKOUT_DIR, applyCopilotExclusion, ensureCheckout, ensureCopilotFreeScripts, prepare, restoreCopilotForDependencyInstall, syncBuiltin, syncWebApp } from "./bootstrap.mjs";
 
 const PLATFORMS = ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"];
+const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // Windows packaging needs signtool.exe on PATH — not to SIGN anything (we ship unsigned), but
 // because upstream's patchWin32DependenciesTask calls `signtool verify` and `signtool remove` to
@@ -112,20 +113,25 @@ if (command === "bootstrap") {
   await prepare();
 } else if (command === "install") {
   requireCheckout();
+  restoreCopilotForDependencyInstall();
   run("npm", ["ci"]);
+  applyCopilotExclusion();
 } else if (command === "compile") {
   requireCheckout();
+  applyCopilotExclusion();
   syncBuiltin();
   syncWebApp();
   run("npm", ["run", "compile"]);
 } else if (command === "dev") {
   requireCheckout();
+  applyCopilotExclusion();
   syncBuiltin();
   syncWebApp();
   const script = process.platform === "win32" ? "scripts\\code.bat" : "./scripts/code.sh";
   run(script, process.argv.slice(3));
 } else if (command === "package") {
   requireCheckout();
+  applyCopilotExclusion();
   syncBuiltin();
   syncWebApp();
   if (!PLATFORMS.includes(platformArg)) {
@@ -175,7 +181,8 @@ if (command === "bootstrap") {
   console.log(`[build] using Inno Setup at ${iscc}`);
   const script = path.join(desktopDir, "installer", "Thrallo.iss");
   if (!existsSync(script)) throw new Error(`installer script missing: ${script}`);
-  run(iscc, [script], { cwd: desktopDir, shell: false });
+  const productVersion = JSON.parse(readFileSync(path.join(REPO_ROOT, "editor", "vscode", "package.json"), "utf8")).version;
+  run(iscc, [`/DMyAppVersion=${productVersion}`, script], { cwd: desktopDir, shell: false });
 
   const installer = path.join(desktopDir, "out", "Thrallo-Setup-x64.exe");
   if (!existsSync(installer)) {

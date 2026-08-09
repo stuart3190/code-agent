@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "product": "thrallo-desktop",
+  "version": "0.4.0",
+  "platform": "win32",
+  "architecture": "x64",
+  "releaseChannel": "internal",
+  "artifact": {
+    "uri": "private-artifacts/thrallo-win32-x64.zip",
+    "sha256": "f7ff8f6fd57f09ae6c15865e032b6f1af94379f1277089c496ed656f3675dc85",
+    "signatureState": "unsigned"
+  },
+  "manifestSignature": null,
+  "signatureAlgorithm": "unavailable",
+  "releaseNotesRef": "desktop/release/D15-EVIDENCE.md",
+  "minimumCompatibleClient": "0.4.0",
+  "minimumCompatibleServerContract": "desktop-foundation-v1",
+  "futureBuilderV2Contract": "unknown-track-b-blocked",
+  "rollbackEligible": false,
+  "publicationTimestamp": null,
+  "provenanceRef": "desktop/release/build-inputs.json",
+  "withdrawn": false,
+  "rolloutEligible": false,
+  "classification": "PRIVATE_NOT_CUSTOMER_RELEASED",
+  "validForCustomerUpdate": false
+}

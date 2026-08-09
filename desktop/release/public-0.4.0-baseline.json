@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-09",
+  "purpose": "read-only comparison; D15 must not modify or replace public 0.4.0",
+  "files": [
+    {
+      "path": "docs/RELEASE-0.4.0.md",
+      "sizeBytes": 25422,
+      "sha256": "fac61a031b0c7256461faabd70f3e36e87e57b1a0e70e4f9cf13f305beaeb8aa"
+    },
+    {
+      "path": "scripts/build-release-manifest.mjs",
+      "sizeBytes": 2399,
+      "sha256": "7f757b98540ed34e4cb2ad445b1bbdeaba4e89cdca75d5c19a5d997ab13cb06d"
+    },
+    {
+      "path": "shell/server/lib/releaseDownloads.mjs",
+      "sizeBytes": 3781,
+      "sha256": "679d8676ada9eb7f8d7f970b06c89af33a9a82d6bc42bd896392e70ee0cbefb7"
+    }
+  ],
+  "changedByD15": false
+}

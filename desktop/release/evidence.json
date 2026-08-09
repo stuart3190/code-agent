@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "package": "D15",
+  "observedAt": "2026-08-09",
+  "classification": "PRIVATE_NOT_CUSTOMER_RELEASED",
+  "preparedCheckout": {
+    "path": "desktop/vscode",
+    "retainedIgnored": true,
+    "tag": "1.131.0",
+    "commit": "3a03d6f72d628a7741c29f456b4ddbb5ae68502c",
+    "pinVerified": true,
+    "dependencyRestore": "passed-after-release-order-fix",
+    "compile": "passed-zero-errors",
+    "copilotBuiltinIncluded": false
+  },
+  "packagedProduct": {
+    "identity": "Thrallo Desktop",
+    "version": "0.4.0",
+    "genuineCodeOss": true,
+    "telemetryEnabled": false,
+    "extensionGallery": "Open VSX",
+    "uriSchemeConfigured": "thrallo",
+    "builtInThralloExtension": true,
+    "d9ThroughD14CommandsPresent": true
+  },
+  "artifacts": [
+    {
+      "path": "desktop/out/thrallo-win32-x64.zip",
+      "purpose": "retained private portable archive for integration review",
+      "sizeBytes": 339350095,
+      "sha256": "f7ff8f6fd57f09ae6c15865e032b6f1af94379f1277089c496ed656f3675dc85",
+      "builtAt": "2026-08-09T15:29:56.6611869Z",
+      "signingState": "unsigned-not-applicable-to-zip",
+      "testState": "package-built-partial-workbench-smoke",
+      "releaseEligible": false
+    },
+    {
+      "path": "desktop/out/Thrallo-Setup-x64.exe",
+      "purpose": "retained private installer for integration review",
+      "sizeBytes": 228794172,
+      "sha256": "70347d25fb73111c4447fb5a670508be8a4320cb343e43730611f407838490f6",
+      "builtAt": "2026-08-09T15:39:53.8131757Z",
+      "signingState": "authenticode-not-signed",
+      "testState": "isolated-install-and-uninstall-passed-with-empty-directory-residue-cleaned",
+      "releaseEligible": false
+    },
+    {
+      "path": "desktop/VSCode-win32-x64/Thrallo.exe",
+      "purpose": "retained ignored prepared packaged workbench",
+      "sizeBytes": 232755200,
+      "sha256": "9957b8834efac6f1dad76248e711f674c57ac570c75a492017a2a6fdcd22283b",
+      "builtAt": "2026-08-09T15:26:47.9656201Z",
+      "signingState": "authenticode-not-signed",
+      "testState": "launch-and-partial-surface-smoke",
+      "releaseEligible": false
+    }
+  ],
+  "workbenchSmoke": {
+    "result": "raw-5/13; visually-substantiated-3/13",
+    "passed": [
+      "packaged workbench launch",
+      "Thrallo product identity",
+      "Thrallo Home marker"
+    ],
+    "notVerified": [
+      "local file edit through Code OSS",
+      "integrated terminal execution",
+      "conversation transition",
+      "projects transition",
+      "agents transition",
+      "usage transition",
+      "preview transition",
+      "deployments transition",
+      "settings transition",
+      "companion transition"
+    ],
+    "finding": "Screenshots prove the harness targeted the agent input and the command palette reported no matching results. Raw Settings and Companion marker matches were false positives from Home navigation labels, so only 3/13 results are visually substantiated; D15 does not convert those failures into product passes.",
+    "screenshotsRetained": [
+      "desktop/out/d15-private-smoke/01-home.png",
+      "desktop/out/d15-private-smoke/08-settings.png",
+      "desktop/out/d15-private-smoke/09-companion.png"
+    ],
+    "windowsAppControlBlocker": "Computer Use could not attach because required sandboxPolicy metadata was unavailable.",
+    "productionCredentialsUsed": false,
+    "productionNetworkRequired": false
+  },
+  "installer": {
+    "isolatedPath": "desktop/out/d15-private-install",
+    "installExit": 0,
+    "installedProductIdentity": "Thrallo Desktop",
+    "uninstallExit": 0,
+    "shortcutRemoved": true,
+    "uninstallRegistryKeyRemoved": true,
+    "emptyDirectoryResidueRemoved": true,
+    "normalThralloInstallTouched": false
+  },
+  "protocol": {
+    "productSchemeConfigured": true,
+    "d2CallbackParserFixtureVerified": true,
+    "installerRegistrationVerified": false,
+    "runtimeForwardingVerified": false,
+    "blocker": "The current installer has no explicit protocol-registration entry and the built-in extension has no packaged URI-handler registration; D15 does not invent production auth wiring."
+  },
+  "signing": {
+    "windows": "unavailable-no-authenticode-certificate",
+    "macos": "unavailable-no-developer-id-or-notarization-runner",
+    "linux": "configured-policy-only",
+    "privateKeyCommitted": false,
+    "customerEligibilityFailsClosed": true
+  },
+  "updateAndRecovery": {
+    "manifest": "private-internal-fixture-only",
+    "signatureValidation": "contract-tested",
+    "hashValidation": "contract-tested",
+    "arbitraryReferenceRejected": true,
+    "atomicUpdate": "fixture-tested",
+    "rollback": "fixture-tested-compatible-state-only",
+    "crashRecovery": "metadata-contract-tested-no-project-rewrite",
+    "crashUpload": "disabled"
+  },
+  "releaseEligibility": {
+    "eligible": false,
+    "classification": "PRIVATE_NOT_RELEASE_ELIGIBLE",
+    "failedGates": [
+      "clean-final-source-provenance",
+      "pinned-node-runtime",
+      "complete-package-smoke",
+      "authenticode-signing",
+      "platform-qualification",
+      "signed-rollback-artifact"
+    ],
+    "publicationAuthorized": false
+  },
+  "verification": {
+    "d15Contracts": "17/17",
+    "d15FoundationSmoke": "12/12",
+    "trackA": {
+      "D14": "24/24 plus 15/15 smoke",
+      "D12": "30/30 plus 13/13 smoke",
+      "D11": "27/27 plus 12/12 smoke",
+      "D10": "21/21 plus 10/10 smoke",
+      "D9": "25/25 plus 9/9 smoke",
+      "D8": "24/24 plus 9/9 smoke",
+      "D4": "10/10",
+      "D3": "23/23 plus 7/7 smoke",
+      "D2": "24/24 plus 5/5 smoke",
+      "D1": "16/16",
+      "D0": "6/6"
+    },
+    "existingDesktopReleaseRoutes": "28/28",
+    "protectedPathBuildr101FixtureNetworkGuard": "passed",
+    "gitDiffCheck": "passed-before-commit",
+    "packagedWorkbench": "raw-5/13-visually-substantiated-3/13-not-a-release-pass"
+  },
+  "public040": {
+    "baseline": "desktop/release/public-0.4.0-baseline.json",
+    "modified": false,
+    "difference": "D15 contains D8-D14 fixture/local foundations and release contracts, but remains unsigned, partially smoke-verified, and private; public 0.4.0 remains the customer release."
+  },
+  "cleanup": {
+    "privateElectronProcessesRemaining": 0,
+    "temporaryInstallPathRemaining": false,
+    "startMenuShortcutRemaining": false,
+    "uninstallRegistryKeyRemaining": false,
+    "testProtocolRegistrationCreated": false,
+    "externalRouteCreated": false,
+    "preparedCheckoutRetained": true,
+    "privateArtifactsRetained": true
+  }
+}

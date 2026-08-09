@@ -8,7 +8,9 @@
 ; Output: desktop\out\Thrallo-Setup-x64.exe
 
 #define MyAppName "Thrallo"
-#define MyAppVersion "1.131.0"
+#ifndef MyAppVersion
+#define MyAppVersion "0.4.0"
+#endif
 #define MyAppPublisher "Thrallo"
 #define MyAppURL "https://app.thrallo.com"
 #define MyAppExeName "Thrallo.exe"

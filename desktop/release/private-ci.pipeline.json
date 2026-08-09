@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "thrallo-desktop-private-release",
+  "trigger": "manual_internal_only",
+  "defaultPublication": "disabled",
+  "steps": [
+    "clean_checkout",
+    "restore_dependencies",
+    "verify_code_oss_pin",
+    "apply_thrallo_overlay",
+    "compile",
+    "test",
+    "package",
+    "hash",
+    "sign_from_protected_ci",
+    "verify_signature",
+    "private_smoke",
+    "generate_private_manifest",
+    "evaluate_release_gates",
+    "retain_private_artifact"
+  ],
+  "customerPublicationStage": null,
+  "secrets": {
+    "source": "protected_ci_only",
+    "repositoryFallback": false,
+    "plaintextFileFallback": false
+  }
+}

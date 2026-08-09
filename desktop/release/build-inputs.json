@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "classification": "PRIVATE_NOT_CUSTOMER_RELEASED",
+  "source": {
+    "branch": "desktop/foundation",
+    "baseCommit": "dce038c0960d7a698c9001f37a0fbe160918475f",
+    "workingTreeAtBuild": "dirty-with-D15-release-order-fix",
+    "finalD15Commit": null,
+    "releaseEligibilityImpact": "artifact is private and cannot be promoted because it was built before the final focused D15 commit"
+  },
+  "codeOss": {
+    "tag": "1.131.0",
+    "commit": "3a03d6f72d628a7741c29f456b4ddbb5ae68502c",
+    "checkout": "desktop/vscode",
+    "checkoutCommitted": false,
+    "pinVerified": true
+  },
+  "product": {
+    "version": "0.4.0",
+    "target": "win32",
+    "architecture": "x64",
+    "operatingSystem": "Windows 10 Pro x64",
+    "productOverlaySha256": "e638ce3ee055b98dad7160ada48f2947f5237d8cdfcbbc019bb856979c24ce38",
+    "extensionBaseTree": "140fa325750aeda6db815bb6d49d0e8e08f03f04",
+    "sharedClientBaseTree": "737e130a56e85012a688469eba708af48cd9ef59"
+  },
+  "toolchain": {
+    "requiredNode": "24.18.0",
+    "actualNode": "24.16.0",
+    "nodePatchMismatchAllowedForPrivateDevelopment": true,
+    "nodePatchMismatchBlocksReproducibleRelease": true,
+    "packageManager": "npm@11.13.0",
+    "git": "2.54.0.windows.1",
+    "innoSetup": "6.7.3",
+    "windowsSdk": "10.0.26100.0",
+    "rootLockfileSha256": "a4fcde19fe588d350bb6584259ceaca3b25d10a606081517371ec0436f7a0500",
+    "webLockfileSha256": "7d483d54ee51a8d2210d132c1ddfb62dd22d5c0e3764c81863a1804b56bc5d4b"
+  },
+  "equivalencePolicy": "Equivalent unsigned product contents are expected for identical clean source and pinned inputs; signing and trusted timestamp metadata are excluded. D15 did not perform a second clean-room build, so byte reproducibility is not claimed."
+}

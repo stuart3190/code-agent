@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "win32-x64": {
+      "configured": true,
+      "buildAttempted": true,
+      "built": true,
+      "packaged": true,
+      "smokeTested": false,
+      "smokeState": "raw-5-of-13-visually-substantiated-3-of-13-with-harness-input-failures",
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false
+    },
+    "win32-arm64": {
+      "configured": true,
+      "buildAttempted": false,
+      "built": false,
+      "packaged": false,
+      "smokeTested": false,
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false
+    },
+    "darwin-x64": {
+      "configured": true,
+      "buildAttempted": false,
+      "built": false,
+      "packaged": false,
+      "smokeTested": false,
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false,
+      "blocker": "no approved genuine macOS runner"
+    },
+    "darwin-arm64": {
+      "configured": true,
+      "buildAttempted": false,
+      "built": false,
+      "packaged": false,
+      "smokeTested": false,
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false,
+      "blocker": "no approved genuine macOS runner"
+    },
+    "linux-x64": {
+      "configured": true,
+      "buildAttempted": false,
+      "built": false,
+      "packaged": false,
+      "smokeTested": false,
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false,
+      "blocker": "no approved Linux build/runtime environment used in D15"
+    },
+    "linux-arm64": {
+      "configured": true,
+      "buildAttempted": false,
+      "built": false,
+      "packaged": false,
+      "smokeTested": false,
+      "signed": false,
+      "notarized": false,
+      "releaseEligible": false,
+      "blocker": "no approved Linux ARM64 build/runtime environment used in D15"
+    }
+  }
+}
