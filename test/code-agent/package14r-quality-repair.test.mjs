@@ -411,12 +411,14 @@ test("14R cleanup tears down isolated previews before erasing qualification proj
   assert.match(runner, /previewStops/);
 });
 
-test("14R dark-worker restore removes qualification authority and restores the narrow allowlist", async () => {
+test("14R dark-worker restore keeps preview authority and restores the narrow allowlist", async () => {
   const restore = await readFile(new URL("../../ops/restore-package14-worker-dark.mjs", import.meta.url), "utf8");
   for (const name of ["CODE_AGENT_STORE", "PLATFORM_ENC_KEY", "BYOK_ENC_KEY",
-    "PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN",
     "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]) {
     assert.match(restore, new RegExp(`\\"${name}\\"`));
+  }
+  for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
+    assert.doesNotMatch(restore, new RegExp(`\\"${name}\\"`));
   }
   assert.match(restore, /THRALLO_BUILD_JOB_TYPES=proof_slow,publish_package/);
   assert.match(restore, /rename\(temporary, targetPath\)/);

@@ -5,6 +5,7 @@
 // the queue remain server-only and are never copied into a generated tree.
 
 import { chmod, chown, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { workerPreviewConfiguration } from "../build-worker/runtimeConfig.mjs";
 
 const sourcePath = "/home/ubuntu/code-agent/shell/.env";
 const targetPath = "/etc/thrallo/build-worker.env";
@@ -48,6 +49,7 @@ const updates = new Map([
 for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
   if (source.values.get(name)) updates.set(name, source.values.get(name));
 }
+workerPreviewConfiguration(Object.fromEntries(updates));
 for (const name of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]) {
   if (source.values.get(name)) updates.set(name, source.values.get(name));
 }

@@ -15,6 +15,7 @@ import { loadEnv } from "../shell/server/lib/env.mjs";
 import { buildProjectErasureManifest, eraseProjectPermanently } from "../shell/server/lib/erasureService.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { previewProvider } from "../shell/server/preview/index.mjs";
+import { requireFreshWorkerPreviewProof } from "../build-worker/previewIsolationPreflight.mjs";
 
 loadEnv();
 process.env.THRALLO_BUILD_WORKER_ENABLED = "1"; // operator only; customer shell routing stays dark
@@ -70,6 +71,16 @@ async function connectedCodexOwner() {
     if (credential) return { owner: preference.owner, preference };
   }
   throw new Error("Package 14S requires an active connected Codex owner");
+}
+
+async function workerPreviewPreflight() {
+  const result = await client.from("build_worker_nodes")
+    .select("worker_id,state,job_types,heartbeat_at,metadata")
+    .order("heartbeat_at", { ascending: false }).limit(20);
+  if (result.error) throw Object.assign(new Error(`worker preview preflight: ${result.error.message}`), {
+    code: "preview_isolation_required",
+  });
+  return requireFreshWorkerPreviewProof(result.data || []);
 }
 
 const BASELINE_TABLES = [
@@ -242,6 +253,14 @@ await save(state);
 
 if (STAGE === "preflight") {
   if (state.project || Object.keys(state.stages).length) throw new Error("Package 14S run already started");
+  let workerPreview;
+  try {
+    workerPreview = await workerPreviewPreflight();
+  } catch (error) {
+    await emit("preflight_failed", { code: "preview_isolation_required", providerCalls: 0,
+      tokens: 0, credits: 0, detail: error.message });
+    throw error;
+  }
   state.baseline = await baseline();
   state.project = unwrap(await client.from("projects").insert({
     owner: state.owner, name: "Package 14S - Ember Table booking", builder_version: "v2",
@@ -249,7 +268,10 @@ if (STAGE === "preflight") {
   await save(state);
   await emit("preflight", { ownerHash: state.ownerHash, totalCeiling: TOTAL_CEILING,
     projectId: state.project.id, ownerPreference: owner.preference.routing_mode,
-    qualificationRouting: "auto", managedSettlementPaused: process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED === "1" });
+    qualificationRouting: "auto", managedSettlementPaused: process.env.THRALLO_MANAGED_SETTLEMENT_PAUSED === "1",
+    workerPreview: { workerId: workerPreview.workerId, heartbeatAt: workerPreview.heartbeatAt,
+      resolvedMode: workerPreview.resolvedMode, provisiondOrigin: workerPreview.provisiondOrigin,
+      health: workerPreview.health, preview: workerPreview.preview, teardown: workerPreview.teardown } });
 } else if (STAGE === "booking") {
   if (!state.project) throw new Error("run preflight first");
   await runLifecycle(state, { stage: "booking", mode: "build", prompt: BOOKING_REQUEST, ceiling: TOTAL_CEILING });

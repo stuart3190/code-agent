@@ -8,8 +8,10 @@ import { redactDiagnosticText } from "../shell/server/lib/appBuild/buildDiagnost
 import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
 import { createWorkerQueue } from "./queue.mjs";
+import { proveWorkerPreviewIsolation } from "./previewIsolationPreflight.mjs";
 import { reconcileOrphanSandboxes, runSandboxJob } from "./sandboxRunner.mjs";
 import { assertWorkerCredentialAuthority } from "./runtimeConfig.mjs";
+import { previewProvider } from "../shell/server/preview/index.mjs";
 
 loadEnv();
 process.env.THRALLO_PROCESS_ROLE = "build-worker";
@@ -23,6 +25,18 @@ const JOB_TYPES = (process.env.THRALLO_BUILD_JOB_TYPES || [
   "image_optimise", "publish_package", "android_package", "proof_slow",
 ].join(",")).split(",").map((v) => v.trim()).filter(Boolean);
 assertWorkerCredentialAuthority(JOB_TYPES);
+
+let previewIsolation = { status: "not_required" };
+if (JOB_TYPES.includes("builder_pipeline")) {
+  try {
+    previewIsolation = await proveWorkerPreviewIsolation({ preview: previewProvider() });
+    console.log(JSON.stringify({ event: "worker_preview_isolation_preflight", ...previewIsolation }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "worker_preview_isolation_preflight", status: "failed",
+      code: error.code || "preview_isolation_required", message: error.message }));
+    throw error;
+  }
+}
 
 const client = serviceClient();
 const queue = createWorkerQueue(client);
@@ -224,7 +238,7 @@ async function tick() {
   else if (!stopping && commanded === "active") { draining = false; paused = false; }
   const state = stopping ? "stopped" : draining ? "draining" : paused ? "paused" : "active";
   await queue.nodeHeartbeat(WORKER_ID, VERSION, state, JOB_TYPES, current?.id || null, {
-    pid: process.pid, hostname: os.hostname(), leaseSeconds: LEASE_SECONDS,
+    pid: process.pid, hostname: os.hostname(), leaseSeconds: LEASE_SECONDS, previewIsolation,
   });
   if (stopping || draining || paused || current) return;
   const job = await queue.lease(WORKER_ID, JOB_TYPES, LEASE_SECONDS);

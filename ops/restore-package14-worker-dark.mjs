@@ -1,6 +1,7 @@
 // Restore the production build worker to its dark, least-privilege authority after Package 14R.
-// Values are never logged. The qualification-only credential and preview authority is removed,
-// while the original synthetic/publish-package job allowlist is restored atomically.
+// Values are never logged. Qualification-only provider credential authority is removed, while
+// the isolated-preview authority remains durable and the original synthetic/publish-package job
+// allowlist is restored atomically.
 
 import { chmod, chown, readFile, rename, stat, writeFile } from "node:fs/promises";
 
@@ -9,9 +10,6 @@ const remove = new Set([
   "CODE_AGENT_STORE",
   "PLATFORM_ENC_KEY",
   "BYOK_ENC_KEY",
-  "PREVIEW_MODE",
-  "PROVISIOND_URL",
-  "PROVISIOND_TOKEN",
   "SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_ANON_KEY",
 ]);
