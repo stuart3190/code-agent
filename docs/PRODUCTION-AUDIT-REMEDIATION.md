@@ -317,3 +317,18 @@ pre/post parity; customer data, Caddy, flags, settlement and V1 routing were unc
 remains blocked pending a narrow deterministic capability-lint contract repair and a separately
 approved proof. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.
+
+## Package 14S capability-lint forward repair and reproof (2026-08-09)
+
+The capability-lint defect is **fixed and production-dark proven** by commit `6261a03`. Babel AST
+provenance accepts direct, destructured and aliased methods only when they derive from the required
+factory object and are actually invoked, including verified generated-module exports/imports. The
+negative provenance matrix remains fail-closed. Focused tests passed 33/33; relevant tests passed
+255/255.
+
+The sole reproof passed capability/module lint, compiled and reached browser verification, but the
+essential booking journey was red at contact entry, review, confirmation and reload. The sole
+checkpoint repair was reservation-blocked before dispatch: its six-credit call ceiling did not fit
+within the remaining 5.901 approved build credits. Total spend was 3.099/9 credits over three calls.
+Cleanup/customer parity passed and all safety controls remain unchanged. Package 15 remains blocked.
+Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.

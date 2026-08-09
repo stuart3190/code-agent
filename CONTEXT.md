@@ -1276,3 +1276,21 @@ Cleanup and canonical customer parity passed. The worker is dark again, V1 is de
 customer C7/C8 routing remain off, settlement is paused, and Caddy was untouched. Package 15 remains
 blocked by this narrow capability-lint contract defect. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.
+
+## Package 14S AST linter repair passed; live quality remains red (2026-08-09)
+
+Commit `6261a03` adds fail-closed Babel AST provenance for direct, destructured, aliased, exported
+and imported capability methods, with bound and invoked state tracked separately. Matching local
+functions, unrelated objects/imports, unused aliases, invalid factories and ambiguous identifiers
+do not pass. Focused tests passed 33/33 and the relevant zero-model suite passed 255/255.
+
+The one new AUTO booking build spent 3.099/9 credits over three connected Codex calls. It was
+correctly medium, produced the exact modular plan, passed live capability lint on core attempt 2,
+compiled and reached an immutable working checkpoint plus browser verification. The essential
+journey failed at contact entry, review, durable confirmation and reload; the other three journeys
+were not run. The sole allowed checkpoint repair made zero provider calls because its six-credit
+call ceiling could not fit a useful response inside the remaining 5.901 build credits.
+
+Cleanup and customer parity passed; worker/V1/flags/settlement/Caddy safety state is unchanged.
+Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.

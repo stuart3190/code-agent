@@ -265,8 +265,13 @@ if (STAGE === "preflight") {
   }
   const problems = [
     ...(bv2Result.pendingIncrements || []).map((row) => `required journey ${row.journeyId}: ${row.reason || "red"}`),
+    ...(first.evidence?.derived?.strictQuality?.journeys || []).flatMap((row) => {
+      if (!row.verdict) return [`required journey ${row.journeyId}: not yet verified`];
+      return (row.verdict.steps || []).filter((step) => step.status !== "pass").map((step) =>
+        `required journey ${row.journeyId}, ${step.status} at ${step.action}: ${step.detail}; expected ${step.expect}`);
+    }),
     bv2Result.error || v2.error,
-  ].filter(Boolean);
+  ].filter(Boolean).slice(0, 20).map((problem) => String(problem).slice(0, 1_000));
   const current = await spend(state.project.id);
   const remaining = round(TOTAL_CEILING - current.credits);
   if (!(remaining > 0)) throw new Error("no approved Package 14S headroom remains for targeted repair");

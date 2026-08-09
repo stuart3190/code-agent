@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **live proof failed 2026-08-09**: planning/classification correct, but capability lint rejected valid destructured bindings before compile | none | 4.4655 spent | internal fixture cleaned; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **linter repaired; live quality still failed 2026-08-09**: compile/checkpoint reached, essential booking journey red; sole repair failed pre-dispatch on remaining-headroom sizing | none | 3.099 additional spent | internal fixture cleaned; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -158,6 +158,15 @@ the planned modules and factories, but the capability linter accepts only direct
 calls and rejected valid destructured exports of booking, wizard and contact methods eleven times.
 No full retry or targeted repair was possible because no working checkpoint existed. Package 15
 remains blocked. Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.
+
+The follow-up AST repair at `6261a03` now proves direct, destructured, aliased and cross-module
+capability method provenance while rejecting unrelated or unused names. It passed 33/33 focused and
+255/255 relevant zero-model tests. The one new live build passed capability/module lint on its
+second bounded core candidate, compiled and reached browser verification. Its essential booking
+journey remained red at contact entry, review, durable confirmation and reload. The sole checkpoint
+repair then failed before dispatch because its six-credit call ceiling could not fit inside 5.901
+credits of remaining build headroom. Package 15 remains blocked; no retry was run. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.
 
 ## Deterministic qualification gate
 
