@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **reservation sizing repaired; live quality still failed 2026-08-09**: the one fresh build hit a capability-linter aggregate exception before compile/checkpoint | none | 1.6652 additional spent in latest proof | internal fixture cleaned; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **capability aggregation repaired; live quality still failed 2026-08-09**: the one fresh build exposed direct factory-result destructuring outside the deterministic grammar matrix and never reached compile/checkpoint | none | 3.3876 additional spent in latest proof | internal fixture cleaned; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -177,6 +177,19 @@ booking capability with the valid CRUD factory, exposing an AST aggregate bug wh
 exception occurred before compile/checkpoint, so no repair or regeneration was permitted. Package
 15 remains blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-REPAIR-RESERVATION-SIZING.md`.
+
+The registry-total aggregation repair at `6677361` separates recognised, required and actually used
+capability factories. Every one of the six registry factories now receives complete instance,
+binding, invocation and module facts; the former `makeBookingSystem` + `makeEntityStore` crash is
+covered directly. Focused tests passed 42/42 and the relevant zero-model V2/provider/verification
+suite passed 302/302. The single approved live build proved the exception gone, medium complexity
+and the six-module plan, but all three bounded core candidates remained pre-compile failures. The
+last candidate used valid direct factory-result destructuring
+(`export const { submitContact } = makeContactForm(...)`), a grammar form the new matrix had not
+covered, so contact provenance was falsely reported missing. It also genuinely bound but did not
+invoke wizard `getState` and `subscribe`. With no working checkpoint, repair was forbidden. Cleanup
+and customer parity passed; Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-AGGREGATION-TOTALITY.md`.
 
 ## Deterministic qualification gate
 

@@ -1294,3 +1294,22 @@ call ceiling could not fit a useful response inside the remaining 5.901 build cr
 Cleanup and customer parity passed; worker/V1/flags/settlement/Caddy safety state is unchanged.
 Package 15 remains blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.
+
+## Package 14S registry-total capability aggregation passed; live quality remains red (2026-08-09)
+
+Commit `6677361` derives the recognised factory inventory from the capability registry and creates
+aggregate provenance facts for every recognised factory, independently of contract requiredness.
+Facts retain exact instances, bindings, invocations and source modules. `makeWizardPersistence` is
+now covered by the method-drift proof; auxiliary `makeEntityStore` can coexist with required booking
+and wizard capabilities without crashing or satisfying their requirements. The compatibility matrix
+and focused tests passed 42/42; the broader relevant zero-model suite passed 302/302.
+
+The single fresh AUTO booking proof spent 3.3876/12 credits over one contract and three core calls.
+It was correctly medium and carried the exact six-module plan. The aggregation exception was gone.
+No candidate reached compile: the final candidate used the valid but unmodelled grammar
+`export const { submitContact } = makeContactForm(...)`, which the linter falsely treated as a
+missing contact factory, and it bound wizard `getState`/`subscribe` without invoking them. There was
+no working checkpoint, so no repair or full regeneration ran. Cleanup parity passed across all 12
+canonical datasets. Worker/V1/flags/settlement/Caddy safety state is unchanged. Package 15 remains
+blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-AGGREGATION-TOTALITY.md`.
