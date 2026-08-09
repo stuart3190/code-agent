@@ -54,6 +54,15 @@ test("14S materialization contains only public runtime values and the project id
   assert.throws(() => publicRuntimeConfig(PROJECT, {
     env: env({ SUPABASE_PUBLISHABLE_KEY: SERVICE_KEY }),
   }), (error) => error.code === "runtime_public_credential_invalid");
+  const legacyServiceJwt = [
+    Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url"),
+    "signature",
+  ].join(".");
+  assert.throws(() => publicRuntimeConfig(PROJECT, {
+    env: env({ SUPABASE_PUBLISHABLE_KEY: legacyServiceJwt,
+      SUPABASE_SERVICE_ROLE_KEY: "different-server-secret" }),
+  }), (error) => error.code === "runtime_public_credential_invalid");
 });
 
 test("14S public generated backend initialises and completes disposable write/read/delete", async (t) => {

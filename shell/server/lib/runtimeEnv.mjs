@@ -25,11 +25,20 @@ function configurationError(code, message, details = {}) {
   });
 }
 
+function jwtRole(value) {
+  const parts = String(value || "").split(".");
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))?.role || null; }
+  catch { return null; }
+}
+
 /** Resolve only values that are intentionally safe to ship to generated browser code. */
 export function publicRuntimeConfig(projectId, { env = process.env } = {}) {
   const url = String(env.SUPABASE_URL || "").trim();
-  const publishableKey = String(env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "").trim();
-  const source = env.SUPABASE_PUBLISHABLE_KEY ? "SUPABASE_PUBLISHABLE_KEY" : "SUPABASE_ANON_KEY";
+  const publishable = String(env.SUPABASE_PUBLISHABLE_KEY || "").trim();
+  const anon = String(env.SUPABASE_ANON_KEY || "").trim();
+  const publishableKey = publishable || anon;
+  const source = publishable ? "SUPABASE_PUBLISHABLE_KEY" : "SUPABASE_ANON_KEY";
   const appId = String(projectId || "").trim();
   const missing = [];
   if (!url) missing.push("SUPABASE_URL");
@@ -51,7 +60,8 @@ export function publicRuntimeConfig(projectId, { env = process.env } = {}) {
   }
   const serviceKeys = [env.SUPABASE_SERVICE_ROLE_KEY, env.SUPABASE_SERVICE_ROLE, env.SUPABASE_SECRET_KEY]
     .filter(Boolean).map((value) => String(value));
-  if (publishableKey.startsWith("sb_secret_") || serviceKeys.includes(publishableKey)) {
+  if (publishableKey.startsWith("sb_secret_") || jwtRole(publishableKey) === "service_role"
+      || serviceKeys.includes(publishableKey)) {
     throw configurationError("runtime_public_credential_invalid",
       "Builder V2 refused a privileged Supabase credential for browser materialization; no provider call was made.",
       { field: source });

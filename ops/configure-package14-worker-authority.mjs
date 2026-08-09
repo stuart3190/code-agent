@@ -21,6 +21,13 @@ function parse(text) {
   return { rows, values };
 }
 
+function jwtRole(value) {
+  const parts = String(value || "").split(".");
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))?.role || null; }
+  catch { return null; }
+}
+
 const source = parse(await readFile(sourcePath, "utf8"));
 const target = parse(await readFile(targetPath, "utf8"));
 const targetStat = await stat(targetPath);
@@ -50,7 +57,8 @@ if (!updates.get("SUPABASE_URL") || !publicKey) {
 }
 const privileged = [source.values.get("SUPABASE_SERVICE_ROLE_KEY"), source.values.get("SUPABASE_SERVICE_ROLE"),
   source.values.get("SUPABASE_SECRET_KEY")].filter(Boolean);
-if (publicKey.startsWith("sb_secret_") || privileged.includes(publicKey)) {
+if (publicKey.startsWith("sb_secret_") || jwtRole(publicKey) === "service_role"
+    || privileged.includes(publicKey)) {
   throw new Error("refusing to install a privileged Supabase key as generated-browser configuration");
 }
 const seen = new Set();
