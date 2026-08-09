@@ -314,6 +314,36 @@ test("14R cancellation removes only that build's unpromoted working checkpoints"
   assert.deepEqual(await snapshots.materialize("owner", resumable.id), { "src/a.js": "b" });
 });
 
+test("14R an exact repaired tree reuses its byte-proven content-addressed snapshot", async () => {
+  const snapshots = createSnapshotStore();
+  const tree = { "src/App.jsx": "export default function App(){ return <main>green</main>; }" };
+  const green = await snapshots.createSnapshot("owner", "project", tree, {
+    buildId: "core-build", reason: "working:core",
+  });
+  await snapshots.promote("owner", "project", "green", green.id);
+  const repaired = await snapshots.createSnapshot("owner", "project", tree, {
+    buildId: "repair-build", parent: green.id, reason: "working:resumed-repair",
+  });
+  assert.equal(repaired.id, green.id);
+  assert.equal(repaired.reused, true);
+  assert.deepEqual(await snapshots.materialize("owner", repaired.id), tree);
+  assert.equal(await snapshots.pointer("owner", "project", "green"), green.id);
+});
+
+test("14R asset-only regeneration creates a distinct immutable snapshot identity", async () => {
+  const snapshots = createSnapshotStore();
+  const tree = { "src/App.jsx": "export default function App(){ return <main />; }" };
+  const first = await snapshots.createSnapshot("owner", "project", tree, {
+    assetManifest: [{ slot: "hero", providerAssetId: "101" }],
+  });
+  const second = await snapshots.createSnapshot("owner", "project", tree, {
+    assetManifest: [{ slot: "hero", providerAssetId: "103" }],
+  });
+  assert.notEqual(second.id, first.id);
+  assert.deepEqual(first.asset_manifest, [{ slot: "hero", providerAssetId: "101" }]);
+  assert.deepEqual(second.asset_manifest, [{ slot: "hero", providerAssetId: "103" }]);
+});
+
 test("14R automatic router selects an executable candidate and persists a rationale without manual selection", () => {
   const candidates = [
     { provider: "openai", laneProvider: "openai", model: "gpt-5.6-sol", tier: "quality",
@@ -353,6 +383,7 @@ test("14R live runner hard-caps aggregate spend and cannot force a manual model"
   assert.match(runner, /approved zero-spend pre-dispatch failure/);
   assert.match(runner, /archive-edit-predispatch/);
   assert.match(runner, /archive-repair-predispatch/);
+  assert.match(runner, /archive-repair-platform-failure/);
   assert.match(runner, /EDIT_REQUEST, ceiling: 4/);
   assert.match(runner, /sourceBuildId: seed\.sourceBuildId, problems: seed\.problems/);
   assert.match(runner, /bounded pre-dispatch correction limit/);

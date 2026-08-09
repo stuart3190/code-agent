@@ -71,6 +71,9 @@ confirmed/reference and cancelled state, and never uses browser storage or impos
 10. Per-build `routingMode: "auto"` is durable, avoids owner-preference mutation and does not force
     a manual model identity.
 11. The live runner is exactly-once per stage and hard-caps aggregate settled usage at 12 credits.
+12. Exact repaired bytes reuse an existing byte-proven snapshot, while asset-only regeneration has
+    a manifest-distinct immutable identity. Migration `20260808235700` replaces the incorrect
+    `(project_id, tree_hash)` uniqueness rule without rewriting snapshot rows.
 
 ## Deterministic proof
 

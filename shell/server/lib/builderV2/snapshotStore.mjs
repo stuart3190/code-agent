@@ -13,6 +13,11 @@
 import crypto from "node:crypto";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
+const canonicalJson = (value) => JSON.stringify(value, (_, current) => (
+  current && typeof current === "object" && !Array.isArray(current)
+    ? Object.fromEntries(Object.entries(current).sort(([a], [b]) => a.localeCompare(b)))
+    : current
+));
 
 export function treeHashFromPairs(pairs) {
   return sha256(pairs.map(([path, hash]) => `${path} ${hash}`).sort().join("\n"));
@@ -82,6 +87,27 @@ export function memorySnapshotStorage() {
 }
 
 export function createSnapshotStore(storage = memorySnapshotStorage()) {
+  async function reusableReadySnapshot(owner, projectId, treeHash, entries, assetManifest) {
+    const existing = (await storage.listSnapshots(owner, projectId))
+      .find((snapshot) => snapshot.owner === owner && snapshot.project_id === projectId
+        && snapshot.tree_hash === treeHash && snapshot.state === "ready"
+        && canonicalJson(snapshot.asset_manifest || []) === canonicalJson(assetManifest || []));
+    if (!existing) return null;
+    const expected = entries.map((entry) => `${entry.path}:${entry.contentHash}`).sort();
+    const actual = (await storage.getManifest(existing.id))
+      .map((entry) => `${entry.path}:${entry.contentHash}`).sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error("content-addressed snapshot identity has a mismatched manifest");
+    }
+    for (const entry of entries) {
+      const content = await storage.getBlob(owner, entry.contentHash);
+      if (content === null || sha256(String(content)) !== entry.contentHash) {
+        throw new Error(`content-addressed snapshot is corrupt for ${entry.path}`);
+      }
+    }
+    return { ...existing, reused: true };
+  }
+
   return {
     /**
      * C2 creation protocol. Throws (and leaves nothing usable) rather than ever exposing a
@@ -101,14 +127,29 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       }
       const expectedTreeHash = treeHashFromPairs(entries.map((e) => [e.path, e.contentHash]));
 
+      // Snapshot identity is content-addressed per project. A repair that restores the exact
+      // previous green bytes must reuse that immutable row rather than fail its unique index or
+      // create duplicate history. Manifest and blob bytes are re-proven before reuse.
+      const existing = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+      if (existing) return existing;
+
       // 2. snapshot row is born INERT.
-      const id = await storage.insertSnapshot({
-        owner, project_id: projectId, build_id: buildId, parent_snapshot: parent,
-        tree_hash: expectedTreeHash, reason, state: "building",
-        file_count: entries.length,
-        total_tokens: Object.values(tree).reduce((t, c) => t + Math.ceil(String(c).length / 4), 0),
-        asset_manifest: assetManifest, created_at: new Date().toISOString(),
-      });
+      let id;
+      try {
+        id = await storage.insertSnapshot({
+          owner, project_id: projectId, build_id: buildId, parent_snapshot: parent,
+          tree_hash: expectedTreeHash, reason, state: "building",
+          file_count: entries.length,
+          total_tokens: Object.values(tree).reduce((t, c) => t + Math.ceil(String(c).length / 4), 0),
+          asset_manifest: assetManifest, created_at: new Date().toISOString(),
+        });
+      } catch (error) {
+        // Concurrent identical finalisation may have won after the first probe. Reuse only a fully
+        // ready, byte-proven winner; an incomplete/broken row still fails loudly and is retryable.
+        const winner = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+        if (winner) return winner;
+        throw error;
+      }
 
       // 3. complete manifest.
       await storage.putManifest(id, entries);

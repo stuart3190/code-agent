@@ -226,6 +226,27 @@ async function archiveZeroSpendPreDispatch(state, stage) {
     credits: 0, calls: 0, v2Builds: v2Builds.length });
 }
 
+async function archiveRepairedTreeIdentityFailure(state) {
+  const row = state.stages.repair;
+  const evidence = row?.evidence || {};
+  const reservation = evidence.reservations?.[0];
+  const patch = evidence.patches?.[0];
+  if (!row?.terminal || row.result !== "fail"
+      || !/bv2_snapshots_project_tree/.test(evidence.publicBuild?.error || "")
+      || evidence.reservations?.length !== 1 || reservation.state !== "settled"
+      || !(Number(reservation.actual_credits || 0) > 0)
+      || evidence.patches?.length !== 1 || patch.outcome !== "applied"
+      || patch.files_changed?.length !== 1 || patch.files_changed[0] !== state.controlledRepair?.path) {
+    throw new Error("repair is not the approved post-patch content-addressed snapshot failure");
+  }
+  if (state.stages.repair_platform_failure_1) throw new Error("repair platform failure already archived");
+  state.stages.repair_platform_failure_1 = row;
+  delete state.stages.repair;
+  await save(state);
+  await emit("repair_platform_failure_archived", { credits: row.stageCredits,
+    path: patch.files_changed[0], reason: "content_addressed_snapshot_reuse" });
+}
+
 async function cleanup(state) {
   const reports = [];
   for (const project of Object.values(state.projects)) {
@@ -280,6 +301,8 @@ if (STAGE === "preflight") {
     ceiling: 4, v2Input: { sourceBuildId: seed.sourceBuildId, problems: seed.problems } });
 } else if (STAGE === "archive-repair-predispatch") {
   await archiveZeroSpendPreDispatch(state, "repair");
+} else if (STAGE === "archive-repair-platform-failure") {
+  await archiveRepairedTreeIdentityFailure(state);
 } else if (STAGE === "booking") {
   if (state.stages.booking) throw new Error("booking already exists; exactly one attempt is authorized");
   const project = state.projects.booking || await createProject(state.owner, "Package 14R - Ember Table booking");
