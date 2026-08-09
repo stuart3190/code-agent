@@ -120,7 +120,8 @@ or Package 12 completion claim.
 | 12. Platform launch blockers | complete 2026-08-08; all 12A-12G production proofs and post-migration isolated restore green | `20260808180841`, `20260808180845` | no | yes, test-owner only |
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
-| 14R. Deterministic quality repair and bounded requalification | in progress 2026-08-08; deterministic repair/gate green, one bounded live requalification pending | none | 12-credit ceiling approved | internal projects/provider calls |
+| 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
+| 14S. Contracted completion and modular booking planning repair | next; deterministic secondary-journey completion gate, booking module-plan enforcement and complexity classification, then separately approved booking-only proof | none expected | no spend until separate approval | local first, then internal booking fixture |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -140,6 +141,13 @@ Package 14R structurally binds contract-required headless capabilities, makes re
 consume live build headroom, retains immutable unpromoted working checkpoints for targeted resume,
 and repairs durable wizard terminal-state recovery. Its deterministic gate is recorded in
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.
+
+The one bounded 14R run did not qualify quality. It used 8.2934/12 credits. The targeted checkpoint
+repair passed after a forward repair to snapshot asset identity, but the simple/edit sequence still
+carried a failed contracted contact-persistence journey, and the one booking build was blocked after
+three attempts repeatedly violated modularity limits. AUTO routing executed, but only one connected
+Codex catalogue model was available, so it proved lane/rationale persistence rather than a real
+cost-tier comparison. Package 15 is blocked by Package 14S; no second booking build is authorised.
 
 ## Deterministic qualification gate
 

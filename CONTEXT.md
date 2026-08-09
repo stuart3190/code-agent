@@ -1224,3 +1224,26 @@ repair headroom. Full tests are green (1,337 pass, 17 intentional skips). The wo
 dark `proof_slow,publish_package` mode; V1 remains the default, V2 flags are off, settlement is
 paused, and there are zero active worker jobs. Package 15 is blocked. Next is separately approved
 Package 14R; see `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.
+
+## Package 14R quality requalification failed (2026-08-09)
+
+Package 14R repaired mandatory capability binding, reusable repair headroom, immutable pre-green
+working checkpoints, repair-only resume, and durable wizard review/confirmation/cancel recovery.
+The deterministic V2 gate was green before live spend. One additive snapshot identity repair was
+required after the targeted repair produced exact prior bytes with a distinct asset manifest:
+`20260808235700_bv2_snapshot_asset_identity.sql`. Production is at 71 migrations.
+
+The single approved live run spent 8.2934/12 credits over ten AUTO-routed Codex calls. The targeted
+repair passed. The simple/edit runtime states were green but their final diagnostics still showed
+the contracted contact-persistence journey red with no backend mutation, so they are quality
+failures. The only booking build was blocked after three core attempts repeatedly generated an
+oversized three-journey HomePage; it was not rerun. Generation quality is not qualified.
+
+Cleanup is complete: both projects and every scoped V2 build, reservation, worker job, snapshot,
+diagnostic and AI request were erased; production counts returned to the pre-run baseline. The
+worker is restored to `proof_slow,publish_package`, qualification-only authority was removed, V1 is
+default, V2 flags are off, settlement is paused, Caddy is unchanged, and no Stripe transaction ran.
+Package 15 is blocked. Exact next work is Package 14S: deterministic contracted-journey completion
+gating, booking module-plan enforcement and booking complexity classification, then a separately
+approved booking-only proof. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.

@@ -268,3 +268,24 @@ settlement remained paused and no Stripe/Caddy/provisiond operation occurred. Th
 restored to `proof_slow,publish_package`, with zero active jobs. Package 15 is blocked pending a
 separately approved Package 14R. Evidence and exact accounting are in
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.
+
+## Package 14R deterministic quality repair and requalification (2026-08-09)
+
+Package 14R is **FAIL** as a final quality gate. The deterministic implementation repaired exact
+capability binding, repair headroom, immutable pre-green checkpoint resume and durable wizard
+terminal state. Focused and relevant V2 regressions were green before spend. The one live run used
+8.2934 of 12 credits across ten AUTO-routed Codex calls.
+
+The controlled targeted repair passed and proved no contract/core replay. Its first completion
+exposed an asset-manifest snapshot identity defect; additive migration `20260808235700` and commit
+`bb87a1f` fixed it without rewriting snapshots. The simple/edit runtime states were green, but final
+diagnostics still showed the required contact persistence journey red with zero backend mutation,
+so this ledger does not count them as product-quality passes. The only booking build remained
+blocked after three model attempts repeatedly produced an oversized multi-journey HomePage.
+
+All disposable rows and previews were removed; global production counts returned to baseline. The
+worker is dark at `proof_slow,publish_package`, V1 remains default, V2 flags remain off, managed
+settlement remains paused and Caddy is unchanged. Package 15 stays blocked. Next is Package 14S,
+limited to deterministic contracted-completion gating, booking module-plan enforcement and
+complexity classification before any separately approved booking-only spend. Full evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.
