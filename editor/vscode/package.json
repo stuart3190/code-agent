@@ -105,6 +105,10 @@
         "title": "Thrallo: Open Application Preview"
       },
       {
+        "command": "thrallo.openDeployments",
+        "title": "Thrallo: Open Deployments and Releases"
+      },
+      {
         "command": "thrallo.local.openFolder",
         "title": "Thrallo: Open Local Folder"
       },

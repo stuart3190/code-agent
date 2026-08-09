@@ -5,6 +5,7 @@
 
 const { D9_FIXTURE_CLOCK, D9_FIXTURE_SEED, createD9FixtureActionProvider, getD9Scenario } = require("./desktopProductFixtures.js");
 const { createPreviewController } = require("./previewFoundation.js");
+const { createDeploymentController } = require("./deploymentFoundation.js");
 
 const D9_STATE_KEY = "thrallo.desktopProduct.d9.v1";
 const NAVIGATION_ITEMS = Object.freeze([
@@ -19,8 +20,8 @@ const NAVIGATION_ITEMS = Object.freeze([
   Object.freeze({ id: "terminal", label: "Terminal", kind: "code_oss", enabled: true, command: "workbench.action.terminal.focus" }),
   Object.freeze({ id: "preview", label: "Preview", kind: "thrallo", enabled: true, package: "D10" }),
   Object.freeze({ id: "cloud_workspace", label: "Cloud Workspace", kind: "future", enabled: false, state: "capability_unavailable" }),
-  Object.freeze({ id: "deployments", label: "Deployments", kind: "future", enabled: false, state: "integration_pending", package: "D11" }),
-  Object.freeze({ id: "domains", label: "Domains", kind: "future", enabled: false, state: "integration_pending", package: "D11" }),
+  Object.freeze({ id: "deployments", label: "Deployments", kind: "thrallo", enabled: true, package: "D11" }),
+  Object.freeze({ id: "domains", label: "Domains", kind: "thrallo", enabled: true, package: "D11" }),
   Object.freeze({ id: "database", label: "Database", kind: "future", enabled: false, state: "integration_pending", package: "D12" }),
   Object.freeze({ id: "integrations", label: "Integrations", kind: "future", enabled: false, state: "integration_pending", package: "D12" }),
   Object.freeze({ id: "visual_editor", label: "Visual Editor", kind: "future", enabled: false, state: "integration_pending", package: "D13" }),
@@ -61,6 +62,8 @@ async function createDesktopProductController({
   seed = D9_FIXTURE_SEED,
   previewScenario = "preview-idle",
   localPreviewAdapter = null,
+  deploymentScenario = "live-healthy",
+  deploymentExportAdapter = null,
 } = {}) {
   assertDependencies(client, localRegistry);
   const definition = getD9Scenario(scenario);
@@ -97,6 +100,8 @@ async function createDesktopProductController({
   });
   const persisted = validPersistedState(stateStore?.get?.(D9_STATE_KEY), scenario, seed);
   const previewController = createPreviewController({ scenario: previewScenario, seed: `${seed}:preview`, localAdapter: localPreviewAdapter, providerPreview: unwrap(previewResult, null) });
+  const deploymentController = createDeploymentController({ scenario: deploymentScenario, seed: `${seed}:deployments`, providerDeployments: unwrap(deploymentsResult, []), exportAdapter: deploymentExportAdapter });
+  let recentWorkspaces = recent;
   let actionSequence = persisted?.actionSequence || 0;
   let state = {
     schemaVersion: "1.0",
@@ -116,7 +121,7 @@ async function createDesktopProductController({
       fixtureOnly: true,
     },
     access,
-    projects: createProjectLauncher(unwrap(projectsResult, []), recent, unwrap(deploymentsResult, [])),
+    projects: createProjectLauncher(unwrap(projectsResult, []), recentWorkspaces, deploymentController.snapshot()),
     selectedProjectId: persisted?.selectedProjectId || null,
     conversation: createConversation(unwrap(turnsResult, []), definition),
     plan: createPlan(unwrap(planResult, null), persisted?.planState || definition.planState),
@@ -125,13 +130,14 @@ async function createDesktopProductController({
     providerUsage: { usage: unwrap(modelUsageResult, null), budget: unwrap(budgetResult, null) },
     build: { ...createBuildPresentation(definition.buildState), provider: unwrap(buildResult, null) },
     preview: previewController.snapshot(),
+    deployment: deploymentController.snapshot(),
     notices: createNotices(definition, access),
     lastAction: null,
     integration: {
       builderV2Mutation: "capability_unavailable",
       canonicalProjectSync: "integration_pending",
       cloudWorkspace: definition.futureCloudState,
-      publishing: "integration_pending",
+      publishing: "fixture_foundation",
       providerSource: "deterministic_fixture",
     },
   };
@@ -150,8 +156,11 @@ async function createDesktopProductController({
     else if (action.type === "refresh_local_workspaces") result = await refreshLocalWorkspaces();
     else if (action.type === "preview_action") result = (await previewController.dispatch(action.action)).result;
     else if (action.type === "open_preview") result = await openPreview(action.projectId);
+    else if (action.type === "deployment_action") result = (await deploymentController.dispatch(action.action)).result;
     else throw new TypeError(`Unsupported D9 action: ${action.type}`);
     state.preview = previewController.snapshot();
+    state.deployment = deploymentController.snapshot();
+    state.projects = createProjectLauncher(unwrap(projectsResult, []), recentWorkspaces, state.deployment);
     state.lastAction = Object.freeze({ sequence: actionSequence, type: action.type, result });
     await persist();
     return Object.freeze({ result, state: snapshot() });
@@ -259,8 +268,8 @@ async function createDesktopProductController({
   }
 
   async function refreshLocalWorkspaces() {
-    const recentWorkspaces = await localRegistry.recent();
-    state.projects = createProjectLauncher(unwrap(projectsResult, []), recentWorkspaces, unwrap(deploymentsResult, []));
+    recentWorkspaces = await localRegistry.recent();
+    state.projects = createProjectLauncher(unwrap(projectsResult, []), recentWorkspaces, deploymentController.snapshot());
     return Object.freeze({ ok: true, state: "refreshed", count: recentWorkspaces.length });
   }
 
@@ -271,6 +280,7 @@ async function createDesktopProductController({
       access: accessFixture.getCalls(),
       actions: fixtureActions.getCalls(),
       preview: previewController.getCalls(),
+      deployment: deploymentController.getCalls(),
     });
   }
   async function persist() {
@@ -288,11 +298,12 @@ async function createDesktopProductController({
   }
 
   await persist();
-  return Object.freeze({ dispatch, snapshot, getCalls, providerSuite, accessFixture, previewController });
+  return Object.freeze({ dispatch, snapshot, getCalls, providerSuite, accessFixture, previewController, deploymentController });
 }
 
-function createProjectLauncher(fixtureProjects, recent, deployments) {
-  const deployment = deployments[0] || null;
+function createProjectLauncher(fixtureProjects, recent, deploymentState) {
+  const deployment = deploymentState?.deployments?.[0] || null;
+  const publishingState = deploymentState?.publishing?.state || "fixture_only";
   const localItems = recent.map((workspace) => Object.freeze({
     id: workspace.id,
     name: workspace.displayName,
@@ -324,7 +335,8 @@ function createProjectLauncher(fixtureProjects, recent, deployments) {
     dirty: project.status === "conflict",
     conflict: project.status === "conflict",
     runState: project.status,
-    deploymentState: deployment?.state || "fixture_only",
+    deploymentState: compactPublishingState(publishingState, deployment?.status),
+    healthState: deploymentState?.health?.state || "unknown",
     resumable: true,
     availability: "fixture_only",
     previewCommands: [],
@@ -342,11 +354,20 @@ function createProjectLauncher(fixtureProjects, recent, deployments) {
       conflict: false,
       runState: "capability_unavailable",
       deploymentState: null,
+      healthState: "unavailable",
       resumable: false,
       availability: "integration_pending",
       previewCommands: [],
     })]),
   });
+}
+
+function compactPublishingState(publishingState, deploymentState) {
+  if (["publish_failed", "update_failed", "unpublish_failed"].includes(publishingState) || deploymentState === "failed") return "failed";
+  if (publishingState === "update_available" || deploymentState === "update_available") return "update_available";
+  if (publishingState === "published" || publishingState === "rollback_available") return "published";
+  if (publishingState === "unpublished") return "unpublished";
+  return "draft";
 }
 
 function createConversation(turns, definition) {

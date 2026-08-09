@@ -4,6 +4,7 @@
 "use strict";
 
 const { renderPreview, previewStyles } = require("./previewView.js");
+const { renderDeployments, deploymentStyles } = require("./deploymentView.js");
 
 function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
   if (!state || state.source !== "fixture") throw new TypeError("D9 view requires fixture-backed desktop state");
@@ -15,11 +16,12 @@ function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
         : current === "agents" ? renderAgents(state)
           : current === "usage" ? renderUsage(state)
             : current === "preview" ? renderPreview(state.preview, escapeHtml, escapeAttribute, humanize)
+              : current === "deployments" || current === "domains" ? renderDeployments(state.deployment, escapeHtml, escapeAttribute, humanize)
               : renderHome(state);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escapeAttribute(cspSource)} 'unsafe-inline'; script-src 'nonce-${escapeAttribute(nonce)}'; img-src data: ${escapeAttribute(cspSource)}; frame-src 'self' http://127.0.0.1:* http://localhost:*;">
-<style>${styles()}${previewStyles()}</style></head>
+<style>${styles()}${previewStyles()}${deploymentStyles()}</style></head>
 <body><a class="skip-link" href="#main">Skip to Thrallo content</a>
 <div class="shell">
   <aside class="sidebar" aria-label="Thrallo navigation">
@@ -100,14 +102,14 @@ function renderProjects(state) {
 
 function renderProjectRow(project) {
   const git = project.git?.detected ? `${project.git.branch || "Detached HEAD"}${project.dirty ? " - uncommitted changes" : " - clean"}` : "No Git repository detected";
-  const meta = project.local ? `${humanize(project.framework || "unknown")} · ${git}` : `${humanize(project.runState)} · deployment ${humanize(project.deploymentState || "none")}`;
+  const meta = project.local ? `${humanize(project.framework || "unknown")} · ${git}` : `${humanize(project.runState)} · deployment ${humanize(project.deploymentState || "none")}${["degraded", "unhealthy"].includes(project.healthState) ? ` · health ${humanize(project.healthState)}` : ""}`;
   const previewHint = project.local && project.previewCommands?.length ? ` · Preview available: ${project.previewCommands.map((item) => item.command).join(", ")} (not started)` : "";
   const disabled = project.workspaceType === "future_cloud_workspace" || project.availability === "missing_folder" || project.availability === "inaccessible_folder";
   return `<article class="project-row" data-workspace-type="${escapeAttribute(project.workspaceType)}">
     <div class="source-mark" aria-hidden="true">${project.local ? "L" : project.workspaceType === "fixture_thrallo_project" ? "T" : "C"}</div>
     <div class="project-copy"><div><h3>${escapeHtml(project.name)}</h3><span class="state-label">${escapeHtml(project.sourceLabel)}</span></div><p>${escapeHtml(meta)}</p>
       <small>${escapeHtml(project.updatedAt ? `Updated ${formatDate(project.updatedAt)}` : humanize(project.availability))}${project.conflict ? " · Conflict requires review" : ""}${escapeHtml(previewHint)}</small></div>
-    <div class="row-actions">${project.dirty ? `<span class="warning-text">Dirty</span>` : ""}<button type="button" data-preview-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>Preview</button><button type="button" data-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>${project.local ? "Resume" : project.workspaceType === "fixture_thrallo_project" ? "Open fixture" : "Unavailable"}</button></div>
+    <div class="row-actions">${project.dirty ? `<span class="warning-text">Dirty</span>` : ""}${["failed", "degraded", "unhealthy"].includes(project.deploymentState) || ["degraded", "unhealthy"].includes(project.healthState) ? `<span class="warning-text">Deployment warning</span>` : ""}<button type="button" data-preview-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>Preview</button>${project.workspaceType === "fixture_thrallo_project" ? `<button type="button" data-nav="deployments">Deployments</button>` : ""}<button type="button" data-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>${project.local ? "Resume" : project.workspaceType === "fixture_thrallo_project" ? "Open fixture" : "Unavailable"}</button></div>
   </article>`;
 }
 
@@ -200,7 +202,7 @@ function renderNotices(notices) {
 
 function emptyState(title, detail) { return `<div class="empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p></div>`; }
 
-function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget", preview: "Application preview" })[id] || "Thrallo"; }
+function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget", preview: "Application preview", deployments: "Deployments and releases", domains: "Domains and health" })[id] || "Thrallo"; }
 function humanize(value) { return String(value ?? "unknown").replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : date.toISOString().slice(0, 10); }
 function formatDuration(seconds) { const minutes = Math.floor(seconds / 60); return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`; }
@@ -215,6 +217,12 @@ document.addEventListener('click',(event)=>{const button=event.target.closest('b
  else if(button.dataset.hostAction)vscode.postMessage({type:'hostAction',action:button.dataset.hostAction});
  else if(button.dataset.project)vscode.postMessage({type:'selectProject',projectId:button.dataset.project});
  else if(button.dataset.previewProject)vscode.postMessage({type:'openPreview',projectId:button.dataset.previewProject});
+ else if(button.dataset.deploymentId)vscode.postMessage({type:'deploymentAction',action:{type:'select_deployment',deploymentId:button.dataset.deploymentId}});
+ else if(button.dataset.releaseId)vscode.postMessage({type:'deploymentAction',action:{type:'select_release',releaseId:button.dataset.releaseId}});
+ else if(button.dataset.deploymentReview)vscode.postMessage({type:'deploymentAction',action:{type:'review_action',actionId:button.dataset.deploymentReview}});
+ else if(button.dataset.deploymentConfirm)vscode.postMessage({type:'deploymentAction',action:{type:'confirm_action',actionId:button.dataset.deploymentConfirm,confirmed:true}});
+ else if(button.dataset.deploymentAction)vscode.postMessage({type:'deploymentAction',action:deploymentAction(button.dataset.deploymentAction)});
+ else if(button.dataset.deploymentFocus){const ids={deployments:'deployment-history-title',releases:'release-history-title',logs:'deployment-logs-title',domains:'domain-title'};document.getElementById(ids[button.dataset.deploymentFocus])?.scrollIntoView({block:'start'});}
  else if(button.dataset.planDecision)vscode.postMessage({type:'planDecision',decision:button.dataset.planDecision,planId:button.dataset.planId,comment:document.getElementById('plan-comment')?.value||''});
  else if(button.dataset.agentControl)vscode.postMessage({type:'agentControl',agentId:button.dataset.agent,control:button.dataset.agentControl});
  else if(button.dataset.portal)vscode.postMessage({type:'portal',destination:button.dataset.portal});
@@ -228,7 +236,11 @@ document.querySelectorAll('[data-viewport]').forEach((button)=>button.addEventLi
 document.getElementById('viewport-zoom')?.addEventListener('change',(event)=>vscode.postMessage({type:'previewAction',action:{type:'set_zoom',zoom:event.target.value==='fit'?'fit':Number(event.target.value)}}));
 document.getElementById('diagnostic-filter')?.addEventListener('change',(event)=>vscode.postMessage({type:'previewAction',action:{type:'filter_diagnostics',severity:event.target.value}}));
 document.querySelectorAll('[data-source-file]').forEach((button)=>button.addEventListener('click',()=>vscode.postMessage({type:'openDiagnosticSource',file:button.dataset.sourceFile,line:Number(button.dataset.sourceLine),column:Number(button.dataset.sourceColumn)})));
-function previewAction(action,command){return ({start:{type:'start_preview',commandId:command,userInitiated:true},restart:{type:'restart_preview',commandId:command,userInitiated:true},stop:{type:'stop_preview'},reload:{type:'reload_preview'},back:{type:'history_back'},forward:{type:'history_forward'},screenshot:{type:'capture_screenshot'},tests:{type:'run_tests'},'cancel-tests':{type:'cancel_tests'},rotate:{type:'rotate_viewport'},'reset-viewport':{type:'reset_viewport'},'clear-diagnostics':{type:'clear_diagnostics',kind:'all'},'copy-diagnostics':{type:'copy_diagnostics'},external:{type:'open_external'}})[action]||{type:'unsupported'};}`;
+document.getElementById('deployment-log-filter')?.addEventListener('submit',(event)=>{event.preventDefault();const form=new FormData(event.target);vscode.postMessage({type:'deploymentAction',action:{type:'filter_logs',phase:form.get('phase'),severity:form.get('severity'),search:form.get('search')}});});
+document.getElementById('log-follow')?.addEventListener('change',(event)=>vscode.postMessage({type:'deploymentAction',action:{type:'toggle_log_follow',follow:event.target.checked}}));
+const deploymentDialog=document.querySelector('.deployment-review');if(deploymentDialog){deploymentDialog.close();deploymentDialog.showModal();deploymentDialog.querySelector('button')?.focus();}
+function previewAction(action,command){return ({start:{type:'start_preview',commandId:command,userInitiated:true},restart:{type:'restart_preview',commandId:command,userInitiated:true},stop:{type:'stop_preview'},reload:{type:'reload_preview'},back:{type:'history_back'},forward:{type:'history_forward'},screenshot:{type:'capture_screenshot'},tests:{type:'run_tests'},'cancel-tests':{type:'cancel_tests'},rotate:{type:'rotate_viewport'},'reset-viewport':{type:'reset_viewport'},'clear-diagnostics':{type:'clear_diagnostics',kind:'all'},'copy-diagnostics':{type:'copy_diagnostics'},external:{type:'open_external'}})[action]||{type:'unsupported'};}
+function deploymentAction(action){return ({load_older_logs:{type:'load_older_logs'},cancel_review:{type:'cancel_review'},copy_dns_instructions:{type:'copy_dns_instructions'},export:{type:'export_fixture'}})[action]||{type:'unsupported'};}`;
 }
 
 function styles() {

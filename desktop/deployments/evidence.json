@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "package": "D11-foundation",
+  "observedAt": "2026-08-09",
+  "classification": "fixture-deployment-publishing-presentation-foundation",
+  "items": [
+    {
+      "id": "deployment-release-model",
+      "category": "fixture-verified",
+      "state": "deterministic-fixture-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Deployment execution, immutable release history, public activation and project state are represented separately with terminal-state activity protection."
+    },
+    {
+      "id": "fixture-publishing-actions",
+      "category": "fixture-verified",
+      "state": "deterministic-fixture-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Publish, update, rollback, unpublish and domain transitions affect fixture state only and record bounded calls without a network transport."
+    },
+    {
+      "id": "local-fixture-export",
+      "category": "local-runtime-verified",
+      "state": "synthetic-local-runtime-verified",
+      "runtimeVerified": true,
+      "claim": "A redacted JSON fixture export is written only under an injected extension-storage root and is marked local-only and not uploaded."
+    },
+    {
+      "id": "stable-read-only-boundary",
+      "category": "contract-verified",
+      "state": "injected-read-only-adapter",
+      "runtimeVerified": false,
+      "claim": "Optional D1 deployment reads accept injected transport and origin-relative GET or HEAD routes only; deterministic tests do not call a network."
+    },
+    {
+      "id": "track-b-publishing",
+      "category": "future-integration",
+      "state": "blocked",
+      "runtimeVerified": false,
+      "claim": "D7 source identity and D11 Track B production publishing, rollback, domain, logs, health and export contracts remain unavailable."
+    }
+  ],
+  "visualVerification": {
+    "renderer": "loopback-hosted-real-D9-D10-D11-controller-and-view",
+    "loopbackHttpStatus": 200,
+    "scenarios": {
+      "liveHealthy": 41982,
+      "updateAvailable": 42041,
+      "domainPendingDns": 41972,
+      "failedDeployment": 40727,
+      "rollbackReview": 43082,
+      "unpublishReview": 42700
+    },
+    "requiredSurfaceMarkersVerified": true,
+    "accessibleReviewDialogsVerified": true,
+    "inAppBrowserScreenshot": false,
+    "inAppBrowserBlocker": "The in-app Browser controller rejected the inspection session because sandbox policy metadata was unavailable.",
+    "actualElectronWorkbench": false,
+    "actualElectronBlocker": "The isolated compiled Code OSS/Electron development workbench checkout remains unavailable.",
+    "productionAccessUsed": false,
+    "cleanup": "The loopback renderer was stopped and port 43121 was verified closed."
+  },
+  "negativeClaims": {
+    "productionPublish": false,
+    "productionUpdate": false,
+    "productionRollback": false,
+    "productionUnpublish": false,
+    "productionDomainMutation": false,
+    "builderV2SourceIdentity": false,
+    "buildr101RouteReuse": false
+  }
+}

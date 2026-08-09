@@ -11,6 +11,7 @@ const { NAVIGATION_ITEMS, createDesktopProductController } = require("./desktopP
 const { renderDesktopProductHtml } = require("./desktopProductView.js");
 const { createLocalPreviewRuntime } = require("./previewLocalRuntime.js");
 const { safeLocalPreviewUrl, safeRelativeFile } = require("./previewFoundation.js");
+const { createDeploymentLocalExportAdapter } = require("./deploymentLocalExport.js");
 
 const HOST_ACTIONS = Object.freeze(["openLocalFolder", "openLocalGit", "importLocal"]);
 
@@ -21,6 +22,7 @@ function createDesktopProductHost({
   localWorkspaceHost,
   scenario = "authenticated-paid",
   previewScenario = "preview-idle",
+  deploymentScenario = "live-healthy",
   client: injectedClient = null,
 } = {}) {
   if (!vscode || !context || !localWorkspaceHost) throw new TypeError("D9 host requires Code OSS, extension context, and the D8 local workspace host");
@@ -36,6 +38,7 @@ function createDesktopProductHost({
       registry: localWorkspaceHost.registry,
       artifactRoot: context.storageUri?.fsPath ? path.join(context.storageUri.fsPath, "preview-artifacts") : null,
     });
+    const deploymentExportAdapter = createDeploymentLocalExportAdapter({ root: context.storageUri?.fsPath ? path.join(context.storageUri.fsPath, "deployment-exports") : null });
     controller ||= await createDesktopProductController({
       client,
       localRegistry: localWorkspaceHost.registry,
@@ -43,6 +46,8 @@ function createDesktopProductHost({
       scenario,
       previewScenario,
       localPreviewAdapter: localPreviewRuntime,
+      deploymentScenario,
+      deploymentExportAdapter,
     });
     portal ||= client.createPortalHandoff({
       openExternal: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
@@ -103,6 +108,12 @@ function createDesktopProductHost({
       return dispatchAndRender({ type: "preview_action", action: message.action });
     }
     if (message.type === "openDiagnosticSource") return openDiagnosticSource(message);
+    if (message.type === "deploymentAction") {
+      const response = await controller.dispatch({ type: "deployment_action", action: message.action });
+      if (response.result.state === "fixture_dns_instructions_ready") await vscode.env.clipboard.writeText(JSON.stringify(response.result.instructions, null, 2));
+      render();
+      return response.result;
+    }
     if (message.type === "sendMessage") return dispatchAndRender({ type: "send_message", text: message.text });
     if (message.type === "planDecision") return dispatchAndRender({ type: "plan_decision", planId: message.planId, decision: message.decision, comment: message.comment });
     if (message.type === "agentControl") return dispatchAndRender({ type: "agent_control", agentId: message.agentId, control: message.control });
@@ -181,6 +192,7 @@ function createDesktopProductHost({
       vscode.commands.registerCommand("thrallo.openAgents", () => open("agents")),
       vscode.commands.registerCommand("thrallo.openUsage", () => open("usage")),
       vscode.commands.registerCommand("thrallo.openPreview", () => open("preview")),
+      vscode.commands.registerCommand("thrallo.openDeployments", () => open("deployments")),
       Object.freeze({ dispose: () => { localPreviewRuntime?.cleanup().catch(() => {}); } }),
     ];
   }
