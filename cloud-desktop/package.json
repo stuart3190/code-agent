@@ -1,0 +1,30 @@
+{
+  "name": "@thrallo/cloud-desktop",
+  "version": "0.0.0-c0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated browser application for the Thrallo Cloud Desktop.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4174 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
+    "test:unit": "vitest run --config vitest.config.js",
+    "test:playwright": "playwright test --config playwright.config.js",
+    "test:e2e": "npm run test:playwright",
+    "guard:paths": "node scripts/guard-protected-paths.mjs",
+    "guard:boundaries": "node scripts/guard-import-boundaries.mjs",
+    "guard:network": "node scripts/guard-no-production-network.mjs",
+    "test": "npm run test:unit && npm run guard:paths && npm run guard:boundaries && npm run guard:network",
+    "verify": "npm run test && npm run build && npm run test:playwright"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@vitejs/plugin-react": "6.0.4",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  }
+}

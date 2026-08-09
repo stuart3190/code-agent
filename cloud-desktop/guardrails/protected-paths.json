@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "package": "C0",
+  "sourceCommit": "92e4c9fe5c864799eee228f304849064bacb0190",
+  "allowedChangeRoots": [
+    "cloud-desktop/"
+  ],
+  "externalProtectedWorktrees": [
+    "C:/Users/Administrator/code-agent",
+    "C:/Users/Administrator/code-agent-desktop"
+  ],
+  "protectedGroups": [
+    {
+      "id": "builder_v2",
+      "paths": ["shell/server/lib/builderV2/**", "docs/BUILDER-V2-*/**"]
+    },
+    {
+      "id": "native_desktop_code_oss",
+      "paths": ["desktop/**", "editor/**"]
+    },
+    {
+      "id": "app_thrallo_portal_and_server",
+      "paths": ["shell/web/**", "shell/server/**"]
+    },
+    {
+      "id": "production_and_deployment",
+      "paths": ["ops/**", "provisiond/**", "build-worker/**", "runtime-worker/**", ".github/**"]
+    },
+    {
+      "id": "migrations_and_data",
+      "paths": ["migrations/**", "supabase/**"]
+    },
+    {
+      "id": "legacy_buildr101",
+      "paths": ["src/**", "harness/**", "baseline/**"]
+    }
+  ]
+}

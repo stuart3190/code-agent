@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "package": "C0",
+  "allowedProviderKinds": ["fixture"],
+  "productionProviderAllowed": false,
+  "liveFallbackAllowed": false,
+  "externalNetworkAllowed": false,
+  "requiredUnavailableCode": "capability_unavailable",
+  "prohibitedServices": [
+    "Supabase",
+    "Daytona",
+    "Builder V2",
+    "Stripe",
+    "GitHub",
+    "model provider",
+    "production authentication"
+  ]
+}

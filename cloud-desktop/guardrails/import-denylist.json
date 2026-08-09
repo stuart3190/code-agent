@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "forbiddenDependencies": [
+    "electron",
+    "vscode",
+    "@daytona/sdk",
+    "@supabase/supabase-js",
+    "stripe",
+    "@octokit/rest",
+    "openai"
+  ],
+  "forbiddenImportFragments": [
+    "/desktop/",
+    "/editor/",
+    "editor/vscode",
+    "shell/server",
+    "builderV2",
+    "build-worker",
+    "runtime-worker",
+    "provisiond",
+    "routes/generate",
+    "routes/projects",
+    "routes/publish",
+    "runtimeConnectors",
+    "saasPayments",
+    "capabilityRuntime"
+  ]
+}
