@@ -76,8 +76,8 @@ test("fixture source scanners reject network and production fallback primitives"
   assert.equal(fixtures.network.productionMutationFallback, false);
 });
 
-test("the current D0 branch diff passes the protected-boundary guard", () => {
-  const result = runGuard({ phase: "D0" });
+test("the current desktop branch diff passes the D0 protected-boundary guard", () => {
+  const result = runGuard();
   assert.ok(result.changedFiles.includes("desktop/d0/capability-registry.json"));
   assert.ok(result.changedFiles.includes("test/desktop/d0-contracts.test.mjs"));
 });

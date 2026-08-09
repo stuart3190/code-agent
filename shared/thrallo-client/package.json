@@ -1,0 +1,18 @@
+{
+  "name": "@thrallo/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Versioned host-neutral Thrallo client and provider contracts for native and cloud workbenches.",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.mjs"
+    },
+    "./fixtures": {
+      "types": "./index.d.ts",
+      "import": "./src/fixtures/createFixtureProviders.mjs"
+    }
+  },
+  "types": "./index.d.ts"
+}
