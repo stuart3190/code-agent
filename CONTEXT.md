@@ -1247,3 +1247,17 @@ Package 15 is blocked. Exact next work is Package 14S: deterministic contracted-
 gating, booking module-plan enforcement and booking complexity classification, then a separately
 approved booking-only proof. Evidence is in
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.
+
+## Package 14S deterministic gate passed (2026-08-09)
+
+Builder V2 now refuses final `green` completion when any required contracted journey is red or
+missing. Core/increment work stays as immutable `working:*` repair input until the whole contract
+passes. Multi-step booking is classified medium, receives an exact behavior-only module plan before
+generation, and must bind both `makeBookingSystem` and `makeWizardMachine`; missing planned modules
+or bindings fail before compile/browser verification. One-step booking remains simple and the
+previously approved modularity thresholds were not changed.
+
+Package 14S focused fixtures passed 6/6 and 238/238 relevant zero-model V2 tests passed. No provider
+call or production mutation occurred. The only remaining Package 14S step is one separately approved
+live booking proof; Package 15 remains blocked until that proof passes. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.

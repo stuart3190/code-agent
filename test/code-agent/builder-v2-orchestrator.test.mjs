@@ -197,9 +197,9 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
 
   const build = await buildStore.get(result.buildId);
   assert.deepEqual(build.states, [
-    "created", "contracting", "assets", "core", "verify_core", "green",
+    "created", "contracting", "assets", "core", "verify_core",
     "increment:newsletter-signup", "increment:browse-info", "green",
-  ], "the exact Part 5 state walk");
+  ], "green is written only after every contracted journey passes");
 
   // The green pointer names the LAST increment's snapshot; its tree holds everything.
   const pointer = await snapshotStore.pointer("o", "proj-1", "green");
@@ -213,26 +213,27 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
 
   // Snapshot lineage: core → newsletter → browse.
   const finalSnap = await snapshotStore.getSnapshot(pointer);
-  assert.equal(finalSnap.reason, "increment:browse-info");
+  assert.equal(finalSnap.reason, "working:increment:browse-info");
   const mid = await snapshotStore.getSnapshot(finalSnap.parent_snapshot);
-  assert.equal(mid.reason, "increment:newsletter-signup");
+  assert.equal(mid.reason, "working:increment:newsletter-signup");
   assert.equal((await snapshotStore.getSnapshot(mid.parent_snapshot)).reason, "working:core");
   assert.ok(finalSnap.asset_manifest.length >= 2, "the asset manifest versions with the snapshot");
 });
 
-test("WP8/C4 — a failing secondary increment NEVER blocks the core: rollback + pending, later increments continue", async () => {
+test("14S — a red required secondary blocks completion while retaining resumable work", async () => {
   const { orchestrator, snapshotStore } = harness({ failJourneys: ["newsletter-signup"] });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
 
-  assert.equal(result.state, "green");
-  assert.deepEqual(result.shipped, ["browse-info"], "the increment AFTER the failure still ships");
+  assert.equal(result.state, "blocked");
+  assert.deepEqual(result.shipped, ["browse-info"], "later deterministic work is retained but not promoted");
   assert.deepEqual(result.pendingIncrements.map((p) => p.journeyId), ["newsletter-signup"]);
 
-  const finalTree = await snapshotStore.materialize("o", await snapshotStore.pointer("o", "proj-1", "green"));
-  assert.ok(finalTree["src/routes/BookPage.jsx"]);
-  assert.ok(finalTree["src/routes/AboutSection.jsx"]);
-  assert.equal(finalTree["src/routes/NewsletterPanel.jsx"], undefined,
-    "the failed increment's tree was rolled back — its file is in NO promoted snapshot");
+  assert.equal(await snapshotStore.pointer("o", "proj-1", "green"), null,
+    "no partial contract can become the project's green authority");
+  const working = await orchestrator.resumeWorkingContext("o", "proj-1", result.buildId);
+  assert.ok(working.tree["src/routes/BookPage.jsx"]);
+  assert.ok(working.tree["src/routes/AboutSection.jsx"]);
+  assert.ok(working.tree["src/routes/NewsletterPanel.jsx"], "red work remains available for targeted repair");
 });
 
 test("WP8/C4 — a failing ESSENTIAL journey blocks: no snapshot, no green pointer, state blocked", async () => {

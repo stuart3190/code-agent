@@ -289,3 +289,16 @@ settlement remains paused and Caddy is unchanged. Package 15 stays blocked. Next
 limited to deterministic contracted-completion gating, booking module-plan enforcement and
 complexity classification before any separately approved booking-only spend. Full evidence:
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.
+
+## Package 14S deterministic contracted-completion gate (2026-08-09)
+
+Package 14S deterministic work is **PASS**. Green completion now requires every contracted journey;
+red secondary work remains an immutable resumable checkpoint and is never promoted. Explicit and
+contract-derived multi-step booking is medium complexity. A visually headless booking module plan
+is supplied before patch dispatch and exact planned modules plus `makeBookingSystem` and
+`makeWizardMachine` bindings are rejected before compile/browser work when absent.
+
+Focused fixtures passed 6/6 and the relevant zero-model Builder V2 suite passed 238/238. No live
+provider call, production mutation, infrastructure certification, threshold change, or billing
+change occurred. Package 15 remains blocked only by the separately approved single live booking
+proof. Evidence: `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.

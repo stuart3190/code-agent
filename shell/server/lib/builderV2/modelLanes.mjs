@@ -165,7 +165,7 @@ function renderJourneyBrief(journeys) {
 
 export function renderPatchPrompt({
   step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
-  projectKnowledge = null, onRetrieval = null,
+  projectKnowledge = null, onRetrieval = null, modulePlan = [],
 }) {
   const isEdit = step === "edit";
   const isRepair = step === "repair";
@@ -186,6 +186,11 @@ export function renderPatchPrompt({
     contractBrief(contract),
     "",
     capabilityRequirementsBrief(contract),
+    modulePlan.length ? [
+      "REQUIRED MODULE PLAN (exact paths are machine checked; roles are behavioural, not visual):",
+      ...modulePlan.map((module) => `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}`),
+      "Keep styling, layout, typography and component composition original to this app.",
+    ].join("\n") : "REQUIRED MODULE PLAN: none for this scope.",
     "",
     projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
@@ -474,11 +479,11 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest, signal = null }) => {
+    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest, modulePlan = [], signal = null }) => {
       const projectKnowledge = await loadKnowledge(owner, projectId);
       let retrievalTrace = null;
       const prompt = renderPatchPrompt({
-        step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge,
+        step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
         onRetrieval: (trace) => { retrievalTrace = trace; },
       });
       if (retrievalTrace && recordRetrieval) {

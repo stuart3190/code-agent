@@ -173,3 +173,18 @@ export function lintRequiredCapabilityBindings(tree, bindings = []) {
   }
   return { ok: problems.length === 0, problems };
 }
+
+/** Exact module existence/factory placement for a deterministic module plan. */
+export function lintRequiredModulePlan(tree, plan = []) {
+  const problems = [];
+  for (const module of plan) {
+    if (typeof tree?.[module.path] !== "string") {
+      problems.push(`required planned module is missing: ${module.path} (${module.role})`);
+      continue;
+    }
+    if (module.factory && !new RegExp(`\\b${module.factory}\\s*\\(`).test(String(tree[module.path]))) {
+      problems.push(`required planned module ${module.path} must bind ${module.factory}(...)`);
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}

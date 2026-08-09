@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | next; deterministic secondary-journey completion gate, booking module-plan enforcement and complexity classification, then separately approved booking-only proof | none expected | no spend until separate approval | local first, then internal booking fixture |
+| 14S. Contracted completion and modular booking planning repair | deterministic gate complete 2026-08-09: 238/238 relevant V2 tests; single live booking proof awaits separate approval | none | zero spent; live proof not run | local complete; internal booking fixture pending |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -147,7 +147,14 @@ repair passed after a forward repair to snapshot asset identity, but the simple/
 carried a failed contracted contact-persistence journey, and the one booking build was blocked after
 three attempts repeatedly violated modularity limits. AUTO routing executed, but only one connected
 Codex catalogue model was available, so it proved lane/rationale persistence rather than a real
-cost-tier comparison. Package 15 is blocked by Package 14S; no second booking build is authorised.
+cost-tier comparison.
+
+Package 14S now prevents `green` completion while any contracted journey is red or missing, refines
+multi-step booking to medium complexity, and injects plus machine-checks a visually headless booking
+module plan before compile/browser work. Required `makeBookingSystem` and `makeWizardMachine`
+bindings remain structural. The deterministic gate passed 238/238 relevant V2 tests with zero model
+calls. Package 15 is blocked only by one separately approved booking-only live proof. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.
 
 ## Deterministic qualification gate
 

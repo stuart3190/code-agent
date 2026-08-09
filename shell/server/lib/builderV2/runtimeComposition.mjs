@@ -329,10 +329,11 @@ export function createBuilderV2Runtime({
       const complexity = classifyComplexity({ prompt: request }).level;
       const providerForStep = async ({ step, ...stepContext }) => {
         const routedStep = String(step).startsWith("increment:") ? "increment" : step;
+        const stepComplexity = classifyComplexity({ prompt: request, contract: stepContext.contract || null }).level;
         const decision = routeV2Step({
           step: routedStep,
-          taskClass: stepContext.taskClass || `${routedStep}:${complexity}`,
-          complexity,
+          taskClass: stepContext.taskClass || `${routedStep}:${stepComplexity}`,
+          complexity: stepComplexity,
           affectedModules: Number(stepContext.affectedModules || changedModuleCount({ step, ...stepContext })),
           retrievalTokens: Number(stepContext.retrievalTokens || 0),
           repairRound: Number(stepContext.attempt || 0), candidates, history,
@@ -473,6 +474,9 @@ export function createBuilderV2Runtime({
           indexerVersion: INDEXER_VERSION,
         },
         journeysFn, backendProbeFn, compile, baseTree: () => clone(fromScaffold(REACT_VITE)), events,
+        classifyContract: ({ contract: generatedContract, profile }) => (
+          classifyComplexity({ prompt: request, contract: generatedContract }).level || profile
+        ),
         log: (line) => emit("stdout", line),
       });
 

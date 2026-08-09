@@ -161,6 +161,52 @@ export function bindingsForJourneys(contract, bindings, journeys = []) {
   });
 }
 
+/**
+ * A deterministic, visually headless module plan for the one class that repeatedly
+ * collapsed into a single route during live qualification: multi-step booking.
+ * Ordinary one-step booking forms deliberately have no prescribed module layout.
+ */
+export function bookingModulePlan(contract, journeys = contract?.journeys || []) {
+  const scopedContract = { ...contract, journeys };
+  const bindings = bindingsForJourneys(contract, bindCapabilities(contract), journeys);
+  if (!bindings.some((binding) => binding.name === "booking") || !requiresWizard(scopedContract)) return [];
+
+  const text = journeys.map(journeyText).join(" ").toLowerCase();
+  const plan = [
+    { path: "src/data/bookingSystem.js", role: "booking persistence adapter", factory: "makeBookingSystem" },
+    { path: "src/data/bookingWizard.js", role: "durable wizard state adapter", factory: "makeWizardMachine" },
+    { path: "src/components/booking/BookingFlow.jsx", role: "step navigation and flow composition" },
+  ];
+  if (/review|summary/.test(text)) {
+    plan.push({ path: "src/components/booking/BookingReview.jsx", role: "review presentation" });
+  }
+  if (/confirm|confirmation|reference/.test(text)) {
+    plan.push({ path: "src/components/booking/BookingConfirmation.jsx", role: "confirmation and reference presentation" });
+  }
+  if (/cancel|reload|refresh|recover|status/.test(text)) {
+    plan.push({ path: "src/components/booking/BookingStatus.jsx", role: "restored and cancelled booking presentation" });
+  }
+  return plan;
+}
+
+/** Final success is stricter than the internal first-green progression gate. */
+export function completionEligibility({ contract, gates, journeyResults, backendRowFailures = [], blockingErrors = [] }) {
+  const required = contract?.journeys || [];
+  const failures = [];
+  if (!gates?.ok) failures.push("deterministic gates (D0-D2) are not green");
+  const byId = new Map((journeyResults?.journeys || []).map((journey) => [journey.id, journey]));
+  for (const journey of required) {
+    const outcome = byId.get(journey.id);
+    if (!outcome) failures.push(`required journey ${journey.id} was never verified`);
+    else if (outcome.status !== "pass") failures.push(`required journey ${journey.id} is ${outcome.status || "not green"}`);
+  }
+  for (const row of backendRowFailures) {
+    failures.push(`required backend-row check failed (${row.journeyId || "unknown journey"})`);
+  }
+  if (blockingErrors.length) failures.push(`blocking console/network errors: ${blockingErrors.length}`);
+  return { eligible: failures.length === 0, failures };
+}
+
 /** Image intents per route — the Asset Service's input; the model never searches (Part 18). */
 export function imageIntents(contract) {
   const subject = String(contract?.summary || "").split(/[.!?]/)[0].slice(0, 80).trim();

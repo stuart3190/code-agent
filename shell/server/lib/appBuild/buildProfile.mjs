@@ -59,6 +59,26 @@ export function classifyComplexity({ prompt = "", contract = null } = {}) {
     if (signal.test(text)) { reasons.push(`matches an advanced pattern (${signal.source.slice(0, 40)})`); return { level: COMPLEXITY.advanced, reasons }; }
   }
 
+  const journeyDetail = (contract?.journeys || []).map((journey) => [
+    journey.id, journey.title,
+    ...(journey.steps || []).flatMap((step) => [step.action, step.expect]),
+  ].join(" ")).join(" ").toLowerCase();
+  const explicitMultiStepBooking = /\b(booking|reservation|appointment)\b/i.test(text)
+    && (/\b(multi[- ]?step|wizard)\b/i.test(text)
+      || (/(date|slot|party|quantity|details|guest)/i.test(text)
+        && /(review|confirm|confirmation|reference|refresh|reload|cancel)/i.test(text)));
+  const contractedMultiStepBooking = /booking|reservation|appointment/.test(journeyDetail)
+    && (contract?.journeys || []).some((journey) => {
+      const steps = journey.steps || [];
+      const details = steps.map((step) => `${step.action} ${step.expect}`).join(" ").toLowerCase();
+      return steps.length >= 4 && /(choose|select|date|slot|party|quantity|details|guest)/.test(details)
+        && /(review|summary|confirm|confirmation|reference)/.test(details);
+    });
+  if (explicitMultiStepBooking || contractedMultiStepBooking) {
+    reasons.push("multi-step booking flow requires coordinated durable state");
+    return { level: COMPLEXITY.medium, reasons };
+  }
+
   // Structural evidence: a lot of moving parts is medium regardless of what it is called.
   const journeys = (contract?.journeys || []).length;
   const entities = (contract?.entities || []).length;
