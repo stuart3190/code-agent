@@ -1,6 +1,6 @@
 {
   "name": "@thrallo/client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Versioned host-neutral Thrallo client and provider contracts for native and cloud workbenches.",
@@ -16,6 +16,10 @@
     "./auth/fixtures": {
       "types": "./index.d.ts",
       "import": "./src/auth/fixtures/createDeterministicAuthProvider.mjs"
+    },
+    "./access/fixtures": {
+      "types": "./index.d.ts",
+      "import": "./src/access/fixtures/createDesktopAccessFixture.mjs"
     }
   },
   "types": "./index.d.ts"

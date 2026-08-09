@@ -46,3 +46,31 @@ export {
   AUTH_FIXTURE_SEED,
   createDeterministicAuthProvider,
 } from "./auth/fixtures/createDeterministicAuthProvider.mjs";
+export { ACCOUNT_RECOVERY_STATES, createAccountPresentationModel } from "./access/account.mjs";
+export {
+  ENTITLEMENT_RESOURCE_KEYS,
+  ENTITLEMENT_STATES,
+  RESOURCE_AVAILABILITY,
+  createEntitlementModel,
+  createResourceGrant,
+  createUnknownEntitlementModel,
+  unknownResourceGrant,
+} from "./access/entitlements.mjs";
+export {
+  USAGE_RESOURCE_KEYS,
+  USAGE_STATES,
+  classifyUsage,
+  createUnavailableUsageBudgetModel,
+  createUsageBudgetModel,
+  createUsageMeter,
+} from "./access/usage.mjs";
+export { DESKTOP_LAUNCH_ACTIONS, LAUNCH_DECISION_STATES, evaluateDesktopLaunchActions, evaluateLaunchAction } from "./access/launch.mjs";
+export { composeDesktopAccessState } from "./access/compose.mjs";
+export { ACCOUNT_ACCESS_OPERATIONS, assertAccountAccessProvider, createStableReadOnlyAccountAccessProvider } from "./access/provider.mjs";
+export { PORTAL_ACTIONS, PORTAL_DESTINATIONS, createPortalHandoff } from "./access/portalHandoff.mjs";
+export {
+  DESKTOP_ACCESS_FIXTURE_CLOCK,
+  DESKTOP_ACCESS_FIXTURE_SEED,
+  DESKTOP_ACCESS_SCENARIO_NAMES,
+  createDesktopAccessFixture,
+} from "./access/fixtures/createDesktopAccessFixture.mjs";

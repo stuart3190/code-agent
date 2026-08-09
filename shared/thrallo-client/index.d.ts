@@ -396,3 +396,159 @@ export function createDeterministicAuthProvider(options?: { seed?: string; clock
   now(): number;
   getCalls(): readonly unknown[];
 };
+
+export type EntitlementState = "free" | "active_paid" | "trial" | "past_due" | "canceled" | "suspended" | "recovery_only" | "unknown";
+export type ResourceAvailability = "available" | "unavailable" | "unknown";
+export type EntitlementResource =
+  | "managedAi" | "cloudDesktop" | "nativeManagedServices" | "concurrentAgents" | "builds"
+  | "previewTesting" | "storage" | "workspaceCompute" | "publishing" | "integrations";
+
+export interface ResourceGrant {
+  readonly availability: ResourceAvailability;
+  readonly reason: string | null;
+  readonly limit: Readonly<{ kind: "known" | "unlimited" | "unknown"; value: number | null; unit: string | null }>;
+}
+
+export interface EntitlementModel {
+  readonly schemaVersion: "1.0";
+  readonly state: EntitlementState;
+  readonly resources: Readonly<Record<EntitlementResource, ResourceGrant>>;
+  readonly freshness: "fresh" | "stale" | "unavailable";
+  readonly observedAt: string | null;
+  readonly period: Readonly<{ startsAt: string | null; endsAt: string | null; resetsAt: string | null }>;
+}
+
+export type UsageResource = "aiModel" | "builds" | "agents" | "storage" | "workspaceCompute" | "browserTesting";
+export type UsageState = "low" | "normal" | "warning_80" | "warning_90" | "exhausted" | "unavailable";
+
+export interface UsageMeter {
+  readonly state: UsageState;
+  readonly used: number | null;
+  readonly limit: number | null;
+  readonly remaining: number | null;
+  readonly percent: number | null;
+  readonly unit: string | null;
+  readonly hardLimit: boolean;
+  readonly hardLimitReached: boolean;
+  readonly freshness: "fresh" | "stale" | "unavailable";
+  readonly observedAt: string | null;
+  readonly period: Readonly<{ startsAt: string | null; endsAt: string | null; resetsAt: string | null }>;
+}
+
+export interface UsageBudgetModel {
+  readonly schemaVersion: "1.0";
+  readonly resources: Readonly<Record<UsageResource, UsageMeter>>;
+  readonly warnings: readonly Readonly<{ resource: UsageResource; state: UsageState; percent: number | null; hardLimitReached: boolean }>[];
+  readonly hardLimitReached: boolean;
+  readonly freshness: "fresh" | "stale" | "unavailable";
+  readonly observedAt: string | null;
+}
+
+export interface AccountPresentationModel {
+  readonly schemaVersion: "1.0";
+  readonly identity: Readonly<{ subject: "current_account"; displayName: string | null; emailLabel: string | null; avatarLabel: string | null }> | null;
+  readonly session: Readonly<{
+    state: NativeAuthState; method: string | null; deviceLabel: string; platform: string | null;
+    expiresAt: number | null; otherActiveSessions: Readonly<{ state: "known" | "unknown"; value: number | null }>;
+  }>;
+  readonly recovery: Readonly<{
+    state: "none" | "account_recovery_required" | "billing_recovery_required" | "workspace_recovery_required" | "multiple";
+    accountRequired: boolean; billingRequired: boolean; workspaceRequired: boolean; reason: string | null;
+  }>;
+  readonly portalActions: readonly Readonly<{ destination: string; label: string }>[];
+  readonly freshness: "fresh" | "stale" | "unavailable";
+  readonly observedAt: string | null;
+}
+
+export type DesktopLaunchAction =
+  | "open_local_workspace" | "open_installed_desktop_project" | "open_cloud_workspace"
+  | "open_portal" | "manage_subscription" | "recover_billing" | "recover_suspended_workspace";
+export type LaunchDecisionState =
+  | "allowed" | "blocked_entitlement" | "blocked_auth" | "blocked_billing"
+  | "capability_unavailable" | "requires_portal" | "requires_reauthentication" | "unsupported";
+export interface LaunchDecision {
+  readonly action: DesktopLaunchAction | string;
+  readonly state: LaunchDecisionState;
+  readonly allowed: boolean;
+  readonly reason: string;
+  readonly portalDestination: PortalDestination | null;
+}
+
+export interface DesktopAccessState {
+  readonly schemaVersion: "1.0";
+  readonly account: AccountPresentationModel;
+  readonly entitlement: EntitlementModel;
+  readonly usage: UsageBudgetModel;
+  readonly capabilities: Readonly<Record<string, Readonly<{
+    availability: ResourceAvailability;
+    reason: string;
+    hostCapability: HostCapability;
+    entitlementResource: EntitlementResource | null;
+  }>>>;
+  readonly launchActions: Readonly<Record<DesktopLaunchAction, LaunchDecision>>;
+}
+
+export interface AccountAccessProvider {
+  readonly kind?: string;
+  readonly capabilities?: Readonly<{ readOnly: boolean; productionMutation: boolean }>;
+  getAccount(input?: { signal?: AbortSignal }): Promise<ProviderResult>;
+  getEntitlements(input?: { signal?: AbortSignal }): Promise<ProviderResult<EntitlementModel>>;
+  getUsage(input?: { signal?: AbortSignal }): Promise<ProviderResult<UsageBudgetModel>>;
+}
+
+export type PortalDestination = "account" | "billing" | "usage" | "integrations" | "api_keys" | "downloads" | "recovery";
+
+export const ACCOUNT_RECOVERY_STATES: readonly string[];
+export const ENTITLEMENT_STATES: readonly EntitlementState[];
+export const ENTITLEMENT_RESOURCE_KEYS: readonly EntitlementResource[];
+export const RESOURCE_AVAILABILITY: readonly ResourceAvailability[];
+export const USAGE_RESOURCE_KEYS: readonly UsageResource[];
+export const USAGE_STATES: readonly UsageState[];
+export const DESKTOP_LAUNCH_ACTIONS: readonly DesktopLaunchAction[];
+export const LAUNCH_DECISION_STATES: readonly LaunchDecisionState[];
+export const ACCOUNT_ACCESS_OPERATIONS: readonly ["getAccount", "getEntitlements", "getUsage"];
+export const PORTAL_DESTINATIONS: readonly PortalDestination[];
+export const PORTAL_ACTIONS: Readonly<Record<PortalDestination, Readonly<{ path: string; label: string }>>>;
+
+export function createAccountPresentationModel(options: {
+  authSnapshot: NativeAuthSnapshot;
+  profile?: { displayName?: string; emailLabel?: string; avatarLabel?: string } | null;
+  device?: { label?: string; platform?: string; otherActiveSessions?: number } | null;
+  recovery?: { state?: string; reason?: string } | null;
+  observedAt?: string | null;
+  freshness?: "fresh" | "stale" | "unavailable";
+}): AccountPresentationModel;
+export function createResourceGrant(options?: { availability?: ResourceAvailability; reason?: string | null; limit?: { kind: "known" | "unlimited" | "unknown"; value?: number; unit?: string | null } | null }): ResourceGrant;
+export function unknownResourceGrant(reason?: string): ResourceGrant;
+export function createEntitlementModel(options?: { state?: EntitlementState; resources?: Partial<Record<EntitlementResource, Partial<ResourceGrant>>>; freshness?: "fresh" | "stale" | "unavailable"; observedAt?: string | null; period?: { startsAt?: string; endsAt?: string; resetsAt?: string } | null }): EntitlementModel;
+export function createUnknownEntitlementModel(reason?: string): EntitlementModel;
+export function classifyUsage(options?: { used?: number | null; limit?: number | null; available?: boolean }): UsageState;
+export function createUsageMeter(options?: Record<string, unknown>): UsageMeter;
+export function createUsageBudgetModel(options?: { resources?: Partial<Record<UsageResource, Record<string, unknown>>>; freshness?: "fresh" | "stale" | "unavailable"; observedAt?: string | null }): UsageBudgetModel;
+export function createUnavailableUsageBudgetModel(): UsageBudgetModel;
+export function evaluateLaunchAction(action: string, context: { authSnapshot: NativeAuthSnapshot; hostCapabilities: HostCapabilities; entitlement: EntitlementModel; usage: UsageBudgetModel }): LaunchDecision;
+export function evaluateDesktopLaunchActions(context: { authSnapshot: NativeAuthSnapshot; hostCapabilities: HostCapabilities; entitlement: EntitlementModel; usage: UsageBudgetModel }): Readonly<Record<DesktopLaunchAction, LaunchDecision>>;
+export function composeDesktopAccessState(options: { authSnapshot: NativeAuthSnapshot; hostCapabilities: HostCapabilities; accountResult?: ProviderResult | object | null; entitlementResult?: ProviderResult<EntitlementModel> | EntitlementModel | null; usageResult?: ProviderResult<UsageBudgetModel> | UsageBudgetModel | null }): DesktopAccessState;
+export function assertAccountAccessProvider<T extends AccountAccessProvider>(provider: T): T;
+export function createStableReadOnlyAccountAccessProvider(options: { transport: ThralloTransport; routeMap?: Partial<Record<"getAccount" | "getEntitlements" | "getUsage", { method?: "GET" | "HEAD"; path: string; map?: (data: unknown) => unknown }>> }): AccountAccessProvider;
+export function createPortalHandoff(options: { openExternal(url: string): Promise<void> | void }): Readonly<{
+  open(destination: PortalDestination): Promise<Readonly<{ sequence: number; destination: PortalDestination; label: string; pathname: string }>>;
+  descriptor(destination: PortalDestination): Readonly<{ destination: PortalDestination; label: string; pathname: string }>;
+  getCalls(): readonly Readonly<{ sequence: number; destination: PortalDestination; label: string; pathname: string }>[];
+}>;
+
+export const DESKTOP_ACCESS_FIXTURE_CLOCK: string;
+export const DESKTOP_ACCESS_FIXTURE_SEED: string;
+export const DESKTOP_ACCESS_SCENARIO_NAMES: readonly string[];
+export function createDesktopAccessFixture(options?: { scenario?: string; seed?: string }): Readonly<{
+  schemaVersion: "1.0";
+  source: "fixture";
+  seed: string;
+  scenario: string;
+  authSnapshot: NativeAuthSnapshot;
+  hostCapabilities: HostCapabilities;
+  provider: AccountAccessProvider;
+  portal: ReturnType<typeof createPortalHandoff>;
+  getCalls(): readonly unknown[];
+  getPortalOpens(): readonly Readonly<{ origin: string; pathname: string }>[];
+}>;

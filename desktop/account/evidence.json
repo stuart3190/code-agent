@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "package": "D3",
+  "claim": "Native desktop account, entitlement, usage, capability and launch presentation foundation",
+  "classification": "fixture-verified-foundation",
+  "fixtureRuntimeVerified": true,
+  "productionEntitlementVerified": false,
+  "productionBillingMutationImplemented": false,
+  "cloudWorkspaceLaunchImplemented": false,
+  "portalRoutesModified": false,
+  "presentation": "bounded reusable account/access panel model and HTML renderer; not the D9 desktop home"
+}
