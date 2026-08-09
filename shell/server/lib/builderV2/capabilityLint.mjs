@@ -197,6 +197,30 @@ function factoryFromExpression(expression) {
   return null;
 }
 
+function capabilitySourceFromExpression(expression, module) {
+  const node = unwrapExpression(expression);
+  if (node?.type === "Identifier") {
+    const factory = module.instances.get(node.name);
+    return factory ? { factory, kind: "named", local: node.name } : null;
+  }
+  const factory = factoryFromExpression(node);
+  return factory ? { factory, kind: "factory_result", local: null } : null;
+}
+
+function directSourceKey(source, node) {
+  return `${source.factory}:${node?.start ?? "?"}:${node?.end ?? "?"}`;
+}
+
+function recordDirectSource(module, source, node) {
+  if (source?.kind !== "factory_result") return;
+  module.directInstances.set(directSourceKey(source, node), {
+    factory: source.factory,
+    kind: source.kind,
+    start: node?.start ?? null,
+    end: node?.end ?? null,
+  });
+}
+
 function propertyName(node) {
   if (node?.type === "Identifier") return node.name;
   if (node?.type === "StringLiteral") return node.value;
@@ -232,12 +256,13 @@ function parseGeneratedModules(tree) {
         ast,
         declarations: new Map(),
         instances: new Map(),
+        directInstances: new Map(),
         aliases: new Map(),
         exports: new Map(),
         exportLocals: [],
         imports: [],
         identifierCalls: new Set(),
-        memberCalls: [],
+        capabilityMemberCalls: [],
       });
     } catch {
       // Parse failure is independently blocked by the patch/index gate. Never invent provenance.
@@ -262,7 +287,9 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
       .filter((row) => row.type === "ExportNamedDeclaration" && row.declaration)
       .map((row) => row.declaration));
 
-    walkAst(module.ast, (node, parent) => {
+    // Pass 1 collects declarations and named factory results. Capability use is resolved in
+    // pass 2 so a function body may safely refer to a module-level capability declared later.
+    walkAst(module.ast, (node) => {
       if (node.type === "VariableDeclarator") for (const name of patternNames(node.id)) increment(module.declarations, name);
       else if (["FunctionDeclaration", "ClassDeclaration"].includes(node.type)) increment(module.declarations, node.id?.name);
       else if (["FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
@@ -278,13 +305,6 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
             local: specifier.local.name,
           });
         }
-      } else if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
-        const callee = unwrapExpression(node.callee);
-        if (callee?.type === "Identifier") module.identifierCalls.add(callee.name);
-        else if (["MemberExpression", "OptionalMemberExpression"].includes(callee?.type)
-          && callee.object?.type === "Identifier" && !callee.computed) {
-          module.memberCalls.push({ object: callee.object.name, method: propertyName(callee.property) });
-        }
       } else if (node.type === "ExportNamedDeclaration" && !node.source) {
         for (const specifier of node.specifiers || []) module.exportLocals.push({
           local: propertyName(specifier.local), exported: propertyName(specifier.exported),
@@ -295,17 +315,34 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
         const factory = factoryFromExpression(node.init);
         if (factory) module.instances.set(node.id.name, factory);
       }
+    });
+
+    // Pass 2 resolves every supported binding/use through the same source abstraction: either a
+    // named identifier already proven in pass 1 or a direct recognised factory result.
+    walkAst(module.ast, (node) => {
+      if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
+        const callee = unwrapExpression(node.callee);
+        if (callee?.type === "Identifier") module.identifierCalls.add(callee.name);
+        else if (["MemberExpression", "OptionalMemberExpression"].includes(callee?.type) && !callee.computed) {
+          const source = capabilitySourceFromExpression(callee.object, module);
+          const method = propertyName(callee.property);
+          if (source && FACTORY_METHODS[source.factory]?.includes(method)) {
+            recordDirectSource(module, source, callee.object);
+            module.capabilityMemberCalls.push({ source, method });
+          }
+        }
+      }
       if (node.type === "VariableDeclarator" && node.id?.type === "ObjectPattern"
-        && node.init?.type === "Identifier") {
-        const factory = module.instances.get(node.init.name);
-        if (!factory) return;
+        && node.init) {
+        const source = capabilitySourceFromExpression(node.init, module);
+        if (!source) return;
+        recordDirectSource(module, source, node.init);
         for (const property of node.id.properties || []) {
           if (property.type !== "ObjectProperty" || property.computed) continue;
           const method = propertyName(property.key);
           const local = localName(property.value);
-          if (!method || !local || !FACTORY_METHODS[factory]?.includes(method)) continue;
-          module.aliases.set(local, { factory, method });
-          if (exportedDeclarations.has(parent)) module.exports.set(local, { factory, method });
+          if (!method || !local || !FACTORY_METHODS[source.factory]?.includes(method)) continue;
+          module.aliases.set(local, { factory: source.factory, method, source });
         }
       }
     });
@@ -350,27 +387,54 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
     bound: new Set(),
     invoked: new Set(),
   }]));
+  const factFor = (factory) => {
+    if (!RECOGNIZED_FACTORY_SET.has(factory)) return null;
+    let fact = facts.get(factory);
+    if (!fact) {
+      fact = {
+        factory, required: requiredFactories.has(factory), instances: [], bindings: [],
+        invocations: [], modules: new Set(), bound: new Set(), invoked: new Set(),
+      };
+      facts.set(factory, fact);
+    }
+    return fact;
+  };
   for (const [file, module] of modules) {
     for (const [instance, factory] of module.instances) {
       if (module.declarations.get(instance) !== 1) continue; // ambiguous/shadowed names fail closed
-      const fact = facts.get(factory);
-      if (!fact) throw new Error(`capability_factory_registry_incomplete:${factory}`);
-      fact.instances.push({ module: file, local: instance });
+      const fact = factFor(factory);
+      if (!fact) continue;
+      fact.instances.push({ module: file, local: instance, kind: "named" });
       fact.modules.add(file);
-      for (const call of module.memberCalls) {
-        if (call.object !== instance || !FACTORY_METHODS[factory]?.includes(call.method)) continue;
-        fact.bound.add(call.method);
-        fact.invoked.add(call.method);
-        fact.bindings.push({ module: file, local: instance, method: call.method, kind: "member" });
-        fact.invocations.push({ module: file, local: instance, method: call.method, kind: "member" });
-      }
+    }
+    for (const source of module.directInstances.values()) {
+      const fact = factFor(source.factory);
+      if (!fact) continue;
+      fact.instances.push({ module: file, local: null, kind: source.kind, start: source.start, end: source.end });
+      fact.modules.add(file);
+    }
+    for (const call of module.capabilityMemberCalls) {
+      if (call.source.kind === "named" && module.declarations.get(call.source.local) !== 1) continue;
+      const fact = factFor(call.source.factory);
+      if (!fact) continue;
+      fact.bound.add(call.method);
+      fact.invoked.add(call.method);
+      fact.bindings.push({ module: file, local: call.source.local, method: call.method,
+        kind: call.source.kind === "named" ? "member" : "factory_result_member" });
+      fact.invocations.push({ module: file, local: call.source.local, method: call.method,
+        kind: call.source.kind === "named" ? "member" : "factory_result_member" });
+      fact.modules.add(file);
     }
     for (const [alias, provenance] of module.aliases) {
       if (module.declarations.get(alias) !== 1) continue; // a local redeclaration cannot borrow provenance
-      const fact = facts.get(provenance.factory);
-      if (!fact) throw new Error(`capability_factory_registry_incomplete:${provenance.factory}`);
+      if (provenance.source?.kind === "named"
+        && module.instances.has(provenance.source.local)
+        && module.declarations.get(provenance.source.local) !== 1) continue;
+      const fact = factFor(provenance.factory);
+      if (!fact) continue;
       fact.bound.add(provenance.method);
-      fact.bindings.push({ module: file, local: alias, method: provenance.method, kind: "destructured" });
+      fact.bindings.push({ module: file, local: alias, method: provenance.method,
+        kind: provenance.source?.kind === "factory_result" ? "factory_result_destructured" : "destructured" });
       fact.modules.add(file);
       if (module.identifierCalls.has(alias)) {
         fact.invoked.add(provenance.method);
@@ -390,12 +454,19 @@ export function lintRequiredCapabilityBindings(tree, bindings = []) {
   const source = generatedSource(tree);
   const provenance = aggregateCapabilityFacts(tree, bindings);
   const problems = [];
+  const issues = [];
+  const reject = (code, message, details = {}) => {
+    problems.push(message);
+    issues.push({ code, message, ...details });
+  };
   for (const binding of bindings.filter((row) => row.requiredMethods?.length)) {
     const factory = CAPABILITY_FACTORIES[binding.name];
     if (!factory) continue;
     const facts = provenance.get(factory);
     if (!facts?.instances.length) {
-      problems.push(`required capability ${binding.name} is missing: instantiate ${factory}(...) before verification`);
+      reject("required_factory_missing",
+        `required capability ${binding.name} is missing: instantiate ${factory}(...) before verification`,
+        { capability: binding.name, factory });
       continue;
     }
     const entity = binding.configuration?.entity;
@@ -403,24 +474,30 @@ export function lintRequiredCapabilityBindings(tree, bindings = []) {
       const escaped = String(entity).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const configured = new RegExp(`\\b${factory}\\s*\\(\\s*\\{[\\s\\S]{0,600}?\\bentity\\s*:\\s*["'\\x60]${escaped}["'\\x60]`, "m");
       if (!configured.test(source)) {
-        problems.push(`required capability ${binding.name} must be configured with entity: ${JSON.stringify(entity)}; unsupported option names are rejected`);
+        reject("invalid_factory_configuration",
+          `required capability ${binding.name} must be configured with entity: ${JSON.stringify(entity)}; unsupported option names are rejected`,
+          { capability: binding.name, factory, configuration: { entity } });
       }
     }
     if (binding.name === "wizard" && binding.configuration?.persistence === "platform") {
       const disabledPersistence = /\bmakeWizardMachine\s*\(\s*\{[\s\S]{0,1000}?\bpersistence\s*:\s*(?:null|false|undefined)\b/m;
       if (disabledPersistence.test(source)) {
-        problems.push("required capability wizard must use platform persistence; persistence: null/false/undefined is forbidden");
+        reject("invalid_factory_configuration",
+          "required capability wizard must use platform persistence; persistence: null/false/undefined is forbidden",
+          { capability: binding.name, factory, configuration: { persistence: "platform" } });
       }
     }
     for (const method of binding.requiredMethods) {
       if (!facts.bound.has(method)) {
-        problems.push(`required capability ${binding.name} is not bound to ${method}(...)`);
+        reject("required_method_unbound", `required capability ${binding.name} is not bound to ${method}(...)`,
+          { capability: binding.name, factory, method });
       } else if (!facts.invoked.has(method)) {
-        problems.push(`required capability ${binding.name} binds ${method}(...) but never invokes it`);
+        reject("required_method_uninvoked", `required capability ${binding.name} binds ${method}(...) but never invokes it`,
+          { capability: binding.name, factory, method });
       }
     }
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, issues };
 }
 
 /** Exact module existence/factory placement for a deterministic module plan. */

@@ -62,20 +62,30 @@ test("14S aggregation is total for every recognised required and auxiliary facto
   }
 });
 
-test("14S every factory supports direct, destructured, exported, aliased and cross-module provenance", () => {
+test("14S registry-driven source/binding/usage cross-product preserves provenance", () => {
+  let combinations = 0;
   for (const factory of RECOGNIZED_CAPABILITY_FACTORIES) {
     const { method, expression } = FACTORY_CASES[factory];
     const shapes = [
       { tree: { "src/data/capability.js": `const capability = ${expression}; capability.${method}();` }, local: "capability" },
+      { tree: { "src/data/capability.js": `${expression}.${method}();` }, local: null },
       { tree: { "src/data/capability.js": `const capability = ${expression}; const { ${method} } = capability; ${method}();` }, local: method },
       { tree: { "src/data/capability.js": `const capability = ${expression}; export const { ${method} } = capability; ${method}();` }, local: method },
       { tree: { "src/data/capability.js": `const capability = ${expression}; const { ${method}: invoke } = capability; invoke();` }, local: "invoke" },
+      { tree: { "src/data/capability.js": `const { ${method} } = ${expression}; ${method}();` }, local: method },
+      { tree: { "src/data/capability.js": `export const { ${method} } = ${expression}; ${method}();` }, local: method },
+      { tree: { "src/data/capability.js": `const { ${method}: invoke } = ${expression}; invoke();` }, local: "invoke" },
       { tree: {
         "src/data/capability.js": `const capability = ${expression}; export const { ${method} } = capability;`,
         "src/routes/Page.jsx": `import { ${method} as invoke } from "../data/capability.js"; invoke();`,
       }, local: "invoke" },
+      { tree: {
+        "src/data/capability.js": `export const { ${method} } = ${expression};`,
+        "src/routes/Page.jsx": `import { ${method} as invoke } from "../data/capability.js"; invoke();`,
+      }, local: "invoke" },
     ];
     for (const { tree, local } of shapes) {
+      combinations += 1;
       const fact = aggregateCapabilityFacts(tree).get(factory);
       assert.equal(fact.instances.length, 1, `${factory}:${local}:instance`);
       assert.ok(fact.bound.has(method), `${factory}:${local}:bound`);
@@ -83,6 +93,7 @@ test("14S every factory supports direct, destructured, exported, aliased and cro
       assert.ok(fact.bindings.some((row) => row.local === local), `${factory}:${local}:binding provenance`);
     }
   }
+  assert.equal(combinations, RECOGNIZED_CAPABILITY_FACTORIES.length * 10);
 });
 
 test("14S bound-but-unused and matching unproven names never satisfy required invocation", () => {
@@ -90,6 +101,7 @@ test("14S bound-but-unused and matching unproven names never satisfy required in
     const { method, expression } = FACTORY_CASES[factory];
     const rejected = [
       `const capability = ${expression}; const { ${method} } = capability;`,
+      `const { ${method} } = ${expression};`,
       `const capability = ${expression}; function ${method}() {} ${method}();`,
       `const capability = ${expression}; const unrelated = { ${method}() {} }; const { ${method}: invoke } = unrelated; invoke();`,
       `const unrelated = { ${method}() {} }; const { ${method} } = unrelated; ${method}();`,
@@ -97,8 +109,46 @@ test("14S bound-but-unused and matching unproven names never satisfy required in
     for (const source of rejected) {
       const result = lintRequiredCapabilityBindings({ "src/data/capability.js": source }, [binding]);
       assert.equal(result.ok, false, `${factory}: ${source}`);
+      assert.ok(result.issues.some((issue) => ["required_factory_missing", "required_method_unbound", "required_method_uninvoked"].includes(issue.code)),
+        `${factory}: machine-readable rejection`);
     }
   }
+});
+
+test("14S invalid required factory configuration stays a machine-readable rejection", () => {
+  const cases = [
+    {
+      source: 'const { createBooking } = makeBookingSystem({ entity: "notBooking" }); createBooking({});',
+      binding: REQUIRED_BINDINGS.makeBookingSystem,
+    },
+    {
+      source: 'const { submitContact } = makeContactForm({ entity: "notContact" }); submitContact({});',
+      binding: REQUIRED_BINDINGS.makeContactForm,
+    },
+    {
+      source: 'const { subscribe } = makeNewsletter({ entity: "notNewsletter" }); subscribe("a@b.test");',
+      binding: REQUIRED_BINDINGS.makeNewsletter,
+    },
+    {
+      source: 'const wizard = makeWizardMachine({ id: "x", steps: ["a", "b"], persistence: false }); wizard.getState();',
+      binding: REQUIRED_BINDINGS.makeWizardMachine,
+    },
+  ];
+  for (const item of cases) {
+    const result = lintRequiredCapabilityBindings({ "src/data/capability.js": item.source }, [item.binding]);
+    assert.equal(result.ok, false);
+    assert.ok(result.issues.some((issue) => issue.code === "invalid_factory_configuration"));
+  }
+});
+
+test("14S two-pass resolution handles use before a named capability declaration", () => {
+  const source = `
+    export function submit(fields) { return contact.submitContact(fields); }
+    const contact = makeContactForm({ entity: "contactMessage" });
+  `;
+  const result = lintRequiredCapabilityBindings({ "src/data/contact.js": source },
+    [REQUIRED_BINDINGS.makeContactForm]);
+  assert.equal(result.ok, true, result.problems.join("; "));
 });
 
 test("14S missing required factories/methods fail while duplicate recognised instances remain tracked", () => {
@@ -140,6 +190,20 @@ test("14S formerly crashing booking plus entity-store combination is fully track
   assert.equal(facts.get("makeEntityStore").instances.length, 1);
   assert.ok(facts.get("makeEntityStore").invoked.has("create"));
   assert.equal(lintRequiredCapabilityBindings(tree, [REQUIRED_BINDINGS.makeBookingSystem]).ok, true);
+});
+
+test("14S direct factory-result binding cannot borrow provenance from local or unrelated callables", () => {
+  const rejected = [
+    `export const { submitContact } = makeUnrelatedForm(); submitContact({});`,
+    `function submitContact() {} submitContact({});`,
+    `const { submitContact } = { submitContact() {} }; submitContact({});`,
+  ];
+  for (const source of rejected) {
+    const result = lintRequiredCapabilityBindings({ "src/data/contact.js": source },
+      [REQUIRED_BINDINGS.makeContactForm]);
+    assert.equal(result.ok, false);
+    assert.ok(result.issues.some((issue) => issue.code === "required_factory_missing"));
+  }
 });
 
 test("14S full booking factory combination aggregates across generated modules", () => {

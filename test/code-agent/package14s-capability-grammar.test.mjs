@@ -21,6 +21,10 @@ test("14S capability grammar accepts direct and provenance-backed destructured c
      export const { createBooking } = bookingCapability; createBooking({});`,
     `const bookingCapability = makeBookingSystem({ entity: "booking" });
      const { createBooking: create } = bookingCapability; create({});`,
+    `const { createBooking } = makeBookingSystem({ entity: "booking" }); createBooking({});`,
+    `export const { createBooking } = makeBookingSystem({ entity: "booking" }); createBooking({});`,
+    `const { createBooking: create } = makeBookingSystem({ entity: "booking" }); create({});`,
+    `makeBookingSystem({ entity: "booking" }).createBooking({});`,
   ];
   for (const source of cases) {
     const result = lintBooking(source);
