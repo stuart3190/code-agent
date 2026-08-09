@@ -8,6 +8,7 @@ import { TerminalApp } from "./apps/TerminalApp.jsx";
 import { ThralloApp } from "./apps/ThralloApp.jsx";
 import { Launcher } from "./components/Launcher.jsx";
 import { DesktopHeader } from "./components/DesktopHeader.jsx";
+import { DesktopShortcuts } from "./components/DesktopShortcuts.jsx";
 import { ModalLayer } from "./components/ModalLayer.jsx";
 import { Taskbar } from "./components/Taskbar.jsx";
 import { WindowFrame } from "./components/WindowFrame.jsx";
@@ -75,6 +76,7 @@ export default function App() {
       <DesktopHeader state={state} actions={actions} />
       <div className="desktop-canvas" aria-label="Cloud desktop workspace">
         <div className="desktop-watermark" aria-hidden="true"><span>Thrallo</span><small>Cloud workspace</small></div>
+        <DesktopShortcuts positions={state.desktopShortcutPositions} windows={state.windows} focusedApplication={state.focusedApplication} actions={actions} />
         <div className="window-layer" aria-live="off">
           {Object.values(state.windows).sort((left, right) => left.zIndex - right.zIndex).map((windowState) => {
             const Component = applicationComponents[windowState.applicationId];

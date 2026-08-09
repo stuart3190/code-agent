@@ -4,7 +4,7 @@ import { CaretRight, Info, Plus, X } from "@phosphor-icons/react";
 const commandOutput = Object.freeze({
   help: ["Available fixture commands:", "help  ls  pwd  whoami  git status  clear"],
   ls: ["customer-portal/", "launch-campaign/", "README.md", "workspace.json"],
-  pwd: ["/workspace/atlas"],
+  pwd: ["/workspace/my-workspace"],
   whoami: ["thrallo-fixture-user"],
   "git status": ["On branch main", "Your branch is up to date with 'origin/main'.", "nothing to commit, working tree clean"],
 });
@@ -36,7 +36,7 @@ export function TerminalApp() {
     setSessions((current) => current.map((entry) => {
       if (entry.id !== activeSession) return entry;
       if (result.clear) return { ...entry, lines: welcomeLines };
-      return { ...entry, lines: [...entry.lines, { kind: "command", text: `fixture@atlas:~$ ${command}` }, ...result.lines] };
+      return { ...entry, lines: [...entry.lines, { kind: "command", text: `fixture@my-workspace:~$ ${command}` }, ...result.lines] };
     }));
     setInput("");
   };
@@ -55,7 +55,7 @@ export function TerminalApp() {
       </div>
       <div className="terminal-notice"><Info /> Deterministic fixture · commands never reach a real shell</div>
       <div className="terminal-output" aria-live="polite">{session.lines.map((line, index) => <div key={`${line.text}-${index}`} className={`terminal-line line-${line.kind}`}>{line.text}</div>)}</div>
-      <form className="terminal-input" onSubmit={submit}><span>fixture@atlas:~$</span><input ref={inputRef} aria-label="Fixture terminal command" autoComplete="off" spellCheck="false" value={input} onChange={(event) => setInput(event.target.value)} /></form>
+      <form className="terminal-input" onSubmit={submit}><span>fixture@my-workspace:~$</span><input ref={inputRef} aria-label="Fixture terminal command" autoComplete="off" spellCheck="false" value={input} onChange={(event) => setInput(event.target.value)} /></form>
     </div>
   );
 }

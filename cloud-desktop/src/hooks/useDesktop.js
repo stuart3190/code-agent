@@ -39,6 +39,7 @@ export function useDesktop({ storage = typeof window === "undefined" ? null : wi
     close: (applicationId) => dispatch({ type: "CLOSE_APP", applicationId }),
     move: (applicationId, x, y) => dispatch({ type: "MOVE_APP", applicationId, x, y }),
     resize: (applicationId, width, height) => dispatch({ type: "RESIZE_APP", applicationId, width, height }),
+    moveDesktopShortcut: (applicationId, x, y) => dispatch({ type: "MOVE_DESKTOP_SHORTCUT", applicationId, x, y }),
     toggleLauncher: (open) => dispatch({ type: "TOGGLE_LAUNCHER", open }),
     setModal: (modal) => dispatch({ type: "SET_MODAL", modal }),
     setAppearance: (appearance) => dispatch({ type: "SET_APPEARANCE", appearance }),

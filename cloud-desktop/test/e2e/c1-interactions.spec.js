@@ -34,6 +34,49 @@ test("launcher search, keyboard dismissal, and fixture app opening", async ({ pa
   await expect(page.locator("[data-launcher]")).toHaveCount(0);
 });
 
+test("desktop shortcuts open and focus apps while launcher and taskbar stay synchronized", async ({ page }) => {
+  await page.getByLabel("Fixture scenario").selectOption("first-launch");
+  const shortcuts = page.locator("[data-desktop-shortcut]");
+  await expect(shortcuts).toHaveCount(7);
+
+  await page.locator("[data-desktop-shortcut='files']").dblclick();
+  await expect(page.locator("[data-application-window='files']")).toBeVisible();
+  await expect(page.locator("[data-desktop-shortcut='files']")).toHaveAttribute("data-focused", "true");
+  await expect(page.locator("[data-taskbar-app='files']")).toHaveAttribute("aria-label", /focused/);
+
+  await openLauncher(page);
+  await expect(page.locator("[data-launch-app='files']")).toContainText("Running");
+  await page.keyboard.press("Escape");
+
+  const terminalShortcut = page.locator("[data-desktop-shortcut='terminal']");
+  await terminalShortcut.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-application-window='terminal']")).toBeVisible();
+  await expect(page.locator("[data-taskbar-app='terminal']")).toHaveAttribute("aria-label", /focused/);
+
+  await page.locator("[data-desktop-shortcut='github']").dispatchEvent("pointerup", { pointerType: "touch", pointerId: 17, button: 0 });
+  await expect(page.locator("[data-application-window='github']")).toBeVisible();
+  await expect(page.locator("[data-desktop-shortcut='github']")).toHaveAttribute("data-focused", "true");
+});
+
+test("desktop shortcut positions can be moved and survive refresh", async ({ page }) => {
+  await page.getByLabel("Fixture scenario").selectOption("first-launch");
+  const shortcut = page.locator("[data-desktop-shortcut='settings']");
+  const before = await shortcut.boundingBox();
+  await page.mouse.move(before.x + 30, before.y + 28);
+  await page.mouse.down();
+  await page.mouse.move(before.x + 118, before.y + 76, { steps: 5 });
+  await page.mouse.up();
+  const moved = await shortcut.boundingBox();
+  expect(moved.x).toBeGreaterThan(before.x + 60);
+  expect(moved.y).toBeGreaterThan(before.y + 20);
+
+  await page.reload();
+  const restored = await page.locator("[data-desktop-shortcut='settings']").boundingBox();
+  expect(Math.abs(restored.x - moved.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(restored.y - moved.y)).toBeLessThanOrEqual(1);
+});
+
 test("window focus, minimize, restore, maximize, snap, close, drag and resize", async ({ page }) => {
   const browserWindow = page.locator("[data-application-window='browser']");
   await browserWindow.getByLabel("Minimize Browser").click();
@@ -111,7 +154,7 @@ test("Browser tabs, safe history, downloads, and blocked navigation are fixture-
   await browser.getByText("Four active projects").click();
   await expect(browser.getByRole("heading", { name: "Your cloud projects" })).toBeVisible();
   await browser.getByLabel("Go back").click();
-  await expect(browser.getByRole("heading", { name: "Welcome back to Atlas" })).toBeVisible();
+  await expect(browser.getByRole("heading", { name: "Welcome back to My Workspace" })).toBeVisible();
   await browser.getByLabel("Go forward").click();
   await expect(browser.getByRole("heading", { name: "Your cloud projects" })).toBeVisible();
   await browser.getByLabel("Reload fixture page").click();
@@ -148,7 +191,7 @@ test("Terminal supports only safe deterministic commands", async ({ page }) => {
   const input = terminal.getByLabel("Fixture terminal command");
   await input.fill("pwd");
   await input.press("Enter");
-  await expect(terminal.getByText("/workspace/atlas")).toBeVisible();
+  await expect(terminal.getByText("/workspace/my-workspace")).toBeVisible();
   await input.fill("whoami");
   await input.press("Enter");
   await expect(terminal.getByText("thrallo-fixture-user")).toBeVisible();
@@ -197,9 +240,11 @@ test("@accessibility launcher and window controls are keyboard reachable with no
 test("responsive tablet and mobile layouts preserve usable app switching", async ({ page }) => {
   await page.setViewportSize({ width: 834, height: 1112 });
   await expect(page.locator("[data-desktop-shell]")).toHaveAttribute("data-layout", "tablet");
+  await expect(page.locator("[data-desktop-shortcuts]")).toBeHidden();
   await expect(page.locator("[data-application-window='browser']")).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator("[data-desktop-shell]")).toHaveAttribute("data-layout", "mobile");
+  await expect(page.locator("[data-desktop-shortcuts]")).toBeHidden();
   await page.locator("[data-launcher-button]").click();
   await expect(page.locator("[data-launcher]")).toBeVisible();
   await expect(page.locator("[data-launch-app]")).toHaveCount(7);

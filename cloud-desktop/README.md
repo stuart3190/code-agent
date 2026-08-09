@@ -4,8 +4,8 @@ This package is the isolated browser application for the new Thrallo Cloud Deskt
 native Thrallo desktop, Code OSS, VS Code in a browser, Builder V2, or a decorated copy of
 `app.thrallo.com`.
 
-C1 is a visually complete, deterministic prototype. It includes the cloud desktop shell, a compact
-application shelf/taskbar, launcher, fixture workspace status, persistent window management, and
+C1 is a visually complete, deterministic prototype. It includes the cloud desktop shell, seven
+accessible desktop shortcuts, a compact application shelf/taskbar, launcher, fixture workspace status, persistent window management, and
 exactly seven fixture applications: Thrallo, Browser, Files, Terminal, GitHub, Storage, and
 Settings. It makes no production request and invokes no local shell or filesystem API.
 

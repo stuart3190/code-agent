@@ -10,16 +10,19 @@
 
 ## Full-view comparison evidence
 
-The implementation preserves the selected direction's distinguishing structure: a narrow vertical
-application shelf, a separate bottom workspace/status rail, a pale full-surface desktop, compact
-window chrome, a dominant fixture Browser window, a secondary Thrallo placeholder window, subtle
-active-window elevation, teal/blue application accents, and restrained density. The implementation
-uses a flat pale stone canvas instead of copying the concept's decorative paper texture; this keeps
-C1 within the product requirement to avoid wallpaper-like novelty and avoids inventing a raster
-brand asset.
+The corrected implementation preserves the selected direction's distinguishing structure: a narrow
+vertical application shelf, a separate bottom workspace/status rail, a pale full-surface desktop,
+compact window chrome, a dominant fixture Browser window, a secondary Thrallo placeholder window,
+subtle active-window elevation, teal/blue application accents, and restrained density. A compact
+two-column application-shortcut grid now occupies the free upper-left canvas without competing with
+the application windows. The implementation uses a flat pale stone canvas instead of copying the
+concept's decorative paper texture; this keeps C1 within the product requirement to avoid
+wallpaper-like novelty and avoids inventing a raster brand asset.
 
 ## Focused comparison evidence
 
+The first-launch and normal-desktop captures verify all seven canvas shortcuts with coherent
+Phosphor icons, readable labels, focused/running state, and adequate separation from the shelf.
 App-specific captures `05-thrallo-placeholder.png`, `06-browser-app.png`, `07-files-app.png`,
 `08-terminal-app.png`, `09-github-app.png`, `10-storage-warning.png`, and `11-settings-app.png` were
 opened and inspected at native screenshot resolution. Typography remains readable, title-bar and
@@ -44,10 +47,12 @@ needed because the native 1440 × 1024 captures keep every important control rea
 
 ## Interaction and responsive verification
 
-Playwright exercised launcher search/keyboard dismissal, app open/focus, taskbar restore,
-minimize/maximize/restore, snapping, drag, resize, close, persistence, corrupt-state recovery, all
-seven fixture apps, reduced motion, tablet portrait/landscape, mobile app switching, and fixed-origin
-network enforcement. Chromium console output contained no application error during the passing run.
+Playwright exercised mouse double-click, touch single-tap, keyboard shortcut opening, shortcut
+drag/persistence, launcher and taskbar synchronization, launcher search/keyboard dismissal, app
+open/focus, taskbar restore, minimize/maximize/restore, snapping, window drag/resize, close,
+persistence, corrupt-state recovery, all seven fixture apps, reduced motion, tablet
+portrait/landscape, mobile app switching, and fixed-origin network enforcement. Chromium console
+output contained no application error during the passing run.
 
 ## Findings
 
@@ -58,15 +63,18 @@ mark. C1 intentionally uses the selected structure and a library icon until thos
 
 ## Comparison history
 
-The first browser pass found functional test issues in drag bounds, ambiguous test selectors, and a
-tablist accessibility role. The drag implementation and Playwright viewport were corrected, test
-selectors were scoped to their semantic regions, and the new-tab control was moved outside the
-tablist. Post-fix evidence is the current fifteen-screenshot set and the passing Chromium suite.
+The original C1 browser pass found functional test issues in drag bounds, ambiguous test selectors,
+and a tablist accessibility role; those were corrected before the original handoff. The C1 visual
+correction then found that the full-size window layer intercepted pointer input intended for the new
+canvas shortcuts. Empty window-layer space was made pointer-transparent while real windows retain
+normal input. Post-fix evidence is the refreshed fifteen-screenshot set, the regenerated side-by-side
+comparison, and the passing shortcut-focused Chromium checks.
 
 ## Implementation checklist
 
 - [x] Selected visual structure implemented
 - [x] All seven fixture applications represented
+- [x] All seven applications available as accessible desktop shortcuts
 - [x] Window and launcher interactions verified
 - [x] Responsive and accessibility states verified
 - [x] No-production-network boundary verified

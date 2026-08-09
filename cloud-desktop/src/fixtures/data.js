@@ -1,11 +1,11 @@
 export const browserPages = Object.freeze({
-  "thrallo://home": Object.freeze({ title: "Workspace overview", eyebrow: "Fixture page", heading: "Welcome back to Atlas", body: "Everything in this browser stays inside the deterministic C1 demo.", rows: Object.freeze(["Four active projects", "Two recent downloads", "Workspace backup complete"]) }),
+  "thrallo://home": Object.freeze({ title: "Workspace overview", eyebrow: "Fixture page", heading: "Welcome back to My Workspace", body: "Everything in this browser stays inside the deterministic C1 demo.", rows: Object.freeze(["Four active projects", "Two recent downloads", "Workspace backup complete"]) }),
   "thrallo://projects": Object.freeze({ title: "Projects", eyebrow: "Fixture workspace", heading: "Your cloud projects", body: "Review the bundled projects in this safe, offline browser.", rows: Object.freeze(["Customer portal", "Launch campaign", "Operations dashboard"]) }),
   "thrallo://activity": Object.freeze({ title: "Activity", eyebrow: "Fixture history", heading: "Recent workspace activity", body: "A deterministic record of changes made in this prototype.", rows: Object.freeze(["Brand brief uploaded", "Workspace backup created", "Project folder renamed"]) }),
 });
 
 export const initialFiles = Object.freeze([
-  Object.freeze({ id: "project-atlas", name: "Project Atlas", type: "folder", location: "Cloud drive", size: "8.2 GB", modified: "Today, 9:41 AM" }),
+  Object.freeze({ id: "starter-project", name: "Starter Project", type: "folder", location: "Cloud drive", size: "8.2 GB", modified: "Today, 9:41 AM" }),
   Object.freeze({ id: "design-system", name: "Design System", type: "folder", location: "Cloud drive", size: "3.6 GB", modified: "Today, 8:15 AM" }),
   Object.freeze({ id: "marketing-site", name: "Marketing Site", type: "folder", location: "Cloud drive", size: "2.9 GB", modified: "Yesterday" }),
   Object.freeze({ id: "brand-guide", name: "brand-guidelines.pdf", type: "file", location: "Cloud drive", size: "4.3 MB", modified: "Yesterday" }),

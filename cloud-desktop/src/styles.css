@@ -117,7 +117,36 @@ svg { flex: 0 0 auto; }
 .desktop-watermark { position: absolute; right: 24px; top: 18px; display: flex; align-items: baseline; gap: 8px; color: color-mix(in srgb, var(--text-faint) 55%, transparent); pointer-events: none; }
 .desktop-watermark span { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
 .desktop-watermark small { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
-.window-layer { position: absolute; inset: 0; z-index: 2; }
+.desktop-shortcuts { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.desktop-shortcut {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 68px;
+  height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: default;
+  pointer-events: auto;
+  touch-action: manipulation;
+  user-select: none;
+}
+.desktop-shortcut:hover, .desktop-shortcut.is-selected { border-color: color-mix(in srgb, var(--accent) 22%, transparent); background: color-mix(in srgb, var(--surface-selected) 74%, transparent); color: var(--text); }
+.desktop-shortcut.is-active { background: color-mix(in srgb, var(--accent-soft) 86%, transparent); color: var(--accent); }
+.desktop-shortcut-icon { width: 38px; height: 34px; display: grid; place-items: center; }
+.desktop-shortcut-label { max-width: 62px; overflow: hidden; font-size: 10px; font-weight: 600; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-shortcut-state { position: absolute; bottom: 2px; width: 14px; height: 3px; border-radius: 2px; background: var(--teal); }
+.desktop-shortcut.is-active .desktop-shortcut-state { background: var(--accent); }
+.window-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.window-layer > .app-window { pointer-events: auto; }
 
 .app-shelf {
   position: absolute;
@@ -445,6 +474,7 @@ button.system-status { cursor: pointer; }
   .cloud-desktop { min-height: 480px; }
   .desktop-header { left: 0; padding-left: 16px; }
   .desktop-canvas { inset: 44px 0 124px 0; }
+  .desktop-shortcuts { display: none; }
   .app-shelf { inset: auto 10px 54px 10px; width: auto; height: 64px; flex-direction: row; border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: 0 8px 30px rgba(39, 53, 64, .15); }
   .shelf-brand { display: none; }
   .shelf-apps { flex-direction: row; justify-content: center; padding: 5px; gap: 2px; }

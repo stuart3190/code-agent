@@ -15,6 +15,7 @@ export function serializeDesktopState(state) {
     reduceMotion: state.reduceMotion,
     taskbarLabels: state.taskbarLabels,
     focusedApplication: state.focusedApplication,
+    desktopShortcutPositions: state.desktopShortcutPositions,
     windows: Object.fromEntries(Object.entries(state.windows).map(([id, windowState]) => [id, {
       isOpen: windowState.isOpen,
       minimized: windowState.minimized,
@@ -29,6 +30,10 @@ export function serializeDesktopState(state) {
 
 function validBounds(bounds) {
   return bounds && ["x", "y", "width", "height"].every((key) => Number.isFinite(bounds[key]));
+}
+
+function validShortcutPosition(position) {
+  return position && Number.isFinite(position.x) && Number.isFinite(position.y);
 }
 
 export function parseDesktopState(rawValue) {
@@ -48,14 +53,23 @@ export function parseDesktopState(rawValue) {
         zIndex: Number.isFinite(state.zIndex) ? state.zIndex : 0,
       };
     }
+    const desktopShortcutPositions = {};
+    if (parsed.desktopShortcutPositions !== undefined) {
+      if (!parsed.desktopShortcutPositions || typeof parsed.desktopShortcutPositions !== "object") return null;
+      for (const [id, position] of Object.entries(parsed.desktopShortcutPositions)) {
+        if (!allowedApplications.has(id) || !validShortcutPosition(position)) return null;
+        desktopShortcutPositions[id] = { x: position.x, y: position.y };
+      }
+    }
     return {
       scenarioId: typeof parsed.scenarioId === "string" ? parsed.scenarioId : "normal-active",
-      workspaceName: typeof parsed.workspaceName === "string" && parsed.workspaceName.trim() ? parsed.workspaceName.slice(0, 48) : "Atlas",
+      workspaceName: typeof parsed.workspaceName === "string" && parsed.workspaceName.trim() ? parsed.workspaceName.slice(0, 48) : "My Workspace",
       appearance: parsed.appearance === "dark" ? "dark" : "light",
       density: parsed.density === "comfortable" ? "comfortable" : "compact",
       reduceMotion: Boolean(parsed.reduceMotion),
       taskbarLabels: parsed.taskbarLabels !== false,
       focusedApplication: allowedApplications.has(parsed.focusedApplication) ? parsed.focusedApplication : null,
+      desktopShortcutPositions,
       windows,
     };
   } catch {

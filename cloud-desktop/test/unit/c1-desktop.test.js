@@ -4,6 +4,7 @@ import { applicationRegistry } from "../../src/apps/registry.js";
 import { getScenario, listScenarios } from "../../src/fixtures/scenarios.js";
 import { createDesktopState, desktopReducer } from "../../src/state/desktopReducer.js";
 import { parseDesktopState, serializeDesktopState } from "../../src/state/persistence.js";
+import { clampDesktopShortcutPosition, createDesktopShortcutPositions } from "../../src/state/desktopShortcuts.js";
 import { clampBounds, snapBounds } from "../../src/state/windowManager.js";
 
 const viewport = { width: 1440, height: 900 };
@@ -58,17 +59,31 @@ describe("C1 deterministic cloud desktop state", () => {
   });
 
   it("round-trips versioned persistence and rejects corrupt or incompatible state", () => {
-    const state = createDesktopState({ scenarioId: "several-apps", viewport });
+    let state = createDesktopState({ scenarioId: "several-apps", viewport });
+    state = desktopReducer(state, { type: "MOVE_DESKTOP_SHORTCUT", applicationId: "settings", x: 412, y: 288 });
     const parsed = parseDesktopState(serializeDesktopState(state));
-    expect(parsed.workspaceName).toBe("Atlas");
+    expect(parsed.workspaceName).toBe("My Workspace");
     expect(parsed.windows.terminal.isOpen).toBe(true);
+    expect(parsed.desktopShortcutPositions.settings).toEqual({ x: 412, y: 288 });
     expect(parseDesktopState("not-json")).toBeNull();
     expect(parseDesktopState(JSON.stringify({ version: 99, windows: {} }))).toBeNull();
     expect(parseDesktopState(JSON.stringify({ version: 1, windows: { intruder: { bounds: { x: 0, y: 0, width: 1, height: 1 } } } }))).toBeNull();
   });
 
+  it("creates a compact deterministic shortcut grid and keeps moved icons reachable", () => {
+    const positions = createDesktopShortcutPositions();
+    expect(Object.keys(positions)).toEqual(applicationRegistry.map((application) => application.id));
+    expect(positions.thrallo).toEqual({ x: 16, y: 18 });
+    expect(positions.settings).toEqual({ x: 16, y: 246 });
+    expect(clampDesktopShortcutPosition({ x: 9999, y: 9999 }, viewport)).toEqual({ x: 1244, y: 718 });
+
+    let state = createDesktopState({ scenarioId: "first-launch", viewport });
+    state = desktopReducer(state, { type: "MOVE_DESKTOP_SHORTCUT", applicationId: "browser", x: -200, y: 6000 });
+    expect(state.desktopShortcutPositions.browser).toEqual({ x: 16, y: 718 });
+  });
+
   it("executes only deterministic fixture terminal commands", () => {
-    expect(evaluateFixtureCommand("pwd").lines.map((line) => line.text)).toEqual(["/workspace/atlas"]);
+    expect(evaluateFixtureCommand("pwd").lines.map((line) => line.text)).toEqual(["/workspace/my-workspace"]);
     expect(evaluateFixtureCommand("git   status").lines[0].text).toBe("On branch main");
     expect(evaluateFixtureCommand("clear").clear).toBe(true);
     expect(evaluateFixtureCommand("curl production.example").lines[0].text).toContain("not available");

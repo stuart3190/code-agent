@@ -12,7 +12,7 @@ export const SCENARIO_IDS = freeze([
 const scenarios = {
   "first-launch": {
     label: "First launch",
-    workspaceName: "My workspace",
+    workspaceName: "My Workspace",
     connection: "ready",
     storageState: "normal",
     appearance: "light",
@@ -21,7 +21,7 @@ const scenarios = {
   },
   "normal-active": {
     label: "Normal active workspace",
-    workspaceName: "Atlas",
+    workspaceName: "My Workspace",
     connection: "connected",
     storageState: "normal",
     appearance: "light",
@@ -30,7 +30,7 @@ const scenarios = {
   },
   "several-apps": {
     label: "Several apps running",
-    workspaceName: "Atlas",
+    workspaceName: "My Workspace",
     connection: "connected",
     storageState: "normal",
     appearance: "light",
@@ -39,7 +39,7 @@ const scenarios = {
   },
   "storage-warning": {
     label: "Storage warning",
-    workspaceName: "Atlas",
+    workspaceName: "My Workspace",
     connection: "connected",
     storageState: "warning",
     appearance: "light",
@@ -48,7 +48,7 @@ const scenarios = {
   },
   "offline-recovery": {
     label: "Offline and recovery",
-    workspaceName: "Atlas recovery",
+    workspaceName: "My Workspace",
     connection: "offline",
     storageState: "normal",
     appearance: "light",
@@ -57,7 +57,7 @@ const scenarios = {
   },
   "dark-compatibility": {
     label: "Dark theme compatibility",
-    workspaceName: "Night workspace",
+    workspaceName: "My Workspace",
     connection: "connected",
     storageState: "near-full",
     appearance: "dark",

@@ -1,5 +1,6 @@
 import { getApplication } from "../apps/registry.js";
 import { getScenario } from "../fixtures/scenarios.js";
+import { clampDesktopShortcutPosition, constrainDesktopShortcutPositions, createDesktopShortcutPositions } from "./desktopShortcuts.js";
 import { clampBounds, constrainAllWindows, createWindowMap, getTopVisibleWindow, highestZ, snapBounds, updateWindow } from "./windowManager.js";
 
 export function createDesktopState({ scenarioId = "normal-active", viewport = { width: 1440, height: 900 }, persisted = null } = {}) {
@@ -19,6 +20,7 @@ export function createDesktopState({ scenarioId = "normal-active", viewport = { 
     modal: null,
     announcement: `${scenario.label} loaded`,
     viewport,
+    desktopShortcutPositions: createDesktopShortcutPositions(),
     windows,
   };
   if (!persisted) return base;
@@ -35,6 +37,7 @@ export function createDesktopState({ scenarioId = "normal-active", viewport = { 
     modal: null,
     connection: scenario.connection,
     storageState: scenario.storageState,
+    desktopShortcutPositions: constrainDesktopShortcutPositions(persisted.desktopShortcutPositions, viewport),
     windows: constrainAllWindows(mergedWindows, viewport),
     announcement: "Saved workspace layout restored",
   };
@@ -130,8 +133,23 @@ export function desktopReducer(state, action) {
       return { ...state, launcherOpen: action.open ?? !state.launcherOpen, modal: null };
     case "SET_MODAL":
       return { ...state, modal: action.modal, launcherOpen: false };
+    case "MOVE_DESKTOP_SHORTCUT":
+      if (!state.desktopShortcutPositions[action.applicationId]) return state;
+      return {
+        ...state,
+        desktopShortcutPositions: {
+          ...state.desktopShortcutPositions,
+          [action.applicationId]: clampDesktopShortcutPosition({ x: action.x, y: action.y }, state.viewport),
+        },
+        announcement: `${getApplication(action.applicationId)?.title} shortcut moved`,
+      };
     case "SET_VIEWPORT":
-      return { ...state, viewport: action.viewport, windows: constrainAllWindows(state.windows, action.viewport) };
+      return {
+        ...state,
+        viewport: action.viewport,
+        desktopShortcutPositions: constrainDesktopShortcutPositions(state.desktopShortcutPositions, action.viewport),
+        windows: constrainAllWindows(state.windows, action.viewport),
+      };
     case "SET_APPEARANCE":
       return { ...state, appearance: action.appearance === "dark" ? "dark" : "light", announcement: `${action.appearance} appearance selected` };
     case "SET_DENSITY":
