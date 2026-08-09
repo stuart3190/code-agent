@@ -303,16 +303,34 @@ export function routeForStep(step) {
   return STEP_ROUTING[kind] || STEP_ROUTING.core;
 }
 
+/**
+ * Conservative prompt-token estimate without the previous one-byte-equals-one-token bug.
+ * The actual unescaped values are budgeted at one token per three UTF-8 bytes, followed by a 20%
+ * safety margin and fixed wire overhead. This is intentionally more conservative than the usual
+ * four-characters-per-token approximation without counting JSON escape bytes as model tokens.
+ * This remains deliberately above observed Responses usage while avoiding a 3-4x false hold for
+ * large retrieval prompts.
+ */
+export function estimatePromptTokens(options) {
+  // Count the values sent over the wire, not JSON escape bytes. JSON.stringify turns every source
+  // newline into two characters and was the remaining source of the live repair's false hold.
+  const wire = [
+    String(options?.systemPrompt || ""),
+    ...(options?.messages || []).flatMap((message) => [
+      String(message?.role || ""),
+      typeof message?.content === "string" ? message.content : JSON.stringify(message?.content || ""),
+    ]),
+    JSON.stringify(options?.tools || []),
+  ].join("\n");
+  return Math.ceil((Buffer.byteLength(wire, "utf8") / 3) * 1.2) + 512;
+}
+
 export function conservativeCallReservation(options, model, {
-  maxOutputTokens = 16_000, minimumCredits = 0,
+  maxOutputTokens = 16_000, minimumCredits = 0, inputTokens = null,
 } = {}) {
-  // UTF-8 bytes are a deliberately conservative upper bound for prompt tokens. Include the tool
-  // schemas and fixed wire overhead, then assume zero cache discount. The provider is given the
-  // same output cap, so the reserved amount bounds the call instead of merely guessing its cost.
-  const wireBytes = Buffer.byteLength(JSON.stringify({
-    systemPrompt: options?.systemPrompt || "", messages: options?.messages || [], tools: options?.tools || [],
-  }), "utf8");
-  const inputUpper = wireBytes + 512;
+  const hasExplicitInput = inputTokens !== null && inputTokens !== undefined && inputTokens !== "";
+  const inputUpper = hasExplicitInput && Number.isFinite(Number(inputTokens)) && Number(inputTokens) >= 0
+    ? Math.ceil(Number(inputTokens)) : estimatePromptTokens(options);
   const calculated = creditsForUsage({
     usage: { input: inputUpper, cached: 0, output: maxOutputTokens, total: inputUpper + maxOutputTokens },
     model,
