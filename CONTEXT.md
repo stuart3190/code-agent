@@ -1313,3 +1313,22 @@ no working checkpoint, so no repair or full regeneration ran. Cleanup parity pas
 canonical datasets. Worker/V1/flags/settlement/Caddy safety state is unchanged. Package 15 remains
 blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-AGGREGATION-TOTALITY.md`.
+
+## Package 14S direct factory-result grammar gate passed (2026-08-09)
+
+Commit `9c794c7` gives the capability validator one source resolver for both named, proven
+capability objects and direct recognised factory `CallExpression` results. Direct/exported/aliased
+destructuring, direct member use and cross-module imports retain machine-verifiable factory
+provenance. The registry-driven matrix covers all six recognised factories across ten positive
+syntax forms each and retains fail-closed results for unrelated callables, objects, invalid factory
+configuration, missing methods and bound-but-unused methods.
+
+The retained live candidate shape now accepts its valid direct
+`makeContactForm({ entity: "contactMessage" })` destructuring but still rejects wizard `getState`
+and `subscribe` as bound but never invoked. It passes AST parse, patch/module-plan validation and a
+real Vite compile. A corrected version that invokes those methods passes every deterministic gate
+and also compiles. Focused grammar/replay tests passed 25/25; the relevant zero-model
+V2/provider/verification suite passed 307/307. No provider call, deployment or production mutation
+occurred. Another live booking proof is technically justified only under separate approval;
+Package 15 remains blocked until live strict quality passes. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-FACTORY-GRAMMAR.md`.

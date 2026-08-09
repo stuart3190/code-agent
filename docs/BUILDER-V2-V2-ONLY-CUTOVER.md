@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **capability aggregation repaired; live quality still failed 2026-08-09**: the one fresh build exposed direct factory-result destructuring outside the deterministic grammar matrix and never reached compile/checkpoint | none | 3.3876 additional spent in latest proof | internal fixture cleaned; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **zero-model grammar gate green; live quality remains unqualified 2026-08-09**: direct factory-result provenance is registry-covered and retained-source compile proof passes; no new provider call was run | none | no additional spend in grammar repair | separate live booking approval required; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -190,6 +190,17 @@ covered, so contact provenance was falsely reported missing. It also genuinely b
 invoke wizard `getState` and `subscribe`. With no working checkpoint, repair was forbidden. Cleanup
 and customer parity passed; Package 15 remains blocked. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-AGGREGATION-TOTALITY.md`.
+
+The direct factory-result grammar repair at `9c794c7` resolves both named capability identifiers and
+recognised factory `CallExpression` values through one AST provenance abstraction. All six factories
+derived from the registry pass ten source/binding/import forms each. A retained live-shape fixture
+now accepts `export const { submitContact } = makeContactForm(...)` without accepting unrelated
+names; it still rejects the genuinely bound-but-uninvoked wizard `getState` and `subscribe` methods.
+The retained tree and its corrected variant both pass patch validation and real Vite compilation,
+while only the corrected variant passes the capability contract. Focused grammar/replay tests passed
+25/25 and the relevant zero-model V2/provider/verification suite passed 307/307. No provider call or
+production action occurred. Package 15 remains blocked pending a separately approved booking proof.
+Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-FACTORY-GRAMMAR.md`.
 
 ## Deterministic qualification gate
 
