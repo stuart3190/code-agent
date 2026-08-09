@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "package": "D10-foundation",
+  "observedAt": "2026-08-09",
+  "classification": "local-and-fixture-preview-testing-foundation",
+  "items": [
+    {
+      "id": "local-preview-runtime",
+      "category": "local-runtime-verified",
+      "state": "synthetic-local-runtime-verified",
+      "runtimeVerified": true,
+      "claim": "An explicit D8-discovered npm preview command started a disposable loopback server, changed to its announced port, restarted and stopped without installing dependencies.",
+      "evidence": ["test/desktop/d10-preview.test.mjs", "editor/vscode/lib/previewLocalRuntime.js"]
+    },
+    {
+      "id": "responsive-preview-simulation",
+      "category": "fixture-and-render-verified",
+      "state": "responsive-simulation-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "realDeviceVerified": false,
+      "claim": "Desktop, laptop, tablet and mobile viewport dimensions render through the D10 application-preview surface; this is not real-device qualification."
+    },
+    {
+      "id": "local-playwright",
+      "category": "local-runtime-verified",
+      "state": "synthetic-local-runtime-verified",
+      "runtimeVerified": true,
+      "claim": "Installed local Playwright Chromium loaded the disposable application, captured a PNG and trace, collected bounded console/network evidence and terminated cleanly.",
+      "evidence": ["test/desktop/d10-preview.test.mjs"]
+    },
+    {
+      "id": "fixture-diagnostics",
+      "category": "fixture-verified",
+      "state": "deterministic-fixture-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Console, runtime, network, screenshot and test-result scenarios are deterministic and redact fake credential-shaped values."
+    },
+    {
+      "id": "d4-cloud-browser-evidence",
+      "category": "prior-cloud-feasibility",
+      "state": "D4-evidence-only",
+      "runtimeVerified": false,
+      "claim": "D4 proved Daytona signed preview and Playwright primitives; D10 does not promote those vendor links into a customer preview gateway.",
+      "evidence": ["desktop/d4/evidence/preview.json", "desktop/d4/evidence/browser-tests.json"]
+    },
+    {
+      "id": "cloud-snapshot-track-b",
+      "category": "future-integration",
+      "state": "blocked",
+      "runtimeVerified": false,
+      "claim": "D6 cloud gateway, D7 canonical snapshots and D10 Track B production diagnostics/artifacts remain unavailable.",
+      "evidence": ["desktop/preview/TRACK-B-INTEGRATION-BOUNDARY.md"]
+    }
+  ],
+  "visualVerification": {
+    "renderer": "loopback-hosted-real-D10-controller-and-view",
+    "loopbackHttpStatus": 200,
+    "loopbackRenderedBytes": 28299,
+    "requiredSurfaceMarkersVerified": true,
+    "localPlaywrightScreenshotRuntimeVerified": true,
+    "localPlaywrightTraceRuntimeVerified": true,
+    "inAppBrowserScreenshot": false,
+    "inAppBrowserBlocker": "The in-app Browser controller rejected the inspection session because sandbox policy metadata was unavailable.",
+    "actualElectronWorkbench": false,
+    "actualElectronBlocker": "The isolated desktop/vscode checkout and compiled development workbench are not present.",
+    "productionAccessUsed": false,
+    "cleanup": "The loopback visual process was stopped and port 43120 was verified closed. Disposable local preview/test processes and artifacts were removed by the automated test cleanup."
+  },
+  "negativeClaims": {
+    "realDeviceVerified": false,
+    "productionBrowserDiagnostics": false,
+    "productionPreviewGateway": false,
+    "builderV2Mutation": false,
+    "canonicalSnapshot": false,
+    "artifactUpload": false,
+    "publishingOrDeploymentMutation": false
+  }
+}

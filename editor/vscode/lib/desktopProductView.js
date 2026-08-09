@@ -3,6 +3,8 @@
 
 "use strict";
 
+const { renderPreview, previewStyles } = require("./previewView.js");
+
 function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
   if (!state || state.source !== "fixture") throw new TypeError("D9 view requires fixture-backed desktop state");
   if (!nonce) throw new TypeError("D9 view requires a CSP nonce");
@@ -12,11 +14,12 @@ function renderDesktopProductHtml(state, { nonce, cspSource = "'self'" } = {}) {
       : current === "conversation" ? renderConversation(state)
         : current === "agents" ? renderAgents(state)
           : current === "usage" ? renderUsage(state)
-            : renderHome(state);
+            : current === "preview" ? renderPreview(state.preview, escapeHtml, escapeAttribute, humanize)
+              : renderHome(state);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escapeAttribute(cspSource)} 'unsafe-inline'; script-src 'nonce-${escapeAttribute(nonce)}';">
-<style>${styles()}</style></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escapeAttribute(cspSource)} 'unsafe-inline'; script-src 'nonce-${escapeAttribute(nonce)}'; img-src data: ${escapeAttribute(cspSource)}; frame-src 'self' http://127.0.0.1:* http://localhost:*;">
+<style>${styles()}${previewStyles()}</style></head>
 <body><a class="skip-link" href="#main">Skip to Thrallo content</a>
 <div class="shell">
   <aside class="sidebar" aria-label="Thrallo navigation">
@@ -104,12 +107,12 @@ function renderProjectRow(project) {
     <div class="source-mark" aria-hidden="true">${project.local ? "L" : project.workspaceType === "fixture_thrallo_project" ? "T" : "C"}</div>
     <div class="project-copy"><div><h3>${escapeHtml(project.name)}</h3><span class="state-label">${escapeHtml(project.sourceLabel)}</span></div><p>${escapeHtml(meta)}</p>
       <small>${escapeHtml(project.updatedAt ? `Updated ${formatDate(project.updatedAt)}` : humanize(project.availability))}${project.conflict ? " · Conflict requires review" : ""}${escapeHtml(previewHint)}</small></div>
-    <div class="row-actions">${project.dirty ? `<span class="warning-text">Dirty</span>` : ""}<button type="button" data-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>${project.local ? "Resume" : project.workspaceType === "fixture_thrallo_project" ? "Open fixture" : "Unavailable"}</button></div>
+    <div class="row-actions">${project.dirty ? `<span class="warning-text">Dirty</span>` : ""}<button type="button" data-preview-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>Preview</button><button type="button" data-project="${escapeAttribute(project.id)}"${disabled ? " disabled" : ""}>${project.local ? "Resume" : project.workspaceType === "fixture_thrallo_project" ? "Open fixture" : "Unavailable"}</button></div>
   </article>`;
 }
 
 function renderConversation(state) {
-  return `<div class="conversation-layout"><section class="conversation" aria-labelledby="conversation-title"><div class="section-heading"><div><p class="eyebrow">Builder conversation</p><h1 id="conversation-title">Build with Thrallo</h1></div><span class="fixture-pill">Fixture-backed</span></div>
+  return `<div class="conversation-layout"><section class="conversation" aria-labelledby="conversation-title"><div class="section-heading"><div><p class="eyebrow">Builder conversation</p><h1 id="conversation-title">Build with Thrallo</h1></div><div><button class="quiet" type="button" data-nav="preview">Open Preview</button><span class="fixture-pill">Fixture-backed</span></div></div>
     <div class="messages" role="log" aria-label="Thrallo conversation" aria-live="polite">${state.conversation.messages.map(renderMessage).join("")}</div>
     ${renderPlan(state.plan)}
     <form id="message-form" class="composer"><label for="message">Send a fixture instruction</label><div><textarea id="message" name="message" rows="2" maxlength="4000" placeholder="Describe what you want to change"></textarea><button class="primary" type="submit">Send</button></div><small>Chat messages never approve plans. Use the typed plan controls above.</small></form>
@@ -197,7 +200,7 @@ function renderNotices(notices) {
 
 function emptyState(title, detail) { return `<div class="empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p></div>`; }
 
-function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget" })[id] || "Thrallo"; }
+function sectionTitle(id) { return ({ home: "Home", conversation: "Conversation", projects: "Projects", agents: "Agent activity", usage: "Usage and budget", preview: "Application preview" })[id] || "Thrallo"; }
 function humanize(value) { return String(value ?? "unknown").replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : date.toISOString().slice(0, 10); }
 function formatDuration(seconds) { const minutes = Math.floor(seconds / 60); return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`; }
@@ -211,13 +214,21 @@ document.addEventListener('click',(event)=>{const button=event.target.closest('b
  if(button.dataset.nav)vscode.postMessage({type:'navigate',destination:button.dataset.nav});
  else if(button.dataset.hostAction)vscode.postMessage({type:'hostAction',action:button.dataset.hostAction});
  else if(button.dataset.project)vscode.postMessage({type:'selectProject',projectId:button.dataset.project});
+ else if(button.dataset.previewProject)vscode.postMessage({type:'openPreview',projectId:button.dataset.previewProject});
  else if(button.dataset.planDecision)vscode.postMessage({type:'planDecision',decision:button.dataset.planDecision,planId:button.dataset.planId,comment:document.getElementById('plan-comment')?.value||''});
  else if(button.dataset.agentControl)vscode.postMessage({type:'agentControl',agentId:button.dataset.agent,control:button.dataset.agentControl});
  else if(button.dataset.portal)vscode.postMessage({type:'portal',destination:button.dataset.portal});
+ else if(button.dataset.preview){const command=document.getElementById('preview-command')?.value||null;const action=button.dataset.preview;if(action==='custom-viewport')vscode.postMessage({type:'previewAction',action:{type:'set_viewport',width:Number(document.getElementById('viewport-width')?.value),height:Number(document.getElementById('viewport-height')?.value)}});else vscode.postMessage({type:'previewAction',action:previewAction(action,command)});}
  else if(button.hasAttribute('data-advance-build'))vscode.postMessage({type:'advanceFixtureBuild'});
  announce(button.textContent.trim());});
 document.getElementById('message-form')?.addEventListener('submit',(event)=>{event.preventDefault();const field=document.getElementById('message');const text=field.value.trim();if(text){vscode.postMessage({type:'sendMessage',text});field.value='';}});
-document.getElementById('model-select')?.addEventListener('change',(event)=>vscode.postMessage({type:'selectModel',modelId:event.target.value}));`;
+document.getElementById('model-select')?.addEventListener('change',(event)=>vscode.postMessage({type:'selectModel',modelId:event.target.value}));
+document.getElementById('preview-path-form')?.addEventListener('submit',(event)=>{event.preventDefault();vscode.postMessage({type:'previewAction',action:{type:'navigate_preview',path:document.getElementById('preview-path')?.value||'/'}});});
+document.querySelectorAll('[data-viewport]').forEach((button)=>button.addEventListener('click',()=>vscode.postMessage({type:'previewAction',action:{type:'set_viewport',presetId:button.dataset.viewport}})));
+document.getElementById('viewport-zoom')?.addEventListener('change',(event)=>vscode.postMessage({type:'previewAction',action:{type:'set_zoom',zoom:event.target.value==='fit'?'fit':Number(event.target.value)}}));
+document.getElementById('diagnostic-filter')?.addEventListener('change',(event)=>vscode.postMessage({type:'previewAction',action:{type:'filter_diagnostics',severity:event.target.value}}));
+document.querySelectorAll('[data-source-file]').forEach((button)=>button.addEventListener('click',()=>vscode.postMessage({type:'openDiagnosticSource',file:button.dataset.sourceFile,line:Number(button.dataset.sourceLine),column:Number(button.dataset.sourceColumn)})));
+function previewAction(action,command){return ({start:{type:'start_preview',commandId:command,userInitiated:true},restart:{type:'restart_preview',commandId:command,userInitiated:true},stop:{type:'stop_preview'},reload:{type:'reload_preview'},back:{type:'history_back'},forward:{type:'history_forward'},screenshot:{type:'capture_screenshot'},tests:{type:'run_tests'},'cancel-tests':{type:'cancel_tests'},rotate:{type:'rotate_viewport'},'reset-viewport':{type:'reset_viewport'},'clear-diagnostics':{type:'clear_diagnostics',kind:'all'},'copy-diagnostics':{type:'copy_diagnostics'},external:{type:'open_external'}})[action]||{type:'unsupported'};}`;
 }
 
 function styles() {

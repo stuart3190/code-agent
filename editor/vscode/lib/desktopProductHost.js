@@ -9,6 +9,8 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { NAVIGATION_ITEMS, createDesktopProductController } = require("./desktopProduct.js");
 const { renderDesktopProductHtml } = require("./desktopProductView.js");
+const { createLocalPreviewRuntime } = require("./previewLocalRuntime.js");
+const { safeLocalPreviewUrl, safeRelativeFile } = require("./previewFoundation.js");
 
 const HOST_ACTIONS = Object.freeze(["openLocalFolder", "openLocalGit", "importLocal"]);
 
@@ -18,6 +20,7 @@ function createDesktopProductHost({
   output,
   localWorkspaceHost,
   scenario = "authenticated-paid",
+  previewScenario = "preview-idle",
   client: injectedClient = null,
 } = {}) {
   if (!vscode || !context || !localWorkspaceHost) throw new TypeError("D9 host requires Code OSS, extension context, and the D8 local workspace host");
@@ -25,14 +28,21 @@ function createDesktopProductHost({
   let controller = null;
   let client = injectedClient;
   let portal = null;
+  let localPreviewRuntime = null;
 
   async function initialize() {
     client ||= await loadSharedClient(context.extensionUri?.fsPath || path.resolve(__dirname, ".."));
+    localPreviewRuntime ||= createLocalPreviewRuntime({
+      registry: localWorkspaceHost.registry,
+      artifactRoot: context.storageUri?.fsPath ? path.join(context.storageUri.fsPath, "preview-artifacts") : null,
+    });
     controller ||= await createDesktopProductController({
       client,
       localRegistry: localWorkspaceHost.registry,
       stateStore: context.workspaceState || context.globalState,
       scenario,
+      previewScenario,
+      localPreviewAdapter: localPreviewRuntime,
     });
     portal ||= client.createPortalHandoff({
       openExternal: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
@@ -86,6 +96,13 @@ function createDesktopProductHost({
       else render();
       return response.result;
     }
+    if (message.type === "openPreview") return dispatchAndRender({ type: "open_preview", projectId: String(message.projectId || "") });
+    if (message.type === "previewAction") {
+      if (message.action?.type === "open_external") return openPreviewExternal();
+      if (message.action?.type === "copy_diagnostics") return copyDiagnostics();
+      return dispatchAndRender({ type: "preview_action", action: message.action });
+    }
+    if (message.type === "openDiagnosticSource") return openDiagnosticSource(message);
     if (message.type === "sendMessage") return dispatchAndRender({ type: "send_message", text: message.text });
     if (message.type === "planDecision") return dispatchAndRender({ type: "plan_decision", planId: message.planId, decision: message.decision, comment: message.comment });
     if (message.type === "agentControl") return dispatchAndRender({ type: "agent_control", agentId: message.agentId, control: message.control });
@@ -96,6 +113,37 @@ function createDesktopProductHost({
       return Object.freeze({ ok: true, state: "system_browser_opened", destination: descriptor.destination });
     }
     return unavailable("unsupported_message");
+  }
+
+  async function copyDiagnostics() {
+    const state = controller.snapshot().preview;
+    const summary = JSON.stringify({ preview: { source: state.preview.source, state: state.preview.state, path: state.preview.path, health: state.preview.health }, diagnostics: state.diagnostics, testSession: state.testSession }, null, 2);
+    await vscode.env.clipboard.writeText(summary);
+    return Object.freeze({ ok: true, state: "redacted_diagnostics_copied", sideEffects: true });
+  }
+
+  async function openPreviewExternal() {
+    const preview = controller.snapshot().preview.preview;
+    const url = safeLocalPreviewUrl(preview.url);
+    if (!url || !preview.externalAllowed) return unavailable("external_preview_unavailable");
+    await vscode.env.openExternal(vscode.Uri.parse(`${url.replace(/\/$/, "")}${preview.path || "/"}`));
+    return Object.freeze({ ok: true, state: "system_browser_opened", sideEffects: true });
+  }
+
+  async function openDiagnosticSource(message) {
+    const relative = safeRelativeFile(message.file);
+    const project = controller.snapshot().preview.project;
+    if (!relative || !project.local || !project.rootPath) return unavailable("diagnostic_source_unavailable");
+    const target = resolveDiagnosticSource(project.rootPath, relative);
+    if (!target) return unavailable("diagnostic_source_rejected");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+    const editor = await vscode.window.showTextDocument(document, { preview: true, viewColumn: vscode.ViewColumn.One });
+    const line = Math.max(0, Number(message.line || 1) - 1);
+    const column = Math.max(0, Number(message.column || 1) - 1);
+    const position = new vscode.Position(line, column);
+    editor.selection = new vscode.Selection(position, position);
+    editor.revealRange(new vscode.Range(position, position));
+    return Object.freeze({ ok: true, state: "source_opened", file: relative, line: line + 1, column: column + 1 });
   }
 
   async function handleHostAction(action) {
@@ -132,11 +180,13 @@ function createDesktopProductHost({
       vscode.commands.registerCommand("thrallo.openProjects", () => open("projects")),
       vscode.commands.registerCommand("thrallo.openAgents", () => open("agents")),
       vscode.commands.registerCommand("thrallo.openUsage", () => open("usage")),
+      vscode.commands.registerCommand("thrallo.openPreview", () => open("preview")),
+      Object.freeze({ dispose: () => { localPreviewRuntime?.cleanup().catch(() => {}); } }),
     ];
   }
 
   function log(message) { output?.appendLine?.(`[desktop] ${message}`); }
-  return Object.freeze({ initialize, open, handleMessage, registerCommands, getController: () => controller, getPanel: () => panel });
+  return Object.freeze({ initialize, open, handleMessage, registerCommands, getController: () => controller, getPanel: () => panel, getLocalPreviewRuntime: () => localPreviewRuntime });
 }
 
 async function loadSharedClient(extensionRoot) {
@@ -151,5 +201,19 @@ async function loadSharedClient(extensionRoot) {
 
 function unavailable(code) { return Object.freeze({ ok: false, code, state: "capability_unavailable", sideEffects: false }); }
 function safeMessage(error) { return String(error?.message || error || "unknown error").replace(/[\r\n]+/g, " ").slice(0, 240); }
+function resolveDiagnosticSource(rootPath, relativeFile, fsApi = fs) {
+  const relative = safeRelativeFile(relativeFile);
+  if (!rootPath || !relative) return null;
+  try {
+    const root = fsApi.realpathSync(path.resolve(rootPath));
+    const target = path.resolve(root, relative);
+    const stat = fsApi.lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    const realTarget = fsApi.realpathSync(target);
+    const check = path.relative(root, realTarget);
+    if (!check || check.startsWith("..") || path.isAbsolute(check)) return null;
+    return realTarget;
+  } catch { return null; }
+}
 
-module.exports = { HOST_ACTIONS, createDesktopProductHost, loadSharedClient };
+module.exports = { HOST_ACTIONS, createDesktopProductHost, loadSharedClient, resolveDiagnosticSource };

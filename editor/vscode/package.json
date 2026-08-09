@@ -101,6 +101,10 @@
         "title": "Thrallo: Open Usage"
       },
       {
+        "command": "thrallo.openPreview",
+        "title": "Thrallo: Open Application Preview"
+      },
+      {
         "command": "thrallo.local.openFolder",
         "title": "Thrallo: Open Local Folder"
       },

@@ -46,6 +46,7 @@
     "test:desktop:d4": "node --test test/desktop/d4-spike.test.mjs && node desktop/d0/guard.mjs",
     "test:desktop:d8": "node --test test/desktop/d8-local-workspace.test.mjs && node desktop/local-workspace/smoke.mjs && node desktop/d0/guard.mjs",
     "test:desktop:d9": "node --test test/desktop/d9-foundation.test.mjs && node desktop/product/smoke.mjs && node desktop/d0/guard.mjs",
+    "test:desktop:d10": "node --test test/desktop/d10-preview.test.mjs && node desktop/preview/smoke.mjs && node desktop/d0/guard.mjs",
     "spike:desktop:d4": "node desktop/d4/live/run.mjs --confirm-synthetic",
     "smoke:desktop:auth": "node desktop/auth/smoke.mjs",
     "smoke:desktop:account": "node desktop/account/smoke.mjs",
