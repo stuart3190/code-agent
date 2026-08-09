@@ -15,6 +15,8 @@ test("serves the isolated C1 cloud desktop without external requests", async ({ 
   await expect(page.locator("[data-desktop-shell]")).toHaveCount(1);
   await expect(page.locator("[data-taskbar]")).toHaveCount(1);
   await expect(page.locator("[data-application-window='browser']")).toBeVisible();
+  const desktopBackground = await page.locator(".desktop-canvas").evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(desktopBackground).toContain("thrallo-cloud-workspace-background.png");
 
   for (const requestUrl of requests) {
     const url = new URL(requestUrl);

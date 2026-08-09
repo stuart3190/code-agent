@@ -111,10 +111,14 @@ svg { flex: 0 0 auto; }
   z-index: 1;
   inset: 44px 0 54px 112px;
   overflow: hidden;
-  background: var(--canvas);
+  background-color: #eef7ff;
+  background-image: url("/thrallo-cloud-workspace-background.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
-.desktop-watermark { position: absolute; right: 24px; top: 18px; display: flex; align-items: baseline; gap: 8px; color: color-mix(in srgb, var(--text-faint) 55%, transparent); pointer-events: none; }
+.desktop-watermark { display: none; }
 .desktop-watermark span { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
 .desktop-watermark small { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
 .desktop-shortcuts { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
@@ -139,10 +143,10 @@ svg { flex: 0 0 auto; }
   touch-action: manipulation;
   user-select: none;
 }
-.desktop-shortcut:hover, .desktop-shortcut.is-selected { border-color: color-mix(in srgb, var(--accent) 22%, transparent); background: color-mix(in srgb, var(--surface-selected) 74%, transparent); color: var(--text); }
-.desktop-shortcut.is-active { background: color-mix(in srgb, var(--accent-soft) 86%, transparent); color: var(--accent); }
-.desktop-shortcut-icon { width: 38px; height: 34px; display: grid; place-items: center; }
-.desktop-shortcut-label { max-width: 62px; overflow: hidden; font-size: 10px; font-weight: 600; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-shortcut:hover, .desktop-shortcut.is-selected { border-color: rgba(49, 132, 225, .48); background: rgba(255, 255, 255, .82); color: #1d344a; }
+.desktop-shortcut.is-active { border-color: rgba(43, 131, 233, .62); background: rgba(225, 240, 255, .9); color: #176bc9; }
+.desktop-shortcut-icon { width: 38px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(255, 255, 255, .72); border-radius: 6px; background: rgba(255, 255, 255, .94); box-shadow: 0 5px 16px rgba(0, 11, 35, .25); }
+.desktop-shortcut-label { max-width: 64px; overflow: hidden; color: #19324a; font-size: 10px; font-weight: 650; line-height: 1.15; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(255, 255, 255, .96); white-space: nowrap; }
 .desktop-shortcut-state { position: absolute; bottom: 2px; width: 14px; height: 3px; border-radius: 2px; background: var(--teal); }
 .desktop-shortcut.is-active .desktop-shortcut-state { background: var(--accent); }
 .window-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
@@ -193,6 +197,10 @@ svg { flex: 0 0 auto; }
 .app-tone-github { color: var(--text); }
 .app-tone-storage { color: #1ea69a; }
 .app-tone-settings { color: #627485; }
+.desktop-shortcut .desktop-shortcut-icon { color: #293b4d; }
+.desktop-shortcut .app-tone-thrallo, .desktop-shortcut .app-tone-storage { color: #0eaa98; }
+.desktop-shortcut .app-tone-browser, .desktop-shortcut .app-tone-files { color: #2b83e9; }
+.desktop-shortcut .app-tone-settings { color: #627485; }
 
 .status-rail {
   position: absolute;

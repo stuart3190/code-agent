@@ -1,82 +1,75 @@
 # C1 design QA
 
-- Source visual truth: `evidence/c1/selected-visual-option-2.png`
-- Browser-rendered implementation: `evidence/c1/screenshots/02-normal-desktop.png`
+- Source visual truth: `public/thrallo-cloud-workspace-background.png`
+- Existing C1 structural reference: `evidence/c1/selected-visual-option-2.png`
+- Browser-rendered implementation: `evidence/c1/screenshots/01-first-launch.png`
 - Side-by-side comparison: `evidence/c1/design-qa-comparison.png`
-- Source pixels: 1487 × 1058
-- Implementation pixels: 1440 × 1024
-- Comparison normalization: source scaled to 1440 × 1024; implementation captured at 1440 × 1024; device scale factor 1
-- State: normal active workspace, light appearance, Browser focused with Thrallo behind
+- Source pixels: 1672 x 941
+- Implementation pixels: 1440 x 1024
+- Comparison normalization: source aspect ratio preserved with a centered cover crop to 1440 x 1024; implementation captured at 1440 x 1024 with device scale factor 1
+- State: first launch, light shell appearance, Thrallo placeholder open
 
 ## Full-view comparison evidence
 
-The corrected implementation preserves the selected direction's distinguishing structure: a narrow
-vertical application shelf, a separate bottom workspace/status rail, a pale full-surface desktop,
-compact window chrome, a dominant fixture Browser window, a secondary Thrallo placeholder window,
-subtle active-window elevation, teal/blue application accents, and restrained density. A compact
-two-column application-shortcut grid now occupies the free upper-left canvas without competing with
-the application windows. The implementation uses a flat pale stone canvas instead of copying the
-concept's decorative paper texture; this keeps C1 within the product requirement to avoid
-wallpaper-like novelty and avoids inventing a raster brand asset.
+The exact supplied light Thrallo cloud image is rendered on the desktop canvas with `cover` sizing
+and centered positioning. Its blue geometric mark remains visible at the left, pale cloud and circuit
+details frame the application windows, and the Thrallo signature remains at the lower right. The
+image restores the requested light product identity while keeping enough separation between the
+desktop, white windows, application shelf, and status rail.
 
 ## Focused comparison evidence
 
-The first-launch and normal-desktop captures verify all seven canvas shortcuts with coherent
-Phosphor icons, readable labels, focused/running state, and adequate separation from the shelf.
-App-specific captures `05-thrallo-placeholder.png`, `06-browser-app.png`, `07-files-app.png`,
-`08-terminal-app.png`, `09-github-app.png`, `10-storage-warning.png`, and `11-settings-app.png` were
-opened and inspected at native screenshot resolution. Typography remains readable, title-bar and
-toolbar spacing stays compact, icons come from one coherent Phosphor family, controls are not
-clipped, and fixture labels clearly distinguish offline/demo behavior. Separate crops were not
-needed because the native 1440 × 1024 captures keep every important control readable.
+The first-launch, normal-desktop, multiple-window, launcher, and dark-compatibility captures were
+opened at native resolution. All seven canvas shortcuts remain readable over the lighter image using
+dark labels, subtle white text shadow, small white icon plates, and pale-blue focus/running states.
+The image remains behind the C1 window layer and does not alter window dimensions, taskbar layout,
+launcher placement, or responsive behavior.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: Inter-compatible system stack, compact 10–14 px chrome, strong 20–42 px
-  content hierarchy, and stable wrapping match the selected direction's editorial density.
-- Spacing and layout rhythm: 112 px shelf, 54 px status rail, 42 px title bars, lean separators,
-  modest 6–10 px radii, and restrained window elevation preserve the reference proportions.
-- Colors and visual tokens: pale stone canvas, white surfaces, deep ink text, blue focused state,
-  and teal connection/application accents align with the selected direction. Dark mode is a
-  compatibility state rather than the product identity.
-- Image quality and asset fidelity: the concept contains no required photo or illustration asset.
-  Application and control icons use the Phosphor library; no emoji, handcrafted SVG, or placeholder
-  icon art is used.
-- Copy and content: Thrallo remains explicitly a future-integration placeholder. Browser, Files,
-  Terminal, GitHub, Storage, and Settings use realistic but clearly fixture-only content.
+- Fonts and typography: the existing Inter-compatible system stack and compact C1 hierarchy are
+  unchanged. Shortcut labels retain their compact size and use dark ink over the light image.
+- Spacing and layout rhythm: the 112 px shelf, 54 px status rail, 42 px title bars, 68 px shortcut
+  footprints, window positions, and restrained elevation remain unchanged.
+- Colors and visual tokens: the supplied white, ice-blue, and electric-blue image is used verbatim.
+  Its palette supports the approved light-by-default direction; dark-mode chrome remains compatible
+  without replacing the desktop image.
+- Image quality and asset fidelity: the supplied 1672 x 941 PNG is copied byte-for-byte into the
+  package and rendered with aspect-preserving `cover`; no CSS recreation, generated substitute, or
+  stretched raster is used.
+- Copy and content: fixture content and Thrallo placeholder copy are unchanged. The redundant
+  code-rendered canvas watermark remains hidden because the supplied image already contains Thrallo
+  branding.
 
 ## Interaction and responsive verification
 
-Playwright exercised mouse double-click, touch single-tap, keyboard shortcut opening, shortcut
-drag/persistence, launcher and taskbar synchronization, launcher search/keyboard dismissal, app
-open/focus, taskbar restore, minimize/maximize/restore, snapping, window drag/resize, close,
-persistence, corrupt-state recovery, all seven fixture apps, reduced motion, tablet
-portrait/landscape, mobile app switching, and fixed-origin network enforcement. Chromium console
-output contained no application error during the passing run.
+Playwright verified the exact local background request, all shortcut launch/focus paths, launcher and
+taskbar synchronization, accessibility, tablet and mobile layouts, and loopback-only network
+behavior. Tablet and mobile continue using their focused-window/app-switcher layouts, so the desktop
+image creates no new overflow or touch regression.
 
 ## Findings
 
-No actionable P0, P1, or P2 visual mismatch remains.
+No actionable P0, P1, or P2 visual issue remains.
 
-P3 follow-up: a future brand pass may supply an approved subtle canvas texture or bespoke Thrallo
-mark. C1 intentionally uses the selected structure and a library icon until those assets exist.
+P3 follow-up: the user may prefer a different focal crop after reviewing the live prototype. The
+current centered `cover` crop is the most stable default across common desktop aspect ratios.
 
 ## Comparison history
 
-The original C1 browser pass found functional test issues in drag bounds, ambiguous test selectors,
-and a tablist accessibility role; those were corrected before the original handoff. The C1 visual
-correction then found that the full-size window layer intercepted pointer input intended for the new
-canvas shortcuts. Empty window-layer space was made pointer-transparent while real windows retain
-normal input. Post-fix evidence is the refreshed fifteen-screenshot set, the regenerated side-by-side
-comparison, and the passing shortcut-focused Chromium checks.
+The rejected first background pass used the earlier dark-blue version of the artwork and required
+white shortcut labels. The user supplied a lighter replacement, which was applied byte-for-byte.
+Shortcut labels, selection surfaces, and fallback canvas color were then returned to a light-product
+contrast treatment. Post-fix evidence is the refreshed fifteen-screenshot set and current
+side-by-side comparison.
 
 ## Implementation checklist
 
-- [x] Selected visual structure implemented
-- [x] All seven fixture applications represented
-- [x] All seven applications available as accessible desktop shortcuts
-- [x] Window and launcher interactions verified
-- [x] Responsive and accessibility states verified
-- [x] No-production-network boundary verified
+- [x] Exact replacement background asset used
+- [x] Desktop canvas only; surrounding C1 shell preserved
+- [x] Seven shortcuts remain readable and interactive
+- [x] Light and dark compatibility checked
+- [x] Desktop, tablet, and mobile layouts checked
+- [x] No-production-network boundary preserved
 
 final result: passed

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeRoots = ["src", "public", "index.html"];
+const textFileExtensions = new Set([".css", ".html", ".js", ".jsx", ".json", ".mjs", ".svg", ".txt"]);
 const files = [];
 
 function collect(target) {
@@ -11,7 +12,7 @@ function collect(target) {
   const info = statSync(absolute);
   if (info.isDirectory()) {
     for (const child of readdirSync(absolute)) collect(path.join(target, child));
-  } else {
+  } else if (textFileExtensions.has(path.extname(absolute).toLowerCase())) {
     files.push(absolute);
   }
 }
