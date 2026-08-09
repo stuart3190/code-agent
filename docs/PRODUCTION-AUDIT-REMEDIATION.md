@@ -332,3 +332,18 @@ checkpoint repair was reservation-blocked before dispatch: its six-credit call c
 within the remaining 5.901 approved build credits. Total spend was 3.099/9 credits over three calls.
 Cleanup/customer parity passed and all safety controls remain unchanged. Package 15 remains blocked.
 Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.
+
+## Package 14S repair-reservation sizing and bounded reproof (2026-08-09)
+
+The confirmed 5.901-credit remaining-headroom defect is fixed in `1cb6427`. Repair output is now
+scope-sized and the effective call ceiling is the smaller of the configured repair ceiling and
+live approved build headroom. The old nominal repair allowance no longer blocks otherwise approved
+headroom. Focused tests passed 29/29 and the relevant zero-model V2/provider suite passed 235/235.
+
+The single live reproof used 1.6652/12 credits and stopped before compilation on a new linter
+exception: generated `makeEntityStore` provenance was recorded in `module.instances`, while the
+required-capability aggregate map contained no CRUD entry and dereferenced `undefined.instances`.
+No working checkpoint existed, so no repair or full regeneration was run. Exact cleanup parity
+passed and all customer/safety state is unchanged. Package 15 remains blocked pending a separately
+approved narrow aggregate guard. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-REPAIR-RESERVATION-SIZING.md`.

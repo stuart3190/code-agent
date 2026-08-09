@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **linter repaired; live quality still failed 2026-08-09**: compile/checkpoint reached, essential booking journey red; sole repair failed pre-dispatch on remaining-headroom sizing | none | 3.099 additional spent | internal fixture cleaned; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **reservation sizing repaired; live quality still failed 2026-08-09**: the one fresh build hit a capability-linter aggregate exception before compile/checkpoint | none | 1.6652 additional spent in latest proof | internal fixture cleaned; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -167,6 +167,16 @@ journey remained red at contact entry, review, durable confirmation and reload. 
 repair then failed before dispatch because its six-credit call ceiling could not fit inside 5.901
 credits of remaining build headroom. Package 15 remains blocked; no retry was run. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.
+
+The narrow reservation repair at `1cb6427` now sizes a targeted repair to
+`min(configured call ceiling, remaining approved build headroom)` and a scope-proportionate output
+allowance. The exact 5.901/6.0 case and the full zero-model reservation matrix pass. Its single
+authorized live booking proof did not reach that repair path: generated code combined the required
+booking capability with the valid CRUD factory, exposing an AST aggregate bug where
+`makeEntityStore` exists in `module.instances` but not the required-capability facts map. The
+exception occurred before compile/checkpoint, so no repair or regeneration was permitted. Package
+15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-REPAIR-RESERVATION-SIZING.md`.
 
 ## Deterministic qualification gate
 
