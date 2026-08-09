@@ -13,20 +13,15 @@
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches } from "./patchEngine.mjs";
-import {
-  tierContract, bindCapabilities, bindingsForJourneys, bookingModulePlan, completionEligibility,
-  imageIntents, previewEligibility,
-} from "./contractTiering.mjs";
+import { completionEligibility, previewEligibility } from "./contractTiering.mjs";
+import { deriveBuildSpec, scopeBuildSpec } from "./buildSpec.mjs";
+import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
   lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
 } from "./persistenceLint.mjs";
+import { interactionFailureDiagnostics, scopeInteractionContract } from "./interactionContract.mjs";
 import {
-  buildInteractionContract, interactionFailureDiagnostics,
-  scopeInteractionContract, validateInteractionContract,
-} from "./interactionContract.mjs";
-import {
-  buildModuleGenerationContracts, moduleCorrectionScope, validateModuleConformance,
-  validateModulePatchScope,
+  moduleCorrectionScope, validateModuleConformance, validateModulePatchScope,
 } from "./moduleContracts.mjs";
 import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
@@ -137,11 +132,12 @@ export function createOrchestrator({
   journeysFn = null,                // browser layer: async ({tree, journeys, graph}) → {journeys:[{id,title,status,priority}]}
   backendProbeFn = null,            // D4 row check: async ({owner, projectId, contract, tiers}) → [{journeyId, detail}]
   maxJourneyRepairs = 2,            // V2-20 repair tier: targeted rounds against verified browser failures
+  maxPrecompileCorrections = 2,     // deterministic pre-compile corrections; SEPARATE from the repair tier
   compile = async () => ({ ok: true }),
   baseTree,                         // () → scaffold tree (injected so tests pin the real REACT_VITE)
   baseline = null,                  // protected-path baseline for the stage gate
   extraGateOptions = {},            // e.g. { nodeModules, log } for live runs — merged into every gate call
-  maxCoreAttempts = 3,              // 1 generation + 2 repairs (Part 4 stop rule)
+  maxCoreAttempts = 3,              // REAL generation failures only: unusable output or a tree that will not compile
   events = {},                      // durable composition hooks: contract, patches, snapshot
   classifyContract = null,          // deterministic post-contract complexity refinement
   log = () => {},
@@ -202,7 +198,11 @@ export function createOrchestrator({
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
     editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
-    parentSnapshotId = null, signal = null }) {
+    parentSnapshotId = null, signal = null, spec = null }) {
+    // A CORRECTION continues from the retained candidate; an ATTEMPT redoes the work from the
+    // increment's starting tree. Keeping the distinction explicit stops a fresh generation from
+    // colliding with files the discarded candidate already created.
+    const originalTree = tree;
     let working = tree;
     let rejections = [];
     let problems = initialProblems;
@@ -211,24 +211,52 @@ export function createOrchestrator({
     let contractCorrectionScope = null;
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
-    const modulePlan = bookingModulePlan(contract, journeys);
-    const scopedInteractionContract = scopeInteractionContract(contract.interactionContract, journeys);
-    const scopedBindings = bindingsForJourneys(contract, bindings, journeys);
-    const moduleContracts = buildModuleGenerationContracts({
-      contract, modulePlan, interactionContract: scopedInteractionContract, bindings: scopedBindings, journeys,
+    let advisory = [];
+    // ONE derived specification, narrowed to this increment's journeys. Every view below —
+    // module plan, interaction contract, per-module contracts, persistence ownership — is a
+    // projection of the same object rather than an independent re-reading of the contract.
+    const scoped = scopeBuildSpec(spec || deriveBuildSpec(contract, { journeys }), journeys);
+    const { modulePlan, moduleContracts, bindings: scopedBindings, interactionContract: scopedInteractionContract } = scoped;
+
+    // Two independent allowances. A core ATTEMPT means "that generation was unusable and the
+    // work must be redone"; a CORRECTION means "the tree is usable and one named part needs
+    // fixing". Conflating them is why narrow validator findings used to consume the same
+    // budget as a failed generation and exhaust a build in three rounds.
+    let attempts = 0;
+    let corrections = 0;
+    const spend = () => attempts + corrections;
+    const maxDispatches = maxCoreAttempts + maxPrecompileCorrections;
+    const exhausted = () => attempts >= maxCoreAttempts || spend() >= maxDispatches;
+    const failure = (reason, extra = {}) => ({
+      ok: false, reason, problems, advisory, advisoryFindings: advisory,
+      candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope,
+      moduleCorrectionUsed, attempts, corrections, ...extra,
     });
-    for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
+
+    while (!exhausted()) {
       abortIfRequested(signal);
-      const dispatchStep = repairScope ? "repair" : step;
+      const attempt = spend() + 1;
+      // Pre-compile corrections dispatch under their own step identity so they draw on the
+      // correction allowance, never on the single browser-informed repair slot.
+      const dispatchStep = repairScope ? "correction" : contractCorrectionScope ? "correction" : step;
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
-        modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, signal });
+        modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope,
+        advisory, spec: scoped, signal });
       const activeScope = repairScope || contractCorrectionScope;
       const patchScope = validateModulePatchScope(patches, activeScope);
       if (!patchScope.ok) {
+        // The correction reached outside its boundary. Retrying the same scope would just
+        // reproduce the same batch, so fall back to an unscoped attempt with the boundary
+        // explained — the tree is retained either way.
         rejections = patchScope.findings.map((finding) => ({ signature: finding.code, reason: JSON.stringify(finding) }));
-        log(`${step}: module-scoped correction attempted ${patchScope.findings.length} out-of-scope write(s)`);
+        repairScope = null;
+        contractCorrectionScope = null;
+        working = originalTree;
+        attempts += 1;
+        log(`${step}: scoped correction attempted ${patchScope.findings.length} out-of-scope write(s); `
+          + `retrying unscoped (attempt ${attempts}/${maxCoreAttempts})`);
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
@@ -242,15 +270,31 @@ export function createOrchestrator({
         rejected: applied.rejected, filesChanged,
       });
       if (applied.rejected.length) {
+        // Patches that will not apply leave no tree to run: a real generation failure.
         rejections = applied.rejected;
+        working = originalTree;
+        attempts += 1;
         log(`${step}: ${applied.rejected.length} patch op(s) rejected, feeding reasons back`);
         continue;
       }
       if (activeScope) {
         const outsideScope = filesChanged.filter((path) => !activeScope.allowedFiles.includes(path));
         if (outsideScope.length) {
-          return { ok: false, problems: [`targeted pre-compile repair changed files outside its boundary: ${outsideScope.join(", ")}`],
-            reason: "targeted pre-compile repair exceeded its write scope", candidateSnapshotId: latestCandidate?.id || null };
+          // A correction that reached wider than its boundary is not a reason to abandon a
+          // build: drop back to an unscoped attempt with the boundary explained, rather than
+          // discarding work over a write-scope technicality.
+          rejections = [{
+            signature: "correction-scope",
+            reason: `your correction changed ${outsideScope.join(", ")}, outside its boundary `
+              + `[${activeScope.allowedFiles.join(", ")}]. Re-emit the fix for the named files only, `
+              + "or address the problem across the step if it genuinely cannot be scoped.",
+          }];
+          repairScope = null;
+          contractCorrectionScope = null;
+          working = originalTree;
+          attempts += 1;
+          log(`${step}: correction exceeded its boundary; retrying unscoped (attempt ${attempts}/${maxCoreAttempts})`);
+          continue;
         }
       }
       // No-op batches are rejected DETERMINISTICALLY, before a gate cycle is spent on them:
@@ -264,56 +308,22 @@ export function createOrchestrator({
             + "CREATE the required sections/pages as newFile entries (src/routes/…), register them in src/App.jsx, "
             + "and make every journey outcome visible as real UI text",
         }];
+        working = originalTree;
+        attempts += 1;
         log(`${step}: no-op batch rejected deterministically`);
         continue;
       }
-      // D1 capability-usage lint — a call to a method the capability does not export is a
-      // guaranteed runtime failure; caught HERE it costs a free round, not a browser cycle
-      // (live run 3 lost its build to contactForm.submit vs submitContact).
-      const conformance = validateModuleConformance(applied.tree, {
-        contract, modulePlan, moduleContracts, interactionContract: scopedInteractionContract, bindings: scopedBindings,
-      });
-      if (!conformance.ok) {
-        const signature = problemSignature(conformance.problems);
-        if (signature === lastSignature) {
-          return { ok: false, problems: conformance.problems,
-            reason: "the same module-contract defect survived a scoped correction (stop rule)" };
-        }
-        lastSignature = signature;
-        if (!conformance.correction.wholeCoreRequired) {
-          contractCorrectionScope = moduleCorrectionScope(conformance, moduleContracts);
-          moduleCorrectionUsed = true;
-          working = applied.tree;
-          problems = conformance.problems;
-          rejections = [];
-          log(`${step}: ${conformance.findings.length} module-contract defect(s); retaining the tree and correcting only [${contractCorrectionScope.allowedFiles.join(", ")}]`);
-          continue;
-        }
-        contractCorrectionScope = null;
-        rejections = conformance.problems.map((reason) => {
-          let code = "";
-          try { code = JSON.parse(reason)?.code || ""; } catch { /* deterministic plain-text validator */ }
-          const signature = code === "capability_usage_violation" ? "capability-usage"
-            : code.startsWith("required_method_") || code.startsWith("required_factory_") ? "required-capability"
-              : code.startsWith("required_module_") || code === "module_plan_violation" ? "required-module"
-                : code.startsWith("interaction_") || code.includes("data_flow") ? "interaction-contract"
-                  : "module-contract";
-          return { signature, reason };
-        });
-        const missingPlanned = conformance.findings.some((finding) => finding.code === "required_module_missing");
-        log(`${step}: ${conformance.findings.length} ${missingPlanned ? "required planned module defect(s) plus " : ""}widespread or unmapped module-contract defect(s) require a whole-core retry`);
-        continue;
-      }
-      contractCorrectionScope = null;
-      const assetCompliance = lintAssetAttribution(applied.tree, assets);
-      if (!assetCompliance.ok) {
-        rejections = assetCompliance.problems.map((reason) => ({ signature: "asset-attribution", reason }));
-        log(`${step}: ${assetCompliance.problems.length} asset-attribution defect(s) rejected deterministically`);
-        continue;
-      }
 
-      // The first structurally viable tree becomes an immutable, content-addressed candidate
-      // BEFORE persistence/compile/browser gates. It is resumable but explicitly unpromotable.
+      // ── EARLIEST SAFE CHECKPOINT ────────────────────────────────────────────────────────
+      // Patches applied, tree integrity holds, write scope honoured. That is everything
+      // required to make this tree resumable, so it is captured HERE — before any shape gate.
+      //
+      // It used to be captured after module conformance, which meant the failure class that
+      // dominated live runs produced no checkpoint at all: four consecutive qualifications
+      // ended "targeted repair: not run because no immutable working checkpoint existed",
+      // and a usable tree was discarded because a static validator disliked its shape.
+      // The candidate stays non-promotable, non-preview, non-publishable until compile and
+      // browser verification pass — that guarantee is unchanged.
       latestCandidate = await snapshotStore.createSnapshot(owner, projectId, applied.tree, {
         buildId, parent: latestCandidate?.id || parentSnapshotId, reason: `candidate:${step}:${attempt}`,
         assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
@@ -321,26 +331,84 @@ export function createOrchestrator({
       await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
         tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
 
+      // Shape analysis now RECORDS rather than rejects. Only genuine safety/integrity findings
+      // (see validationSeverity) can stop a candidate that is otherwise runnable.
+      const conformance = validateModuleConformance(applied.tree, {
+        contract, modulePlan, moduleContracts, interactionContract: scopedInteractionContract, bindings: scopedBindings,
+      });
       const persistence = lintDurablePersistence(applied.tree, { contract, journeys, modulePlan });
-      if (!persistence.ok) {
-        const persistenceProblems = persistenceFindingMessages(persistence);
-        if (!repairScope && step !== "repair") {
-          repairScope = persistenceRepairScope(persistence, modulePlan);
-          problems = persistenceProblems;
-          rejections = [];
+      const persistenceVerdict = partitionFindings(persistence.findings || []);
+      advisory = [...(conformance.advisory || []), ...persistenceVerdict.advisory];
+      const blocking = [...(conformance.blocking || []), ...persistenceVerdict.blocking];
+      if (advisory.length) {
+        log(`${step}: ${advisory.length} advisory finding(s) recorded; the candidate remains runnable`);
+      }
+      await events.candidateFindings?.({ owner, projectId, buildId, step, attempt,
+        snapshotId: latestCandidate.id, advisory, blocking });
+
+      if (blocking.length) {
+        const blockingProblems = blocking.map((finding) => JSON.stringify(finding));
+        const signature = problemSignature(blockingProblems);
+        if (signature === lastSignature) {
+          return failure("the same blocking defect survived a scoped correction (stop rule)",
+            { problems: blockingProblems });
+        }
+        if (corrections >= maxPrecompileCorrections) {
+          return failure("blocking pre-compile findings remain after the correction allowance",
+            { problems: blockingProblems });
+        }
+        lastSignature = signature;
+        problems = blockingProblems;
+        rejections = [];
+
+        // A persistence violation names its own write boundary; other blocking findings are
+        // scoped by the modules they actually name. Either way the candidate is RETAINED and
+        // the correction draws on its own allowance.
+        if (persistenceVerdict.blocking.length) {
+          repairScope = persistenceRepairScope({ findings: persistenceVerdict.blocking }, modulePlan);
+          contractCorrectionScope = null;
           working = await snapshotStore.materialize(owner, latestCandidate.id);
-          log(`${step}: ${persistence.findings.length} forbidden-persistence finding(s); `
-            + `checkpoint ${latestCandidate.id} retained and one targeted repair selected`);
+          corrections += 1;
+          log(`${step}: ${persistenceVerdict.blocking.length} forbidden-persistence finding(s); `
+            + `checkpoint ${latestCandidate.id} retained and one scoped correction selected`);
           continue;
         }
-        return { ok: false, problems: persistenceProblems,
-          reason: "targeted pre-compile persistence repair did not clear the deterministic gate",
-          candidateSnapshotId: latestCandidate.id, repairUsed: !!repairScope };
+        const scope = moduleCorrectionScope(conformance, moduleContracts);
+        if (conformance.correction.wholeCoreRequired || !scope.allowedFiles.length) {
+          // Widespread or unattributable: no honest boundary exists, so this is a real
+          // generation attempt rather than a correction, and the step starts over.
+          repairScope = null;
+          contractCorrectionScope = null;
+          rejections = blockingProblems.map((reason) => ({ signature: "blocking-defect", reason }));
+          working = originalTree;
+          attempts += 1;
+          log(`${step}: ${blocking.length} widespread or unmapped blocking defect(s) require a whole-core `
+            + `retry (attempt ${attempts}/${maxCoreAttempts})`);
+          continue;
+        }
+        contractCorrectionScope = scope;
+        repairScope = null;
+        moduleCorrectionUsed = true;
+        working = await snapshotStore.materialize(owner, latestCandidate.id);
+        corrections += 1;
+        log(`${step}: ${blocking.length} blocking defect(s); retaining the tree and correcting only `
+          + `[${scope.allowedFiles.join(", ")}]`);
+        continue;
+      }
+      repairScope = null;
+      contractCorrectionScope = null;
+      const assetCompliance = lintAssetAttribution(applied.tree, assets);
+      if (!assetCompliance.ok) {
+        rejections = assetCompliance.problems.map((reason) => ({ signature: "asset-attribution", reason }));
+        corrections += 1;
+        log(`${step}: ${assetCompliance.problems.length} asset-attribution defect(s) rejected deterministically`);
+        continue;
       }
       abortIfRequested(signal);
       const gate = await verifyStage(applied.tree, gateOptions(contract, step, journeys, {
         owner, projectId, buildId, step, attempt, signal,
       }));
+      advisory = [...advisory, ...(gate.advisory || [])];
       if (gate.ok) {
         let qualifiedCandidate = latestCandidate;
         if (!treesEqual(applied.tree, gate.tree)) {
@@ -353,25 +421,24 @@ export function createOrchestrator({
         }
         return { ok: true, tree: gate.tree, snapshot: qualifiedCandidate,
           candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope,
-          moduleCorrectionUsed };
+          moduleCorrectionUsed, advisory, advisoryFindings: advisory, attempts, corrections };
       }
+      // Compilation/protected-path failure: the tree cannot run, so this IS a real attempt.
       const gateProblems = gate.layers.d0d2.problems || [];
       const signature = problemSignature(gateProblems);
       if (signature === lastSignature) {
-        return { ok: false, problems: gateProblems, reason: "the same defect survived a repair round (stop rule)" };
+        return failure("the same defect survived a repair round (stop rule)", { problems: gateProblems });
       }
       lastSignature = signature;
       problems = gateProblems;
       rejections = [];
-      if (repairScope) {
-        return { ok: false, problems: gateProblems,
-          reason: "the one targeted pre-compile repair passed persistence but failed a later gate",
-          candidateSnapshotId: latestCandidate.id, repairUsed: true };
-      }
-      log(`${step}: gate failed (${gateProblems.length} problem(s)), repair attempt ${attempt}/${maxCoreAttempts}`);
+      working = originalTree;
+      attempts += 1;
+      log(`${step}: gate failed (${gateProblems.length} problem(s)), attempt ${attempts}/${maxCoreAttempts}`);
     }
-    return { ok: false, problems, reason: `no green tree within ${maxCoreAttempts} attempts`,
-      candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope, moduleCorrectionUsed };
+    return failure(attempts >= maxCoreAttempts
+      ? `no runnable tree within ${maxCoreAttempts} generation attempts`
+      : `no runnable tree within ${maxDispatches} dispatches (${attempts} attempt(s), ${corrections} correction(s))`);
   }
 
   return {
@@ -410,22 +477,22 @@ export function createOrchestrator({
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
         await setState("contracting");
         const rawContract = await contractFn({ owner, projectId, buildId, request, profile, signal });
-        const interactionContract = buildInteractionContract(rawContract);
-        const interactionVerdict = validateInteractionContract(interactionContract);
-        if (!interactionVerdict.ok) return finish("blocked", {
+        // ONE derivation for the whole build: tiers, bindings, module plan, interaction
+        // contract, per-module contracts, persistence ownership and image intents all come
+        // from here and are passed down, so no subsystem re-reads the contract prose alone.
+        const spec = deriveBuildSpec(rawContract, { userCritical });
+        if (!spec.verdict.ok) return finish("blocked", {
           error: "interaction contract is structurally incomplete before generation",
-          problems: interactionVerdict.problems,
+          problems: spec.verdict.problems,
           failureClassification: "interaction_contract_invalid",
         });
-        const contract = { ...rawContract, interactionContract };
+        const { contract, tiers, bindings, interactionContract } = spec;
+        const intents = spec.imageIntents;
         const refinedProfile = await classifyContract?.({ request, contract, profile }) || profile;
         if (refinedProfile !== profile) {
           try { await buildStore.update(buildId, { profile: refinedProfile }); }
           catch (error) { log(`profile refinement failed: ${error.message}`); }
         }
-        const tiers = tierContract(contract, { userCritical });
-        const bindings = bindCapabilities(contract); // structural authority before implementation dispatch
-        const intents = imageIntents(contract);
         const persistedContract = await events.contract?.({ owner, projectId, buildId, contract, tiers,
           bindings, intents });
         if (persistedContract?.id) {
@@ -450,11 +517,14 @@ export function createOrchestrator({
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
           step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-          journeys: essentialJourneys, checkpointReason: "working:core", signal,
+          journeys: essentialJourneys, checkpointReason: "working:core", signal, spec,
         });
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems,
+          advisoryFindings: core.advisory || [],
+          coreAttempts: core.attempts, coreCorrections: core.corrections,
           workingSnapshotId: core.candidateSnapshotId || null });
         tree = core.tree;
+        const coreAdvisory = core.advisory || [];
         workingSnapshot = core.snapshot;
         let workingReason = "working:core";
 
@@ -491,6 +561,9 @@ export function createOrchestrator({
             ...structuredInteractionEvidence,
             ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
             ...coreVerdicts.blockingErrors,
+            // Shape findings that did not stop the build ride along as CONTEXT for a repair
+            // that is now driven by observed browser failure. They explain, they do not accuse.
+            ...advisoryMessages(coreAdvisory),
           ];
           if (!evidence.length) break; // nothing actionable to brief — blocked below
           await setState(`repair:${round}`);
@@ -501,7 +574,8 @@ export function createOrchestrator({
             repair = await buildIncrement({
               step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
               journeys: essentialJourneys, initialProblems: evidence,
-              checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null, signal,
+              checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null,
+              signal, spec,
             });
           } catch (error) {
             if (error?.code !== "repair_limit_reached") throw error;
@@ -531,6 +605,7 @@ export function createOrchestrator({
           finalVerificationDiagnostics: interactionFailureDiagnostics({
             contract, interactionContract, journeyResults: coreVerdicts, tree,
           }),
+          advisoryFindings: coreAdvisory,
           platformDefects: coreVerdicts.platformDefects,
           workingSnapshotId: workingSnapshot?.id || null,
         });
@@ -556,7 +631,8 @@ export function createOrchestrator({
           const startTree = await snapshotStore.materialize(owner, candidate.id);
           const increment = await buildIncrement({
             step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
-            journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id, signal,
+            journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id,
+            signal, spec,
           });
           let verdicts = null;
           if (increment.ok) {
@@ -666,17 +742,17 @@ export function createOrchestrator({
       };
       try {
         abortIfRequested(signal);
-        contract = { ...contract, interactionContract: contract?.interactionContract || buildInteractionContract(contract) };
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
-        const tiers = tierContract(contract, { userCritical });
-        const bindings = bindCapabilities(contract);
+        const spec = deriveBuildSpec(contract, { userCritical });
+        contract = spec.contract;
+        const { tiers, bindings } = spec;
         const journeysById = new Map((contract.journeys || []).map((journey) => [journey.id, journey]));
         const allJourneys = [...journeysById.values()];
         const repair = await buildIncrement({
           step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
           assets: [], journeys: allJourneys, initialProblems, editRequest: request,
-          checkpointReason: "working:resumed-repair", parentSnapshotId: source.snapshotId, signal,
+          checkpointReason: "working:resumed-repair", parentSnapshotId: source.snapshotId, signal, spec,
         });
         if (!repair.ok) return finish("blocked", { error: repair.reason, problems: repair.problems,
           workingSnapshotId: source.snapshotId });
@@ -733,7 +809,8 @@ export function createOrchestrator({
 
       try {
         abortIfRequested(signal);
-        contract = { ...contract, interactionContract: contract?.interactionContract || buildInteractionContract(contract) };
+        const spec = deriveBuildSpec(contract, { userCritical });
+        contract = spec.contract;
         const ctx = await this.resumeContext(owner, projectId);
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption
@@ -744,17 +821,17 @@ export function createOrchestrator({
             ctx.tree[path] = source;
           }
         }
-        const tiers = tierContract(contract, { userCritical });
-        const bindings = bindCapabilities(contract);
+        const { tiers, bindings } = spec;
         const journeys = contract.journeys || [];
 
         await setState("editing");
         const edit = await buildIncrement({
           step: "edit", owner, projectId, buildId, contract, tiers, bindings, tree: ctx.tree, assets: [],
           journeys, editRequest: request, checkpointReason: "working:edit",
-          parentSnapshotId: ctx.snapshotId, signal,
+          parentSnapshotId: ctx.snapshotId, signal, spec,
         });
-        if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
+        if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems,
+          advisoryFindings: edit.advisory || [] });
 
         let workingSnapshot = edit.snapshot;
 

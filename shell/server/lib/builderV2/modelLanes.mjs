@@ -218,22 +218,30 @@ function renderJourneyBrief(journeys) {
 export function renderPatchPrompt({
   step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
-  repairScope = null, moduleCorrectionScope = null,
+  repairScope = null, moduleCorrectionScope = null, advisory = [],
 }) {
   const isEdit = step === "edit";
-  const isRepair = step === "repair";
+  const isRepair = step === "repair" || step === "correction";
   const scopedJourneys = step === "core" || isRepair
     ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
   const capabilityPaths = bindCapabilities(contract)
     .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
+  const advisoryNotes = (advisory || []).length ? [
+    "",
+    "ADVISORY NOTES from the previous candidate (NOT rejections — the tree was kept and is running;"
+    + " address them only where they make the journeys below more likely to pass):",
+    ...advisory.slice(0, 12).map((finding) => `- ${finding.code}: ${finding.message || ""}`),
+  ].join("\n") : "";
   const parts = [
     `STEP: ${step}`,
     moduleCorrectionScope
       ? "CORE CORRECTION: preserve the current candidate and patch ONLY the validator-named modules. Do not replay or redesign conforming modules."
       : step === "core"
       ? `Build the ESSENTIAL scope only: journeys [${tiers.essential.journeys.join(", ")}], entities [${tiers.essential.entities.join(", ")}]. Secondary work is delivered later as increments — do NOT build it now.`
+      : step === "correction"
+        ? "PRE-COMPILE CORRECTION: your current tree is retained and usable. A deterministic safety check named the exact problem below. Fix ONLY that; change nothing else."
       : isRepair
         ? "REPAIR: a real browser drove the journeys below against your current tree and the listed steps FAILED with the exact evidence shown. Fix ONLY what the evidence names — the smallest correct patch wins, and everything currently passing must keep passing."
         : isEdit
@@ -245,7 +253,8 @@ export function renderPatchPrompt({
     "",
     capabilityRequirementsBrief(contract),
     modulePlan.length ? [
-      "REQUIRED MODULE PLAN (exact paths are machine checked; roles are behavioural, not visual):",
+      "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
+      + " application is never rejected for naming a file differently):",
       ...modulePlan.map((module) => {
         const ownership = module.stateOwnership || {};
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
@@ -281,6 +290,7 @@ export function renderPatchPrompt({
       : projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
     renderJourneyBrief(scopedJourneys),
+    advisoryNotes,
     repairScope || moduleCorrectionScope
       ? renderPrecompileRepairContext(tree, { repairScope: repairScope || moduleCorrectionScope, onRetrieval })
       : isEdit || isRepair
@@ -317,9 +327,16 @@ export const STEP_ROUTING = Object.freeze({
   contract: { reasoningEffort: "medium" },
   core: { reasoningEffort: "medium" },
   repair: { reasoningEffort: "medium" },
+  // A deterministic pre-compile correction is narrow and fully specified by validator findings:
+  // it is mechanical work, and routes accordingly. It is also budgeted separately from `repair`
+  // so a correction can never consume the one browser-informed repair slot.
+  correction: { reasoningEffort: "low" },
   edit: { reasoningEffort: "low" },
   increment: { reasoningEffort: "low" },
 });
+
+/** Steps whose write scope is bounded by the validator, so output is sized from that scope. */
+export const SCOPED_STEPS = Object.freeze(new Set(["repair", "correction"]));
 
 export function routeForStep(step) {
   const kind = String(step || "").startsWith("increment:") ? "increment" : String(step || "");
@@ -478,6 +495,7 @@ export function createModelLanes({
   strictKnowledge = false,
   maxOutputTokens = 16_000,
   maxRepairs = 2,
+  maxCorrections = 2,
 }) {
   if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
@@ -515,10 +533,10 @@ export function createModelLanes({
             requestedMaxOutputTokens: selectedMaxOutputTokens,
             // A route estimate is not a mandatory hold. Repair usefulness is enforced by its
             // minimum output envelope; the durable whole-build ceiling remains authoritative.
-            minimumCredits: step === "repair" ? 0 : selected.decision?.estimatedCredits || 0,
+            minimumCredits: SCOPED_STEPS.has(step) ? 0 : selected.decision?.estimatedCredits || 0,
             callCeilingCredits: callCeiling,
             repairAllowanceCredits: selected.decision?.repairAllowanceCredits,
-            repairSizing: step === "repair" ? {
+            repairSizing: SCOPED_STEPS.has(step) ? {
               retrievedFileCount: Number(context.affectedModules || 1),
               retrievalTokens: Number(context.retrievalTokens || 0),
               problemCount: Array.isArray(context.problems) ? context.problems.length : 1,
@@ -536,7 +554,7 @@ export function createModelLanes({
             model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
             reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
             accountAvailableCredits,
-            maxRepairs,
+            maxRepairs, maxCorrections,
             metadata: {
               routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
               budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
@@ -645,12 +663,13 @@ export function createModelLanes({
     },
 
     patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest,
-      modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null, signal = null }) => {
+      modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
+      advisory = [], signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope ? null : await loadKnowledge(owner, projectId);
       let retrievalTrace = null;
       const prompt = renderPatchPrompt({
         step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
-        moduleContracts, repairScope, moduleCorrectionScope,
+        moduleContracts, repairScope, moduleCorrectionScope, advisory,
         onRetrieval: (trace) => { retrievalTrace = trace; },
       });
       if (retrievalTrace && recordRetrieval) {

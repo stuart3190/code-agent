@@ -43,6 +43,7 @@ export function reservationBudget(rows, { owner, buildId, ceilingCredits }) {
 export function memoryModelReservations() {
   const rows = new Map();
   const repairLimits = new Map();
+  const correctionLimits = new Map();
   let serial = 0;
   return {
     async budget(owner, buildId, ceilingCredits) {
@@ -59,22 +60,43 @@ export function memoryModelReservations() {
           code: "repair_limit_identity_conflict", maxRepairs, requestedLimit,
         });
       }
+      const requestedCorrections = Number.isInteger(input.maxCorrections) ? input.maxCorrections : 2;
+      if (!correctionLimits.has(buildKey)) correctionLimits.set(buildKey, requestedCorrections);
+      const maxCorrections = correctionLimits.get(buildKey);
+      if (maxCorrections !== requestedCorrections) {
+        throw Object.assign(new Error("Builder V2 correction limit changed after build creation"), {
+          code: "correction_limit_identity_conflict", maxCorrections, requestedCorrections,
+        });
+      }
       const existing = rows.get(key);
       if (existing) {
         const same = ["projectId", "step", "provider", "model", "billingLane", "reservedCredits"]
           .every((field) => existing[field] === input[field]);
         if (!same) throw new Error("Builder V2 call key was reused with different reservation identity");
-        if (existing.state !== "released") return { ...existing, acquired: false,
-          repairDispatchCount: [...rows.values()].filter((row) => row.owner === input.owner
-            && row.buildId === input.buildId && row.step === "repair"
-            && ["held", "settled"].includes(row.state)).length, maxRepairs };
+        if (existing.state !== "released") {
+          const dispatched = (step) => [...rows.values()].filter((row) => row.owner === input.owner
+            && row.buildId === input.buildId && row.step === step
+            && ["held", "settled"].includes(row.state)).length;
+          return { ...existing, acquired: false, maxRepairs, maxCorrections,
+            repairDispatchCount: dispatched("repair"), correctionDispatchCount: dispatched("correction") };
+        }
       }
       const siblings = [...rows.values()].filter((row) => row.owner === input.owner && row.buildId === input.buildId);
+      // `repair` = a round briefed by OBSERVED browser failure. `correction` = a deterministic
+      // pre-compile fix. They are counted separately: a correction used to consume the one
+      // browser-informed repair slot, so a build could reach verification with no repair left.
       const repairDispatchCount = siblings.filter((row) => row.step === "repair"
+        && ["held", "settled"].includes(row.state)).length;
+      const correctionDispatchCount = siblings.filter((row) => row.step === "correction"
         && ["held", "settled"].includes(row.state)).length;
       if (input.step === "repair" && repairDispatchCount >= maxRepairs) {
         throw Object.assign(new Error("Builder V2 repair provider-call limit reached"), {
           code: "repair_limit_reached", repairsDispatched: repairDispatchCount, maxRepairs,
+        });
+      }
+      if (input.step === "correction" && correctionDispatchCount >= maxCorrections) {
+        throw Object.assign(new Error("Builder V2 pre-compile correction limit reached"), {
+          code: "correction_limit_reached", correctionsDispatched: correctionDispatchCount, maxCorrections,
         });
       }
       const spent = siblings.filter((row) => row.state === "settled").reduce((sum, row) => sum + row.actualCredits, 0);
@@ -100,7 +122,8 @@ export function memoryModelReservations() {
       Object.assign(row, { state: "held", releasedAt: null });
       rows.set(key, row);
       return { ...row, acquired: true,
-        repairDispatchCount: repairDispatchCount + (input.step === "repair" ? 1 : 0), maxRepairs };
+        repairDispatchCount: repairDispatchCount + (input.step === "repair" ? 1 : 0), maxRepairs,
+        correctionDispatchCount: correctionDispatchCount + (input.step === "correction" ? 1 : 0), maxCorrections };
     },
     async settle(owner, id, { actualCredits, usage = {}, providerRequestIds = [] }) {
       const row = [...rows.values()].find((candidate) => candidate.id === id && candidate.owner === owner);
@@ -167,6 +190,11 @@ export function supabaseModelReservations(client = serviceClient()) {
         acquired: result.acquired === true,
         repairDispatchCount: Number(result.repair_dispatch_count || 0),
         maxRepairs: Number(result.max_repairs),
+        // Corrections dispatch under step "correction", so the durable repair counter no longer
+        // sees them at all — that IS the separation. The correction cap itself is enforced by
+        // the orchestrator; giving it its own database counter needs a migration and is
+        // deliberately not bundled with this change.
+        correctionDispatchCount: Number(result.correction_dispatch_count || 0),
       };
     },
     async settle(owner, id, { actualCredits, usage = {}, providerRequestIds = [] }) {

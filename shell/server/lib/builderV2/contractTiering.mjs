@@ -182,23 +182,21 @@ export function durablePersistenceJourneys(contract, journeys = contract?.journe
 export function persistenceOwnershipPlan(contract, journeys = contract?.journeys || [], modulePlan = null) {
   const durableJourneys = durablePersistenceJourneys(contract, journeys);
   if (!durableJourneys.length) return null;
-  const plan = modulePlan || bookingModulePlan(contract, journeys);
+  const plan = modulePlan || deriveModulePlan(contract, journeys);
   const bindings = bindingsForJourneys(contract, bindCapabilities(contract), journeys);
-  const owners = [];
-  if (bindings.some((binding) => binding.name === "booking")) {
-    owners.push({ state: "booking records, capacity, status and durable reference",
-      capability: "makeBookingSystem", module: "src/data/bookingSystem.js" });
-  }
-  if (bindings.some((binding) => binding.name === "wizard")) {
-    owners.push({ state: "recoverable wizard selections, review, confirmation and cancellation",
-      capability: "makeWizardMachine", persistence: "platform", module: "src/data/bookingWizard.js" });
-  }
-  for (const binding of bindings) {
-    if (!["booking", "wizard"].includes(binding.name)) {
-      owners.push({ state: `${binding.name} contracted records`, capability: CAPABILITIES[binding.name].interface[0],
-        module: CAPABILITIES[binding.name].package });
-    }
-  }
+  // Every bound capability declares its own durable ownership; none is named specially here.
+  const owners = bindings.map((binding) => {
+    const capability = CAPABILITIES[binding.name];
+    const factory = (capability?.interface || []).find((entry) => /^make[A-Z]/.test(entry))
+      || capability?.interface?.[0];
+    const adapter = plan.find((module) => module.factory === factory)?.path || capability?.package;
+    return {
+      state: `${binding.name} contracted durable records and status`,
+      capability: factory,
+      module: adapter,
+      ...(binding.configuration?.persistence === "platform" ? { persistence: "platform" } : {}),
+    };
+  }).filter((owner) => owner.capability);
   return {
     durableJourneys: durableJourneys.map((journey) => journey.id),
     forbiddenBusinessPersistence: [...FORBIDDEN_DURABLE_PERSISTENCE],
@@ -214,44 +212,106 @@ export function persistenceOwnershipPlan(contract, journeys = contract?.journeys
   };
 }
 
-/**
- * A deterministic, visually headless module plan for the one class that repeatedly
- * collapsed into a single route during live qualification: multi-step booking.
- * Ordinary one-step booking forms deliberately have no prescribed module layout.
- */
-export function bookingModulePlan(contract, journeys = contract?.journeys || []) {
-  const scopedContract = { ...contract, journeys };
-  const bindings = bindingsForJourneys(contract, bindCapabilities(contract), journeys);
-  if (!bindings.some((binding) => binding.name === "booking") || !requiresWizard(scopedContract)) return [];
+const pascal = (value) => String(value || "")
+  .split(/[^a-zA-Z0-9]+/).filter(Boolean)
+  .map((part) => part[0].toUpperCase() + part.slice(1)).join("") || "Flow";
 
-  const text = journeys.map(journeyText).join(" ").toLowerCase();
-  const plan = [
-    { path: "src/data/bookingSystem.js", role: "booking persistence adapter", factory: "makeBookingSystem",
-      stateOwnership: { owns: "booking records, capacity, status and durable reference", survivesReload: true,
-        approvedPersistence: "makeBookingSystem" } },
-    { path: "src/data/bookingWizard.js", role: "durable wizard state adapter", factory: "makeWizardMachine",
-      stateOwnership: { owns: "wizard selections, review, confirmation and cancellation", survivesReload: true,
-        approvedPersistence: "makeWizardMachine platform persistence" } },
-    { path: "src/components/booking/BookingFlow.jsx", role: "step navigation and flow composition",
-      stateOwnership: { owns: "ephemeral UI orchestration only", survivesReload: false,
-        durableStateOwner: "makeBookingSystem + makeWizardMachine" } },
-  ];
-  if (/review|summary/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingReview.jsx", role: "review presentation",
-      stateOwnership: { owns: "presentation only", survivesReload: false,
-        durableStateOwner: "makeWizardMachine" } });
+/**
+ * A deterministic module plan derived from the CONTRACT — capability bindings and journey
+ * shape — rather than from an application domain.
+ *
+ * This replaces `bookingModulePlan`, which hardcoded six literal booking file paths
+ * (src/data/bookingSystem.js, src/components/booking/BookingFlow.jsx, …) into the generic
+ * production path for every application Thrallo builds. Module responsibilities are real and
+ * worth planning; their domain is not Thrallo's to assume. A CRM gets CRM module names, an
+ * inventory system gets inventory ones, and a booking benchmark still gets booking-shaped
+ * modules — because its contract says booking, not because this function does.
+ *
+ * Module paths are ADVISORY (see validationSeverity): the plan shapes generation and gives
+ * repair a vocabulary, but a working application is never rejected for naming a file
+ * differently.
+ */
+export function deriveModulePlan(contract, journeys = contract?.journeys || []) {
+  const scopedContract = { ...contract, journeys };
+  const all = bindCapabilities(contract);
+  const scopedBindings = bindingsForJourneys(contract, all, journeys);
+  // Plan modules only where the work is genuinely multi-part: a durable owner plus a journey
+  // that walks through several observable states. A one-step form needs no prescribed layout.
+  if (!requiresWizard(scopedContract)) return [];
+
+  // Capabilities the contract requires methods from own their own adapters. A contract that
+  // requires none — an ordinary entity-backed CRM, inventory or admin app — falls back to the
+  // registry's GENERIC entity store, identified by its interface rather than by its name.
+  const genericStore = all.filter((binding) => {
+    const factory = (CAPABILITIES[binding.name]?.interface || []).find((entry) => /^make[A-Z]/.test(entry));
+    const methods = factory ? CAPABILITIES[binding.name]?.storeInterface || [] : [];
+    return ["create", "update", "remove"].every((method) => methods.includes(method));
+  });
+  const owners = scopedBindings.filter((binding) => binding.requiredMethods?.length);
+  const planned = owners.length ? owners : ((contract?.entities || []).length ? genericStore : []);
+  if (!planned.length) return [];
+
+  const plan = [];
+  const adapterOwners = [];
+  for (const binding of planned) {
+    const factory = (CAPABILITIES[binding.name]?.interface || []).find((entry) => /^make[A-Z]/.test(entry));
+    if (!factory) continue;
+    const path = `src/data/${binding.name}.js`;
+    adapterOwners.push(factory);
+    plan.push({
+      path,
+      role: `${binding.name} capability adapter`,
+      factory,
+      stateOwnership: {
+        owns: `${binding.name} contracted durable records and status`,
+        survivesReload: true,
+        approvedPersistence: factory,
+      },
+    });
   }
-  if (/confirm|confirmation|reference/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingConfirmation.jsx", role: "confirmation and reference presentation",
-      stateOwnership: { owns: "presentation only", survivesReload: false,
-        durableStateOwner: "makeBookingSystem + makeWizardMachine" } });
-  }
-  if (/cancel|reload|refresh|recover|status/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingStatus.jsx", role: "restored and cancelled booking presentation",
-      stateOwnership: { owns: "presentation only", survivesReload: false,
-        durableStateOwner: "makeBookingSystem + makeWizardMachine" } });
+  if (!plan.length) return [];
+
+  const durableStateOwner = adapterOwners.join(" + ");
+  for (const journey of journeys) {
+    const kinds = new Set(journeyStepKinds(journey));
+    if (!kinds.has("mutation") && !kinds.has("selection") && !kinds.has("input")) continue;
+    const name = pascal(journey.id);
+    const directory = `src/components/${String(journey.id).replace(/[^a-zA-Z0-9-]+/g, "-").toLowerCase()}`;
+    plan.push({ path: `${directory}/${name}Flow.jsx`, role: "step navigation and flow composition",
+      stateOwnership: { owns: "ephemeral UI orchestration only", survivesReload: false, durableStateOwner } });
+    if (kinds.has("review")) {
+      plan.push({ path: `${directory}/${name}Review.jsx`, role: "review presentation",
+        stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
+    }
+    if (kinds.has("mutation")) {
+      plan.push({ path: `${directory}/${name}Confirmation.jsx`, role: "confirmation and reference presentation",
+        stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
+    }
+    if (kinds.has("cancellation") || kinds.has("recovery") || kinds.has("lookup")) {
+      plan.push({ path: `${directory}/${name}Status.jsx`, role: "restored and cancelled status presentation",
+        stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
+    }
   }
   return plan;
+}
+
+/**
+ * Domain-neutral step vocabulary shared by the module plan and the interaction contract, so
+ * one journey is not interpreted twice by two different regex tables.
+ */
+export function journeyStepKinds(journey) {
+  const kinds = [];
+  for (const step of journey?.steps || []) {
+    const text = `${step?.action || ""} ${step?.target || ""}`.toLowerCase();
+    if (/\b(select|choose|pick)\b/.test(text)) kinds.push("selection");
+    if (/\b(enter|type|fill|provide|complete)\b/.test(text)) kinds.push("input");
+    if (/\b(review|summary)\b/.test(text)) kinds.push("review");
+    if (/\b(confirm|submit|book|reserve|create)\b/.test(text)) kinds.push("mutation");
+    if (/\b(reload|refresh|recover|restore|sign[ -]?in)\b/.test(text)) kinds.push("recovery");
+    if (/\b(look ?up|find|search)\b/.test(text)) kinds.push("lookup");
+    if (/\bcancel\b/.test(text)) kinds.push("cancellation");
+  }
+  return [...new Set(kinds)];
 }
 
 /** Final success is stricter than the internal first-green progression gate. */

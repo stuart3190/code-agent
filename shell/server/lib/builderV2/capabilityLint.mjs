@@ -51,14 +51,9 @@ const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js
 const MAX_GENERATED_FILE_TOKENS = FILE_MAX_TOKENS;
 const tokensOf = (text) => Math.ceil(String(text || "").length / 4);
 
-// Entity types OWNED by a capability: persisting them any other way bypasses session
-// management and validation. Live run 4 wrote its own db.entity("contactMessage").create
-// data layer with no session — an unauthenticated insert, a 401, and a dead build.
-const OWNED_ENTITIES = Object.freeze({
-  contactMessage: 'makeContactForm().submitContact(fields)',
-  newsletterSignup: 'makeNewsletter().subscribe(email)',
-  booking: 'makeBookingSystem().createBooking(...)',
-});
+// Capability-owned entities must be persisted through their capability — that check lives in
+// moduleContracts.ownershipRules, derived from the contract's ACTUAL bindings rather than a
+// static list, so it generalises to any capability and any entity name.
 
 // Stores are usually bound first (const store = db.entity(...)), so the mutation check is
 // two-part: the module touches db.entity AND calls a mutating method on something.
@@ -67,66 +62,73 @@ const MUTATION_RE = /\.\s*(create|update|remove|delete)\s*\(/;
 const SESSION_RE = /ensureSession|ensureVisitorSession|currentUser/;
 
 /**
- * Scan generated files for capability-instance method calls that the capability does not
- * export. Returns { ok, problems } with teaching-quality reasons.
+ * Capability SAFETY lint — the checks that survive the blocking/advisory split.
+ *
+ * This used to be a second, regex-based capability authority running alongside the AST
+ * provenance aggregator: it re-derived instances with `(?:const|let|var)\s+(\w+)\s*=.*factory\(`
+ * and re-derived method calls with `\bvar\.(\w+)\s*\(`. Two implementations of one truth
+ * disagreed on every grammar the regex could not see (destructuring, aliases, cross-module
+ * imports), which is how eleven false "missing method" defects reached a live run.
+ *
+ * Method existence is now derived from the SAME AST facts as everything else. What remains
+ * regex-shaped is genuinely different work: the sessionless-mutation check reads a module's
+ * session vocabulary, not capability provenance.
+ *
+ * Ownership (`capability_owner_bypassed`) is NOT checked here. It is contract-derived in
+ * moduleContracts.ownershipRules, which knows the actual bound entities instead of a static
+ * hardcoded list, and applies to every generated module including unplanned helpers.
  */
-export function lintCapabilityUsage(tree) {
-  const problems = [];
-  for (const [path, source] of Object.entries(tree)) {
+export function lintCapabilitySafety(tree, bindings = []) {
+  const findings = [];
+  const facts = aggregateCapabilityFacts(tree, bindings);
+
+  // A call to a method the capability does not export is a guaranteed runtime TypeError.
+  // (Live run 3 lost its build to contactForm.submit vs submitContact.) Provable statically,
+  // so it stays blocking — but now from real provenance, not a regex.
+  for (const fact of facts.values()) {
+    for (const unknown of fact.unknownMethods || []) {
+      findings.push({
+        code: "capability_method_unknown",
+        module: unknown.module,
+        factory: fact.factory,
+        method: unknown.method,
+        message: `${unknown.module}: ${fact.factory}() has no ${unknown.method}(...) — it exposes exactly `
+          + `[${(FACTORY_METHODS[fact.factory] || []).join(", ")}]. Call the real method; do not reimplement the capability.`,
+      });
+    }
+  }
+
+  for (const [path, source] of Object.entries(tree || {})) {
     if (!GENERATED_FILE.test(path) || PLATFORM_PATH.test(path)) continue;
     const code = String(source);
 
-    // The monolith cap: every edit to an oversized file pays its whole body as context.
+    // Raw entity MUTATION in a module that never touches session management is an
+    // unauthenticated write for anonymous visitors: a 401 under row-level security.
+    if (USES_ENTITIES_RE.test(code) && MUTATION_RE.test(code) && !SESSION_RE.test(code)) {
+      findings.push({
+        code: "sessionless_mutation",
+        module: path,
+        message: `${path}: db.entity(...).create/update/remove with NO session in this module — call `
+          + `await ensureVisitorSession() (from ../lib/capabilities) before mutating, or use the `
+          + `owning capability. Unauthenticated writes fail with 401 under row-level security.`,
+      });
+    }
+
+    // The monolith cap is a maintenance/cost preference, not a correctness property: an
+    // oversized module makes every later edit pay its whole body as context. Advisory.
     const size = tokensOf(code);
     if (size > MAX_GENERATED_FILE_TOKENS) {
-      problems.push(
-        `${path} is ${size} tokens (cap ${MAX_GENERATED_FILE_TOKENS}) — split sections into `
-        + `components under src/components/ and import them; single-file apps make every `
-        + `future edit pay the whole file as context.`,
-      );
-    }
-
-    // Capability-owned entities may ONLY be persisted through their capability.
-    for (const [entity, correctCall] of Object.entries(OWNED_ENTITIES)) {
-      const direct = new RegExp(`\\bdb\\s*\\.\\s*entity\\s*\\(\\s*["'\`]${entity}["'\`]`);
-      if (direct.test(code)) {
-        problems.push(
-          `${path}: db.entity("${entity}") is a direct write to a capability-owned entity — `
-          + `use ${correctCall} instead. The capability establishes the visitor session and `
-          + `validation; the raw path sends an unauthenticated insert and fails with 401.`,
-        );
-      }
-    }
-
-    // Any other raw entity MUTATION in a module that never touches session management is an
-    // unauthenticated write for anonymous visitors — same 401, different table.
-    if (USES_ENTITIES_RE.test(code) && MUTATION_RE.test(code) && !SESSION_RE.test(code)) {
-      problems.push(
-        `${path}: db.entity(...).create/update/remove with NO session in this module — call `
-        + `await ensureVisitorSession() (from ../lib/capabilities) before mutating, or use the `
-        + `owning capability. Unauthenticated writes fail with 401 under row-level security.`,
-      );
-    }
-    for (const [factory, methods] of Object.entries(FACTORY_METHODS)) {
-      // Every binding of this factory's instance: const x = makeContactForm(...),
-      // including through useMemo(() => makeContactForm(...)).
-      const bindingRe = new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=[^;\\n]*\\b${factory}\\s*\\(`, "g");
-      for (const bindingMatch of code.matchAll(bindingRe)) {
-        const varName = bindingMatch[1];
-        const callRe = new RegExp(`\\b${varName}\\.(\\w+)\\s*\\(`, "g");
-        for (const call of code.matchAll(callRe)) {
-          const method = call[1];
-          if (methods.includes(method)) continue;
-          if ((FACTORY_PROPERTIES[factory] || []).includes(method)) continue;
-          problems.push(
-            `${path}: ${varName}.${method}(...) does not exist — ${factory}() exposes exactly `
-            + `[${methods.join(", ")}]. Call the real method; do not reimplement the capability.`,
-          );
-        }
-      }
+      findings.push({
+        code: "monolith_size",
+        module: path,
+        actualTokens: size,
+        maximumTokens: MAX_GENERATED_FILE_TOKENS,
+        message: `${path} is ${size} tokens (preferred cap ${MAX_GENERATED_FILE_TOKENS}) — splitting sections into `
+          + `components under src/components/ keeps later edits cheap.`,
+      });
     }
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: findings.length === 0, findings, problems: findings.map((row) => row.message) };
 }
 
 function generatedSource(tree) {
@@ -233,6 +235,76 @@ function localName(node) {
   return null;
 }
 
+/**
+ * Every Identifier node that NAMES a new binding rather than reading an existing one.
+ *
+ * Collected as node identities, not names, because shorthand destructuring
+ * (`const { createBooking } = capability`) produces an Identifier in value position that is
+ * still a declaration — treating it as a read would make "bound but never used" unobservable.
+ */
+function collectPatternNodes(pattern, output) {
+  if (!pattern || typeof pattern !== "object") return output;
+  if (pattern.type === "Identifier") output.add(pattern);
+  else if (pattern.type === "ObjectPattern") {
+    for (const property of pattern.properties || []) {
+      if (property.type === "ObjectProperty") {
+        if (!property.computed) output.add(property.key);
+        collectPatternNodes(property.value, output);
+      } else if (property.type === "RestElement") collectPatternNodes(property.argument, output);
+    }
+  } else if (pattern.type === "ArrayPattern") {
+    for (const element of pattern.elements || []) collectPatternNodes(element, output);
+  } else if (pattern.type === "AssignmentPattern") collectPatternNodes(pattern.left, output);
+  else if (pattern.type === "RestElement") collectPatternNodes(pattern.argument, output);
+  return output;
+}
+
+function declarationNodesOf(ast) {
+  const nodes = new Set();
+  walkAst(ast, (node) => {
+    if (node.type === "VariableDeclarator") collectPatternNodes(node.id, nodes);
+    else if (["FunctionDeclaration", "ClassDeclaration", "FunctionExpression", "ArrowFunctionExpression"]
+      .includes(node.type)) {
+      if (node.id) nodes.add(node.id);
+      for (const parameter of node.params || []) collectPatternNodes(parameter, nodes);
+    } else if (node.type === "CatchClause") collectPatternNodes(node.param, nodes);
+    else if (node.type === "ImportDeclaration") {
+      for (const specifier of node.specifiers || []) {
+        if (specifier.local) nodes.add(specifier.local);
+        if (specifier.imported) nodes.add(specifier.imported);
+      }
+    } else if (node.type === "ExportSpecifier") {
+      if (node.local) nodes.add(node.local);
+      if (node.exported) nodes.add(node.exported);
+    }
+  });
+  return nodes;
+}
+
+/** Is this node the thing being called, rather than a value being passed around? */
+function isCalleeOf(node, parent) {
+  if (!["CallExpression", "OptionalCallExpression"].includes(parent?.type)) return false;
+  return unwrapExpression(parent.callee) === node || parent.callee === node;
+}
+
+/**
+ * Identifiers that NAME a binding rather than read one. Without this, every declaration would
+ * count as a reference to itself and `const { subscribe } = wizard` would look used on sight.
+ */
+function isDeclarationName(node, parent) {
+  if (!parent) return false;
+  if (parent.type === "VariableDeclarator" && parent.id === node) return true;
+  if (["FunctionDeclaration", "ClassDeclaration", "FunctionExpression", "ArrowFunctionExpression"]
+    .includes(parent.type) && parent.id === node) return true;
+  if (parent.type === "ObjectProperty" && parent.key === node && !parent.computed) return true;
+  if (["MemberExpression", "OptionalMemberExpression"].includes(parent.type)
+    && parent.property === node && !parent.computed) return true;
+  if (["ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier"].includes(parent.type)) return true;
+  if (parent.type === "ExportSpecifier") return true;
+  if (parent.type === "JSXAttribute" && parent.name === node) return true;
+  return false;
+}
+
 function resolveGeneratedImport(importer, specifier, files) {
   if (!specifier?.startsWith(".")) return null;
   const base = path.posix.normalize(path.posix.join(path.posix.dirname(importer), specifier));
@@ -262,7 +334,9 @@ function parseGeneratedModules(tree) {
         exportLocals: [],
         imports: [],
         identifierCalls: new Set(),
+        identifierReferences: new Set(),
         capabilityMemberCalls: [],
+        unknownMemberCalls: [],
       });
     } catch {
       // Parse failure is independently blocked by the patch/index gate. Never invent provenance.
@@ -319,16 +393,33 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
 
     // Pass 2 resolves every supported binding/use through the same source abstraction: either a
     // named identifier already proven in pass 1 or a direct recognised factory result.
-    walkAst(module.ast, (node) => {
+    //
+    // A capability method is USED when the application reaches it — whether it calls it
+    // (`wizard.next()`) or hands it to a consumer that will (`useSyncExternalStore(
+    // wizard.subscribe, wizard.getState)`). The platform's own stores are built for exactly
+    // that second shape, so the member expression is inspected wherever it appears, and
+    // "was it the callee?" becomes a recorded property rather than the price of admission.
+    const declarationNodes = declarationNodesOf(module.ast);
+    walkAst(module.ast, (node, parent) => {
       if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
         const callee = unwrapExpression(node.callee);
         if (callee?.type === "Identifier") module.identifierCalls.add(callee.name);
-        else if (["MemberExpression", "OptionalMemberExpression"].includes(callee?.type) && !callee.computed) {
-          const source = capabilitySourceFromExpression(callee.object, module);
-          const method = propertyName(callee.property);
-          if (source && FACTORY_METHODS[source.factory]?.includes(method)) {
-            recordDirectSource(module, source, callee.object);
-            module.capabilityMemberCalls.push({ source, method });
+      }
+      if (node.type === "Identifier" && !declarationNodes.has(node) && !isDeclarationName(node, parent)) {
+        module.identifierReferences.add(node.name);
+      }
+      if (["MemberExpression", "OptionalMemberExpression"].includes(node.type) && !node.computed) {
+        const source = capabilitySourceFromExpression(node.object, module);
+        const method = propertyName(node.property);
+        if (source && method) {
+          const known = FACTORY_METHODS[source.factory]?.includes(method);
+          const property = (FACTORY_PROPERTIES[source.factory] || []).includes(method);
+          if (known) {
+            recordDirectSource(module, source, node.object);
+            module.capabilityMemberCalls.push({ source, method, invoked: isCalleeOf(node, parent) });
+          } else if (!property && isCalleeOf(node, parent)) {
+            // Calling something the capability does not expose is a guaranteed TypeError.
+            module.unknownMemberCalls.push({ factory: source.factory, method });
           }
         }
       }
@@ -377,26 +468,27 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
     .filter((binding) => binding.requiredMethods?.length)
     .map((binding) => CAPABILITY_FACTORIES[binding.name])
     .filter(Boolean));
-  const facts = new Map(RECOGNIZED_CAPABILITY_FACTORIES.map((factory) => [factory, {
+  // `invoked` = called directly. `referenced` = handed to a consumer that will call it.
+  // `used` = either; it is what "the application reaches this behaviour" actually means.
+  const emptyFact = (factory) => ({
     factory,
     required: requiredFactories.has(factory),
     instances: [],
     bindings: [],
     invocations: [],
+    references: [],
+    unknownMethods: [],
     modules: new Set(),
     bound: new Set(),
     invoked: new Set(),
-  }]));
+    referenced: new Set(),
+    used: new Set(),
+  });
+  const facts = new Map(RECOGNIZED_CAPABILITY_FACTORIES.map((factory) => [factory, emptyFact(factory)]));
   const factFor = (factory) => {
     if (!RECOGNIZED_FACTORY_SET.has(factory)) return null;
     let fact = facts.get(factory);
-    if (!fact) {
-      fact = {
-        factory, required: requiredFactories.has(factory), instances: [], bindings: [],
-        invocations: [], modules: new Set(), bound: new Set(), invoked: new Set(),
-      };
-      facts.set(factory, fact);
-    }
+    if (!fact) { fact = emptyFact(factory); facts.set(factory, fact); }
     return fact;
   };
   for (const [file, module] of modules) {
@@ -417,13 +509,25 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
       if (call.source.kind === "named" && module.declarations.get(call.source.local) !== 1) continue;
       const fact = factFor(call.source.factory);
       if (!fact) continue;
+      const kind = call.source.kind === "named" ? "member" : "factory_result_member";
       fact.bound.add(call.method);
-      fact.invoked.add(call.method);
-      fact.bindings.push({ module: file, local: call.source.local, method: call.method,
-        kind: call.source.kind === "named" ? "member" : "factory_result_member" });
-      fact.invocations.push({ module: file, local: call.source.local, method: call.method,
-        kind: call.source.kind === "named" ? "member" : "factory_result_member" });
+      fact.used.add(call.method);
+      fact.bindings.push({ module: file, local: call.source.local, method: call.method, kind });
+      if (call.invoked) {
+        fact.invoked.add(call.method);
+        fact.invocations.push({ module: file, local: call.source.local, method: call.method, kind });
+      } else {
+        // `useSyncExternalStore(wizard.subscribe, wizard.getState)` — the platform's own store
+        // contract. The reference IS the use; the consumer performs the call.
+        fact.referenced.add(call.method);
+        fact.references.push({ module: file, local: call.source.local, method: call.method,
+          kind: `${kind}_reference` });
+      }
       fact.modules.add(file);
+    }
+    for (const unknown of module.unknownMemberCalls) {
+      const fact = factFor(unknown.factory);
+      if (fact) fact.unknownMethods.push({ module: file, method: unknown.method });
     }
     for (const [alias, provenance] of module.aliases) {
       if (module.declarations.get(alias) !== 1) continue; // a local redeclaration cannot borrow provenance
@@ -438,7 +542,14 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
       fact.modules.add(file);
       if (module.identifierCalls.has(alias)) {
         fact.invoked.add(provenance.method);
+        fact.used.add(provenance.method);
         fact.invocations.push({ module: file, local: alias, method: provenance.method, kind: "destructured" });
+      } else if (module.identifierReferences.has(alias)) {
+        // `const { subscribe, getState } = wizard; useSyncExternalStore(subscribe, getState)`
+        fact.referenced.add(provenance.method);
+        fact.used.add(provenance.method);
+        fact.references.push({ module: file, local: alias, method: provenance.method,
+          kind: "destructured_reference" });
       }
     }
   }
@@ -491,8 +602,10 @@ export function lintRequiredCapabilityBindings(tree, bindings = []) {
       if (!facts.bound.has(method)) {
         reject("required_method_unbound", `required capability ${binding.name} is not bound to ${method}(...)`,
           { capability: binding.name, factory, method });
-      } else if (!facts.invoked.has(method)) {
-        reject("required_method_uninvoked", `required capability ${binding.name} binds ${method}(...) but never invokes it`,
+      } else if (!facts.used.has(method)) {
+        // Bound but neither called nor handed to a consumer. Advisory: the browser journey is
+        // the authority on whether the behaviour actually reaches the user.
+        reject("required_method_uninvoked", `required capability ${binding.name} binds ${method}(...) but neither invokes nor passes it`,
           { capability: binding.name, factory, method });
       }
     }

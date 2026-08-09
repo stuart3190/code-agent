@@ -11,6 +11,11 @@ export { isOwner, requireOwner } from "./roles.js";
 export { makeBookingSystem, BOOKING_STATUS, CREATE_RESULT } from "./booking.js";
 export { makeWizardMachine, makeWizardPersistence, WIZARD_STATUS } from "./wizard.js";
 export { makeContactForm, makeNewsletter, CONTACT_RESULT, NEWSLETTER_RESULT } from "./forms.js";
+// React bindings: subscribe to any capability store, and get accessible/driveable control props
+// without hand-wiring them. Domain-neutral and JSX-free — styling stays entirely yours.
+export {
+  useCapabilityState, useCapabilityAction, useSemanticField, useSemanticSelection, useStatusRegion,
+} from "./react.js";
 
 export const CAPABILITY_VERSIONS = Object.freeze({
   crud: "1.0.0",

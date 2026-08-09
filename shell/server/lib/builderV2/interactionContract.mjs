@@ -5,15 +5,47 @@
 
 import { parse } from "@babel/parser";
 
-import { aggregateCapabilityFacts } from "./capabilityLint.mjs";
-import { bindCapabilities, bookingModulePlan } from "./contractTiering.mjs";
+import { aggregateCapabilityFacts, FACTORY_METHODS } from "./capabilityLint.mjs";
+import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { bindCapabilities, deriveModulePlan } from "./contractTiering.mjs";
+import { IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey } from "./controlIdentity.mjs";
+
+// A method name that changes a durable record. Domain-neutral vocabulary: it reads the
+// registry's real interfaces rather than naming any application's capability.
+const DURABLE_MUTATION = /^(?:cancel|remove|delete|update|archive|void|close)/i;
+const factoryFor = (name) => (CAPABILITIES[name]?.interface || []).find((entry) => /^make[A-Z]/.test(entry)) || null;
+
+/**
+ * Which bound capability owns durable state changes for this contract.
+ *
+ * Derived from the contract's own bindings and the registry's declared interfaces, so a CRM
+ * resolves to makeEntityStore.update/remove, a booking app to makeBookingSystem.cancelBooking,
+ * and a contract that binds no durable owner resolves to nothing at all.
+ */
+export function durableOperationOwner(bindings = []) {
+  const candidates = (bindings || [])
+    .map((binding) => ({ binding, factory: factoryFor(binding.name) }))
+    .filter((row) => row.factory && FACTORY_METHODS[row.factory])
+    .map((row) => ({ ...row, methods: FACTORY_METHODS[row.factory].filter((method) => DURABLE_MUTATION.test(method)) }))
+    .filter((row) => row.methods.length);
+  const preferred = candidates.find((row) => row.binding.requiredMethods?.length) || candidates[0];
+  return preferred
+    ? { capability: preferred.binding.name, factory: preferred.factory, methods: preferred.methods }
+    : null;
+}
+
+/** Which bound capability owns in-progress (pre-commit) interaction state, if any. */
+export function draftStateOwner(bindings = []) {
+  const binding = (bindings || []).find((row) => Array.isArray(CAPABILITIES[row.name]?.uiContract)
+    && (CAPABILITIES[row.name]?.entities || []).length === 0 && factoryFor(row.name)
+    && FACTORY_METHODS[factoryFor(row.name)]?.includes("getState"));
+  return binding ? { capability: binding.name, factory: factoryFor(binding.name) } : null;
+}
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
 const PLATFORM = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const AST_SKIP = new Set(["loc", "start", "end", "extra", "errors", "comments", "tokens"]);
-const STOP = new Set(["select", "choose", "pick", "enter", "provide", "complete", "click", "press",
-  "submit", "confirm", "review", "show", "display", "open", "page", "form", "details", "available",
-  "booking", "reservation", "guest", "visitor", "the", "and", "then", "with", "from", "into"]);
+const STOP = IDENTITY_STOP_WORDS;
 
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
@@ -61,16 +93,6 @@ function fieldCandidates(contract, text, kind) {
     || declared.some((declaredName) => normalized(declaredName) === normalized(name)));
   const fallback = words(text).filter((word) => !STOP.has(word)).slice(0, 2);
   const candidates = unique([...declared, ...semantic, ...(declared.length || semantic.length ? [] : fallback)]);
-  const semanticKey = (name) => {
-    const value = normalized(name);
-    if (/date|day/.test(value)) return "date";
-    if (/slot|time/.test(value)) return "slot";
-    if (/party|quantity|people|guestcount|adult|child/.test(value)) return "partySize";
-    if (/email/.test(value)) return "email";
-    if (/phone|telephone|mobile/.test(value)) return "phone";
-    if (/name/.test(value)) return "name";
-    return value;
-  };
   const seen = new Set();
   return candidates.filter((name) => {
     const key = semanticKey(name);
@@ -80,25 +102,22 @@ function fieldCandidates(contract, text, kind) {
   }).slice(0, kind === "input" ? 8 : 4);
 }
 
-function fieldAliases(field) {
-  const raw = String(field || "").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
-  const aliases = [raw];
-  const lower = raw.toLowerCase();
-  if (/name/.test(lower)) aliases.push("name");
-  if (/email/.test(lower)) aliases.push("email");
-  if (/phone|telephone/i.test(raw)) aliases.push("phone", "telephone");
-  if (/slot|time/i.test(raw)) aliases.push("slot", "time");
-  if (/date|day/i.test(raw)) aliases.push("date", "day");
-  if (/party|quantity|guest|people/i.test(raw)) aliases.push("party size", "guests", "people");
-  return unique(aliases.map((value) => value.trim()).filter(Boolean));
-}
+// One shared vocabulary with the browser verifier — see controlIdentity.mjs.
+const fieldAliases = semanticAliases;
 
-function ownerModules(modulePlan, kind) {
-  const byFactory = (factory) => modulePlan.find((module) => module.factory === factory)?.path || null;
+/**
+ * Which planned modules own a flow of this kind — resolved through the contract's capability
+ * owners, never through a hardcoded factory name.
+ */
+function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null } = {}) {
+  const byFactory = (factory) => (factory
+    ? modulePlan.find((module) => module.factory === factory)?.path : null) || null;
   const visual = modulePlan.find((module) => /flow|composition/i.test(module.role || ""))?.path || null;
-  if (["mutation", "cancellation", "lookup"].includes(kind)) return unique([byFactory("makeBookingSystem")]);
+  if (["mutation", "cancellation", "lookup"].includes(kind)) {
+    return unique([byFactory(durableOwner?.factory), visual]);
+  }
   if (["selection", "input", "review", "recovery", "action"].includes(kind)) {
-    return unique([byFactory("makeWizardMachine"), visual]);
+    return unique([byFactory(draftOwner?.factory), visual]);
   }
   return unique([visual]);
 }
@@ -122,9 +141,11 @@ function controlRequirement(kind, field, step) {
 
 /** Derive the interaction/data-flow contract once, before implementation generation. */
 export function buildInteractionContract(contract, {
-  modulePlan = bookingModulePlan(contract, contract?.journeys || []),
+  modulePlan = deriveModulePlan(contract, contract?.journeys || []),
   bindings = bindCapabilities(contract),
 } = {}) {
+  const durableOwner = durableOperationOwner(bindings);
+  const draftOwner = draftStateOwner(bindings);
   const flows = [];
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
@@ -153,7 +174,7 @@ export function buildInteractionContract(contract, {
             reads.push(durableRecord || `${journey.id}.durable.reference`);
             writes.push(`${journey.id}.durable.status`);
           }
-          const owners = ownerModules(modulePlan, kind);
+          const owners = ownerModules(modulePlan, kind, { durableOwner, draftOwner });
           const stateOwner = owners[0] || `journey:${journey.id}`;
           const control = controlRequirement(kind, field, step);
           if (control) Object.assign(control, {
@@ -178,8 +199,8 @@ export function buildInteractionContract(contract, {
             observable: step.expect,
             control,
             capability: ["mutation", "cancellation", "lookup"].includes(kind)
-              ? (bindings.some((binding) => binding.name === "booking") ? "makeBookingSystem" : "makeEntityStore")
-              : bindings.some((binding) => binding.name === "wizard") ? "makeWizardMachine" : null,
+              ? durableOwner?.factory || null
+              : draftOwner?.factory || null,
           });
         }
       }
@@ -208,7 +229,9 @@ export function validateInteractionContract(plan) {
     if (missing.length) problems.push(`${flow.id} reads state before it is produced: ${missing.join(", ")}`);
     if (flow.kind === "review" && !(flow.reads || []).length) problems.push(`${flow.id} review has no source values`);
     if (flow.kind === "mutation" && !(flow.reads || []).length) problems.push(`${flow.id} mutation consumes no contracted input state`);
-    if (flow.kind === "cancellation" && flow.capability !== "makeBookingSystem" && flow.capability !== "makeEntityStore") {
+    // Any bound durable capability may own cancellation; the registry decides which, not a
+    // hardcoded factory name.
+    if (flow.kind === "cancellation" && !flow.capability) {
       problems.push(`${flow.id} cancellation has no durable operation owner`);
     }
     if (flow.control && (!flow.control.accessibleName || !(flow.control.roles || []).length)) {
@@ -368,11 +391,7 @@ export function collectInteractionControls(tree) {
 }
 
 function nameMatches(control, required) {
-  const requiredNames = Array.isArray(required) ? required : [required];
-  const wanted = requiredNames.flatMap((name) => words(String(name || "").replace(/([a-z])([A-Z])/g, "$1 $2")))
-    .filter((word) => !STOP.has(word));
-  const actual = (control.locatorIdentities || [control.name]).map(normalized);
-  return !wanted.length || wanted.some((word) => actual.some((name) => name.includes(normalized(word))));
+  return identityMatches(control.locatorIdentities || [control.name], required);
 }
 
 function stateConnection(control, flow) {
@@ -469,9 +488,26 @@ export function lintInteractiveWorkflow(tree, { interactionContract, modulePlan 
       reject("fabricated_confirmation_reference", "confirmation reference is fabricated locally instead of using the durable mutation result");
     }
   }
-  if ((interactionContract?.flows || []).some((flow) => flow.kind === "cancellation")) {
-    const facts = aggregateCapabilityFacts(tree, bindings).get("makeBookingSystem");
-    if (!facts?.invoked?.has("cancelBooking")) reject("durable_cancellation_missing", "cancellation does not invoke the required durable capability operation");
+  // Durable cancellation is checked against the capability the CONTRACT actually binds.
+  //
+  // This previously hardcoded makeBookingSystem.cancelBooking for any journey step matching
+  // /\bcancel\b/, with no guard on the booking capability being bound at all — so "cancel the
+  // subscription", "cancel the order" and "cancel the invitation" each demanded a booking
+  // capability the contract never bound and the prompt never mentioned, in applications that
+  // have nothing to do with bookings.
+  const cancellationFlows = (interactionContract?.flows || []).filter((flow) => flow.kind === "cancellation");
+  if (cancellationFlows.length) {
+    const owner = durableOperationOwner(bindings);
+    if (owner) {
+      const facts = aggregateCapabilityFacts(tree, bindings).get(owner.factory);
+      const satisfied = owner.methods.some((method) => facts?.used?.has(method));
+      if (!satisfied) {
+        reject("durable_cancellation_missing",
+          `cancellation does not reach a durable operation on ${owner.factory} `
+          + `(any of [${owner.methods.join(", ")}])`,
+          cancellationFlows[0], { factory: owner.factory, acceptableMethods: owner.methods });
+      }
+    }
   }
   return { ok: findings.length === 0, findings, problems: findings.map((row) => JSON.stringify(row)), controls };
 }

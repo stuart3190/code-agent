@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 
 import { classifyComplexity, COMPLEXITY } from "../../shell/server/lib/appBuild/buildProfile.mjs";
 import {
-  bindCapabilities, bookingModulePlan, completionEligibility, previewEligibility, tierContract,
+  bindCapabilities, deriveModulePlan, completionEligibility, previewEligibility, tierContract,
 } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import {
   lintRequiredCapabilityBindings, lintRequiredModulePlan,
 } from "../../shell/server/lib/builderV2/capabilityLint.mjs";
 import { renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { createOrchestrator } from "../../shell/server/lib/builderV2/orchestrator.mjs";
+import { SEVERITY, severityOf } from "../../shell/server/lib/builderV2/validationSeverity.mjs";
+import { readFileSync } from "node:fs";
 
 const BOOKING = {
   summary: "A distinctive multi-step table booking experience",
@@ -80,44 +82,86 @@ test("14S classifies explicit and contracted multi-step booking as medium while 
   assert.equal(classifyComplexity({ prompt: "make the site", contract: BOOKING }).level, COMPLEXITY.medium);
 });
 
-test("14S derives the modular booking plan before generation without prescribing visual design", () => {
-  const plan = bookingModulePlan(BOOKING, BOOKING.journeys);
+test("14S derives a modular plan from the CONTRACT, not from a hardcoded application domain", () => {
+  const plan = deriveModulePlan(BOOKING, BOOKING.journeys);
+  // Module names come from the contract's own capability bindings and journey ids. A booking
+  // contract still yields booking-shaped modules — because its contract says booking, not
+  // because the planner does.
   assert.deepEqual(plan.map((module) => module.path), [
-    "src/data/bookingSystem.js",
-    "src/data/bookingWizard.js",
-    "src/components/booking/BookingFlow.jsx",
-    "src/components/booking/BookingReview.jsx",
-    "src/components/booking/BookingConfirmation.jsx",
-    "src/components/booking/BookingStatus.jsx",
+    "src/data/booking.js",
+    "src/data/wizard.js",
+    "src/components/complete-booking/CompleteBookingFlow.jsx",
+    "src/components/complete-booking/CompleteBookingReview.jsx",
+    "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+    "src/components/complete-booking/CompleteBookingStatus.jsx",
   ]);
+  assert.deepEqual(plan.map((module) => module.role), [
+    "booking capability adapter",
+    "wizard capability adapter",
+    "step navigation and flow composition",
+    "review presentation",
+    "confirmation and reference presentation",
+    "restored and cancelled status presentation",
+  ]);
+  // No booking vocabulary is baked into the planner itself.
+  const source = readFileSync(new URL("../../shell/server/lib/builderV2/contractTiering.mjs", import.meta.url), "utf8");
+  const planner = source.slice(source.indexOf("export function deriveModulePlan"), source.indexOf("export function journeyStepKinds"));
+  assert.equal(/booking|reservation/i.test(planner), false, "deriveModulePlan must not name an application domain");
+
   const prompt = renderPatchPrompt({
     step: "core", contract: BOOKING, tiers: tierContract(BOOKING), tree: {}, modulePlan: plan,
   });
-  assert.match(prompt, /REQUIRED MODULE PLAN/);
-  assert.match(prompt, /src\/data\/bookingSystem\.js: booking persistence adapter; bind makeBookingSystem/);
+  assert.match(prompt, /SUGGESTED MODULE PLAN/);
+  assert.match(prompt, /exact paths are guidance, not a gate/);
+  assert.match(prompt, /src\/data\/booking\.js: booking capability adapter; bind makeBookingSystem/);
   assert.match(prompt, /styling, layout, typography and component composition original/);
 
   const oneStep = { ...BOOKING, summary: "Simple booking", journeys: [{
     id: "book", title: "Book", priority: "primary",
     steps: [{ action: "submit booking", expect: "booking confirmed" }],
   }] };
-  assert.deepEqual(bookingModulePlan(oneStep, oneStep.journeys), []);
+  assert.deepEqual(deriveModulePlan(oneStep, oneStep.journeys), []);
 });
 
-test("14S rejects missing planned modules and misplaced headless factory bindings deterministically", () => {
-  const plan = bookingModulePlan(BOOKING, BOOKING.journeys);
-  const missing = lintRequiredModulePlan({
-    ...COMPLETE_TREE,
-    "src/data/bookingWizard.js": undefined,
-  }, plan);
-  assert.equal(missing.ok, false);
-  assert.match(missing.problems.join("\n"), /bookingWizard\.js/);
+test("14S the same planner serves non-booking applications with their own vocabulary", () => {
+  const crm = {
+    summary: "A CRM for tracking leads",
+    entities: [{ name: "lead", fields: [{ name: "company" }, { name: "email" }] }],
+    routes: [{ path: "/", name: "Leads" }],
+    journeys: [{
+      id: "manage-lead", title: "Manage a lead", priority: "primary",
+      steps: [
+        { action: "enter the company name", expect: "company captured" },
+        { action: "select a pipeline stage", expect: "stage highlighted" },
+        { action: "review the lead summary", expect: "summary shows company" },
+        { action: "create the lead", expect: "lead reference shown" },
+        { action: "cancel the lead", expect: "status shows cancelled" },
+      ],
+    }],
+  };
+  const plan = deriveModulePlan(crm, crm.journeys);
+  assert.ok(plan.length, "a multi-step CRM journey earns a module plan");
+  assert.equal(plan.some((module) => /booking/i.test(module.path)), false);
+  assert.ok(plan.some((module) => module.path === "src/components/manage-lead/ManageLeadFlow.jsx"));
+  assert.ok(plan.some((module) => module.path === "src/data/crud.js"));
+});
 
-  const absent = { ...COMPLETE_TREE };
-  delete absent["src/components/booking/BookingReview.jsx"];
-  assert.equal(lintRequiredModulePlan(absent, plan).ok, false);
-  assert.match(lintRequiredModulePlan(absent, plan).problems.join("\n"), /BookingReview\.jsx/);
-  assert.equal(lintRequiredModulePlan(COMPLETE_TREE, plan).ok, true);
+test("14S reports missing planned modules as ADVISORY, never as a terminal rejection", () => {
+  const plan = [
+    { path: "src/data/booking.js", role: "booking capability adapter", factory: "makeBookingSystem" },
+    { path: "src/components/complete-booking/CompleteBookingReview.jsx", role: "review presentation" },
+  ];
+  // The lint still SEES a differently-named tree...
+  const verdict = lintRequiredModulePlan(COMPLETE_TREE, plan);
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.problems.join("\n"), /src\/data\/booking\.js/);
+
+  // ...but naming a file differently is guidance, not correctness: it must never block.
+  for (const problem of verdict.problems) {
+    const code = problem.startsWith("required planned module is missing") ? "required_module_missing" : "module_plan_violation";
+    assert.equal(severityOf(code), SEVERITY.ADVISORY, problem);
+  }
+  assert.equal(lintRequiredModulePlan(COMPLETE_TREE, []).ok, true);
 });
 
 test("14S machine-enforces both booking and wizard capability contracts", () => {
@@ -133,7 +177,10 @@ test("14S machine-enforces both booking and wizard capability contracts", () => 
   assert.match(rejected.problems.join("\n"), /makeWizardMachine/);
 });
 
-test("14S orchestrator rejects a missing planned booking module before compile or browser verification", async () => {
+test("a differently-shaped module layout still COMPILES and RUNS; the shortfall is advisory", async () => {
+  // The tree implements the contract but does not use the planned file names. Previously this
+  // was terminal before compilation and cost a whole core attempt. It must now reach execution:
+  // the browser decides whether the application works.
   const incomplete = { ...COMPLETE_TREE };
   delete incomplete["src/components/booking/BookingReview.jsx"];
   let compileCalls = 0;
@@ -150,16 +197,28 @@ test("14S orchestrator rejects a missing planned booking module before compile o
       async resolveIntents() { return { resolved: [], providerCalls: 0 }; },
       async assetManifestFor() { return []; },
     },
-    baseTree: () => ({ "src/App.jsx": "export default function App(){ return <main />; }" }),
+    baseTree: () => ({
+      "package.json": JSON.stringify({ name: "app", type: "module", scripts: { build: "vite build" } }),
+      "index.html": '<!doctype html><html><body><div id="root"></div></body></html>',
+      "vite.config.js": "export default {};",
+      "src/main.jsx": "export {};",
+      "src/App.jsx": "export default function App(){ return <main />; }",
+    }),
     compile: async () => { compileCalls += 1; return { ok: true }; },
     journeysFn: async () => { browserCalls += 1; return { journeys: [] }; },
     maxCoreAttempts: 1,
     log: (line) => logs.push(line),
   });
   const result = await orchestrator.runBuild({ owner: "owner", projectId: "project", request: "multi-step booking" });
+  // The plan is still briefed to the model...
+  assert.ok(receivedPlan.some((module) => module.path.endsWith("Review.jsx")));
+  // ...and the candidate still reached compilation AND the browser.
+  assert.equal(compileCalls, 1, `the candidate must be compiled, not discarded for its shape: ${logs.join(" | ")}`);
+  assert.equal(browserCalls, 1, "behaviour must be verified in a browser");
+  // It is blocked only because the contracted journeys were never proven green — the real bar.
   assert.equal(result.state, "blocked");
-  assert.ok(receivedPlan.some((module) => module.path.endsWith("BookingReview.jsx")));
-  assert.equal(compileCalls, 0);
-  assert.equal(browserCalls, 0);
-  assert.ok(logs.some((line) => /required planned module defect/.test(line)), logs.join("\n"));
+  assert.equal(result.failureClassification, "contracted_journeys_red");
+  assert.ok(logs.some((line) => /advisory finding\(s\) recorded/.test(line)), logs.join("\n"));
+  assert.ok((result.advisoryFindings || []).some((finding) => finding.code === "required_module_missing"),
+    JSON.stringify(result.advisoryFindings));
 });

@@ -5,7 +5,7 @@ import {
   FACTORY_METHODS,
   RECOGNIZED_CAPABILITY_FACTORIES,
   aggregateCapabilityFacts,
-  lintCapabilityUsage,
+  lintCapabilitySafety,
   lintRequiredCapabilityBindings,
   lintRequiredModulePlan,
 } from "../../shell/server/lib/builderV2/capabilityLint.mjs";
@@ -286,7 +286,7 @@ test("14S retained live adapter/module shape reaches the deterministic module-pl
     { path: "src/components/booking/BookingConfirmation.jsx", role: "confirmation and reference presentation" },
     { path: "src/components/booking/BookingStatus.jsx", role: "restored and cancelled booking presentation" },
   ];
-  assert.equal(lintCapabilityUsage(tree).ok, true);
+  assert.equal(lintCapabilitySafety(tree).ok, true);
   assert.equal(lintRequiredCapabilityBindings(tree, bindings).ok, true);
   assert.equal(lintRequiredModulePlan(tree, plan).ok, true);
 });

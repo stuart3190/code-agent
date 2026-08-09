@@ -7,7 +7,7 @@ import { buildTree, ensureDeps } from "../../harness/workspace.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import {
-  lintCapabilityUsage,
+  lintCapabilitySafety,
   lintRequiredCapabilityBindings,
   lintRequiredModulePlan,
 } from "../../shell/server/lib/builderV2/capabilityLint.mjs";
@@ -161,7 +161,7 @@ function applyCandidate({ corrected }) {
 
 test("14S retained direct-factory candidate keeps genuine unused wizard violations and compiles", async () => {
   const tree = applyCandidate({ corrected: false });
-  assert.equal(lintCapabilityUsage(tree).ok, true);
+  assert.equal(lintCapabilitySafety(tree).ok, true);
   assert.equal(lintRequiredModulePlan(tree, PLAN).ok, true);
 
   const lint = lintRequiredCapabilityBindings(tree, BINDINGS);
@@ -179,7 +179,7 @@ test("14S retained direct-factory candidate keeps genuine unused wizard violatio
 
 test("14S corrected retained candidate passes every deterministic gate and compiles", async () => {
   const tree = applyCandidate({ corrected: true });
-  assert.equal(lintCapabilityUsage(tree).ok, true);
+  assert.equal(lintCapabilitySafety(tree).ok, true);
   const lint = lintRequiredCapabilityBindings(tree, BINDINGS);
   assert.equal(lint.ok, true, lint.problems.join("; "));
   assert.equal(lintRequiredModulePlan(tree, PLAN).ok, true);

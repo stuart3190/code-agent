@@ -6,7 +6,7 @@ import { REACT_VITE } from "../src/scaffolds/reactVite.mjs";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { applyPatches } from "../shell/server/lib/builderV2/patchEngine.mjs";
-import { bindCapabilities, bookingModulePlan } from "../shell/server/lib/builderV2/contractTiering.mjs";
+import { bindCapabilities, deriveModulePlan } from "../shell/server/lib/builderV2/contractTiering.mjs";
 import { lintRequiredCapabilityBindings, lintRequiredModulePlan } from "../shell/server/lib/builderV2/capabilityLint.mjs";
 
 loadEnv();
@@ -28,7 +28,7 @@ for (const row of rows) {
 }
 const bindings = bindCapabilities(contractRow.contract);
 const essential = (contractRow.contract.journeys || []).filter((journey) => journey.priority === "primary");
-const plan = bookingModulePlan(contractRow.contract, essential);
+const plan = deriveModulePlan(contractRow.contract, essential);
 const report = groups.map((group, index) => {
   const tree = fromScaffold(REACT_VITE);
   const applied = applyPatches(tree, group.rows.map((row) => row.patch), { contract: contractRow.contract });

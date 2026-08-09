@@ -134,8 +134,14 @@ export function lintDurablePersistence(tree, { contract = null, journeys = contr
           const key = `${path}:${declaration.start}:process_memory`;
           if (seen.has(key)) continue;
           seen.add(key);
-          findings.push(finding({ path, node: declaration, api: "process_memory", journeys: journeyIds,
-            owners: requiredOwners(path, plan), detail: `module-level ${name} is mutable and cannot survive process/reload boundaries` }));
+          // A mutable module-level binding whose NAME suggests state is a guess, not a proof:
+          // an ephemeral subscriber registry, memo cache or ref table looks identical to a fake
+          // durable store. Reload recovery in the browser is what actually settles it, so this
+          // carries its own advisory code rather than the blocking `forbidden_persistence` one.
+          findings.push(finding({ code: "process_memory", path, node: declaration, api: "process_memory",
+            journeys: journeyIds, owners: requiredOwners(path, plan),
+            detail: `module-level ${name} is mutable; if it holds contracted durable state it cannot `
+              + "survive process/reload boundaries" }));
         }
       }
     }

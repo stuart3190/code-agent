@@ -84,6 +84,16 @@ export function validateBindings(bindings = []) {
 // usage lint (capabilityLint.mjs pins the same table; a drift test compares both against
 // the real factories). Live run 3 failed on contactForm.submit vs submitContact because
 // the brief named the factories but never their methods.
+// React bindings for the stores above. Advertised so generated code assembles the wiring
+// instead of reinventing it — and so a capability method may simply be HANDED to a hook.
+export const REACT_BINDINGS = [
+  "useCapabilityState(store, selector?) → live state via useSyncExternalStore(store.subscribe, store.getState)",
+  "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
+  "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps } with a guaranteed accessible name",
+  "useSemanticSelection({ name, value, onSelect }) → { groupProps, optionProps(option) } with observable aria-checked state",
+  "useStatusRegion({ label }) → { statusProps } announcing a state transition",
+];
+
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
   booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
@@ -102,5 +112,8 @@ export function capabilityBrief(names = Object.keys(CAPABILITIES)) {
     if (INSTANCE_METHODS[name]) lines.push(`    ${INSTANCE_METHODS[name]}`);
     if (entry.uiContract.length) lines.push(`    UI must render states: ${entry.uiContract.join(", ")}`);
   }
+  lines.push("REACT BINDINGS (import from ./lib/capabilities — assemble, do not reinvent):");
+  for (const binding of REACT_BINDINGS) lines.push(`  ${binding}`);
+  lines.push("  A capability method may be CALLED or PASSED as a reference; both are correct usage.");
   return lines.join("\n");
 }

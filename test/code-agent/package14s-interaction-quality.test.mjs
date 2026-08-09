@@ -5,7 +5,7 @@ import {
   buildInteractionContract, collectInteractionControls, interactionContractBrief, interactionFailureDiagnostics,
   lintInteractiveWorkflow, validateInteractionContract,
 } from "../../shell/server/lib/builderV2/interactionContract.mjs";
-import { bindCapabilities, bookingModulePlan, tierContract } from "../../shell/server/lib/builderV2/contractTiering.mjs";
+import { bindCapabilities, deriveModulePlan, tierContract } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { createOrchestrator } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { makeBookingSystem } from "../../src/scaffolds/reactVite/lib/capabilities/booking.js";
@@ -40,16 +40,16 @@ const CONTRACT = {
 };
 
 const TREE = {
-  "src/App.jsx": `import { BookingFlow } from "./components/booking/BookingFlow";
+  "src/App.jsx": `import { BookingFlow } from "./components/book/BookFlow";
 export default function App(){ return <BookingFlow />; }`,
-  "src/data/bookingSystem.js": `const booking = makeBookingSystem({ entity: "booking" });
+  "src/data/booking.js": `const booking = makeBookingSystem({ entity: "booking" });
 export const create = (draft) => booking.createBooking(draft);
 export const lookup = (id) => booking.getBooking(id);
 export const cancel = (id) => booking.cancelBooking(id);`,
-  "src/data/bookingWizard.js": `const wizard = makeWizardMachine({ id: "booking", steps: ["date","slot","contact","review","confirm"] });
+  "src/data/wizard.js": `const wizard = makeWizardMachine({ id: "booking", steps: ["date","slot","contact","review","confirm"] });
 wizard.getState(); wizard.subscribe(() => {}); wizard.restore(); wizard.select("date", "2026-08-10");
 wizard.next(); wizard.confirm(); wizard.cancel(); export { wizard };`,
-  "src/components/booking/BookingFlow.jsx": `export function BookingFlow(){ const draft = { date: "", slot: "", partySize: 1, name: "", email: "", phone: "" };
+  "src/components/book/BookFlow.jsx": `export function BookingFlow(){ const draft = { date: "", slot: "", partySize: 1, name: "", email: "", phone: "" };
 return <main>
   <button aria-label="date option" aria-pressed={draft.date === "2026-08-10"}>Select date</button>
   <button aria-label="slot option" aria-pressed={draft.slot === "10:00"}>Select slot</button>
@@ -59,14 +59,14 @@ return <main>
   <label>Phone<input name="phone" aria-label="phone" /></label>
   <button>Confirm booking</button><button>Cancel booking</button>
 </main> }`,
-  "src/components/booking/BookingReview.jsx": `export function BookingReview({ draft }){ return <dl>{draft.date}{draft.slot}{draft.partySize}{draft.name}{draft.email}{draft.phone}</dl> }`,
-  "src/components/booking/BookingConfirmation.jsx": `export function BookingConfirmation({ booking }){ return <p>Booking reference {booking.reference}</p> }`,
-  "src/components/booking/BookingStatus.jsx": `export function BookingStatus({ booking }){ return <p>{booking.status}</p> }`,
+  "src/components/book/BookReview.jsx": `export function BookingReview({ draft }){ return <dl>{draft.date}{draft.slot}{draft.partySize}{draft.name}{draft.email}{draft.phone}</dl> }`,
+  "src/components/book/BookConfirmation.jsx": `export function BookingConfirmation({ booking }){ return <p>Booking reference {booking.reference}</p> }`,
+  "src/components/book/BookStatus.jsx": `export function BookingStatus({ booking }){ return <p>{booking.status}</p> }`,
 };
 
 function plan() {
   return buildInteractionContract(CONTRACT, {
-    modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT),
+    modulePlan: deriveModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT),
   });
 }
 
@@ -117,7 +117,7 @@ test("14S one semantic control is not multiplied by entity id/label compatibilit
 test("14S generation prompt receives the exact machine-readable interaction contract", () => {
   const contract = { ...CONTRACT, interactionContract: plan() };
   const prompt = renderPatchPrompt({ step: "core", contract, tiers: tierContract(contract), tree: {},
-    modulePlan: bookingModulePlan(contract, contract.journeys) });
+    modulePlan: deriveModulePlan(contract, contract.journeys) });
   assert.match(prompt, /INTERACTION CONTRACT \(machine-enforced JSON/);
   assert.match(prompt, /"stateOwner"/);
   assert.match(prompt, /"selectedState": true/);
@@ -128,26 +128,26 @@ test("14S generation prompt receives the exact machine-readable interaction cont
 test("14S retained booking fixture is driveable and structurally traces review, confirmation and cancellation", () => {
   const interaction = plan();
   const verdict = lintInteractiveWorkflow(TREE, { interactionContract: interaction,
-    modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) });
+    modulePlan: deriveModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) });
   assert.equal(verdict.ok, true, verdict.problems.join("\n"));
 
   const undriveable = { ...TREE,
-    "src/components/booking/BookingFlow.jsx": `export function BookingFlow(){ return <div onClick={() => {}}>contact booking controls</div> }` };
+    "src/components/book/BookFlow.jsx": `export function BookingFlow(){ return <div onClick={() => {}}>contact booking controls</div> }` };
   const driven = lintInteractiveWorkflow(undriveable, { interactionContract: interaction,
-    modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) });
+    modulePlan: deriveModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) });
   assert.equal(driven.ok, false);
   assert.ok(driven.findings.some((row) => row.code === "interaction_control_undriveable"));
 
   const noReviewFlow = { ...TREE,
-    "src/components/booking/BookingReview.jsx": `export function BookingReview(){ return <p>Review</p> }` };
+    "src/components/book/BookReview.jsx": `export function BookingReview(){ return <p>Review</p> }` };
   assert.ok(lintInteractiveWorkflow(noReviewFlow, { interactionContract: interaction,
-    modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) })
+    modulePlan: deriveModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) })
     .findings.some((row) => row.code === "review_data_flow_missing"));
 
   const fakeReference = { ...TREE,
-    "src/components/booking/BookingConfirmation.jsx": `export function BookingConfirmation(){ return <p>Reference {Date.now()}</p> }` };
+    "src/components/book/BookConfirmation.jsx": `export function BookingConfirmation(){ return <p>Reference {Date.now()}</p> }` };
   assert.ok(lintInteractiveWorkflow(fakeReference, { interactionContract: interaction,
-    modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) })
+    modulePlan: deriveModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) })
     .findings.some((row) => row.code === "fabricated_confirmation_reference"));
 });
 
@@ -240,7 +240,7 @@ test("14S retained zero-model workflow propagates input through durable confirma
 
 test("14S repair context identifies state before/after, owner, modules and downstream failures", () => {
   const diagnostics = interactionFailureDiagnostics({ contract: CONTRACT, interactionContract: plan(), journeyResults: {
-    journeys: [{ id: "book", owners: ["src/components/booking/BookingFlow.jsx"], steps: [
+    journeys: [{ id: "book", owners: ["src/components/book/BookFlow.jsx"], steps: [
       { action: "select a date", expect: "the selected date becomes active", status: "fail", detail: "date did not highlight",
         controlEvidence: { attemptedLocators: ["date:role=button name=date"], renderedControls: [{ role: "button", accessibleName: "Date" }] } },
       { action: "select a slot", status: "not_reached", detail: "blocked by date" },
@@ -250,7 +250,7 @@ test("14S repair context identifies state before/after, owner, modules and downs
   assert.equal(diagnostics[0].actualObservedState, "date did not highlight");
   assert.match(diagnostics[0].expectedStateAfter, /selected date/);
   assert.ok(diagnostics[0].stateOwners.length);
-  assert.ok(diagnostics[0].responsibleModules.includes("src/components/booking/BookingFlow.jsx"));
+  assert.ok(diagnostics[0].responsibleModules.includes("src/components/book/BookFlow.jsx"));
   assert.deepEqual(diagnostics[0].dataOperations, ["create-booking"]);
   assert.ok(diagnostics[0].downstreamDependencies.length, "review/mutation dependencies are named for one causal repair");
   assert.deepEqual(diagnostics[0].attemptedLocators, ["date:role=button name=date"]);

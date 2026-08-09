@@ -51,7 +51,10 @@ test("14S capability grammar rejects names and aliases without capability proven
     const result = lintBooking(source);
     assert.equal(result.ok, false, source);
   }
-  assert.match(lintBooking(cases[4]).problems.join("\n"), /binds createBooking.*never invokes/);
+  // Bound but neither called nor handed to a consumer. (Passing it as a reference — e.g.
+  // useSyncExternalStore(store.subscribe, store.getState) — now counts as use; see
+  // builder-v2-capability-semantics.test.mjs.)
+  assert.match(lintBooking(cases[4]).problems.join("\n"), /binds createBooking.*neither invokes nor passes/);
 });
 
 test("14S exact live-candidate destructuring survives export/import while retaining provenance", () => {

@@ -148,6 +148,7 @@ function editHarness() {
   const journeyDrives = [];
   const knowledgeFacts = [];
   let editPatches = EDIT_PATCH;
+  let failJourneys = new Set();
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,
     patchesFn: async ({ step }) => ({
@@ -159,13 +160,14 @@ function editHarness() {
     assetService, snapshotStore, buildStore, verificationCache,
     journeysFn: async ({ journeys }) => {
       journeyDrives.push(journeys.map((j) => j.id));
-      return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: "pass" })) };
+      return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: failJourneys.has(j.id) ? "fail" : "pass" })) };
     },
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
     events: { knowledge: async (fact) => { knowledgeFacts.push(fact); } },
   });
-  return { orchestrator, snapshotStore, journeyDrives, knowledgeFacts, assetService, setEditPatches: (p) => { editPatches = p; } };
+  return { orchestrator, snapshotStore, journeyDrives, knowledgeFacts, assetService, setEditPatches: (p) => { editPatches = p; },
+    failJourneys: (ids) => { failJourneys = new Set(ids); } };
 }
 
 test("WP10/C3 — an edit re-drives the touched journey and every zero-owner journey", async () => {
@@ -200,8 +202,10 @@ test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", a
   const build = await h.orchestrator.runBuild({ owner: "o", projectId: "p1", request: "booking site" });
   const before = await h.snapshotStore.pointer("o", "p1", "green");
 
-  // An edit that vandalises the ESSENTIAL journey's outcome text: the gate's expectation
-  // check fails it deterministically, twice → stop rule → blocked.
+  // An edit that vandalises the ESSENTIAL journey's outcome. The browser — not a lexical
+  // pre-compile proxy — is what fails it, which is the whole point of the correction: the
+  // edit RUNS, its behaviour is verified, and only then is it refused promotion.
+  h.failJourneys(["book-a-visit"]);
   h.setEditPatches([{
     file: "src/routes/BookPage.jsx",
     ops: [{ op: "replace_symbol", symbol: "BookPage",

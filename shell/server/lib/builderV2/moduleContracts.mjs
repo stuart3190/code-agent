@@ -6,8 +6,9 @@
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
 import {
-  aggregateCapabilityFacts, lintCapabilityUsage, lintRequiredCapabilityBindings, lintRequiredModulePlan,
+  aggregateCapabilityFacts, lintCapabilitySafety, lintRequiredCapabilityBindings, lintRequiredModulePlan,
 } from "./capabilityLint.mjs";
+import { partitionFindings } from "./validationSeverity.mjs";
 import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 
@@ -123,10 +124,13 @@ export function buildModuleGenerationContracts({
 export function moduleGenerationContractsBrief(moduleContracts) {
   if (!(moduleContracts?.specifications || []).length) return "PER-MODULE GENERATION CONTRACTS: none for this scope.";
   return [
-    "PER-MODULE GENERATION CONTRACTS (machine-enforced; emit structured patches inside these boundaries):",
+    "PER-MODULE GENERATION CONTRACTS (the intended responsibilities for this build):",
     JSON.stringify(moduleContracts, null, 2),
-    "A required method marked invoked must be called from its capability provenance, not merely imported or bound.",
-    "Capability-owned operations may not be reimplemented through a lower-level persistence API.",
+    "ENFORCED: capability-owned operations may not be reimplemented through a lower-level persistence API,",
+    "and contracted durable state may not live in browser or process-local storage. These are checked before compilation.",
+    "GUIDANCE: module paths, where a capability is instantiated, and how a required method is reached",
+    "(called directly or passed as a reference, e.g. useSyncExternalStore) are yours to decide — the browser",
+    "journeys decide whether the result is correct.",
     "Semantic controls may use any standards-compliant accessible HTML/ARIA shape; visual design is unrestricted.",
   ].join("\n");
 }
@@ -234,31 +238,35 @@ export function validateModuleConformance(tree, {
         journeys: spec.ownedJourneys, message: `${spec.path} must export ${requiredExport}` });
       else report.satisfiedFacts.push(`export:${requiredExport}`);
     }
+    // Capability facts are read PROJECT-WIDE, not per module.
+    //
+    // Requiring the declaring module to also invoke every method ("invocation locality") had no
+    // correctness meaning: a clean `src/data/wizard.js` that instantiates the machine and exports
+    // it failed seven checks, and the only passing shape was a hand-written pass-through wrapper
+    // per method. Where a capability is instantiated is architecture preference — recorded as
+    // placement advice, never a defect.
     for (const required of spec.requiredCapabilities) {
       const facts = provenance.get(required.factory);
       const instances = (facts?.instances || []).filter((row) => row.module === spec.path);
       if (!instances.length) {
-        add({ code: "required_factory_missing", module: spec.path, factory: required.factory,
-          journeys: spec.ownedJourneys, message: `${spec.path} must instantiate ${required.factory}(...)` });
+        add({ code: "module_factory_placement", module: spec.path, factory: required.factory,
+          journeys: spec.ownedJourneys,
+          placedIn: [...new Set((facts?.instances || []).map((row) => row.module))],
+          message: `${spec.path} was planned to instantiate ${required.factory}(...)`
+            + `${(facts?.instances || []).length ? ` (found in ${[...new Set((facts.instances).map((row) => row.module))].join(", ")})` : ""}` });
         continue;
       }
       report.satisfiedFacts.push(`factory:${required.factory}`);
       for (const method of required.methods || []) {
-        const bound = (facts?.bindings || []).some((row) => row.module === spec.path && row.method === method.method);
-        const invoked = (facts?.invocations || []).some((row) => row.module === spec.path && row.method === method.method);
-        if (!bound) add({ code: "required_method_unbound", module: spec.path, factory: required.factory,
-          method: method.method, journeys: method.reachableFromJourneys,
-          message: `${spec.path} must bind ${required.factory}.${method.method}` });
-        else report.satisfiedFacts.push(`bound:${required.factory}.${method.method}`);
-        if (method.invoked && !invoked) add({ code: "required_method_uninvoked", module: spec.path,
-          factory: required.factory, method: method.method, journeys: method.reachableFromJourneys,
-          message: `${spec.path} binds ${required.factory}.${method.method} but never invokes it` });
-        else if (method.invoked && invoked) report.satisfiedFacts.push(`invoked:${required.factory}.${method.method}`);
+        if (facts?.bound?.has(method.method)) report.satisfiedFacts.push(`bound:${required.factory}.${method.method}`);
+        if (method.invoked && facts?.used?.has(method.method)) {
+          report.satisfiedFacts.push(`invoked:${required.factory}.${method.method}`);
+        }
         if (method.exported) {
           const exported = new RegExp(`\\bexport\\s+(?:const|function|class|\\{)[\\s\\S]{0,240}\\b${method.method}\\b`).test(source);
           if (!exported) add({ code: "required_method_unexported", module: spec.path, factory: required.factory,
             method: method.method, journeys: method.reachableFromJourneys,
-            message: `${spec.path} must export the contracted ${method.method} operation` });
+            message: `${spec.path} was planned to export the contracted ${method.method} operation` });
           else report.satisfiedFacts.push(`exported:${required.factory}.${method.method}`);
         }
       }
@@ -319,13 +327,11 @@ export function validateModuleConformance(tree, {
     if (!duplicate) add({ ...issue, module, message: issue.message });
   }
 
-  const usage = lintCapabilityUsage(tree);
-  for (const problem of usage.problems || []) {
-    const module = [...reports.keys()].find((path) => String(problem).startsWith(`${path}:`)) || null;
-    if (!findings.some((finding) => finding.code === "capability_owner_bypassed" && finding.module === module)
-      && !/direct write to a capability-owned entity/.test(problem)) {
-      add({ code: "capability_usage_violation", module, message: problem });
-    }
+  // One capability authority: safety findings now arrive already structured and AST-derived.
+  for (const issue of lintCapabilitySafety(tree, bindings).findings || []) {
+    if (findings.some((finding) => finding.code === "capability_owner_bypassed" && finding.module === issue.module)
+      && issue.code === "sessionless_mutation") continue; // ownership already names the exact fix
+    add(issue);
   }
 
   const interactions = lintInteractiveWorkflow(tree, { interactionContract, modulePlan, bindings });
@@ -366,20 +372,26 @@ export function validateModuleConformance(tree, {
     report.forbiddenFacts = unique(report.forbiddenFacts).sort();
     report.dependentJourneys = unique(report.dependentJourneys).sort();
   }
-  const offendingModules = unique(findings.map((finding) => finding.module)).sort();
-  const unmapped = findings.some((finding) => !finding.module);
+  // Severity decides what stops a build. Only BLOCKING findings can scope a correction or
+  // demand regeneration; advisory findings ride along as evidence.
+  const { blocking, advisory } = partitionFindings(findings);
+  const offendingModules = unique(blocking.map((finding) => finding.module)).sort();
+  const unmapped = blocking.some((finding) => !finding.module);
   const narrowLimit = Math.max(2, Math.ceil((contracts.specifications || []).length / 2));
   const narrow = offendingModules.length > 0 && offendingModules.length <= narrowLimit && !unmapped;
   return {
-    ok: findings.length === 0,
+    ok: blocking.length === 0,
     version: 1,
     modules: [...reports.values()].sort((a, b) => a.path.localeCompare(b.path)),
     findings,
-    problems: findings.map((finding) => JSON.stringify(finding)),
+    blocking,
+    advisory,
+    problems: blocking.map((finding) => JSON.stringify(finding)),
+    advisoryProblems: advisory.map((finding) => JSON.stringify(finding)),
     correction: {
       kind: narrow ? "module_scoped" : "whole_core",
       modules: offendingModules,
-      wholeCoreRequired: !narrow,
+      wholeCoreRequired: blocking.length > 0 && !narrow,
     },
   };
 }
@@ -387,9 +399,10 @@ export function validateModuleConformance(tree, {
 export function moduleCorrectionScope(report, moduleContracts) {
   const allowedFiles = unique(report?.correction?.modules).sort();
   const selected = (moduleContracts?.specifications || []).filter((spec) => allowedFiles.includes(spec.path));
+  const blocking = report?.blocking || report?.findings || [];
   const factories = unique([
     ...selected.flatMap((spec) => spec.requiredCapabilities.map((row) => row.factory)),
-    ...(report?.findings || []).filter((finding) => allowedFiles.includes(finding.module)).map((finding) => finding.expectedOwner),
+    ...blocking.filter((finding) => allowedFiles.includes(finding.module)).map((finding) => finding.expectedOwner),
   ]);
   const capabilityPaths = unique(factories.map((factory) => CAPABILITIES[FACTORY_TO_CAPABILITY.get(factory)]?.package));
   return {
@@ -398,7 +411,7 @@ export function moduleCorrectionScope(report, moduleContracts) {
     allowedFiles,
     adapterInterfaces: allowedFiles.filter((path) => /\/data\//.test(path)),
     capabilityPaths,
-    findings: report.findings,
+    findings: blocking,
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
     instruction: "Correct only the validator-named modules so they satisfy their per-module generation contracts. Preserve every conforming module, the module plan, and visual design; do not regenerate the application.",
   };

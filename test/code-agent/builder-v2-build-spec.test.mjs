@@ -1,0 +1,139 @@
+// The canonical derived build specification.
+//
+// One contract used to be re-interpreted independently by the orchestrator, the interaction
+// contract, the persistence plan and the prompt builder — four regex passes over the same
+// model-written prose, free to drift from one another. This proves there is now one derivation,
+// computed once and projected downward.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { deriveBuildSpec, scopeBuildSpec, buildSpecSummary } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { deriveModulePlan, journeyStepKinds } from "../../shell/server/lib/builderV2/contractTiering.mjs";
+import { validateInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
+
+const CONTRACT = {
+  summary: "A workshop booking system with review, recovery and cancellation",
+  entities: [{ name: "booking", fields: [{ name: "date" }, { name: "slot" }, { name: "email" }] }],
+  operations: [{ id: "create-booking", entity: "booking", action: "create" }],
+  routes: [{ path: "/", name: "Booking" }, { path: "/manage", name: "Manage" }],
+  auth: { required: false },
+  journeys: [
+    { id: "book", title: "Complete a booking", priority: "primary", steps: [
+      { action: "select a date", target: "date", expect: "date becomes active" },
+      { action: "select a slot", target: "slot", expect: "slot becomes active" },
+      { action: "enter your email", target: "email", expect: "email accepted" },
+      { action: "review the booking", target: "review", expect: "review shows the values" },
+      { action: "confirm booking", target: "confirm", expect: "booking reference" },
+      { action: "cancel booking", target: "cancel", expect: "cancelled status" },
+    ] },
+    { id: "newsletter", title: "Join the newsletter", priority: "secondary", steps: [
+      { action: "submit the newsletter form", expect: "subscribed confirmation" },
+    ] },
+  ],
+};
+
+test("one derivation produces every downstream view of the contract", () => {
+  const spec = deriveBuildSpec(CONTRACT);
+  for (const key of ["tiers", "bindings", "modulePlan", "interactionContract", "moduleContracts",
+    "persistencePlan", "imageIntents", "verdict"]) {
+    assert.ok(spec[key], `the spec carries ${key}`);
+  }
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems?.join("; "));
+  // The contract handed downward already carries its interaction contract, so no consumer has
+  // to rebuild one — which is how the two used to diverge.
+  assert.equal(spec.contract.interactionContract, spec.interactionContract);
+});
+
+test("deriving twice is identical — the derivation has no hidden state", () => {
+  const a = buildSpecSummary(deriveBuildSpec(CONTRACT));
+  const b = buildSpecSummary(deriveBuildSpec(CONTRACT));
+  assert.deepEqual(a, b);
+});
+
+test("every view agrees about ownership: module plan, interactions and persistence", () => {
+  const spec = deriveBuildSpec(CONTRACT);
+  const plannedPaths = new Set(spec.modulePlan.map((module) => module.path));
+
+  // Interaction ownership only ever names modules the plan actually contains.
+  for (const flow of spec.interactionContract.flows) {
+    for (const owner of flow.responsibleModules || []) {
+      assert.ok(plannedPaths.has(owner), `${flow.id} owner ${owner} is not in the module plan`);
+    }
+  }
+  // Persistence ownership names the same adapters, by the same paths.
+  for (const module of spec.persistencePlan.modules) {
+    assert.ok(plannedPaths.has(module.path), `${module.path} is not in the module plan`);
+  }
+  // Per-module contracts are generated for exactly the planned modules.
+  assert.deepEqual(
+    spec.moduleContracts.specifications.map((row) => row.path).sort(),
+    [...plannedPaths].sort(),
+  );
+});
+
+test("scoping an increment narrows the same object rather than recomputing it", () => {
+  const spec = deriveBuildSpec(CONTRACT);
+  const essential = CONTRACT.journeys.filter((journey) => journey.priority === "primary");
+  const scoped = scopeBuildSpec(spec, essential);
+
+  assert.deepEqual(scoped.scopedJourneyIds, ["book"]);
+  assert.equal(scoped.contract, spec.contract, "the contract identity is preserved");
+  assert.ok(scoped.interactionContract.flows.every((flow) => flow.journeyId === "book"));
+  assert.ok(scoped.interactionContract.flows.length < spec.interactionContract.flows.length
+    || spec.interactionContract.flows.every((flow) => flow.journeyId === "book"));
+  // Every scoped view stays mutually consistent.
+  const scopedPaths = new Set(scoped.modulePlan.map((module) => module.path));
+  assert.deepEqual(scoped.moduleContracts.specifications.map((row) => row.path).sort(), [...scopedPaths].sort());
+});
+
+test("the module plan derives its vocabulary from the contract, never from a domain", () => {
+  const inventory = {
+    summary: "An inventory system for stock levels",
+    entities: [{ name: "stockItem", fields: [{ name: "sku" }, { name: "quantity" }] }],
+    operations: [{ id: "adjust-stock", entity: "stockItem", action: "update" }],
+    routes: [{ path: "/", name: "Stock" }], auth: { required: false },
+    journeys: [{ id: "adjust-stock", title: "Adjust stock", priority: "primary", steps: [
+      { action: "select an item", target: "sku", expect: "item becomes active" },
+      { action: "enter the new quantity", target: "quantity", expect: "quantity accepted" },
+      { action: "review the adjustment", target: "review", expect: "review shows the quantity" },
+      { action: "create the adjustment", target: "create", expect: "adjustment reference" },
+    ] }],
+  };
+  const plan = deriveModulePlan(inventory, inventory.journeys);
+  assert.ok(plan.length, "an inventory workflow earns a module plan too");
+  assert.equal(plan.some((module) => /booking|reservation|wizard/i.test(module.path)), false,
+    `no foreign domain vocabulary: ${plan.map((m) => m.path).join(", ")}`);
+  assert.ok(plan.some((module) => module.path === "src/components/adjust-stock/AdjustStockFlow.jsx"));
+  assert.ok(plan.some((module) => module.path === "src/data/crud.js"));
+});
+
+test("step kinds are read once and shared by the plan and the interaction contract", () => {
+  assert.deepEqual(journeyStepKinds(CONTRACT.journeys[0]),
+    ["selection", "input", "review", "mutation", "cancellation"]);
+  const spec = deriveBuildSpec(CONTRACT);
+  const flowKinds = new Set(spec.interactionContract.flows
+    .filter((flow) => flow.journeyId === "book").map((flow) => flow.kind));
+  for (const kind of journeyStepKinds(CONTRACT.journeys[0])) {
+    assert.ok(flowKinds.has(kind), `the interaction contract agrees about ${kind}`);
+  }
+});
+
+test("a structurally impossible data flow is still refused before generation", () => {
+  // The pre-generation guard is unchanged by this correction: an interaction graph that cannot
+  // be implemented is still rejected before a single token is spent.
+  const broken = validateInteractionContract({ version: 1, flows: [
+    { id: "x:1:review", journeyId: "x", kind: "review", stateOwner: "src/x.jsx", reads: [], writes: [] },
+    { id: "x:2:mutation", journeyId: "x", kind: "mutation", stateOwner: "src/x.jsx", reads: [], writes: ["x.durable.record"] },
+    { id: "x:3:cancellation", journeyId: "x", kind: "cancellation", stateOwner: "src/x.jsx",
+      capability: null, reads: ["x.durable.record"], writes: ["x.durable.status"] },
+  ] });
+  assert.equal(broken.ok, false);
+  const problems = broken.problems.join("; ");
+  assert.match(problems, /review has no source values/);
+  assert.match(problems, /mutation consumes no contracted input state/);
+  assert.match(problems, /cancellation has no durable operation owner/);
+
+  // And a well-formed contract passes it.
+  assert.equal(deriveBuildSpec(CONTRACT).verdict.ok, true);
+});

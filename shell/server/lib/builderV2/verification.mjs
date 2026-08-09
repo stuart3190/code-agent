@@ -99,7 +99,9 @@ export function attributeFailures(journeyResults, graph, contract) {
  * Parity with direct runStageGate calls is asserted by test — the facade may never drift.
  */
 export async function verifyStage(tree, options = {}) {
-  const gate = await runStageGate(tree, options);
+  // Builder V2 runs the expectation-copy check as advisory: the browser verifier drives the
+  // real page and is the authority on whether an outcome appeared. See validationSeverity.mjs.
+  const gate = await runStageGate(tree, { expectationsAdvisory: true, ...options });
   // A repair round can only fix what its brief names: "the project does not compile" with
   // no compiler output sent a live booking build into blind guessing until the stop rule.
   // The stderr excerpt rides WITH the problem so the next round sees file, line and error.
@@ -111,6 +113,7 @@ export async function verifyStage(tree, options = {}) {
   return {
     ok: gate.ok,
     layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems } },
+    advisory: gate.advisory || [],
     tree: gate.tree,
     deterministicRepair: gate.deterministicRepair || null,
   };

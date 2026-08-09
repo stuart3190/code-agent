@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { bindCapabilities, bookingModulePlan, tierContract } from "../../shell/server/lib/builderV2/contractTiering.mjs";
+import { bindCapabilities, deriveModulePlan, tierContract } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { buildInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import {
   buildModuleGenerationContracts, moduleCorrectionScope, moduleGenerationContractsBrief,
@@ -9,6 +9,7 @@ import {
 } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { createOrchestrator } from "../../shell/server/lib/builderV2/orchestrator.mjs";
+import { SEVERITY } from "../../shell/server/lib/builderV2/validationSeverity.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { buildTree, ensureDeps } from "../../harness/workspace.mjs";
@@ -37,7 +38,7 @@ const BOOKING = {
   ] }],
 };
 
-const PLAN = bookingModulePlan(BOOKING, BOOKING.journeys);
+const PLAN = deriveModulePlan(BOOKING, BOOKING.journeys);
 const BINDINGS = bindCapabilities(BOOKING);
 const INTERACTIONS = buildInteractionContract(BOOKING, { modulePlan: PLAN, bindings: BINDINGS });
 const CONTRACTS = buildModuleGenerationContracts({
@@ -45,16 +46,16 @@ const CONTRACTS = buildModuleGenerationContracts({
 });
 
 const CORRECT = {
-  "src/data/bookingSystem.js": `import { makeBookingSystem } from "../lib/capabilities/booking";
+  "src/data/booking.js": `import { makeBookingSystem } from "../lib/capabilities/booking";
 const booking = makeBookingSystem({ entity: "booking" });
 export const createBooking = (draft) => booking.createBooking(draft);
 export const getBooking = (id) => booking.getBooking(id);
 export const cancelBooking = (id) => booking.cancelBooking(id);`,
-  "src/data/bookingWizard.js": `import { makeWizardMachine } from "../lib/capabilities/wizard";
+  "src/data/wizard.js": `import { makeWizardMachine } from "../lib/capabilities/wizard";
 const wizard = makeWizardMachine({ id: "book", steps: ["date","slot","party","contact","review","confirm"] });
 wizard.getState(); wizard.subscribe(() => {}); wizard.restore(); wizard.select("date", "2026-08-12");
 wizard.next(); wizard.confirm(); wizard.cancel(); export { wizard };`,
-  "src/components/booking/BookingFlow.jsx": `export function BookingFlow({ draft, setDraft, confirm, cancel }) { return <main>
+  "src/components/book/BookFlow.jsx": `export function BookingFlow({ draft, setDraft, confirm, cancel }) { return <main>
 <button aria-label="date" aria-pressed={Boolean(draft.date)} onClick={() => setDraft({...draft,date:"2026-08-12"})}>Date</button>
 <button aria-label="slot" aria-pressed={Boolean(draft.slot)} onClick={() => setDraft({...draft,slot:"10:00"})}>Slot</button>
 <button aria-label="party size" aria-pressed={draft.partySize === 2} onClick={() => setDraft({...draft,partySize:2})}>Party</button>
@@ -63,9 +64,9 @@ wizard.next(); wizard.confirm(); wizard.cancel(); export { wizard };`,
 <label>Phone<input type="tel" name="phone" aria-label="phone" value={draft.phone} onChange={(e)=>setDraft({...draft,phone:e.target.value})}/></label>
 <button aria-label="confirm booking" onClick={confirm}>Confirm booking</button><button aria-label="cancel booking" onClick={cancel}>Cancel booking</button>
 </main> }`,
-  "src/components/booking/BookingReview.jsx": `export function BookingReview({draft}) { return <p>{draft.date} {draft.slot} {draft.partySize} {draft.name} {draft.email} {draft.phone}</p> }`,
-  "src/components/booking/BookingConfirmation.jsx": `export function BookingConfirmation({booking}) { return <p>Booking reference {booking.reference}</p> }`,
-  "src/components/booking/BookingStatus.jsx": `export function BookingStatus({booking,onLookup}) { return <section><button aria-label="booking status" onClick={onLookup}>Look up booking</button><p>{booking.reference} {booking.status}</p></section> }`,
+  "src/components/book/BookReview.jsx": `export function BookingReview({draft}) { return <p>{draft.date} {draft.slot} {draft.partySize} {draft.name} {draft.email} {draft.phone}</p> }`,
+  "src/components/book/BookConfirmation.jsx": `export function BookingConfirmation({booking}) { return <p>Booking reference {booking.reference}</p> }`,
+  "src/components/book/BookStatus.jsx": `export function BookingStatus({booking,onLookup}) { return <section><button aria-label="booking status" onClick={onLookup}>Look up booking</button><p>{booking.reference} {booking.status}</p></section> }`,
 };
 
 const verdict = (tree) => validateModuleConformance(tree, {
@@ -73,8 +74,8 @@ const verdict = (tree) => validateModuleConformance(tree, {
 });
 
 test("per-module generation specifications carry capability, identity, ownership, flow and size facts", () => {
-  const flow = CONTRACTS.specifications.find((row) => row.path.endsWith("BookingFlow.jsx"));
-  const booking = CONTRACTS.specifications.find((row) => row.path.endsWith("bookingSystem.js"));
+  const flow = CONTRACTS.specifications.find((row) => row.path.endsWith("BookFlow.jsx"));
+  const booking = CONTRACTS.specifications.find((row) => row.path.endsWith("booking.js"));
   assert.ok(flow.semanticInteractions.some((row) => row.logicalField === "date"));
   assert.ok(flow.semanticInteractions.some((row) => row.logicalField === "email"));
   assert.ok(flow.downstream.produces.some((path) => path.endsWith("date")));
@@ -89,45 +90,52 @@ test("per-module generation specifications carry capability, identity, ownership
   assert.match(prompt, /"forbiddenCapabilityBypasses"/);
 });
 
-test("retained candidate A: bound but unused cancel selects only the wizard adapter", () => {
-  const tree = { ...CORRECT, "src/data/bookingWizard.js": CORRECT["src/data/bookingWizard.js"].replace("wizard.cancel();", "const cancel = wizard.cancel;") };
+test("retained candidate A: a capability method held as a reference is ADVISORY, not a rejection", () => {
+  // `const cancel = wizard.cancel;` hands the method to a consumer. That is legitimate usage —
+  // the same shape React's own store contract requires — so it must never fail a candidate.
+  const tree = { ...CORRECT, "src/data/wizard.js": CORRECT["src/data/wizard.js"].replace("wizard.cancel();", "const cancel = wizard.cancel; void cancel;") };
   const result = verdict(tree);
-  const issue = result.findings.find((row) => row.code === "required_method_uninvoked" && row.method === "cancel");
-  assert.equal(issue.module, "src/data/bookingWizard.js");
-  assert.deepEqual(result.correction.modules, ["src/data/bookingWizard.js"]);
-  assert.equal(result.correction.wholeCoreRequired, false);
+  assert.equal(result.ok, true, result.problems.join("\n"));
+  assert.equal(result.blocking.length, 0);
+
+  // Bound and then genuinely dropped on the floor is still reported — as advice.
+  const unused = { ...CORRECT, "src/data/wizard.js": CORRECT["src/data/wizard.js"].replace("wizard.cancel();", "") };
+  const unusedResult = verdict(unused);
+  assert.equal(unusedResult.ok, true, "shape findings never block a runnable candidate");
+  assert.ok(unusedResult.advisory.some((row) => ["required_method_unbound", "required_method_uninvoked"].includes(row.code)));
+  assert.ok(unusedResult.advisory.every((row) => row.severity === SEVERITY.ADVISORY));
 });
 
-test("retained candidate B: missing semantic selections and review date select only offending presentation modules", () => {
+test("retained candidate B: static interaction/review heuristics are ADVISORY; the browser decides", () => {
   const tree = { ...CORRECT,
-    "src/components/booking/BookingFlow.jsx": CORRECT["src/components/booking/BookingFlow.jsx"]
+    "src/components/book/BookFlow.jsx": CORRECT["src/components/book/BookFlow.jsx"]
       .replace('aria-label="date"', 'title="choose"').replace('aria-label="slot"', 'title="choose"')
       .replace('aria-label="party size"', 'title="choose"').replace(">Date</button>", ">Choose</button>")
       .replace(">Slot</button>", ">Choose</button>").replace(">Party</button>", ">Choose</button>"),
-    "src/components/booking/BookingReview.jsx": CORRECT["src/components/booking/BookingReview.jsx"].replace("{draft.date} ", ""),
+    "src/components/book/BookReview.jsx": CORRECT["src/components/book/BookReview.jsx"].replace("{draft.date} ", ""),
   };
   const result = verdict(tree);
-  assert.ok(result.findings.some((row) => row.code === "interaction_control_undriveable"));
-  assert.ok(result.findings.some((row) => row.code === "review_data_flow_missing"));
-  assert.deepEqual(result.correction.modules, [
-    "src/components/booking/BookingFlow.jsx", "src/components/booking/BookingReview.jsx",
-  ]);
+  // The findings are still produced and still visible...
+  assert.ok(result.advisory.some((row) => row.code === "interaction_control_undriveable"));
+  assert.ok(result.advisory.some((row) => row.code === "review_data_flow_missing"));
+  // ...and the candidate still runs, because only a real browser can prove driveability.
+  assert.equal(result.ok, true, result.problems.join("\n"));
   assert.equal(result.correction.wholeCoreRequired, false);
 });
 
 test("retained candidate C: raw owned-entity persistence emits capability_owner_bypassed with span", () => {
   const tree = { ...CORRECT,
-    "src/data/bookingSystem.js": `${CORRECT["src/data/bookingSystem.js"]}\nexport const bypass = (db, row) => db.entity("booking").create(row);`,
+    "src/data/booking.js": `${CORRECT["src/data/booking.js"]}\nexport const bypass = (db, row) => db.entity("booking").create(row);`,
   };
   const result = verdict(tree);
   const issue = result.findings.find((row) => row.code === "capability_owner_bypassed");
-  assert.equal(issue.module, "src/data/bookingSystem.js");
+  assert.equal(issue.module, "src/data/booking.js");
   assert.equal(issue.expectedOwner, "makeBookingSystem");
   assert.equal(issue.operation, "createBooking");
   assert.equal(issue.actualApi, 'db.entity("booking").create(...)');
   assert.ok(issue.line > 0);
   assert.ok(issue.span.end > issue.span.start);
-  assert.deepEqual(result.correction.modules, ["src/data/bookingSystem.js"]);
+  assert.deepEqual(result.correction.modules, ["src/data/booking.js"]);
 
   const extraHelper = verdict({ ...CORRECT,
     "src/data/bookingShortcut.js": `export const save = (db, row) => db.entity("booking").create(row);`,
@@ -147,12 +155,12 @@ test("corrected retained booking candidate passes a real Vite compilation", asyn
   await ensureDeps(() => {});
   const tree = { ...fromScaffold(REACT_VITE), ...CORRECT,
     "src/App.jsx": `import { useState } from "react";
-import { BookingFlow } from "./components/booking/BookingFlow";
-import { BookingReview } from "./components/booking/BookingReview";
-import { BookingConfirmation } from "./components/booking/BookingConfirmation";
-import { BookingStatus } from "./components/booking/BookingStatus";
-import * as bookingSystem from "./data/bookingSystem";
-import { wizard } from "./data/bookingWizard";
+import { BookingFlow } from "./components/book/BookFlow";
+import { BookingReview } from "./components/book/BookReview";
+import { BookingConfirmation } from "./components/book/BookConfirmation";
+import { BookingStatus } from "./components/book/BookStatus";
+import * as bookingSystem from "./data/booking";
+import { wizard } from "./data/wizard";
 export default function App(){ const [draft,setDraft]=useState({date:"",slot:"",partySize:1,name:"",email:"",phone:""});
 const booking={reference:"BK-1",status:"confirmed"}; void bookingSystem; void wizard;
 return <><BookingFlow draft={draft} setDraft={setDraft} confirm={()=>{}} cancel={()=>{}}/><BookingReview draft={draft}/><BookingConfirmation booking={booking}/><BookingStatus booking={booking} onLookup={()=>{}}/></> }`,
@@ -199,50 +207,57 @@ test("generic contact, CRUD admin, checkout/order and account/settings contracts
     const result = validateModuleConformance(fixture.tree, fixture);
     assert.equal(result.ok, true, result.problems.join("\n"));
     const firstMethod = fixture.bindings[0].requiredMethods[0];
+    // Genuinely never reached: not called, and not handed to anything either. (Merely holding
+    // the reference — `store.create && (…)` — IS use, and is covered separately.)
     const uninvoked = { ...fixture.tree, [fixture.modulePlan[0].path]: fixture.tree[fixture.modulePlan[0].path]
-      .replace(`store.${firstMethod}(`, `store.${firstMethod} && (`) };
-    assert.ok(validateModuleConformance(uninvoked, fixture).findings
+      .replace(new RegExp(`store\\.${firstMethod}\\([^)]*\\);`), "") };
+    // Shape differences are OBSERVED across every domain, and none of them blocks.
+    assert.ok(validateModuleConformance(uninvoked, fixture).advisory
       .some((row) => ["required_method_unbound", "required_method_uninvoked"].includes(row.code)));
+    assert.equal(validateModuleConformance(uninvoked, fixture).ok, true);
     const identityMissing = { ...fixture.tree, [fixture.modulePlan[1].path]: `export function Form({draft,setDraft}) { return <div><input value={draft.x} onChange={(e)=>setDraft({...draft,x:e.target.value})}/></div> }` };
-    assert.ok(validateModuleConformance(identityMissing, fixture).findings.some((row) => row.code === "interaction_control_undriveable"));
+    assert.ok(validateModuleConformance(identityMissing, fixture).advisory.some((row) => row.code === "interaction_control_undriveable"));
+    assert.equal(validateModuleConformance(identityMissing, fixture).ok, true);
     const reviewMissing = { ...fixture.tree, [fixture.modulePlan[2].path]: "export function Review(){return <p>Review</p>}" };
-    assert.ok(validateModuleConformance(reviewMissing, fixture).findings.some((row) => row.code === "review_data_flow_missing"));
+    assert.ok(validateModuleConformance(reviewMissing, fixture).advisory.some((row) => row.code === "review_data_flow_missing"));
+
+    // Honesty still blocks, in every domain: a raw write to a capability-owned entity bypasses
+    // session and validation, and no amount of running the app makes that acceptable.
     const bypassTree = { ...fixture.tree, [fixture.modulePlan[0].path]: `${fixture.tree[fixture.modulePlan[0].path]}\ndb.entity(${JSON.stringify(fixture.contract.entities[0].name)}).create({});` };
-    assert.ok(validateModuleConformance(bypassTree, fixture).findings.some((row) => row.code === "capability_owner_bypassed"));
+    const bypass = validateModuleConformance(bypassTree, fixture);
+    assert.equal(bypass.ok, false, "capability ownership must remain blocking");
+    assert.ok(bypass.blocking.some((row) => row.code === "capability_owner_bypassed"));
   }
 });
 
-test("module-scoped correction prompt and patch boundary retain conforming modules", () => {
-  const failed = verdict({ ...CORRECT, "src/data/bookingWizard.js": CORRECT["src/data/bookingWizard.js"].replace("wizard.cancel();", "const cancel = wizard.cancel;") });
+test("a BLOCKING finding scopes a correction to the offending module and retains the rest", () => {
+  // Scoped correction is now driven by findings that genuinely block — here a raw write to a
+  // capability-owned entity, which no amount of running the app makes acceptable.
+  const failed = verdict({ ...CORRECT,
+    "src/data/booking.js": `${CORRECT["src/data/booking.js"]}\nexport const bypass = (db, row) => db.entity("booking").create(row);` });
+  assert.equal(failed.ok, false);
   const scope = moduleCorrectionScope(failed, CONTRACTS);
-  assert.deepEqual(scope.allowedFiles, ["src/data/bookingWizard.js"]);
-  assert.equal(validateModulePatchScope([{ replaceFile: "src/data/bookingWizard.js", content: "x" }], scope).ok, true);
+  assert.deepEqual(scope.allowedFiles, ["src/data/booking.js"]);
+  assert.equal(validateModulePatchScope([{ replaceFile: "src/data/booking.js", content: "x" }], scope).ok, true);
   assert.equal(validateModulePatchScope([{ replaceFile: "src/App.jsx", content: "x" }], scope).ok, false);
-  const prompt = renderPatchPrompt({ step: "core", contract: { ...BOOKING, interactionContract: INTERACTIONS },
+  const prompt = renderPatchPrompt({ step: "correction", contract: { ...BOOKING, interactionContract: INTERACTIONS },
     tiers: tierContract(BOOKING), tree: { ...CORRECT }, modulePlan: PLAN, moduleContracts: CONTRACTS,
     moduleCorrectionScope: scope });
   assert.match(prompt, /MODULE-SCOPED CORE CORRECTION/);
-  assert.match(prompt, /Allowed files: \[src\/data\/bookingWizard\.js\]/);
+  assert.match(prompt, /Allowed files: \[src\/data\/booking\.js\]/);
   assert.doesNotMatch(prompt, /BUILD THE WHOLE STEP/);
-
-  const missingTree = { ...CORRECT };
-  delete missingTree["src/components/booking/BookingReview.jsx"];
-  const missingScope = moduleCorrectionScope(verdict(missingTree), CONTRACTS);
-  const missingPrompt = renderPatchPrompt({ step: "core", contract: { ...BOOKING, interactionContract: INTERACTIONS },
-    tiers: tierContract(BOOKING), tree: missingTree, modulePlan: PLAN, moduleContracts: CONTRACTS,
-    moduleCorrectionScope: missingScope });
-  assert.match(missingPrompt, /REQUIRED PLANNED MODULE IS MISSING; create it with newFile/);
 });
 
 test("orchestrator corrects one offending module without replaying the whole core", async () => {
-  const first = { ...CORRECT, "src/data/bookingWizard.js": CORRECT["src/data/bookingWizard.js"].replace("wizard.cancel();", "const cancel = wizard.cancel;") };
+  const first = { ...CORRECT,
+    "src/data/booking.js": `${CORRECT["src/data/booking.js"]}\nexport const bypass = (db, row) => db.entity("booking").create(row);` };
   const calls = [];
   const orchestrator = createOrchestrator({
     contractFn: async () => BOOKING,
     patchesFn: async (input) => {
       calls.push(input);
       if (calls.length === 1) return Object.entries(first).map(([path, content]) => ({ newFile: path, content }));
-      return [{ replaceFile: "src/data/bookingWizard.js", content: CORRECT["src/data/bookingWizard.js"] }];
+      return [{ replaceFile: "src/data/booking.js", content: CORRECT["src/data/booking.js"] }];
     },
     assetService: { async resolveIntents() { return { resolved: [] }; }, async assetManifestFor() { return []; } },
     baseTree: () => fromScaffold(REACT_VITE),
@@ -254,7 +269,10 @@ test("orchestrator corrects one offending module without replaying the whole cor
   assert.equal(result.state, "green", JSON.stringify(result));
   assert.equal(calls.length, 2);
   assert.equal(calls[0].moduleCorrectionScope, null);
-  assert.deepEqual(calls[1].moduleCorrectionScope.allowedFiles, ["src/data/bookingWizard.js"]);
-  assert.equal(calls[1].step, "core");
-  assert.equal(calls[1].tree["src/components/booking/BookingFlow.jsx"], first["src/components/booking/BookingFlow.jsx"]);
+  assert.deepEqual(calls[1].moduleCorrectionScope.allowedFiles, ["src/data/booking.js"]);
+  // The correction dispatches under its own step identity, so it draws on the correction
+  // allowance and can never consume the one browser-informed repair slot.
+  assert.equal(calls[1].step, "correction");
+  assert.equal(calls[1].originalStep, "core");
+  assert.equal(calls[1].tree["src/components/book/BookFlow.jsx"], first["src/components/book/BookFlow.jsx"]);
 });

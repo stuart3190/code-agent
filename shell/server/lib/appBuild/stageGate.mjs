@@ -95,9 +95,10 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
  */
 export async function runStageGate(tree, {
   nodeModules, baseline = null, compile = null, log = () => {},
-  contract = null, stage = null, previousGreen = null,
+  contract = null, stage = null, previousGreen = null, expectationsAdvisory = false,
 } = {}) {
   const checks = [];
+  const advisory = [];
   const record = (name, ok, detail) => { checks.push({ name, ok, detail }); return ok; };
 
   // 1. imports — milliseconds, and the fault class that cost a whole build in production.
@@ -186,9 +187,19 @@ export async function runStageGate(tree, {
         }
       }
     }
-    if (!record("expectations", absent.length === 0,
-      absent.length ? `${absent.length} outcome(s) with no trace in the UI` : "all step outcomes have some trace")) {
-      return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+    // Builder V2 treats this as ADVISORY. It is a lexical proxy for something the browser tests
+    // directly and better: the verifier drives the real page and decides whether the outcome
+    // appeared. Blocking here discarded candidates whose copy simply read differently — and cost
+    // a generation attempt to do it. V1 keeps the strict behaviour it was tuned against.
+    const passed = absent.length === 0;
+    record("expectations", passed || expectationsAdvisory,
+      passed ? "all step outcomes have some trace"
+        : `${absent.length} outcome(s) with no trace in the UI${expectationsAdvisory ? " (advisory)" : ""}`);
+    if (!passed) {
+      if (!expectationsAdvisory) {
+        return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+      }
+      advisory.push(...absent.map((message) => ({ code: "expectation_copy_absent", message })));
     }
   }
 
@@ -204,7 +215,7 @@ export async function runStageGate(tree, {
     }
   }
 
-  return { ok: true, checks, tree: working, corrections, deterministicRepair, problems: [] };
+  return { ok: true, checks, tree: working, corrections, deterministicRepair, problems: [], advisory };
 }
 
 /** One line for the diagnostics step and the job log. */

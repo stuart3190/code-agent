@@ -15,6 +15,8 @@
 
 import { createRequire } from "node:module";
 
+import { semanticAliases, semanticKey } from "../builderV2/controlIdentity.mjs";
+
 const requireCjs = createRequire(import.meta.url);
 
 const STEP_TIMEOUT_MS = 15_000;
@@ -114,31 +116,22 @@ const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
 function controlAliases(control) {
-  const raw = String(control?.logicalField || control?.accessibleName || "").replace(/([a-z])([A-Z])/g, "$1 $2");
-  const aliases = [...(control?.accessibleNames || []), control?.accessibleName, control?.logicalField, raw];
-  if (/name/i.test(raw)) aliases.push("name");
-  if (/email/i.test(raw)) aliases.push("email");
-  if (/phone|telephone|mobile/i.test(raw)) aliases.push("phone", "telephone");
-  if (/date|day/i.test(raw)) aliases.push("date", "day");
-  if (/slot|time/i.test(raw)) aliases.push("slot", "time");
-  if (/party|quantity|guest|people/i.test(raw)) aliases.push("party size", "guests", "people");
-  return unique(aliases);
+  // Same vocabulary the static interaction lint uses (builderV2/controlIdentity.mjs), so the
+  // two never disagree about which control a contracted field refers to.
+  return unique([
+    ...(control?.accessibleNames || []),
+    control?.accessibleName,
+    control?.logicalField,
+    ...semanticAliases(control?.logicalField || control?.accessibleName),
+  ]);
 }
 
 function interactionFlowsFor(contract, journeyId, stepIndex, kind = null) {
   const flows = (contract?.interactionContract?.flows || []).filter((flow) => flow.journeyId === journeyId
     && flow.stepIndex === stepIndex && (!kind || flow.kind === kind));
-  const canonical = (flow) => {
-    const value = String(flow.control?.logicalField || flow.control?.accessibleName || flow.valueWritten || flow.kind)
-      .toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (/date|day/.test(value)) return `${flow.kind}:date`;
-    if (/slot|time/.test(value)) return `${flow.kind}:slot`;
-    if (/party|quantity|people|guestcount|adult|child/.test(value)) return `${flow.kind}:partySize`;
-    if (/email/.test(value)) return `${flow.kind}:email`;
-    if (/phone|telephone|mobile/.test(value)) return `${flow.kind}:phone`;
-    if (/name/.test(value)) return `${flow.kind}:name`;
-    return `${flow.kind}:${value}`;
-  };
+  const canonical = (flow) => `${flow.kind}:${semanticKey(
+    flow.control?.logicalField || flow.control?.accessibleName || flow.valueWritten || flow.kind,
+  )}`;
   const seen = new Set();
   return flows.filter((flow) => {
     const key = canonical(flow);

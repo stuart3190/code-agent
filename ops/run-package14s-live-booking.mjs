@@ -10,7 +10,7 @@ import { classifyComplexity } from "../shell/server/lib/appBuild/buildProfile.mj
 import { createDiagSession } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
 import { createJob } from "../shell/server/lib/buildJobs.mjs";
 import { awaitBuildWork } from "../shell/server/lib/buildWorkQueue.mjs";
-import { bookingModulePlan } from "../shell/server/lib/builderV2/contractTiering.mjs";
+import { deriveModulePlan } from "../shell/server/lib/builderV2/contractTiering.mjs";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { buildProjectErasureManifest, eraseProjectPermanently } from "../shell/server/lib/erasureService.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
@@ -150,7 +150,7 @@ async function collectEvidence({ owner, projectId, publicBuildId, diagId, starte
   const contract = evidence.contracts.at(-1)?.contract || null;
   evidence.derived = {
     complexity: classifyComplexity({ prompt: BOOKING_REQUEST, contract }),
-    modulePlan: contract ? bookingModulePlan(contract, contract.journeys || []) : [],
+    modulePlan: contract ? deriveModulePlan(contract, contract.journeys || []) : [],
     capabilityBindings: evidence.contracts.at(-1)?.capabilities || [],
   };
   const compileJobs = evidence.workJobs.filter((job) => job.job_type === "compile");

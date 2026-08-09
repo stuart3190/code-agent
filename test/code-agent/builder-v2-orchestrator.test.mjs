@@ -171,7 +171,12 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
   const failSet = new Set(failJourneys);
   const orchestrator = createOrchestrator({
     contractFn: async () => contract,
-    patchesFn: async (ctx) => { patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length, problems: ctx.problems }); return plan[ctx.step](ctx); },
+    patchesFn: async (ctx) => {
+      patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length, problems: ctx.problems });
+      // A pre-compile `correction` is a scoped re-emission of its originating step.
+      const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
+      return plan[stage](ctx);
+    },
     assetService,
     snapshotStore,
     buildStore,
@@ -297,18 +302,27 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
 test("WP8 — stop rule: the same defect surviving a repair round blocks instead of burning attempts", async () => {
   const { orchestrator } = harness({
     contract: {
-      summary: "deterministic stop-rule fixture", entities: [], operations: [],
-      routes: [{ path: "/", name: "Home" }], auth: { required: false },
-      journeys: [{ id: "book-a-visit", title: "Complete fixture", priority: "primary",
+      summary: "deterministic stop-rule fixture", entities: [{ name: "booking" }], operations: [],
+      routes: [{ path: "/", name: "Booking" }], auth: { required: false },
+      journeys: [{ id: "book-a-visit", title: "Complete a booking", priority: "primary",
         steps: [{ action: "complete the flow", expect: "zzqx-final-outcome" }] }],
     },
     patchPlan: {
-      // Compiles and parses, but never renders the expected outcome → the expectations
-      // gate fails identically every round.
-      core: () => [{
-        newFile: "src/routes/BookPage.jsx",
-        content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\nimport { makeBookingSystem } from \"../lib/capabilities/index.js\";\nconst booking = makeBookingSystem({ entity: \"booking\" });\n\nexport default function BookPage() {\n  return <main><h1>Placeholder</h1><button onClick={() => booking.createBooking({ date: \"2026-08-10\", slot: \"10:00\", partySize: 2 })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
-      }],
+      // Compiles and parses, but writes a capability-owned entity through the raw persistence
+      // API every round — a genuine BLOCKING defect that survives its scoped correction.
+      // (A merely cosmetic difference would no longer stop a build, and should not.)
+      // Each round differs textually (so it is never a no-op batch) but repeats the SAME
+      // blocking defect, which is exactly what the stop rule exists to catch.
+      core: ({ attempt }) => [
+        {
+          newFile: "src/data/bookings.js",
+          content: `// round ${attempt}\nimport { db } from "../lib/backend/index.js";\nimport { makeBookingSystem, ensureVisitorSession } from "../lib/capabilities/index.js";\nconst booking = makeBookingSystem({ entity: "booking" });\nexport const create = async (draft) => { await ensureVisitorSession(); return db.entity("booking").create(draft); };\nexport const viaCapability = (draft) => booking.createBooking(draft);\n`,
+        },
+        {
+          newFile: "src/routes/BookPage.jsx",
+          content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\nimport { create } from \"../data/bookings.js\";\n\nexport default function BookPage() {\n  return <main><h1>zzqx-final-outcome</h1><button onClick={() => create({ date: \"2026-08-10\" })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
+        },
+      ],
     },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
@@ -434,22 +448,33 @@ export default function BookPage() {
 }
 `,
   }];
+  const taught = [];
   const { orchestrator } = harness({
     patchPlan: {
-      core: ({ rejections }) => {
+      core: ({ rejections, problems }) => {
         round += 1;
+        taught.push(...(rejections || []).map((row) => row.reason), ...(problems || []));
         if (round === 1) return BAD_CONTACT_PATCH;
         fedBack = rejections;
         return CORE_PATCH;
+      },
+      // A blocking defect now arrives as a SCOPED correction over the retained tree: the fix is
+      // re-emitted for the one offending module rather than regenerating the whole step.
+      correction: ({ problems, moduleCorrectionScope: scope }) => {
+        taught.push(...(problems || []));
+        assert.deepEqual(scope.allowedFiles, ["src/routes/BookPage.jsx"]);
+        return [{ replaceFile: "src/routes/BookPage.jsx", content: BAD_CONTACT_PATCH[0].content.replace("contactForm.submit(", "contactForm.submitContact(") }];
       },
       "increment:newsletter-signup": () => NEWSLETTER_PATCH,
       "increment:browse-info": () => BROWSE_PATCH,
     },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
-  assert.equal(result.state, "green", "round 2 recovers with the taught interface");
-  assert.ok(fedBack?.some((r) => r.signature === "capability-usage" && /\[submitContact\]/.test(r.reason)),
-    `the rejection teaches the REAL interface: ${JSON.stringify(fedBack)}`);
+  assert.equal(result.state, "green", `the scoped correction recovers with the taught interface: ${result.error} :: ${JSON.stringify(taught)}`);
+  assert.ok(taught.some((reason) => /\[submitContact\]/.test(String(reason))),
+    `the rejection teaches the REAL interface: ${JSON.stringify(taught)}`);
+  assert.ok(taught.some((reason) => /capability_method_unknown/.test(String(reason))),
+    "a call to a method the capability does not export remains BLOCKING");
 });
 
 test("WP11/V2-20 — the repair tier: a verified browser failure earns a targeted round briefed with the evidence, then green", async () => {
