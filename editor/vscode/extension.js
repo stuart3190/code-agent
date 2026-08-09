@@ -9,6 +9,7 @@ const { ThralloClient, describeEvent, TERMINAL_STATES } = require("./lib/api.js"
 const { buildLocalIndex, queryLocalIndex, isIndexableFile } = require("./lib/localIndex.js");
 const { rewriteIndexHtml, connectHtml } = require("./lib/conversationPanel.js");
 const { createLocalWorkspaceHost } = require("./lib/localWorkspaceHost.js");
+const { createDesktopProductHost } = require("./lib/desktopProductHost.js");
 
 const TOKEN_KEY = "thrallo.apiToken";
 
@@ -19,12 +20,14 @@ let output = null;
 let treeProvider = null;
 let statusItem = null;
 let localWorkspaceHost = null;
+let desktopProductHost = null;
 
 function activate(context) {
   output = vscode.window.createOutputChannel("Thrallo");
   treeProvider = new AgentTreeProvider();
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
   localWorkspaceHost = createLocalWorkspaceHost({ vscode, context, output });
+  desktopProductHost = createDesktopProductHost({ vscode, context, output, localWorkspaceHost });
   statusItem.name = "Thrallo";
   statusItem.command = "thrallo.showOutput";
   context.subscriptions.push(
@@ -37,7 +40,7 @@ function activate(context) {
     vscode.commands.registerCommand("thrallo.runTask", (item) => runTask(item)),
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
     vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
-    vscode.commands.registerCommand("thrallo.openConversation", () => openConversation(context)),
+    ...desktopProductHost.registerCommands(),
     ...localWorkspaceHost.registerCommands(),
     vscode.languages.registerInlineCompletionItemProvider(
       { pattern: "**" },
@@ -49,10 +52,10 @@ function activate(context) {
     output.appendLine(`[local] Local workspace recovery unavailable: ${String(error?.message || error).slice(0, 240)}`);
   });
 
-  // Thrallo Desktop (Phase 23): the conversation surface is the primary view of the fork —
-  // it opens itself on startup. In stock VS Code the panel stays behind its command.
+  // D9 foundation: Thrallo Desktop opens on a native fixture-backed home. The copied
+  // full-site bundle remains legacy evidence only and is no longer the primary path.
   if (/thrallo/i.test(vscode.env.appName || "")) {
-    setTimeout(() => { openConversation(context).catch(() => {}); }, 400);
+    setTimeout(() => { desktopProductHost.open("home").catch((error) => output.appendLine(`[desktop] Home unavailable: ${String(error?.message || error).slice(0, 240)}`)); }, 400);
   }
 }
 

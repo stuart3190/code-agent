@@ -42,6 +42,29 @@ function createLocalWorkspaceHost({ vscode, context, output, now = () => new Dat
     return workspace;
   }
 
+  async function openLocalGitRepository() {
+    const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: "Open Local Git Repository", title: "Choose an existing local Git repository" });
+    if (!selected?.[0]) return null;
+    const inspected = await inspectLocalWorkspace(selected[0].fsPath);
+    if (!inspected.git?.detected) {
+      vscode.window.showWarningMessage("That folder is not an existing Git repository. Thrallo did not initialize or modify it.");
+      return Object.freeze({ ok: false, code: "git_repository_not_detected", state: "capability_unavailable", sideEffects: false });
+    }
+    const workspace = await registry.open(inspected.realPath, { mode: "local_git_repository", restoreOnStartup: true });
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(workspace.realPath), false);
+    return workspace;
+  }
+
+  async function openWorkspaceById(workspaceId) {
+    const recent = await registry.recent();
+    const selected = recent.find((workspace) => workspace.id === workspaceId);
+    if (!selected) return Object.freeze({ ok: false, code: "local_workspace_unknown", state: "capability_unavailable", sideEffects: false });
+    if (selected.availability !== "available") return Object.freeze({ ok: false, code: selected.availability, state: "capability_unavailable", sideEffects: false });
+    const workspace = await registry.open(selected.realPath, { mode: selected.mode, restoreOnStartup: true });
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(workspace.realPath), false);
+    return workspace;
+  }
+
   async function openRecentWorkspace() {
     const recent = await registry.recent();
     if (!recent.length) { vscode.window.showInformationMessage("No recent local Thrallo workspaces."); return null; }
@@ -170,7 +193,7 @@ function createLocalWorkspaceHost({ vscode, context, output, now = () => new Dat
 
   function log(message) { output?.appendLine?.(`[local] ${message}`); }
 
-  return Object.freeze({ initialize, openLocalFolder, openRecentWorkspace, showLocalStatus, reviewLocalImport, openLocalTerminal, startLocalPreview, onTerminalClosed, terminalStatus, associationBoundary, registerCommands, registry });
+  return Object.freeze({ initialize, openLocalFolder, openLocalGitRepository, openWorkspaceById, openRecentWorkspace, showLocalStatus, reviewLocalImport, openLocalTerminal, startLocalPreview, onTerminalClosed, terminalStatus, associationBoundary, registerCommands, registry });
 }
 
 function presentationWorkspace(workspace) {

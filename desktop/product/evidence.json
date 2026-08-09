@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "package": "D9-foundation",
+  "observedAt": "2026-08-09",
+  "classification": "fixture-backed-workbench-foundation",
+  "items": [
+    {
+      "id": "genuine-code-oss-shell",
+      "category": "code-oss-native",
+      "state": "existing-runtime-evidence",
+      "runtimeVerified": true,
+      "claim": "Thrallo remains a pinned genuine Code OSS workbench with native explorer, editor, search, SCM and terminal.",
+      "evidence": ["desktop/d0/desktop-evidence.json", "editor/vscode/extension.js"]
+    },
+    {
+      "id": "thrallo-desktop-home-and-navigation",
+      "category": "thrallo-native-fixture-ui",
+      "state": "host-adapter-and-render-verified",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "The D9 home, launcher, navigation, conversation, typed plan card, agent activity, model selector, usage and run presentation execute against deterministic providers.",
+      "evidence": ["editor/vscode/lib/desktopProduct.js", "editor/vscode/lib/desktopProductView.js", "test/desktop/d9-foundation.test.mjs", "desktop/product/smoke.mjs"]
+    },
+    {
+      "id": "d8-local-workspace-presentation",
+      "category": "thrallo-native-local-integration",
+      "state": "host-adapter-verified",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "D8 recent workspaces, framework/Git state, native folder launch, terminal and import review are coordinated from the D9 product surface without upload.",
+      "evidence": ["editor/vscode/lib/localWorkspaceHost.js", "editor/vscode/lib/desktopProductHost.js"]
+    },
+    {
+      "id": "stable-read-only-capabilities",
+      "category": "shared-provider-foundation",
+      "state": "contract-verified",
+      "runtimeVerified": false,
+      "claim": "D9 consumes D1 and D3 fixture/read contracts through the packaged shared client; it contains no live transport or default origin.",
+      "evidence": ["shared/thrallo-client", "desktop/bootstrap.mjs"]
+    },
+    {
+      "id": "builder-v2-integration",
+      "category": "future-builder-v2-integration",
+      "state": "track-b-blocked",
+      "runtimeVerified": false,
+      "claim": "Production conversations, plan decisions, agent controls, model selection, builds and canonical project association remain blocked until Track B contract freeze.",
+      "result": "capability_unavailable",
+      "evidence": ["desktop/product/TRACK-B-INTEGRATION-BOUNDARY.md"]
+    },
+    {
+      "id": "cloud-and-publishing-integration",
+      "category": "future-cloud-integration",
+      "state": "integration-pending",
+      "runtimeVerified": false,
+      "claim": "Cloud workspaces, preview, deployments, domains, database, integrations and visual editing are labelled future capabilities and are not implemented by D9."
+    }
+  ],
+  "visualVerification": {
+    "loopbackHarnessRendered": true,
+    "loopbackHttpStatus": 200,
+    "browserScreenshotVerified": false,
+    "browserBlocker": "The in-app browser controller rejected the local inspection session because sandbox policy metadata was unavailable.",
+    "actualWorkbenchRebuilt": false,
+    "workbenchBlocker": "desktop/vscode checkout, shell/web/dist, packaged Thrallo executable and dev Electron build are absent in the isolated worktree.",
+    "fallbackEvidence": ["test/desktop/d9-foundation.test.mjs", "desktop/product/smoke.mjs", "desktop/product/visual-preview.mjs"]
+  },
+  "negativeClaims": {
+    "productionMutationImplemented": false,
+    "builderV2AdapterImplemented": false,
+    "canonicalSynchronizationImplemented": false,
+    "projectUploadImplemented": false,
+    "cloudWorkspaceImplemented": false,
+    "publishingImplemented": false,
+    "productionEntitlementVerified": false
+  }
+}

@@ -66,7 +66,8 @@ export async function ensureCheckout({ log = console.log } = {}) {
 }
 
 // The overlay hash covers everything prepare() writes, so any change re-applies cleanly.
-// The builtin extension mirrors editor/vscode VERBATIM. Runs at prepare AND before every
+// The builtin extension mirrors editor/vscode VERBATIM and carries the versioned shared
+// client used by its provider-injected D9 foundation. Runs at prepare AND before every
 // dev/compile/package (the prepare marker hashes the COMMITTED tree, so uncommitted
 // extension work would otherwise never reach the builtin).
 export function syncBuiltin({ log = console.log } = {}) {
@@ -76,7 +77,13 @@ export function syncBuiltin({ log = console.log } = {}) {
     recursive: true,
     filter: (source) => !/thrallo-.*\.vsix$/.test(source) && !source.includes("node_modules"),
   });
+  const sharedClientTarget = path.join(builtinDir, "shared", "thrallo-client");
+  cpSync(path.join(REPO_ROOT, "shared", "thrallo-client"), sharedClientTarget, {
+    recursive: true,
+    filter: (source) => !source.includes("node_modules"),
+  });
   log("built-in extension copied to extensions/thrallo");
+  log("versioned shared client copied to extensions/thrallo/shared/thrallo-client");
   // The copy just wiped media/app — the web bundle must always ride along.
   syncWebApp({ log });
 }
@@ -102,6 +109,7 @@ export function overlayHash() {
     hash.update(readFileSync(path.join(DESKTOP_DIR, "assets", asset)));
   }
   hash.update(git(["rev-parse", "HEAD:editor/vscode"], REPO_ROOT));
+  hash.update(git(["rev-parse", "HEAD:shared/thrallo-client"], REPO_ROOT));
   return hash.digest("hex");
 }
 
