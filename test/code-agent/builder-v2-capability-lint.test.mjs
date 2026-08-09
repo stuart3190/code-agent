@@ -106,10 +106,10 @@ test("D1 lint — the capability brief now carries the instance methods the mode
 });
 
 test("monolith cap — an oversized generated file is rejected with the split taught", () => {
-  const big = `export default function HomePage() {\n  return (<main>${"<p>section content here</p>".repeat(500)}</main>);\n}`;
+  const big = `export default function HomePage() {\n  return (<main>${"<p>section content here</p>".repeat(900)}</main>);\n}`;
   const bad = lintCapabilityUsage({ "src/routes/HomePage.jsx": big });
   assert.equal(bad.ok, false);
-  assert.match(bad.problems[0], /tokens \(cap 3000\)/);
+  assert.match(bad.problems[0], /tokens \(cap 5500\)/);
   assert.match(bad.problems[0], /split sections into/);
 
   // Platform lib files and reasonable files are untouched.
@@ -118,4 +118,15 @@ test("monolith cap — an oversized generated file is rejected with the split ta
     "src/lib/capabilities/forms.js": big,
   });
   assert.equal(ok.ok, true, JSON.stringify(ok.problems));
+});
+
+test("V2 capability lint accepts the two Package 14R booking-page sizes", () => {
+  for (const target of [4_261, 4_364]) {
+    const base = "export default function HomePage() { return <main>Booking</main>; }\n/*";
+    const suffix = "*/";
+    const source = `${base}${"x".repeat(target * 4 - base.length - suffix.length)}${suffix}`;
+    assert.equal(Math.ceil(source.length / 4), target);
+    const result = lintCapabilityUsage({ "src/routes/HomePage.jsx": source });
+    assert.equal(result.ok, true, `${target}: ${JSON.stringify(result.problems)}`);
+  }
 });

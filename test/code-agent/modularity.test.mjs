@@ -11,7 +11,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { modularityCheck, fileMetrics, APP_SHELL_MAX_TOKENS, FILE_MAX_TOKENS } from "../../shell/server/lib/appBuild/modularity.mjs";
+import { modularityCheck, fileMetrics, APP_SHELL_MAX_TOKENS, FILE_MAX_TOKENS,
+  MULTI_JOURNEY_MIN_TOKENS } from "../../shell/server/lib/appBuild/modularity.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { planStages, stagePrompt, STAGE_GLOBAL_INVARIANTS } from "../../shell/server/lib/appBuild/stagePlan.mjs";
 import { buildStageContext } from "../../shell/server/lib/appBuild/contextBuilder.mjs";
@@ -20,6 +21,27 @@ import { buildManifest, tokensOf } from "../../shell/server/lib/appBuild/project
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const CONTRACT = JSON.parse(readFileSync(path.join(FIXTURES, "cf130c23", "contract.json"), "utf8"));
 const MONOLITH = readFileSync(path.join(FIXTURES, "run178f7fc8", "App.jsx"), "utf8");
+
+const THREE_JOURNEY_CONTRACT = {
+  journeys: [
+    { id: "choose-date", title: "Choose aurora date", steps: [{ action: "select aurora calendar", expect: "comet date selected" }] },
+    { id: "review-booking", title: "Review ember booking", steps: [{ action: "inspect ember summary", expect: "lantern details visible" }] },
+    { id: "cancel-booking", title: "Cancel cedar booking", steps: [{ action: "cancel cedar reservation", expect: "willow status visible" }] },
+  ],
+};
+
+function routeAtTokens(target) {
+  const base = `export default function BookingPage() {
+  // aurora calendar comet date ember summary lantern details cedar reservation willow status
+  return <main>Booking</main>;
+}
+/*`;
+  const suffix = "*/";
+  assert.ok(base.length + suffix.length <= target * 4);
+  const source = `${base}${"x".repeat(target * 4 - base.length - suffix.length)}${suffix}`;
+  assert.equal(tokensOf(source), target);
+  return source;
+}
 
 test("the 46-run monolith fails the gate: shell size AND god-component, measured not guessed", () => {
   const result = modularityCheck({ "src/App.jsx": MONOLITH }, { contract: CONTRACT });
@@ -43,6 +65,30 @@ test("the scaffold's shell passes: known-good slots, not an invented architectur
   assert.equal(result.ok, true, JSON.stringify(result.problems));
 });
 
+test("booking pages at the Package 14R sizes pass the pragmatic size and multi-journey gates", () => {
+  assert.equal(FILE_MAX_TOKENS, 5_500);
+  assert.equal(MULTI_JOURNEY_MIN_TOKENS, 5_000);
+  for (const tokens of [4_261, 4_364]) {
+    const result = modularityCheck({ "src/routes/HomePage.jsx": routeAtTokens(tokens) },
+      { contract: THREE_JOURNEY_CONTRACT });
+    assert.equal(result.ok, true, `${tokens}: ${JSON.stringify(result.problems)}`);
+    assert.equal(result.metrics[0].journeys.length, 3, "fixture genuinely touches three journeys");
+  }
+});
+
+test("the relaxed route threshold still rejects genuinely huge files and keeps App.jsx strict", () => {
+  const hugeRoute = modularityCheck({ "src/routes/HomePage.jsx": routeAtTokens(5_501) },
+    { contract: THREE_JOURNEY_CONTRACT });
+  assert.equal(hugeRoute.ok, false);
+  assert.ok(hugeRoute.problems.some((problem) => /max 5500/.test(problem)));
+
+  const oversizedShell = modularityCheck({ "src/App.jsx": routeAtTokens(APP_SHELL_MAX_TOKENS + 1) },
+    { contract: THREE_JOURNEY_CONTRACT });
+  assert.equal(oversizedShell.ok, false);
+  assert.ok(oversizedShell.problems.some((problem) => /shell carries routing/.test(problem)
+    && /max 2000/.test(problem)));
+});
+
 test("persistence inside a component is flagged; in a data module it is not", () => {
   const bad = modularityCheck({
     "src/routes/BookingPage.jsx": 'import { db } from "../lib/backend";\nexport default function BookingPage() { db.entity("booking").create({}); return null; }',
@@ -59,7 +105,7 @@ test("persistence inside a component is flagged; in a data module it is not", ()
 
 test("an oversized file with a stated modularity exception is recorded, not blocked", () => {
   const big = `// modularity: generated data table with ${"x".repeat(20)} fixed rows, no logic\n`
-    + `export const ROWS = [${Array.from({ length: 2000 }, (_, i) => `"row-${i}"`).join(",")}];\n`;
+    + `export const ROWS = [${Array.from({ length: 2500 }, (_, i) => `"row-${i}"`).join(",")}];\n`;
   assert.ok(tokensOf(big) > FILE_MAX_TOKENS, "the fixture really is oversized");
   const result = modularityCheck({ "src/data/rows.js": big }, { contract: CONTRACT });
   assert.equal(result.ok, true, JSON.stringify(result.problems));

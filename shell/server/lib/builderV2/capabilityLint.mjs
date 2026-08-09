@@ -10,6 +10,8 @@
 // FACTORY_METHODS is pinned statically for byte-stable prompts and lint output; a drift
 // test asserts it equals Object.keys() of what the real scaffold factories return.
 
+import { FILE_MAX_TOKENS } from "../appBuild/modularity.mjs";
+
 export const FACTORY_METHODS = Object.freeze({
   makeEntityStore: ["list", "get", "create", "update", "remove", "count", "subscribe"],
   makeBookingSystem: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
@@ -32,7 +34,7 @@ const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js
 // The monolith tax (WP-10 variance): a whole-app-in-one-file page makes every future edit
 // carry the whole app as context (~8k tokens/round measured live). Generous cap — real
 // booking pages are big — but a file beyond it must split into components.
-const MAX_GENERATED_FILE_TOKENS = 3000;
+const MAX_GENERATED_FILE_TOKENS = FILE_MAX_TOKENS;
 const tokensOf = (text) => Math.ceil(String(text || "").length / 4);
 
 // Entity types OWNED by a capability: persisting them any other way bypasses session

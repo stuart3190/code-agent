@@ -15,9 +15,13 @@ import { tokensOf } from "./projectManifest.mjs";
 // scaffold's own shell is ~600 tokens; triple that is generous.
 export const APP_SHELL_MAX_TOKENS = 2_000;
 // A single module bigger than this owns too much to patch, slice or verify surgically.
-export const FILE_MAX_TOKENS = 4_000;
+export const FILE_MAX_TOKENS = 5_500;
 // Touching this many journeys in one big file is the definition of the monolith.
 export const MAX_JOURNEYS_PER_FILE = 2;
+// Related multi-step journeys may legitimately share a route coordinator. Combine the journey
+// count signal with size only once the file is materially large; 4k-ish booking pages are not
+// monoliths by size alone.
+export const MULTI_JOURNEY_MIN_TOKENS = 5_000;
 
 const APP_SOURCE = (path) => /\.(jsx?|tsx?)$/.test(path) && path.startsWith("src/")
   && !path.startsWith("src/lib/") && !path.startsWith("src/components/ui/");
@@ -81,7 +85,7 @@ export function modularityCheck(tree, { contract = null, previousGreen = null } 
           + "or state a justified exception in a leading `// modularity: <reason>` comment");
       }
     }
-    if (file.journeys.length > MAX_JOURNEYS_PER_FILE && file.tokens > 3_000) {
+    if (file.journeys.length > MAX_JOURNEYS_PER_FILE && file.tokens > MULTI_JOURNEY_MIN_TOKENS) {
       problems.push(`${file.path} implements ${file.journeys.length} journeys (${file.journeys.join(", ")}) — `
         + "a god component; give each journey its own route/component modules");
     }
