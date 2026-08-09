@@ -9,11 +9,13 @@ import { contractBrief } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
-import { capabilityBrief } from "./capabilityRegistry.mjs";
+import { CAPABILITIES, capabilityBrief } from "./capabilityRegistry.mjs";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
-import { bindCapabilities, capabilityRequirementsBrief } from "./contractTiering.mjs";
+import {
+  bindCapabilities, capabilityRequirementsBrief, persistenceOwnershipPlan,
+} from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
@@ -114,6 +116,46 @@ export function renderScopedContext(tree, {
   ].join("\n");
 }
 
+/** Strict context for a deterministic pre-compile defect: no unrelated source bodies. */
+export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval = null } = {}) {
+  const files = [...new Set(repairScope?.files || [])].sort();
+  const interfaces = [...new Set([
+    ...(repairScope?.adapterInterfaces || []), ...(repairScope?.capabilityPaths || []),
+  ])].filter((path) => !files.includes(path)).sort();
+  for (const path of files) {
+    if (typeof tree?.[path] !== "string") throw new Error(`pre-compile repair source is missing: ${path}`);
+  }
+  const graph = memoryGraph("ctx", "ctx", indexTree(tree));
+  const interfaceText = (path) => {
+    const file = graph.file(path);
+    if (!file) return `${path} (platform interface is supplied by the capability contract)`;
+    const exported = (file.symbols || []).filter((symbol) => symbol.exported)
+      .map((symbol) => `${symbol.kind} ${symbol.name}`).join(", ");
+    return `${path}${exported ? ` — exports ${exported}` : ""}`;
+  };
+  const included = [
+    ...files.map((path) => ({ path, form: "full", reason: "deterministic validator pointed here",
+      tokens: Math.ceil(String(tree[path]).length / 4) })),
+    ...interfaces.map((path) => ({ path, form: "interface", reason: "required persistence interface",
+      tokens: Math.ceil(interfaceText(path).length / 4) })),
+  ];
+  const tokens = included.reduce((sum, row) => sum + row.tokens, 0);
+  onRetrieval?.({
+    query: { step: "repair", kind: repairScope?.kind, files, capabilityPaths: repairScope?.capabilityPaths || [] },
+    included, omittedCount: Math.max(0, Object.keys(tree || {}).length - included.length), tokens,
+  });
+  return [
+    "FILE TREE (paths only; only the validator-named repair scope is included below):",
+    Object.keys(tree || {}).sort().map((path) => `  ${path}`).join("\n"),
+    "",
+    "FILES IN FULL:",
+    ...files.map((path) => `\n// ${path} — deterministic validator pointed here\n${tree[path]}`),
+    "",
+    "RELEVANT INTERFACES:",
+    ...interfaces.map(interfaceText),
+  ].join("\n");
+}
+
 /** Deterministic edit-scope targeting: generated files ranked by request-keyword hits. */
 export function editTargets(tree, request, { limit = 3 } = {}) {
   const words = [...new Set(String(request).toLowerCase().match(/[a-z]{4,}/g) || [])];
@@ -165,13 +207,16 @@ function renderJourneyBrief(journeys) {
 
 export function renderPatchPrompt({
   step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
-  projectKnowledge = null, onRetrieval = null, modulePlan = [],
+  projectKnowledge = null, onRetrieval = null, modulePlan = [], repairScope = null,
 }) {
   const isEdit = step === "edit";
   const isRepair = step === "repair";
   const scopedJourneys = step === "core" || isRepair
     ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
+  const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
+  const capabilityPaths = bindCapabilities(contract)
+    .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
   const parts = [
     `STEP: ${step}`,
     step === "core"
@@ -188,17 +233,37 @@ export function renderPatchPrompt({
     capabilityRequirementsBrief(contract),
     modulePlan.length ? [
       "REQUIRED MODULE PLAN (exact paths are machine checked; roles are behavioural, not visual):",
-      ...modulePlan.map((module) => `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}`),
+      ...modulePlan.map((module) => {
+        const ownership = module.stateOwnership || {};
+        return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
+          + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `
+          + `approvedPersistence=${ownership.approvedPersistence || "none"}; durableStateOwner=${ownership.durableStateOwner || "self/none"}`;
+      }),
       "Keep styling, layout, typography and component composition original to this app.",
     ].join("\n") : "REQUIRED MODULE PLAN: none for this scope.",
     "",
-    projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
+    persistencePlan
+      ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(persistencePlan, null, 2)}`
+      : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
+    "",
+    repairScope ? [
+      "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",
+      repairScope.instruction,
+      `Allowed files: [${repairScope.allowedFiles.join(", ")}]`,
+      `Validator findings: ${JSON.stringify(repairScope.findings)}`,
+    ].join("\n") : "",
+    repairScope ? "" : null,
+    repairScope
+      ? "PROJECT KNOWLEDGE: omitted for this deterministic pre-compile repair."
+      : projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
     renderJourneyBrief(scopedJourneys),
-    isEdit || isRepair
+    repairScope
+      ? renderPrecompileRepairContext(tree, { repairScope, onRetrieval })
+      : isEdit || isRepair
       ? renderScopedContext(tree, {
         step, editRequest, problems, journeys: scopedJourneys,
-        capabilityPaths: bindCapabilities(contract).map((binding) => binding.package),
+        capabilityPaths,
         onRetrieval,
       })
       : renderTreeContext(tree),
@@ -212,7 +277,7 @@ export function renderPatchPrompt({
       ...problems.map((p) => `- ${p}`));
   }
   parts.push("", "Call emit_patches now with the complete batch for this step.");
-  return parts.join("\n");
+  return parts.filter((part) => part !== null).join("\n");
 }
 
 // ── the lanes ─────────────────────────────────────────────────────────────────────────────────
@@ -535,11 +600,12 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest, modulePlan = [], signal = null }) => {
-      const projectKnowledge = await loadKnowledge(owner, projectId);
+    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest, modulePlan = [], repairScope = null, signal = null }) => {
+      const projectKnowledge = repairScope ? null : await loadKnowledge(owner, projectId);
       let retrievalTrace = null;
       const prompt = renderPatchPrompt({
         step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
+        repairScope,
         onRetrieval: (trace) => { retrievalTrace = trace; },
       });
       if (retrievalTrace && recordRetrieval) {

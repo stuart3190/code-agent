@@ -166,10 +166,12 @@ async function resumableBuild(client, owner, projectId) {
   if (!ids.length) return null;
   const { data: snapshots, error: snapshotError } = await client.from("bv2_snapshots")
     .select("id,build_id,reason,created_at").eq("owner", owner).eq("project_id", projectId)
-    .eq("state", "ready").in("build_id", ids).like("reason", "working:%")
+    .eq("state", "ready").in("build_id", ids)
     .order("created_at", { ascending: false });
   if (snapshotError) throw new Error(`Builder V2 checkpoint lookup failed: ${snapshotError.message}`);
-  const available = new Set((snapshots || []).map((row) => row.build_id));
+  const available = new Set((snapshots || [])
+    .filter((row) => /^(?:working|candidate):/.test(String(row.reason || "")))
+    .map((row) => row.build_id));
   const build = (builds || []).find((row) => available.has(row.id));
   return build ? { buildId: build.id, problems: build.error ? [String(build.error)] : [] } : null;
 }

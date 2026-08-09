@@ -137,19 +137,8 @@ export async function runStageGate(tree, {
     }
   }
 
-  // 3. the compiler — the expensive one, last.
-  if (compile) {
-    const built = await compile(working);
-    if (!record("compile", !!built.ok, built.ok ? "passed" : "failed")) {
-      return {
-        ok: false, checks, tree: working, corrections,
-        problems: ["the project does not compile"],
-        stderr: built.stderr || "",
-      };
-    }
-  }
-
-  // 4. honesty, IN the stage that created the defect. The 24.26-credit booking build wrote
+  // 3. honesty, IN the stage that created the defect and BEFORE compilation. The 24.26-credit
+  // booking build wrote
   // localStorage persistence in its data stage and heard about it twenty minutes later, at final
   // verification, when the budget left no room to fix it. The scan costs milliseconds; the safe
   // deterministic transforms cost nothing; and a defect the transform cannot fix feeds the CHEAP
@@ -162,17 +151,7 @@ export async function runStageGate(tree, {
       if (fixed.fixed.length) {
         const rescanned = honestyScan(fixed.tree, { contract, stageScoped: true });
         if (rescanned.findings.length < scan.findings.length) {
-          // Adopt the transform — and the compile must still pass on the transformed tree.
-          if (compile) {
-            const rebuilt = await compile(fixed.tree);
-            if (!rebuilt.ok) {
-              return {
-                ok: false, checks, tree: working, corrections,
-                problems: ["the deterministic persistence transform broke the build", ...(scan.findings.map((f) => f.message))],
-                stderr: rebuilt.stderr || "",
-              };
-            }
-          }
+          // Adopt the transform. The single compiler pass below validates the transformed tree.
           working = { ...fixed.tree };
           deterministicRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
           scan = rescanned;
@@ -189,7 +168,7 @@ export async function runStageGate(tree, {
     }
   }
 
-  // 5. expectation presence — only for the stage that owns journeys, and only the strong signal.
+  // 4. expectation presence — only for the stage that owns journeys, and only the strong signal.
   // If NONE of a step's verifier keywords appear anywhere in the app's rendered source, the
   // outcome was never built; the verifier will fail it later at fifty times the price. A partial
   // match proves nothing either way and is deliberately not checked.
@@ -210,6 +189,18 @@ export async function runStageGate(tree, {
     if (!record("expectations", absent.length === 0,
       absent.length ? `${absent.length} outcome(s) with no trace in the UI` : "all step outcomes have some trace")) {
       return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+    }
+  }
+
+  // 5. the compiler — the expensive check, strictly after every static/honesty verdict.
+  if (compile) {
+    const built = await compile(working);
+    if (!record("compile", !!built.ok, built.ok ? "passed" : "failed")) {
+      return {
+        ok: false, checks, tree: working, corrections,
+        problems: ["the project does not compile"],
+        stderr: built.stderr || "",
+      };
     }
   }
 

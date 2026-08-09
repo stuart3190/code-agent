@@ -24,6 +24,7 @@ export function treeHashFromPairs(pairs) {
 }
 
 export const PROMOTABLE_LABELS = Object.freeze(["green", "preview", "published"]);
+export const CANDIDATE_REASON_PREFIX = "candidate:";
 
 /** The storage seam. Memory twin below; the supabase twin (commit J) implements the same shape. */
 export function memorySnapshotStorage() {
@@ -176,12 +177,33 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
     async getSnapshot(id) { return storage.getSnapshot(id); },
 
     /** Locate the newest immutable checkpoint for one owner/project/build. */
-    async latestForBuild(owner, projectId, buildId, { reasonPrefix = null } = {}) {
+    async latestForBuild(owner, projectId, buildId, { reasonPrefix = null, reasonPrefixes = null } = {}) {
+      const prefixes = reasonPrefixes || (reasonPrefix ? [reasonPrefix] : []);
       return (await storage.listSnapshots(owner, projectId))
         .filter((snapshot) => snapshot.owner === owner && snapshot.project_id === projectId
           && snapshot.build_id === buildId && snapshot.state === "ready"
-          && (!reasonPrefix || String(snapshot.reason || "").startsWith(reasonPrefix)))
+          && (!prefixes.length || prefixes.some((prefix) => String(snapshot.reason || "").startsWith(prefix))))
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+    },
+
+    /**
+     * Advance an immutable candidate's metadata only after every deterministic/compile gate passes.
+     * Bytes and manifest never change. A candidate cannot be pointed at while this transition is
+     * pending; a reused previously-qualified snapshot is returned unchanged.
+     */
+    async markCandidateValidated(owner, projectId, snapshotId, { reason }) {
+      if (!String(reason || "").startsWith("working:")) throw new Error("validated candidate needs a working:* reason");
+      const snapshot = await storage.getSnapshot(snapshotId);
+      if (!snapshot || snapshot.owner !== owner || snapshot.project_id !== projectId) {
+        throw new Error("candidate snapshot not found for this owner/project");
+      }
+      if (snapshot.state !== "ready") throw new Error(`candidate snapshot is ${snapshot.state}, not ready`);
+      await this.materialize(owner, snapshotId);
+      if (String(snapshot.reason || "").startsWith(CANDIDATE_REASON_PREFIX)) {
+        await storage.updateSnapshot(snapshotId, { reason });
+        return { ...(await storage.getSnapshot(snapshotId)) };
+      }
+      return { ...snapshot, reusedQualified: true };
     },
 
     /**
@@ -196,7 +218,8 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       }
       const matches = (await storage.listSnapshots(owner, projectId)).filter((snapshot) => (
         snapshot.owner === owner && snapshot.project_id === projectId && snapshot.build_id === buildId
-        && String(snapshot.reason || "").startsWith("working:") && !pointed.has(snapshot.id)
+        && (String(snapshot.reason || "").startsWith("working:")
+          || String(snapshot.reason || "").startsWith(CANDIDATE_REASON_PREFIX)) && !pointed.has(snapshot.id)
       ));
       for (const snapshot of matches) await storage.deleteSnapshot(snapshot.id);
       if (matches.length) await this.gc(owner, projectId, { keepLatest: 20 });
@@ -247,6 +270,9 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         throw new Error("snapshot not found for this owner/project");
       }
       if (snapshot.state !== "ready") throw new Error(`only ready snapshots promote (this one is ${snapshot.state})`);
+      if (String(snapshot.reason || "").startsWith(CANDIDATE_REASON_PREFIX)) {
+        throw new Error("candidate snapshots are internal and cannot promote before validation");
+      }
       await this.materialize(owner, snapshotId); // byte proof immediately before activation
       const previous = await storage.getPointer(owner, projectId, label);
       if (!(await storage.compareAndSetPointer(owner, projectId, label, previous, snapshotId))) {

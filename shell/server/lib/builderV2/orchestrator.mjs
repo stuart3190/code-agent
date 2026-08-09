@@ -19,6 +19,9 @@ import {
 } from "./contractTiering.mjs";
 import { lintCapabilityUsage, lintRequiredCapabilityBindings, lintRequiredModulePlan } from "./capabilityLint.mjs";
 import {
+  lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
+} from "./persistenceLint.mjs";
+import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
@@ -108,6 +111,11 @@ export function lintAssetAttribution(tree, assets = []) {
 }
 
 const problemSignature = (problems) => (problems || []).map((p) => String(p).slice(0, 120)).sort().join("|");
+const treesEqual = (a, b) => {
+  const left = Object.keys(a || {}).sort();
+  const right = Object.keys(b || {}).sort();
+  return left.length === right.length && left.every((path, index) => path === right[index] && a[path] === b[path]);
+};
 
 // ── the orchestrator ──────────────────────────────────────────────────────────────────────────
 
@@ -184,23 +192,28 @@ export function createOrchestrator({
    * Returns { ok, tree } or { ok:false, problems }.
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
-    editRequest = null, initialProblems = [], signal = null }) {
+    editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
+    parentSnapshotId = null, signal = null }) {
     let working = tree;
     let rejections = [];
     let problems = initialProblems;
     let lastSignature = null;
+    let repairScope = null;
+    let latestCandidate = null;
     const modulePlan = bookingModulePlan(contract, journeys);
     for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
       abortIfRequested(signal);
-      const patches = await patchesFn({ step, owner, projectId, buildId, attempt, contract, tiers,
-        tree: working, assets, rejections, problems, journey: journeys?.[0] || null, editRequest, modulePlan, signal });
+      const dispatchStep = repairScope ? "repair" : step;
+      const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
+        contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
+        editRequest: repairScope?.instruction || editRequest, modulePlan, repairScope, signal });
       const applied = applyPatches(working, patches, { contract });
       const filesChanged = [...new Set([
         ...Object.keys(applied.tree).filter((path) => applied.tree[path] !== working[path]),
         ...Object.keys(working).filter((path) => !(path in applied.tree)),
       ])].sort();
       await events.patches?.({
-        owner, projectId, buildId, step, attempt, patches,
+        owner, projectId, buildId, step: dispatchStep, attempt, patches,
         outcome: applied.rejected.length ? "rejected" : "applied",
         rejected: applied.rejected, filesChanged,
       });
@@ -208,6 +221,13 @@ export function createOrchestrator({
         rejections = applied.rejected;
         log(`${step}: ${applied.rejected.length} patch op(s) rejected, feeding reasons back`);
         continue;
+      }
+      if (repairScope) {
+        const outsideScope = filesChanged.filter((path) => !repairScope.allowedFiles.includes(path));
+        if (outsideScope.length) {
+          return { ok: false, problems: [`targeted pre-compile repair changed files outside its boundary: ${outsideScope.join(", ")}`],
+            reason: "targeted pre-compile repair exceeded its write scope", candidateSnapshotId: latestCandidate?.id || null };
+        }
       }
       // No-op batches are rejected DETERMINISTICALLY, before a gate cycle is spent on them:
       // the first live run's model "replaced" a stub with its own identical content, twice.
@@ -250,11 +270,53 @@ export function createOrchestrator({
         log(`${step}: ${assetCompliance.problems.length} asset-attribution defect(s) rejected deterministically`);
         continue;
       }
+
+      // The first structurally viable tree becomes an immutable, content-addressed candidate
+      // BEFORE persistence/compile/browser gates. It is resumable but explicitly unpromotable.
+      latestCandidate = await snapshotStore.createSnapshot(owner, projectId, applied.tree, {
+        buildId, parent: latestCandidate?.id || parentSnapshotId, reason: `candidate:${step}:${attempt}`,
+        assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+      });
+      await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
+        tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
+
+      const persistence = lintDurablePersistence(applied.tree, { contract, journeys, modulePlan });
+      if (!persistence.ok) {
+        const persistenceProblems = persistenceFindingMessages(persistence);
+        if (!repairScope && step !== "repair") {
+          repairScope = persistenceRepairScope(persistence, modulePlan);
+          problems = persistenceProblems;
+          rejections = [];
+          working = await snapshotStore.materialize(owner, latestCandidate.id);
+          log(`${step}: ${persistence.findings.length} forbidden-persistence finding(s); `
+            + `checkpoint ${latestCandidate.id} retained and one targeted repair selected`);
+          continue;
+        }
+        return { ok: false, problems: persistenceProblems,
+          reason: "targeted pre-compile persistence repair did not clear the deterministic gate",
+          candidateSnapshotId: latestCandidate.id, repairUsed: !!repairScope };
+      }
       abortIfRequested(signal);
       const gate = await verifyStage(applied.tree, gateOptions(contract, step, journeys, {
         owner, projectId, buildId, step, attempt, signal,
       }));
-      if (gate.ok) return { ok: true, tree: gate.tree };
+      if (gate.ok) {
+        let qualifiedCandidate = latestCandidate;
+        if (!treesEqual(applied.tree, gate.tree)) {
+          qualifiedCandidate = await snapshotStore.createSnapshot(owner, projectId, gate.tree, {
+            buildId, parent: latestCandidate.id, reason: `candidate:${step}:${attempt}:corrected`,
+            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: qualifiedCandidate,
+            tree: gate.tree, reason: `candidate:${step}:${attempt}:corrected`, promotable: false });
+        }
+        const snapshot = await snapshotStore.markCandidateValidated(owner, projectId, qualifiedCandidate.id,
+          { reason: checkpointReason });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: gate.tree,
+          reason: checkpointReason, promotable: false });
+        return { ok: true, tree: gate.tree, snapshot, candidateSnapshotId: latestCandidate.id,
+          repairUsed: !!repairScope };
+      }
       const gateProblems = gate.layers.d0d2.problems || [];
       const signature = problemSignature(gateProblems);
       if (signature === lastSignature) {
@@ -263,9 +325,15 @@ export function createOrchestrator({
       lastSignature = signature;
       problems = gateProblems;
       rejections = [];
+      if (repairScope) {
+        return { ok: false, problems: gateProblems,
+          reason: "the one targeted pre-compile repair passed persistence but failed a later gate",
+          candidateSnapshotId: latestCandidate.id, repairUsed: true };
+      }
       log(`${step}: gate failed (${gateProblems.length} problem(s)), repair attempt ${attempt}/${maxCoreAttempts}`);
     }
-    return { ok: false, problems, reason: `no green tree within ${maxCoreAttempts} attempts` };
+    return { ok: false, problems, reason: `no green tree within ${maxCoreAttempts} attempts`,
+      candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope };
   }
 
   return {
@@ -334,14 +402,12 @@ export function createOrchestrator({
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
           step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-          journeys: essentialJourneys, signal,
+          journeys: essentialJourneys, checkpointReason: "working:core", signal,
         });
-        if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems });
+        if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems,
+          workingSnapshotId: core.candidateSnapshotId || null });
         tree = core.tree;
-        workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
-          buildId, reason: "working:core", assetManifest: await assetService.assetManifestFor(owner, projectId),
-        });
-        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree, reason: "working:core" });
+        workingSnapshot = core.snapshot;
 
         // 4. verify essential journeys (differential), then the C4 eligibility decision —
         //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
@@ -375,16 +441,12 @@ export function createOrchestrator({
           log(`repair ${round}/${maxJourneyRepairs}: ${evidence.length} verified failure(s)`);
           const repair = await buildIncrement({
             step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-            journeys: essentialJourneys, initialProblems: evidence, signal,
+            journeys: essentialJourneys, initialProblems: evidence,
+            checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null, signal,
           });
           if (!repair.ok) break;
           tree = repair.tree;
-          workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
-            buildId, parent: workingSnapshot?.id || null, reason: `working:repair:${round}`,
-            assetManifest: await assetService.assetManifestFor(owner, projectId),
-          });
-          await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree,
-            reason: `working:repair:${round}` });
+          workingSnapshot = repair.snapshot;
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
             journeys: essentialJourneys, tree, snapshotId: null, signal });
           backendRowFailures = backendProbeFn ? await backendProbeFn({
@@ -415,7 +477,7 @@ export function createOrchestrator({
           const startTree = await snapshotStore.materialize(owner, candidate.id);
           const increment = await buildIncrement({
             step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
-            journeys: [journey], signal,
+            journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id, signal,
           });
           let verdicts = null;
           if (increment.ok) {
@@ -430,10 +492,7 @@ export function createOrchestrator({
           if (!passed) {
             pendingIncrements.push({ journeyId: journey.id, title: journey.title, reason: increment.ok ? "journey verification failed" : increment.reason });
             if (increment.ok) {
-              workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, increment.tree, {
-                buildId, parent: candidate.id, reason: `working:${step}:red`,
-                assetManifest: await assetService.assetManifestFor(owner, projectId),
-              });
+              workingSnapshot = increment.snapshot;
               candidate = workingSnapshot;
               await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot,
                 tree: increment.tree, reason: `working:${step}:red` });
@@ -441,12 +500,7 @@ export function createOrchestrator({
             log(`${step}: required journey remains red; retained only as a working checkpoint`);
             continue;
           }
-          const snapshot = await snapshotStore.createSnapshot(owner, projectId, increment.tree, {
-            buildId, parent: candidate.id, reason: `working:${step}`,
-            assetManifest: await assetService.assetManifestFor(owner, projectId),
-          });
-          await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: increment.tree,
-            reason: `working:${step}` });
+          const snapshot = increment.snapshot;
           candidate = snapshot;
           workingSnapshot = snapshot;
           shipped.push(journey.id);
@@ -503,7 +557,8 @@ export function createOrchestrator({
 
     /** Resume a failed/pre-green build from byte-verified immutable source, never projects.tree. */
     async resumeWorkingContext(owner, projectId, buildId) {
-      const snapshot = await snapshotStore.latestForBuild(owner, projectId, buildId, { reasonPrefix: "working:" });
+      const snapshot = await snapshotStore.latestForBuild(owner, projectId, buildId,
+        { reasonPrefixes: ["working:", "candidate:"] });
       if (!snapshot) return null;
       const tree = await snapshotStore.materialize(owner, snapshot.id);
       return { snapshotId: snapshot.id, tree, index: indexTree(tree), reason: snapshot.reason };
@@ -537,16 +592,12 @@ export function createOrchestrator({
         const allJourneys = [...journeysById.values()];
         const repair = await buildIncrement({
           step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
-          assets: [], journeys: allJourneys, initialProblems, editRequest: request, signal,
+          assets: [], journeys: allJourneys, initialProblems, editRequest: request,
+          checkpointReason: "working:resumed-repair", parentSnapshotId: source.snapshotId, signal,
         });
         if (!repair.ok) return finish("blocked", { error: repair.reason, problems: repair.problems,
           workingSnapshotId: source.snapshotId });
-        const checkpoint = await snapshotStore.createSnapshot(owner, projectId, repair.tree, {
-          buildId, parent: source.snapshotId, reason: "working:resumed-repair",
-          assetManifest: await assetService.assetManifestFor(owner, projectId),
-        });
-        await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,
-          tree: repair.tree, reason: "working:resumed-repair" });
+        const checkpoint = repair.snapshot;
         const verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
           journeys: allJourneys, tree: repair.tree, snapshotId: checkpoint.id, signal });
         const eligibility = completionEligibility({ contract, gates: { ok: true },
@@ -611,16 +662,12 @@ export function createOrchestrator({
         await setState("editing");
         const edit = await buildIncrement({
           step: "edit", owner, projectId, buildId, contract, tiers, bindings, tree: ctx.tree, assets: [],
-          journeys, editRequest: request, signal,
+          journeys, editRequest: request, checkpointReason: "working:edit",
+          parentSnapshotId: ctx.snapshotId, signal,
         });
         if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems });
 
-        const workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, edit.tree, {
-          buildId, parent: ctx.snapshotId, reason: "working:edit",
-          assetManifest: await assetService.assetManifestFor(owner, projectId),
-        });
-        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree: edit.tree,
-          reason: "working:edit" });
+        const workingSnapshot = edit.snapshot;
 
         // Differential verification over EVERY contract journey: the cache decides what to
         // actually drive. Unchanged owners reuse; changed owners (and prior fails) re-drive.

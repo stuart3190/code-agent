@@ -12,6 +12,10 @@ const words = (text) => new Set(String(text || "").toLowerCase().match(/[a-z]{4,
 const journeyText = (j) => `${j.id} ${j.title} ${(j.steps || []).map((s) => `${s.action} ${s.expect}`).join(" ")}`;
 const overlaps = (setA, setB) => [...setA].some((w) => setB.has(w));
 
+export const FORBIDDEN_DURABLE_PERSISTENCE = Object.freeze([
+  "localStorage", "sessionStorage", "indexedDB", "IndexedDB", "process_memory",
+]);
+
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const featureText = (contract) => [
   ...(contract?.journeys || []).map((journey) => `${journey.id} ${journey.title}`),
@@ -161,6 +165,55 @@ export function bindingsForJourneys(contract, bindings, journeys = []) {
   });
 }
 
+/** Journeys whose contracted outcome must survive a reload or exist outside one JS process. */
+export function durablePersistenceJourneys(contract, journeys = contract?.journeys || []) {
+  const hasPersistedEntity = (contract?.entities || []).length > 0;
+  return (journeys || []).filter((journey) => {
+    const text = journeyText(journey).toLowerCase();
+    return /persist|durable|reload|refresh|recover|reference|confirm|cancel|booking|reservation/.test(text)
+      || (hasPersistedEntity && /(create|submit|save|store)/.test(text));
+  });
+}
+
+/**
+ * Machine-readable storage ownership carried from contract to every generation/repair turn.
+ * Visual modules may own ephemeral presentation state, never durable business records.
+ */
+export function persistenceOwnershipPlan(contract, journeys = contract?.journeys || [], modulePlan = null) {
+  const durableJourneys = durablePersistenceJourneys(contract, journeys);
+  if (!durableJourneys.length) return null;
+  const plan = modulePlan || bookingModulePlan(contract, journeys);
+  const bindings = bindingsForJourneys(contract, bindCapabilities(contract), journeys);
+  const owners = [];
+  if (bindings.some((binding) => binding.name === "booking")) {
+    owners.push({ state: "booking records, capacity, status and durable reference",
+      capability: "makeBookingSystem", module: "src/data/bookingSystem.js" });
+  }
+  if (bindings.some((binding) => binding.name === "wizard")) {
+    owners.push({ state: "recoverable wizard selections, review, confirmation and cancellation",
+      capability: "makeWizardMachine", persistence: "platform", module: "src/data/bookingWizard.js" });
+  }
+  for (const binding of bindings) {
+    if (!["booking", "wizard"].includes(binding.name)) {
+      owners.push({ state: `${binding.name} contracted records`, capability: CAPABILITIES[binding.name].interface[0],
+        module: CAPABILITIES[binding.name].package });
+    }
+  }
+  return {
+    durableJourneys: durableJourneys.map((journey) => journey.id),
+    forbiddenBusinessPersistence: [...FORBIDDEN_DURABLE_PERSISTENCE],
+    owners,
+    modules: plan.map((module) => ({
+      path: module.path,
+      owns: module.stateOwnership?.owns || "presentation only",
+      survivesReload: module.stateOwnership?.survivesReload === true,
+      approvedPersistence: module.stateOwnership?.approvedPersistence || null,
+      durableStateOwner: module.stateOwnership?.durableStateOwner || null,
+      forbiddenPersistence: [...FORBIDDEN_DURABLE_PERSISTENCE],
+    })),
+  };
+}
+
 /**
  * A deterministic, visually headless module plan for the one class that repeatedly
  * collapsed into a single route during live qualification: multi-step booking.
@@ -173,18 +226,30 @@ export function bookingModulePlan(contract, journeys = contract?.journeys || [])
 
   const text = journeys.map(journeyText).join(" ").toLowerCase();
   const plan = [
-    { path: "src/data/bookingSystem.js", role: "booking persistence adapter", factory: "makeBookingSystem" },
-    { path: "src/data/bookingWizard.js", role: "durable wizard state adapter", factory: "makeWizardMachine" },
-    { path: "src/components/booking/BookingFlow.jsx", role: "step navigation and flow composition" },
+    { path: "src/data/bookingSystem.js", role: "booking persistence adapter", factory: "makeBookingSystem",
+      stateOwnership: { owns: "booking records, capacity, status and durable reference", survivesReload: true,
+        approvedPersistence: "makeBookingSystem" } },
+    { path: "src/data/bookingWizard.js", role: "durable wizard state adapter", factory: "makeWizardMachine",
+      stateOwnership: { owns: "wizard selections, review, confirmation and cancellation", survivesReload: true,
+        approvedPersistence: "makeWizardMachine platform persistence" } },
+    { path: "src/components/booking/BookingFlow.jsx", role: "step navigation and flow composition",
+      stateOwnership: { owns: "ephemeral UI orchestration only", survivesReload: false,
+        durableStateOwner: "makeBookingSystem + makeWizardMachine" } },
   ];
   if (/review|summary/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingReview.jsx", role: "review presentation" });
+    plan.push({ path: "src/components/booking/BookingReview.jsx", role: "review presentation",
+      stateOwnership: { owns: "presentation only", survivesReload: false,
+        durableStateOwner: "makeWizardMachine" } });
   }
   if (/confirm|confirmation|reference/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingConfirmation.jsx", role: "confirmation and reference presentation" });
+    plan.push({ path: "src/components/booking/BookingConfirmation.jsx", role: "confirmation and reference presentation",
+      stateOwnership: { owns: "presentation only", survivesReload: false,
+        durableStateOwner: "makeBookingSystem + makeWizardMachine" } });
   }
   if (/cancel|reload|refresh|recover|status/.test(text)) {
-    plan.push({ path: "src/components/booking/BookingStatus.jsx", role: "restored and cancelled booking presentation" });
+    plan.push({ path: "src/components/booking/BookingStatus.jsx", role: "restored and cancelled booking presentation",
+      stateOwnership: { owns: "presentation only", survivesReload: false,
+        durableStateOwner: "makeBookingSystem + makeWizardMachine" } });
   }
   return plan;
 }
