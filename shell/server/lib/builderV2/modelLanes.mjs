@@ -256,25 +256,64 @@ export function conservativeCallReservation(options, model, {
 }
 
 /**
- * Fit a provider call into both its per-call limit and the live build headroom. For repairs an
- * explicit allowance bounds the internal fix turn, but unused build headroom remains reusable.
- * Reducing maxOutputTokens makes the reservation a real upper bound rather than an optimistic
- * estimate. The durable reserve RPC is still the final concurrency guard.
+ * Size a targeted repair response from its known retrieval/patch scope. This is deliberately a
+ * simple envelope, not a second router: enough room for a useful structured patch batch, without
+ * reserving the step's 10k emergency maximum for every one-file correction.
+ */
+export function repairOutputEnvelope({
+  requestedMaxOutputTokens = 10_000,
+  retrievedFileCount = 1,
+  retrievalTokens = 0,
+  problemCount = 1,
+  expectedPatchTokens = null,
+} = {}) {
+  const requested = Math.max(1, Math.floor(Number(requestedMaxOutputTokens || 0)));
+  const files = Math.max(1, Math.min(8, Math.floor(Number(retrievedFileCount || 1))));
+  const context = Math.max(0, Number(retrievalTokens || 0));
+  const problems = Math.max(1, Math.min(12, Math.floor(Number(problemCount || 1))));
+  const expected = Number.isFinite(Number(expectedPatchTokens)) && Number(expectedPatchTokens) > 0
+    ? Number(expectedPatchTokens)
+    : 900 + (files * 700) + (problems * 160);
+  const minimumUsefulOutputTokens = Math.min(requested, Math.max(1_200, 700 + (files * 250)));
+  const contextAllowance = Math.min(1_500, Math.ceil(context * 0.12));
+  const plannedOutputTokens = Math.min(requested, Math.max(
+    minimumUsefulOutputTokens,
+    Math.ceil((expected + contextAllowance) / 100) * 100,
+  ));
+  return {
+    requestedMaxOutputTokens: requested,
+    plannedOutputTokens,
+    minimumUsefulOutputTokens,
+    retrievedFileCount: files,
+    retrievalTokens: context,
+    problemCount: problems,
+    expectedPatchTokens: Math.ceil(expected),
+  };
+}
+
+/**
+ * Fit a provider call into both its per-call limit and the live build headroom. A repair's nominal
+ * allowance informs policy/evidence but is not another hard ceiling; its retrieved scope sizes the
+ * output envelope. Reducing maxOutputTokens makes the reservation a real upper bound rather than
+ * an optimistic estimate. The durable reserve RPC is still the final concurrency guard.
  */
 export function planCallReservation(options, model, {
   requestedMaxOutputTokens = 16_000,
   minimumCredits = 0,
   callCeilingCredits,
   repairAllowanceCredits = null,
+  repairSizing = null,
   fundingPolicy = "request_owner",
   budget,
 } = {}) {
   const remaining = Number(budget?.remainingCredits || 0);
   const perCall = Number(callCeilingCredits || 0);
   const allowance = repairAllowanceCredits == null ? Infinity : Number(repairAllowanceCredits);
-  const creditLimit = Math.min(remaining, perCall, allowance);
-  const limitingCode = perCall <= remaining && perCall <= allowance
-    ? "step_budget_ceiling" : "budget_ceiling";
+  // The configured per-call ceiling and live whole-build headroom are hard limits. The historical
+  // repair allowance is a sizing target only: treating it as another ceiling stranded approved
+  // build headroom and blocked a bounded repair before dispatch.
+  const creditLimit = Math.min(remaining, perCall);
+  const limitingCode = perCall <= remaining ? "step_budget_ceiling" : "budget_ceiling";
   if (!(creditLimit > 0) || creditLimit + 1e-9 < Number(minimumCredits || 0)) {
     throw Object.assign(new Error("Builder V2 model call has insufficient approved build headroom"), {
       code: limitingCode, retryable: false, dispatchState: "before_dispatch",
@@ -282,7 +321,13 @@ export function planCallReservation(options, model, {
       minimumCredits: Number(minimumCredits || 0),
     });
   }
-  const requested = Math.max(0, Math.floor(Number(requestedMaxOutputTokens || 0)));
+  const sizing = repairSizing ? repairOutputEnvelope({
+    requestedMaxOutputTokens,
+    ...repairSizing,
+  }) : null;
+  const requested = sizing?.plannedOutputTokens
+    ?? Math.max(0, Math.floor(Number(requestedMaxOutputTokens || 0)));
+  const minimumUsefulOutputTokens = sizing?.minimumUsefulOutputTokens || 1;
   let low = 0;
   let high = requested;
   while (low < high) {
@@ -296,11 +341,12 @@ export function planCallReservation(options, model, {
   const reservedCredits = conservativeCallReservation(options, model, {
     maxOutputTokens: low, minimumCredits,
   });
-  if (reservedCredits > creditLimit + 1e-9 || low < 1) {
+  if (reservedCredits > creditLimit + 1e-9 || low < minimumUsefulOutputTokens) {
     throw Object.assign(new Error("Builder V2 call cannot fit a useful response inside approved headroom"), {
       code: limitingCode, retryable: false, dispatchState: "before_dispatch",
       remaining, callCeiling: perCall, repairAllowance: Number.isFinite(allowance) ? allowance : null,
-      minimumCredits: Number(minimumCredits || 0),
+      minimumCredits: Number(minimumCredits || 0), minimumUsefulOutputTokens,
+      maximumFittingOutputTokens: low,
     });
   }
   return {
@@ -312,6 +358,9 @@ export function planCallReservation(options, model, {
     remainingCredits: remaining,
     repairAllowanceCredits: Number.isFinite(allowance) ? allowance : null,
     callCeilingCredits: perCall,
+    effectiveCallCeilingCredits: creditLimit,
+    outputEnvelope: sizing,
+    pricingAssumption: "uncached_input_upper_bound",
     fundingPolicy,
   };
 }
@@ -357,9 +406,16 @@ export function createModelLanes({
             };
           const plan = planCallReservation(options, selected.provider.model, {
             requestedMaxOutputTokens: selectedMaxOutputTokens,
-            minimumCredits: selected.decision?.estimatedCredits || 0,
+            // A route estimate is not a mandatory hold. Repair usefulness is enforced by its
+            // minimum output envelope; the durable whole-build ceiling remains authoritative.
+            minimumCredits: step === "repair" ? 0 : selected.decision?.estimatedCredits || 0,
             callCeilingCredits: callCeiling,
             repairAllowanceCredits: selected.decision?.repairAllowanceCredits,
+            repairSizing: step === "repair" ? {
+              retrievedFileCount: Number(context.affectedModules || 1),
+              retrievalTokens: Number(context.retrievalTokens || 0),
+              problemCount: Array.isArray(context.problems) ? context.problems.length : 1,
+            } : null,
             fundingPolicy: selected.decision?.fundingPolicy || "request_owner",
             budget,
           });

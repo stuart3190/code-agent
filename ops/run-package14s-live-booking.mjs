@@ -1,6 +1,6 @@
 // Package 14S: exactly one AUTO-routed live booking build and, only if a durable working
 // checkpoint exists, at most one targeted resume-repair. Aggregate connected-allowance spend
-// is hard-capped at 9 internal credits. Evidence is private and incremental.
+// is hard-capped at 12 internal credits. Evidence is private and incremental.
 
 import crypto from "node:crypto";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -19,7 +19,7 @@ import { previewProvider } from "../shell/server/preview/index.mjs";
 loadEnv();
 process.env.THRALLO_BUILD_WORKER_ENABLED = "1"; // operator only; customer shell routing stays dark
 
-const TOTAL_CEILING = 9;
+const TOTAL_CEILING = 12;
 const STAGE = String(process.argv[2] || "preflight").toLowerCase();
 const evidenceDir = path.resolve(process.env.PACKAGE14S_EVIDENCE_DIR
   || "/home/ubuntu/thrallo-deploy-evidence/package14s-live-20260809");

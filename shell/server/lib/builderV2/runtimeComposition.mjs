@@ -64,10 +64,8 @@ export function stepOutputPolicy(step) {
   return {
     contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
     core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
-    // A retained real checkpoint can carry enough contract/retrieval context that the deliberately
-    // conservative zero-cache input bound exceeds 2.5 credits before any output token. Four
-    // credits remains an independent repair cap; live build headroom and the durable RPC are still
-    // stricter whenever less is available.
+    // repairAllowanceCredits is the nominal planning target, not a hard reservation ceiling.
+    // modelLanes sizes a targeted output envelope and caps it at the live whole-build headroom.
     repair: { estimatedCredits: 1, maxOutputTokens: 10_000, callCeilingCredits: 6, repairAllowanceCredits: 4 },
     edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
     increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
