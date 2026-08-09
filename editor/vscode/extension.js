@@ -8,6 +8,7 @@ const vscode = require("vscode");
 const { ThralloClient, describeEvent, TERMINAL_STATES } = require("./lib/api.js");
 const { buildLocalIndex, queryLocalIndex, isIndexableFile } = require("./lib/localIndex.js");
 const { rewriteIndexHtml, connectHtml } = require("./lib/conversationPanel.js");
+const { createLocalWorkspaceHost } = require("./lib/localWorkspaceHost.js");
 
 const TOKEN_KEY = "thrallo.apiToken";
 
@@ -17,11 +18,13 @@ let client = null;
 let output = null;
 let treeProvider = null;
 let statusItem = null;
+let localWorkspaceHost = null;
 
 function activate(context) {
   output = vscode.window.createOutputChannel("Thrallo");
   treeProvider = new AgentTreeProvider();
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+  localWorkspaceHost = createLocalWorkspaceHost({ vscode, context, output });
   statusItem.name = "Thrallo";
   statusItem.command = "thrallo.showOutput";
   context.subscriptions.push(
@@ -35,12 +38,16 @@ function activate(context) {
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
     vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
     vscode.commands.registerCommand("thrallo.openConversation", () => openConversation(context)),
+    ...localWorkspaceHost.registerCommands(),
     vscode.languages.registerInlineCompletionItemProvider(
       { pattern: "**" },
       new ThralloCompletionProvider(),
     ),
   );
   restoreConnection(context);
+  localWorkspaceHost.initialize().catch((error) => {
+    output.appendLine(`[local] Local workspace recovery unavailable: ${String(error?.message || error).slice(0, 240)}`);
+  });
 
   // Thrallo Desktop (Phase 23): the conversation surface is the primary view of the fork —
   // it opens itself on startup. In stock VS Code the panel stays behind its command.

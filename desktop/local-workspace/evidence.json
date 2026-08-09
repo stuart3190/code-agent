@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "package": "D8",
+  "claim": "Native and local workspace foundation using genuine Code OSS workbench primitives",
+  "classification": "local-runtime-and-fixture-verified-foundation",
+  "observedAt": "2026-08-09",
+  "items": [
+    {
+      "id": "code-oss-local-workbench",
+      "category": "code-oss-native",
+      "state": "existing-runtime-evidence",
+      "runtimeVerified": true,
+      "claim": "Pinned Code OSS supplies explorer, editors, search, integrated terminal, SCM, file watching and workbench persistence.",
+      "verifiedSubset": ["workbench launch", "local folder open", "file edit persisted", "integrated terminal command"],
+      "notReverifiedByD8": ["full search workflow", "complete SCM workflow", "file watcher edge cases"],
+      "evidence": ["desktop/d0/desktop-evidence.json", "desktop/smoke/smoke.mjs"]
+    },
+    {
+      "id": "thrallo-local-coordinator",
+      "category": "thrallo-extension",
+      "state": "host-adapter-test-verified",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Thrallo coordinates local folder selection, recent workspaces, advisory detection, read-only Git state, local terminal roots, explicit preview commands, safe import review and restart recovery through Code OSS host APIs.",
+      "evidence": ["editor/vscode/lib/localWorkspace.js", "editor/vscode/lib/localWorkspaceHost.js", "test/desktop/d8-local-workspace.test.mjs", "desktop/local-workspace/smoke.mjs"]
+    },
+    {
+      "id": "safe-local-import-review",
+      "category": "thrallo-extension",
+      "state": "fixture-runtime-verified",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Local import review enumerates included and excluded paths without file contents, excludes secrets and generated trees, and performs no upload or synchronization.",
+      "evidence": ["test/desktop/d8-fixtures.mjs", "test/desktop/d8-local-workspace.test.mjs"]
+    },
+    {
+      "id": "local-offline-operation",
+      "category": "thrallo-extension",
+      "state": "fixture-runtime-verified",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "The D8 coordinator and metadata paths have no production network dependency; native editor, search, terminal and Git remain Code OSS responsibilities.",
+      "evidence": ["test/desktop/d8-local-workspace.test.mjs"]
+    },
+    {
+      "id": "canonical-thrallo-association",
+      "category": "future-builder-v2-integration",
+      "state": "builder-v2-blocked",
+      "runtimeVerified": false,
+      "claim": "Canonical Thrallo association, working sets and verified synchronization remain blocked until D7 and frozen Builder V2 contracts.",
+      "result": "capability_unavailable",
+      "evidence": ["desktop/local-workspace/D7-ASSOCIATION-BOUNDARY.md"]
+    },
+    {
+      "id": "cloud-workspace",
+      "category": "future-cloud-integration",
+      "state": "integration-pending",
+      "runtimeVerified": false,
+      "claim": "D8 does not create, open or synchronize a cloud workspace.",
+      "result": "capability_unavailable",
+      "evidence": ["editor/vscode/lib/localWorkspace.js"]
+    }
+  ],
+  "negativeClaims": {
+    "projectUploadImplemented": false,
+    "canonicalSynchronizationImplemented": false,
+    "automaticDependencyInstallImplemented": false,
+    "automaticProjectCommandImplemented": false,
+    "remoteTerminalImplemented": false,
+    "productionMutationDependency": false
+  }
+}

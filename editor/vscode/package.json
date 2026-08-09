@@ -83,6 +83,30 @@
       {
         "command": "thrallo.openConversation",
         "title": "Thrallo: Open Conversation"
+      },
+      {
+        "command": "thrallo.local.openFolder",
+        "title": "Thrallo: Open Local Folder"
+      },
+      {
+        "command": "thrallo.local.openRecent",
+        "title": "Thrallo: Open Recent Local Workspace"
+      },
+      {
+        "command": "thrallo.local.showStatus",
+        "title": "Thrallo: Show Local Workspace Status"
+      },
+      {
+        "command": "thrallo.local.reviewImport",
+        "title": "Thrallo: Review Local Project Import"
+      },
+      {
+        "command": "thrallo.local.openTerminal",
+        "title": "Thrallo: Open Local Terminal"
+      },
+      {
+        "command": "thrallo.local.startPreview",
+        "title": "Thrallo: Start Detected Local Preview"
       }
     ],
     "walkthroughs": [
