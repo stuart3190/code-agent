@@ -17,14 +17,17 @@ import {
   tierContract, bindCapabilities, bindingsForJourneys, bookingModulePlan, completionEligibility,
   imageIntents, previewEligibility,
 } from "./contractTiering.mjs";
-import { lintCapabilityUsage, lintRequiredCapabilityBindings, lintRequiredModulePlan } from "./capabilityLint.mjs";
 import {
   lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
 } from "./persistenceLint.mjs";
 import {
-  buildInteractionContract, interactionFailureDiagnostics, lintInteractiveWorkflow,
+  buildInteractionContract, interactionFailureDiagnostics,
   scopeInteractionContract, validateInteractionContract,
 } from "./interactionContract.mjs";
+import {
+  buildModuleGenerationContracts, moduleCorrectionScope, validateModuleConformance,
+  validateModulePatchScope,
+} from "./moduleContracts.mjs";
 import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
@@ -205,14 +208,29 @@ export function createOrchestrator({
     let problems = initialProblems;
     let lastSignature = null;
     let repairScope = null;
+    let contractCorrectionScope = null;
+    let moduleCorrectionUsed = false;
     let latestCandidate = null;
     const modulePlan = bookingModulePlan(contract, journeys);
+    const scopedInteractionContract = scopeInteractionContract(contract.interactionContract, journeys);
+    const scopedBindings = bindingsForJourneys(contract, bindings, journeys);
+    const moduleContracts = buildModuleGenerationContracts({
+      contract, modulePlan, interactionContract: scopedInteractionContract, bindings: scopedBindings, journeys,
+    });
     for (let attempt = 1; attempt <= maxCoreAttempts; attempt += 1) {
       abortIfRequested(signal);
       const dispatchStep = repairScope ? "repair" : step;
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
-        editRequest: repairScope?.instruction || editRequest, modulePlan, repairScope, signal });
+        editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
+        modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, signal });
+      const activeScope = repairScope || contractCorrectionScope;
+      const patchScope = validateModulePatchScope(patches, activeScope);
+      if (!patchScope.ok) {
+        rejections = patchScope.findings.map((finding) => ({ signature: finding.code, reason: JSON.stringify(finding) }));
+        log(`${step}: module-scoped correction attempted ${patchScope.findings.length} out-of-scope write(s)`);
+        continue;
+      }
       const applied = applyPatches(working, patches, { contract });
       const filesChanged = [...new Set([
         ...Object.keys(applied.tree).filter((path) => applied.tree[path] !== working[path]),
@@ -228,8 +246,8 @@ export function createOrchestrator({
         log(`${step}: ${applied.rejected.length} patch op(s) rejected, feeding reasons back`);
         continue;
       }
-      if (repairScope) {
-        const outsideScope = filesChanged.filter((path) => !repairScope.allowedFiles.includes(path));
+      if (activeScope) {
+        const outsideScope = filesChanged.filter((path) => !activeScope.allowedFiles.includes(path));
         if (outsideScope.length) {
           return { ok: false, problems: [`targeted pre-compile repair changed files outside its boundary: ${outsideScope.join(", ")}`],
             reason: "targeted pre-compile repair exceeded its write scope", candidateSnapshotId: latestCandidate?.id || null };
@@ -252,38 +270,41 @@ export function createOrchestrator({
       // D1 capability-usage lint — a call to a method the capability does not export is a
       // guaranteed runtime failure; caught HERE it costs a free round, not a browser cycle
       // (live run 3 lost its build to contactForm.submit vs submitContact).
-      const usage = lintCapabilityUsage(applied.tree);
-      if (!usage.ok) {
-        rejections = usage.problems.map((reason) => ({ signature: "capability-usage", reason }));
-        log(`${step}: ${usage.problems.length} capability-usage defect(s) rejected deterministically`);
-        continue;
-      }
-      const required = lintRequiredCapabilityBindings(applied.tree, bindingsForJourneys(contract, bindings, journeys));
-      if (!required.ok) {
-        rejections = required.problems.map((reason) => ({ signature: "required-capability", reason }));
-        log(`${step}: ${required.problems.length} required capability binding defect(s) rejected deterministically`);
-        continue;
-      }
-      const planned = lintRequiredModulePlan(applied.tree, modulePlan);
-      if (!planned.ok) {
-        rejections = planned.problems.map((reason) => ({ signature: "required-module", reason }));
-        log(`${step}: ${planned.problems.length} required planned module defect(s) rejected deterministically`);
-        continue;
-      }
-      const interactions = lintInteractiveWorkflow(applied.tree, {
-        interactionContract: scopeInteractionContract(contract.interactionContract, journeys), modulePlan, bindings,
+      const conformance = validateModuleConformance(applied.tree, {
+        contract, modulePlan, moduleContracts, interactionContract: scopedInteractionContract, bindings: scopedBindings,
       });
-      if (!interactions.ok) {
-        const signature = problemSignature(interactions.problems);
+      if (!conformance.ok) {
+        const signature = problemSignature(conformance.problems);
         if (signature === lastSignature) {
-          return { ok: false, problems: interactions.problems,
-            reason: "the same interaction/data-flow defect survived a repair round (stop rule)" };
+          return { ok: false, problems: conformance.problems,
+            reason: "the same module-contract defect survived a scoped correction (stop rule)" };
         }
         lastSignature = signature;
-        rejections = interactions.problems.map((reason) => ({ signature: "interaction-contract", reason }));
-        log(`${step}: ${interactions.findings.length} interaction/data-flow defect(s) rejected deterministically`);
+        if (!conformance.correction.wholeCoreRequired) {
+          contractCorrectionScope = moduleCorrectionScope(conformance, moduleContracts);
+          moduleCorrectionUsed = true;
+          working = applied.tree;
+          problems = conformance.problems;
+          rejections = [];
+          log(`${step}: ${conformance.findings.length} module-contract defect(s); retaining the tree and correcting only [${contractCorrectionScope.allowedFiles.join(", ")}]`);
+          continue;
+        }
+        contractCorrectionScope = null;
+        rejections = conformance.problems.map((reason) => {
+          let code = "";
+          try { code = JSON.parse(reason)?.code || ""; } catch { /* deterministic plain-text validator */ }
+          const signature = code === "capability_usage_violation" ? "capability-usage"
+            : code.startsWith("required_method_") || code.startsWith("required_factory_") ? "required-capability"
+              : code.startsWith("required_module_") || code === "module_plan_violation" ? "required-module"
+                : code.startsWith("interaction_") || code.includes("data_flow") ? "interaction-contract"
+                  : "module-contract";
+          return { signature, reason };
+        });
+        const missingPlanned = conformance.findings.some((finding) => finding.code === "required_module_missing");
+        log(`${step}: ${conformance.findings.length} ${missingPlanned ? "required planned module defect(s) plus " : ""}widespread or unmapped module-contract defect(s) require a whole-core retry`);
         continue;
       }
+      contractCorrectionScope = null;
       const assetCompliance = lintAssetAttribution(applied.tree, assets);
       if (!assetCompliance.ok) {
         rejections = assetCompliance.problems.map((reason) => ({ signature: "asset-attribution", reason }));
@@ -331,7 +352,8 @@ export function createOrchestrator({
             tree: gate.tree, reason: `candidate:${step}:${attempt}:corrected`, promotable: false });
         }
         return { ok: true, tree: gate.tree, snapshot: qualifiedCandidate,
-          candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope };
+          candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope,
+          moduleCorrectionUsed };
       }
       const gateProblems = gate.layers.d0d2.problems || [];
       const signature = problemSignature(gateProblems);
@@ -349,7 +371,7 @@ export function createOrchestrator({
       log(`${step}: gate failed (${gateProblems.length} problem(s)), repair attempt ${attempt}/${maxCoreAttempts}`);
     }
     return { ok: false, problems, reason: `no green tree within ${maxCoreAttempts} attempts`,
-      candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope };
+      candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope, moduleCorrectionUsed };
   }
 
   return {
