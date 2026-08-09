@@ -1,6 +1,6 @@
 {
   "name": "@thrallo/cloud-desktop",
-  "version": "0.0.0-c0",
+  "version": "0.1.0-c1",
   "private": true,
   "type": "module",
   "description": "Isolated browser application for the Thrallo Cloud Desktop.",
@@ -15,13 +15,17 @@
     "guard:boundaries": "node scripts/guard-import-boundaries.mjs",
     "guard:network": "node scripts/guard-no-production-network.mjs",
     "test": "npm run test:unit && npm run guard:paths && npm run guard:boundaries && npm run guard:network",
+    "test:accessibility": "playwright test --config playwright.config.js --grep @accessibility",
+    "test:visual": "playwright test --config playwright.config.js --grep @visual",
     "verify": "npm run test && npm run build && npm run test:playwright"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
     "@playwright/test": "1.61.1",
     "@vitejs/plugin-react": "6.0.4",
     "vite": "8.1.5",

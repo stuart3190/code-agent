@@ -18,7 +18,8 @@ function lines(value) {
 const committed = lines(git(["diff", "--name-only", `${manifest.sourceCommit}...HEAD`]));
 const unstaged = lines(git(["diff", "--name-only"]));
 const staged = lines(git(["diff", "--cached", "--name-only"]));
-const status = lines(git(["status", "--porcelain=v1", "--untracked-files=all"]))
+const statusOutput = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: repositoryRoot, encoding: "utf8" }).replaceAll("\r", "").replace(/\n$/, "");
+const status = String(statusOutput || "").split("\n").filter(Boolean)
   .map((line) => line.slice(3).replace(/^"|"$/g, ""));
 const changed = [...new Set([...committed, ...unstaged, ...staged, ...status])]
   .map((entry) => entry.replaceAll("\\", "/"));

@@ -12,11 +12,13 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    viewport: { width: 1440, height: 1024 },
+    screenshot: "only-on-failure",
   },
   projects: [
     {
-      name: "c0-chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "c1-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1024 } },
     },
   ],
   webServer: {

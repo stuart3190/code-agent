@@ -4,16 +4,18 @@ import { createFixtureProvider } from "../../src/providers/fixtureProvider.js";
 import { CAPABILITY_UNAVAILABLE, FIXTURE_PROVIDER_KIND } from "../../src/providers/providerContract.js";
 
 describe("C0 cloud desktop foundation", () => {
-  it("registers no applications before C1", () => {
+  it("registers exactly the seven approved C1 applications", () => {
     const registry = getApplicationRegistry();
     expect(registry.contractVersion).toBe(1);
-    expect(registry.applications).toEqual([]);
+    expect(registry.applications.map((application) => application.id)).toEqual([
+      "thrallo", "browser", "files", "terminal", "github", "storage", "settings",
+    ]);
     expect(Object.isFrozen(registry.applications)).toBe(true);
   });
 
   it("uses only a deterministic fixture provider", () => {
-    const first = createFixtureProvider({ seed: "same", scenario: "neutral" });
-    const second = createFixtureProvider({ seed: "same", scenario: "neutral" });
+    const first = createFixtureProvider({ seed: "same", scenario: "normal-active" });
+    const second = createFixtureProvider({ seed: "same", scenario: "normal-active" });
 
     expect(first.kind).toBe(FIXTURE_PROVIDER_KIND);
     expect(first.getBootstrapState()).toEqual(second.getBootstrapState());
@@ -21,7 +23,7 @@ describe("C0 cloud desktop foundation", () => {
   });
 
   it("fails closed for unsupported capabilities and records the call", () => {
-    const provider = createFixtureProvider({ seed: "c0", scenario: "neutral" });
+    const provider = createFixtureProvider({ seed: "c1", scenario: "normal-active" });
     const result = provider.invoke("workspace.create");
 
     expect(result).toMatchObject({

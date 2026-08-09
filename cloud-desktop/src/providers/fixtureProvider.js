@@ -4,8 +4,10 @@ import {
   assertCloudDesktopProvider,
   capabilityUnavailable,
 } from "./providerContract.js";
+import { getApplicationRegistry } from "../apps/registry.js";
+import { getScenario } from "../fixtures/scenarios.js";
 
-export function createFixtureProvider({ seed = "c0", scenario = "neutral" } = {}) {
+export function createFixtureProvider({ seed = "thrallo-cloud-desktop-c1", scenario = "normal-active" } = {}) {
   const identity = Object.freeze({ seed: String(seed), scenario: String(scenario) });
   const calls = [];
 
@@ -18,7 +20,8 @@ export function createFixtureProvider({ seed = "c0", scenario = "neutral" } = {}
         providerKind: FIXTURE_PROVIDER_KIND,
         seed: identity.seed,
         scenario: identity.scenario,
-        applications: Object.freeze([]),
+        applications: getApplicationRegistry().applications,
+        workspace: getScenario(identity.scenario),
       });
     },
     invoke(capability) {
