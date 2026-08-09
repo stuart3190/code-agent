@@ -14,14 +14,25 @@ import path from "node:path";
 import { parse } from "@babel/parser";
 
 import { FILE_MAX_TOKENS } from "../appBuild/modularity.mjs";
+import { CAPABILITIES } from "./capabilityRegistry.mjs";
 
 export const FACTORY_METHODS = Object.freeze({
   makeEntityStore: ["list", "get", "create", "update", "remove", "count", "subscribe"],
   makeBookingSystem: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
   makeWizardMachine: ["getState", "subscribe", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
+  makeWizardPersistence: ["save", "load", "clear"],
   makeContactForm: ["submitContact"],
   makeNewsletter: ["subscribe"],
 });
+
+/** Every capability factory advertised by the authoritative registry. */
+export const RECOGNIZED_CAPABILITY_FACTORIES = Object.freeze([...new Set(
+  Object.values(CAPABILITIES)
+    .flatMap((capability) => capability.interface || [])
+    .filter((name) => /^make[A-Z]/.test(name)),
+)].sort());
+
+const RECOGNIZED_FACTORY_SET = new Set(RECOGNIZED_CAPABILITY_FACTORIES);
 
 // Non-method properties an instance legitimately exposes (enums; never called).
 const FACTORY_PROPERTIES = Object.freeze({
@@ -126,6 +137,7 @@ function generatedSource(tree) {
 }
 
 const CAPABILITY_FACTORIES = Object.freeze({
+  crud: "makeEntityStore",
   booking: "makeBookingSystem",
   wizard: "makeWizardMachine",
   contact: "makeContactForm",
@@ -176,7 +188,7 @@ function returnedExpression(fn) {
 function factoryFromExpression(expression) {
   const node = unwrapExpression(expression);
   if (node?.type !== "CallExpression" && node?.type !== "OptionalCallExpression") return null;
-  if (node.callee?.type === "Identifier" && FACTORY_METHODS[node.callee.name]) return node.callee.name;
+  if (node.callee?.type === "Identifier" && RECOGNIZED_FACTORY_SET.has(node.callee.name)) return node.callee.name;
   // Existing generated code legitimately memoises capability objects. Only accept the known
   // transparent wrapper shape; arbitrary functions receiving a factory result are not provenance.
   if (node.callee?.type === "Identifier" && node.callee.name === "useMemo") {
@@ -238,7 +250,12 @@ function increment(map, name) {
   if (name) map.set(name, (map.get(name) || 0) + 1);
 }
 
-function analyseCapabilityProvenance(tree) {
+/**
+ * Build total, machine-verifiable provenance facts for every recognised capability factory.
+ * Requiredness is contract metadata; it never controls whether an actually used auxiliary
+ * factory receives a fact record.
+ */
+export function aggregateCapabilityFacts(tree, bindings = []) {
   const modules = parseGeneratedModules(tree);
   for (const module of modules.values()) {
     const exportedDeclarations = new Set((module.ast.program.body || [])
@@ -319,23 +336,46 @@ function analyseCapabilityProvenance(tree) {
     }
   }
 
-  const facts = new Map(Object.values(CAPABILITY_FACTORIES).map((factory) => [factory, {
-    instances: 0, bound: new Set(), invoked: new Set(),
+  const requiredFactories = new Set(bindings
+    .filter((binding) => binding.requiredMethods?.length)
+    .map((binding) => CAPABILITY_FACTORIES[binding.name])
+    .filter(Boolean));
+  const facts = new Map(RECOGNIZED_CAPABILITY_FACTORIES.map((factory) => [factory, {
+    factory,
+    required: requiredFactories.has(factory),
+    instances: [],
+    bindings: [],
+    invocations: [],
+    modules: new Set(),
+    bound: new Set(),
+    invoked: new Set(),
   }]));
-  for (const module of modules.values()) {
+  for (const [file, module] of modules) {
     for (const [instance, factory] of module.instances) {
       if (module.declarations.get(instance) !== 1) continue; // ambiguous/shadowed names fail closed
-      facts.get(factory).instances += 1;
+      const fact = facts.get(factory);
+      if (!fact) throw new Error(`capability_factory_registry_incomplete:${factory}`);
+      fact.instances.push({ module: file, local: instance });
+      fact.modules.add(file);
       for (const call of module.memberCalls) {
         if (call.object !== instance || !FACTORY_METHODS[factory]?.includes(call.method)) continue;
-        facts.get(factory).bound.add(call.method);
-        facts.get(factory).invoked.add(call.method);
+        fact.bound.add(call.method);
+        fact.invoked.add(call.method);
+        fact.bindings.push({ module: file, local: instance, method: call.method, kind: "member" });
+        fact.invocations.push({ module: file, local: instance, method: call.method, kind: "member" });
       }
     }
     for (const [alias, provenance] of module.aliases) {
       if (module.declarations.get(alias) !== 1) continue; // a local redeclaration cannot borrow provenance
-      facts.get(provenance.factory).bound.add(provenance.method);
-      if (module.identifierCalls.has(alias)) facts.get(provenance.factory).invoked.add(provenance.method);
+      const fact = facts.get(provenance.factory);
+      if (!fact) throw new Error(`capability_factory_registry_incomplete:${provenance.factory}`);
+      fact.bound.add(provenance.method);
+      fact.bindings.push({ module: file, local: alias, method: provenance.method, kind: "destructured" });
+      fact.modules.add(file);
+      if (module.identifierCalls.has(alias)) {
+        fact.invoked.add(provenance.method);
+        fact.invocations.push({ module: file, local: alias, method: provenance.method, kind: "destructured" });
+      }
     }
   }
   return facts;
@@ -348,13 +388,13 @@ function analyseCapabilityProvenance(tree) {
  */
 export function lintRequiredCapabilityBindings(tree, bindings = []) {
   const source = generatedSource(tree);
-  const provenance = analyseCapabilityProvenance(tree);
+  const provenance = aggregateCapabilityFacts(tree, bindings);
   const problems = [];
   for (const binding of bindings.filter((row) => row.requiredMethods?.length)) {
     const factory = CAPABILITY_FACTORIES[binding.name];
     if (!factory) continue;
     const facts = provenance.get(factory);
-    if (!facts?.instances) {
+    if (!facts?.instances.length) {
       problems.push(`required capability ${binding.name} is missing: instantiate ${factory}(...) before verification`);
       continue;
     }
