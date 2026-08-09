@@ -82,6 +82,12 @@ async function stubApi(page) {
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 
+async function deleteFirstProject(page) {
+  const project = page.locator(".ct-project:not(.ct-recent)").first();
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  await project.getByRole("menuitem", { name: "Delete project" }).click();
+}
+
 // The shell swaps to its narrow layout at the CSS breakpoint (max-width: 820px), NOT on touch
 // capability. Playwright's `isMobile` means touch — true for iPads — so branching on it made
 // the tablet projects assert the phone layout at 834px, where the desktop rail is correct.
@@ -447,7 +453,7 @@ test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboa
     return route.fulfill({ json: { conversations: [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } });
   });
   await page.goto("/");
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // A failed send reports the error and puts the draft back — never loses typed text.
   const box = page.getByPlaceholder(/Describe anything/);
@@ -457,11 +463,11 @@ test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboa
   await expect(box).toHaveValue("build me a store");
 
   // Escape dismisses the delete confirmation without deleting anything.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await expect(page.getByText("Delete this project?")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Delete this project?")).not.toBeVisible();
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // Palette is fully keyboard-driven: arrows move the selection, Enter opens it.
   await page.keyboard.press("Control+k");
@@ -499,17 +505,17 @@ test("soft delete → Recently Deleted → restore → Delete Now workflow", asy
     return route.fulfill({ json: { restored: true, id: "c1", title: "FocusFlow" } });
   });
   await page.goto("/");
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // Cancel does nothing.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await expect(page.getByText("Delete this project?")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
   expect(softDeleted).toBe(false);
 
   // Confirm soft-deletes: card disappears immediately, project appears in Recently Deleted.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByText("Project moved to Recently Deleted.")).toBeVisible();
   await expect(page.locator(".ct-project:not(.ct-recent)")).toHaveCount(0);
@@ -526,7 +532,7 @@ test("soft delete → Recently Deleted → restore → Delete Now workflow", asy
   expect(restored).toBe(true);
 
   // Delete again, then Delete Now bypasses the waiting period after its own confirmation.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: /Recently Deleted \(1\)/ }).click();
   await page.getByRole("button", { name: "Delete now" }).click();

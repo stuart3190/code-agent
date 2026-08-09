@@ -41,7 +41,9 @@ test("polish screenshots", async ({ page }, testInfo) => {
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${OUT}/p2-recently-deleted.png` });
 
-  await page.locator(".ct-pdelete").first().click();
+  const project = page.locator(".ct-project:not(.ct-recent)").first();
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  await project.getByRole("menuitem", { name: "Delete project" }).click();
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${OUT}/p3-delete-modal.png` });
   await page.keyboard.press("Escape");

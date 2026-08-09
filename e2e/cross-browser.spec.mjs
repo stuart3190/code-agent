@@ -117,10 +117,10 @@ test("keyboard focus reaches the composer and the cards", async ({ page }) => {
 
   // Cards are focusable in DOM order on every engine — WebKit in particular does not put
   // non-form controls in the tab order unless they carry an explicit tabindex, which these do.
-  const card = page.locator(".ct-project").first();
+  const card = page.locator(".ct-project").first().locator(".ct-project-open-button");
   await card.focus();
   await expect(card).toBeFocused();
-  await expect(card).toHaveAttribute("tabindex", "0");
+  await expect(card).toHaveAttribute("type", "button");
 });
 
 test("the event stream API the shell reads events with exists", async ({ page }) => {

@@ -32,8 +32,6 @@ import {
   readBillingReturn, rememberBillingReturn, takeRememberedBillingReturn,
 } from "../billing/billingReturn.js";
 import PublishedPanel from "../publish/PublishedPanel.jsx";
-import ProjectPublishRow from "../publish/ProjectPublishRow.jsx";
-
 import ProjectDashboard from "../publish/ProjectDashboard.jsx";
 import Onboarding from "../start/Onboarding.jsx";
 import StarterGallery from "../start/StarterGallery.jsx";
@@ -57,7 +55,7 @@ const bulkMessage = (action, n) => {
 };
 import { useDebounced } from "../lib/useDebounced.js";
 import {
-  TABS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
+  TABS, STATUS, statusOf, countByTab, isLive, badgesFor, groupProjects, DOMAIN_STATUS_LABEL,
   PUBLISH_SUCCESS_DURATION_MS,
 } from "../publish/publishLifecycle.js";
 import PricingView from "../billing/PricingView.jsx";
@@ -1003,6 +1001,15 @@ function projectState(c) {
 
 const RETURNING_KEY = "thrallo-returning";
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true">
+      <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m12.6 12.6 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function Begin({ user, conversations, loaded = true, onSend, composerSeed = null, onOpenStarters = null, onStarterPrompt = () => {}, onContinue, onDelete, deletedItems = [], onRestore, onDeleteNow, modelPref = "auto", onModelChange = null, onOpenSettings = null, onPublishUpdate = () => {}, onUnpublish = () => {}, onProjectSettings = () => {}, onAnalytics = () => {}, onHealth = () => {},
   counts: serverCounts = {}, page = null, busy = false, error = "", tab = "all", onTab = () => {},
   search = "", onSearch = () => {}, onLoadMore = () => {}, onRetryList = () => {},
@@ -1013,6 +1020,10 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
   const name = firstName(user);
   const [showDeleted, setShowDeleted] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [managing, setManaging] = useState(false);
+  const sidebarClose = useRef(null);
+  const sidebarToggle = useRef(null);
   // The box types freely; the fetch waits until typing stops, so every keystroke is not a request.
   const [searchDraft, setSearchDraft] = useState(search);
   useEffect(() => { setSearchDraft(search); }, [search]);
@@ -1022,6 +1033,17 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledDraft]);
   useEffect(() => { if (!deletedItems.length) setShowDeleted(false); }, [deletedItems.length]);
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+    sidebarClose.current?.focus();
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setSidebarOpen(false);
+      sidebarToggle.current?.focus();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen]);
   // Remember whether this account had projects so the greeting doesn't flash from
   // "Let's build something." to "Welcome back" while the list loads.
   // A narrowed view is not an empty account. Browsing an empty archive, or favourites before
@@ -1033,6 +1055,7 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
     if (loaded && !filtered) localStorage.setItem(RETURNING_KEY, conversations.length ? "1" : "0");
   }, [loaded, filtered, conversations.length]);
   const fresh = !returning;
+  const recentProject = !fresh && !filtered && sort === "activity" ? conversations[0] || null : null;
   const act = (id, run) => { setBusyId(id); Promise.resolve(run()).finally(() => setBusyId(null)); };
 
   // Everything the server sent for the current tab and search is shown. The old version kept the
@@ -1058,12 +1081,12 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
 
   const cardProps = {
     onOpen: onContinue, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics,
-    onHealth, onToggleFavourite,
-    // Selection only appears once something is selected: a checkbox on every card at all times is
-    // permanent chrome for an action most visits never take.
-    selecting: selected.length > 0,
+    onHealth, onToggleFavourite, archived,
+    onArchive: (c) => onBulk(archived ? "restore" : "archive", [c.id]),
+    selecting: managing,
     selectedSet,
     onSelect: toggleSelect,
+    onStartManaging: (id) => { setManaging(true); onSelected([id]); },
   };
   // Selecting a tab that empties out (the last published project is unpublished, say) would leave
   // the user staring at nothing they asked for. Fall back to All rather than an empty screen —
@@ -1072,8 +1095,19 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
     if (tab !== "all" && !search && counts[tab] === 0) onTab("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, counts, search]);
+  const focusNewProject = () => {
+    setSidebarOpen(false);
+    requestAnimationFrame(() => document.querySelector(".ct-home-layout .ct-composer textarea")?.focus());
+  };
+  const finishBulk = (action) => onBulk(action);
   return (
-    <div className="ct-begin" style={{ justifyContent: fresh ? "center" : "flex-start", overflowY: "auto" }}>
+    <div className={`ct-begin ct-home-layout ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <button className="ct-projects-scrim" aria-label="Close projects"
+        onClick={() => { setSidebarOpen(false); sidebarToggle.current?.focus(); }} />
+      <button ref={sidebarToggle} className="ct-projects-toggle" aria-controls="ct-project-sidebar"
+        aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>
+        <span aria-hidden="true">&#9776;</span> Projects <span className="n">{counts.all ?? conversations.length}</span>
+      </button>
       <div className="ct-halo" />
       <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
@@ -1084,15 +1118,35 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
           <ModelSelector value={modelPref} onChange={onModelChange} onOpenSettings={onOpenSettings} />
         </div>
       )}
+      {recentProject && (
+        <button className="ct-continue-project" onClick={() => onContinue(recentProject.id)}>
+          <span className="ct-continue-kicker">Continue working</span>
+          <span className="ct-continue-name">{recentProject.title || "Untitled project"}</span>
+          <span className="ct-continue-state">{projectState(recentProject).label}</span>
+          <span className="ct-continue-arrow" aria-hidden="true">→</span>
+        </button>
+      )}
       {!loaded && returning && (
-        <div className="ct-workspace" aria-hidden="true">
-          <div className="ct-ws-label">Projects</div>
-          <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "42%" }} /><i style={{ width: "63%" }} /></span></div>
-          <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "55%" }} /><i style={{ width: "38%" }} /></span></div>
+        <div className="ct-workspace ct-project-sidebar" id="ct-project-sidebar">
+          <div className="ct-sidebar-head">
+            <strong>Projects</strong>
+            <button ref={sidebarClose} className="ct-sidebar-close" aria-label="Close projects"
+              onClick={() => { setSidebarOpen(false); sidebarToggle.current?.focus(); }}>&times;</button>
+          </div>
+          <div aria-hidden="true">
+            <div className="ct-ws-label">Projects</div>
+            <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "42%" }} /><i style={{ width: "63%" }} /></span></div>
+            <div className="ct-project ct-skel"><span className="ct-skel-dot" /><span className="ct-skel-lines"><i style={{ width: "55%" }} /><i style={{ width: "38%" }} /></span></div>
+          </div>
         </div>
       )}
       {loaded && error && (
-        <div className="ct-workspace">
+        <div className="ct-workspace ct-project-sidebar" id="ct-project-sidebar">
+          <div className="ct-sidebar-head">
+            <strong>Projects</strong>
+            <button ref={sidebarClose} className="ct-sidebar-close" aria-label="Close projects"
+              onClick={() => { setSidebarOpen(false); sidebarToggle.current?.focus(); }}>&times;</button>
+          </div>
           <div className="mg-error">
             {error} <button className="ct-linkish" onClick={onRetryList}>Try again</button>
           </div>
@@ -1101,22 +1155,32 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
       {/* `favouritesOnly` and `archived` belong here as much as search does: without them, turning
           on a filter that matches nothing unmounts the controls that would turn it back off, and
           the empty state below is unreachable. */}
-      {loaded && !error && (conversations.length > 0 || search || tab !== "all" || favouritesOnly || archived) && (
-        <div className={`ct-workspace ${selected.length ? "ct-selecting" : ""}`}>
+      {loaded && !error && (
+        <div className={`ct-workspace ct-project-sidebar ${managing ? "ct-selecting" : ""}`}
+          id="ct-project-sidebar">
+          <div className="ct-sidebar-head">
+            <div><span className="ct-sidebar-kicker">Workspace</span><strong>Projects</strong></div>
+            <button ref={sidebarClose} className="ct-sidebar-close" aria-label="Close projects"
+              onClick={() => { setSidebarOpen(false); sidebarToggle.current?.focus(); }}>&times;</button>
+          </div>
+          <button className="ct-new-project" onClick={focusNewProject}>
+            <span aria-hidden="true">+</span> New project
+          </button>
+          <label className="ct-sidebar-search">
+            <span className="sr-only">Search projects</span>
+            <span className="ct-sidebar-search-icon"><SearchIcon /></span>
+            <input className="ct-ws-search" value={searchDraft} placeholder="Search projects…"
+              aria-label="Search projects" onChange={(e) => setSearchDraft(e.target.value)} />
+          </label>
           {/* Tabs are views over one field, so a project can never be missing from every tab.
               Counts come from the SERVER and cover the whole account, not the page on screen. */}
           <div className="ct-ws-tabs" role="tablist" aria-label="Project status">
             {TABS.filter((t) => t.id === "all" || counts[t.id] > 0 || tab === t.id).map((t) => (
               <button key={t.id} role="tab" aria-selected={tab === t.id}
                 className={`ct-ws-tab ${tab === t.id ? "on" : ""}`} onClick={() => onTab(t.id)}>
-                {t.label}<span className="n">{counts[t.id] ?? 0}</span>
+                {t.id === "all" ? "All projects" : t.label}<span className="n">{counts[t.id] ?? 0}</span>
               </button>
             ))}
-            {/* Shown once there is enough to make finding one a chore. */}
-            {(counts.all > 8 || search) && (
-              <input className="ct-ws-search" value={searchDraft} placeholder="Search projects…"
-                aria-label="Search projects" onChange={(e) => setSearchDraft(e.target.value)} />
-            )}
           </div>
 
           {/* Favourites, ordering and the archive. Each is one click and each is reflected in what
@@ -1140,12 +1204,24 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
               </label>
             )}
             {conversations.length > 0 && (
-              <button className="ct-linkish ct-ws-selectall"
-                onClick={() => onSelected(allSelected ? [] : allShown)}>
-                {allSelected ? "Clear selection" : "Select all"}
+              <button className={`ct-manage-toggle ${managing ? "on" : ""}`} aria-pressed={managing}
+                onClick={() => {
+                  if (managing) onSelected([]);
+                  setManaging((value) => !value);
+                }}>
+                {managing ? "Done" : "Manage"}
               </button>
             )}
           </div>
+
+          {managing && conversations.length > 0 && (
+            <div className="ct-managebar" role="region" aria-label="Project selection">
+              <button className="ct-linkish" onClick={() => onSelected(allSelected ? [] : allShown)}>
+                {allSelected ? "Clear all" : "Select all"}
+              </button>
+              <span>{selected.length ? `${selected.length} selected` : "Choose projects below"}</span>
+            </div>
+          )}
 
           {/* The bulk bar appears only when something is selected, and says exactly what it will
               act on rather than "selected items". */}
@@ -1156,17 +1232,17 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
               </span>
               <div className="ct-bulkbar-actions">
                 {archived ? (
-                  <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("restore")}>Restore</button>
+                  <button className="ct-pubrow-btn" disabled={busy} onClick={() => finishBulk("restore")}>Restore</button>
                 ) : (
                   <>
-                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("favourite")}>★ Favourite</button>
-                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("archive")}>Archive</button>
+                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => finishBulk("favourite")}>★ Favourite</button>
+                    <button className="ct-pubrow-btn" disabled={busy} onClick={() => finishBulk("archive")}>Archive</button>
                   </>
                 )}
                 {/* The same soft delete a single project gets — Recently Deleted, recoverable for
                     seven days. A bulk action must never be more destructive than the individual one. */}
-                <button className="ct-pubrow-btn" disabled={busy} onClick={() => onBulk("delete")}>Delete</button>
-                <button className="ct-btn-quiet" onClick={() => onSelected([])}>Cancel</button>
+                <button className="ct-pubrow-btn" disabled={busy} onClick={() => finishBulk("delete")}>Delete</button>
+                <button className="ct-btn-quiet" onClick={() => { onSelected([]); setManaging(false); }}>Cancel</button>
               </div>
             </div>
           )}
@@ -1203,6 +1279,31 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
           {page && page.total > 0 && page.nextOffset == null && page.total > page.limit && (
             <div className="ct-ws-empty ct-hint">All {page.total} projects shown.</div>
           )}
+          {deletedItems.length > 0 && (
+            <div className="ct-sidebar-deleted">
+              <button className="ct-recent-toggle" aria-expanded={showDeleted} onClick={() => setShowDeleted((v) => !v)}>
+                Recently Deleted ({deletedItems.length})
+              </button>
+              {showDeleted && deletedItems.map((item) => (
+                <div className="ct-project ct-recent" key={item.id}>
+                  <span className="ct-pmeta">
+                    <span className="ct-pname">{item.title || "Untitled project"}</span>
+                    <span className="ct-pactivity">
+                      Deleted {new Date(item.deletedAt).toLocaleDateString()} · {item.daysRemaining === 0
+                        ? "permanent deletion soon"
+                        : `${item.daysRemaining} day${item.daysRemaining === 1 ? "" : "s"} left`}
+                    </span>
+                  </span>
+                  <button className="ct-btn-quiet ct-recent-btn" disabled={busyId === item.id}
+                    onClick={() => act(item.id, () => onRestore(item))}>
+                    {busyId === item.id ? "Restoring…" : "Restore"}
+                  </button>
+                  <button className="ct-btn-quiet ct-recent-btn ct-recent-danger" disabled={busyId === item.id}
+                    onClick={() => onDeleteNow(item)}>Delete now</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Never built anything. Not "no results": the difference is counts.all, which describes the
@@ -1223,97 +1324,167 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
           </button>
         </div>
       )}
-      {deletedItems.length > 0 && (
-        <div className="ct-workspace" style={{ marginTop: conversations.length ? 6 : 28 }}>
-          <button className="ct-recent-toggle" aria-expanded={showDeleted} onClick={() => setShowDeleted((v) => !v)}>
-            Recently Deleted ({deletedItems.length})
-          </button>
-          {showDeleted && deletedItems.map((item) => (
-            <div className="ct-project ct-recent" key={item.id}>
-              <span className="ct-pmeta">
-                <span className="ct-pname">{item.title || "Untitled project"}</span>
-                <span className="ct-pactivity">
-                  Deleted {new Date(item.deletedAt).toLocaleDateString()} · {item.daysRemaining === 0
-                    ? "permanent deletion soon"
-                    : `${item.daysRemaining} day${item.daysRemaining === 1 ? "" : "s"} left`}
-                </span>
-              </span>
-              <button className="ct-btn-quiet ct-recent-btn" disabled={busyId === item.id}
-                onClick={() => act(item.id, () => onRestore(item))}>
-                {busyId === item.id ? "Restoring…" : "Restore"}
-              </button>
-              <button className="ct-btn-quiet ct-recent-btn ct-recent-danger" disabled={busyId === item.id}
-                onClick={() => onDeleteNow(item)}>Delete now</button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
+  );
+}
+
+function ProjectActionsMenu({
+  c, status, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics,
+  onHealth, onToggleFavourite, onArchive, archived,
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const trigger = useRef(null);
+  const menu = useRef(null);
+  const site = c.site || null;
+  const address = site?.primaryUrl || site?.url || "";
+  const offline = status === STATUS.unpublished;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        trigger.current?.focus();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const items = [...(menu.current?.querySelectorAll("[role='menuitem']") || [])];
+        if (!items.length) return;
+        const at = items.indexOf(document.activeElement);
+        const next = event.key === "ArrowDown"
+          ? items[(at + 1 + items.length) % items.length]
+          : items[(at - 1 + items.length) % items.length];
+        next?.focus();
+      }
+    };
+    const onAway = (event) => {
+      if (menu.current?.contains(event.target) || trigger.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onAway);
+    requestAnimationFrame(() => menu.current?.querySelector("[role='menuitem']")?.focus());
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onAway);
+    };
+  }, [open]);
+
+  const choose = (run) => (event) => {
+    event.stopPropagation();
+    setOpen(false);
+    trigger.current?.focus();
+    run?.();
+  };
+  const copyUrl = async (event) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_000);
+    } catch { setCopied(false); }
+  };
+
+  return (
+    <span className="ct-project-actions" onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}>
+      <button ref={trigger} className="ct-project-menu-trigger" aria-haspopup="menu"
+        aria-expanded={open} aria-label={`Project actions for ${c.title || "untitled project"}`}
+        title="Project actions" onClick={() => setOpen((value) => !value)}>
+        <span aria-hidden="true">•••</span>
+      </button>
+      {open && (
+        <span ref={menu} className="ct-project-menu" role="menu" aria-label={`${c.title || "Project"} actions`}>
+          <button role="menuitem" onClick={choose(() => onOpen(c.id))}>Open project</button>
+          {site && !offline && (
+            <a role="menuitem" href={address} target="_blank" rel="noopener noreferrer"
+              onClick={(event) => { event.stopPropagation(); setOpen(false); }}>View live site</a>
+          )}
+          {address && !offline && (
+            <button role="menuitem" onClick={copyUrl}>{copied ? "Copied" : "Copy live URL"}</button>
+          )}
+          {site && (
+            <>
+              <span className="ct-project-menu-separator" role="separator" />
+              <button role="menuitem" className={status === STATUS.updateAvailable ? "accent" : ""}
+                onClick={choose(() => onPublishUpdate(c))}>
+                {offline ? "Publish again" : "Publish update"}
+              </button>
+              {!offline && <button role="menuitem" onClick={choose(() => onUnpublish(c))}>Unpublish</button>}
+              <button role="menuitem" onClick={choose(() => onHealth(c))}>Health</button>
+              <button role="menuitem" onClick={choose(() => onAnalytics(c))}>Analytics</button>
+              <button role="menuitem" onClick={choose(() => onProjectSettings(c))}>Project settings</button>
+            </>
+          )}
+          <span className="ct-project-menu-separator" role="separator" />
+          {!archived && (
+            <button role="menuitem" onClick={choose(() => onToggleFavourite(c))}>
+              {c.favourite ? "Remove from favourites" : "Add to favourites"}
+            </button>
+          )}
+          <button role="menuitem" onClick={choose(() => onArchive(c))}>
+            {archived ? "Restore from archive" : "Archive project"}
+          </button>
+          <span className="ct-project-menu-separator" role="separator" />
+          <button role="menuitem" className="danger" onClick={choose(() => onDelete(c))}>Delete project</button>
+        </span>
+      )}
+    </span>
   );
 }
 
 function ProjectCard({
   c, onOpen, onDelete, onPublishUpdate, onUnpublish, onProjectSettings, onAnalytics, onHealth,
-  onToggleFavourite = () => {}, selecting = false, selectedSet = new Set(), onSelect = () => {},
+  onToggleFavourite = () => {}, onArchive = () => {}, archived = false,
+  selecting = false, selectedSet = new Set(), onSelect = () => {}, onStartManaging = () => {},
 }) {
   const s = projectState(c);
   const status = statusOf(c);
-  const site = c.site || null;
   const badges = badgesFor(c);
+  const primaryBadge = ["failed", "offline", "degraded", "update", "unpublished", "draft", "live", "building", "waiting"]
+    .map((id) => badges.find((badge) => badge.id === id)).find(Boolean) || badges[0];
   const isSelected = selectedSet.has(c.id);
-  // Stops a click on a control inside the card from also opening the project.
-  const only = (run) => (event) => { event.stopPropagation(); run(); };
   // While a selection is running a click selects rather than opens, so the label must say so.
   const cardLabel = `${selecting ? (isSelected ? "Deselect" : "Select") : "Open"} ${c.title || "untitled project"}`
     + ` — ${badges.map((b) => b.label).join(", ")}, ${s.label}`;
 
   return (
-    <div className={`ct-project ${site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""} ${isSelected ? "is-selected" : ""}`}
-      role="button" tabIndex={0} onClick={() => (selecting ? onSelect(c.id) : onOpen(c.id))}
-      {...(selecting ? { "aria-pressed": isSelected } : {})}
-      aria-label={cardLabel}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selecting ? onSelect(c.id) : onOpen(c.id); }
-        // A single key to start selecting, so bulk work does not begin with a hunt for a checkbox.
-        if (e.key === "x" || e.key === "X") { e.preventDefault(); onSelect(c.id); }
-      }}>
-      {/* Always rendered, faded away until the card is hovered or focused (or a selection is
-          already running). It cannot be conditional on `selecting`: that left the keyboard's `x`
-          as the only way to begin, so a mouse could never start a selection at all. */}
-      <input type="checkbox" className="ct-pselect" checked={isSelected} onClick={(e) => e.stopPropagation()}
-        onChange={() => onSelect(c.id)} aria-label={`Select ${c.title || "untitled project"}`} />
-      <span className="ct-pmeta">
-        <span className="ct-pname">
-          {c.title || "Untitled project"}
-          {/* Badges, not a dot. A dot could only ever say one thing, and a project is often two
-              things at once — live AND building, or live AND a newer build waiting. */}
-          {badges.map((b) => (
-            <span className={`ct-badge tone-${b.tone}`} key={b.id}>{b.label}</span>
-          ))}
+    <div className={`ct-project ${c.site ? "has-pub" : ""} ${isLive(status) ? "is-live" : ""} ${isSelected ? "is-selected" : ""}`}>
+      {selecting && (
+        <input type="checkbox" className="ct-pselect" checked={isSelected}
+          onChange={() => onSelect(c.id)} aria-label={`Select ${c.title || "untitled project"}`} />
+      )}
+      <button type="button" className="ct-project-open-button"
+        onClick={() => (selecting ? onSelect(c.id) : onOpen(c.id))}
+        {...(selecting ? { "aria-pressed": isSelected } : {})}
+        aria-label={cardLabel}
+        onKeyDown={(e) => {
+          // A single key to start selecting, so bulk work does not begin with a hunt for a checkbox.
+          if (e.key === "x" || e.key === "X") {
+            e.preventDefault();
+            selecting ? onSelect(c.id) : onStartManaging(c.id);
+          }
+        }}>
+        <span className="ct-pmeta">
+          <span className="ct-pname">
+            <span className="ct-pname-text">{c.title || "Untitled project"}</span>
+            {/* Badges, not a dot. A dot could only ever say one thing, and a project is often two
+                things at once — live AND building, or live AND a newer build waiting. */}
+            {primaryBadge && <span className={`ct-badge tone-${primaryBadge.tone}`}>{primaryBadge.label}</span>}
+          </span>
+          <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
         </span>
-        <span className="ct-pactivity">{s.agent ? `${s.agent} · ` : ""}{s.label}</span>
-        {site && (
-          <ProjectPublishRow site={site} status={status}
-            onPublishUpdate={() => onPublishUpdate(c)}
-            onUnpublish={() => onUnpublish(c)}
-            onSettings={() => onProjectSettings(c)}
-            onAnalytics={() => onAnalytics(c)}
-            onHealth={() => onHealth(c)}
-            health={c.health} today={c.today} />
-        )}
-      </span>
-      <span className="ct-popen">Open</span>
-      {/* A card action, grouped with the other one rather than inside the name. Inside `.ct-pname`
-          it sat close enough to the centre that clicking the name hit the star, and `only()` stops
-          the click there — so the project silently refused to open. */}
-      <button className={`ct-pfav ${c.favourite ? "on" : ""}`} onClick={only(() => onToggleFavourite(c))}
-        aria-pressed={!!c.favourite}
-        aria-label={c.favourite ? "Remove from favourites" : "Add to favourites"}
-        title={c.favourite ? "Remove from favourites" : "Add to favourites"}>
-        {c.favourite ? "★" : "☆"}
+        <span className="ct-popen">Open</span>
       </button>
-      <button className="ct-pdelete" title="Delete project" aria-label={`Delete ${c.title || "project"}`}
-        onClick={(e) => { e.stopPropagation(); onDelete(c); }}>×</button>
+      {!selecting && (
+        <ProjectActionsMenu c={c} status={status} onOpen={onOpen} onDelete={onDelete}
+          onPublishUpdate={onPublishUpdate} onUnpublish={onUnpublish}
+          onProjectSettings={onProjectSettings} onAnalytics={onAnalytics} onHealth={onHealth}
+          onToggleFavourite={onToggleFavourite} onArchive={onArchive} archived={archived} />
+      )}
     </div>
   );
 }

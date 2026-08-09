@@ -1,5 +1,5 @@
 // Model selector — Provider → Model → Mode. The closed pill always says what will run
-// ("🤖 Model: Auto" / "🤖 gpt-5.6-terra • Deep Thinking"); the open menu is a PORTAL
+// ("Model: Auto" / "gpt-5.6-terra • Deep Thinking"); the open menu is a PORTAL
 // popover anchored to the pill (never clipped by parent containers, never behind cards,
 // flips above when near the viewport bottom, closes on outside click / Escape). Fully
 // keyboard navigable. Populates entirely from /api/v1/models adapter metadata.
@@ -133,7 +133,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
       <button ref={pillRef} className={`ct-model-pill ${selectedUnavailable ? "warn" : ""}`}
         onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="listbox"
         title={selectedUnavailable ? "Selected model unavailable — choose another" : "Choose which AI model powers this project"}>
-        <span className="ct-model-glyph" aria-hidden="true">🤖</span>
+        <span className="ct-model-glyph" aria-hidden="true"><span className="ct-model-mark" /></span>
         {pillLabel}
         <span className="ct-model-caret" aria-hidden="true">▾</span>
       </button>
@@ -142,7 +142,7 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
         <div ref={menuRef} className="ct-model-menu" role="listbox" aria-label="Model"
           style={{ left: menuPos.left, top: menuPos.top, bottom: menuPos.bottom, width: menuPos.width }}
           onKeyDown={onMenuKey}>
-          <div className="ct-model-head" aria-hidden="true">🤖 Model</div>
+          <div className="ct-model-head" aria-hidden="true"><span className="ct-model-mark" /> Model</div>
           {selectedUnavailable && (
             <div className="ct-model-warnrow">
               Your selected model isn't available any more. Pick another below or switch to Auto

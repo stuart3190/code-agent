@@ -148,6 +148,15 @@ const cards = (page) => page.locator(".ct-project").filter({ hasText: new RegExp
 // The name cell also carries status badges and the star, so pull the project name back out.
 const titles = async (page) => (await cards(page).locator(".ct-pname").allInnerTexts())
   .map((t) => t.match(new RegExp(NAMES.join("|")))?.[0] || t.trim());
+const openActions = async (project) => {
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  return project.getByRole("menu");
+};
+const enterManage = async (page) => {
+  const toggle = page.locator("#ct-project-sidebar").getByRole("button", { name: /^(Manage|Done)$/ });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.textContent())?.trim() === "Manage") await toggle.click();
+};
 
 // ── Favourites ──────────────────────────────────────────────────────────────────────────
 
@@ -160,7 +169,7 @@ test("starring a project pins it above everything, whatever the sort", async ({ 
   // Olive is last by activity AND last alphabetically — so if it leads either order afterwards,
   // that can only be because the pin was honoured.
   const olive = cards(page).filter({ hasText: "Olive" });
-  await olive.locator(".ct-pfav").click();
+  await (await openActions(olive)).getByRole("menuitem", { name: "Add to favourites" }).click();
   await expect(page.locator(".ct-toast.show")).toContainText("1 project added to favourites");
   await expect.poll(async () => (await titles(page))[0]).toBe("Olive");
 
@@ -175,7 +184,8 @@ test("starring a project pins it above everything, whatever the sort", async ({ 
 test("the favourites filter is served by the server and can be turned back off", async ({ page }) => {
   await stub(page);
   await page.goto("/");
-  await cards(page).filter({ hasText: "Rowan" }).locator(".ct-pfav").click();
+  const rowan = cards(page).filter({ hasText: "Rowan" });
+  await (await openActions(rowan)).getByRole("menuitem", { name: "Add to favourites" }).click();
 
   const chip = page.getByRole("button", { name: /Favourites/ });
   await expect(chip).toContainText("(1)");
@@ -219,6 +229,7 @@ test("archiving takes a project out of the way and restoring brings it back", as
   await page.goto("/");
 
   const willow = cards(page).filter({ hasText: "Willow" });
+  await enterManage(page);
   await willow.locator(".ct-pselect").check();
   await expect(page.locator(".ct-bulkbar")).toContainText("1 project selected");
   await bulk(page).getByRole("button", { name: "Archive", exact: true }).click();
@@ -233,6 +244,7 @@ test("archiving takes a project out of the way and restoring brings it back", as
   // Archive is not delete: the published state travels with it untouched.
   await expect(page.locator(".ct-ws-label")).toContainText("Archived");
 
+  await enterManage(page);
   await cards(page).first().locator(".ct-pselect").check();
   await bulk(page).getByRole("button", { name: "Restore", exact: true }).click();
   await expect(page.locator(".ct-toast.show")).toContainText("1 project restored");
@@ -247,6 +259,7 @@ test("the archive offers restore rather than archive again", async ({ page }) =>
   rows[0].archivedAt = new Date().toISOString();
   await page.goto("/");
   await page.getByRole("button", { name: /^Archived/ }).click();
+  await enterManage(page);
   await cards(page).first().locator(".ct-pselect").check();
   await expect(bulk(page).getByRole("button", { name: "Restore", exact: true })).toBeVisible();
   await expect(bulk(page).getByRole("button", { name: "Archive", exact: true })).toHaveCount(0);
@@ -257,9 +270,10 @@ test("the archive offers restore rather than archive again", async ({ page }) =>
 test("select all acts on everything loaded, and says how many", async ({ page }) => {
   await stub(page);
   await page.goto("/");
+  await enterManage(page);
   await page.getByRole("button", { name: "Select all" }).click();
   await expect(page.locator(".ct-bulkbar")).toContainText("12 projects selected");
-  await expect(page.getByRole("button", { name: "Clear selection" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear all" })).toBeVisible();
 
   await bulk(page).getByRole("button", { name: "★ Favourite", exact: true }).click();
   await expect(page.locator(".ct-toast.show")).toContainText("12 projects added to favourites");
@@ -273,6 +287,7 @@ test("a bulk failure keeps the projects on screen", async ({ page }) => {
     onBulk: (r) => r.fulfill({ status: 500, json: { error: "That did not work. Nothing was changed." } }),
   });
   await page.goto("/");
+  await enterManage(page);
   await page.getByRole("button", { name: "Select all" }).click();
   await bulk(page).getByRole("button", { name: "Archive", exact: true }).click();
 
@@ -289,11 +304,12 @@ test("keyboard alone can select and act", async ({ page }) => {
   await stub(page);
   await page.goto("/");
   const first = cards(page).first();
-  await first.focus();
+  const openButton = first.locator(".ct-project-open-button");
+  await openButton.focus();
   await page.keyboard.press("x");
   await expect(page.locator(".ct-bulkbar")).toContainText("1 project selected");
   // The card must now announce what a press will do, not the "Open" it announced a moment ago.
-  await expect(first).toHaveAttribute("aria-label", /^Deselect Zephyr/);
+  await expect(openButton).toHaveAttribute("aria-label", /^Deselect Zephyr/);
   await page.keyboard.press("x");
   await expect(page.locator(".ct-bulkbar")).toHaveCount(0);
 });
@@ -301,6 +317,7 @@ test("keyboard alone can select and act", async ({ page }) => {
 test("the bulk bar stays reachable while a long list scrolls", async ({ page }) => {
   await stub(page);
   await page.goto("/");
+  await enterManage(page);
   await page.getByRole("button", { name: "Select all" }).click();
   const bar = page.locator(".ct-bulkbar");
   await expect(bar).toBeVisible();
@@ -317,6 +334,7 @@ test("the bulk bar stays reachable while a long list scrolls", async ({ page }) 
 test("the page never scrolls sideways, whatever is on screen", async ({ page }) => {
   await stub(page);
   await page.goto("/");
+  await enterManage(page);
   await page.getByRole("button", { name: "Select all" }).click();
   await expect(page.locator(".ct-bulkbar")).toBeVisible();
 
@@ -331,30 +349,29 @@ test("nothing moves for someone who asked for less motion", async ({ page }) => 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await stub(page);
   await page.goto("/");
+  await enterManage(page);
   await page.getByRole("button", { name: "Select all" }).click();
   const bar = page.locator(".ct-bulkbar");
   await expect(bar).toBeVisible();
   expect(await bar.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
-  // The star's hover grow is the other movement this phase introduced.
-  const star = cards(page).first().locator(".ct-pfav");
-  await star.hover();
-  expect(await star.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
+  // Project action triggers do not animate when motion is reduced.
+  await page.locator("#ct-project-sidebar").getByRole("button", { name: "Done", exact: true }).click();
+  const actions = cards(page).first().locator(".ct-project-menu-trigger");
+  await actions.hover();
+  expect(await actions.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
 });
 
-test("the favourite and delete controls do not sit on top of the project name", async ({ page }) => {
+test("the project actions control does not sit on top of the project name", async ({ page }) => {
   await stub(page);
   await page.goto("/");
   const card = cards(page).first();
   const name = await card.locator(".ct-pname").boundingBox();
-  const star = await card.locator(".ct-pfav").boundingBox();
-  const del = await card.locator(".ct-pdelete").boundingBox();
-  // Both are absolutely positioned in the card's right-hand gutter; the name must end before it.
-  expect(name.x + name.width).toBeLessThanOrEqual(Math.min(star.x, del.x) + 1);
-  expect(star.x + star.width).toBeLessThanOrEqual(del.x + 1);
+  const actions = await card.locator(".ct-project-menu-trigger").boundingBox();
+  expect(name.x + name.width).toBeLessThanOrEqual(actions.x + 1);
 
   // A finger needs a bigger target than a cursor. The coarse-pointer override for this lived
   // EARLIER in the stylesheet than the star's own rule, and a media query carries no extra
   // specificity — so it silently lost and the touch target stayed at its 22px desktop size.
   const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
-  expect(Math.min(star.width, star.height)).toBeGreaterThanOrEqual(coarse ? 32 : 22);
+  expect(Math.min(actions.width, actions.height)).toBeGreaterThanOrEqual(coarse ? 40 : 32);
 });
