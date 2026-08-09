@@ -1,6 +1,6 @@
 {
   "name": "@thrallo/cloud-desktop",
-  "version": "0.2.0-c2",
+  "version": "0.3.0-c3",
   "private": true,
   "type": "module",
   "description": "Isolated browser application for the Thrallo Cloud Desktop.",
@@ -20,6 +20,7 @@
     "test": "npm run test:unit && npm run guard:paths && npm run guard:boundaries && npm run guard:network",
     "test:accessibility": "playwright test --config playwright.config.js --project=cloud-chromium --grep @accessibility",
     "test:visual": "playwright test --config playwright.config.js --project=cloud-chromium --grep @visual",
+    "test:c3": "vitest run --config vitest.config.js test/unit/c3-filesystem.test.js && playwright test --config playwright.config.js --grep @c3",
     "verify": "npm run test && npm run build && npm run test:playwright"
   },
   "dependencies": {

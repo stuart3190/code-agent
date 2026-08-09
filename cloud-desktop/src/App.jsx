@@ -14,6 +14,7 @@ import { Taskbar } from "./components/Taskbar.jsx";
 import { WindowFrame } from "./components/WindowFrame.jsx";
 import { WorkspaceLifecycleOverlay } from "./components/WorkspaceLifecycleOverlay.jsx";
 import { useDesktop } from "./hooks/useDesktop.js";
+import { useFixtureFilesystem } from "./hooks/useFixtureFilesystem.js";
 import { createFixtureProvider } from "./providers/fixtureProvider.js";
 
 const provider = createFixtureProvider({ seed: "thrallo-cloud-desktop-c1", scenario: "normal-active" });
@@ -31,6 +32,7 @@ const applicationComponents = {
 
 export default function App() {
   const { state, actions, viewportMode } = useDesktop();
+  const filesystem = useFixtureFilesystem({ shellStorageState: state.storageState });
 
   useEffect(() => {
     const handleKey = (event) => {
@@ -83,7 +85,7 @@ export default function App() {
             const Component = applicationComponents[windowState.applicationId];
             return (
               <WindowFrame key={windowState.applicationId} windowState={windowState} active={state.focusedApplication === windowState.applicationId} viewportMode={viewportMode} viewport={state.viewport} actions={actions}>
-                <Component state={state} actions={actions} storageState={state.storageState} onFixtureNotice={notice} />
+                <Component state={state} actions={actions} storageState={state.storageState} filesystem={filesystem} onFixtureNotice={notice} />
               </WindowFrame>
             );
           })}

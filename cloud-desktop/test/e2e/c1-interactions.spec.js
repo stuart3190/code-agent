@@ -169,20 +169,25 @@ test("Browser tabs, safe history, downloads, and blocked navigation are fixture-
 test("Files changes remain deterministic fixture state", async ({ page }) => {
   await openApp(page, "files");
   const files = page.locator("[data-application-window='files']");
-  await files.getByRole("button", { name: /New folder/ }).click();
-  await expect(files.getByRole("button", { name: /New folder Folder/ })).toBeVisible();
-  await files.getByRole("button", { name: /New folder Folder/ }).click();
-  await files.getByRole("button", { name: /Rename/ }).click();
-  await expect(files.getByRole("button", { name: /New folder renamed Folder/ })).toBeVisible();
-  await files.getByLabel("Selected file actions").getByRole("button", { name: "Trash" }).click();
+  await files.getByRole("button", { name: "New folder", exact: true }).click();
+  await files.getByLabel("Item name").fill("New folder");
+  await files.getByRole("button", { name: "Create folder" }).click();
+  await files.getByRole("option", { name: /New folder/ }).click();
+  await files.getByRole("button", { name: "Actions" }).click();
+  await files.getByRole("menuitem", { name: /Rename/ }).click();
+  await files.getByLabel("Item name").fill("New folder renamed");
+  await files.getByRole("button", { name: "Rename" }).click();
+  await expect(files.getByRole("option", { name: /New folder renamed/ })).toBeVisible();
+  await files.getByRole("button", { name: "Actions" }).click();
+  await files.getByRole("menuitem", { name: /Move to Trash/ }).click();
   await files.getByLabel("Fixture folders").getByRole("button", { name: "Trash", exact: true }).click();
-  await files.getByRole("button", { name: /New folder renamed Folder/ }).click();
-  await files.getByRole("button", { name: /Restore/ }).click();
-  await files.getByLabel("Fixture folders").getByRole("button", { name: "Cloud drive", exact: true }).click();
-  await files.getByRole("button", { name: /Design System Folder/ }).click();
-  await files.getByLabel("Selected file actions").getByRole("button", { name: "Move" }).click();
-  await files.getByRole("button", { name: /Fixture upload/ }).click();
-  await expect(page.getByRole("dialog")).toContainText("No local file was read");
+  await files.getByRole("option", { name: /New folder renamed/ }).click();
+  await files.getByRole("button", { name: "Actions" }).click();
+  await files.getByRole("menuitem", { name: "Restore" }).click();
+  await files.getByLabel("Fixture folders").getByRole("button", { name: "My Files", exact: true }).click();
+  await expect(files.getByRole("option", { name: /New folder renamed/ })).toBeVisible();
+  await files.getByRole("button", { name: "Synthetic fixture upload" }).click();
+  await expect(page.getByRole("dialog")).toContainText("No browser file picker or local file access");
 });
 
 test("Terminal supports only safe deterministic commands", async ({ page }) => {
