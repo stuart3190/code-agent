@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "package": "D12-foundation",
+  "observedAt": "2026-08-09",
+  "classification": "fixture-settings-secrets-database-integrations-foundation",
+  "items": [
+    {
+      "id": "settings-information-architecture",
+      "category": "fixture-verified",
+      "state": "deterministic-fixture-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Account, workspace, models, environment, secrets, database, Stripe, GitHub, integrations, storage, usage, security, and desktop-local settings are represented with explicit scope and authority."
+    },
+    {
+      "id": "metadata-only-secret-lifecycle",
+      "category": "contract-verified",
+      "state": "synthetic-value-accepted-once",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Synthetic values are accepted transiently for explicit fixture creation or replacement; snapshots, calls, results, audit events, errors, and rendered state contain metadata only."
+    },
+    {
+      "id": "supabase-database-presentation",
+      "category": "fixture-verified",
+      "state": "read-only-schema-and-safety-preview",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Supabase health, schema summaries, migration, storage, auth, and RLS states plus safe/destructive change previews are fixture presentation only; SQL apply and rollback are unavailable."
+    },
+    {
+      "id": "provider-integration-registry",
+      "category": "fixture-verified",
+      "state": "deterministic-fixture-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Stripe, GitHub, model providers, Supabase, and a future external service expose health, scope, auth classification, handoff, and mutation availability without live provider calls."
+    },
+    {
+      "id": "local-project-metadata",
+      "category": "local-safe-contract",
+      "state": "metadata-only",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "D8 local project type, framework, Git state, and supplied size metadata may be shown; environment files are not read and projects are not uploaded."
+    },
+    {
+      "id": "stable-read-only-boundary",
+      "category": "contract-verified",
+      "state": "injected-read-only-adapter",
+      "runtimeVerified": false,
+      "fixtureVerified": true,
+      "claim": "Optional stable reads require injected transport and explicit origin-relative routes; no default production origin or mutation method exists."
+    },
+    {
+      "id": "track-b-mutations",
+      "category": "future-integration",
+      "state": "blocked",
+      "runtimeVerified": false,
+      "fixtureVerified": false,
+      "claim": "Production secrets, environments, database changes, OAuth, provider mutations, durable audit, cloud workspace authority, and Builder V2 integration remain unavailable."
+    }
+  ],
+  "visualVerification": {
+    "renderer": "loopback-hosted-real-D9-D10-D11-D12-controller-and-view",
+    "loopbackHttpStatus": 200,
+    "scenarios": {
+      "settingsOverview": 38565,
+      "secrets": 38335,
+      "environment": 38134,
+      "supabaseDatabase": 39022,
+      "stripe": 37268,
+      "github": 37403,
+      "modelProviders": 37255,
+      "integrationDegraded": 38817,
+      "destructiveDatabaseReview": 39009
+    },
+    "requiredSurfaceMarkersVerified": true,
+    "accessibleDialogsVerified": true,
+    "inAppBrowserScreenshot": false,
+    "inAppBrowserBlocker": "The in-app Browser controller rejected the local inspection session because sandbox policy metadata was unavailable.",
+    "actualElectronWorkbench": false,
+    "actualElectronBlocker": "The isolated compiled Code OSS/Electron development workbench checkout remains unavailable.",
+    "productionAccessUsed": false,
+    "cleanup": "The exact owned loopback renderer was stopped; port 43122 and D12 temporary output files were verified removed."
+  },
+  "negativeClaims": {
+    "productionSecretMutation": false,
+    "productionEnvironmentMutation": false,
+    "productionDatabaseMutation": false,
+    "productionStripeMutation": false,
+    "productionGitHubMutation": false,
+    "productionOAuth": false,
+    "serviceRoleExposure": false,
+    "builderV2Mutation": false,
+    "buildr101RuntimeReuse": false
+  }
+}

@@ -109,6 +109,10 @@
         "title": "Thrallo: Open Deployments and Releases"
       },
       {
+        "command": "thrallo.openThralloSettings",
+        "title": "Thrallo: Open Settings and Integrations"
+      },
+      {
         "command": "thrallo.local.openFolder",
         "title": "Thrallo: Open Local Folder"
       },

@@ -12,6 +12,7 @@ const { renderDesktopProductHtml } = require("./desktopProductView.js");
 const { createLocalPreviewRuntime } = require("./previewLocalRuntime.js");
 const { safeLocalPreviewUrl, safeRelativeFile } = require("./previewFoundation.js");
 const { createDeploymentLocalExportAdapter } = require("./deploymentLocalExport.js");
+const { HANDOFFS, redactSensitive } = require("./settingsFoundation.js");
 
 const HOST_ACTIONS = Object.freeze(["openLocalFolder", "openLocalGit", "importLocal"]);
 
@@ -23,6 +24,7 @@ function createDesktopProductHost({
   scenario = "authenticated-paid",
   previewScenario = "preview-idle",
   deploymentScenario = "live-healthy",
+  settingsScenario = "supabase-healthy",
   client: injectedClient = null,
 } = {}) {
   if (!vscode || !context || !localWorkspaceHost) throw new TypeError("D9 host requires Code OSS, extension context, and the D8 local workspace host");
@@ -48,6 +50,7 @@ function createDesktopProductHost({
       localPreviewAdapter: localPreviewRuntime,
       deploymentScenario,
       deploymentExportAdapter,
+      settingsScenario,
     });
     portal ||= client.createPortalHandoff({
       openExternal: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
@@ -73,7 +76,7 @@ function createDesktopProductHost({
     );
     panel.onDidDispose(() => { panel = null; });
     panel.webview.onDidReceiveMessage((message) => handleMessage(message).catch((error) => {
-      log(`D9 action failed: ${safeMessage(error)}`);
+      log(`Thrallo desktop action failed: ${safeMessage(error)}`);
       vscode.window.showErrorMessage("Thrallo could not complete that fixture action.");
     }));
     render();
@@ -114,6 +117,8 @@ function createDesktopProductHost({
       render();
       return response.result;
     }
+    if (message.type === "settingsAction") return dispatchAndRender({ type: "settings_action", action: message.action });
+    if (message.type === "settingsHandoff") return openSettingsHandoff(String(message.destination || ""));
     if (message.type === "sendMessage") return dispatchAndRender({ type: "send_message", text: message.text });
     if (message.type === "planDecision") return dispatchAndRender({ type: "plan_decision", planId: message.planId, decision: message.decision, comment: message.comment });
     if (message.type === "agentControl") return dispatchAndRender({ type: "agent_control", agentId: message.agentId, control: message.control });
@@ -131,6 +136,20 @@ function createDesktopProductHost({
     const summary = JSON.stringify({ preview: { source: state.preview.source, state: state.preview.state, path: state.preview.path, health: state.preview.health }, diagnostics: state.diagnostics, testSession: state.testSession }, null, 2);
     await vscode.env.clipboard.writeText(summary);
     return Object.freeze({ ok: true, state: "redacted_diagnostics_copied", sideEffects: true });
+  }
+
+  async function openSettingsHandoff(destination) {
+    const response = await controller.dispatch({ type: "settings_action", action: { type: "request_handoff", destination } });
+    if (!response.result.ok) { render(); return response.result; }
+    const descriptor = response.result.descriptor;
+    if (descriptor.kind === "portal") {
+      const opened = await portal.open(descriptor.destination);
+      return Object.freeze({ ok: true, state: "system_browser_opened", destination: opened.destination });
+    }
+    const url = safeExternalSettingsUrl(destination, descriptor);
+    if (!url) return unavailable("handoff_destination_rejected");
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+    return Object.freeze({ ok: true, state: "system_browser_opened", destination });
   }
 
   async function openPreviewExternal() {
@@ -193,6 +212,7 @@ function createDesktopProductHost({
       vscode.commands.registerCommand("thrallo.openUsage", () => open("usage")),
       vscode.commands.registerCommand("thrallo.openPreview", () => open("preview")),
       vscode.commands.registerCommand("thrallo.openDeployments", () => open("deployments")),
+      vscode.commands.registerCommand("thrallo.openThralloSettings", () => open("settings")),
       Object.freeze({ dispose: () => { localPreviewRuntime?.cleanup().catch(() => {}); } }),
     ];
   }
@@ -212,7 +232,12 @@ async function loadSharedClient(extensionRoot) {
 }
 
 function unavailable(code) { return Object.freeze({ ok: false, code, state: "capability_unavailable", sideEffects: false }); }
-function safeMessage(error) { return String(error?.message || error || "unknown error").replace(/[\r\n]+/g, " ").slice(0, 240); }
+function safeMessage(error) { return String(redactSensitive(String(error?.message || error || "unknown error"))).replace(/[\r\n]+/g, " ").slice(0, 240); }
+function safeExternalSettingsUrl(destination, descriptor) {
+  const allowed = HANDOFFS[destination];
+  if (!allowed || allowed.kind !== "external" || descriptor?.url !== allowed.url) return null;
+  try { const url = new URL(allowed.url); return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash ? url.toString() : null; } catch { return null; }
+}
 function resolveDiagnosticSource(rootPath, relativeFile, fsApi = fs) {
   const relative = safeRelativeFile(relativeFile);
   if (!rootPath || !relative) return null;
@@ -228,4 +253,4 @@ function resolveDiagnosticSource(rootPath, relativeFile, fsApi = fs) {
   } catch { return null; }
 }
 
-module.exports = { HOST_ACTIONS, createDesktopProductHost, loadSharedClient, resolveDiagnosticSource };
+module.exports = { HOST_ACTIONS, createDesktopProductHost, loadSharedClient, resolveDiagnosticSource, safeExternalSettingsUrl };
