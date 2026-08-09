@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **zero-model grammar gate green; live quality remains unqualified 2026-08-09**: direct factory-result provenance is registry-covered and retained-source compile proof passes; no new provider call was run | none | no additional spend in grammar repair | separate live booking approval required; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **live qualification failed 2026-08-09**: grammar and module-plan gates passed, but the sole fresh build used `sessionStorage` for durable booking state and never reached compile/checkpoint | none | 4.392 credits in latest proof | fixture cleaned; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -201,6 +201,15 @@ while only the corrected variant passes the capability contract. Focused grammar
 25/25 and the relevant zero-model V2/provider/verification suite passed 307/307. No provider call or
 production action occurred. Package 15 remains blocked pending a separately approved booking proof.
 Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-FACTORY-GRAMMAR.md`.
+
+The one separately approved post-grammar booking lifecycle used AUTO
+`connected_allowance:codex:gpt-5.5:medium` and 4.392/15 internal credits. The direct factory-result
+false rejection did not recur: the terminal candidate passed capability and module-plan validation.
+It was correctly stopped before compilation because `BookingFlow.jsx` used `sessionStorage` at two
+sites for booking recovery. No `working:*` checkpoint existed, so the one allowed targeted repair
+was ineligible and no additional call ran. Cleanup and canonical customer parity passed. Builder V2
+quality remains unqualified and Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-GRAMMAR-LIVE-QUALIFICATION.md`.
 
 ## Deterministic qualification gate
 

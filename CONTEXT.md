@@ -1332,3 +1332,20 @@ V2/provider/verification suite passed 307/307. No provider call, deployment or p
 occurred. Another live booking proof is technically justified only under separate approval;
 Package 15 remains blocked until live strict quality passes. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-FACTORY-GRAMMAR.md`.
+
+## Package 14S post-grammar live booking proof failed (2026-08-09)
+
+The single authorized fresh AUTO booking lifecycle used
+`connected_allowance:codex:gpt-5.5:medium`, four calls and 4.392/15 internal credits. Medium
+complexity, the enforced six-module plan and the full capability grammar all held. The final
+candidate passed capability and module-plan validation, proving the direct factory-result false
+positive did not recur, but the deterministic persistence gate caught `sessionStorage` writes in
+`BookingFlow.jsx` before compilation. No browser journey ran and no immutable working checkpoint
+existed, so the approved targeted repair was ineligible and did not run.
+
+Cleanup restored canonical parity across all twelve guarded datasets. Production is back to 13
+projects, 39 build jobs, 198 AI requests, 284 usage records, one published site and five
+deployments, with zero active V2 builds/reservations/worker jobs. Worker authority is dark again,
+V2 flags are off and managed settlement remains paused. Builder V2 quality is not qualified;
+Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-GRAMMAR-LIVE-QUALIFICATION.md`.
