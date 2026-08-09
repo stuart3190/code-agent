@@ -276,3 +276,123 @@ export function assertProviderConformance(providerKey: string, provider: object)
 export function assertProviderSuiteConformance<T extends ThralloProviderSuite>(suite: T): T;
 export function redact<T>(value: T): T;
 export function redactText(value: unknown): string;
+
+export type NativeAuthState =
+  | "signed_out" | "authorizing" | "awaiting_callback" | "exchanging" | "authenticated"
+  | "refreshing" | "expired" | "revoked" | "offline" | "error";
+
+export interface NativeAuthSnapshot {
+  readonly state: NativeAuthState;
+  readonly method: "native_browser_pkce" | "legacy_manual_pat" | null;
+  readonly accountId: string | null;
+  readonly deviceId: string;
+  readonly expiresAt: number | null;
+  readonly error: Readonly<{ code: string; message: string }> | null;
+}
+
+export interface PkceTransaction {
+  readonly verifier: string;
+  readonly challenge: string;
+  readonly state: string;
+  readonly nonce: string;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
+export interface DeviceSession {
+  readonly accountId: string;
+  readonly deviceId: string;
+  readonly accessHandle: string;
+  readonly refreshHandle: string;
+  readonly accessExpiresAt: number;
+  readonly sessionRevision: number;
+}
+
+export interface CredentialScope {
+  readonly accountId: string;
+  readonly deviceId: string;
+  readonly kind: string;
+}
+
+export interface CredentialVault {
+  readonly kind: string;
+  readonly persistent: boolean;
+  store(scope: CredentialScope, value: unknown): Promise<Readonly<{ revision: number }>>;
+  retrieve(scope: CredentialScope): Promise<Readonly<{ value: any; revision: number }> | null>;
+  replace(scope: CredentialScope, value: unknown, options: { expectedRevision: number }): Promise<Readonly<{ revision: number }>>;
+  delete(scope: CredentialScope): Promise<Readonly<{ deleted: boolean }>>;
+}
+
+export interface NativeAuthProvider {
+  readonly kind: string;
+  readonly capabilities: Readonly<{ browserAuthorization: boolean; productionMutation: boolean }>;
+  beginAuthorization(input: Readonly<{
+    challenge: string; state: string; nonce: string; redirectUri: "thrallo://auth/callback";
+    deviceId: string; expectedAccountId?: string | null;
+  }>): Promise<Readonly<{ authorizationId: string; authorizationUrl: string; expiresAt: number }>>;
+  exchangeAuthorizationCode(input: Readonly<{
+    authorizationId: string; code: string; verifier: string; state: string; nonce: string; deviceId: string;
+  }>): Promise<DeviceSession>;
+  refreshDeviceSession(input: Readonly<{
+    accountId: string; deviceId: string; refreshHandle: string; sessionRevision: number;
+  }>): Promise<DeviceSession>;
+  revokeDeviceSession(input: Readonly<{ accountId: string; deviceId: string; refreshHandle: string }>): Promise<Readonly<{ revoked: boolean }>>;
+  getConnectivity?(): "online" | "offline";
+}
+
+export interface NativeAuthControllerOptions {
+  provider: NativeAuthProvider;
+  vault: CredentialVault;
+  capabilities: HostCapabilities;
+  browser: { openExternal(url: string): Promise<void> | void };
+  deviceId: string;
+  now?: () => number;
+  pkceFactory?: (options: { createdAt: number }) => Promise<PkceTransaction>;
+}
+
+export class NativeAuthController {
+  constructor(options: NativeAuthControllerOptions);
+  getSnapshot(): NativeAuthSnapshot;
+  subscribe(listener: (snapshot: NativeAuthSnapshot) => void): () => void;
+  startup(): Promise<NativeAuthSnapshot>;
+  startAuthorization(options?: { expectedAccountId?: string | null }): Promise<Readonly<{ authorizationId: string; expiresAt: number }>>;
+  handleCallback(url: string): Promise<NativeAuthSnapshot>;
+  refresh(): Promise<NativeAuthSnapshot>;
+  reconnect(): Promise<NativeAuthSnapshot>;
+  logout(): Promise<NativeAuthSnapshot>;
+  switchAccount(accountId: string): Promise<Readonly<{ authorizationId: string; expiresAt: number }>>;
+}
+
+export const NATIVE_AUTH_STATES: readonly NativeAuthState[];
+export const NATIVE_AUTH_PROVIDER_METHODS: readonly string[];
+export const AUTH_CONNECTION_METHODS: Readonly<{ preferred: "native_browser_pkce"; legacy: "legacy_manual_pat" }>;
+export const AUTH_FIXTURE_CLOCK: string;
+export const AUTH_FIXTURE_SEED: string;
+export function canTransitionAuthState(from: string, to: string): boolean;
+export function assertAuthTransition(from: string, to: string): string;
+export function createPkceVerifier(options?: { randomBytes?: (length: number) => Uint8Array }): string;
+export function createCorrelationValue(options?: { randomBytes?: (length: number) => Uint8Array }): string;
+export function createPkceChallenge(verifier: string, options?: { digest?: (value: Uint8Array) => Promise<Uint8Array> | Uint8Array }): Promise<string>;
+export function createPkceTransaction(options?: { randomBytes?: (length: number) => Uint8Array; createdAt?: number; expiresInMs?: number }): Promise<PkceTransaction>;
+export function constantTimeEqual(left: unknown, right: unknown): boolean;
+export function parseAuthCallback(value: string): Readonly<{ code: string | null; state: string; error: string | null; errorDescription: string | null }>;
+export function correlateAuthCallback(callback: ReturnType<typeof parseAuthCallback>, expectedState: string, options?: { now?: number; expiresAt?: number }): ReturnType<typeof parseAuthCallback>;
+export function findAuthCallbackArgument(argumentsList?: readonly string[]): string | null;
+export function createNativeAuthDeepLinkDispatcher(options: { controller: NativeAuthController }): Readonly<{
+  handleOpenUrl(url: string): Promise<NativeAuthSnapshot>;
+  handleLaunchArguments(argumentsList: readonly string[]): Promise<NativeAuthSnapshot | null>;
+}>;
+export function createNativeCredentialVault(options: { secretStorage: { get(key: string): Promise<string | undefined>; store(key: string, value: string): Promise<void>; delete(key: string): Promise<void> }; keyPrefix?: string }): CredentialVault;
+export function createDevelopmentCredentialVault(options?: { failOperations?: readonly string[] }): CredentialVault & { getCalls(): readonly unknown[]; inspectKeys(): readonly string[]; setFailure(operation: string, enabled?: boolean): void };
+export function assertNativeAuthProvider<T extends NativeAuthProvider>(provider: T): T;
+export function createUnavailableServerAuthProvider(): NativeAuthProvider;
+export function createLegacyPatConnection(options: { getPat(): Promise<string | null> | string | null }): Readonly<{ mode: "legacy_manual_pat"; preferred: false; getAuthHeaders(): Promise<Record<string, string>> }>;
+export function createNativeAuthController(options: NativeAuthControllerOptions): NativeAuthController;
+export function createDeterministicAuthProvider(options?: { seed?: string; clock?: string; authorizationLifetimeMs?: number; accessLifetimeMs?: number }): NativeAuthProvider & {
+  completeAuthorization(authorizationId: string, overrides?: { code?: string; state?: string }): string;
+  revokeDevice(input: { accountId: string; deviceId: string }): void;
+  setOffline(value?: boolean): void;
+  advance(milliseconds: number): number;
+  now(): number;
+  getCalls(): readonly unknown[];
+};

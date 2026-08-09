@@ -1,9 +1,10 @@
-const SENSITIVE_KEY = /authorization|cookie|credential|password|secret|token|api[-_]?key|session/i;
+const SENSITIVE_KEY = /authorization|cookie|credential|password|secret|token|api[-_]?key|session|verifier|nonce|(?:access|refresh)[-_]?handle|authorization[-_]?code/i;
 const SENSITIVE_TEXT = [
   /\bBearer\s+[^\s,;]+/gi,
   /\bthrallo_pat_[A-Za-z0-9._-]+/gi,
   /\bsk-[A-Za-z0-9_-]{8,}/gi,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+  /([?&](?:code|state|nonce|code_verifier|refresh_handle|access_handle)=)[^&#\s]*/gi,
 ];
 
 export function redactText(value) {
