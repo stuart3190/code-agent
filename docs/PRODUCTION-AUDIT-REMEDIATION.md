@@ -302,3 +302,18 @@ Focused fixtures passed 6/6 and the relevant zero-model Builder V2 suite passed 
 provider call, production mutation, infrastructure certification, threshold change, or billing
 change occurred. Package 15 remains blocked only by the separately approved single live booking
 proof. Evidence: `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.
+
+## Package 14S live booking proof (2026-08-09)
+
+The one approved AUTO booking build is **FAIL**. Medium classification and the six-module booking
+plan were correct, and every candidate instantiated the required booking/wizard factories. The
+capability linter nevertheless rejected all candidates before compile because it recognizes only
+direct instance-method calls, not valid destructured exports from the capability instance. It
+reported the same eleven missing-method failures across all three bounded core attempts.
+
+Spend stopped at 4.4655/9 credits. No full build was retried and no targeted repair ran because no
+candidate reached an immutable working checkpoint. Disposable state was erased with canonical
+pre/post parity; customer data, Caddy, flags, settlement and V1 routing were unchanged. Package 15
+remains blocked pending a narrow deterministic capability-lint contract repair and a separately
+approved proof. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.

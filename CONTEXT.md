@@ -1261,3 +1261,18 @@ Package 14S focused fixtures passed 6/6 and 238/238 relevant zero-model V2 tests
 call or production mutation occurred. The only remaining Package 14S step is one separately approved
 live booking proof; Package 15 remains blocked until that proof passes. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.
+
+## Package 14S live booking proof failed (2026-08-09)
+
+The single AUTO-routed booking lifecycle ran from deployed commit `c2ad218` on connected Codex and
+used 4.4655/9 credits across one contract and three bounded core calls. Complexity was correctly
+`medium`; every candidate contained the enforced booking modules plus `makeBookingSystem` and
+`makeWizardMachine`. Compile and browser journeys were never reached because the capability linter
+only recognizes direct `instance.method(...)` calls and rejected valid destructured exports of all
+eleven required methods on every attempt. No working checkpoint existed, so the permitted targeted
+repair would have required forbidden full regeneration and was not run.
+
+Cleanup and canonical customer parity passed. The worker is dark again, V1 is default, V2 flags and
+customer C7/C8 routing remain off, settlement is paused, and Caddy was untouched. Package 15 remains
+blocked by this narrow capability-lint contract defect. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.

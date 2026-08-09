@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | deterministic gate complete 2026-08-09: 238/238 relevant V2 tests; single live booking proof awaits separate approval | none | zero spent; live proof not run | local complete; internal booking fixture pending |
+| 14S. Contracted completion and modular booking planning repair | **live proof failed 2026-08-09**: planning/classification correct, but capability lint rejected valid destructured bindings before compile | none | 4.4655 spent | internal fixture cleaned; Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -153,8 +153,11 @@ Package 14S now prevents `green` completion while any contracted journey is red 
 multi-step booking to medium complexity, and injects plus machine-checks a visually headless booking
 module plan before compile/browser work. Required `makeBookingSystem` and `makeWizardMachine`
 bindings remain structural. The deterministic gate passed 238/238 relevant V2 tests with zero model
-calls. Package 15 is blocked only by one separately approved booking-only live proof. Evidence:
-`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.
+calls. The separately approved booking proof then failed before compile: all three candidates had
+the planned modules and factories, but the capability linter accepts only direct instance-method
+calls and rejected valid destructured exports of booking, wizard and contact methods eleven times.
+No full retry or targeted repair was possible because no working checkpoint existed. Package 15
+remains blocked. Evidence: `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.
 
 ## Deterministic qualification gate
 
