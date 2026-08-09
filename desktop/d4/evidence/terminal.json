@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "ptyCreateMs": 369.47,
+  "interactiveShell": true,
+  "streamedOutput": true,
+  "inputRoundTrip": true,
+  "resize": { "supported": true, "cols": 132, "rows": 41 },
+  "reconnect": { "supported": true, "commandExecutionCount": 1, "priorOutputReplayed": false },
+  "workspaceScope": { "aListedOwnSession": true, "bListedASession": false, "crossConnectDirectlyAttempted": false },
+  "termination": true,
+  "productionGap": "A Thrallo-authenticated, rate-limited, audited WebSocket gateway is still required; direct SDK PTY access is not a customer transport."
+}

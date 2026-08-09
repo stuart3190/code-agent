@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "developmentServer": { "started": true, "restarted": true },
+  "ports": [
+    { "port": 4173, "status": 200, "signed": true, "expiredStatus": 401 },
+    { "port": 4174, "status": 200, "signed": true, "expiredStatus": 401 }
+  ],
+  "multiplePorts": true,
+  "workspaceBEnumeratedAPorts": false,
+  "urlsOrTokensRecorded": false,
+  "productionGap": "Vendor signed URLs are capability evidence only. Thrallo authorization, origin policy, audit, expiry policy, content controls, and route revocation still need a gateway."
+}

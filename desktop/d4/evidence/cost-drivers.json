@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-08-09",
+  "source": "Daytona public pricing and billing documentation; organization wallet and negotiated terms were not accessed.",
+  "publishedUnits": {
+    "vcpu": { "perSecondUsd": 0.000014, "perHourUsd": 0.0504 },
+    "memoryGiB": { "perSecondUsd": 0.0000045, "perHourUsd": 0.0162 },
+    "storageGiB": { "perSecondUsd": 0.00000003, "perHourUsd": 0.000108, "publicFreeAllowanceGiB": 5 },
+    "volumes": { "documentedAdditionalCost": 0, "organizationCountLimit": 100 },
+    "networkEgress": { "price": null, "status": "unresolved" },
+    "snapshots": { "price": null, "status": "billed-for-storage-but-unit-not-separately-stated" }
+  },
+  "lifecycleBilling": {
+    "started": ["vCPU", "RAM", "disk"],
+    "stoppedContainer": ["disk"],
+    "pausedVm": ["disk"],
+    "archivedContainer": [],
+    "deleted": [],
+    "snapshotAfterSandboxDeletion": ["snapshot storage"]
+  },
+  "measuredOverheadDrivers": ["larger class needed for Code OSS plus browser", "38.5s one-time Chromium installation without a prepared image", "snapshot capture 81.35s", "browser artifacts", "source and dependency caches", "active agents/processes", "preview traffic"],
+  "notCalculated": "No customer price, margin, monthly estimate, negotiated rate, wallet balance, or account-specific credit was invented."
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    { "id": "class-sizing", "question": "Which container/VM classes and regions reliably support the required CPU, RAM, disk, and pause semantics, and at what account limits?", "blocks": "capacity and cost model" },
+    { "id": "isolation-assurance", "question": "What tenant-isolation certifications, kernel/runtime boundaries, incident response, and vulnerability SLAs apply to the selected class?", "blocks": "security approval" },
+    { "id": "egress", "question": "Can Thrallo receive enforceable per-workspace domain/CIDR policy on the intended tier, plus bandwidth and proxy-abuse controls?", "blocks": "untrusted workload release" },
+    { "id": "preview", "question": "What revocation, cookie-domain, WebSocket, rate-limit, and audit guarantees apply to signed preview URLs at scale?", "blocks": "preview gateway design" },
+    { "id": "pty", "question": "What PTY reconnect retention, backpressure, maximum session, and concurrent connection limits are guaranteed?", "blocks": "terminal gateway SLO" },
+    { "id": "persistence", "question": "What are local disk, volume, archive, and snapshot durability/backup/RPO/RTO guarantees and deletion SLAs?", "blocks": "recovery design" },
+    { "id": "snapshot-api", "question": "When will snapshot/fork APIs used here leave experimental status, and what compatibility guarantees apply?", "blocks": "checkpoint design" },
+    { "id": "regions", "question": "Which regions support data residency, volume/snapshot locality, and deterministic placement?", "blocks": "regional launch" },
+    { "id": "quotas", "question": "Are enforceable pids, process, per-port, bandwidth, wall-clock, idle, and concurrent sandbox quotas available by API?", "blocks": "abuse controls" },
+    { "id": "billing-export", "question": "Is there an authoritative per-sandbox usage/cost export with low enough latency for Thrallo budget enforcement?", "blocks": "commercial enforcement" }
+  ]
+}

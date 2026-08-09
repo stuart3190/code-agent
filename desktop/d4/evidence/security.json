@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "liveChecks": {
+    "distinctWorkspaceIds": true,
+    "workspaceSpecificMarkers": true,
+    "workspaceBListedWorkspaceAPty": false,
+    "workspaceBEnumeratedWorkspaceAPorts": false,
+    "signedPreviewExpiryReturned401": true,
+    "knownThralloCredentialVariableNamesInWorkspace": [],
+    "dockerSocketExposed": false,
+    "productionIdentityOrProjectUsed": false
+  },
+  "resourceLimits": { "memoryCgroupBytes": 1073741824, "observedPidsMax": 629145, "perWorkspaceProcessCeilingSuitable": false },
+  "network": { "sdkControlsPresent": true, "liveOverrideAllowed": false, "reason": "Organization tier restriction cannot be overridden per sandbox", "packageRegistryAndGitReachable": true, "customEgressPolicyVerified": false },
+  "proofLimits": [
+    "Marker and namespace tests are evidence of runtime separation, not a formal hypervisor/container escape assessment.",
+    "Cross-workspace PTY connection was not directly attempted; scoped listing was verified.",
+    "Signed preview token swapping and cross-workspace bearer misuse were not tested.",
+    "Bandwidth quota, crypto-mining detection, proxy/relay detection, and per-process CPU ceilings were not exposed by the tested SDK surface."
+  ],
+  "requiredThralloControls": ["workspace ownership authorization", "short-lived launch tickets", "PTY gateway", "preview gateway", "egress proxy/policy", "audit log", "idle detector", "hard TTL", "process and concurrency quotas", "abuse detection", "secret broker"]
+}

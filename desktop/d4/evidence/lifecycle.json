@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "create": { "confirmed": true, "samplesMs": [4538.05, 87.16] },
+  "initialBoot": { "confirmed": true, "toolboxReadyOnCreate": true },
+  "warmReopen": { "confirmed": true, "samplesMs": [1673.07, 12096.37, 1261.32] },
+  "stop": { "confirmed": true, "samplesMs": [880.84, 1052.86, 1209.71] },
+  "restart": { "confirmed": true },
+  "pauseResume": { "confirmedUnavailableForContainer": true, "error": "Pausing is not supported for this sandbox", "vmUnverified": true },
+  "replacement": { "confirmed": true, "mechanism": "experimental snapshot plus create", "replacementMs": 29449.18 },
+  "deletion": { "confirmed": true },
+  "forcedFailure": { "processExitCode": 23, "sandboxRemainedUsable": true },
+  "interruptedOperation": { "asyncCommandAccepted": true, "sessionDeleted": true },
+  "recovery": { "snapshotRecoveryConfirmed": true, "recoverMethodPresentButUnexercised": true },
+  "archive": { "archiveMs": 158.69, "restoreMs": 2679.96, "filesystemPreserved": true }
+}

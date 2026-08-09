@@ -43,6 +43,8 @@
     "test:desktop:d1": "node --test test/desktop/d1-client.test.mjs && node desktop/d0/guard.mjs",
     "test:desktop:d2": "node --test test/desktop/d2-auth.test.mjs && node desktop/auth/smoke.mjs && node desktop/d0/guard.mjs",
     "test:desktop:d3": "node --test test/desktop/d3-access.test.mjs && node desktop/account/smoke.mjs && node desktop/d0/guard.mjs",
+    "test:desktop:d4": "node --test test/desktop/d4-spike.test.mjs && node desktop/d0/guard.mjs",
+    "spike:desktop:d4": "node desktop/d4/live/run.mjs --confirm-synthetic",
     "smoke:desktop:auth": "node desktop/auth/smoke.mjs",
     "smoke:desktop:account": "node desktop/account/smoke.mjs",
     "test:bv2:qualification": "node ops/run-bv2-qualification.mjs",

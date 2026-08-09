@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "0.201.0",
+  "target": "eu",
+  "statuses": ["confirmed-live", "api-present-unverified", "partial", "unavailable-for-tested-class", "blocked-by-thrallo-packaging", "requires-thrallo-control"],
+  "capabilities": [
+    { "id": "workspace_create", "status": "confirmed-live", "evidence": "Two private synthetic workspaces created; raw samples 4538.05ms and 87.16ms." },
+    { "id": "start_stop", "status": "confirmed-live", "evidence": "Three stop/start cycles plus forced stop/restart preserved files." },
+    { "id": "pause_resume", "status": "unavailable-for-tested-class", "evidence": "Default container returned 'Pausing is not supported'; VM class was not provisioned." },
+    { "id": "archive_restore", "status": "confirmed-live", "evidence": "Container archive 158.69ms; restore 2679.96ms; local marker preserved." },
+    { "id": "persistent_filesystem", "status": "confirmed-live", "evidence": "Local source survived normal and forced stop/start and archive/restore." },
+    { "id": "persistent_volume", "status": "confirmed-live", "evidence": "S3-backed volume survived and remounted into the snapshot replacement." },
+    { "id": "snapshot_recovery", "status": "confirmed-live", "evidence": "Experimental snapshot completed in 81350.06ms; replacement restored local and volume markers in 29449.18ms." },
+    { "id": "fork", "status": "api-present-unverified", "evidence": "SDK exposes _experimental_fork; D4 used snapshot replacement instead." },
+    { "id": "recover_error_state", "status": "api-present-unverified", "evidence": "SDK exposes recover(); no safe sandbox-level recoverable fault injection was available." },
+    { "id": "command_execution", "status": "confirmed-live", "evidence": "Success, exit-23 failure, session interruption, and subsequent usability were observed." },
+    { "id": "pty", "status": "confirmed-live", "evidence": "Streaming input/output, 132x41 resize, disconnect/reconnect, single execution, scope listing, and kill passed." },
+    { "id": "preview_ports", "status": "confirmed-live", "evidence": "Ports 4173 and 4174 returned 200 through distinct signed links; expired links returned 401." },
+    { "id": "preview_auth", "status": "requires-thrallo-control", "evidence": "Daytona signed bearer links work; Thrallo account authorization, audit, and gateway policy remain absent." },
+    { "id": "playwright", "status": "confirmed-live", "evidence": "Chromium reached the fixture, captured screenshot and trace, observed console/runtime and failed-network events, then terminated." },
+    { "id": "code_oss_web", "status": "blocked-by-thrallo-packaging", "evidence": "Exact source pin fetched, but clean code-web.sh lacked installed dependencies and no Thrallo web artifact exists." },
+    { "id": "resource_configuration", "status": "partial", "evidence": "Tested defaults were 1 vCPU, 1GiB RAM, 3GiB disk; cgroup memory limit observed. Resize/custom class not benchmarked." },
+    { "id": "network_policy", "status": "partial", "evidence": "SDK exposes block/allow controls, but this organization tier reported restrictions cannot be overridden per sandbox." },
+    { "id": "region_selection", "status": "confirmed-live", "evidence": "Host selected eu and both workspaces reported target eu." },
+    { "id": "deletion", "status": "confirmed-live", "evidence": "All sandboxes, volume, and snapshot were deleted and namespace re-listed empty." },
+    { "id": "maximum_runtime", "status": "partial", "evidence": "120-minute synthetic TTL was accepted; automatic expiry was not awaited." },
+    { "id": "process_abuse_limits", "status": "requires-thrallo-control", "evidence": "Cgroup pids.max was 629145; no suitable per-workspace process ceiling was proven." }
+  ]
+}

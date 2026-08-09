@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260809t100653z-a307198c",
+  "samplePolicy": "Raw values are authoritative. p50/p95 are omitted because no operation has 20 samples.",
+  "provisionalTargets": { "warmResumeP95Ms": 15000, "coldLaunchP95Ms": 60000 },
+  "measurements": {
+    "workspaceCreateMs": { "raw": [4538.05, 87.16], "min": 87.16, "median": 2312.61, "max": 4538.05, "p50": null, "p95": null },
+    "stopMs": { "raw": [880.84, 1052.86, 1209.71], "min": 880.84, "median": 1052.86, "max": 1209.71, "p50": null, "p95": null },
+    "warmStartMs": { "raw": [1673.07, 12096.37, 1261.32], "min": 1261.32, "median": 1673.07, "max": 12096.37, "p50": null, "p95": null },
+    "forcedStopMs": { "raw": [1370.75], "p50": null, "p95": null },
+    "forcedStopRestartMs": { "raw": [2646.97], "p50": null, "p95": null },
+    "archiveMs": { "raw": [158.69], "p50": null, "p95": null },
+    "archiveRestoreMs": { "raw": [2679.96], "p50": null, "p95": null },
+    "snapshotMs": { "raw": [81350.06], "p50": null, "p95": null },
+    "snapshotReplacementMs": { "raw": [29449.18], "p50": null, "p95": null },
+    "ptyCreateMs": { "raw": [369.47], "p50": null, "p95": null },
+    "playwrightInstallMs": { "raw": [38473.03], "p50": null, "p95": null },
+    "browserTestMs": { "raw": [1657.86], "p50": null, "p95": null },
+    "pinnedSourceFetchMs": { "raw": [6038.6, 6472.02], "p50": null, "p95": null },
+    "codeOssStartupMs": { "raw": [], "blocked": true },
+    "devServerReadinessMs": { "raw": [], "verifiedButNotTimedSeparately": true },
+    "previewReadinessMs": { "raw": [], "verifiedButNotTimedSeparately": true }
+  },
+  "targetAssessment": {
+    "coldLaunch": "All raw empty-workspace create samples are below 60s, but Code OSS readiness is unmeasured and the p95 target is not proven.",
+    "warmResume": "All three raw start samples are below 15s, but p95 is not statistically established."
+  }
+}

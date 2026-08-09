@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "localFilesystem": { "normalStopStartCycles": 3, "survived": true, "forcedStopSurvived": true, "archiveSurvived": true },
+  "volume": { "type": "Daytona S3-backed volume", "survivedSnapshotReplacement": true, "subpathScoped": true },
+  "snapshot": { "api": "experimental", "captureMs": 81350.06, "replacementMs": 29449.18, "localStateRestored": true, "volumeStateRestored": true },
+  "ioSample": { "bytes": 16777216, "writeMs": 11.109326, "readMs": 7.763133, "sha256": "5838cd2089b2d88ee2d989d9c984b3ffd9ca8cbdf67ab7bf15cc371d58dec692", "warning": "Single cached 16MiB sample; not a storage benchmark." },
+  "unclear": ["Durability SLA and backup retention for local sandbox disks", "Volume consistency under simultaneous writers", "Snapshot restore behavior across regions", "Customer-grade point-in-time recovery and deletion guarantees"]
+}

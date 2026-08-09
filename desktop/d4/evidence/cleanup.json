@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "finalVerifiedAt": "2026-08-09T10:14:35Z",
+  "finalNamespace": { "sandboxes": [], "volumes": [], "snapshots": [], "empty": true },
+  "completedRun": {
+    "runId": "20260809t100653z-a307198c",
+    "deleted": ["replacement sandbox", "snapshot", "workspace B", "workspace A", "volume"],
+    "allRemoved": true
+  },
+  "additionalCodeOssChecks": [
+    { "resource": "thrallo-d4-20260809101153-code-oss-only", "deleted": true },
+    { "resource": "thrallo-d4-20260809101312-code-web-sh", "deleted": true }
+  ],
+  "harnessIncidents": [
+    { "runId": "20260809t100332z-a2e073c6", "issue": "Volume was pending_create when immediate mount/delete was attempted", "resolution": "Waited to ready, deleted, verified absent, and hardened harness." },
+    { "runId": "20260809t100429z-ae158920", "issue": "Over-broad isolation grep timed out after partial evidence", "resolution": "Runner finally deleted both workspaces and volume; verification reported empty." }
+  ],
+  "productionProjectTouched": false,
+  "productionCredentialStoredInWorkspace": false,
+  "externallyExposedRouteRemaining": false,
+  "backgroundSyntheticProcessRemaining": false
+}

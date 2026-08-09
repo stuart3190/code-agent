@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "pin": { "tag": "1.131.0", "commit": "3a03d6f72d628a7741c29f456b4ddbb5ae68502c", "requiredNode": "24.18.0" },
+  "sourceFetched": true,
+  "fetchSamplesMs": [6038.6, 6472.02],
+  "runtimeObserved": { "node": "v25.9.0", "git": "2.53.0", "python3": true, "make": true, "gxx": true, "corepack": true },
+  "startupAttempt": { "command": "scripts/code-web.sh", "commandAccepted": true, "listenerReady": false, "firstBlockingError": "ERR_MODULE_NOT_FOUND: rimraf imported by build/lib/builtInExtensions.ts" },
+  "thralloWorkbenchStarted": false,
+  "memoryCpuFileWatchExtensionCompatibilityMeasured": false,
+  "exactBlocker": "The repository produces a native Electron checkout/package only. A clean pinned source checkout has no installed dependencies, compiled web output, server artifact, product overlay, or web-compatible Thrallo extension bundle.",
+  "smallestLaterPackagingChange": "Add a separately approved reproducible CI packaging prototype that installs the pinned toolchain, builds the upstream web/server target, applies Thrallo product assets, packages the Thrallo extension for web, emits hashes/SBOM, and supplies a disposable artifact to D4/D5 without changing native Electron."
+}

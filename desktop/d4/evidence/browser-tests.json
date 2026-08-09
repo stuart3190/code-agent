@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "playwrightVersion": "1.61.1",
+  "installMs": 38473.03,
+  "testMs": 1657.86,
+  "chromiumLaunched": true,
+  "fixtureReached": true,
+  "screenshot": { "captured": true, "bytes": 7488 },
+  "trace": { "captured": true, "bytes": 8129 },
+  "consoleTypes": ["log", "error", "warning"],
+  "intentionalRuntimeErrorObserved": true,
+  "intentionalFailedNetworkObserved": true,
+  "browserTerminated": true,
+  "productionDataUsed": false
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "workload": { "codeOss": "not running due packaging blocker", "developmentServer": true, "browserSession": true, "boundedSyntheticWorkers": 2 },
+  "representativeFullLoadProven": false,
+  "reason": "The real Code OSS workbench did not start; this is a measured lower-bound workload only.",
+  "resourceAllocation": { "cpu": 1, "memoryBytes": 1073741824, "diskGiB": 3 },
+  "samples": {
+    "before": { "memoryBytes": 739909632, "processCount": 65, "cpuUsageUsec": 38855201 },
+    "during": { "memoryBytes": 750395392, "processCount": 76, "cpuUsageUsec": 40703846 },
+    "after": { "memoryBytes": 740728832, "processCount": 67, "cpuUsageUsec": 42296100 }
+  },
+  "duringDelta": { "memoryBytes": 10485760, "processCount": 11, "cpuUsageUsec": 1848645 },
+  "browserExitCode": 0,
+  "workersAccepted": true,
+  "resourceLimitFinding": "The default 1GiB workspace already held about 750MiB during the lower-bound load. A full Code OSS plus browser benchmark requires a larger explicitly priced class."
+}
