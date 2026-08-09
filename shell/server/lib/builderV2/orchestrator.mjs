@@ -168,7 +168,9 @@ export function createOrchestrator({
     });
     let driven = { journeys: [] };
     if (plan.drive.length && journeysFn) {
-      driven = await journeysFn({ owner, projectId, buildId, tree, journeys: plan.drive.map((d) => d.journey), graph, signal });
+      driven = await journeysFn({ owner, projectId, buildId, tree,
+        contract: { ...scoped, interactionContract: scopeInteractionContract(contract.interactionContract, plan.drive.map((d) => d.journey)) },
+        journeys: plan.drive.map((d) => d.journey), graph, signal });
       abortIfRequested(signal);
       driven = { ...driven, journeys: attributeFailures(driven, graph, scoped) };
       await recordJourneyVerdicts({ owner, projectId, cache: verificationCache, plan, results: driven, snapshotId });
@@ -451,7 +453,7 @@ export function createOrchestrator({
         let repairLimit = null;
         for (let round = 1; !eligibility.eligible && round <= maxRepairs; round += 1) {
           const structuredInteractionEvidence = interactionFailureDiagnostics({
-            contract, interactionContract, journeyResults: coreVerdicts,
+            contract, interactionContract, journeyResults: coreVerdicts, tree,
           }).map((row) => JSON.stringify(row));
           const evidence = [
             ...coreVerdicts.journeys.filter((j) => j.status !== "pass").flatMap((j) => {
@@ -505,7 +507,7 @@ export function createOrchestrator({
           repairLimit,
           finalJourneyVerdicts: coreVerdicts.journeys,
           finalVerificationDiagnostics: interactionFailureDiagnostics({
-            contract, interactionContract, journeyResults: coreVerdicts,
+            contract, interactionContract, journeyResults: coreVerdicts, tree,
           }),
           platformDefects: coreVerdicts.platformDefects,
           workingSnapshotId: workingSnapshot?.id || null,

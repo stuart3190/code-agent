@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildInteractionContract, interactionContractBrief, interactionFailureDiagnostics,
+  buildInteractionContract, collectInteractionControls, interactionContractBrief, interactionFailureDiagnostics,
   lintInteractiveWorkflow, validateInteractionContract,
 } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import { bindCapabilities, bookingModulePlan, tierContract } from "../../shell/server/lib/builderV2/contractTiering.mjs";
@@ -55,7 +55,7 @@ return <main>
   <button aria-label="slot option" aria-pressed={draft.slot === "10:00"}>Select slot</button>
   <button aria-label="party size" aria-pressed={draft.partySize === 2}>Party size</button>
   <label>Name<input name="name" aria-label="name" /></label>
-  <label>Email<input name="email" aria-label="email" /></label>
+  <label>Email<input type="email" name="email" aria-label="email" /></label>
   <label>Phone<input name="phone" aria-label="phone" /></label>
   <button>Confirm booking</button><button>Cancel booking</button>
 </main> }`,
@@ -95,6 +95,25 @@ test("14S interaction planning rejects broken state ownership and data-flow befo
   assert.match(validateInteractionContract(brokenReview).problems.join("\n"), /review has no source values/);
 });
 
+test("14S one semantic control is not multiplied by entity id/label compatibility fields", () => {
+  const contract = { entities: [{ fields: [
+    { name: "dateId" }, { name: "dateLabel" }, { name: "date" },
+    { name: "slotId" }, { name: "slotLabel" }, { name: "slot" },
+    { name: "guestName" }, { name: "name" }, { name: "guestEmail" }, { name: "email" },
+    { name: "guestPhone" }, { name: "phone" },
+  ] }], journeys: [{ id: "retained", steps: [
+    { action: "select an available date", expect: "date selected" },
+    { action: "select an available slot", expect: "slot selected" },
+    { action: "enter a valid name, email and phone number", expect: "review visible" },
+  ] }] };
+  const interaction = buildInteractionContract(contract, { modulePlan: [], bindings: [] });
+  assert.deepEqual(interaction.flows.filter((flow) => flow.stepIndex === 0).map((flow) => flow.valueWritten), ["dateId"]);
+  assert.deepEqual(interaction.flows.filter((flow) => flow.stepIndex === 1).map((flow) => flow.valueWritten), ["slotId"]);
+  assert.deepEqual(interaction.flows.filter((flow) => flow.stepIndex === 2).map((flow) => flow.valueWritten),
+    ["guestName", "guestEmail", "guestPhone"]);
+  assert.ok(interaction.flows.find((flow) => flow.valueWritten === "guestName").control.accessibleNames.includes("name"));
+});
+
 test("14S generation prompt receives the exact machine-readable interaction contract", () => {
   const contract = { ...CONTRACT, interactionContract: plan() };
   const prompt = renderPatchPrompt({ step: "core", contract, tiers: tierContract(contract), tree: {},
@@ -130,6 +149,51 @@ test("14S retained booking fixture is driveable and structurally traces review, 
   assert.ok(lintInteractiveWorkflow(fakeReference, { interactionContract: interaction,
     modulePlan: bookingModulePlan(CONTRACT, CONTRACT.journeys), bindings: bindCapabilities(CONTRACT) })
     .findings.some((row) => row.code === "fabricated_confirmation_reference"));
+});
+
+test("14S contracted fields require accessible, editable controls connected to owned state", () => {
+  const emailFlow = plan().flows.find((flow) => flow.kind === "input" && flow.valueWritten === "email");
+  const interactionContract = { version: 1, flows: [emailFlow] };
+  const lint = (source) => lintInteractiveWorkflow({ "src/Contact.jsx": source }, { interactionContract });
+
+  for (const source of [
+    `export function Contact(){ return <><label htmlFor="email">Email</label><input type="email" id="email" name="email" /></> }`,
+    `export function Contact(){ return <label>Email<input type="email" name="email" /></label> }`,
+    `export function Contact(){ return <input type="email" aria-label="Email" name="email" /> }`,
+  ]) assert.equal(lint(source).ok, true, source);
+
+  const missingName = lint(`export function Contact({draft,setDraft}){ return <input type="email" value={draft.email}
+    onChange={(event) => setDraft({...draft,email:event.target.value})} /> }`);
+  assert.equal(missingName.ok, false);
+  assert.equal(missingName.findings[0].reason, "missing_accessible_identity");
+
+  for (const [source, reason] of [
+    [`export function Contact(){ return <input type="number" aria-label="Email" name="email" /> }`, "invalid_control_type"],
+    [`export function Contact(){ return <input type="email" aria-label="Email" name="email" disabled /> }`, "disabled"],
+    [`export function Contact(){ return <input type="email" aria-label="Email" name="email" readOnly /> }`, "readonly"],
+    [`export function Contact({draft}){ return <input type="email" aria-label="Email" name="email" value={draft.email} /> }`, "controlled_without_change_handler"],
+    [`export function Contact({draft,setDraft}){ return <input type="email" aria-label="Email" name="email" value={draft.phone}
+      onChange={(event) => setDraft({...draft,phone:event.target.value})} /> }`, "state_owner_not_connected"],
+  ]) {
+    const verdict = lint(source);
+    assert.equal(verdict.ok, false, source);
+    assert.ok(verdict.findings.some((finding) => finding.reason === reason), JSON.stringify(verdict));
+  }
+});
+
+test("14S source control facts retain locator, editability and state provenance for repair", () => {
+  const controls = collectInteractionControls({
+    "src/Contact.jsx": `export function Contact({contact,setContact}){ return <><label htmlFor="guest-email">Email</label>
+      <input id="guest-email" name="email" type="email" value={contact.email}
+        onChange={(event) => setContact({...contact,email:event.target.value})} /></> }`,
+  });
+  assert.equal(controls.length, 1);
+  assert.equal(controls[0].accessibleName, "Email");
+  assert.equal(controls[0].inputType, "email");
+  assert.equal(controls[0].controlled, true);
+  assert.equal(controls[0].hasChangeHandler, true);
+  assert.match(controls[0].valueSource, /contact\.email/);
+  assert.equal(controls[0].line, 2);
 });
 
 test("14S retained zero-model workflow propagates input through durable confirmation, recovery and cancellation", async () => {
@@ -177,7 +241,9 @@ test("14S retained zero-model workflow propagates input through durable confirma
 test("14S repair context identifies state before/after, owner, modules and downstream failures", () => {
   const diagnostics = interactionFailureDiagnostics({ contract: CONTRACT, interactionContract: plan(), journeyResults: {
     journeys: [{ id: "book", owners: ["src/components/booking/BookingFlow.jsx"], steps: [
-      { action: "select a date", expect: "the selected date becomes active", status: "fail", detail: "date did not highlight" },
+      { action: "select a date", expect: "the selected date becomes active", status: "fail", detail: "date did not highlight",
+        controlEvidence: { attemptedLocators: ["date:role=button name=date"], renderedControls: [{ role: "button", accessibleName: "Date" }] } },
+      { action: "select a slot", status: "not_reached", detail: "blocked by date" },
     ] }],
   } });
   assert.equal(diagnostics.length, 1);
@@ -187,10 +253,14 @@ test("14S repair context identifies state before/after, owner, modules and downs
   assert.ok(diagnostics[0].responsibleModules.includes("src/components/booking/BookingFlow.jsx"));
   assert.deepEqual(diagnostics[0].dataOperations, ["create-booking"]);
   assert.ok(diagnostics[0].downstreamDependencies.length, "review/mutation dependencies are named for one causal repair");
+  assert.deepEqual(diagnostics[0].attemptedLocators, ["date:role=button name=date"]);
+  assert.equal(diagnostics[0].renderedControlFacts[0].accessibleName, "Date");
+  assert.equal(diagnostics.length, 1, "downstream NOT REACHED steps do not become independent repair defects");
 });
 
 test("14S repair exhaustion remains metadata while contracted red journeys remain the terminal cause", async () => {
   let calls = 0;
+  let browserContract = null;
   const scaffold = fromScaffold(REACT_VITE);
   const patches = Object.entries(TREE).map(([path, content]) => scaffold[path] === undefined
     ? { newFile: path, content } : { replaceFile: path, content });
@@ -207,8 +277,11 @@ test("14S repair exhaustion remains metadata while contracted red journeys remai
     baseTree: () => fromScaffold(REACT_VITE),
     baseline: REACT_VITE,
     compile: async (tree) => ({ ok: true, tree }),
-    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({ ...journey, status: "fail",
-      steps: journey.steps.map((step) => ({ ...step, status: "fail", detail: "transition stayed red" })) })) }),
+    journeysFn: async ({ journeys, contract }) => {
+      browserContract = contract;
+      return { journeys: journeys.map((journey) => ({ ...journey, status: "fail",
+        steps: journey.steps.map((step) => ({ ...step, status: "fail", detail: "transition stayed red" })) })) };
+    },
     maxCoreAttempts: 1,
   });
   const result = await orchestrator.runBuild({ owner: "owner", projectId: "project", request: "booking", maxRepairs: 1 });
@@ -221,4 +294,6 @@ test("14S repair exhaustion remains metadata while contracted red journeys remai
   assert.equal(result.finalJourneyVerdicts[0].status, "fail");
   assert.ok(result.finalVerificationDiagnostics.length);
   assert.equal(calls, 2, "one core and one blocked repair dispatch attempt; no hidden second repair");
+  assert.ok(browserContract?.interactionContract?.flows?.length,
+    "the machine-readable interaction contract reaches the browser verifier");
 });

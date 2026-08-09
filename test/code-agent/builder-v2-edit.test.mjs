@@ -67,7 +67,7 @@ export default function NewsletterPanel() {
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed</p> : null}
-      <label>Email address<input name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <label>Email address<input type="email" name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
       <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
@@ -95,7 +95,7 @@ const EDIT_PATCH = [{
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed — welcome aboard</p> : null}
-      <label>Email address<input name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <label>Email address<input type="email" name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
       <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );

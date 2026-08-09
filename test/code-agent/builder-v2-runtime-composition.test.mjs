@@ -24,6 +24,9 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
   assert.match(runtime, /\.in\("owner", userIds\)/);
   assert.match(runtime, /browser journey passed without a corresponding app-scoped database mutation/);
   assert.match(runtime, /preview\.mode !== "vps"/);
+  assert.match(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
+    "the browser worker receives the machine-readable contract rather than English journeys alone");
+  assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
   assert.match(verification, /backendEvidence: outcome\.backendEvidence \|\| null/);
 });
 

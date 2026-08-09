@@ -110,6 +110,127 @@ function valueFor(label, marker) {
   return `Journey ${marker}`;
 }
 
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const unique = (values) => [...new Set(values.filter(Boolean))];
+
+function controlAliases(control) {
+  const raw = String(control?.logicalField || control?.accessibleName || "").replace(/([a-z])([A-Z])/g, "$1 $2");
+  const aliases = [...(control?.accessibleNames || []), control?.accessibleName, control?.logicalField, raw];
+  if (/name/i.test(raw)) aliases.push("name");
+  if (/email/i.test(raw)) aliases.push("email");
+  if (/phone|telephone|mobile/i.test(raw)) aliases.push("phone", "telephone");
+  if (/date|day/i.test(raw)) aliases.push("date", "day");
+  if (/slot|time/i.test(raw)) aliases.push("slot", "time");
+  if (/party|quantity|guest|people/i.test(raw)) aliases.push("party size", "guests", "people");
+  return unique(aliases);
+}
+
+function interactionFlowsFor(contract, journeyId, stepIndex, kind = null) {
+  const flows = (contract?.interactionContract?.flows || []).filter((flow) => flow.journeyId === journeyId
+    && flow.stepIndex === stepIndex && (!kind || flow.kind === kind));
+  const canonical = (flow) => {
+    const value = String(flow.control?.logicalField || flow.control?.accessibleName || flow.valueWritten || flow.kind)
+      .toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (/date|day/.test(value)) return `${flow.kind}:date`;
+    if (/slot|time/.test(value)) return `${flow.kind}:slot`;
+    if (/party|quantity|people|guestcount|adult|child/.test(value)) return `${flow.kind}:partySize`;
+    if (/email/.test(value)) return `${flow.kind}:email`;
+    if (/phone|telephone|mobile/.test(value)) return `${flow.kind}:phone`;
+    if (/name/.test(value)) return `${flow.kind}:name`;
+    return `${flow.kind}:${value}`;
+  };
+  const seen = new Set();
+  return flows.filter((flow) => {
+    const key = canonical(flow);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function renderedFormControls(page) {
+  return page.locator("input, textarea, select").evaluateAll((elements) => elements.map((el) => {
+    const labels = el.labels ? [...el.labels].map((label) => (label.innerText || "").trim()).filter(Boolean) : [];
+    const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText?.trim()).filter(Boolean);
+    return {
+      tag: el.tagName.toLowerCase(), type: el.getAttribute("type") || el.tagName.toLowerCase(),
+      name: el.getAttribute("name"), id: el.id || null, placeholder: el.getAttribute("placeholder"),
+      ariaLabel: el.getAttribute("aria-label"), accessibleName: el.getAttribute("aria-label")
+        || labelledBy.join(" ") || labels.join(" ") || null,
+      role: el.getAttribute("role"), visible: el.offsetParent !== null,
+      disabled: Boolean(el.disabled), readOnly: Boolean(el.readOnly), value: String(el.value || ""),
+    };
+  })).catch(() => []);
+}
+
+function contractedLocators(page, control) {
+  const aliases = controlAliases(control);
+  const rows = [];
+  for (const alias of aliases) {
+    const pattern = new RegExp(`^\\s*${escapeRegex(alias)}\\s*$`, "i");
+    for (const role of control?.roles || ["textbox"]) {
+      rows.push({ description: `role=${role} name=${alias}`, locator: page.getByRole(role, { name: pattern }) });
+    }
+    rows.push({ description: `label=${alias}`, locator: page.getByLabel(pattern) });
+    rows.push({ description: `name=${alias}`, locator: page.locator(`[name="${String(alias).replace(/["\\]/g, "\\$&")}"]`) });
+    rows.push({ description: `id=${alias}`, locator: page.locator(`[id="${String(alias).replace(/["\\]/g, "\\$&")}"]`) });
+    rows.push({ description: `placeholder=${alias}`, locator: page.getByPlaceholder(pattern) });
+  }
+  return rows;
+}
+
+/** Drive only the fields the machine-readable contract assigns to this step. */
+async function fillContractedFields(page, flows, marker) {
+  const evidence = { attemptedLocators: [], renderedControls: await renderedFormControls(page), fields: [] };
+  const filled = [];
+  for (const flow of flows) {
+    const logicalField = flow.control.logicalField || flow.valueWritten || flow.control.accessibleName;
+    const attempts = contractedLocators(page, flow.control);
+    evidence.attemptedLocators.push(...attempts.map((row) => `${logicalField}:${row.description}`));
+    let field = null;
+    let matchedBy = null;
+    for (const attempt of attempts) {
+      const count = Math.min(await attempt.locator.count().catch(() => 0), 3);
+      for (let index = 0; index < count; index += 1) {
+        const candidate = attempt.locator.nth(index);
+        if (await candidate.isVisible().catch(() => false)) {
+          field = candidate;
+          matchedBy = attempt.description;
+          break;
+        }
+      }
+      if (field) break;
+    }
+    const fieldEvidence = { field: logicalField, expectedStateOwner: flow.stateOwner, matchedBy,
+      accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName] };
+    if (!field) {
+      evidence.fields.push({ ...fieldEvidence, status: "missing" });
+      continue;
+    }
+    const disabled = await field.isDisabled().catch(() => true);
+    const editable = await field.isEditable().catch(() => false);
+    const facts = await field.evaluate((el) => ({
+      tag: el.tagName.toLowerCase(), type: el.getAttribute("type") || "text", name: el.getAttribute("name"),
+      id: el.id || null, placeholder: el.getAttribute("placeholder"), ariaLabel: el.getAttribute("aria-label"),
+      labels: el.labels ? [...el.labels].map((label) => (label.innerText || "").trim()).filter(Boolean) : [],
+      disabled: Boolean(el.disabled), readOnly: Boolean(el.readOnly),
+    })).catch(() => null);
+    if (disabled || !editable) {
+      evidence.fields.push({ ...fieldEvidence, status: "not_editable", facts });
+      continue;
+    }
+    const value = valueFor(logicalField, marker);
+    await field.fill(value, { timeout: 3_000 }).catch(() => {});
+    const observedValue = await field.inputValue().catch(() => "");
+    const status = observedValue === value ? "filled" : "value_not_accepted";
+    evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue, facts });
+    if (status === "filled") filled.push(logicalField);
+  }
+  evidence.attemptedLocators = unique(evidence.attemptedLocators);
+  return { filled, evidence, complete: filled.length === flows.length };
+}
+
 /** Fill every visible empty input on the page, so a "enter your details" step can be completed. */
 async function fillVisibleForm(page, marker) {
   const filled = [];
@@ -261,8 +382,11 @@ async function groupState(page, groupId) {
 
 // Drive a selection step semantically. Returns a full step outcome, or null when no selectable
 // group matches — the caller falls back to the generic text path.
-async function driveSelection(page, step) {
-  const wanted = keywords(`${step.target || ""} ${step.action} ${step.expect}`, 8);
+async function driveSelection(page, step, flow = null, excludedGroupIds = new Set()) {
+  const contractedNames = controlAliases(flow?.control);
+  const wanted = contractedNames.length
+    ? unique(contractedNames.flatMap((name) => keywords(name, 5)))
+    : keywords(`${step.target || ""} ${step.action} ${step.expect}`, 8);
   const groups = await selectionGroups(page);
   if (!groups.length) return null;
 
@@ -270,6 +394,7 @@ async function driveSelection(page, step) {
     // A group of "+"/"−" buttons is a STEPPER, not a selection — clicking one never yields a
     // selected state, and judging it here misfired on "choose numbers of adults and children".
     .filter((g) => g.options.some((o) => (o.text || "").length >= 3))
+    .filter((g) => !excludedGroupIds.has(g.groupId))
     .map((g) => ({ ...g, score: wanted.filter((w) => g.contextText.includes(w)).length }))
     .sort((a, b) => b.score - a.score);
   const group = scored[0];
@@ -291,12 +416,15 @@ async function driveSelection(page, step) {
     status: verdict.ok ? "pass" : "fail",
     detail: verdict.ok ? verdict.detail : verdict.reason,
     selectedText: verdict.selectedText || null,
+    groupId: group.groupId,
+    controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+      selectedGroupContext: group.contextText, selectedOptions: after },
   };
 }
 
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
-async function runStep(page, step, { marker, previewUrl, selections = [] }) {
+async function runStep(page, step, { marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [] }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
   const expect = String(step.expect || "");
@@ -307,6 +435,7 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   // match was the word "booking" in the button the step had just clicked.
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const urlBefore = page.url();
+  let controlEvidence = null;
 
   // Navigation, when the step names a route.
   const route = (step.target || "").match(/^\/[\w/-]*/) || action.match(/\s(\/[\w/-]+)/);
@@ -329,8 +458,23 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   const navigated = drove;
 
   if (/enter|type|fill|complete|provide/i.test(action)) {
-    const filled = await fillVisibleForm(page, marker);
-    drove = drove || filled.length > 0;
+    const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control);
+    if (contractedInputs.length) {
+      const result = await fillContractedFields(page, contractedInputs, marker);
+      controlEvidence = result.evidence;
+      enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
+        .map((field) => ({ field: field.field, value: field.expectedValue })));
+      drove = drove || result.filled.length > 0;
+      if (!result.complete) {
+        const missing = result.evidence.fields.filter((field) => field.status !== "filled")
+          .map((field) => `${field.field}:${field.status}`).join(", ");
+        return { drove, status: "undriveable", detail: `contracted control(s) could not be driven: ${missing}`,
+          controlEvidence };
+      }
+    } else {
+      const filled = await fillVisibleForm(page, marker);
+      drove = drove || filled.length > 0;
+    }
   }
 
   // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
@@ -342,6 +486,25 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   // the default-selected date all over again. When no selectable group matches, the generic
   // path below still applies.
   if (!navigated && /\b(choose|select|pick)\b/i.test(action) && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
+    const selectionFlows = interactionFlows.filter((flow) => flow.kind === "selection" && flow.control);
+    if (selectionFlows.length) {
+      const outcomes = [];
+      const used = new Set();
+      for (const flow of selectionFlows) {
+        const outcome = await driveSelection(page, step, flow, used);
+        if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
+          detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
+          controlEvidence: { contractedField: flow.control.logicalField,
+            aliases: flow.control.accessibleNames || [flow.control.accessibleName] } };
+        used.add(outcome.groupId);
+        outcomes.push(outcome);
+        if (outcome.status !== "pass") return outcome;
+        if (outcome.selectedText) selections.push(outcome.selectedText);
+      }
+      return { drove: true, status: "pass", detail: outcomes.map((row) => row.detail).join("; "),
+        selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
+        controlEvidence: { selections: outcomes.map((row) => row.controlEvidence) } };
+    }
     const outcome = await driveSelection(page, step);
     if (outcome) return outcome;
   }
@@ -460,7 +623,7 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     }).catch(() => null);
 
     if (state && state.inputs > 0 && state.filled >= Math.ceil(state.inputs / 2)) {
-      return { drove, status: "pass", detail: `${state.filled}/${state.inputs} fields hold values` };
+      return { drove, status: "pass", detail: `${state.filled}/${state.inputs} fields hold values`, controlEvidence };
     }
     if (state && /enabled/i.test(expect) && state.enabledButtons > 0) {
       return { drove, status: "pass", detail: `${state.enabledButtons} control(s) enabled` };
@@ -473,6 +636,15 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
   const urlChanged = page.url() !== urlBefore;
   const outcome = expectationOutcome({ wanted, found, fresh, drove, action, urlChanged });
 
+  if (outcome.status === "pass" && interactionFlows.some((flow) => flow.kind === "review") && enteredValues.length) {
+    const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    const missingValues = enteredValues.filter(({ value }) => !reviewText.includes(value));
+    if (missingValues.length) return { ...outcome, status: "fail",
+      detail: `review omitted exact contracted values: ${missingValues.map((row) => row.field).join(", ")}`,
+      controlEvidence: { enteredValues, missingValues } };
+    outcome.detail += ` · review contains ${enteredValues.length} exact entered value(s)`;
+  }
+
   // A passing confirmation must reflect what was actually selected earlier in the journey — the
   // numbers in a chosen date/slot survive any formatting.
   if (outcome.status === "pass" && selections.length && /confirmation|reference|summary|booking details/i.test(expect)) {
@@ -481,7 +653,7 @@ async function runStep(page, step, { marker, previewUrl, selections = [] }) {
     if (reflect.checked && !reflect.ok) return { ...outcome, status: "fail", detail: reflect.detail };
     if (reflect.checked) outcome.detail += ` · reflects the selection (${reflect.matched})`;
   }
-  return outcome;
+  return controlEvidence ? { ...outcome, controlEvidence } : outcome;
 }
 
 /**
@@ -581,13 +753,23 @@ export async function verifyJourneys({
 
       const steps = [];
       const selections = []; // what this journey actually chose — confirmations must reflect it
-      for (const step of journey.steps || []) {
+      const enteredValues = []; // exact contracted values; review must echo them
+      let blockedBy = null;
+      for (const [stepIndex, step] of (journey.steps || []).entries()) {
         if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
-        const outcome = await runStep(page, step, { marker, previewUrl, selections }).catch((error) => ({
+        if (blockedBy) {
+          steps.push({ action: step.action, expect: step.expect, status: "not_reached",
+            detail: `not reached because step ${blockedBy.stepIndex + 1} was ${blockedBy.status}`,
+            blockedBy: blockedBy.stepIndex });
+          continue;
+        }
+        const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
+        const outcome = await runStep(page, step, { marker, previewUrl, selections, enteredValues, interactionFlows }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
         if (outcome.selectedText) selections.push(outcome.selectedText);
         steps.push({ action: step.action, expect: step.expect, ...outcome });
+        if (!["pass", "skipped"].includes(outcome.status)) blockedBy = { stepIndex, status: outcome.status };
       }
 
       const failed = steps.filter((s) => s.status === "fail");
@@ -628,7 +810,7 @@ export function journeyFailures(result) {
   const out = [];
   const journeys = result?.journeys || [...(result?.failures || []), ...(result?.undriveable || [])];
   for (const journey of journeys) {
-    for (const step of journey.steps.filter((s) => s.status !== "pass")) {
+    for (const step of journey.steps.filter((s) => !["pass", "not_reached", "skipped"].includes(s.status))) {
       out.push(`the journey "${journey.title}" fails at "${step.action}": ${step.detail}`);
     }
   }

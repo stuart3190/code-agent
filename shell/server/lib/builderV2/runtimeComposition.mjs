@@ -35,6 +35,7 @@ import {
   loadIndex, persistIndex, supabaseSnapshotStorage,
 } from "./supabaseTwins.mjs";
 import { supabaseVerificationCache } from "./verification.mjs";
+import { scopeInteractionContract } from "./interactionContract.mjs";
 import { assertExecutableCandidate } from "../modelCatalogue.mjs";
 
 const uuid = () => crypto.randomUUID();
@@ -430,7 +431,7 @@ export function createBuilderV2Runtime({
         signal: execution.signal || signal,
         onStdout: (chunk) => emit("stdout", chunk), onStderr: (chunk) => emit("stderr", chunk),
       });
-      const journeysFn = async ({ tree, journeys, signal: journeySignal }) => {
+      const journeysFn = async ({ tree, journeys, contract: journeyContract, signal: journeySignal }) => {
         previewResult = await preview.start(projectId, withRuntimeEnv(tree, projectId));
         if (!previewResult?.url) throw new Error("verification preview returned no URL");
         const results = [];
@@ -442,7 +443,10 @@ export function createBuilderV2Runtime({
           const outcome = await isolated({
             id: `${workJob.id}-journey-${uuid()}`, durable_job_id: workJob.id,
             job_type: "browser_verify", attempts: workJob.attempts || 1,
-            payload: { previewUrl: previewResult.url, contract: { journeys: [journey] }, timeoutMs: 180_000 },
+            payload: { previewUrl: previewResult.url,
+              contract: { ...journeyContract, journeys: [journey],
+                interactionContract: scopeInteractionContract(journeyContract?.interactionContract, [journey]) },
+              timeoutMs: 180_000 },
             resource_limits: runtimeLimits(workJob, "browser_verify"),
           }, {
             signal: journeySignal || signal,
