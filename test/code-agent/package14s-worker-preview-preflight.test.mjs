@@ -80,3 +80,11 @@ test("14S official preflight checks actual worker proof before project creation 
   assert.ok(workerCheck > 0 && projectCreate > workerCheck && bookingBranch > projectCreate);
   assert.match(source, /preflight_failed[\s\S]*code: "preview_isolation_required"[\s\S]*providerCalls: 0/);
 });
+
+test("14S worker startup emits the machine-readable isolation failure around authority validation", async () => {
+  const source = await readFile(new URL("../../build-worker/index.mjs", import.meta.url), "utf8");
+  const guard = source.indexOf("assertWorkerCredentialAuthority(JOB_TYPES)");
+  const caught = source.indexOf('event: "worker_preview_isolation_preflight", status: "failed"', guard);
+  assert.ok(source.lastIndexOf("try {", guard) > 0 && caught > guard);
+  assert.match(source.slice(guard, caught + 200), /code: error\.code/);
+});

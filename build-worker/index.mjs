@@ -24,18 +24,18 @@ const JOB_TYPES = (process.env.THRALLO_BUILD_JOB_TYPES || [
   "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
   "image_optimise", "publish_package", "android_package", "proof_slow",
 ].join(",")).split(",").map((v) => v.trim()).filter(Boolean);
-assertWorkerCredentialAuthority(JOB_TYPES);
 
 let previewIsolation = { status: "not_required" };
-if (JOB_TYPES.includes("builder_pipeline")) {
-  try {
+try {
+  assertWorkerCredentialAuthority(JOB_TYPES);
+  if (JOB_TYPES.includes("builder_pipeline")) {
     previewIsolation = await proveWorkerPreviewIsolation({ preview: previewProvider() });
     console.log(JSON.stringify({ event: "worker_preview_isolation_preflight", ...previewIsolation }));
-  } catch (error) {
-    console.error(JSON.stringify({ event: "worker_preview_isolation_preflight", status: "failed",
-      code: error.code || "preview_isolation_required", message: error.message }));
-    throw error;
   }
+} catch (error) {
+  console.error(JSON.stringify({ event: "worker_preview_isolation_preflight", status: "failed",
+    code: error.code || "worker_preflight_failed", message: error.message }));
+  throw error;
 }
 
 const client = serviceClient();
