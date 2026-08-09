@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "denylistId": "thrallo-desktop-buildr101-denylist-v1",
+  "policy": "Desktop code, shared desktop packages, fixture providers and cloud workspace code must never import, mount, call or reproduce these retired Buildr101 systems as shortcuts.",
+  "retiredRouteModules": [
+    { "path": "shell/server/routes/analytics.mjs", "reason": "Buildr101 per-app analytics connector" },
+    { "path": "shell/server/routes/android.mjs", "reason": "Buildr101 Android/TWA packaging" },
+    { "path": "shell/server/routes/capabilities.mjs", "reason": "Buildr101 connector capability runtime" },
+    { "path": "shell/server/routes/connectWebhook.mjs", "reason": "Generated-app Stripe Connect webhook" },
+    { "path": "shell/server/routes/connectors.mjs", "reason": "Buildr101 connector hub" },
+    { "path": "shell/server/routes/domains.mjs", "reason": "Legacy domain handler" },
+    { "path": "shell/server/routes/environments.mjs", "reason": "Buildr101 environments and releases" },
+    { "path": "shell/server/routes/features.mjs", "reason": "Buildr101 feature matrix" },
+    { "path": "shell/server/routes/foundation.mjs", "reason": "Buildr101 secrets, releases and environments foundation" },
+    { "path": "shell/server/routes/generate.mjs", "reason": "Legacy synchronous generator" },
+    { "path": "shell/server/routes/github.mjs", "reason": "Legacy PAT-based GitHub export" },
+    { "path": "shell/server/routes/integrations.mjs", "reason": "Buildr101 integrations" },
+    { "path": "shell/server/routes/ownerConsole.mjs", "reason": "Buildr101 owner console" },
+    { "path": "shell/server/routes/preview.mjs", "reason": "Legacy synchronous preview handler" },
+    { "path": "shell/server/routes/projects.mjs", "reason": "Legacy project route handler" },
+    { "path": "shell/server/routes/publish.mjs", "reason": "Legacy publish route handler" },
+    { "path": "shell/server/routes/runtimeCheckout.mjs", "reason": "Generated-app checkout runtime" },
+    { "path": "shell/server/routes/runtimeConnectors.mjs", "reason": "Generated-app connector runtime" },
+    { "path": "shell/server/routes/runtimeWebhook.mjs", "reason": "Generated-app webhook runtime" },
+    { "path": "shell/server/routes/saasPayments.mjs", "reason": "Generated-app SaaS payments" },
+    { "path": "shell/server/routes/stripeWebhook.mjs", "reason": "Legacy platform billing webhook" },
+    { "path": "shell/server/routes/templates.mjs", "reason": "Buildr101 templates" },
+    { "path": "shell/server/routes/visualBrand.mjs", "reason": "Buildr101 visual brand kits" }
+  ],
+  "retiredLibraries": [
+    "shell/server/lib/capabilityRuntime.mjs",
+    "shell/server/lib/environments.mjs",
+    "shell/server/lib/projectSecrets.mjs",
+    "shell/server/lib/saasPayments.mjs",
+    "shell/server/lib/templates.mjs",
+    "shell/server/lib/visualBrand.mjs"
+  ],
+  "retiredRuntimes": [
+    {
+      "path": "runtime-worker/**",
+      "identity": "buildr-runtime-worker",
+      "reason": "Buildr101 generated-application capability runtime; it is not a cloud desktop workspace service."
+    }
+  ],
+  "forbiddenConfigurationFamilies": [
+    "Buildr101 Supabase projects or service credentials",
+    "Buildr101 Stripe variables, products, prices or credit ledger",
+    "Buildr101 Meta connector defaults",
+    "Buildr101 Android/TWA release configuration"
+  ],
+  "allowedClarification": "Mounted Thrallo APIs and shared generation/build helpers may be reused only through the approved Thrallo service/provider interfaces. Their presence does not authorize importing a denied route or runtime."
+}

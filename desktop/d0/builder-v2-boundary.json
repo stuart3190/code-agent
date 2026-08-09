@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "boundaryId": "thrallo-desktop-builder-v2-boundary-v1",
+  "observedAt": "2026-08-08",
+  "qualificationState": {
+    "package14": "failed",
+    "package14R": "pending",
+    "package15": "blocked",
+    "customerDefault": "Builder V1",
+    "desktopIntegration": "blocked"
+  },
+  "releaseConditions": [
+    "Package 14R is accepted.",
+    "Package 15 is accepted.",
+    "Snapshot, build, repair, verification and publishing contracts are declared frozen.",
+    "A separate integration approval is granted for the desktop branch."
+  ],
+  "blockedIntegrations": [
+    {
+      "id": "canonical-project-synchronization",
+      "packages": ["D7"],
+      "contracts": ["green snapshot identity", "working-set base snapshot", "checkpoint", "conflict", "verified apply"],
+      "allowedBeforeRelease": "Provider interfaces, deterministic fixtures and local-only workspace behavior."
+    },
+    {
+      "id": "builder-backed-conversation-agents",
+      "packages": ["D9"],
+      "contracts": ["typed plan decision", "build run", "repair run", "verified edit", "write-capable concurrent agent merge"],
+      "allowedBeforeRelease": "Conversation, approval and agent-control UI against deterministic providers."
+    },
+    {
+      "id": "canonical-preview-diagnostics",
+      "packages": ["D10"],
+      "contracts": ["preview source snapshot", "verified build status", "cloud workspace port binding"],
+      "allowedBeforeRelease": "Local preview and deterministic browser/diagnostic fixtures."
+    },
+    {
+      "id": "publish-source-integration",
+      "packages": ["D11"],
+      "contracts": ["publishable snapshot", "immutable release source", "update", "rollback", "unpublish"],
+      "allowedBeforeRelease": "Deployment/publishing UI against fixtures or stable read-only APIs."
+    },
+    {
+      "id": "project-mutation-integrations",
+      "packages": ["D12"],
+      "contracts": ["project environment", "secret binding", "database change", "external-service mutation"],
+      "allowedBeforeRelease": "Redacted fixture contracts and presentation only."
+    },
+    {
+      "id": "source-backed-visual-editing",
+      "packages": ["D13"],
+      "contracts": ["selection-to-source mapping", "patch", "verification", "snapshot advance"],
+      "allowedBeforeRelease": "None; D13 remains entirely blocked."
+    },
+    {
+      "id": "desktop-default-and-retirement",
+      "packages": ["D16", "D17"],
+      "contracts": ["parity evidence", "project preservation", "production rollback", "compatibility mode"],
+      "allowedBeforeRelease": "Evidence schemas only; no default, route or retirement change."
+    }
+  ],
+  "prohibitedDesktopBranchActions": [
+    "Edit Builder V2 implementation or qualification evidence.",
+    "Call a live Builder V2 mutation path.",
+    "Create a database migration or production route.",
+    "Change dispatch, settlement, rollout or customer-default flags.",
+    "Publish from an unverified workspace filesystem.",
+    "Merge or deploy without separate approval."
+  ]
+}

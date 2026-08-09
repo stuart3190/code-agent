@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "thrallo-code-oss-desktop-current-state-v1",
+  "observedAt": "2026-08-08",
+  "categories": [
+    "code-oss-native",
+    "thrallo-extension",
+    "embedded-web",
+    "packaging-configuration",
+    "runtime-smoke"
+  ],
+  "items": [
+    {
+      "id": "code-oss-foundation",
+      "category": "code-oss-native",
+      "claim": "Thrallo Desktop is built from a pinned genuine Code OSS source checkout with a product overlay, not an Electron wrapper around app.thrallo.com.",
+      "state": "repository-confirmed",
+      "runtimeVerified": true,
+      "evidence": ["desktop/upstream.json", "desktop/bootstrap.mjs", "desktop/product.overrides.json", "desktop/smoke/smoke.mjs"]
+    },
+    {
+      "id": "native-workbench",
+      "category": "code-oss-native",
+      "claim": "The workbench supplies local folders, editors, explorer, search, source control, extensions and integrated terminals.",
+      "state": "partial-runtime-proof",
+      "runtimeVerified": true,
+      "verifiedSubset": ["editor launch", "local folder open", "file edit persisted to disk", "integrated terminal command"],
+      "unverifiedSubset": ["complete explorer workflow", "search workflow", "end-to-end Git workflow", "extension install compatibility"],
+      "evidence": ["desktop/smoke/smoke.mjs", "CONTEXT.md"]
+    },
+    {
+      "id": "thrallo-agent-view",
+      "category": "thrallo-extension",
+      "claim": "The built-in Thrallo extension contributes an Agents view and connect, disconnect, refresh, run, latest-run and conversation commands.",
+      "state": "repository-confirmed",
+      "runtimeVerified": true,
+      "verifiedSubset": ["PAT sign-in", "agent list rendered"],
+      "unverifiedSubset": ["complete run lifecycle", "cancel", "resume", "diff review", "PR approval"],
+      "evidence": ["editor/vscode/package.json", "editor/vscode/extension.js", "desktop/smoke/smoke.mjs"]
+    },
+    {
+      "id": "thrallo-completions-context",
+      "category": "thrallo-extension",
+      "claim": "The extension includes opt-in completion, bounded local indexing and active-file/selection/diagnostic context capture.",
+      "state": "code-and-test-confirmed",
+      "runtimeVerified": false,
+      "evidence": ["editor/vscode/lib/localIndex.js", "editor/vscode/extension.js", "test/code-agent/workspace-context.test.mjs"]
+    },
+    {
+      "id": "conversation-webview",
+      "category": "embedded-web",
+      "claim": "The current Thrallo conversation surface is the compiled web product bundle hosted in a Code OSS webview with a desktop bootstrap object.",
+      "state": "runtime-verified",
+      "runtimeVerified": true,
+      "evidence": ["editor/vscode/lib/conversationPanel.js", "test/code-agent/desktop-conversation.test.mjs", "desktop/smoke/smoke.mjs", "CONTEXT.md"]
+    },
+    {
+      "id": "embedded-web-limit",
+      "category": "embedded-web",
+      "claim": "Web project, billing, usage, deployment, domain and settings surfaces visible through the bundle are embedded-web capabilities, not desktop-native parity.",
+      "state": "architecture-finding",
+      "runtimeVerified": false,
+      "evidence": ["editor/vscode/lib/conversationPanel.js", "shell/web/src/chat/ChatShell.jsx"]
+    },
+    {
+      "id": "windows-package",
+      "category": "packaging-configuration",
+      "claim": "Windows x64 package, portable archive and Inno Setup installer targets exist.",
+      "state": "runtime-verified",
+      "runtimeVerified": true,
+      "evidence": ["desktop/build.mjs", "desktop/installer/Thrallo.iss", "CONTEXT.md"]
+    },
+    {
+      "id": "cross-platform-targets",
+      "category": "packaging-configuration",
+      "claim": "Windows ARM64, macOS x64/ARM64 and Linux x64/ARM64 package targets are declared.",
+      "state": "configured-only",
+      "runtimeVerified": false,
+      "evidence": ["desktop/build.mjs", "desktop/README.md"]
+    },
+    {
+      "id": "signing-updates",
+      "category": "packaging-configuration",
+      "claim": "Current binaries are unsigned; macOS is not notarized; Code OSS updateUrl is empty; no staged native auto-update system is present.",
+      "state": "missing",
+      "runtimeVerified": false,
+      "evidence": ["desktop/product.overrides.json", "desktop/installer/Thrallo.iss", "desktop/README.md"]
+    },
+    {
+      "id": "windows-six-step-smoke",
+      "category": "runtime-smoke",
+      "claim": "Recorded Windows installed/portable evidence passed six steps: launch, Thrallo branding, disk edit, terminal command, production PAT sign-in/agent list, and conversation bundle render.",
+      "state": "recorded-runtime-evidence",
+      "runtimeVerified": true,
+      "steps": [
+        "editor launches",
+        "window title carries Thrallo product identity",
+        "real file edit reaches disk",
+        "integrated terminal runs a command",
+        "built-in Thrallo extension signs in and lists agents",
+        "conversation surface opens and hosts the web bundle"
+      ],
+      "evidence": ["desktop/smoke/smoke.mjs", "CONTEXT.md"]
+    },
+    {
+      "id": "cloud-desktop",
+      "category": "runtime-smoke",
+      "claim": "No browser-hosted Code OSS cloud desktop or persistent interactive cloud workspace has been runtime verified.",
+      "state": "missing",
+      "runtimeVerified": false,
+      "evidence": ["desktop/README.md", "runtime-worker/README.md"]
+    }
+  ]
+}

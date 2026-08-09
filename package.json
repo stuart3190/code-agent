@@ -39,6 +39,7 @@
     "prove:billing": "node harness/proveBilling.mjs",
     "prove:jobs": "node shell/harness/prove-jobs.mjs",
     "test:code-agent": "node --test test/code-agent/*.test.mjs",
+    "test:desktop:d0": "node --test test/desktop/d0-contracts.test.mjs && node desktop/d0/guard.mjs --phase D0",
     "test:bv2:qualification": "node ops/run-bv2-qualification.mjs",
     "test:ui": "playwright test e2e/public-shell.spec.mjs e2e/chat-shell.spec.mjs e2e/theme-check.spec.mjs e2e/provider-settings.spec.mjs",
     "audit:remediation-baseline": "node ops/capture-remediation-baseline.mjs",

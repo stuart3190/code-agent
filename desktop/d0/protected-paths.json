@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "thrallo-desktop-foundation-protected-paths-v1",
+  "baseline": {
+    "branch": "desktop/foundation",
+    "forkCommit": "138a7831301cee5d84bcfa16add95f5a3a8ada83",
+    "originalWorktree": "C:/Users/Administrator/code-agent",
+    "desktopWorktree": "C:/Users/Administrator/code-agent-desktop"
+  },
+  "policy": {
+    "default": "Desktop foundation changes are limited to desktop/workbench code, desktop-specific shared contracts, deterministic fixtures, packaging and desktop tests.",
+    "integrationOverride": "Changing a protected path requires a later explicit integration approval and an amendment to this manifest in a separately reviewed change.",
+    "productionMutation": "forbidden",
+    "deployment": "forbidden",
+    "migration": "forbidden"
+  },
+  "d0AllowedPaths": [
+    "desktop/d0/**",
+    "test/desktop/**",
+    "package.json"
+  ],
+  "futureDesktopFoundationRoots": [
+    "desktop/**",
+    "editor/vscode/**",
+    "shared/desktop/**",
+    "shared/thrallo-client/**",
+    "test/desktop/**"
+  ],
+  "protectedGroups": [
+    {
+      "id": "builder-v2-implementation",
+      "reason": "Builder V2 implementation and composition remain owned by the active qualification programme.",
+      "patterns": [
+        "shell/server/lib/builderV2/**",
+        "shell/server/lib/appBuild/**",
+        "shell/server/lib/buildJobs.mjs",
+        "shell/server/lib/buildWorkQueue.mjs",
+        "shell/server/lib/qaRuns.mjs",
+        "shell/server/lib/modelSelector.mjs",
+        "shell/server/lib/capabilities/coreCapabilities.mjs"
+      ]
+    },
+    {
+      "id": "package-14r-15-qualification",
+      "reason": "Package 14R repair and Package 15 qualification/evidence are controlled by the existing Builder V2 working tree.",
+      "patterns": [
+        "test/code-agent/package14*.test.mjs",
+        "test/code-agent/*qualification*.test.mjs",
+        "ops/run-package14*.mjs",
+        "ops/run-bv2-qualification.mjs",
+        "docs/evidence/builder-v2-runtime/**",
+        "docs/BUILDER-V2-*.md",
+        "CONTEXT.md"
+      ]
+    },
+    {
+      "id": "database-migrations",
+      "reason": "Desktop foundation work cannot create or alter database schema or migration history.",
+      "patterns": [
+        "migrations/**",
+        "supabase/migrations/**",
+        "supabase/functions/**"
+      ]
+    },
+    {
+      "id": "production-routing-dispatch",
+      "reason": "Production routes, route mounting, dispatch and customer defaults cannot change on the desktop foundation branch.",
+      "patterns": [
+        "shell/server/index.mjs",
+        "shell/server/routes/**",
+        "shell/web/**"
+      ]
+    },
+    {
+      "id": "production-deployment-configuration",
+      "reason": "Deployment, service, proxy, environment and production release operations require separate approval.",
+      "patterns": [
+        "ops/**",
+        ".github/workflows/release.yml",
+        ".github/workflows/*deploy*.yml",
+        "**/Caddyfile*",
+        "**/*.service",
+        "**/*.timer",
+        "shell/.env*",
+        "scripts/smoke-production.mjs",
+        "scripts/build-release-manifest.mjs"
+      ]
+    },
+    {
+      "id": "production-workers",
+      "reason": "Desktop foundation cannot alter build worker, preview provisioner or legacy runtime-worker behavior.",
+      "patterns": [
+        "build-worker/**",
+        "provisiond/**",
+        "runtime-worker/**"
+      ]
+    },
+    {
+      "id": "legacy-buildr101-implementations",
+      "reason": "Retired Buildr101 systems remain present only for compatibility or shared internal helpers and cannot become desktop dependencies.",
+      "patterns": [
+        "shell/server/lib/capabilityRuntime.mjs",
+        "shell/server/lib/environments.mjs",
+        "shell/server/lib/projectSecrets.mjs",
+        "shell/server/lib/saasPayments.mjs",
+        "shell/server/lib/templates.mjs",
+        "shell/server/lib/visualBrand.mjs"
+      ]
+    }
+  ]
+}

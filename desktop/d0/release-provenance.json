@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "provenanceId": "thrallo-desktop-release-provenance-2026-08-08",
+  "observedAt": "2026-08-08",
+  "repositorySource": {
+    "desktopBranch": "desktop/foundation",
+    "forkCommit": "138a7831301cee5d84bcfa16add95f5a3a8ada83",
+    "forkCommitSubject": "fix(builder-v2): fit checkpoint repairs within live headroom",
+    "codeOssRepository": "https://github.com/microsoft/vscode.git",
+    "codeOssTag": "1.131.0",
+    "codeOssCommit": "3a03d6f72d628a7741c29f456b4ddbb5ae68502c",
+    "nodeVersion": "24.18.0",
+    "desktopProductVersion": "0.4.0",
+    "versionClarification": "0.4.0 is the Thrallo product/extension release; 1.131.0 is the pinned Code OSS upstream version."
+  },
+  "packageTargets": [
+    { "target": "win32-x64", "state": "built-and-smoke-recorded" },
+    { "target": "win32-arm64", "state": "configured-only" },
+    { "target": "darwin-x64", "state": "configured-only" },
+    { "target": "darwin-arm64", "state": "configured-only" },
+    { "target": "linux-x64", "state": "configured-only" },
+    { "target": "linux-arm64", "state": "configured-only" }
+  ],
+  "publishedManifest": {
+    "source": "Read-only GET https://app.thrallo.com/api/v1/downloads",
+    "observedAt": "2026-08-08",
+    "product": "Thrallo Desktop",
+    "version": "0.4.0",
+    "platform": "Windows 10/11 x64",
+    "releasedAt": "2026-08-01T22:32:41.189Z",
+    "artifactSourceCommit": null,
+    "artifactSourceCommitStatus": "not-present-in-published-manifest",
+    "artifacts": [
+      {
+        "kind": "setup",
+        "name": "Thrallo-Setup-x64.exe",
+        "sizeBytes": 228696453,
+        "sha256": "58bc2335088cfcef6e0810bd9dca7562b07fead4d53d253f182021b16eb875f2",
+        "path": "/downloads/Thrallo-Setup-x64.exe",
+        "headStatus": 200,
+        "headContentLengthVerified": true,
+        "byteHashVerificationThisRun": "not-downloaded; hash is manifest-recorded"
+      },
+      {
+        "kind": "portable",
+        "name": "Thrallo-Portable-x64.zip",
+        "sizeBytes": 339208032,
+        "sha256": "d6b8af68f843991314feaa811a4377fafede8301bac0a444f3a24540c08819bc",
+        "path": "/downloads/Thrallo-Portable-x64.zip",
+        "headStatus": 200,
+        "headContentLengthVerified": true,
+        "byteHashVerificationThisRun": "not-downloaded; hash is manifest-recorded"
+      }
+    ]
+  },
+  "signing": {
+    "windowsAuthenticode": "unsigned",
+    "installerSignToolDirective": "commented-out",
+    "macosDeveloperId": "not-configured",
+    "macosNotarization": "not-configured",
+    "linuxPackageSigning": "not-configured",
+    "codeOssUpdateUrl": "empty",
+    "nativeAutoUpdate": "missing"
+  },
+  "smokeEvidence": {
+    "recordedPlatform": "Windows x64",
+    "recordedResult": "6/6",
+    "recordedTargets": ["development build", "installed build", "portable build"],
+    "steps": [
+      "editor launches",
+      "Thrallo title/branding",
+      "real local file edit persists",
+      "integrated terminal executes",
+      "Thrallo extension authenticates with PAT and lists agents",
+      "conversation web bundle renders"
+    ],
+    "evidence": ["desktop/smoke/smoke.mjs", "CONTEXT.md"],
+    "rerunDuringD0": false,
+    "rerunReason": "D0 is evidence/contract work; the isolated worktree has no prepared Code OSS checkout or local release artifacts and must not call a production mutation path."
+  },
+  "findings": [
+    "The published artifact manifest does not identify the source repository commit used to build version 0.4.0.",
+    "Published SHA-256 values are present, but D0 did not download hundreds of megabytes to recompute them; HEAD content lengths match the manifest.",
+    "The isolated desktop worktree contains no tracked or prepared binary output, so current local reproducibility is not claimed by D0.",
+    "Windows is recorded as smoke verified; every other package target remains configured only.",
+    "Signing, notarization and native automatic updates are absent."
+  ]
+}

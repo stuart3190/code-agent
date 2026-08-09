@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "registryId": "thrallo-desktop-parity-v1",
+  "observedAt": "2026-08-08",
+  "source": {
+    "branch": "desktop/foundation",
+    "forkCommit": "138a7831301cee5d84bcfa16add95f5a3a8ada83"
+  },
+  "classificationKeys": [
+    "webNative",
+    "desktopNative",
+    "embeddedWebOnly",
+    "backendApiPresent",
+    "configuredOnly",
+    "runtimeVerified",
+    "fixtureOnly",
+    "missing",
+    "builderV2Blocked"
+  ],
+  "classificationValues": ["yes", "partial", "no", "not-applicable"],
+  "capabilities": [
+    {
+      "id": "account_auth",
+      "name": "Account and authentication",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/chat/ChatShell.jsx", "shell/web/src/lib/backend.js"] },
+        "desktopNative": { "value": "partial", "evidence": ["editor/vscode/extension.js", "editor/vscode/package.json"] },
+        "embeddedWebOnly": { "value": "partial", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/index.mjs", "shell/server/routes/apiTokens.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["desktop/smoke/smoke.mjs", "CONTEXT.md"] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Native PKCE, rotating device sessions, device revocation UI and account recovery handoff are absent."] },
+        "builderV2Blocked": { "value": "no", "evidence": [] }
+      }
+    },
+    {
+      "id": "projects",
+      "name": "Projects",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/chat/ChatShell.jsx", "shell/web/src/publish/ProjectDashboard.jsx"] },
+        "desktopNative": { "value": "no", "evidence": ["No native Thrallo project launcher or generated-project checkout exists."] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/conversations.mjs", "shell/server/routes/export.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Web project behavior has tests; desktop project checkout has no runtime proof."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Desktop home, project launcher, checkout, import association and conflict UX."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Canonical generated-project checkout and synchronization require frozen Builder V2 snapshot contracts."] }
+      }
+    },
+    {
+      "id": "conversation",
+      "name": "Builder conversation",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/chat/ChatShell.jsx"] },
+        "desktopNative": { "value": "partial", "evidence": ["editor/vscode/extension.js"] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/conversations.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "yes", "evidence": ["desktop/smoke/smoke.mjs", "CONTEXT.md"] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["A shared workbench-native conversation package is not present; the current surface is the copied web bundle."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Build, repair and verified-edit conversation operations await Builder V2 contract freeze."] }
+      }
+    },
+    {
+      "id": "plan_approval",
+      "name": "Typed plan approval",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "partial", "evidence": ["shell/web/src/chat/ChatShell.jsx", "shell/web/src/manage/RunOverlay.jsx"] },
+        "desktopNative": { "value": "no", "evidence": ["No desktop-native typed plan decision state exists."] },
+        "embeddedWebOnly": { "value": "partial", "evidence": ["Existing run approval UI is available only through embedded web surfaces."] },
+        "backendApiPresent": { "value": "partial", "evidence": ["Run review/approval exists; a durable PlanDecision lifecycle is not confirmed."] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Agent approval paths have tests; typed desktop plan decisions have no runtime proof."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Approve, reject, request-changes, expiry and audit state for plans."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["UI/state fixtures may proceed; durable decisions affecting Builder V2 work remain blocked."] }
+      }
+    },
+    {
+      "id": "agents",
+      "name": "Agents",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/manage/RunOverlay.jsx"] },
+        "desktopNative": { "value": "partial", "evidence": ["editor/vscode/extension.js", "editor/vscode/package.json"] },
+        "embeddedWebOnly": { "value": "partial", "evidence": ["Full run surfaces remain in the embedded web bundle."] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/codeAgent.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["desktop/smoke/smoke.mjs verifies sign-in and agent listing."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Concurrent topology, cost, scope, conflict and approval controls."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Fixture-backed controls may proceed; write-capable build agents require frozen Builder V2 contracts."] }
+      }
+    },
+    {
+      "id": "models_usage",
+      "name": "Models and usage",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/settings/UsageTab.jsx", "shell/web/src/manage/AiSettings.jsx"] },
+        "desktopNative": { "value": "no", "evidence": ["No native workbench model selector or usage surface exists."] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/aiConnections.mjs", "shell/server/routes/subscription.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Backend and web tests exist; desktop-native selection is unverified."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Native selector, route explanation, current-run usage and budget presentation."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Catalogue UI may proceed; build-step routing and settlement remain blocked."] }
+      }
+    },
+    {
+      "id": "builds",
+      "name": "Build, repair and verification",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/chat/ChatShell.jsx"] },
+        "desktopNative": { "value": "no", "evidence": ["No native build/repair state machine exists."] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/builds.mjs", "shell/server/lib/buildJobs.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Current web/V1 paths are tested; Builder V2 Package 14 qualification failed."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Native presentation and independently deterministic build scenarios."] },
+        "builderV2Blocked": { "value": "yes", "evidence": ["Live snapshot, build, repair and verification adapters wait for Packages 14R and 15."] }
+      }
+    },
+    {
+      "id": "files_editor",
+      "name": "Files and editor",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "no", "evidence": ["The current web builder is conversation-first rather than a Code OSS workbench."] },
+        "desktopNative": { "value": "yes", "evidence": ["desktop/upstream.json", "desktop/bootstrap.mjs"] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "partial", "evidence": ["Repository search/index APIs exist; generated-project filesystem sync does not."] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "yes", "evidence": ["desktop/smoke/smoke.mjs verifies editor launch and a disk-persisted edit."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Canonical Thrallo project checkout and conflict-aware apply."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Local folders are independent; generated-project synchronization is blocked."] }
+      }
+    },
+    {
+      "id": "terminal_git",
+      "name": "Terminal and Git",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "no", "evidence": [] },
+        "desktopNative": { "value": "yes", "evidence": ["Code OSS workbench", "editor/vscode/extension.js"] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "partial", "evidence": ["GitHub App and repository agent APIs exist; no cloud PTY exists."] },
+        "configuredOnly": { "value": "partial", "evidence": ["Code OSS SCM is inherited; Git workflow smoke is not recorded."] },
+        "runtimeVerified": { "value": "partial", "evidence": ["desktop/smoke/smoke.mjs verifies terminal execution, not the full Git workflow."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Cloud PTY, project-aware Git policy and end-to-end native Git evidence."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Local terminal/Git may proceed; canonical generated-project integration is blocked."] }
+      }
+    },
+    {
+      "id": "preview_testing",
+      "name": "Preview and browser testing",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "partial", "evidence": ["shell/web/src/chat/ChatShell.jsx", "shell/server/routes/qa.mjs"] },
+        "desktopNative": { "value": "no", "evidence": ["No native preview/browser diagnostics panel exists."] },
+        "embeddedWebOnly": { "value": "partial", "evidence": ["The embedded conversation can render current web preview surfaces."] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/qa.mjs", "shell/server/routes/logs.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Web QA tests exist; desktop preview, viewport and diagnostics are unverified."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Native preview, responsive presets, console, network, runtime and Playwright/CDP integration."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Fixture/local UI may proceed; canonical snapshot attribution and live cloud preview are blocked."] }
+      }
+    },
+    {
+      "id": "snapshots_history",
+      "name": "Snapshots, history and rollback",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "partial", "evidence": ["shell/web/src/history/HistoryView.jsx", "shell/web/src/publish/ProjectDashboard.jsx"] },
+        "desktopNative": { "value": "no", "evidence": [] },
+        "embeddedWebOnly": { "value": "partial", "evidence": ["Current web history may appear through the embedded bundle."] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/history.mjs", "shell/server/routes/deployments.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Existing history/release tests do not prove desktop working-set checkpoints."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Workspace checkpoints, working-set history, conflicts and desktop restore UX."] },
+        "builderV2Blocked": { "value": "yes", "evidence": ["Canonical snapshot and apply semantics wait for Packages 14R and 15."] }
+      }
+    },
+    {
+      "id": "deployments_publishing_domains",
+      "name": "Deployments, publishing and domains",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/publish/ProjectDashboard.jsx"] },
+        "desktopNative": { "value": "no", "evidence": [] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/publishState.mjs", "shell/server/routes/deployments.mjs", "shell/server/routes/customDomains.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Existing web and backend proofs exist; desktop publish-source identity is unverified."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Native deployments UI and verified snapshot-to-release connection."] },
+        "builderV2Blocked": { "value": "yes", "evidence": ["Publish-source integration waits for frozen Builder V2 publishing contracts."] }
+      }
+    },
+    {
+      "id": "secrets_integrations",
+      "name": "Secrets and integrations",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "yes", "evidence": ["shell/web/src/manage/AiSettings.jsx", "shell/web/src/manage/RepositoriesView.jsx"] },
+        "desktopNative": { "value": "no", "evidence": [] },
+        "embeddedWebOnly": { "value": "yes", "evidence": ["editor/vscode/lib/conversationPanel.js"] },
+        "backendApiPresent": { "value": "yes", "evidence": ["shell/server/routes/aiConnections.mjs", "shell/server/routes/githubApp.mjs"] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Selected current integrations have tests/production evidence; no native advanced tools are verified."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Native secrets, environments, database and external-service tools."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["UI/contracts may proceed; project mutation integration remains separately gated."] }
+      }
+    },
+    {
+      "id": "local_workspace",
+      "name": "Installed-desktop local workspace",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "no", "evidence": [] },
+        "desktopNative": { "value": "yes", "evidence": ["Code OSS workbench"] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "not-applicable", "evidence": ["Opening and editing an unassociated local folder is local-only."] },
+        "configuredOnly": { "value": "no", "evidence": [] },
+        "runtimeVerified": { "value": "yes", "evidence": ["desktop/smoke/smoke.mjs verifies a real local folder, edit and terminal."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "partial", "evidence": ["Thrallo local-project home, import safety, explicit association and recovery UX."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Local mode is independent; association/sync with generated projects is blocked."] }
+      }
+    },
+    {
+      "id": "cloud_workspace",
+      "name": "Cloud desktop workspace",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "no", "evidence": [] },
+        "desktopNative": { "value": "no", "evidence": [] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "partial", "evidence": ["Daytona supports ephemeral repository-agent sandboxes; no interactive desktop workspace API exists."] },
+        "configuredOnly": { "value": "partial", "evidence": ["@daytona/sdk is installed but not configured as a persistent cloud desktop."] },
+        "runtimeVerified": { "value": "no", "evidence": [] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Workspace broker, Code OSS server, durable volume, PTY, gateway, sleep/wake, recovery and quotas."] },
+        "builderV2Blocked": { "value": "partial", "evidence": ["Infrastructure spike may proceed; canonical project integration is blocked."] }
+      }
+    },
+    {
+      "id": "native_packaging",
+      "name": "Native packaging and updates",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "not-applicable", "evidence": [] },
+        "desktopNative": { "value": "yes", "evidence": ["desktop/build.mjs", "desktop/installer/Thrallo.iss"] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "partial", "evidence": ["shell/server/lib/releaseDownloads.mjs provides manifest and downloads, not auto-update orchestration."] },
+        "configuredOnly": { "value": "partial", "evidence": ["macOS/Linux and ARM targets are configured but unverified."] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Windows installer and portable builds have recorded 6/6 smoke evidence."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Signing, notarization, staged auto-update, crash upload and verified macOS/Linux releases."] },
+        "builderV2Blocked": { "value": "no", "evidence": [] }
+      }
+    },
+    {
+      "id": "tablet_mobile_companion",
+      "name": "Tablet and mobile companion",
+      "retirementCritical": true,
+      "classifications": {
+        "webNative": { "value": "partial", "evidence": ["shell/web/src/chat/chat.css", "playwright.config.mjs"] },
+        "desktopNative": { "value": "not-applicable", "evidence": [] },
+        "embeddedWebOnly": { "value": "no", "evidence": [] },
+        "backendApiPresent": { "value": "yes", "evidence": ["Existing owner-scoped APIs can serve a limited companion."] },
+        "configuredOnly": { "value": "partial", "evidence": ["Automated tablet/mobile browser projects are configured."] },
+        "runtimeVerified": { "value": "partial", "evidence": ["Playwright device emulation exists; real-device companion behavior is unverified."] },
+        "fixtureOnly": { "value": "no", "evidence": [] },
+        "missing": { "value": "yes", "evidence": ["Deliberate monitor/instruct/approve/deploy companion IA and real-device evidence."] },
+        "builderV2Blocked": { "value": "no", "evidence": [] }
+      }
+    }
+  ]
+}

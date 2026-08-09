@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "contractId": "thrallo-desktop-provider-families-v1",
+  "globalPolicy": {
+    "fixtureProviderRequired": true,
+    "stableReadOnlyProviderOptional": true,
+    "builderV2ProviderBlocked": true,
+    "productionMutationFallback": "forbidden",
+    "fixtureNetwork": "disabled",
+    "unsupportedMutationResult": {
+      "ok": false,
+      "code": "capability_unavailable",
+      "retryable": false
+    },
+    "determinism": {
+      "clock": "fixture-controlled",
+      "identifiers": "fixture-defined",
+      "ordering": "stable",
+      "randomness": "seeded-or-disabled",
+      "network": "none"
+    }
+  },
+  "adapterKinds": [
+    {
+      "id": "fixture",
+      "availability": "required-now",
+      "mayReadLiveApi": false,
+      "mayMutateLiveApi": false,
+      "purpose": "Deterministic desktop development and automated tests."
+    },
+    {
+      "id": "stable-read-only",
+      "availability": "optional-now",
+      "mayReadLiveApi": true,
+      "mayMutateLiveApi": false,
+      "purpose": "Existing stable owner-scoped reads only, with explicit configuration."
+    },
+    {
+      "id": "builder-v2",
+      "availability": "blocked-until-14r-15-and-contract-freeze",
+      "mayReadLiveApi": true,
+      "mayMutateLiveApi": true,
+      "purpose": "Later separately approved canonical project/build integration."
+    }
+  ],
+  "commonEnvelope": {
+    "request": ["operationId", "requestId", "ownerContext", "payload", "capabilities"],
+    "success": ["ok", "requestId", "data", "observedAt", "source", "revision"],
+    "failure": ["ok", "requestId", "code", "message", "retryable", "details"],
+    "streamEvent": ["streamId", "sequence", "eventId", "type", "occurredAt", "payload", "terminal"]
+  },
+  "families": [
+    {
+      "id": "project-catalogue",
+      "operations": [
+        { "id": "listProjects", "kind": "read", "builderV2Blocked": false },
+        { "id": "getProject", "kind": "read", "builderV2Blocked": false },
+        { "id": "createProject", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "importProject", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "archiveProject", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "restoreProject", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["projects.default", "projects.empty", "projects.loading-failure", "projects.suspended"]
+    },
+    {
+      "id": "conversation-events",
+      "operations": [
+        { "id": "getConversation", "kind": "read", "builderV2Blocked": false },
+        { "id": "listTurns", "kind": "read", "builderV2Blocked": false },
+        { "id": "subscribeConversation", "kind": "stream", "builderV2Blocked": false },
+        { "id": "sendInstruction", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "cancelTurn", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["conversation.ready", "conversation.streaming", "conversation.reconnect", "conversation.failed"]
+    },
+    {
+      "id": "plan-decisions",
+      "operations": [
+        { "id": "getPlan", "kind": "read", "builderV2Blocked": false },
+        { "id": "subscribePlan", "kind": "stream", "builderV2Blocked": false },
+        { "id": "approvePlan", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "rejectPlan", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "requestPlanChanges", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["plan.awaiting", "plan.approved", "plan.changes-requested", "plan.expired"]
+    },
+    {
+      "id": "agent-runs",
+      "operations": [
+        { "id": "listAgents", "kind": "read", "builderV2Blocked": false },
+        { "id": "getRun", "kind": "read", "builderV2Blocked": false },
+        { "id": "subscribeRun", "kind": "stream", "builderV2Blocked": false },
+        { "id": "startRun", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "cancelRun", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "retryRun", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["agents.idle", "agents.concurrent", "agents.waiting-approval", "agents.failed"]
+    },
+    {
+      "id": "models-usage",
+      "operations": [
+        { "id": "listModels", "kind": "read", "builderV2Blocked": false },
+        { "id": "getUsage", "kind": "read", "builderV2Blocked": false },
+        { "id": "getBudget", "kind": "read", "builderV2Blocked": false },
+        { "id": "selectModel", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["models.available", "models.byok-missing", "models.budget-warning", "models.exhausted"]
+    },
+    {
+      "id": "build-repair-verification",
+      "operations": [
+        { "id": "getBuild", "kind": "read", "builderV2Blocked": false },
+        { "id": "subscribeBuild", "kind": "stream", "builderV2Blocked": false },
+        { "id": "startBuild", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "startRepair", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "cancelBuild", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["build.queued", "build.progress", "build.green", "build.verification-failed", "build.repairing"]
+    },
+    {
+      "id": "snapshots-working-sets",
+      "operations": [
+        { "id": "listSnapshots", "kind": "read", "builderV2Blocked": true },
+        { "id": "getSnapshot", "kind": "read", "builderV2Blocked": true },
+        { "id": "createWorkingSet", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "checkpointWorkingSet", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "applyWorkingSet", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "resolveConflict", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["snapshots.clean", "snapshots.dirty", "snapshots.conflict", "snapshots.recovery"]
+    },
+    {
+      "id": "preview-browser-testing",
+      "operations": [
+        { "id": "getPreview", "kind": "read", "builderV2Blocked": false },
+        { "id": "subscribeDiagnostics", "kind": "stream", "builderV2Blocked": false },
+        { "id": "startTestSession", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "cancelTestSession", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["preview.ready", "preview.compile-error", "preview.runtime-error", "preview.network-failure", "preview.responsive"]
+    },
+    {
+      "id": "deployments-publishing",
+      "operations": [
+        { "id": "listDeployments", "kind": "read", "builderV2Blocked": false },
+        { "id": "getDeployment", "kind": "read", "builderV2Blocked": false },
+        { "id": "getDomainStatus", "kind": "read", "builderV2Blocked": false },
+        { "id": "publish", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "updateRelease", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "rollback", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "unpublish", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "connectDomain", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["deployments.empty", "deployments.healthy", "deployments.failed", "deployments.rollback", "deployments.domain-pending"]
+    },
+    {
+      "id": "secrets-database-integrations",
+      "operations": [
+        { "id": "listIntegrationStates", "kind": "read", "builderV2Blocked": false },
+        { "id": "listSecretNames", "kind": "read", "builderV2Blocked": false },
+        { "id": "getDatabaseSummary", "kind": "read", "builderV2Blocked": false },
+        { "id": "setSecret", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "connectIntegration", "kind": "mutation", "builderV2Blocked": true },
+        { "id": "applyDatabaseChange", "kind": "mutation", "builderV2Blocked": true }
+      ],
+      "fixtureScenarios": ["integrations.disconnected", "integrations.connected", "integrations.revoked", "integrations.secret-redacted", "integrations.database-plan"]
+    }
+  ]
+}
