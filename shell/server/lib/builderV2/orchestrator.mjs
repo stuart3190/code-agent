@@ -22,6 +22,10 @@ import {
   lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
 } from "./persistenceLint.mjs";
 import {
+  buildInteractionContract, interactionFailureDiagnostics, lintInteractiveWorkflow,
+  scopeInteractionContract, validateInteractionContract,
+} from "./interactionContract.mjs";
+import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
@@ -264,6 +268,20 @@ export function createOrchestrator({
         log(`${step}: ${planned.problems.length} required planned module defect(s) rejected deterministically`);
         continue;
       }
+      const interactions = lintInteractiveWorkflow(applied.tree, {
+        interactionContract: scopeInteractionContract(contract.interactionContract, journeys), modulePlan, bindings,
+      });
+      if (!interactions.ok) {
+        const signature = problemSignature(interactions.problems);
+        if (signature === lastSignature) {
+          return { ok: false, problems: interactions.problems,
+            reason: "the same interaction/data-flow defect survived a repair round (stop rule)" };
+        }
+        lastSignature = signature;
+        rejections = interactions.problems.map((reason) => ({ signature: "interaction-contract", reason }));
+        log(`${step}: ${interactions.findings.length} interaction/data-flow defect(s) rejected deterministically`);
+        continue;
+      }
       const assetCompliance = lintAssetAttribution(applied.tree, assets);
       if (!assetCompliance.ok) {
         rejections = assetCompliance.problems.map((reason) => ({ signature: "asset-attribution", reason }));
@@ -367,7 +385,15 @@ export function createOrchestrator({
         abortIfRequested(signal);
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
         await setState("contracting");
-        const contract = await contractFn({ owner, projectId, buildId, request, profile, signal });
+        const rawContract = await contractFn({ owner, projectId, buildId, request, profile, signal });
+        const interactionContract = buildInteractionContract(rawContract);
+        const interactionVerdict = validateInteractionContract(interactionContract);
+        if (!interactionVerdict.ok) return finish("blocked", {
+          error: "interaction contract is structurally incomplete before generation",
+          problems: interactionVerdict.problems,
+          failureClassification: "interaction_contract_invalid",
+        });
+        const contract = { ...rawContract, interactionContract };
         const refinedProfile = await classifyContract?.({ request, contract, profile }) || profile;
         if (refinedProfile !== profile) {
           try { await buildStore.update(buildId, { profile: refinedProfile }); }
@@ -410,7 +436,7 @@ export function createOrchestrator({
 
         // 4. verify essential journeys (differential), then the C4 eligibility decision —
         //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
-        //    to maxJourneyRepairs targeted rounds, each briefed with the exact step
+        //    to maxRepairs targeted rounds, each briefed with the exact step
         //    evidence, each re-verified differentially (passing journeys reuse verdicts).
         await setState("verify_core");
         let coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
@@ -420,10 +446,16 @@ export function createOrchestrator({
         }) : [];
         let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
           backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
-        for (let round = 1; !eligibility.eligible && round <= maxJourneyRepairs; round += 1) {
+        let repairsAttempted = 0;
+        let repairExhausted = false;
+        let repairLimit = null;
+        for (let round = 1; !eligibility.eligible && round <= maxRepairs; round += 1) {
+          const structuredInteractionEvidence = interactionFailureDiagnostics({
+            contract, interactionContract, journeyResults: coreVerdicts,
+          }).map((row) => JSON.stringify(row));
           const evidence = [
-            ...coreVerdicts.journeys.filter((j) => j.status === "fail").flatMap((j) => {
-              const failedSteps = (j.steps || []).filter((s) => s.status === "fail");
+            ...coreVerdicts.journeys.filter((j) => j.status !== "pass").flatMap((j) => {
+              const failedSteps = (j.steps || []).filter((s) => s.status !== "pass");
               const journeyEvidence = failedSteps.length
                 ? failedSteps.map((s) => `journey ${j.id} · step "${s.action}" FAILED in a real browser: ${s.detail || "expected outcome never appeared"}`)
                 : [`journey ${j.id} FAILED in a real browser (no per-step evidence recorded)`];
@@ -432,17 +464,28 @@ export function createOrchestrator({
                 : [];
               return [...journeyEvidence, ...attributionEvidence];
             }),
+            ...structuredInteractionEvidence,
             ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
             ...coreVerdicts.blockingErrors,
           ];
           if (!evidence.length) break; // nothing actionable to brief — blocked below
           await setState(`repair:${round}`);
-          log(`repair ${round}/${maxJourneyRepairs}: ${evidence.length} verified failure(s)`);
-          const repair = await buildIncrement({
-            step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-            journeys: essentialJourneys, initialProblems: evidence,
-            checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null, signal,
-          });
+          log(`repair ${round}/${maxRepairs}: ${evidence.length} verified failure(s)`);
+          repairsAttempted += 1;
+          let repair;
+          try {
+            repair = await buildIncrement({
+              step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
+              journeys: essentialJourneys, initialProblems: evidence,
+              checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null, signal,
+            });
+          } catch (error) {
+            if (error?.code !== "repair_limit_reached") throw error;
+            repairExhausted = true;
+            repairLimit = { code: error.code, repairsDispatched: error.repairsDispatched,
+              maxRepairs: error.maxRepairs };
+            break;
+          }
           if (!repair.ok) break;
           tree = repair.tree;
           workingSnapshot = repair.snapshot;
@@ -456,7 +499,14 @@ export function createOrchestrator({
             backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
         }
         if (!eligibility.eligible) return finish("blocked", {
-          error: eligibility.failures.join("; "),
+          error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
+          failureClassification: "contracted_journeys_red",
+          repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
+          repairLimit,
+          finalJourneyVerdicts: coreVerdicts.journeys,
+          finalVerificationDiagnostics: interactionFailureDiagnostics({
+            contract, interactionContract, journeyResults: coreVerdicts,
+          }),
           platformDefects: coreVerdicts.platformDefects,
           workingSnapshotId: workingSnapshot?.id || null,
         });
@@ -592,6 +642,7 @@ export function createOrchestrator({
       };
       try {
         abortIfRequested(signal);
+        contract = { ...contract, interactionContract: contract?.interactionContract || buildInteractionContract(contract) };
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
         const tiers = tierContract(contract, { userCritical });
@@ -658,6 +709,7 @@ export function createOrchestrator({
 
       try {
         abortIfRequested(signal);
+        contract = { ...contract, interactionContract: contract?.interactionContract || buildInteractionContract(contract) };
         const ctx = await this.resumeContext(owner, projectId);
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption

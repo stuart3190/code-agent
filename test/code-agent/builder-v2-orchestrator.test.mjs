@@ -65,10 +65,12 @@ const newsletter = makeNewsletter({ entity: "newslettersignup" });
 
 export default function NewsletterPanel() {
   const [state, setState] = useState("idle");
+  const [email, setEmail] = useState("");
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed</p> : null}
-      <button onClick={async () => { await newsletter.subscribe("reader@example.test"); setState("done"); }}>Subscribe</button>
+      <label>Email address<input name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }

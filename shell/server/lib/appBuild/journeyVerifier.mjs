@@ -9,10 +9,9 @@
 // this browser is still there after a reload" are different claims, and only the second one is
 // what the customer asked for.
 //
-// Deliberately conservative about what counts as a FAILURE. A step it could not drive — because it
-// could not find the control the contract described — is reported as `undriveable`, not as a
-// defect. Failing a build because an automated heuristic could not find a button would be the
-// preflight mistake again, in a place where it costs a whole rebuild.
+// An undriveable step remains diagnostically distinct from a behavioural failure, but it cannot
+// qualify contracted quality. Generated controls must expose semantic HTML/ARIA that the same
+// driver can identify before browser verification begins.
 
 import { createRequire } from "node:module";
 
@@ -595,7 +594,9 @@ export async function verifyJourneys({
       const undriveable = steps.filter((s) => s.status === "undriveable");
       results.push({
         id: journey.id, title: journey.title, priority: journey.priority,
-        status: failed.length ? "fail" : (undriveable.length === steps.length ? "undriveable" : "pass"),
+        // A contracted step the browser cannot drive is not qualified. It remains distinct from a
+        // behavioural failure for diagnosis, but the journey cannot become green around it.
+        status: failed.length ? "fail" : (undriveable.length ? "undriveable" : "pass"),
         steps, failedSteps: failed.length, undriveableSteps: undriveable.length,
       });
     }
@@ -612,9 +613,7 @@ export async function verifyJourneys({
 
   const primary = results.find((j) => j.priority === "primary") || results[0];
   return {
-    // Only a genuine `fail` blocks. An undriveable journey means the driver could not find the
-    // controls, which is a limitation of the driver as often as it is a fault in the app.
-    pass: primary ? primary.status !== "fail" : null,
+    pass: primary ? primary.status === "pass" : null,
     primaryStatus: primary?.status || null,
     journeys: results,
     failures: results.filter((j) => j.status === "fail"),
@@ -627,8 +626,9 @@ export async function verifyJourneys({
 /** The failures, phrased for a repair brief. */
 export function journeyFailures(result) {
   const out = [];
-  for (const journey of result?.failures || []) {
-    for (const step of journey.steps.filter((s) => s.status === "fail")) {
+  const journeys = result?.journeys || [...(result?.failures || []), ...(result?.undriveable || [])];
+  for (const journey of journeys) {
+    for (const step of journey.steps.filter((s) => s.status !== "pass")) {
       out.push(`the journey "${journey.title}" fails at "${step.action}": ${step.detail}`);
     }
   }

@@ -300,13 +300,13 @@ export function previewEligibility({ tiers, gates, journeyResults, backendRowFai
   for (const id of essential) {
     const outcome = byId.get(id);
     if (!outcome) failures.push(`essential journey ${id} was never verified`);
-    else if (outcome.status === "fail") failures.push(`essential journey ${id} fails`);
+    else if (outcome.status !== "pass") failures.push(`essential journey ${id} is ${outcome.status || "not green"}`);
   }
   for (const row of backendRowFailures) if (essential.has(row.journeyId)) failures.push(`essential backend-row check failed (${row.journeyId})`);
   if (blockingErrors.length) failures.push(`blocking console/network errors: ${blockingErrors.length}`);
 
   const pendingIncrements = (journeyResults?.journeys || [])
-    .filter((j) => !essential.has(j.id) && j.status === "fail")
+    .filter((j) => !essential.has(j.id) && j.status !== "pass")
     .map((j) => ({ journeyId: j.id, title: j.title }));
 
   return { eligible: failures.length === 0, failures, pendingIncrements };

@@ -37,7 +37,7 @@ test("the scaffold ships ONE maintained visitor-session module and the scan exem
   const module = REACT_VITE[SCAFFOLD_SESSION];
   assert.ok(module, "src/lib/visitorSession.js ships with the scaffold");
   assert.match(module, /export async function ensureVisitorSession/);
-  assert.match(module, /auth\.signIn|auth\.signUp/);
+  assert.match(module, /ensureAppVisitorSession/);
 
   // The scan does not flag the scaffold module — by PATH, not by shape. (Stage-scoped: a
   // one-file tree has no db.entity call, and the whole-app rule is not what is under test.)

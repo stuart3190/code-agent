@@ -121,7 +121,7 @@ or Package 12 completion claim.
 | 13. Provider/billing closure and executable model catalogue | complete 2026-08-08; executable catalogue, lane isolation, reservation/failure matrix and zero-model production canary green | no migration | no | synthetic/test-owner |
 | 14. Minimum live generation/edit/repair/booking matrix | **failed 2026-08-08**; 6.6273 credits, simple and booking never green | no | 6.6273 spent | internal projects/provider calls |
 | 14R. Deterministic quality repair and bounded requalification | **failed 2026-08-09**; deterministic repairs green, but contracted contact persistence and the one booking build remained red; 8.2934 credits | `20260808235700` snapshot identity forward repair | 8.2934 spent | internal projects/provider calls |
-| 14S. Contracted completion and modular booking planning repair | **live qualification failed 2026-08-09**: grammar and module-plan gates passed, but the sole fresh build used `sessionStorage` for durable booking state and never reached compile/checkpoint | none | 4.392 credits in latest proof | fixture cleaned; Package 15 blocked |
+| 14S. Contracted completion and modular booking planning repair | **deterministic quality-repair gate green; live strict booking requalification still required** | none | zero credits in latest repair | Package 15 blocked |
 | 15. Final internal V2 production matrix | pending explicit approval | none expected | no model unless separately approved | yes |
 | 16. Genuine Code OSS Windows desktop packaging | pending | none expected | no | release infrastructure |
 | 17. Final backup/restore, `builder-v1-final`, and V2 cutover | pending explicit approval | none expected | internal canary only | yes |
@@ -223,6 +223,23 @@ compile while the final persistence gate remains strict. Focused proof passed 7/
 compatibility passed 69/69, and the relevant V2 suite passed 357/357 with zero provider calls.
 Package 15 remains blocked pending a separately approved single live strict-quality proof. Evidence:
 `docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-PRECOMPILE-PERSISTENCE-REPAIR.md`.
+
+The subsequent zero-model interaction-quality repair removes the generated visitor-session race by
+single-flighting initialization per backend/auth instance and app identity. Ten concurrent fresh
+callers now share one app-auth signup, persisted recovery shares one sign-in, failures clear the
+flight for retry, and sign-out/reset invalidates the authority without crossing app identities.
+Builder V2 now creates a machine-readable interaction/data-flow contract before generation, blocks
+broken ownership edges, injects the contract into model context, and rejects semantically
+undriveable controls plus obvious review, confirmation and cancellation provenance failures before
+browser verification. Browser `undriveable` evidence is blocking, and exhausting the one repair
+allowance remains supplemental metadata while the red contracted journey stays the terminal quality
+reason. The retained booking fixture proves input through durable mutation/reference, recovery and
+cancellation, while repair evidence identifies state before/after, responsible modules, ownership
+and downstream failures. Focused regressions passed 39/39 and the complete relevant
+V2/provider/runtime/verification matrix passed 413/413 across 50 files with zero provider calls.
+Package 15 remains blocked pending a separately approved single live strict booking qualification.
+Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-VISITOR-INTERACTION-REPAIR.md`.
 
 ## Deterministic qualification gate
 

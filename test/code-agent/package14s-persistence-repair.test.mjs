@@ -64,7 +64,10 @@ export function BookingFlow(){
     await recover(reference); setMessage("Confirmed booking restored");
   }
   async function cancelBooking(){ await cancel("BK-1"); setMessage("Booking cancelled"); }
-  return <section><p>{message}</p><button onClick={confirmBooking}>Confirm</button>
+  return <section><p>{message}</p>
+    <button aria-label="date" aria-pressed={false}>Date</button><button aria-label="slot" aria-pressed={false}>Slot</button>
+    <button aria-label="party" aria-pressed={false}>Party</button><input aria-label="contact" name="contact" />
+    <button onClick={confirmBooking}>Confirm</button>
     <button onClick={restoreBooking}>Restore</button><button onClick={cancelBooking}>Cancel</button></section>;
 }
 `;
@@ -78,14 +81,17 @@ export function BookingFlow(){
   async function confirmBooking(){ await create({ date: "2026-08-20", slot: "18:00", partySize: 2 }); setMessage("Booking confirmed with reference"); }
   async function restoreBooking(){ await recover("BK-1"); setMessage("Confirmed booking restored"); }
   async function cancelBooking(){ await cancel("BK-1"); setMessage("Booking cancelled"); }
-  return <section><p>{message}</p><button onClick={confirmBooking}>Confirm</button>
+  return <section><p>{message}</p>
+    <button aria-label="date" aria-pressed={false}>Date</button><button aria-label="slot" aria-pressed={false}>Slot</button>
+    <button aria-label="party" aria-pressed={false}>Party</button><input aria-label="contact" name="contact" />
+    <button onClick={confirmBooking}>Confirm</button>
     <button onClick={restoreBooking}>Restore</button><button onClick={cancelBooking}>Cancel</button></section>;
 }
 `;
 
 const plannedPresentation = {
-  "src/components/booking/BookingReview.jsx": "export function BookingReview(){ return <section>Booking review</section>; }",
-  "src/components/booking/BookingConfirmation.jsx": "export function BookingConfirmation(){ return <section>Booking confirmed with reference</section>; }",
+  "src/components/booking/BookingReview.jsx": "export function BookingReview({ draft }){ return <section>Booking review {draft.date} {draft.slot} {draft.partySize} {draft.contact}</section>; }",
+  "src/components/booking/BookingConfirmation.jsx": "export function BookingConfirmation({ booking }){ return <section>Booking confirmed with reference {booking.reference}</section>; }",
   "src/components/booking/BookingStatus.jsx": "export function BookingStatus(){ return <section>Confirmed booking restored Booking cancelled</section>; }",
 };
 

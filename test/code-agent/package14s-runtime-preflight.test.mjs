@@ -6,7 +6,9 @@ import { createBuilderV2Runtime } from "../../shell/server/lib/builderV2/runtime
 import {
   proveGeneratedRuntimeBackend, publicRuntimeConfig, withRuntimeEnv,
 } from "../../shell/server/lib/runtimeEnv.mjs";
-import { ensureAppVisitorSession } from "../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
+import {
+  createSupabaseBackend, ensureAppVisitorSession, invalidateAppVisitorSession,
+} from "../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const OWNER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -81,6 +83,137 @@ test("14S fresh visitor goes directly to app-auth signup instead of generating t
   });
   assert.equal(user.id, "visitor");
   assert.deepEqual(calls, ["signup"], "no expected-failure signin request reaches browser diagnostics");
+});
+
+test("14S ten fresh concurrent visitor initializers share one signup and one valid result", async () => {
+  const storage = new Map();
+  let signupCalls = 0;
+  let signinCalls = 0;
+  let release;
+  const signup = new Promise((resolve) => { release = resolve; });
+  const user = { id: "one-visitor" };
+  const auth = {
+    currentUser: async () => null,
+    signIn: async () => { signinCalls += 1; throw new Error("premature sign-in"); },
+    signUp: async () => { signupCalls += 1; await signup; return user; },
+    signOut: async () => {},
+  };
+  const calls = Array.from({ length: 10 }, () => ensureAppVisitorSession({
+    auth, appId: PROJECT,
+    storage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
+    randomUUID: () => "single-flight",
+  }));
+  await Promise.resolve();
+  release();
+  const users = await Promise.all(calls);
+  assert.equal(signupCalls, 1);
+  assert.equal(signinCalls, 0);
+  assert.ok(users.every((value) => value === user));
+});
+
+test("14S persisted visitor recovery is single-flight and failures clear for a later retry", async () => {
+  const credentials = JSON.stringify({ email: "visitor@visitor.local", password: "secret" });
+  const storage = { getItem: () => credentials, setItem: () => {} };
+  let attempts = 0;
+  const recovered = { id: "recovered" };
+  const auth = {
+    currentUser: async () => null,
+    signUp: async () => { throw new Error("signup must not run"); },
+    signIn: async () => {
+      attempts += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      return recovered;
+    },
+    signOut: async () => {},
+  };
+  const first = await Promise.all(Array.from({ length: 10 }, () => ensureAppVisitorSession({ auth, appId: PROJECT, storage })));
+  assert.equal(attempts, 1);
+  assert.ok(first.every((value) => value === recovered));
+
+  let freshAttempts = 0;
+  const failingAuth = { currentUser: async () => null, signIn: async () => null,
+    signUp: async () => { freshAttempts += 1; await new Promise((resolve) => setImmediate(resolve));
+      if (freshAttempts === 1) throw new Error("auth unavailable"); return recovered; }, signOut: async () => {} };
+  const emptyStorage = { getItem: () => null, setItem: () => {} };
+  await assert.rejects(Promise.all(Array.from({ length: 4 }, () => ensureAppVisitorSession({
+    auth: failingAuth, appId: "failed-app", storage: emptyStorage,
+  }))), /auth unavailable/);
+  assert.equal(freshAttempts, 1, "all failed waiters share one initialization attempt");
+  assert.equal((await ensureAppVisitorSession({ auth: failingAuth, appId: "failed-app", storage: emptyStorage })).id, "recovered");
+  assert.equal(freshAttempts, 2, "a failed flight is cleared for a legitimate retry");
+});
+
+test("14S session flights are identity scoped and reset invalidates an in-progress initialization", async () => {
+  const makeAuth = (id) => ({ currentUser: async () => null, signIn: async () => ({ id }),
+    signUp: async () => ({ id }), signOut: async () => {} });
+  const left = makeAuth("left");
+  const right = makeAuth("right");
+  const storage = { getItem: () => null, setItem: () => {} };
+  const [a, b, c] = await Promise.all([
+    ensureAppVisitorSession({ auth: left, appId: "app-a", storage, randomUUID: () => "a" }),
+    ensureAppVisitorSession({ auth: left, appId: "app-b", storage, randomUUID: () => "b" }),
+    ensureAppVisitorSession({ auth: right, appId: "app-a", storage, randomUUID: () => "c" }),
+  ]);
+  assert.deepEqual([a.id, b.id, c.id], ["left", "left", "right"]);
+
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  let signOuts = 0;
+  const resetAuth = { currentUser: async () => null, signIn: async () => null,
+    signUp: async () => { await pending; return { id: "late" }; }, signOut: async () => { signOuts += 1; } };
+  const initializing = ensureAppVisitorSession({ auth: resetAuth, appId: PROJECT, storage, randomUUID: () => "late" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(invalidateAppVisitorSession({ auth: resetAuth, appId: PROJECT }), true);
+  release();
+  await assert.rejects(initializing, (error) => error.code === "visitor_session_reset");
+  assert.equal(signOuts, 1);
+});
+
+test("14S exact generated app-auth runtime shares initialization across concurrent entity operations", async (t) => {
+  let signupCalls = 0;
+  let signinCalls = 0;
+  let entityCalls = 0;
+  const token = [Buffer.from('{"alg":"HS256"}').toString("base64url"),
+    Buffer.from(JSON.stringify({ sub: "visitor", role: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url"),
+    "c2lnbmF0dXJl"].join(".");
+  const server = http.createServer(async (request, response) => {
+    const body = await new Promise((resolve) => { let value = ""; request.on("data", (chunk) => { value += chunk; }); request.on("end", () => resolve(value)); });
+    response.setHeader("Content-Type", "application/json");
+    if (request.url === "/functions/v1/app-auth") {
+      const input = JSON.parse(body);
+      if (input.action === "signup") { signupCalls += 1; await new Promise((resolve) => setTimeout(resolve, 20)); }
+      if (input.action === "signin") signinCalls += 1;
+      response.end(JSON.stringify({ user: { id: "visitor", email: input.email }, session: { access_token: token, refresh_token: "refresh" } }));
+      return;
+    }
+    if (request.url.startsWith("/auth/v1/user")) { response.end(JSON.stringify({ id: "visitor", role: "authenticated" })); return; }
+    if (request.url.startsWith("/auth/v1/logout")) { response.statusCode = 204; response.end(); return; }
+    if (request.url.startsWith("/rest/v1/entities") && request.method === "POST") {
+      entityCalls += 1; response.statusCode = 201;
+      response.end(JSON.stringify([{ id: `row-${entityCalls}`, type: "proof", data: JSON.parse(body).data, owner: "visitor" }])); return;
+    }
+    response.statusCode = 404; response.end(JSON.stringify({ message: "not found" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  const backend = createSupabaseBackend({ url: `http://127.0.0.1:${address.port}`, anonKey: PUBLIC_KEY,
+    appId: PROJECT, authUrl: `http://127.0.0.1:${address.port}/functions/v1/app-auth` });
+  const storage = new Map();
+  const ensure = () => ensureAppVisitorSession({ auth: backend.auth, appId: PROJECT,
+    storage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
+    randomUUID: () => "exact-runtime" });
+  const rows = await Promise.all(Array.from({ length: 10 }, async (_, index) => {
+    await ensure();
+    return backend.db.entity("proof").create({ index });
+  }));
+  assert.equal(signupCalls, 1);
+  assert.equal(signinCalls, 0);
+  assert.equal(entityCalls, 10);
+  assert.equal(rows.length, 10);
+  await backend.auth.signOut();
+  await ensure();
+  assert.equal(signinCalls, 1, "logout invalidates the initialized session and persisted credentials recover once");
 });
 
 test("14S preflight uses VITE_AUTH_URL app-auth, recovers the visitor, and completes authenticated CRUD", async (t) => {

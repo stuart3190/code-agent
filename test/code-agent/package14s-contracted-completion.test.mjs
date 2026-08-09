@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { classifyComplexity, COMPLEXITY } from "../../shell/server/lib/appBuild/buildProfile.mjs";
 import {
-  bindCapabilities, bookingModulePlan, completionEligibility, tierContract,
+  bindCapabilities, bookingModulePlan, completionEligibility, previewEligibility, tierContract,
 } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import {
   lintRequiredCapabilityBindings, lintRequiredModulePlan,
@@ -63,6 +63,13 @@ test("14S completion requires every contracted journey, not only the essential t
     { id: "complete-booking", status: "pass" },
     { id: "contact-persistence", status: "pass" },
   ] } }).eligible, true);
+});
+
+test("14S undriveable contracted controls remain distinct diagnostics but cannot become green", () => {
+  const tiers = tierContract(BOOKING);
+  const outcome = { journeys: [{ id: "complete-booking", status: "undriveable" }] };
+  assert.equal(previewEligibility({ tiers, gates: { ok: true }, journeyResults: outcome }).eligible, false);
+  assert.equal(completionEligibility({ contract: BOOKING, gates: { ok: true }, journeyResults: outcome }).eligible, false);
 });
 
 test("14S classifies explicit and contracted multi-step booking as medium while one-step booking stays simple", () => {

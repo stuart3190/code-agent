@@ -18,6 +18,31 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+// One auth client represents one browser/app session. Keep initialization flights scoped to that
+// exact client so generated modules share work without ever sharing a visitor across clients.
+const visitorSessionFlights = new WeakMap();
+
+function sessionFlightsFor(auth) {
+  let flights = visitorSessionFlights.get(auth);
+  if (!flights) {
+    flights = new Map();
+    visitorSessionFlights.set(auth, flights);
+  }
+  return flights;
+}
+
+/** Invalidate one app-scoped initialization flight (sign-out/reset boundary). */
+export function invalidateAppVisitorSession({ auth, appId } = {}) {
+  const flights = auth && visitorSessionFlights.get(auth);
+  if (!flights) return false;
+  const key = String(appId || "app");
+  const flight = flights.get(key);
+  if (flight) flight.invalidated = true;
+  flights.delete(key);
+  if (!flights.size) visitorSessionFlights.delete(auth);
+  return !!flight;
+}
+
 /**
  * Exact anonymous app-session state machine shared by generated browsers and the worker preflight.
  * Fresh credentials go directly to signup: signin-first is a guaranteed 401 which verification
@@ -36,19 +61,42 @@ export async function ensureAppVisitorSession({
   const current = await auth.currentUser().catch(() => null);
   if (current) return current;
 
-  const key = `visitor-session:${appId || "app"}`;
-  let saved = null;
-  let fresh = false;
-  try { saved = JSON.parse(storage?.getItem?.(key) || "null"); } catch { saved = null; }
-  if (!saved?.email || !saved?.password) {
-    const id = randomUUID();
-    saved = { email: `visitor-${id}@visitor.local`, password: `Visitor-${id}-key` };
-    fresh = true;
-    try { storage?.setItem?.(key, JSON.stringify(saved)); } catch { /* a per-load session still works */ }
-  }
+  const identity = String(appId || "app");
+  const flights = sessionFlightsFor(auth);
+  const existing = flights.get(identity);
+  if (existing) return existing.promise;
 
-  if (fresh) return auth.signUp(saved);
-  try { return await auth.signIn(saved); } catch { return auth.signUp(saved); }
+  const flight = { invalidated: false, promise: null };
+  flight.promise = (async () => {
+    const key = `visitor-session:${identity}`;
+    let saved = null;
+    let fresh = false;
+    try { saved = JSON.parse(storage?.getItem?.(key) || "null"); } catch { saved = null; }
+    if (!saved?.email || !saved?.password) {
+      const id = randomUUID();
+      saved = { email: `visitor-${id}@visitor.local`, password: `Visitor-${id}-key` };
+      fresh = true;
+      try { storage?.setItem?.(key, JSON.stringify(saved)); } catch { /* a per-load session still works */ }
+    }
+
+    const user = fresh
+      ? await auth.signUp(saved)
+      : await auth.signIn(saved).catch(() => auth.signUp(saved));
+    if (flight.invalidated) {
+      await auth.signOut?.().catch(() => {});
+      throw Object.assign(new Error("Visitor session initialization was reset before completion."), {
+        code: "visitor_session_reset",
+      });
+    }
+    return user;
+  })();
+  flights.set(identity, flight);
+  try {
+    return await flight.promise;
+  } finally {
+    if (flights.get(identity) === flight) flights.delete(identity);
+    if (!flights.size) visitorSessionFlights.delete(auth);
+  }
 }
 
 export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, fetchImpl = globalThis.fetch } = {}) {
@@ -140,6 +188,14 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           return data?.user ?? null;
         },
       };
+
+  // Sign-out is also a generated-runtime cache boundary. Invalidating first ensures a concurrent
+  // signup cannot remain the session authority after the user explicitly signed out.
+  const signOut = auth.signOut.bind(auth);
+  auth.signOut = async () => {
+    invalidateAppVisitorSession({ auth, appId });
+    return signOut();
+  };
 
   // db.entity(type) — CRUD over the generic `entities` table, scoped to one `type`.
   // Records are returned flat: { id, type, data, owner, created_at }.

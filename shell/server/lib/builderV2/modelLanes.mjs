@@ -20,6 +20,7 @@ import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
 import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
+import { interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -245,6 +246,8 @@ export function renderPatchPrompt({
     persistencePlan
       ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(persistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
+    "",
+    interactionContractBrief(scopeInteractionContract(contract.interactionContract, scopedJourneys)),
     "",
     repairScope ? [
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",
