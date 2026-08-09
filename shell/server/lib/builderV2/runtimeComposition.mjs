@@ -15,7 +15,7 @@ import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 import { resolveBuildContext } from "../appBuild/buildContext.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
-import { withRuntimeEnv } from "../runtimeEnv.mjs";
+import { proveGeneratedRuntimeBackend, withRuntimeEnv } from "../runtimeEnv.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { runSandboxJob } from "../../../../build-worker/sandboxRunner.mjs";
@@ -238,6 +238,7 @@ export function createBuilderV2Runtime({
   reservations = null,
   historyResolver = routingHistory,
   accountCreditResolver = async (owner) => (await createBudgetLedger().getBalance(owner)).total,
+  runtimePreflight = null,
   requireWorker = true,
   log = console.log,
 } = {}) {
@@ -246,6 +247,15 @@ export function createBuilderV2Runtime({
     providers: [pexelsProvider()], client, optimiser: createOptimiser({ client }),
   });
   const reservationStore = reservations || supabaseModelReservations(client);
+  let runtimePreflightPromise = null;
+  const ensureRuntimeReady = runtimePreflight || (({ projectId }) => {
+    // EnvironmentFiles are immutable for a running worker. Concurrent work inside this runtime
+    // shares the same promise; a failed proof stays failed until configuration is corrected and
+    // the worker is restarted. The normal worker entry creates a runtime for each pipeline job,
+    // so every backend-dependent qualification gets a fresh pre-dispatch proof.
+    runtimePreflightPromise ||= proveGeneratedRuntimeBackend({ projectId, adminClient: client });
+    return runtimePreflightPromise;
+  });
 
   async function isolated(job, options) {
     let outcome = null;
@@ -300,6 +310,10 @@ export function createBuilderV2Runtime({
         ), { code: "preview_isolation_required" });
       }
       if (workJob.payload?.pipelineVersion !== "v2") throw new Error("not a Builder V2 pipeline job");
+      // This is deliberately ahead of recovery, provider-context resolution and contract creation:
+      // backend-dependent generated apps cannot spend a model token unless the worker can inject
+      // and exercise the exact public browser runtime. Service-role values never enter this path.
+      await ensureRuntimeReady({ projectId: workJob.project_id, workJob });
       const recovery = await prepareBuilderV2PipelineAttempt(workJob, { client });
       if (recovery.action === "recovered") return recovery.outcome;
       const owner = workJob.owner;

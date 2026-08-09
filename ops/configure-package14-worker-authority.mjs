@@ -1,6 +1,8 @@
 // Production-only, secret-safe worker credential authority repair for Package 14.
-// Copies only the credential-store selector and encryption key from the shell's existing
-// private environment into the worker's private EnvironmentFile. Values are never logged.
+// Copies only the credential-store selector, encryption key, preview authority and PUBLIC
+// generated-runtime configuration from the shell's existing private environment into the
+// worker's private EnvironmentFile. Values are never logged. Service-role values already used by
+// the queue remain server-only and are never copied into a generated tree.
 
 import { chmod, chown, readFile, rename, stat, writeFile } from "node:fs/promises";
 
@@ -39,6 +41,18 @@ const updates = new Map([
 for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
   if (source.values.get(name)) updates.set(name, source.values.get(name));
 }
+for (const name of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]) {
+  if (source.values.get(name)) updates.set(name, source.values.get(name));
+}
+const publicKey = updates.get("SUPABASE_PUBLISHABLE_KEY") || updates.get("SUPABASE_ANON_KEY");
+if (!updates.get("SUPABASE_URL") || !publicKey) {
+  throw new Error("shell public generated-runtime configuration is unavailable");
+}
+const privileged = [source.values.get("SUPABASE_SERVICE_ROLE_KEY"), source.values.get("SUPABASE_SERVICE_ROLE"),
+  source.values.get("SUPABASE_SECRET_KEY")].filter(Boolean);
+if (publicKey.startsWith("sb_secret_") || privileged.includes(publicKey)) {
+  throw new Error("refusing to install a privileged Supabase key as generated-browser configuration");
+}
 const seen = new Set();
 const output = target.rows.map((line) => {
   if (!line || line.trimStart().startsWith("#") || !line.includes("=")) return line;
@@ -58,4 +72,4 @@ await chmod(temporary, 0o640);
 await rename(temporary, targetPath);
 console.log(JSON.stringify({ configured: true, store: "supabase", encryptionKeyPresent: true,
   previewAuthorityPresent: ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]
-    .every((name) => updates.has(name)) }));
+    .every((name) => updates.has(name)), publicRuntimePresent: true }));

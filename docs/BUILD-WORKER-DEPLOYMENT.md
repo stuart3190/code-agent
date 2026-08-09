@@ -43,6 +43,15 @@ THRALLO_BUILD_POLL_MS=1000
 THRALLO_MANAGED_SETTLEMENT_PAUSED=1
 ```
 
+Any worker allowed to execute `builder_pipeline` also requires `SUPABASE_URL` and exactly one
+public browser credential (`SUPABASE_PUBLISHABLE_KEY`, preferred, or the legacy
+`SUPABASE_ANON_KEY`). These values come from the same private configuration authority as the shell.
+The worker performs a disposable generated-runtime read/write smoke before the first model dispatch
+for each `builder_pipeline` job. Missing or invalid public configuration fails with a machine-readable
+`runtime_public_config_*`/`runtime_backend_preflight_*` error before spend. Never place a
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SERVICE_ROLE`, or `sb_secret_...` value in either public-key
+field; the materialized preview `.env` contains only browser-safe values and `VITE_APP_ID`.
+
 Do not put provider or production credentials in the image. Apply only
 `20260806230625_durable_build_work_queue.sql` through the approved Supabase migration workflow;
 verify the remote ledger and catalog afterward. Keep `THRALLO_BUILD_WORKER_ENABLED=0` in the shell.

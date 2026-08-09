@@ -12,6 +12,8 @@ const remove = new Set([
   "PREVIEW_MODE",
   "PROVISIOND_URL",
   "PROVISIOND_TOKEN",
+  "SUPABASE_PUBLISHABLE_KEY",
+  "SUPABASE_ANON_KEY",
 ]);
 const target = await readFile(targetPath, "utf8");
 const targetStat = await stat(targetPath);
