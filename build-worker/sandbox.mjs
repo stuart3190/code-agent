@@ -54,6 +54,23 @@ async function browserVerify(payload) {
   return { ok: app.pass !== false && (!journeys || journeys.pass !== false), app, journeys, exitCode: 0, stdout: "", stderr: "" };
 }
 
+// What this image IS, answered through the SAME path a real job takes — same image, same
+// entrypoint, same runner. A provenance file read any other way proves nothing about the code
+// that will actually grade a build. The baked record is returned alongside a live recomputation
+// so a tampered or truncated image is caught rather than believed.
+async function sandboxProvenance() {
+  const { computeSandboxIdentity, readBakedProvenance, compareSandboxIdentity } =
+    await import("../shell/server/lib/builderV2/sandboxProvenance.mjs");
+  const observed = await computeSandboxIdentity({ root: "/app", commit: process.env.SOURCE_COMMIT || null });
+  const baked = await readBakedProvenance("/app");
+  const consistent = compareSandboxIdentity(observed, baked || {});
+  return {
+    ok: true, exitCode: 0, stdout: "", stderr: "",
+    provenance: { ...observed, builtAt: baked?.builtAt || null, baked: Boolean(baked),
+      bakedConsistent: consistent.compatible },
+  };
+}
+
 async function qaBrowser(payload) {
   const { runQaBrowser } = await import("../shell/server/lib/qaRunner.mjs");
   const report = await runQaBrowser({ previewUrl: payload.previewUrl, runId: payload.runId, artifactRoot: "/work/qa" });
@@ -90,6 +107,7 @@ async function main() {
       renderIcons: envelope.jobType === "publish_package" && payload.renderIcons !== false,
     });
   } else if (envelope.jobType === "browser_verify") result = await browserVerify(payload);
+  else if (envelope.jobType === "sandbox_provenance") result = await sandboxProvenance();
   else if (envelope.jobType === "qa_browser") result = await qaBrowser(payload);
   else if (envelope.jobType === "proof_slow") result = await proofSlow(payload);
   else throw new Error(`sandbox does not support ${envelope.jobType}`);

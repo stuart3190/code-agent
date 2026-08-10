@@ -20,6 +20,9 @@ const LIMITS = Object.freeze({
   publish_package: { wallSeconds: 420, cpu: 2, memoryMb: 2048, pids: 256, outputBytes: 32 * 1024 * 1024 },
   android_package: { wallSeconds: 1200, cpu: 2, memoryMb: 3072, pids: 512, outputBytes: 64 * 1024 * 1024 },
   proof_slow: { wallSeconds: 120, cpu: 1, memoryMb: 512, pids: 64, outputBytes: 1024 * 1024 },
+  // Hashes five files and exits. It runs before every pipeline job, so it is deliberately the
+  // cheapest thing the sandbox can be asked to do.
+  sandbox_provenance: { wallSeconds: 60, cpu: 1, memoryMb: 512, pids: 64, outputBytes: 256 * 1024 },
 });
 
 export function buildWorkerEnabled(env = process.env) {

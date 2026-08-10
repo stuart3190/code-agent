@@ -6,6 +6,8 @@
 // but execution fails closed unless the durable build worker owns the job.
 
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { rm } from "node:fs/promises";
 
 import { clone, fromScaffold } from "../../../../src/engine/fileTree.mjs";
@@ -36,9 +38,14 @@ import {
 } from "./supabaseTwins.mjs";
 import { supabaseVerificationCache } from "./verification.mjs";
 import { scopeInteractionContract } from "./interactionContract.mjs";
+import {
+  compareSandboxIdentity, computeSandboxIdentity, sandboxSkewSummary,
+} from "./sandboxProvenance.mjs";
 import { assertExecutableCandidate } from "../modelCatalogue.mjs";
 
 const uuid = () => crypto.randomUUID();
+// shell/server/lib/builderV2 → the checkout root, which is also the image's /app.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const numberEnv = (name, fallback) => {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -258,6 +265,44 @@ export function createBuilderV2Runtime({
     return runtimePreflightPromise;
   });
 
+  let sandboxIdentityPromise = null;
+  /**
+   * Prove the sandbox grades with THIS code, before anything is spent.
+   *
+   * A pinned image is invisible from in here: the worker looks deployed, the shell looks
+   * deployed, and the container quietly runs whatever digest the pin names. On 2026-08-10 that
+   * was a three-day-old verifier, and a full paid qualification produced false passes because of
+   * it. The check costs one 60-second container that hashes five files, and it runs ahead of
+   * contract creation so a stale image ends the job at zero credits with a machine-readable code
+   * instead of buying another wrong verdict.
+   */
+  async function ensureSandboxCompatible(workJob) {
+    // In process mode the sandbox is a child of THIS checkout, so there is nothing to skew and
+    // nothing to prove. Skew is a property of shipping the code somewhere else.
+    if (process.env.THRALLO_BUILD_SANDBOX === "process") return { compatible: true, code: null, inProcess: true };
+    sandboxIdentityPromise ||= (async () => {
+      const host = await computeSandboxIdentity({ root: repoRoot });
+      const outcome = await isolated({
+        id: `${workJob.id}-sandbox-provenance`, durable_job_id: workJob.id,
+        job_type: "sandbox_provenance", attempts: workJob.attempts || 1,
+        payload: {}, resource_limits: runtimeLimits(workJob, "sandbox_provenance"),
+      }, {});
+      const report = compareSandboxIdentity(host, {
+        ...(outcome?.provenance || {}),
+        imageDigest: process.env.THRALLO_BUILD_SANDBOX_IMAGE || null,
+      });
+      log(JSON.stringify({ event: "bv2.sandbox_provenance", ...report, mismatches: report.mismatches }));
+      return report;
+    })();
+    const report = await sandboxIdentityPromise;
+    if (!report.compatible) {
+      throw Object.assign(new Error(`${report.detail} — ${sandboxSkewSummary(report)}`), {
+        code: report.code, classification: report.code, skew: report,
+      });
+    }
+    return report;
+  }
+
   async function isolated(job, options) {
     let outcome = null;
     try {
@@ -315,6 +360,7 @@ export function createBuilderV2Runtime({
       // backend-dependent generated apps cannot spend a model token unless the worker can inject
       // and exercise the exact public browser runtime. Service-role values never enter this path.
       await ensureRuntimeReady({ projectId: workJob.project_id, workJob });
+      await ensureSandboxCompatible(workJob);
       const recovery = await prepareBuilderV2PipelineAttempt(workJob, { client });
       if (recovery.action === "recovered") return recovery.outcome;
       const owner = workJob.owner;

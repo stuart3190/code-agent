@@ -1,0 +1,109 @@
+// Identity of the code that actually grades a build, on both sides of the sandbox boundary.
+//
+// Browser verification does not run this checkout. The worker ships the job into a Docker image
+// pinned by digest, and that image carries its OWN copy of the verifier. On 2026-08-10 the pin
+// was three days stale: every live qualification since 2026-08-07 was graded by journeyVerifier
+// from commit b45a327, while four later fixes sat in the repository looking deployed. Nothing
+// reported the skew — the build simply produced a confident, wrong verdict, after full model
+// spend. See docs/evidence/builder-v2-runtime/2026-08-10/PACKAGE-14S-VERIFIER-PROVENANCE.md.
+//
+// This module is the single definition of "which code decides a verdict", used to compute that
+// identity on the host and inside the image with the same function, so the two can be compared
+// before a single token is spent.
+
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
+/**
+ * The files whose contents change what a build verdict IS. Not every file in the image — a
+ * drifting comment in an unrelated module must not block a qualification — but every file that
+ * can silently turn a red journey green or a green one red.
+ */
+export const SANDBOX_IDENTITY_FILES = Object.freeze([
+  "build-worker/sandbox.mjs",
+  "shell/server/lib/appBuild/journeyVerifier.mjs",
+  "shell/server/lib/appBuild/verificationAgent.mjs",
+  "shell/server/lib/builderV2/controlIdentity.mjs",
+  "src/scaffolds/reactVite.mjs",
+]);
+
+/** The one whose staleness caused the incident, reported by name in every skew message. */
+export const VERIFIER_PATH = "shell/server/lib/appBuild/journeyVerifier.mjs";
+
+export const PROVENANCE_FILENAME = "sandbox-provenance.json";
+
+// Line endings are a deployment artefact, not a behavioural one: the same commit checked out on
+// Windows and copied to Linux must produce the same identity, or the guard cries wolf on every
+// deploy and gets switched off.
+const hash = (text) => createHash("sha256").update(String(text).replace(/\r\n/g, "\n")).digest("hex");
+
+/**
+ * Hash every verdict-deciding file under `root`. A missing file is recorded as `absent:` rather
+ * than throwing, so an image built from a truncated context is reported as incompatible instead
+ * of crashing the check that exists to catch exactly that.
+ */
+export async function computeSandboxIdentity({ root = process.cwd(), commit = null } = {}) {
+  const files = {};
+  for (const relative of SANDBOX_IDENTITY_FILES) {
+    files[relative] = await readFile(path.join(root, relative), "utf8")
+      .then((text) => hash(text)).catch(() => "absent");
+  }
+  const identity = hash(SANDBOX_IDENTITY_FILES.map((name) => `${name}:${files[name]}`).join("\n"));
+  return { identity, commit: commit || null, verifier: files[VERIFIER_PATH], files };
+}
+
+/** The provenance baked into an image at build time, or null when it predates this mechanism. */
+export async function readBakedProvenance(root = process.cwd()) {
+  return readFile(path.join(root, PROVENANCE_FILENAME), "utf8")
+    .then((text) => JSON.parse(text)).catch(() => null);
+}
+
+/**
+ * Is the sandbox running the same verdict-deciding code as this host?
+ *
+ * Returns a machine-readable result rather than throwing, so callers decide where the failure
+ * belongs. `code` is `sandbox_version_mismatch` for any incompatibility, including a sandbox too
+ * old to report an identity at all — an image that cannot say what it is has to be treated as
+ * unknown, which is precisely the state that produced the incident.
+ */
+export function compareSandboxIdentity(host, sandbox) {
+  const report = {
+    compatible: false,
+    code: "sandbox_version_mismatch",
+    hostIdentity: host?.identity || null,
+    sandboxIdentity: sandbox?.identity || null,
+    hostVerifier: host?.verifier || null,
+    sandboxVerifier: sandbox?.verifier || null,
+    hostCommit: host?.commit || null,
+    sandboxCommit: sandbox?.commit || null,
+    imageDigest: sandbox?.imageDigest || null,
+    mismatches: [],
+  };
+  if (!sandbox?.identity) {
+    report.mismatches.push({ file: "*", reason: "the sandbox reported no provenance" });
+    report.detail = "the sandbox image predates provenance reporting and cannot be trusted to grade a build";
+    return report;
+  }
+  for (const relative of SANDBOX_IDENTITY_FILES) {
+    const expected = host?.files?.[relative];
+    const actual = sandbox?.files?.[relative];
+    if (expected !== actual) report.mismatches.push({ file: relative, host: expected || null, sandbox: actual || null });
+  }
+  if (report.mismatches.length) {
+    const names = report.mismatches.map((row) => row.file);
+    report.detail = `the sandbox image is running different verdict-deciding code (${names.join(", ")})`;
+    return report;
+  }
+  return { ...report, compatible: true, code: null, detail: "host and sandbox agree on every verdict-deciding file" };
+}
+
+/** One line for a log or a preflight table. */
+export function sandboxSkewSummary(report) {
+  return [
+    `host verifier ${String(report.hostVerifier).slice(0, 16)}`,
+    `sandbox verifier ${String(report.sandboxVerifier).slice(0, 16)}`,
+    `image ${report.imageDigest || "unknown"}`,
+    report.compatible ? "compatible" : `INCOMPATIBLE (${report.code})`,
+  ].join(" · ");
+}
