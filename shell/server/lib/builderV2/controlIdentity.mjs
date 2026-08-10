@@ -13,6 +13,19 @@ const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
+/**
+ * The ARIA roles Thrallo's journey verifier will actually try when it looks for something to
+ * ACT on. Any scaffold primitive advertised to the model must resolve to one of these, or the
+ * generated control is correct and undriveable at the same time — which is exactly what a live
+ * qualification proved when useSemanticSelection emitted role="radio" onto a <button>.
+ *
+ * journeyVerifier locates with these; a drift test asserts the scaffold primitives conform.
+ */
+export const DRIVEABLE_ACTION_ROLES = Object.freeze(["button", "link", "tab"]);
+
+/** Attributes the platform accepts as observable selected state on an actionable control. */
+export const SELECTED_STATE_ATTRIBUTES = Object.freeze(["aria-pressed", "aria-selected", "aria-checked", "checked"]);
+
 /** Words that identify no control on their own. */
 export const IDENTITY_STOP_WORDS = Object.freeze(new Set([
   "select", "choose", "pick", "enter", "provide", "complete", "click", "press", "submit",

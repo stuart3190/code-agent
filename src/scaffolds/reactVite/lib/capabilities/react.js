@@ -128,9 +128,16 @@ export function useSemanticField({
 /**
  * Props for one option in a selectable group, with observable selected state.
  *
- * Selection that a browser cannot observe is the classic silent failure: the click "works" but
- * nothing on the page changes. `optionProps` always carries a role, an accessible name and
- * aria-checked, so selected state is visible to assistive tech and to verification alike.
+ * Selection a browser cannot observe is the classic silent failure: the click "works" but
+ * nothing on the page changes. `optionProps` therefore carries an accessible name AND an
+ * observable selected state.
+ *
+ * It deliberately does NOT set role="radio". A live qualification proved why: overriding the
+ * native button role made every generated date/slot/party control invisible to Thrallo's own
+ * journey verifier, which locates actionable controls as button/link/tab. The control was
+ * correct and undriveable at the same time. Spread these onto a <button> and it stays a button;
+ * `aria-pressed` carries the selected state, which is the correct ARIA pattern for a toggle
+ * button and is exactly what the interaction lint and the verifier both already read.
  *
  *   const slot = useSemanticSelection({ name: "slot", value: chosen, onSelect: setChosen });
  *   {slots.map((s) => <button key={s} {...slot.optionProps(s)} className="…">{s}</button>)}
@@ -147,11 +154,11 @@ export function useSemanticSelection({ name, value = null, onSelect = null, labe
     const selected = optionValue === value;
     return {
       type: "button",
-      role: "radio",
+      // No `role` override: the element keeps its native role so the verifier can find it.
       id: `${slug(groupName)}-${slug(optionValue)}`,
       name: groupName,
       value: String(optionValue ?? ""),
-      "aria-checked": selected,
+      "aria-pressed": selected,
       "aria-label": text,
       "data-selected": selected ? "true" : "false",
       onClick: () => onSelect?.(optionValue),
@@ -159,7 +166,8 @@ export function useSemanticSelection({ name, value = null, onSelect = null, labe
   }, [groupName, value, onSelect]);
 
   return {
-    groupProps: { role: "radiogroup", "aria-label": accessibleName },
+    // `group` keeps the set announced without changing what its children are.
+    groupProps: { role: "group", "aria-label": accessibleName },
     optionProps,
     selected: value,
     accessibleName,

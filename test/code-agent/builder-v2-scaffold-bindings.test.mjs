@@ -118,11 +118,11 @@ test("semantic props produce controls a verifier can find and drive", { ...needs
 
     // Selected state by construction: observable before AND after, which is what a browser
     // verifier asserts and what hand-rolled selection wiring repeatedly failed to expose.
-    const slot = page.getByRole("radio", { name: "11:00" });
-    assert.equal(await slot.getAttribute("aria-checked"), "false", "unchosen first");
+    const slot = page.getByRole("button", { name: "11:00" });
+    assert.equal(await slot.getAttribute("aria-pressed"), "false", "unchosen first");
     await slot.click();
     await assert.doesNotReject(page.waitForFunction(
-      () => document.querySelector('[aria-label="11:00"]')?.getAttribute("aria-checked") === "true",
+      () => document.querySelector('[aria-label="11:00"]')?.getAttribute("aria-pressed") === "true",
       null, { timeout: 5_000 },
     ), "the click adds a visible selected state");
 
@@ -142,16 +142,16 @@ test("useCapabilityState re-renders from the store, not from local component sta
   try {
     const page = await browser.newPage();
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.getByRole("radio", { name: "10:00" }).click();
+    await page.getByRole("button", { name: "10:00" }).click();
     await page.waitForFunction(
-      () => document.querySelector('[aria-label="10:00"]')?.getAttribute("aria-checked") === "true",
+      () => document.querySelector('[aria-label="10:00"]')?.getAttribute("aria-pressed") === "true",
       null, { timeout: 5_000 },
     );
     // Selecting the other option must move the selected state, proving a single source of truth.
-    await page.getByRole("radio", { name: "11:00" }).click();
+    await page.getByRole("button", { name: "11:00" }).click();
     await page.waitForFunction(() => (
-      document.querySelector('[aria-label="10:00"]')?.getAttribute("aria-checked") === "false"
-      && document.querySelector('[aria-label="11:00"]')?.getAttribute("aria-checked") === "true"
+      document.querySelector('[aria-label="10:00"]')?.getAttribute("aria-pressed") === "false"
+      && document.querySelector('[aria-label="11:00"]')?.getAttribute("aria-pressed") === "true"
     ), null, { timeout: 5_000 });
   } finally {
     await browser.close();

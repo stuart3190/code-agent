@@ -90,7 +90,7 @@ export const REACT_BINDINGS = [
   "useCapabilityState(store, selector?) → live state via useSyncExternalStore(store.subscribe, store.getState)",
   "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
   "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps } with a guaranteed accessible name",
-  "useSemanticSelection({ name, value, onSelect }) → { groupProps, optionProps(option) } with observable aria-checked state",
+  "useSemanticSelection({ name, value, onSelect }) → { groupProps, optionProps(option) }; keeps the native button role and reports selection via aria-pressed",
   "useStatusRegion({ label }) → { statusProps } announcing a state transition",
 ];
 
@@ -113,7 +113,7 @@ const ASSEMBLY_PATTERNS = Object.freeze({
       "  <div {...choice.groupProps}>",
       "    {options.map((o) => <button key={o} {...choice.optionProps(o)}>{label(o)}</button>)}",
       "  </div>",
-      "  // optionProps supplies role, accessible name and aria-checked. Style the button however you like.",
+      "  // optionProps supplies the accessible name and aria-pressed; the element stays a button. Style it however you like.",
     ],
   },
   capabilityState: {

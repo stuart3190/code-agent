@@ -245,7 +245,7 @@ test("GUIDANCE — the assembly brief is derived from the contract and is domain
     const spec = deriveBuildSpec(contract);
     const brief = preferredAssemblyBrief(assemblyNeeds(spec.interactionContract, spec.bindings));
     assert.match(brief, /useSemanticSelection/, `${name} is shown the selection binding`);
-    assert.match(brief, /aria-checked/, `${name} is told selected state must be observable`);
+    assert.match(brief, /aria-pressed/, `${name} is told selected state must be observable`);
     assert.match(brief, /session/i, `${name} is told the runtime owns the session prerequisite`);
     assert.equal(/booking|reservation|party size|supper/i.test(brief), false,
       `${name} brief must contain no foreign domain vocabulary`);
@@ -304,7 +304,7 @@ export function Assembled() {
   return <div>
     <div {...choice.groupProps}>
       {[2, 4, 6].map((size) => (
-        <button key={size} {...choice.optionProps(size, size + " guests")}>{size} guests</button>
+        <button key={size} {...choice.optionProps(size, size + " guests assembled")}>{size} guests assembled</button>
       ))}
     </div>
     <p id="assembled-review">{value ? "Party of " + value : "no selection"}</p>
@@ -356,11 +356,11 @@ test("REPRODUCTION A — the hand-wired option stays broken and stays detectable
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const option = page.locator("#hand-4");
     const before = await option.evaluate((el) => ({
-      aria: el.getAttribute("aria-checked"), data: el.getAttribute("data-selected"), cls: el.className,
+      aria: el.getAttribute("aria-pressed"), data: el.getAttribute("data-selected"), cls: el.className,
     }));
     await option.click();
     const after = await option.evaluate((el) => ({
-      aria: el.getAttribute("aria-checked"), data: el.getAttribute("data-selected"), cls: el.className,
+      aria: el.getAttribute("aria-pressed"), data: el.getAttribute("data-selected"), cls: el.className,
     }));
     // The exact live symptom: aria/data/class all unchanged after the click.
     assert.deepEqual(after, before, "the hand-wired option gains no observable selected state");
@@ -377,21 +377,21 @@ test("CORRECTED A — the binding exposes selected state and propagates the valu
     const page = await browser.newPage();
     await page.goto(baseUrl, { waitUntil: "networkidle" });
 
-    const option = page.getByRole("radio", { name: "4 guests" });
-    assert.equal(await option.getAttribute("aria-checked"), "false", "unchosen first");
+    const option = page.getByRole("button", { name: "4 guests assembled" });
+    assert.equal(await option.getAttribute("aria-pressed"), "false", "unchosen first");
     await option.click();
     await page.waitForFunction(
-      () => document.querySelector('[aria-label="4 guests"]')?.getAttribute("aria-checked") === "true",
+      () => document.querySelector('[aria-label="4 guests assembled"]')?.getAttribute("aria-pressed") === "true",
       null, { timeout: 5_000 },
     );
     // Downstream receives the exact value — the step that cascaded in the live run.
     assert.equal((await page.locator("#assembled-review").textContent()).trim(), "Party of 4");
 
     // Selecting another option moves the state: one source of truth.
-    await page.getByRole("radio", { name: "6 guests" }).click();
+    await page.getByRole("button", { name: "6 guests assembled" }).click();
     await page.waitForFunction(() => (
-      document.querySelector('[aria-label="4 guests"]')?.getAttribute("aria-checked") === "false"
-      && document.querySelector('[aria-label="6 guests"]')?.getAttribute("aria-checked") === "true"
+      document.querySelector('[aria-label="4 guests assembled"]')?.getAttribute("aria-pressed") === "false"
+      && document.querySelector('[aria-label="6 guests assembled"]')?.getAttribute("aria-pressed") === "true"
     ), null, { timeout: 5_000 });
     assert.equal((await page.locator("#assembled-review").textContent()).trim(), "Party of 6");
   } finally { await browser.close(); }

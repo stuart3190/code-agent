@@ -15,7 +15,7 @@
 
 import { createRequire } from "node:module";
 
-import { semanticAliases, semanticKey } from "../builderV2/controlIdentity.mjs";
+import { DRIVEABLE_ACTION_ROLES, semanticAliases, semanticKey } from "../builderV2/controlIdentity.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -71,9 +71,9 @@ function candidatesFor(page, description) {
   const prose = [];
   for (const word of words) {
     const pattern = new RegExp(word, "i");
-    roles.push(page.getByRole("button", { name: pattern }));
-    roles.push(page.getByRole("link", { name: pattern }));
-    roles.push(page.getByRole("tab", { name: pattern }));
+    // One shared contract with the scaffold primitives (builderV2/controlIdentity.mjs): what
+    // this driver will try to act on is what those primitives must resolve to.
+    for (const role of DRIVEABLE_ACTION_ROLES) roles.push(page.getByRole(role, { name: pattern }));
     labels.push(page.getByLabel(pattern));
     labels.push(page.getByPlaceholder(pattern));
     prose.push(page.getByText(pattern));
