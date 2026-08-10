@@ -1,0 +1,2897 @@
+{
+  "provenance": {
+    "note": "RETAINED LIVE EVIDENCE — not reconstructed. Package 14S live booking qualification.",
+    "runId": "package14s-live-20260809",
+    "projectId": "f4036301-cf26-462c-b433-7342f342c586",
+    "publicBuildId": "449cf290-587a-4d12-982c-703ffd40d3e1",
+    "bv2BuildId": "ce144c01-e55d-43c6-84c7-31d1ea1a4f56",
+    "contractRowId": "f479c4f4-0d5c-434c-808d-358e0eb6464d",
+    "startedAt": "2026-08-10T09:07:39.368Z",
+    "finishedAt": "2026-08-10T09:17:10.602Z",
+    "evidenceDir": "/home/ubuntu/thrallo-deploy-evidence/package14s-terminal-20260810T0910Z"
+  },
+  "contract": {
+    "auth": {
+      "model": "guest booking by durable reference using the backend SDK persistence layer",
+      "rules": [
+        "a guest can recover a booking by opening its exact durable reference route",
+        "a guest who does not have a valid reference sees 'Booking not found'",
+        "the booking flow does not require sign-up or sign-in"
+      ],
+      "required": false
+    },
+    "tiers": {
+      "essential": {
+        "entities": [
+          "booking"
+        ],
+        "journeys": [
+          "complete-booking"
+        ],
+        "operations": [
+          "create-booking",
+          "read-booking-by-reference",
+          "list-bookings-for-capacity",
+          "cancel-booking"
+        ]
+      },
+      "secondary": {
+        "entities": [],
+        "journeys": [
+          "cancel-booking",
+          "capacity-enforcement",
+          "validation-and-errors"
+        ],
+        "operations": []
+      }
+    },
+    "routes": [
+      {
+        "auth": false,
+        "name": "Home",
+        "path": "/",
+        "purpose": "Editorial landing page for Ember Table with supper club story, dining format, fixed service information, and entry point to booking"
+      },
+      {
+        "auth": false,
+        "name": "Booking Wizard",
+        "path": "/book",
+        "purpose": "Multi-step booking flow for choosing date, slot, party size, contact details, review and confirmation"
+      },
+      {
+        "auth": false,
+        "name": "Manage Booking",
+        "path": "/booking/:reference",
+        "purpose": "Recover a booking by durable reference, display its current status and allow cancellation when confirmed"
+      }
+    ],
+    "states": [
+      {
+        "empty": "booking entry remains visible even if all listed dates later become sold out",
+        "error": "not applicable on the editorial home page",
+        "loading": "editorial content appears without a blocking remote loading state",
+        "success": "clicking 'Book a seat' opens the booking wizard",
+        "surface": "home page",
+        "validation": "not applicable on the editorial home page"
+      },
+      {
+        "empty": "when no seats remain, the wizard shows 'No seats left for the current evenings'",
+        "error": "if saving fails, the message 'We could not save your booking. Please try again.' is visible and no reference is shown",
+        "loading": "a visible loading or skeleton state appears while persisted bookings are read for capacity",
+        "success": "confirmation screen shows 'Confirmed' with the durable booking reference",
+        "surface": "booking wizard",
+        "validation": "date, slot, party size, name, valid email and phone are required before review"
+      },
+      {
+        "empty": "a slot with zero remaining seats is labelled 'Sold out'",
+        "error": "if capacity changes before confirmation, the message 'Not enough seats remain for that party size' is shown and the booking is not created",
+        "loading": "remaining capacity is not shown as final until capacity data has loaded",
+        "success": "available slots show remaining seat counts and can be selected",
+        "surface": "slot picker",
+        "validation": "party size cannot exceed the displayed remaining capacity"
+      },
+      {
+        "empty": "empty required fields show field-level validation after blur or attempted continue",
+        "error": "invalid fields keep the review step unavailable",
+        "loading": "not applicable once the step is visible",
+        "success": "valid fields allow the guest to continue to review",
+        "surface": "contact details step",
+        "validation": "name is required, email must look like an email, and phone is required"
+      },
+      {
+        "empty": "if a required selection is missing the wizard returns to the first incomplete step",
+        "error": "capacity or persistence errors keep the guest on the review step with a visible message",
+        "loading": "not applicable once all selections are present",
+        "success": "confirming creates the booking and shows the reference",
+        "surface": "review step",
+        "validation": "the review must display exact date, slot, party size and contact details before confirmation"
+      },
+      {
+        "empty": "an unknown reference shows 'Booking not found'",
+        "error": "if lookup fails, the message 'Unable to load booking. Try again.' is visible",
+        "loading": "a visible loading state appears while the reference is looked up",
+        "success": "a found booking shows its reference, status, date, slot, party size and contact details",
+        "surface": "manage booking page",
+        "validation": "a malformed or empty reference shows 'Booking not found'"
+      },
+      {
+        "empty": "not applicable for a known cancelled reference",
+        "error": "if cancellation fails, the message 'Unable to cancel booking. Try again.' is visible and status remains 'Confirmed'",
+        "loading": "a visible loading state appears while the cancelled booking is recovered",
+        "success": "cancelled bookings show status 'Cancelled' after reload",
+        "surface": "cancelled booking page",
+        "validation": "cancel control is hidden when status is already 'Cancelled'"
+      }
+    ],
+    "summary": "A polished multi-step booking application for Ember Table where guests choose an available supper club date and slot, enter party size and validated contact details, review and confirm a durable booking, recover it after reload, and cancel it into a persistent cancelled state.",
+    "version": 1,
+    "deferred": [
+      {
+        "item": "online payment or card capture",
+        "reason": "the requested flow only confirms supper club seats and does not specify payment collection"
+      },
+      {
+        "item": "automated email or SMS confirmations",
+        "reason": "no external messaging provider is available in the fixed scaffold"
+      },
+      {
+        "item": "guest accounts and sign-in",
+        "reason": "the requested guest journey uses durable booking references rather than authenticated accounts"
+      },
+      {
+        "item": "admin schedule editor",
+        "reason": "public supper club dates, slot labels, opening information and editorial content are fixed in-code constants rather than backend entities"
+      },
+      {
+        "item": "waitlist management",
+        "reason": "the request requires honest sold-out capacity handling, not waitlist collection"
+      },
+      {
+        "item": "external calendar integration",
+        "reason": "no calendar provider is included in the allowed platform capabilities"
+      }
+    ],
+    "entities": [
+      {
+        "name": "booking",
+        "owned": false,
+        "fields": [
+          {
+            "name": "reference",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dateId",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "slotId",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "slotLabel",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "partySize",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "guestName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "guestEmail",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "guestPhone",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "createdAt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "cancelledAt",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "relationships": [
+          "a booking references one in-code supper club date by dateId",
+          "a booking references one in-code slot by slotId",
+          "active confirmed bookings reduce the remaining capacity for their referenced slot",
+          "cancelled bookings do not count against remaining slot capacity"
+        ]
+      }
+    ],
+    "journeys": [
+      {
+        "id": "complete-booking",
+        "stage": "primary_journey",
+        "steps": [
+          {
+            "action": "open the home page",
+            "expect": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown",
+            "target": "/"
+          },
+          {
+            "action": "start the booking flow",
+            "expect": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates",
+            "target": "Book a seat control"
+          },
+          {
+            "action": "select a dinner date",
+            "expect": "the selected date is visually highlighted and the slot selection step becomes available",
+            "target": "date picker"
+          },
+          {
+            "action": "select an available slot",
+            "expect": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown",
+            "target": "slot picker"
+          },
+          {
+            "action": "choose a party size within the visible remaining capacity",
+            "expect": "the selected party size is displayed and the contact details step becomes available",
+            "target": "party size control"
+          },
+          {
+            "action": "enter valid guest name, email and phone",
+            "expect": "all contact fields show valid state and the review step becomes available",
+            "target": "contact details form"
+          },
+          {
+            "action": "review the booking",
+            "expect": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+            "target": "review step"
+          },
+          {
+            "action": "confirm the booking",
+            "expect": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+            "target": "Confirm booking control"
+          },
+          {
+            "action": "reload the page",
+            "expect": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+            "target": "browser reload"
+          },
+          {
+            "action": "open the manage booking view using the reference",
+            "expect": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+            "target": "booking reference lookup"
+          }
+        ],
+        "title": "A guest completes and recovers a confirmed Ember Table booking",
+        "priority": "primary",
+        "acceptance": [
+          "a confirmed booking displays a non-empty booking reference",
+          "the confirmed booking survives a full browser reload without using localStorage-visible state",
+          "the recovered booking displays the exact same date, slot, party size and contact details as the review step"
+        ]
+      },
+      {
+        "id": "cancel-booking",
+        "stage": "supporting",
+        "steps": [
+          {
+            "action": "open a confirmed booking",
+            "expect": "the booking details are visible with status 'Confirmed' and a visible 'Cancel booking' control",
+            "target": "manage booking view"
+          },
+          {
+            "action": "request cancellation",
+            "expect": "a confirmation prompt is shown explaining that the booking will be cancelled",
+            "target": "Cancel booking control"
+          },
+          {
+            "action": "confirm cancellation",
+            "expect": "the booking status changes to 'Cancelled' and the original booking reference remains visible",
+            "target": "cancellation confirmation control"
+          },
+          {
+            "action": "reload the page",
+            "expect": "the booking reloads into an explicit 'Cancelled' state with no active confirmation controls",
+            "target": "browser reload"
+          }
+        ],
+        "title": "A guest cancels a confirmed booking and recovers the cancelled state",
+        "priority": "secondary",
+        "acceptance": [
+          "a cancelled booking remains readable after reload",
+          "a cancelled booking shows status 'Cancelled' rather than disappearing",
+          "a cancelled booking cannot be cancelled a second time because the cancel control is not shown"
+        ]
+      },
+      {
+        "id": "capacity-enforcement",
+        "stage": "supporting",
+        "steps": [
+          {
+            "action": "open the booking flow",
+            "expect": "available dates and slots show their remaining seat counts",
+            "target": "/book"
+          },
+          {
+            "action": "select a slot with limited remaining seats",
+            "expect": "party size choices larger than the remaining seats are disabled or unavailable",
+            "target": "slot picker"
+          },
+          {
+            "action": "attempt to proceed with a party size greater than remaining capacity",
+            "expect": "the flow shows 'Not enough seats remain for that party size' and does not enable the review step",
+            "target": "party size control"
+          },
+          {
+            "action": "book the final remaining seats for a slot",
+            "expect": "the booking is confirmed and the selected slot's remaining capacity is reduced",
+            "target": "confirmation step"
+          },
+          {
+            "action": "return to the booking flow for the same slot",
+            "expect": "the fully booked slot is marked 'Sold out' and cannot be selected",
+            "target": "slot picker"
+          }
+        ],
+        "title": "The booking flow honestly enforces slot capacity",
+        "priority": "secondary",
+        "acceptance": [
+          "party sizes above a slot's remaining capacity cannot be selected",
+          "sold-out slots are visibly labelled 'Sold out'",
+          "selecting a sold-out slot does not advance the wizard"
+        ]
+      },
+      {
+        "id": "validation-and-errors",
+        "stage": "polish",
+        "steps": [
+          {
+            "action": "reach the contact details step",
+            "expect": "name, email and phone fields are visible with a disabled continue control until valid details are entered",
+            "target": "booking wizard contact step"
+          },
+          {
+            "action": "enter an invalid email address",
+            "expect": "the message 'Enter a valid email address' is visible and the review step remains unavailable",
+            "target": "email field"
+          },
+          {
+            "action": "leave the guest name empty",
+            "expect": "the message 'Name is required' is visible and the review step remains unavailable",
+            "target": "name field"
+          },
+          {
+            "action": "enter valid name, email and phone",
+            "expect": "validation messages disappear and the review step becomes available",
+            "target": "contact details form"
+          }
+        ],
+        "title": "The wizard blocks invalid contact details and displays recoverable errors",
+        "priority": "secondary",
+        "acceptance": [
+          "invalid email input shows a visible validation message",
+          "blank required contact fields block progression to review",
+          "valid contact details allow the guest to proceed to the exact review step"
+        ]
+      }
+    ],
+    "acceptance": [
+      {
+        "id": "a1",
+        "kind": "persistence",
+        "journey": "complete-booking",
+        "statement": "after a guest confirms a booking, the page shows status 'Confirmed' and a non-empty durable booking reference"
+      },
+      {
+        "id": "a2",
+        "kind": "persistence",
+        "journey": "complete-booking",
+        "statement": "after a full browser reload, the confirmed booking page still shows the same booking reference, date, slot, party size and contact details"
+      },
+      {
+        "id": "a3",
+        "kind": "validation",
+        "journey": "complete-booking",
+        "statement": "the review step displays the exact selected date, slot, party size, guest name, email and phone before the booking can be confirmed"
+      },
+      {
+        "id": "a4",
+        "kind": "capacity",
+        "journey": "capacity-enforcement",
+        "statement": "party size options greater than the displayed remaining capacity are not selectable"
+      },
+      {
+        "id": "a5",
+        "kind": "capacity",
+        "journey": "capacity-enforcement",
+        "statement": "a slot with zero remaining seats is visibly labelled 'Sold out' and cannot be selected"
+      },
+      {
+        "id": "a6",
+        "kind": "persistence",
+        "journey": "cancel-booking",
+        "statement": "after cancellation, the booking page shows status 'Cancelled' and the same booking reference"
+      },
+      {
+        "id": "a7",
+        "kind": "persistence",
+        "journey": "cancel-booking",
+        "statement": "after reloading a cancelled booking, the page still shows status 'Cancelled' and no active cancel button"
+      },
+      {
+        "id": "a8",
+        "kind": "validation",
+        "journey": "validation-and-errors",
+        "statement": "entering an invalid email shows 'Enter a valid email address' and prevents progression to review"
+      },
+      {
+        "id": "a9",
+        "kind": "error",
+        "journey": "complete-booking",
+        "statement": "an unknown booking reference route shows 'Booking not found'"
+      }
+    ],
+    "operations": [
+      {
+        "id": "create-booking",
+        "kind": "create",
+        "entity": "booking",
+        "journey": "complete-booking",
+        "description": "persist a confirmed booking with a generated durable reference via db.entity('booking').create after the review step is confirmed"
+      },
+      {
+        "id": "read-booking-by-reference",
+        "kind": "read",
+        "entity": "booking",
+        "journey": "complete-booking",
+        "description": "load a booking by its reference via db.entity('booking') so the confirmation or cancelled state can be restored after reload"
+      },
+      {
+        "id": "list-bookings-for-capacity",
+        "kind": "read",
+        "entity": "booking",
+        "journey": "capacity-enforcement",
+        "description": "read confirmed bookings for visible slots via db.entity('booking') and calculate remaining capacity from in-code slot capacities"
+      },
+      {
+        "id": "cancel-booking",
+        "kind": "update",
+        "entity": "booking",
+        "journey": "cancel-booking",
+        "description": "update a booking status to 'cancelled' and set cancelledAt via db.entity('booking').update"
+      }
+    ],
+    "projectType": "booking",
+    "imageIntents": [
+      {
+        "slot": "hero",
+        "intent": "A polished multi-step booking application for Ember Table where guests choose an",
+        "orientation": "landscape"
+      },
+      {
+        "slot": "route:/book",
+        "intent": "A polished multi-step booking application for Ember Table where guests choose an — Booking Wizard",
+        "orientation": "landscape"
+      },
+      {
+        "slot": "route:/booking/:reference",
+        "intent": "A polished multi-step booking application for Ember Table where guests choose an — Manage Booking",
+        "orientation": "landscape"
+      }
+    ],
+    "integrations": [
+      {
+        "name": "backend SDK database",
+        "purpose": "durably persist and recover bookings using db.entity('booking')",
+        "required": true
+      },
+      {
+        "name": "none",
+        "purpose": "no payments, email delivery, maps, analytics, or external reservation provider are used",
+        "required": false
+      }
+    ],
+    "interactionContract": {
+      "flows": [
+        {
+          "id": "complete-booking:1:navigation",
+          "kind": "navigation",
+          "reads": [],
+          "action": "open the home page",
+          "writes": [],
+          "control": null,
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown",
+          "stateOwner": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "valueWritten": null,
+          "semanticPurpose": "open the home page",
+          "responsibleModules": [
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown"
+        },
+        {
+          "id": "complete-booking:2:mutation",
+          "kind": "mutation",
+          "reads": [
+            "complete-booking.input"
+          ],
+          "action": "start the booking flow",
+          "writes": [
+            "complete-booking.durable.record",
+            "complete-booking.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "Book a seat control",
+            "statePath": "complete-booking.durable.record",
+            "downstream": [
+              "complete-booking:9:recovery",
+              "complete-booking:10:lookup"
+            ],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "Book a seat control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "complete-booking.input"
+          ],
+          "journeyId": "complete-booking",
+          "stepIndex": 1,
+          "capability": "makeBookingSystem",
+          "observable": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "start the booking flow",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates"
+        },
+        {
+          "id": "complete-booking:3:selection:dateid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select a dinner date",
+          "writes": [
+            "complete-booking.draft.dateId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "dateId",
+            "statePath": "complete-booking.draft.dateId",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "dateId",
+            "selectedState": true,
+            "accessibleName": "date Id",
+            "accessibleNames": [
+              "date Id",
+              "date",
+              "day"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "the selected date is visually highlighted and the slot selection step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "dateId",
+          "semanticPurpose": "select a dinner date",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected date is visually highlighted and the slot selection step becomes available"
+        },
+        {
+          "id": "complete-booking:4:selection:slotid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select an available slot",
+          "writes": [
+            "complete-booking.draft.slotId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "slotId",
+            "statePath": "complete-booking.draft.slotId",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "slotId",
+            "selectedState": true,
+            "accessibleName": "slot Id",
+            "accessibleNames": [
+              "slot Id",
+              "slot",
+              "time"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "slotId",
+          "semanticPurpose": "select an available slot",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown"
+        },
+        {
+          "id": "complete-booking:5:selection:partysize",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose a party size within the visible remaining capacity",
+          "writes": [
+            "complete-booking.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "statePath": "complete-booking.draft.partySize",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "selectedState": true,
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 4,
+          "capability": "makeWizardMachine",
+          "observable": "the selected party size is displayed and the contact details step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "choose a party size within the visible remaining capacity",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected party size is displayed and the contact details step becomes available"
+        },
+        {
+          "id": "complete-booking:6:input:guestname",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid guest name, email and phone",
+          "writes": [
+            "complete-booking.draft.guestName"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestName",
+            "editable": true,
+            "statePath": "complete-booking.draft.guestName",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestName",
+            "accessibleName": "guest Name",
+            "accessibleNames": [
+              "guest Name",
+              "name",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "all contact fields show valid state and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestName",
+          "semanticPurpose": "enter valid guest name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "all contact fields show valid state and the review step becomes available"
+        },
+        {
+          "id": "complete-booking:6:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid guest name, email and phone",
+          "writes": [
+            "complete-booking.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "complete-booking.draft.guestEmail",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "all contact fields show valid state and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter valid guest name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "all contact fields show valid state and the review step becomes available"
+        },
+        {
+          "id": "complete-booking:6:input:guestphone",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid guest name, email and phone",
+          "writes": [
+            "complete-booking.draft.guestPhone"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestPhone",
+            "editable": true,
+            "statePath": "complete-booking.draft.guestPhone",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "inputTypes": [
+              "tel",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestPhone",
+            "accessibleName": "guest Phone",
+            "accessibleNames": [
+              "guest Phone",
+              "phone",
+              "telephone",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "all contact fields show valid state and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestPhone",
+          "semanticPurpose": "enter valid guest name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "all contact fields show valid state and the review step becomes available"
+        },
+        {
+          "id": "complete-booking:6:input:partysize",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid guest name, email and phone",
+          "writes": [
+            "complete-booking.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "editable": true,
+            "statePath": "complete-booking.draft.partySize",
+            "downstream": [
+              "complete-booking:7:review",
+              "complete-booking:8:mutation"
+            ],
+            "inputTypes": [
+              "number",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "complete-booking",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "all contact fields show valid state and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "enter valid guest name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "all contact fields show valid state and the review step becomes available"
+        },
+        {
+          "id": "complete-booking:7:review",
+          "kind": "review",
+          "reads": [
+            "complete-booking.draft.dateId",
+            "complete-booking.draft.slotId",
+            "complete-booking.draft.partySize",
+            "complete-booking.draft.guestName",
+            "complete-booking.draft.guestEmail",
+            "complete-booking.draft.guestPhone"
+          ],
+          "action": "review the booking",
+          "writes": [],
+          "control": null,
+          "dependsOn": [
+            "complete-booking.draft.dateId",
+            "complete-booking.draft.slotId",
+            "complete-booking.draft.partySize",
+            "complete-booking.draft.guestName",
+            "complete-booking.draft.guestEmail",
+            "complete-booking.draft.guestPhone"
+          ],
+          "journeyId": "complete-booking",
+          "stepIndex": 6,
+          "capability": "makeWizardMachine",
+          "observable": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "review the booking",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation"
+        },
+        {
+          "id": "complete-booking:8:mutation",
+          "kind": "mutation",
+          "reads": [
+            "complete-booking.draft.dateId",
+            "complete-booking.draft.slotId",
+            "complete-booking.draft.partySize",
+            "complete-booking.draft.guestName",
+            "complete-booking.draft.guestEmail",
+            "complete-booking.draft.guestPhone"
+          ],
+          "action": "confirm the booking",
+          "writes": [
+            "complete-booking.durable.record",
+            "complete-booking.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "Confirm booking control",
+            "statePath": "complete-booking.durable.record",
+            "downstream": [
+              "complete-booking:9:recovery",
+              "complete-booking:10:lookup"
+            ],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "Confirm booking control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "complete-booking.draft.dateId",
+            "complete-booking.draft.slotId",
+            "complete-booking.draft.partySize",
+            "complete-booking.draft.guestName",
+            "complete-booking.draft.guestEmail",
+            "complete-booking.draft.guestPhone"
+          ],
+          "journeyId": "complete-booking",
+          "stepIndex": 7,
+          "capability": "makeBookingSystem",
+          "observable": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "confirm the booking",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "a confirmation screen appears with status 'Confirmed' and a durable booking reference"
+        },
+        {
+          "id": "complete-booking:9:recovery",
+          "kind": "recovery",
+          "reads": [
+            "complete-booking.durable.record"
+          ],
+          "action": "reload the page",
+          "writes": [
+            "complete-booking.restored"
+          ],
+          "control": null,
+          "dependsOn": [
+            "complete-booking.durable.record"
+          ],
+          "journeyId": "complete-booking",
+          "stepIndex": 8,
+          "capability": "makeWizardMachine",
+          "observable": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "reload the page",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'"
+        },
+        {
+          "id": "complete-booking:10:lookup",
+          "kind": "lookup",
+          "reads": [
+            "complete-booking.durable.record"
+          ],
+          "action": "open the manage booking view using the reference",
+          "writes": [
+            "complete-booking.restored"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "booking reference lookup",
+            "statePath": "complete-booking.restored",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "booking reference lookup",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "complete-booking.durable.record"
+          ],
+          "journeyId": "complete-booking",
+          "stepIndex": 9,
+          "capability": "makeBookingSystem",
+          "observable": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "open the manage booking view using the reference",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the confirmed booking details are visible and match the selected date, slot, party size and contact details"
+        },
+        {
+          "id": "cancel-booking:1:navigation",
+          "kind": "navigation",
+          "reads": [],
+          "action": "open a confirmed booking",
+          "writes": [],
+          "control": null,
+          "dependsOn": [],
+          "journeyId": "cancel-booking",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the booking details are visible with status 'Confirmed' and a visible 'Cancel booking' control",
+          "stateOwner": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "valueWritten": null,
+          "semanticPurpose": "open a confirmed booking",
+          "responsibleModules": [
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking details are visible with status 'Confirmed' and a visible 'Cancel booking' control"
+        },
+        {
+          "id": "cancel-booking:2:cancellation",
+          "kind": "cancellation",
+          "reads": [
+            "cancel-booking.durable.reference"
+          ],
+          "action": "request cancellation",
+          "writes": [
+            "cancel-booking.durable.status"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "Cancel booking control",
+            "statePath": "cancel-booking.durable.status",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "Cancel booking control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "cancel-booking.durable.reference"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 1,
+          "capability": "makeBookingSystem",
+          "observable": "a confirmation prompt is shown explaining that the booking will be cancelled",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "request cancellation",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "a confirmation prompt is shown explaining that the booking will be cancelled"
+        },
+        {
+          "id": "cancel-booking:3:mutation",
+          "kind": "mutation",
+          "reads": [
+            "cancel-booking.input"
+          ],
+          "action": "confirm cancellation",
+          "writes": [
+            "cancel-booking.durable.record",
+            "cancel-booking.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "cancellation confirmation control",
+            "statePath": "cancel-booking.durable.record",
+            "downstream": [
+              "cancel-booking:4:recovery"
+            ],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "cancellation confirmation control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "cancel-booking.input"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 2,
+          "capability": "makeBookingSystem",
+          "observable": "the booking status changes to 'Cancelled' and the original booking reference remains visible",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "confirm cancellation",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking status changes to 'Cancelled' and the original booking reference remains visible"
+        },
+        {
+          "id": "cancel-booking:4:recovery",
+          "kind": "recovery",
+          "reads": [
+            "cancel-booking.durable.record"
+          ],
+          "action": "reload the page",
+          "writes": [
+            "cancel-booking.restored"
+          ],
+          "control": null,
+          "dependsOn": [
+            "cancel-booking.durable.record"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "the booking reloads into an explicit 'Cancelled' state with no active confirmation controls",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "reload the page",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking reloads into an explicit 'Cancelled' state with no active confirmation controls"
+        },
+        {
+          "id": "capacity-enforcement:1:mutation",
+          "kind": "mutation",
+          "reads": [
+            "capacity-enforcement.input"
+          ],
+          "action": "open the booking flow",
+          "writes": [
+            "capacity-enforcement.durable.record",
+            "capacity-enforcement.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "/book",
+            "statePath": "capacity-enforcement.durable.record",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "/book",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "capacity-enforcement.input"
+          ],
+          "journeyId": "capacity-enforcement",
+          "stepIndex": 0,
+          "capability": "makeBookingSystem",
+          "observable": "available dates and slots show their remaining seat counts",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "open the booking flow",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "available dates and slots show their remaining seat counts"
+        },
+        {
+          "id": "capacity-enforcement:2:selection:slotid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select a slot with limited remaining seats",
+          "writes": [
+            "capacity-enforcement.draft.slotId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "slotId",
+            "statePath": "capacity-enforcement.draft.slotId",
+            "downstream": [
+              "capacity-enforcement:4:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "slotId",
+            "selectedState": true,
+            "accessibleName": "slot Id",
+            "accessibleNames": [
+              "slot Id",
+              "slot",
+              "time"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "capacity-enforcement",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "party size choices larger than the remaining seats are disabled or unavailable",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "slotId",
+          "semanticPurpose": "select a slot with limited remaining seats",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "party size choices larger than the remaining seats are disabled or unavailable"
+        },
+        {
+          "id": "capacity-enforcement:4:mutation",
+          "kind": "mutation",
+          "reads": [
+            "capacity-enforcement.draft.slotId"
+          ],
+          "action": "book the final remaining seats for a slot",
+          "writes": [
+            "capacity-enforcement.durable.record",
+            "capacity-enforcement.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "confirmation step",
+            "statePath": "capacity-enforcement.durable.record",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "confirmation step",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "capacity-enforcement.draft.slotId"
+          ],
+          "journeyId": "capacity-enforcement",
+          "stepIndex": 3,
+          "capability": "makeBookingSystem",
+          "observable": "the booking is confirmed and the selected slot's remaining capacity is reduced",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "book the final remaining seats for a slot",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking is confirmed and the selected slot's remaining capacity is reduced"
+        },
+        {
+          "id": "validation-and-errors:2:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter an invalid email address",
+          "writes": [
+            "validation-and-errors.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "validation-and-errors.draft.guestEmail",
+            "downstream": [],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "validation-and-errors",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "the message 'Enter a valid email address' is visible and the review step remains unavailable",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter an invalid email address",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "the message 'Enter a valid email address' is visible and the review step remains unavailable"
+        },
+        {
+          "id": "validation-and-errors:4:input:guestname",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid name, email and phone",
+          "writes": [
+            "validation-and-errors.draft.guestName"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestName",
+            "editable": true,
+            "statePath": "validation-and-errors.draft.guestName",
+            "downstream": [],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestName",
+            "accessibleName": "guest Name",
+            "accessibleNames": [
+              "guest Name",
+              "name",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "validation-and-errors",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages disappear and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestName",
+          "semanticPurpose": "enter valid name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages disappear and the review step becomes available"
+        },
+        {
+          "id": "validation-and-errors:4:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid name, email and phone",
+          "writes": [
+            "validation-and-errors.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "validation-and-errors.draft.guestEmail",
+            "downstream": [],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "validation-and-errors",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages disappear and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter valid name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages disappear and the review step becomes available"
+        },
+        {
+          "id": "validation-and-errors:4:input:guestphone",
+          "kind": "input",
+          "reads": [],
+          "action": "enter valid name, email and phone",
+          "writes": [
+            "validation-and-errors.draft.guestPhone"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestPhone",
+            "editable": true,
+            "statePath": "validation-and-errors.draft.guestPhone",
+            "downstream": [],
+            "inputTypes": [
+              "tel",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestPhone",
+            "accessibleName": "guest Phone",
+            "accessibleNames": [
+              "guest Phone",
+              "phone",
+              "telephone",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "validation-and-errors",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages disappear and the review step becomes available",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestPhone",
+          "semanticPurpose": "enter valid name, email and phone",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/complete-booking/CompleteBookingFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages disappear and the review step becomes available"
+        }
+      ],
+      "valid": true,
+      "version": 1,
+      "problems": []
+    }
+  },
+  "liveVerdict": {
+    "steps": [
+      {
+        "drove": true,
+        "action": "open the home page",
+        "detail": "found: ember, table, editorial, hero, supper",
+        "expect": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown",
+        "status": "pass"
+      },
+      {
+        "drove": true,
+        "action": "start the booking flow",
+        "detail": "found: title, choose, your, evening, list (new: title, choose, your, evening, list)",
+        "expect": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates",
+        "status": "pass"
+      },
+      {
+        "drove": true,
+        "action": "select a dinner date",
+        "detail": "found: selected, date, visually, highlighted, slot (new: selected, visually, highlighted, slot)",
+        "expect": "the selected date is visually highlighted and the slot selection step becomes available",
+        "status": "pass"
+      },
+      {
+        "drove": true,
+        "action": "select an available slot",
+        "detail": "selection moved from \"Friday 18 October\n10 seats remain\nselect\" to \"Saturday 19 October\n10 seats remain\nsele\"",
+        "expect": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown",
+        "status": "pass",
+        "selectedText": "Saturday 19 October\n10 seats remain\nselected date visually highlighted"
+      },
+      {
+        "drove": true,
+        "action": "choose a party size within the visible remaining capacity",
+        "detail": "selection moved from \"Saturday 19 October\n10 seats remain\nsele\" to \"Friday 18 October\n10 seats remain\nselect\"",
+        "expect": "the selected party size is displayed and the contact details step becomes available",
+        "status": "pass",
+        "selectedText": "Friday 18 October\n10 seats remain\nselected date visually highlighted"
+      },
+      {
+        "drove": false,
+        "action": "enter valid guest name, email and phone",
+        "detail": "could not drive: enter valid guest name, email and phone",
+        "expect": "all contact fields show valid state and the review step becomes available",
+        "status": "undriveable"
+      },
+      {
+        "drove": true,
+        "action": "review the booking",
+        "detail": "nothing changed — \"selected, date, slot\" was already on the page before this step, and exact, time never appeared",
+        "expect": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+        "status": "fail"
+      },
+      {
+        "drove": true,
+        "action": "confirm the booking",
+        "detail": "expected confirmation, screen, status, confirmed, durable; found none",
+        "expect": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+        "status": "fail"
+      },
+      {
+        "drove": true,
+        "action": "reload the page",
+        "detail": "expected same, confirmation, screen, restored, booking; found none",
+        "expect": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+        "status": "fail"
+      },
+      {
+        "drove": true,
+        "action": "open the manage booking view using the reference",
+        "detail": "expected confirmed, booking, details, are, match; found booking, are",
+        "expect": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+        "status": "fail"
+      }
+    ],
+    "status": "fail",
+    "failedSteps": 4,
+    "cacheIdentity": {
+      "journeyId": "complete-booking",
+      "contractHash": "e32dae99ad11d12adf447b96cb22f09da3de8a7ac56c90b5373ae981ae2cf45f",
+      "runtimeFiles": [
+        {
+          "path": "src/lib/backend/index.js",
+          "contentHash": "fe689464d5e8517b6b7195a59ed3a3c849ff7154b37bcb979491acdeacbd9dbc"
+        },
+        {
+          "path": "src/lib/backend/supabaseBackend.js",
+          "contentHash": "71e7a0689fb458e41be87b852070149b10cf7637fd6c460acd522db7360276b5"
+        },
+        {
+          "path": "src/lib/capabilities/booking.js",
+          "contentHash": "ef1ecde5c94effb0dcb4792c9a9b830a1bc86cc9aa8a30f325dacd8c08d359d6"
+        },
+        {
+          "path": "src/lib/capabilities/crud.js",
+          "contentHash": "c48f5620ec2ddd10dd248acdf315c96c5e686f0e799d5736959fb3730e937846"
+        },
+        {
+          "path": "src/lib/capabilities/forms.js",
+          "contentHash": "dd68f40f82fcc08be09a7fc3043876516f45f43dc9abcab3abf416bd4592873f"
+        },
+        {
+          "path": "src/lib/capabilities/index.js",
+          "contentHash": "8792625648e16fea557ba97c566b86a771852636e59a72b96ec6100013203e9f"
+        },
+        {
+          "path": "src/lib/capabilities/react.js",
+          "contentHash": "aba6153c3e8d07298a4d7cbb0385205e3c9f15fba6696664c14a1210e5803931"
+        },
+        {
+          "path": "src/lib/capabilities/roles.js",
+          "contentHash": "f93e3d2f04092bffde2691f927c907c1b1abf418ecd7a5cdc9be12df0b2449e9"
+        },
+        {
+          "path": "src/lib/capabilities/session.js",
+          "contentHash": "c278daf7cf98d12898a8fbba511f8fdd56bb5e82836e59eab310ff5167db8236"
+        },
+        {
+          "path": "src/lib/capabilities/wizard.js",
+          "contentHash": "015d94ef919518a4bdaf66b62e9a6c3d8984cba99a99af6db8fa679c39b18057"
+        },
+        {
+          "path": "src/lib/visitorSession.js",
+          "contentHash": "1dac1efac84ac4a61d402d74d39f5891b7d4dfb305291a7aed5abef9ccf48524"
+        }
+      ],
+      "configVersion": "journey-verification-config/1",
+      "owningModules": [
+        {
+          "path": "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+          "contentHash": "f7fa65faa94b6e7fdbdcfdd9d0cfab05b59bde99279e4713b98e5d9ca4772e18"
+        },
+        {
+          "path": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "contentHash": "eac83fa46250c0556d2761ae47a33ac253b881a02e9debe4737bbedda375fc49"
+        },
+        {
+          "path": "src/components/complete-booking/CompleteBookingReview.jsx",
+          "contentHash": "29797691375129729cf6c2505ab3a93296101f86f0b678ae53c8be4ee03c2051"
+        },
+        {
+          "path": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "contentHash": "1f0b0f93fe615eec9a32f8888cd63cead0a0a8a38fa547c52ef7a82176cfabbb"
+        },
+        {
+          "path": "src/components/ui/table.jsx",
+          "contentHash": "18a9f6369bfc068ab674e612f0c3bb7d4ea368a065594ea374e3864b79732a59"
+        },
+        {
+          "path": "src/data/booking.js",
+          "contentHash": "f5a6044c8fce626f49870c3d56cb6553c01a61fae04289b271e5960a74ec8fa7"
+        },
+        {
+          "path": "src/lib/capabilities/booking.js",
+          "contentHash": "ef1ecde5c94effb0dcb4792c9a9b830a1bc86cc9aa8a30f325dacd8c08d359d6"
+        },
+        {
+          "path": "src/routes/ManageBookingPage.jsx",
+          "contentHash": "0b318e191f060126d8596a21867601fd94ee290b938c952bd45c6999cd4a28cc"
+        }
+      ],
+      "backendVersion": "generated-backend/1",
+      "runtimeVersion": "react-vite-runtime/1",
+      "verifierVersion": "journey-v2",
+      "capabilityVersions": [
+        {
+          "name": "booking",
+          "version": "1.0.0"
+        },
+        {
+          "name": "contact",
+          "version": "1.0.0"
+        },
+        {
+          "name": "crud",
+          "version": "1.0.0"
+        },
+        {
+          "name": "session",
+          "version": "1.0.0"
+        },
+        {
+          "name": "wizard",
+          "version": "1.0.0"
+        }
+      ],
+      "environmentVersion": "unknown",
+      "journeyDefinitionHash": "9d2f2a0eaec75390debbf937dbe1c8dfb702261a5b03422491d3fa987053a1ec",
+      "transitiveDependencyClosure": [
+        {
+          "path": "src/data/contact.js",
+          "contentHash": "007b92f6949415b3269276d1d79cf3f87d5291b6d8d0b3336d501d109a744f38"
+        },
+        {
+          "path": "src/data/wizard.js",
+          "contentHash": "3d749a8e32ea0d6be204247c5198463b8bcc2a5af45513767528abdf2378cdf3"
+        },
+        {
+          "path": "src/lib/backend/index.js",
+          "contentHash": "fe689464d5e8517b6b7195a59ed3a3c849ff7154b37bcb979491acdeacbd9dbc"
+        },
+        {
+          "path": "src/lib/backend/supabaseBackend.js",
+          "contentHash": "71e7a0689fb458e41be87b852070149b10cf7637fd6c460acd522db7360276b5"
+        },
+        {
+          "path": "src/lib/capabilities/crud.js",
+          "contentHash": "c48f5620ec2ddd10dd248acdf315c96c5e686f0e799d5736959fb3730e937846"
+        },
+        {
+          "path": "src/lib/capabilities/forms.js",
+          "contentHash": "dd68f40f82fcc08be09a7fc3043876516f45f43dc9abcab3abf416bd4592873f"
+        },
+        {
+          "path": "src/lib/capabilities/index.js",
+          "contentHash": "8792625648e16fea557ba97c566b86a771852636e59a72b96ec6100013203e9f"
+        },
+        {
+          "path": "src/lib/capabilities/react.js",
+          "contentHash": "aba6153c3e8d07298a4d7cbb0385205e3c9f15fba6696664c14a1210e5803931"
+        },
+        {
+          "path": "src/lib/capabilities/roles.js",
+          "contentHash": "f93e3d2f04092bffde2691f927c907c1b1abf418ecd7a5cdc9be12df0b2449e9"
+        },
+        {
+          "path": "src/lib/capabilities/session.js",
+          "contentHash": "c278daf7cf98d12898a8fbba511f8fdd56bb5e82836e59eab310ff5167db8236"
+        },
+        {
+          "path": "src/lib/capabilities/wizard.js",
+          "contentHash": "015d94ef919518a4bdaf66b62e9a6c3d8984cba99a99af6db8fa679c39b18057"
+        },
+        {
+          "path": "src/lib/utils.js",
+          "contentHash": "231eee9157c8517cca95e6517b52dcbff4f28696389fa1cde8ee7cb5a83c709b"
+        },
+        {
+          "path": "src/lib/visitorSession.js",
+          "contentHash": "1dac1efac84ac4a61d402d74d39f5891b7d4dfb305291a7aed5abef9ccf48524"
+        }
+      ]
+    },
+    "backendEvidence": {
+      "after": {
+        "entityCount": 2,
+        "appUserCount": 4
+      },
+      "before": {
+        "entityCount": 1,
+        "appUserCount": 2
+      },
+      "changed": true,
+      "required": true
+    }
+  },
+  "liveBrowserPasses": {
+    "core": {
+      "pass": false,
+      "journeys": [
+        {
+          "id": "complete-booking",
+          "title": "A guest completes and recovers a confirmed Ember Table booking",
+          "priority": "primary",
+          "status": "fail",
+          "steps": [
+            {
+              "action": "open the home page",
+              "expect": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: ember, table, editorial, hero, supper"
+            },
+            {
+              "action": "start the booking flow",
+              "expect": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: title, choose, your, evening, list (new: title, choose, your, evening, list)"
+            },
+            {
+              "action": "select a dinner date",
+              "expect": "the selected date is visually highlighted and the slot selection step becomes available",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: selected, date, visually, highlighted, slot (new: selected, visually, highlighted, slot)"
+            },
+            {
+              "action": "select an available slot",
+              "expect": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown",
+              "drove": true,
+              "status": "pass",
+              "detail": "selection moved from \"Saturday 19 October\n10 seats remain\nsele\" to \"Friday 18 October\n10 seats remain\nselect\"",
+              "selectedText": "Friday 18 October\n10 seats remain\nselected date visually highlighted"
+            },
+            {
+              "action": "choose a party size within the visible remaining capacity",
+              "expect": "the selected party size is displayed and the contact details step becomes available",
+              "drove": true,
+              "status": "pass",
+              "detail": "selection moved from \"Friday 18 October\n10 seats remain\nselect\" to \"Saturday 19 October\n10 seats remain\nsele\"",
+              "selectedText": "Saturday 19 October\n10 seats remain\nselected date visually highlighted"
+            },
+            {
+              "action": "enter valid guest name, email and phone",
+              "expect": "all contact fields show valid state and the review step becomes available",
+              "drove": false,
+              "status": "undriveable",
+              "detail": "could not drive: enter valid guest name, email and phone"
+            },
+            {
+              "action": "review the booking",
+              "expect": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+              "drove": true,
+              "status": "fail",
+              "detail": "nothing changed — \"selected, date, slot\" was already on the page before this step, and exact, time never appeared"
+            },
+            {
+              "action": "confirm the booking",
+              "expect": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected confirmation, screen, status, confirmed, durable; found none"
+            },
+            {
+              "action": "reload the page",
+              "expect": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected same, confirmation, screen, restored, booking; found none"
+            },
+            {
+              "action": "open the manage booking view using the reference",
+              "expect": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected confirmed, booking, details, are, match; found booking, are"
+            }
+          ],
+          "failedSteps": 4,
+          "undriveableSteps": 1,
+          "backendEvidence": {
+            "required": true,
+            "changed": true,
+            "before": {
+              "entityCount": 0,
+              "appUserCount": 0
+            },
+            "after": {
+              "entityCount": 1,
+              "appUserCount": 2
+            }
+          }
+        }
+      ],
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    "afterRepair": {
+      "pass": false,
+      "journeys": [
+        {
+          "id": "complete-booking",
+          "title": "A guest completes and recovers a confirmed Ember Table booking",
+          "priority": "primary",
+          "status": "fail",
+          "steps": [
+            {
+              "action": "open the home page",
+              "expect": "the Ember Table editorial hero, supper club description, and a visible 'Book a seat' control are shown",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: ember, table, editorial, hero, supper"
+            },
+            {
+              "action": "start the booking flow",
+              "expect": "step 1 is visible with the title 'Choose your evening' and a list of available dinner dates",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: title, choose, your, evening, list (new: title, choose, your, evening, list)"
+            },
+            {
+              "action": "select a dinner date",
+              "expect": "the selected date is visually highlighted and the slot selection step becomes available",
+              "drove": true,
+              "status": "pass",
+              "detail": "found: selected, date, visually, highlighted, slot (new: selected, visually, highlighted, slot)"
+            },
+            {
+              "action": "select an available slot",
+              "expect": "the selected slot is highlighted, its remaining seat count is visible, and party size controls are shown",
+              "drove": true,
+              "status": "pass",
+              "detail": "selection moved from \"Friday 18 October\n10 seats remain\nselect\" to \"Saturday 19 October\n10 seats remain\nsele\"",
+              "selectedText": "Saturday 19 October\n10 seats remain\nselected date visually highlighted"
+            },
+            {
+              "action": "choose a party size within the visible remaining capacity",
+              "expect": "the selected party size is displayed and the contact details step becomes available",
+              "drove": true,
+              "status": "pass",
+              "detail": "selection moved from \"Saturday 19 October\n10 seats remain\nsele\" to \"Friday 18 October\n10 seats remain\nselect\"",
+              "selectedText": "Friday 18 October\n10 seats remain\nselected date visually highlighted"
+            },
+            {
+              "action": "enter valid guest name, email and phone",
+              "expect": "all contact fields show valid state and the review step becomes available",
+              "drove": false,
+              "status": "undriveable",
+              "detail": "could not drive: enter valid guest name, email and phone"
+            },
+            {
+              "action": "review the booking",
+              "expect": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+              "drove": true,
+              "status": "fail",
+              "detail": "nothing changed — \"selected, date, slot\" was already on the page before this step, and exact, time never appeared"
+            },
+            {
+              "action": "confirm the booking",
+              "expect": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected confirmation, screen, status, confirmed, durable; found none"
+            },
+            {
+              "action": "reload the page",
+              "expect": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected same, confirmation, screen, restored, booking; found none"
+            },
+            {
+              "action": "open the manage booking view using the reference",
+              "expect": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+              "drove": true,
+              "status": "fail",
+              "detail": "expected confirmed, booking, details, are, match; found booking, are"
+            }
+          ],
+          "failedSteps": 4,
+          "undriveableSteps": 1,
+          "backendEvidence": {
+            "required": true,
+            "changed": true,
+            "before": {
+              "entityCount": 1,
+              "appUserCount": 2
+            },
+            "after": {
+              "entityCount": 2,
+              "appUserCount": 4
+            }
+          }
+        }
+      ],
+      "consoleErrors": [],
+      "failedRequests": []
+    }
+  },
+  "finalVerificationDiagnostics": [
+    {
+      "code": "interaction_verification_failure",
+      "status": "undriveable",
+      "journeyId": "complete-booking",
+      "stepIndex": 5,
+      "userAction": "enter valid guest name, email and phone",
+      "stateOwners": [
+        "src/data/wizard.js"
+      ],
+      "capabilities": [
+        "makeWizardMachine"
+      ],
+      "dataOperations": [
+        "create-booking",
+        "read-booking-by-reference"
+      ],
+      "controlEvidence": null,
+      "expectedControls": [
+        {
+          "field": "guestName",
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "accessibleNames": [
+            "guest Name",
+            "name",
+            "party size",
+            "guests",
+            "people"
+          ],
+          "expectedStateOwner": "src/data/wizard.js"
+        },
+        {
+          "field": "guestEmail",
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "accessibleNames": [
+            "guest Email",
+            "email",
+            "party size",
+            "guests",
+            "people"
+          ],
+          "expectedStateOwner": "src/data/wizard.js"
+        },
+        {
+          "field": "guestPhone",
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "accessibleNames": [
+            "guest Phone",
+            "phone",
+            "telephone",
+            "party size",
+            "guests",
+            "people"
+          ],
+          "expectedStateOwner": "src/data/wizard.js"
+        },
+        {
+          "field": "partySize",
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "accessibleNames": [
+            "party Size",
+            "party size",
+            "guests",
+            "people"
+          ],
+          "expectedStateOwner": "src/data/wizard.js"
+        }
+      ],
+      "attemptedLocators": [],
+      "expectedStateAfter": "all contact fields show valid state and the review step becomes available",
+      "responsibleModules": [
+        "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+        "src/components/complete-booking/CompleteBookingFlow.jsx",
+        "src/components/complete-booking/CompleteBookingReview.jsx",
+        "src/components/complete-booking/CompleteBookingStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/booking.js",
+        "src/lib/capabilities/booking.js",
+        "src/routes/ManageBookingPage.jsx",
+        "src/data/wizard.js"
+      ],
+      "actualObservedState": "could not drive: enter valid guest name, email and phone",
+      "expectedStateBefore": [
+        "guestName:empty",
+        "guestEmail:empty",
+        "guestPhone:empty",
+        "partySize:empty"
+      ],
+      "renderedControlFacts": [
+        {
+          "id": "guest-name",
+          "tag": "input",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 259,
+          "name": "guest Name guestName guest-name",
+          "role": "textbox",
+          "span": {
+            "end": 13648,
+            "start": 13515
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": "guestName",
+          "readOnly": false,
+          "ariaLabel": "guest Name",
+          "inputType": "text",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "guest Name",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "guest Name",
+            "guestName",
+            "guest-name"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": "guest-email",
+          "tag": "input",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 260,
+          "name": "guest Email guestEmail guest-email",
+          "role": "textbox",
+          "span": {
+            "end": 14013,
+            "start": 13875
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": "guestEmail",
+          "readOnly": false,
+          "ariaLabel": "guest Email",
+          "inputType": "text",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "guest Email",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "guest Email",
+            "guestEmail",
+            "guest-email"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": "guest-phone",
+          "tag": "input",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 261,
+          "name": "guest Phone guestPhone guest-phone",
+          "role": "textbox",
+          "span": {
+            "end": 14391,
+            "start": 14253
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": "guestPhone",
+          "readOnly": false,
+          "ariaLabel": "guest Phone",
+          "inputType": "text",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "guest Phone",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "guest Phone",
+            "guestPhone",
+            "guest-phone"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        }
+      ],
+      "downstreamDependencies": [
+        "complete-booking:7:review",
+        "complete-booking:8:mutation"
+      ]
+    },
+    {
+      "code": "interaction_verification_failure",
+      "status": "fail",
+      "journeyId": "complete-booking",
+      "stepIndex": 6,
+      "userAction": "review the booking",
+      "stateOwners": [
+        "src/data/wizard.js"
+      ],
+      "capabilities": [
+        "makeWizardMachine"
+      ],
+      "dataOperations": [
+        "create-booking",
+        "read-booking-by-reference",
+        "list-bookings-for-capacity",
+        "cancel-booking"
+      ],
+      "controlEvidence": null,
+      "expectedControls": [],
+      "attemptedLocators": [],
+      "expectedStateAfter": "the exact selected date, slot time, party size, guest name, email and phone are displayed before confirmation",
+      "responsibleModules": [
+        "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+        "src/components/complete-booking/CompleteBookingFlow.jsx",
+        "src/components/complete-booking/CompleteBookingReview.jsx",
+        "src/components/complete-booking/CompleteBookingStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/booking.js",
+        "src/lib/capabilities/booking.js",
+        "src/routes/ManageBookingPage.jsx",
+        "src/data/wizard.js"
+      ],
+      "actualObservedState": "nothing changed — \"selected, date, slot\" was already on the page before this step, and exact, time never appeared",
+      "expectedStateBefore": [
+        "complete-booking.draft.dateId",
+        "complete-booking.draft.slotId",
+        "complete-booking.draft.partySize",
+        "complete-booking.draft.guestName",
+        "complete-booking.draft.guestEmail",
+        "complete-booking.draft.guestPhone"
+      ],
+      "renderedControlFacts": [],
+      "downstreamDependencies": []
+    },
+    {
+      "code": "interaction_verification_failure",
+      "status": "fail",
+      "journeyId": "complete-booking",
+      "stepIndex": 7,
+      "userAction": "confirm the booking",
+      "stateOwners": [
+        "src/data/booking.js"
+      ],
+      "capabilities": [
+        "makeBookingSystem"
+      ],
+      "dataOperations": [
+        "create-booking",
+        "read-booking-by-reference",
+        "list-bookings-for-capacity",
+        "cancel-booking"
+      ],
+      "controlEvidence": null,
+      "expectedControls": [
+        {
+          "roles": [
+            "button"
+          ],
+          "accessibleNames": [
+            "Confirm booking control"
+          ],
+          "expectedStateOwner": "src/data/booking.js"
+        }
+      ],
+      "attemptedLocators": [],
+      "expectedStateAfter": "a confirmation screen appears with status 'Confirmed' and a durable booking reference",
+      "responsibleModules": [
+        "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+        "src/components/complete-booking/CompleteBookingFlow.jsx",
+        "src/components/complete-booking/CompleteBookingReview.jsx",
+        "src/components/complete-booking/CompleteBookingStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/booking.js",
+        "src/lib/capabilities/booking.js",
+        "src/routes/ManageBookingPage.jsx"
+      ],
+      "actualObservedState": "expected confirmation, screen, status, confirmed, durable; found none",
+      "expectedStateBefore": [
+        "complete-booking.draft.dateId",
+        "complete-booking.draft.slotId",
+        "complete-booking.draft.partySize",
+        "complete-booking.draft.guestName",
+        "complete-booking.draft.guestEmail",
+        "complete-booking.draft.guestPhone"
+      ],
+      "renderedControlFacts": [
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+          "line": 22,
+          "name": "booking reference lookup Open manage booking view",
+          "role": "button",
+          "span": {
+            "end": 1379,
+            "start": 1247
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "booking reference lookup",
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "booking reference lookup",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "booking reference lookup",
+            "Open manage booking view"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+          "line": 23,
+          "name": "Start a new booking",
+          "role": "button",
+          "span": {
+            "end": 1472,
+            "start": 1388
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Start a new booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 17,
+          "name": "booking reference lookup",
+          "role": "button",
+          "span": {
+            "end": 1277,
+            "start": 1138
+          },
+          "label": null,
+          "title": null,
+          "disabled": null,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "booking reference lookup",
+          "inputType": "submit",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "booking reference lookup",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "booking reference lookup"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 36,
+          "name": "Cancel booking",
+          "role": "button",
+          "span": {
+            "end": 2830,
+            "start": 2734
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Cancel booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 41,
+          "name": "Keep booking",
+          "role": "button",
+          "span": {
+            "end": 3285,
+            "start": 3209
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Keep booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 45,
+          "name": "Start a new booking",
+          "role": "button",
+          "span": {
+            "end": 3515,
+            "start": 3431
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Start a new booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 205,
+          "name": "Book a seat control Book a seat",
+          "role": "button",
+          "span": {
+            "end": 9568,
+            "start": 9327
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "Book a seat control",
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "Book a seat control",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Book a seat control",
+            "Book a seat"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 267,
+          "name": "Review the booking",
+          "role": "button",
+          "span": {
+            "end": 15025,
+            "start": 14931
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Review the booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 269,
+          "name": "Confirm booking control Confirm booking",
+          "role": "button",
+          "span": {
+            "end": 15324,
+            "start": 15188
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "Confirm booking control",
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "Confirm booking control",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Confirm booking control",
+            "Confirm booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        }
+      ],
+      "downstreamDependencies": [
+        "complete-booking:9:recovery",
+        "complete-booking:10:lookup"
+      ]
+    },
+    {
+      "code": "interaction_verification_failure",
+      "status": "fail",
+      "journeyId": "complete-booking",
+      "stepIndex": 8,
+      "userAction": "reload the page",
+      "stateOwners": [
+        "src/data/wizard.js"
+      ],
+      "capabilities": [
+        "makeWizardMachine"
+      ],
+      "dataOperations": [
+        "create-booking",
+        "read-booking-by-reference"
+      ],
+      "controlEvidence": null,
+      "expectedControls": [],
+      "attemptedLocators": [],
+      "expectedStateAfter": "the same confirmation screen is restored with the same booking reference and status 'Confirmed'",
+      "responsibleModules": [
+        "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+        "src/components/complete-booking/CompleteBookingFlow.jsx",
+        "src/components/complete-booking/CompleteBookingReview.jsx",
+        "src/components/complete-booking/CompleteBookingStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/booking.js",
+        "src/lib/capabilities/booking.js",
+        "src/routes/ManageBookingPage.jsx",
+        "src/data/wizard.js"
+      ],
+      "actualObservedState": "expected same, confirmation, screen, restored, booking; found none",
+      "expectedStateBefore": [
+        "complete-booking.durable.record"
+      ],
+      "renderedControlFacts": [],
+      "downstreamDependencies": []
+    },
+    {
+      "code": "interaction_verification_failure",
+      "status": "fail",
+      "journeyId": "complete-booking",
+      "stepIndex": 9,
+      "userAction": "open the manage booking view using the reference",
+      "stateOwners": [
+        "src/data/booking.js"
+      ],
+      "capabilities": [
+        "makeBookingSystem"
+      ],
+      "dataOperations": [
+        "create-booking",
+        "read-booking-by-reference",
+        "list-bookings-for-capacity",
+        "cancel-booking"
+      ],
+      "controlEvidence": null,
+      "expectedControls": [
+        {
+          "roles": [
+            "button"
+          ],
+          "accessibleNames": [
+            "booking reference lookup"
+          ],
+          "expectedStateOwner": "src/data/booking.js"
+        }
+      ],
+      "attemptedLocators": [],
+      "expectedStateAfter": "the confirmed booking details are visible and match the selected date, slot, party size and contact details",
+      "responsibleModules": [
+        "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+        "src/components/complete-booking/CompleteBookingFlow.jsx",
+        "src/components/complete-booking/CompleteBookingReview.jsx",
+        "src/components/complete-booking/CompleteBookingStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/booking.js",
+        "src/lib/capabilities/booking.js",
+        "src/routes/ManageBookingPage.jsx"
+      ],
+      "actualObservedState": "expected confirmed, booking, details, are, match; found booking, are",
+      "expectedStateBefore": [
+        "complete-booking.durable.record"
+      ],
+      "renderedControlFacts": [
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+          "line": 22,
+          "name": "booking reference lookup Open manage booking view",
+          "role": "button",
+          "span": {
+            "end": 1379,
+            "start": 1247
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "booking reference lookup",
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "booking reference lookup",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "booking reference lookup",
+            "Open manage booking view"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingConfirmation.jsx",
+          "line": 23,
+          "name": "Start a new booking",
+          "role": "button",
+          "span": {
+            "end": 1472,
+            "start": 1388
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Start a new booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 17,
+          "name": "booking reference lookup",
+          "role": "button",
+          "span": {
+            "end": 1277,
+            "start": 1138
+          },
+          "label": null,
+          "title": null,
+          "disabled": null,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "booking reference lookup",
+          "inputType": "submit",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "booking reference lookup",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "booking reference lookup"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 36,
+          "name": "Cancel booking",
+          "role": "button",
+          "span": {
+            "end": 2830,
+            "start": 2734
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Cancel booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 41,
+          "name": "Keep booking",
+          "role": "button",
+          "span": {
+            "end": 3285,
+            "start": 3209
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Keep booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingStatus.jsx",
+          "line": 45,
+          "name": "Start a new booking",
+          "role": "button",
+          "span": {
+            "end": 3515,
+            "start": 3431
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Start a new booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 267,
+          "name": "Review the booking",
+          "role": "button",
+          "span": {
+            "end": 15025,
+            "start": 14931
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": null,
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": null,
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Review the booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        },
+        {
+          "id": null,
+          "tag": "button",
+          "file": "src/components/complete-booking/CompleteBookingFlow.jsx",
+          "line": 269,
+          "name": "Confirm booking control Confirm booking",
+          "role": "button",
+          "span": {
+            "end": 15324,
+            "start": 15188
+          },
+          "label": null,
+          "title": null,
+          "disabled": false,
+          "nameAttr": null,
+          "readOnly": false,
+          "ariaLabel": "Confirm booking control",
+          "inputType": "button",
+          "controlled": false,
+          "labelledBy": null,
+          "placeholder": null,
+          "valueSource": "",
+          "selectedState": false,
+          "accessibleName": "Confirm booking control",
+          "hasChangeHandler": false,
+          "locatorIdentities": [
+            "Confirm booking control",
+            "Confirm booking"
+          ],
+          "changeHandlerSource": "",
+          "resolvedHandlerSource": ""
+        }
+      ],
+      "downstreamDependencies": []
+    }
+  ]
+}
