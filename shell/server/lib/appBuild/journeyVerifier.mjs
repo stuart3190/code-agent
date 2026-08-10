@@ -627,9 +627,16 @@ async function runStep(page, step, { marker, previewUrl, selections = [], entere
   // failed live because the words it expected existed on the HOME page too — but the whole page
   // was new, which is exactly the navigational exemption.
   const urlChanged = page.url() !== urlBefore;
-  const outcome = expectationOutcome({ wanted, found, fresh, drove, action, urlChanged });
+  // The review exemption is armed ONLY when there are exact contracted values to check, so the
+  // stronger verification below always runs in its place. A review with nothing to verify keeps
+  // the ordinary freshness rule.
+  const isReviewStep = interactionFlows.some((flow) => flow.kind === "review");
+  const outcome = expectationOutcome({
+    wanted, found, fresh, drove, action, urlChanged,
+    reviewWithValues: isReviewStep && enteredValues.length > 0,
+  });
 
-  if (outcome.status === "pass" && interactionFlows.some((flow) => flow.kind === "review") && enteredValues.length) {
+  if (outcome.status === "pass" && isReviewStep && enteredValues.length) {
     const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     const missingValues = enteredValues.filter(({ value }) => !reviewText.includes(value));
     if (missingValues.length) return { ...outcome, status: "fail",
@@ -661,8 +668,23 @@ async function runStep(page, step, { marker, previewUrl, selections = [], entere
  * one of those matches must be new: a step whose every match was already there has demonstrated
  * nothing. Navigation and reload are exempt, since the whole page is new by definition.
  */
-export function expectationOutcome({ wanted, found, fresh, drove, action, urlChanged = false }) {
+export function expectationOutcome({
+  wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
+}) {
   const ratio = found.length / wanted.length;
+  // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
+  // the running selection as it is made is good UX, so by the time review runs its words are
+  // already on screen and nothing can be "new" — four live qualifications failed here with
+  // "nothing changed … was already on the page before this step" while the app worked.
+  //
+  // The exemption is narrow and only ever trades freshness for a STRONGER check: it applies
+  // solely when the caller has exact contracted values to verify, and the caller then fails the
+  // step unless the review actually contains every one of them. "New words appeared" becomes
+  // "the real values are shown", which is what the contract meant by review in the first place.
+  if (reviewWithValues && ratio >= 0.5) {
+    return { drove, status: "pass", reviewExempt: true,
+      detail: `found: ${found.join(", ")} (review: values verified below)` };
+  }
   // jump/scroll/navigation joined the navigational class after a live run: a single-page
   // app renders every section statically, so "use the navigation to jump to services" can
   // never produce FRESH words — static presence at ≥half the keywords is the right bar.
