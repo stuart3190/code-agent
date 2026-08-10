@@ -328,11 +328,9 @@ export function validateModuleConformance(tree, {
   }
 
   // One capability authority: safety findings now arrive already structured and AST-derived.
-  for (const issue of lintCapabilitySafety(tree, bindings).findings || []) {
-    if (findings.some((finding) => finding.code === "capability_owner_bypassed" && finding.module === issue.module)
-      && issue.code === "sessionless_mutation") continue; // ownership already names the exact fix
-    add(issue);
-  }
+  // (The former sessionless_mutation dedupe is gone with the finding itself — session
+  // establishment is a runtime invariant, not a generated-source obligation.)
+  for (const issue of lintCapabilitySafety(tree, bindings).findings || []) add(issue);
 
   const interactions = lintInteractiveWorkflow(tree, { interactionContract, modulePlan, bindings });
   for (const issue of interactions.findings || []) {

@@ -123,7 +123,7 @@ try {
 
 try {
   assertSeverityTablesDisjoint();
-  const blockingOk = ["forbidden_persistence", "capability_owner_bypassed", "sessionless_mutation",
+  const blockingOk = ["forbidden_persistence", "capability_owner_bypassed",
     "compile_failed", "protected_path_violation", "capability_method_unknown", "required_factory_missing"]
     .every((code) => severityOf(code) === SEVERITY.BLOCKING);
   const advisoryOk = ["required_method_uninvoked", "required_method_unbound", "required_module_missing",

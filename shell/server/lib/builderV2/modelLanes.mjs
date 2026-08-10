@@ -53,10 +53,12 @@ against a code index. Rules:
   (replace_symbol on the existing map or the App component).
 - src/lib/backend/, src/lib/visitorSession.js and src/lib/capabilities/ are protected platform
   infrastructure: IMPORT them, never modify or reimplement them. Persistence goes through the
-  capabilities (src/lib/capabilities) — never localStorage. Contact messages, newsletter
-  signups and bookings MUST use their capability (submitContact / subscribe / createBooking):
-  a raw db.entity(...) write has no session and fails with 401 for anonymous visitors. Any
-  other entity mutation must call await ensureVisitorSession() first.
+  capabilities (src/lib/capabilities) — never localStorage. Every entity operation establishes
+  and recovers this app's visitor session automatically, so use the normal capability/entity
+  APIs and do NOT call ensureVisitorSession() yourself. A capability-OWNED entity (contact
+  messages, newsletter signups, bookings, …) must still go through its owning capability
+  (submitContact / subscribe / createBooking): a raw db.entity(...) write to one bypasses that
+  capability's validation and is rejected.
 - Imagery: import { ASSETS } from "./lib/assetData.js" (adjust the relative path) and render
   with the helpers in src/lib/assets.js (imageProps / pictureSources / isPlaceholder /
   placeholderStyle). Never hardcode an image URL and never invent one. When ASSET_CREDITS

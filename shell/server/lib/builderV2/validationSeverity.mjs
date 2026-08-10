@@ -39,7 +39,9 @@ export const BLOCKING_CODES = Object.freeze({
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",
   capability_owner_bypassed: "a capability-owned contracted entity is written through a raw persistence API",
-  sessionless_mutation: "an entity mutation runs with no session; anonymous writes fail closed under RLS",
+  // `sessionless_mutation` was removed: establishing the app-scoped visitor session is a RUNTIME
+  // invariant (createSupabaseBackend gates every protected entity operation), not something
+  // generated application source is responsible for. Requiring it here rejected working code.
 
   // ── capability integrity: provably broken at runtime, not merely unusual ──
   capability_method_unknown: "a method is called that the capability demonstrably does not export",
@@ -79,7 +81,7 @@ export const ADVISORY_CODES = Object.freeze({
 
 /** Codes that must never be demoted, even by an explicit override. */
 const UNDEMOTABLE = Object.freeze(new Set([
-  "forbidden_persistence", "capability_owner_bypassed", "sessionless_mutation",
+  "forbidden_persistence", "capability_owner_bypassed",
   "protected_path_violation", "compile_failed", "patch_application_failed",
   "tree_integrity_invalid", "build_config_invalid", "source_parse_error",
   "runtime_configuration_invalid",

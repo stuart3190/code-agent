@@ -92,20 +92,23 @@ export const send = (fields) => form.sendMessage(fields);`,
   assert.match(bad.problems[0], /has no sendMessage/);
 });
 
-test("sessionless mutation remains BLOCKING; a session-managed custom entity does not", () => {
-  const bad = lintCapabilitySafety({
+test("session establishment is a RUNTIME invariant, so generated source is not policed for it", () => {
+  // Establishing the app-scoped visitor session is createSupabaseBackend's job now. A module
+  // that mutates a non-capability-owned entity without calling ensureVisitorSession() works,
+  // so it must not be rejected — policing it here rejected working code.
+  const withoutSession = lintCapabilitySafety({
     "src/data/projects.js": `
 import { db } from "../lib/backend/index.js";
 export async function saveProject(fields) { return db.entity("project").create(fields); }
 `,
   });
-  assert.equal(bad.ok, false);
-  assert.deepEqual(codes(bad), ["sessionless_mutation"]);
-  assert.match(bad.problems[0], /NO session/);
-  assert.match(bad.problems[0], /401/);
-  assert.equal(severityOf("sessionless_mutation"), SEVERITY.BLOCKING);
+  assert.equal(withoutSession.ok, true, JSON.stringify(withoutSession.problems));
+  assert.equal(codes(withoutSession).includes("sessionless_mutation"), false);
+  assert.equal(severityOf("sessionless_mutation"), SEVERITY.ADVISORY,
+    "the retired code carries no blocking authority");
 
-  const okCustom = lintCapabilitySafety({
+  // Calling it explicitly is still harmless and still accepted.
+  const withSession = lintCapabilitySafety({
     "src/data/projects.js": `
 import { db } from "../lib/backend/index.js";
 import { ensureVisitorSession } from "../lib/capabilities";
@@ -115,9 +118,8 @@ export async function saveProject(fields) {
 }
 `,
   });
-  assert.equal(okCustom.ok, true, JSON.stringify(okCustom.problems));
+  assert.equal(withSession.ok, true, JSON.stringify(withSession.problems));
 
-  // Reads without mutation don't need the session rule.
   const okRead = lintCapabilitySafety({
     "src/data/lookup.js": 'import { db } from "../lib/backend/index.js";\nexport const listFaqs = () => db.entity("faq").list();',
   });

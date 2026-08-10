@@ -151,16 +151,17 @@ const BLOCKERS = {
   "a raw write to a capability-owned entity": {
     "src/data/store.js": `${UNPRESCRIBED["src/data/store.js"]}
 import { db } from "../lib/backend/index.js";
-import { ensureVisitorSession } from "../lib/capabilities";
-export const save = async (row) => { await ensureVisitorSession(); return db.entity("booking").create(row); };`,
+export const save = async (row) => db.entity("booking").create(row);`,
     "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
   },
-  "a sessionless entity mutation": {
-    "src/data/store.js": `${UNPRESCRIBED["src/data/store.js"]}
+};
+
+// Session establishment moved to the runtime, so this shape is CORRECT and must run.
+const RUNTIME_HANDLED = {
+  "src/data/store.js": `${UNPRESCRIBED["src/data/store.js"]}
 import { db } from "../lib/backend/index.js";
 export const saveNote = (row) => db.entity("note").create(row);`,
-    "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
-  },
+  "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
 };
 
 test("genuine safety blockers still stop a build before it ever runs", async () => {
@@ -173,6 +174,16 @@ test("genuine safety blockers still stop a build before it ever runs", async () 
     assert.ok(blocking.length, `${name} must produce a blocking finding`);
     assert.ok(blocking.every((finding) => finding.severity === SEVERITY.BLOCKING));
   }
+});
+
+test("an entity mutation with no explicit session call now RUNS — the runtime owns it", async () => {
+  const h = harness({ patches: () => asPatches(RUNTIME_HANDLED) });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+  assert.equal(h.events.findings.flatMap((event) => event.blocking).length, 0,
+    "session establishment is not generated source's responsibility");
+  assert.ok(h.timeline.includes("compile"));
+  assert.ok(h.timeline.includes("browser"));
+  assert.equal(result.state, "green");
 });
 
 test("a protected-path rewrite is refused", async () => {

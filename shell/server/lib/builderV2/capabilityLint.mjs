@@ -55,11 +55,6 @@ const tokensOf = (text) => Math.ceil(String(text || "").length / 4);
 // moduleContracts.ownershipRules, derived from the contract's ACTUAL bindings rather than a
 // static list, so it generalises to any capability and any entity name.
 
-// Stores are usually bound first (const store = db.entity(...)), so the mutation check is
-// two-part: the module touches db.entity AND calls a mutating method on something.
-const USES_ENTITIES_RE = /\bdb\s*\.\s*entity\s*\(/;
-const MUTATION_RE = /\.\s*(create|update|remove|delete)\s*\(/;
-const SESSION_RE = /ensureSession|ensureVisitorSession|currentUser/;
 
 /**
  * Capability SAFETY lint — the checks that survive the blocking/advisory split.
@@ -98,21 +93,16 @@ export function lintCapabilitySafety(tree, bindings = []) {
     }
   }
 
+  // NOTE: `sessionless_mutation` was retired here. It required generated modules to call
+  // ensureVisitorSession() before mutating, which was correct while session establishment was
+  // the application's job. It no longer is: createSupabaseBackend establishes and recovers the
+  // app-scoped visitor session before every protected entity operation, so the runtime — not
+  // generated source — is the authority. Keeping the check would have rejected code that works.
+  // Capability OWNERSHIP is unaffected and still blocks (capability_owner_bypassed).
+
   for (const [path, source] of Object.entries(tree || {})) {
     if (!GENERATED_FILE.test(path) || PLATFORM_PATH.test(path)) continue;
     const code = String(source);
-
-    // Raw entity MUTATION in a module that never touches session management is an
-    // unauthenticated write for anonymous visitors: a 401 under row-level security.
-    if (USES_ENTITIES_RE.test(code) && MUTATION_RE.test(code) && !SESSION_RE.test(code)) {
-      findings.push({
-        code: "sessionless_mutation",
-        module: path,
-        message: `${path}: db.entity(...).create/update/remove with NO session in this module — call `
-          + `await ensureVisitorSession() (from ../lib/capabilities) before mutating, or use the `
-          + `owning capability. Unauthenticated writes fail with 401 under row-level security.`,
-      });
-    }
 
     // The monolith cap is a maintenance/cost preference, not a correctness property: an
     // oversized module makes every later edit pay its whole body as context. Advisory.
