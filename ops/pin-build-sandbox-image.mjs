@@ -28,9 +28,17 @@ const value = (name, fallback = null) => {
 };
 
 const commit = value("commit") || "unknown";
-const tag = value("tag") || `thrallo-build-sandbox:${commit.slice(0, 12)}`;
+// The image is built from the build context only (src, shell/server, harness, build-worker), so a
+// later commit that touches nothing in it leaves the image correct. Recording both commits keeps
+// that honest instead of quietly claiming the image is newer than it is.
+const imageCommit = value("image-commit") || commit;
+const tag = value("tag") || `thrallo-build-sandbox:${imageCommit.slice(0, 12)}`;
 const envPath = value("env-file", "/etc/thrallo/build-worker.env");
 const provenancePath = path.join(root, ".deployment-provenance.json");
+// The hand-maintained DEPLOYED_COMMIT marker read 0b177e8 while the running source was 1cab2d7,
+// and nobody noticed until a qualification was already spent. It is now generated from the same
+// record as everything else, so it cannot disagree with what was actually pinned.
+const markerPath = path.join(root, "DEPLOYED_COMMIT");
 
 const run = async (file, argv, options = {}) => {
   const result = await runProcess(file, argv, {
@@ -53,7 +61,7 @@ const hostIdentity = await computeSandboxIdentity({ root, commit });
 
 if (flag("build")) {
   // The official build, plus the source commit so the image can say where it came from.
-  await run("docker", ["build", "--build-arg", `SOURCE_COMMIT=${commit}`,
+  await run("docker", ["build", "--build-arg", `SOURCE_COMMIT=${imageCommit}`,
     "-t", tag, "-f", "build-worker/Dockerfile", "."]);
 }
 
@@ -62,6 +70,7 @@ const created = await capture("docker", ["image", "inspect", tag, "--format", "{
 
 const record = {
   sourceCommit: commit,
+  sandboxImageSourceCommit: imageCommit,
   sandboxImageTag: tag,
   sandboxImageDigest: digest,
   sandboxImageCreated: created,
@@ -90,6 +99,7 @@ if (flag("pin")) {
   await chmod(temporary, 0o640);
   await rename(temporary, envPath);
   await writeFile(provenancePath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writeFile(markerPath, `${commit}\n`, "utf8");
 }
 
 if (flag("restart")) await run("sudo", ["systemctl", "restart", "thrallo-build-worker"], { wallMs: 120_000 });

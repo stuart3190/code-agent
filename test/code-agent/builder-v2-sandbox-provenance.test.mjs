@@ -172,3 +172,16 @@ test("the provenance job has a resource budget of its own", async () => {
   assert.match(source, /sandbox_provenance: \{/);
   if (limits) assert.ok(limits.wallSeconds <= 120, "hashing five files must not get a build-sized budget");
 });
+
+test("the deployment marker is generated from the pin, never hand-maintained", async () => {
+  const source = await readFile(path.join(ROOT, "ops", "pin-build-sandbox-image.mjs"), "utf8");
+  // The 2026-08-09 run recorded DEPLOYED_COMMIT=0b177e8 while the running source was 1cab2d7.
+  assert.match(source, /const markerPath = path\.join\(root, "DEPLOYED_COMMIT"\)/);
+  assert.match(source, /writeFile\(markerPath/, "the marker is written by the same code that pins");
+  const pinBlock = source.slice(source.indexOf('if (flag("pin"))'));
+  assert.ok(pinBlock.includes("writeFile(markerPath"),
+    "the marker may only be written when a pin actually happened");
+  // The image is built from a subset of the tree, so the record distinguishes the two commits
+  // instead of claiming the image is as new as the checkout.
+  assert.match(source, /sandboxImageSourceCommit: imageCommit/);
+});
