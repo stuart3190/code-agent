@@ -82,12 +82,13 @@ const CONTRACT = { ...LIVE_CONTRACT, journeys: [PRIMARY] };
 
 test("the vendored verifier is byte-identical to the image production actually runs", async () => {
   const bytes = await readFile(LIVE_VERIFIER);
-  // sha256 of the file as extracted from thrallo-build-sandbox:0d5999c672fe, CRLF preserved.
-  assert.equal(crypto.createHash("sha256").update(bytes).digest("hex"),
-    "ab94383728984e51ca97ca126e99643647bd3236b680c9328725ffe6c7910a75");
+  // Normalised, exactly as sandboxProvenance hashes: line endings are a checkout artefact, and
+  // this file has to identify the same artefact whether it is read on Windows or on the VPS.
   const normalised = crypto.createHash("sha256")
     .update(bytes.toString("utf8").replace(/\r\n/g, "\n")).digest("hex");
-  assert.equal(normalised.slice(0, 16), "9e3019e2b90a6e78", "equals commit b45a327");
+  assert.equal(normalised,
+    "9e3019e2b90a6e780ec753ccf4237717d99b6c677dd300f012047a6811fc37ae",
+    "the artefact extracted from thrallo-build-sandbox:0d5999c672fe, equal to commit b45a327");
 
   const source = bytes.toString("utf8");
   // The two capabilities HEAD has and the graded artefact does not. Both are load-bearing for
