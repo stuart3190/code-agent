@@ -253,6 +253,28 @@ export function interactionContractBrief(plan) {
   ].join("\n");
 }
 
+/**
+ * Which assembly shapes this scope actually needs — derived from the interaction contract and
+ * the contract's own bindings, so it is identical for a party size, a subscription tier, an
+ * inventory option, a CRM stage or a shipping method. No domain vocabulary participates.
+ */
+export function assemblyNeeds(plan, bindings = []) {
+  const kinds = new Set((plan?.flows || []).map((flow) => flow.kind));
+  const controls = (plan?.flows || []).filter((flow) => flow.control);
+  return {
+    selection: controls.some((flow) => flow.control.selectedState === true) || kinds.has("selection"),
+    field: controls.some((flow) => flow.control.editable === true) || kinds.has("input"),
+    // Durable records are implied by what the journeys DO — a mutation, a lookup, a recovery or
+    // a cancellation — not by which capability happens to declare an entity name.
+    entities: ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
+    // A store only holds screen state when there is in-progress state to hold or records to
+    // render. Every contract binds the generic entity store, so its mere presence proves nothing.
+    capabilityState: Boolean(draftStateOwner(bindings))
+      || ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
+    status: ["mutation", "recovery", "cancellation", "lookup"].some((kind) => kinds.has(kind)),
+  };
+}
+
 export function scopeInteractionContract(plan, journeys = []) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
   return { version: plan?.version || 1, flows: (plan?.flows || []).filter((flow) => ids.has(flow.journeyId)) };

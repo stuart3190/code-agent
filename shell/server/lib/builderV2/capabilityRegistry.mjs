@@ -94,6 +94,81 @@ export const REACT_BINDINGS = [
   "useStatusRegion({ label }) → { statusProps } announcing a state transition",
 ];
 
+/**
+ * PREFERRED ASSEMBLY PATTERNS — the shortest correct way to build each shape this contract
+ * actually needs. Selected from the contract, never dumped wholesale.
+ *
+ * A live qualification hand-wired a selection control whose clicked option never gained an
+ * observable selected state; the value never propagated and review, confirmation and recovery
+ * all failed behind it. The binding that prevents that already existed and was listed as an
+ * API. Listing an API is not the same as showing the assembly, so each pattern below is a
+ * complete, copyable few lines. None of them constrains layout, styling or markup.
+ */
+const ASSEMBLY_PATTERNS = Object.freeze({
+  selection: {
+    when: "the contract has selectable choices (a size, tier, variant, stage, status, method, slot…)",
+    lines: [
+      "SELECTABLE STATE — selected state must be observable, or the choice cannot be verified:",
+      '  const choice = useSemanticSelection({ name: "<field>", value: state.<field>, onSelect: (v) => store.select("<field>", v) });',
+      "  <div {...choice.groupProps}>",
+      "    {options.map((o) => <button key={o} {...choice.optionProps(o)}>{label(o)}</button>)}",
+      "  </div>",
+      "  // optionProps supplies role, accessible name and aria-checked. Style the button however you like.",
+    ],
+  },
+  capabilityState: {
+    when: "a capability store holds state a screen renders",
+    lines: [
+      "CAPABILITY STORE STATE — one source of truth, no local mirror of store state:",
+      "  const state = useCapabilityState(<store>);           // or (<store>, (s) => s.values)",
+      "  // Re-renders on every store change. Never copy store state into useState.",
+    ],
+  },
+  field: {
+    when: "the contract collects typed input",
+    lines: [
+      "FORM FIELD — an accessible name is what makes a field findable:",
+      '  const field = useSemanticField({ name: "<field>", value: draft.<field>, type: "<text|email|tel|number>", onChange: (v) => setDraft({ ...draft, <field>: v }) });',
+      "  <label {...field.labelProps} /> <input {...field.inputProps} />",
+    ],
+  },
+  entities: {
+    when: "the app reads or writes contracted records",
+    lines: [
+      "ENTITY ACCESS — call the capability directly:",
+      "  await store.create(values) / store.get(id) / store.list({ filters }) / store.update(id, values)",
+      "  // The runtime establishes the app's visitor session before any protected operation.",
+      "  // Do NOT call ensureVisitorSession() first, and do NOT use db.entity() for a capability-owned type.",
+    ],
+  },
+  status: {
+    when: "a state transition must become visible",
+    lines: [
+      "ANNOUNCED OUTCOME — a transition the browser can observe:",
+      '  const status = useStatusRegion({ label: "<what this reports>" });',
+      "  <p {...status.statusProps}>{message}</p>",
+    ],
+  },
+});
+
+/**
+ * The short, contract-derived assembly brief. Only the shapes this build needs appear, so the
+ * prompt grows by a few lines rather than another instruction block.
+ *
+ * `needs` is a plain fact set derived upstream from the interaction contract — no domain words.
+ */
+export function preferredAssemblyBrief(needs = {}) {
+  const selected = Object.entries(ASSEMBLY_PATTERNS)
+    .filter(([key]) => needs[key])
+    .map(([, pattern]) => pattern.lines.join("\n"));
+  if (!selected.length) return "";
+  return [
+    "PREFERRED ASSEMBLY (supported bindings from ./lib/capabilities — shortest correct path;",
+    "visual design remains entirely yours):",
+    ...selected,
+  ].join("\n");
+}
+
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
   booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",

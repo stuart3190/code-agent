@@ -99,7 +99,7 @@ export async function ensureAppVisitorSession({
   }
 }
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, fetchImpl = globalThis.fetch } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, fetchImpl = globalThis.fetch, visitorStorage = globalThis.localStorage } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -152,6 +152,8 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           return appAuthCall("reset-confirm", { email, code, newPassword });
         },
         async signOut() {
+          releaseEntitySession();
+          invalidateAppVisitorSession({ auth, appId });
           const { error } = await client.auth.signOut();
           if (error) throw error;
         },
@@ -197,6 +199,30 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     return signOut();
   };
 
+  // Entities are owner-scoped by RLS, so every protected operation needs a session. Generated
+  // code used to have to remember `await ensureVisitorSession()` before its first read; a live
+  // qualification lost its booking journey to exactly that omission
+  // (401 GET /rest/v1/entities?type=eq.booking).
+  //
+  // The prerequisite is now satisfied HERE, once, for every entity operation. This grants no
+  // privilege: it establishes the same app-scoped anonymous visitor identity the app would have
+  // created itself, through the same approved app-auth path, and RLS still scopes every row to
+  // that identity. A signed-in user short-circuits it. No service-role credential is involved.
+  const appScopedSession = Boolean(appId && authUrl);
+  let entitySessionFlight = null;
+  /** Reset after sign-out/reset so the next operation establishes a fresh identity. */
+  const releaseEntitySession = () => { entitySessionFlight = null; };
+  async function ensureEntitySession() {
+    if (!appScopedSession) return null;         // platform-auth apps sign in explicitly
+    // One establishment per backend instance, shared by concurrent callers and retryable on
+    // failure — an entity operation must not pay an auth round-trip every call.
+    if (!entitySessionFlight) {
+      entitySessionFlight = ensureAppVisitorSession({ auth, appId, storage: visitorStorage })
+        .catch((error) => { entitySessionFlight = null; throw error; });
+    }
+    return entitySessionFlight;
+  }
+
   // db.entity(type) — CRUD over the generic `entities` table, scoped to one `type`.
   // Records are returned flat: { id, type, data, owner, created_at }.
   const db = {
@@ -207,11 +233,13 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
       const scoped = (q) => (appId ? q.eq("app_id", appId) : q);
       return {
         async create(data = {}) {
+          await ensureEntitySession();
           const row = appId ? { type, data, app_id: appId } : { type, data };
           const rows = unwrap(await table().insert(row).select());
           return rows[0];
         },
         async list({ filters = {}, order = "created_at", ascending = false, limit = 100, cursor = null } = {}) {
+          await ensureEntitySession();
           let query = scoped(table().select("*").eq("type", type));
           for (const [field, value] of Object.entries(filters || {})) {
             const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
@@ -229,25 +257,32 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           return unwrap(await query.order(safeOrder, { ascending }).limit(Math.max(1, Math.min(500, limit))));
         },
         async count(filters = {}) {
+          await ensureEntitySession();
           let query = scoped(table().select("id", { count: "exact", head: true }).eq("type", type));
           for (const [field, value] of Object.entries(filters || {})) query = query.eq(field === "id" ? field : `data->>${field}`, value);
           const { count, error } = await query; if (error) throw error; return count || 0;
         },
         async get(id) {
+          await ensureEntitySession();
           return unwrap(await scoped(table().select("*").eq("type", type).eq("id", id)).single());
         },
         async update(id, patch = {}) {
+          await ensureEntitySession();
           const rows = unwrap(
             await scoped(table().update({ data: patch }).eq("type", type).eq("id", id)).select()
           );
           return rows[0];
         },
         async delete(id) {
+          await ensureEntitySession();
           const { error } = await scoped(table().delete().eq("type", type).eq("id", id));
           if (error) throw error;
         },
         subscribe(callback) {
           if (typeof callback !== "function") throw new Error("db.entity(type).subscribe(callback): callback is required.");
+          // Realtime is RLS-scoped too. subscribe() stays synchronous (callers rely on getting an
+          // unsubscribe immediately), so the session is established alongside it rather than awaited.
+          ensureEntitySession().catch(() => { /* the channel simply yields nothing without a session */ });
           const channel = client.channel(`entities:${appId || "global"}:${type}:${Math.random().toString(36).slice(2)}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "entities", filter: appId ? `app_id=eq.${appId}` : undefined },
               (event) => { const record = event.new?.type === type ? event.new : event.old?.type === type ? event.old : null; if (record) callback({ ...event, record }); })

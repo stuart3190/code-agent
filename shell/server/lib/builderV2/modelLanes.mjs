@@ -9,7 +9,7 @@ import { contractBrief } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
-import { CAPABILITIES, capabilityBrief } from "./capabilityRegistry.mjs";
+import { CAPABILITIES, capabilityBrief, preferredAssemblyBrief } from "./capabilityRegistry.mjs";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
@@ -20,7 +20,7 @@ import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
 import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
-import { interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
+import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
 import { moduleGenerationContractsBrief } from "./moduleContracts.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
@@ -226,6 +226,7 @@ export function renderPatchPrompt({
     ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
+  const scopedInteractions = scopeInteractionContract(contract.interactionContract, scopedJourneys);
   const capabilityPaths = bindCapabilities(contract)
     .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
   const advisoryNotes = (advisory || []).length ? [
@@ -270,7 +271,8 @@ export function renderPatchPrompt({
       ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(persistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
     "",
-    interactionContractBrief(scopeInteractionContract(contract.interactionContract, scopedJourneys)),
+    interactionContractBrief(scopedInteractions),
+    preferredAssemblyBrief(assemblyNeeds(scopedInteractions, bindCapabilities(contract))),
     "",
     repairScope ? [
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",

@@ -7,8 +7,9 @@
 //
 //   import { auth, db, storage } from "./lib/backend";
 //
-// AUTH — sessions are owner-scoped RLS; every db/storage call needs a signed-in session
-// (anonymous apps: import { ensureVisitorSession } from "../visitorSession").
+// AUTH — rows are owner-scoped by RLS. You do NOT need to establish a session before reading
+// or writing entities: the runtime ensures this app's visitor session before every protected
+// entity operation. Call auth.signUp/signIn only when the app has real user accounts.
 //   await auth.signUp({ email, password })            -> user
 //   await auth.signIn({ email, password })            -> user
 //   await auth.currentUser()                          -> user | null

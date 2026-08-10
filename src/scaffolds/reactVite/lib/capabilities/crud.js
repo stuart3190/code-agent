@@ -4,6 +4,9 @@
 // db.entity() with a stable, minimal surface; records come back flat as { id, ...fields }
 // so screens never touch row internals. Persistence NEVER lives in components — components
 // import a store made here (usually via a src/data/ module that names the entity once).
+//
+// The session prerequisite is handled by the runtime: every operation below establishes this
+// app's visitor session first, so no screen has to remember ensureVisitorSession().
 
 import { db } from "../backend/index.js";
 
