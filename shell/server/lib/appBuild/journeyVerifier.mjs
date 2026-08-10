@@ -15,11 +15,19 @@
 
 import { createRequire } from "node:module";
 
-import { DRIVEABLE_ACTION_ROLES, semanticAliases, semanticKey } from "../builderV2/controlIdentity.mjs";
+import {
+  ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, semanticAliases, semanticKey,
+} from "../builderV2/controlIdentity.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
 const STEP_TIMEOUT_MS = 15_000;
+
+// How many times ONE step may advance a step-gated flow to reach its contracted control. A
+// contracted step is one step: needing more than a couple of transitions to reach its own
+// control means the contract and the application disagree, which is a finding, not something to
+// grind through.
+const MAX_FLOW_ADVANCES = 2;
 
 // ── finding things a human would find ─────────────────────────────────────────────────────────
 //
@@ -334,12 +342,29 @@ async function selectionGroups(page) {
       if (!byParent.has(el.parentElement)) byParent.set(el.parentElement, []);
       byParent.get(el.parentElement).push(el);
     }
+    // Position-independent identities the group announces about ITSELF. Read from standard
+    // HTML/ARIA only, never from prose or ordinal, so revealing a step cannot renumber a group
+    // into another group's identity.
+    const identitiesOf = (parent, els) => {
+      const container = parent.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist]") || parent;
+      const labelledBy = (container.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+        .map((id) => document.getElementById(id)?.innerText || "");
+      const idPrefixes = els.map((el) => (el.id || "").split("-")[0]).filter(Boolean);
+      return [
+        ...els.map((el) => el.getAttribute("name") || ""),
+        container.getAttribute("aria-label") || "",
+        ...labelledBy,
+        container.tagName === "FIELDSET" ? (container.querySelector("legend")?.innerText || "") : "",
+        ...idPrefixes,
+      ].map((value) => String(value).trim()).filter(Boolean);
+    };
     const groups = [];
     let id = 0;
     for (const [parent, els] of byParent) {
       if (els.length < 2) continue;
       groups.push({
         groupId: id,
+        identities: [...new Set(identitiesOf(parent, els))],
         contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
         options: els.map((el, i) => {
           el.setAttribute("data-thrallo-opt", `${id}:${i}`);
@@ -373,9 +398,55 @@ async function groupState(page, groupId) {
   }, groupId).catch(() => []);
 }
 
+/**
+ * A selection group's identity, stable across re-renders and step transitions.
+ *
+ * The ordinal `groupId` is a CLICK HANDLE for one pass of the DOM and nothing more: revealing a
+ * step renumbers every group after it, so remembering "group 0 was the date" across steps is
+ * exactly how date, slot and party can swap identities. Anything that must survive a transition
+ * — which group a step already consumed, which group a contracted field means — uses this.
+ */
+export function groupKey(group) {
+  const declared = (group?.identities || []).map((identity) => semanticKey(identity)).filter(Boolean);
+  // A group with no declared identity is keyed by its option VALUES, which are stable while the
+  // group exists and cannot collide with a differently-populated group.
+  return declared.length
+    ? `id:${[...new Set(declared)].sort().join("|")}`
+    : `opts:${(group?.options || []).map((option) => option.text).join("|").slice(0, 120)}`;
+}
+
+/**
+ * Advance a multi-step flow by ONE step, and only when that is demonstrably what happened.
+ *
+ * A step-gated flow renders one step at a time, so a contracted control for a later step is not
+ * on the page yet. Guessing a button here would be worse than failing: "click something and hope"
+ * is how a driver marks a broken app green. So this is deliberately narrow — the control must
+ * name itself with the generic advance vocabulary (controlIdentity.ADVANCE_ACTION_PATTERN), it
+ * must be enabled, and the page must actually change. Anything else leaves the flow where it was
+ * and reports that it could not advance.
+ */
+async function advanceFlow(page) {
+  const before = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  for (const role of DRIVEABLE_ACTION_ROLES) {
+    const control = page.getByRole(role, { name: ADVANCE_ACTION_PATTERN }).first();
+    if (!(await control.count().catch(() => 0))) continue;
+    if (!(await control.isVisible().catch(() => false))) continue;
+    if (await control.isDisabled().catch(() => true)) continue;
+    const name = (await control.textContent().catch(() => "")) || role;
+    await control.click({ timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(700);
+    const after = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    // No observable change means the flow did NOT advance — for example a Continue that is
+    // correctly refusing to move past an incomplete step. Report that, never assume it.
+    if (after === before) return { advanced: false, detail: `"${name.trim().slice(0, 30)}" did not advance the flow` };
+    return { advanced: true, via: name.trim().slice(0, 30) };
+  }
+  return { advanced: false, detail: "no flow-advance control was offered" };
+}
+
 // Drive a selection step semantically. Returns a full step outcome, or null when no selectable
 // group matches — the caller falls back to the generic text path.
-async function driveSelection(page, step, flow = null, excludedGroupIds = new Set()) {
+async function driveSelection(page, step, flow = null, excludedKeys = new Set()) {
   const contractedNames = controlAliases(flow?.control);
   const wanted = contractedNames.length
     ? unique(contractedNames.flatMap((name) => keywords(name, 5)))
@@ -383,15 +454,30 @@ async function driveSelection(page, step, flow = null, excludedGroupIds = new Se
   const groups = await selectionGroups(page);
   if (!groups.length) return null;
 
-  const scored = groups
+  const eligible = groups
     // A group of "+"/"−" buttons is a STEPPER, not a selection — clicking one never yields a
     // selected state, and judging it here misfired on "choose numbers of adults and children".
     .filter((g) => g.options.some((o) => (o.text || "").length >= 3))
-    .filter((g) => !excludedGroupIds.has(g.groupId))
-    .map((g) => ({ ...g, score: wanted.filter((w) => g.contextText.includes(w)).length }))
-    .sort((a, b) => b.score - a.score);
-  const group = scored[0];
-  if (!group || group.score === 0) return null;
+    .map((g) => ({ ...g, key: groupKey(g) }))
+    .filter((g) => !excludedKeys.has(g.key));
+
+  let group = null;
+  if (flow?.control) {
+    // A CONTRACTED selection is matched on the group's own declared identity, never on prose and
+    // never on position. Live proof: scoring by rendered text drove the date options for the
+    // slot step AND for the party step, and both "passed" because selection did move — within
+    // the wrong group. There is deliberately NO prose fallback here: if the contracted group is
+    // not on screen the step is undriveable, which is the truth, rather than a false pass.
+    const target = semanticKey(flow.control.logicalField || flow.control.accessibleName);
+    group = eligible.find((g) => g.identities.some((identity) => semanticKey(identity) === target)) || null;
+    if (!group) return null;
+  } else {
+    const scored = eligible
+      .map((g) => ({ ...g, score: wanted.filter((w) => g.contextText.includes(w)).length }))
+      .sort((a, b) => b.score - a.score);
+    group = scored[0];
+    if (!group || group.score === 0) return null;
+  }
 
   const before = group.options;
   const beforeSelected = before.findIndex((o) => o.selected);
@@ -406,6 +492,7 @@ async function driveSelection(page, step, flow = null, excludedGroupIds = new Se
   const verdict = selectionTransition({ before, after, clickedIndex: clickIndex });
   return {
     drove: true,
+    groupKey: group.key,
     status: verdict.ok ? "pass" : "fail",
     detail: verdict.ok ? verdict.detail : verdict.reason,
     selectedText: verdict.selectedText || null,
@@ -417,7 +504,9 @@ async function driveSelection(page, step, flow = null, excludedGroupIds = new Se
 
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
-async function runStep(page, step, { marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [] }) {
+async function runStep(page, step, {
+  marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], writtenPaths = new Set(),
+}) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
   const expect = String(step.expect || "");
@@ -451,9 +540,24 @@ async function runStep(page, step, { marker, previewUrl, selections = [], entere
   const navigated = drove;
 
   if (/enter|type|fill|complete|provide/i.test(action)) {
-    const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control);
+    // A field an EARLIER contracted step already wrote is not this step's to type into. The live
+    // contract derives party size as both a selection (its own step) and an input on the contact
+    // step; demanding a text box for it would fail a correct application for holding the value it
+    // was already given.
+    const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control
+      && !writtenPaths.has(flow.control.statePath));
     if (contractedInputs.length) {
-      const result = await fillContractedFields(page, contractedInputs, marker);
+      let result = await fillContractedFields(page, contractedInputs, marker);
+      // The contracted fields may belong to a step the flow has not reached. Advance and retry,
+      // bounded, and only while advancing actually changes the page.
+      const advances = [];
+      for (let attempt = 0; !result.complete && attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+        const advance = await advanceFlow(page);
+        advances.push(advance);
+        if (!advance.advanced) break;
+        result = await fillContractedFields(page, contractedInputs, marker);
+      }
+      if (advances.length) result.evidence.flowAdvances = advances;
       controlEvidence = result.evidence;
       enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
         .map((field) => ({ field: field.field, value: field.expectedValue })));
@@ -483,20 +587,31 @@ async function runStep(page, step, { marker, previewUrl, selections = [], entere
     if (selectionFlows.length) {
       const outcomes = [];
       const used = new Set();
+      const advances = [];
       for (const flow of selectionFlows) {
-        const outcome = await driveSelection(page, step, flow, used);
+        let outcome = await driveSelection(page, step, flow, used);
+        // The contracted group may belong to a step the flow has not reached. Advance and retry,
+        // bounded, and only while advancing actually changes the page. The retry re-locates the
+        // group by IDENTITY, so advancing can never hand this step a different group's controls.
+        for (let attempt = 0; !outcome && attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+          const advance = await advanceFlow(page);
+          advances.push(advance);
+          if (!advance.advanced) break;
+          outcome = await driveSelection(page, step, flow, used);
+        }
         if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
           detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
-          controlEvidence: { contractedField: flow.control.logicalField,
+          controlEvidence: { contractedField: flow.control.logicalField, flowAdvances: advances,
             aliases: flow.control.accessibleNames || [flow.control.accessibleName] } };
-        used.add(outcome.groupId);
+        used.add(outcome.groupKey);
         outcomes.push(outcome);
         if (outcome.status !== "pass") return outcome;
+        if (flow.control.statePath) writtenPaths.add(flow.control.statePath);
         if (outcome.selectedText) selections.push(outcome.selectedText);
       }
       return { drove: true, status: "pass", detail: outcomes.map((row) => row.detail).join("; "),
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
-        controlEvidence: { selections: outcomes.map((row) => row.controlEvidence) } };
+        controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
     }
     const outcome = await driveSelection(page, step);
     if (outcome) return outcome;
@@ -554,6 +669,21 @@ async function runStep(page, step, { marker, previewUrl, selections = [], entere
         drove = true;
       }
     }
+  }
+
+  // A contracted REVIEW step writes nothing, so nothing above drives it, and in a step-gated flow
+  // its screen is one transition away. Advancing is allowed here for the same bounded reason as
+  // above — and it cannot manufacture a pass, because a review is judged on whether it shows the
+  // exact values that were actually entered, which no amount of navigation can fabricate.
+  if (!drove && !navigated && interactionFlows.some((flow) => flow.kind === "review")) {
+    const advances = [];
+    for (let attempt = 0; attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+      const advance = await advanceFlow(page);
+      advances.push(advance);
+      if (!advance.advanced) break;
+      drove = true;
+    }
+    controlEvidence = { ...(controlEvidence || {}), flowAdvances: advances };
   }
 
   await page.waitForTimeout(900);
@@ -769,6 +899,7 @@ export async function verifyJourneys({
       const steps = [];
       const selections = []; // what this journey actually chose — confirmations must reflect it
       const enteredValues = []; // exact contracted values; review must echo them
+      const writtenPaths = new Set(); // contracted state this journey has already written
       let blockedBy = null;
       for (const [stepIndex, step] of (journey.steps || []).entries()) {
         if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
@@ -779,7 +910,9 @@ export async function verifyJourneys({
           continue;
         }
         const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
-        const outcome = await runStep(page, step, { marker, previewUrl, selections, enteredValues, interactionFlows }).catch((error) => ({
+        const outcome = await runStep(page, step, {
+          marker, previewUrl, selections, enteredValues, interactionFlows, writtenPaths,
+        }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
         if (outcome.selectedText) selections.push(outcome.selectedText);

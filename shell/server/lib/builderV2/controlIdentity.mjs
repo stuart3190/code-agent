@@ -64,6 +64,34 @@ export function semanticKey(name) {
 }
 
 /**
+ * How a selectable GROUP announces which contracted field it drives, in preference order.
+ *
+ * A live qualification graded a booking flow by driving the DATE options three times: once for
+ * the date, then again for the slot and again for the party size. Nothing was wrong with the
+ * app — the driver picked its group by comparing the step's prose to the group's rendered text,
+ * and the date options happened to echo the words "selected … visually highlighted", so they
+ * out-matched the real slot and party groups. Both wrong steps then "passed", because moving
+ * selection WITHIN the wrong group is still a selection transition.
+ *
+ * Identity therefore may not come from rendered prose, and may not come from DOM position
+ * (a group's ordinal changes the moment a step reveals or hides a sibling). These are the
+ * observable, position-independent identities a group can carry, all of them standard HTML/ARIA
+ * that `useSemanticSelection` already emits.
+ */
+export const SELECTION_GROUP_IDENTITY_SOURCES = Object.freeze([
+  "option name attribute", "group aria-label", "group aria-labelledby", "fieldset legend",
+  "option id prefix",
+]);
+
+/**
+ * Vocabulary for a control that ADVANCES a multi-step flow. Deliberately generic: a checkout,
+ * an onboarding sequence, a CRM creation wizard and a booking flow all use these words, and no
+ * domain noun appears here. A driver may activate such a control only to reach a contracted
+ * control it cannot yet see, and only when the activation demonstrably advances the flow.
+ */
+export const ADVANCE_ACTION_PATTERN = /^\s*(next|continue|proceed|go on|forward|next step|continue to [\w\s]+|proceed to [\w\s]+)\s*(→|>|»)?\s*$/i;
+
+/**
  * Does any of a control's observable identities correspond to any wanted name?
  * Shared by the static lint and the browser driver so both agree on what "named for" means.
  */
