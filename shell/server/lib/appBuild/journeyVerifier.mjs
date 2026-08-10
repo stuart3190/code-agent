@@ -16,7 +16,7 @@
 import { createRequire } from "node:module";
 
 import {
-  ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, semanticAliases, semanticKey,
+  ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases, semanticKey,
 } from "../builderV2/controlIdentity.mjs";
 
 const requireCjs = createRequire(import.meta.url);
@@ -123,6 +123,12 @@ function valueFor(label, marker) {
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
+/** A control "name" made only of words that identify no control — a verb, not a field. */
+function identifiesNothing(name) {
+  const words = String(name || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z][a-z0-9-]{1,}/g) || [];
+  return words.length > 0 && words.every((word) => IDENTITY_STOP_WORDS.has(word));
+}
+
 function controlAliases(control) {
   // Same vocabulary the static interaction lint uses (builderV2/controlIdentity.mjs), so the
   // two never disagree about which control a contracted field refers to.
@@ -168,6 +174,7 @@ async function renderedFormControls(page) {
 function contractedLocators(page, control) {
   const aliases = controlAliases(control);
   const rows = [];
+  const loose = [];
   for (const alias of aliases) {
     const pattern = new RegExp(`^\\s*${escapeRegex(alias)}\\s*$`, "i");
     for (const role of control?.roles || ["textbox"]) {
@@ -177,8 +184,18 @@ function contractedLocators(page, control) {
     rows.push({ description: `name=${alias}`, locator: page.locator(`[name="${String(alias).replace(/["\\]/g, "\\$&")}"]`) });
     rows.push({ description: `id=${alias}`, locator: page.locator(`[id="${String(alias).replace(/["\\]/g, "\\$&")}"]`) });
     rows.push({ description: `placeholder=${alias}`, locator: page.getByPlaceholder(pattern) });
+    // Exact-match only rejected a field a person would call correctly named: a contract field
+    // `reference` against a form labelled "Booking reference" was reported missing, and the whole
+    // lookup journey went undriveable. A WHOLE-WORD containment match is tried only after every
+    // exact match has failed, so a precisely named control still wins.
+    const worded = new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i");
+    for (const role of control?.roles || ["textbox"]) {
+      loose.push({ description: `role=${role} name~${alias}`, locator: page.getByRole(role, { name: worded }) });
+    }
+    loose.push({ description: `label~${alias}`, locator: page.getByLabel(worded) });
+    loose.push({ description: `placeholder~${alias}`, locator: page.getByPlaceholder(worded) });
   }
-  return rows;
+  return [...rows, ...loose];
 }
 
 /** Drive only the fields the machine-readable contract assigns to this step. */
@@ -283,8 +300,41 @@ async function fillVisibleForm(page, marker) {
  * Pure verdict over a selection interaction. `before`/`after` are the option group's states in
  * stable order; `clickedIndex` is the option the driver clicked.
  */
-export function selectionTransition({ before = [], after = [], clickedIndex = -1 } = {}) {
+export function selectionTransition({ before = [], after = [], clickedIndex = -1, autoAdvance = null } = {}) {
   const beforeSelected = before.findIndex((o) => o.selected);
+  // BRANCH B — the control legitimately unmounted because the selection advanced the flow.
+  //
+  // A live qualification failed a working app here: clicking a date advanced the wizard, the date
+  // buttons unmounted, and that date's slots appeared — exactly what the contract asked for — but
+  // this function demanded the clicked option still be on screen. Requiring persistence is an
+  // assumption about wizard implementation that no contract states.
+  //
+  // The branch is deliberately not "the DOM changed, therefore pass". It asks for semantic
+  // causality: the control the CONTRACT names next must now be observable, and this step's own
+  // contracted outcome must have become visible because of the click. An unrelated screen, or the
+  // wrong contracted control, satisfies neither.
+  if (clickedIndex >= 0 && before[clickedIndex] && !after.length && autoAdvance) {
+    const activated = before[clickedIndex];
+    const chosen = activated.label || activated.text || String(activated.value ?? "");
+    if (!autoAdvance.nextControl) {
+      return { ok: false, reason: "the selection removed its own controls and the contract names no following control, so nothing proves the flow advanced" };
+    }
+    if (!autoAdvance.nextControlVisible) {
+      return { ok: false, reason: `the selection removed its own controls without reaching the contracted next state (${autoAdvance.nextControl})` };
+    }
+    if (!autoAdvance.expectationMet) {
+      return { ok: false, reason: `the flow advanced to ${autoAdvance.nextControl} but the contracted outcome of this step never became visible` };
+    }
+    return {
+      ok: true,
+      advanced: true,
+      detail: `selection "${String(chosen).slice(0, 40)}" advanced the flow to ${autoAdvance.nextControl}`,
+      // The pre-click identity IS the evidence of which option was activated — the element it
+      // came from no longer exists. Downstream review/confirmation checks verify this value, which
+      // is what catches a flow that advances carrying the wrong choice.
+      selectedText: activated.text || chosen,
+    };
+  }
   if (clickedIndex < 0 || !after[clickedIndex]) {
     return { ok: false, reason: "no clickable option was identified" };
   }
@@ -368,7 +418,11 @@ async function selectionGroups(page) {
         contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
         options: els.map((el, i) => {
           el.setAttribute("data-thrallo-opt", `${id}:${i}`);
-          return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80), selected: isSelected(el) };
+          // label/value are captured BEFORE any click: when a selection advances the flow its
+          // control unmounts, and this is then the only surviving evidence of what was activated.
+          return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80),
+            label: el.getAttribute("aria-label") || null, value: el.getAttribute("value") || null,
+            selected: isSelected(el) };
         }),
       });
       id += 1;
@@ -425,6 +479,53 @@ export function groupKey(group) {
  * must be enabled, and the page must actually change. Anything else leaves the flow where it was
  * and reports that it could not advance.
  */
+/**
+ * Is a control the interaction contract names observable right now?
+ *
+ * Identity only — the same declared names `selectionGroups` reads, plus form-control identities —
+ * so "the contracted next state arrived" can never be satisfied by prose that happens to match.
+ */
+async function semanticControlVisible(page, control) {
+  if (!control) return false;
+  const target = semanticKey(control.logicalField || control.accessibleName);
+  if (!target) return false;
+  const identities = await page.evaluate(() => {
+    const visible = (el) => el.offsetParent !== null;
+    const rows = [];
+    for (const el of document.querySelectorAll("[name],[aria-label],[id],legend")) {
+      if (!visible(el)) continue;
+      rows.push(el.getAttribute("name") || "", el.getAttribute("aria-label") || "", el.id || "",
+        el.tagName === "LEGEND" ? (el.innerText || "") : "");
+    }
+    return rows.filter(Boolean);
+  }).catch(() => []);
+  return identities.some((identity) => semanticKey(identity) === target);
+}
+
+/** Which control the contract expects AFTER this one, by contracted order. */
+function nextContractedControl(journeyFlows, flow) {
+  if (!flow) return null;
+  return (journeyFlows || [])
+    .filter((row) => row.control && row.stepIndex >= flow.stepIndex)
+    .find((row) => semanticKey(row.control.logicalField || row.control.accessibleName)
+      !== semanticKey(flow.control.logicalField || flow.control.accessibleName))?.control || null;
+}
+
+/** Did this step's own contracted outcome become visible, and become visible NOW? */
+async function expectationBecameVisible(page, expect, textBefore) {
+  const wanted = keywords(expect, 5);
+  if (!wanted.length) return { met: false, found: [], fresh: [] };
+  const before = String(textBefore || "").toLowerCase();
+  const found = [];
+  const fresh = [];
+  for (const word of wanted) {
+    if (!(await page.getByText(new RegExp(word, "i")).first().isVisible().catch(() => false))) continue;
+    found.push(word);
+    if (!before.includes(word)) fresh.push(word);
+  }
+  return { met: found.length / wanted.length >= 0.5 && fresh.length > 0, found, fresh, wanted };
+}
+
 async function advanceFlow(page) {
   const before = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   for (const role of DRIVEABLE_ACTION_ROLES) {
@@ -446,7 +547,7 @@ async function advanceFlow(page) {
 
 // Drive a selection step semantically. Returns a full step outcome, or null when no selectable
 // group matches — the caller falls back to the generic text path.
-async function driveSelection(page, step, flow = null, excludedKeys = new Set()) {
+async function driveSelection(page, step, flow = null, excludedKeys = new Set(), journeyFlows = []) {
   const contractedNames = controlAliases(flow?.control);
   const wanted = contractedNames.length
     ? unique(contractedNames.flatMap((name) => keywords(name, 5)))
@@ -485,11 +586,26 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set())
   const clickIndex = before.findIndex((o, i) => i !== beforeSelected);
   if (clickIndex === -1) return null;
 
+  const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   await page.locator(`[data-thrallo-opt="${group.groupId}:${clickIndex}"]`).click({ timeout: 5_000 }).catch(() => {});
   await page.waitForTimeout(600);
   const after = await groupState(page, group.groupId);
 
-  const verdict = selectionTransition({ before, after, clickedIndex: clickIndex });
+  // Only when the group has gone entirely: gather what it would take to prove the disappearance
+  // was the contracted advance rather than an unrelated transition.
+  let autoAdvance = null;
+  if (!after.length) {
+    const nextControl = nextContractedControl(journeyFlows, flow);
+    const outcome = await expectationBecameVisible(page, step.expect, textBefore);
+    autoAdvance = {
+      nextControl: nextControl ? (nextControl.logicalField || nextControl.accessibleName) : null,
+      nextControlVisible: await semanticControlVisible(page, nextControl),
+      expectationMet: outcome.met,
+      expectationEvidence: outcome,
+    };
+  }
+
+  const verdict = selectionTransition({ before, after, clickedIndex: clickIndex, autoAdvance });
   return {
     drove: true,
     groupKey: group.key,
@@ -505,7 +621,8 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set())
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
 async function runStep(page, step, {
-  marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], writtenPaths = new Set(),
+  marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
+  writtenPaths = new Set(),
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
@@ -546,7 +663,16 @@ async function runStep(page, step, {
     // was already given.
     const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control
       && !writtenPaths.has(flow.control.statePath));
-    if (contractedInputs.length) {
+    // "select an account type" contains the word "type", so the contract derives BOTH a selection
+    // and an input for the same field. Demanding a text box for it fails a correct chooser. When
+    // every contracted input on this step is a field the same step also contracts as a SELECTION,
+    // the selection is the specific claim and the input is the artefact of an ambiguous verb —
+    // a step with a genuinely separate field to fill is untouched.
+    const selectionKeys = new Set(interactionFlows.filter((flow) => flow.kind === "selection" && flow.control)
+      .map((flow) => semanticKey(flow.control.logicalField || flow.control.accessibleName)));
+    const inputsAreSelections = contractedInputs.length > 0 && contractedInputs.every((flow) =>
+      selectionKeys.has(semanticKey(flow.control.logicalField || flow.control.accessibleName)));
+    if (contractedInputs.length && !inputsAreSelections) {
       let result = await fillContractedFields(page, contractedInputs, marker);
       // The contracted fields may belong to a step the flow has not reached. Advance and retry,
       // bounded, and only while advancing actually changes the page.
@@ -568,10 +694,11 @@ async function runStep(page, step, {
         return { drove, status: "undriveable", detail: `contracted control(s) could not be driven: ${missing}`,
           controlEvidence };
       }
-    } else {
+    } else if (!inputsAreSelections) {
       const filled = await fillVisibleForm(page, marker);
       drove = drove || filled.length > 0;
     }
+    // inputsAreSelections: type nothing, and let the selection branch below drive the chooser.
   }
 
   // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
@@ -583,13 +710,20 @@ async function runStep(page, step, {
   // the default-selected date all over again. When no selectable group matches, the generic
   // path below still applies.
   if (!navigated && /\b(choose|select|pick)\b/i.test(action) && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
-    const selectionFlows = interactionFlows.filter((flow) => flow.kind === "selection" && flow.control);
+    // "choose to cancel the booking" derives a SELECTION whose field is the bare verb `cancel`,
+    // because the step says "choose". There is no option group called cancel — it is a button —
+    // and demanding one made a working cancellation undriveable. controlIdentity already names
+    // these words as identifying no control on their own; a selection over one of them is an
+    // artefact of the verb, and the step's real action kind is handled below.
+    const cancels = interactionFlows.some((flow) => flow.kind === "cancellation");
+    const selectionFlows = cancels ? [] : interactionFlows.filter((flow) => flow.kind === "selection"
+      && flow.control && !identifiesNothing(flow.control.logicalField || flow.control.accessibleName));
     if (selectionFlows.length) {
       const outcomes = [];
       const used = new Set();
       const advances = [];
       for (const flow of selectionFlows) {
-        let outcome = await driveSelection(page, step, flow, used);
+        let outcome = await driveSelection(page, step, flow, used, journeyFlows);
         // The contracted group may belong to a step the flow has not reached. Advance and retry,
         // bounded, and only while advancing actually changes the page. The retry re-locates the
         // group by IDENTITY, so advancing can never hand this step a different group's controls.
@@ -597,7 +731,7 @@ async function runStep(page, step, {
           const advance = await advanceFlow(page);
           advances.push(advance);
           if (!advance.advanced) break;
-          outcome = await driveSelection(page, step, flow, used);
+          outcome = await driveSelection(page, step, flow, used, journeyFlows);
         }
         if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
           detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
@@ -645,23 +779,43 @@ async function runStep(page, step, {
 
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
-  if (!navigated && !droveStepper && /click|select|choose|submit|press|tap|continue|confirm|cancel|sign|book|use/i.test(action)) {
+  if (!navigated && !droveStepper && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use/i.test(action)) {
     // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
     // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
     // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"
     // while the real type=submit button sat below it, and a working app failed verification.
     let target = null;
-    if (/submit|send/i.test(action)) {
+    // A REVIEW step observes; it does not act. Keyword matching sent "review the booking" to a
+    // link named "Look up booking" — /book/ matched — and the driver navigated out of the wizard,
+    // after which the review could never be found. An observation step may click only a control
+    // that names itself a review, and otherwise reaches its screen by advancing the flow below.
+    const isReviewObservation = interactionFlows.some((flow) => flow.kind === "review");
+    if (isReviewObservation) {
+      for (const role of DRIVEABLE_ACTION_ROLES) {
+        const candidate = page.getByRole(role, { name: /^\s*review\b/i }).first();
+        if (!(await candidate.count().catch(() => 0))) continue;
+        if (!(await candidate.isVisible().catch(() => false))) continue;
+        target = candidate;
+        break;
+      }
+      if (target) {
+        await target.click({ timeout: 5_000 }).catch(() => {});
+        drove = true;
+      }
+      target = null; // never fall through to keyword or last-button guessing
+    } else if (/submit|send/i.test(action)) {
       const formSubmit = page
         .locator("form:has(input:visible) button[type=submit]:visible, form:has(textarea:visible) button[type=submit]:visible")
         .last();
       if (await formSubmit.count().catch(() => 0)) target = formSubmit;
     }
-    if (!target) target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
+    if (!target && !isReviewObservation) {
+      target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
+    }
     if (target) {
       await target.click({ timeout: 5_000 }).catch(() => {});
       drove = true;
-    } else {
+    } else if (!isReviewObservation) {
       // A submit control the description did not name: the last enabled submit-ish button.
       const submit = page.locator("button[type=submit]:visible, button:visible").last();
       if (await submit.count().catch(() => 0)) {
@@ -675,13 +829,19 @@ async function runStep(page, step, {
   // its screen is one transition away. Advancing is allowed here for the same bounded reason as
   // above — and it cannot manufacture a pass, because a review is judged on whether it shows the
   // exact values that were actually entered, which no amount of navigation can fabricate.
-  if (!drove && !navigated && interactionFlows.some((flow) => flow.kind === "review")) {
+  // Gated on the OUTCOME, not on whether something was clicked. "review the booking" matches the
+  // generic click path's /book/, which then found the words "Booking wizard" in a heading and
+  // clicked the paragraph — inert, but enough to set `drove`, so an earlier version of this branch
+  // never ran and a working review step failed. What matters is whether the review is on screen.
+  if (!navigated && interactionFlows.some((flow) => flow.kind === "review")
+    && !(await expectationBecameVisible(page, expect, textBefore)).met) {
     const advances = [];
     for (let attempt = 0; attempt < MAX_FLOW_ADVANCES; attempt += 1) {
       const advance = await advanceFlow(page);
       advances.push(advance);
       if (!advance.advanced) break;
       drove = true;
+      if ((await expectationBecameVisible(page, expect, textBefore)).met) break;
     }
     controlEvidence = { ...(controlEvidence || {}), flowAdvances: advances };
   }
@@ -900,6 +1060,11 @@ export async function verifyJourneys({
       const selections = []; // what this journey actually chose — confirmations must reflect it
       const enteredValues = []; // exact contracted values; review must echo them
       const writtenPaths = new Set(); // contracted state this journey has already written
+      // The journey's whole contracted order. A selection that advances the flow proves it did so
+      // by reaching the control the CONTRACT names next, which cannot be known from one step.
+      const journeyFlows = [...((contract?.interactionContract?.flows) || [])]
+        .filter((flow) => flow.journeyId === journey.id)
+        .sort((a, b) => a.stepIndex - b.stepIndex);
       let blockedBy = null;
       for (const [stepIndex, step] of (journey.steps || []).entries()) {
         if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
@@ -911,7 +1076,7 @@ export async function verifyJourneys({
         }
         const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
         const outcome = await runStep(page, step, {
-          marker, previewUrl, selections, enteredValues, interactionFlows, writtenPaths,
+          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));

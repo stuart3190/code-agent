@@ -38,7 +38,20 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
     return rows.map(flatten).filter((b) => b.status === BOOKING_STATUS.ACTIVE);
   }
 
+  /**
+   * Seats left, or null when this slot's capacity is not knowable.
+   *
+   * A live build rendered "Infinity remaining seats" on every slot card. The cause was here:
+   * capacityOf falls back to Infinity for a slot the catalogue does not contain, so remaining()
+   * returned Infinity and the app printed it. Infinity is the right ANSWER for an unbounded
+   * booking system — one configured with no catalogue at all — but for a catalogue that simply
+   * does not list this slot it is a wiring bug wearing a number's clothes.
+   *
+   * Unknown is therefore reported as null, which an app cannot mistake for a seat count. The
+   * admission path below keeps using capacityOf directly, so refusal behaviour is unchanged.
+   */
   async function remaining(date, slotId) {
+    if (slots.length && !slots.some((s) => s.id === slotId)) return null;
     const active = await activeFor(date, slotId);
     return capacityOf(slotId) - active.reduce((total, b) => total + (Number(b.partySize) || 1), 0);
   }

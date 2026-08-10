@@ -29,7 +29,9 @@ export const SELECTED_STATE_ATTRIBUTES = Object.freeze(["aria-pressed", "aria-se
 /** Words that identify no control on their own. */
 export const IDENTITY_STOP_WORDS = Object.freeze(new Set([
   "select", "choose", "pick", "enter", "provide", "complete", "click", "press", "submit",
-  "confirm", "review", "show", "display", "open", "page", "form", "details", "available",
+  // "choose to cancel the booking" derives a selection whose field is the bare verb `cancel`.
+  // It sits with confirm and submit for the same reason: it names an action, never a field.
+  "confirm", "cancel", "review", "show", "display", "open", "page", "form", "details", "available",
   "guest", "visitor", "the", "and", "then", "with", "from", "into",
 ]));
 
