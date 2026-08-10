@@ -271,6 +271,10 @@ export function assemblyNeeds(plan, bindings = []) {
     // render. Every contract binds the generic entity store, so its mere presence proves nothing.
     capabilityState: Boolean(draftStateOwner(bindings))
       || ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
+    // A durable multi-step flow that can be completed or abandoned reaches a TERMINAL state its
+    // store refuses to edit and restores on the next visit. A live run stalled on exactly that.
+    terminalReset: Boolean(draftStateOwner(bindings))
+      && ["mutation", "cancellation"].some((kind) => kinds.has(kind)),
     status: ["mutation", "recovery", "cancellation", "lookup"].some((kind) => kinds.has(kind)),
   };
 }

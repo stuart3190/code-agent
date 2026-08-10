@@ -252,6 +252,76 @@ test("GUIDANCE — the assembly brief is derived from the contract and is domain
   }
 });
 
+test("GUIDANCE — a finishable durable flow is told how a visitor starts a new one", () => {
+  // The 2026-08-10 run stalled because a cancelled wizard is restored in its terminal state and
+  // refuses every later edit. The flow needs an explicit way back; nothing may reset implicitly.
+  const durableFlow = {
+    summary: "A multi-step booking workflow",
+    entities: [{ name: "booking", fields: [{ name: "date" }] }],
+    operations: [{ id: "create-booking", entity: "booking", action: "create" }],
+    routes: [{ path: "/", name: "Booking" }], auth: { required: false },
+    journeys: [{ id: "complete-booking", title: "Complete a booking", priority: "primary", steps: [
+      { action: "select a date", target: "date", expect: "date becomes active" },
+      { action: "enter guest details", target: "contact", expect: "details accepted" },
+      { action: "review the selection", target: "review", expect: "review shows the date" },
+      { action: "confirm the booking", target: "confirm", expect: "durable reference" },
+      { action: "cancel the booking", target: "cancel", expect: "cancelled status" },
+    ] }],
+  };
+  const spec = deriveBuildSpec(durableFlow);
+  const needs = assemblyNeeds(spec.interactionContract, spec.bindings);
+  assert.equal(needs.terminalReset, true, "a confirmable AND cancellable durable flow needs it");
+
+  const brief = preferredAssemblyBrief(needs);
+  assert.match(brief, /FINISHED FLOW/);
+  assert.match(brief, /reset\(\)/, "the supported recovery is named");
+  assert.match(brief, /Never reset implicitly on load/, "an implicit reset would discard a real outcome");
+  assert.match(brief, /confirmed|cancelled/, "both terminal states are named");
+  // Still domain-neutral: the concept is named, the application is not.
+  assert.equal(/booking|reservation|supper|party size/i.test(brief), false, brief);
+
+  // A flow that cannot reach a terminal state is not told about one.
+  const oneShot = {
+    ...durableFlow,
+    journeys: [{ id: "browse-menu", title: "Browse", priority: "primary", steps: [
+      { action: "open the menu", target: "menu", expect: "menu is visible" },
+      { action: "navigate to contact", target: "contact", expect: "contact is visible" },
+    ] }],
+  };
+  const oneShotSpec = deriveBuildSpec(oneShot);
+  const oneShotNeeds = assemblyNeeds(oneShotSpec.interactionContract, oneShotSpec.bindings);
+  assert.equal(oneShotNeeds.terminalReset, false);
+  assert.equal(/FINISHED FLOW/.test(preferredAssemblyBrief(oneShotNeeds)), false);
+});
+
+test("GUIDANCE — the finished-flow pattern generalises beyond any one domain", () => {
+  const wizardFlows = {
+    checkout: [
+      { action: "select a shipping method", target: "method", expect: "method active" },
+      { action: "enter the delivery address", target: "address", expect: "accepted" },
+      { action: "review the order", target: "review", expect: "review shows the method" },
+      { action: "confirm the order", target: "confirm", expect: "order reference" },
+    ],
+    onboarding: [
+      { action: "select a plan", target: "plan", expect: "plan active" },
+      { action: "enter the workspace name", target: "workspace", expect: "accepted" },
+      { action: "review the setup", target: "review", expect: "review shows the plan" },
+      { action: "confirm the setup", target: "confirm", expect: "setup reference" },
+    ],
+  };
+  for (const [id, steps] of Object.entries(wizardFlows)) {
+    const contract = {
+      summary: `A ${id} flow`, entities: [{ name: "record", fields: [{ name: "value" }] }],
+      operations: [], routes: [{ path: "/", name: id }], auth: { required: false },
+      journeys: [{ id, title: id, priority: "primary", steps }],
+    };
+    const spec = deriveBuildSpec(contract);
+    const needs = assemblyNeeds(spec.interactionContract, spec.bindings);
+    assert.equal(needs.terminalReset, true, `${id} reaches a terminal state`);
+    assert.match(preferredAssemblyBrief(needs), /FINISHED FLOW/, `${id} is told how to start a new one`);
+  }
+});
+
 test("GUIDANCE — nothing is added when the contract does not need it", () => {
   const landing = domainCase("browse", [
     { action: "open the page", target: "home", expect: "hero is visible" },
@@ -259,7 +329,7 @@ test("GUIDANCE — nothing is added when the contract does not need it", () => {
   ], []);
   const spec = deriveBuildSpec(landing);
   const needs = assemblyNeeds(spec.interactionContract, spec.bindings);
-  assert.deepEqual(needs, { selection: false, field: false, entities: false, capabilityState: false, status: false });
+  assert.deepEqual(needs, { selection: false, field: false, entities: false, capabilityState: false, terminalReset: false, status: false });
   assert.equal(preferredAssemblyBrief(needs), "", "a landing page pays no prompt cost");
 });
 

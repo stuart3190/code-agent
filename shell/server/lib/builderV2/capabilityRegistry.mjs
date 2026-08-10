@@ -149,6 +149,22 @@ const ASSEMBLY_PATTERNS = Object.freeze({
       "  <p {...status.statusProps}>{message}</p>",
     ],
   },
+  terminalReset: {
+    when: "a durable flow can finish (confirmed) or be abandoned (cancelled)",
+    lines: [
+      "FINISHED FLOW — a confirmed or cancelled flow is TERMINAL: it refuses further edits, and it",
+      "is restored in that state on the next visit. Render the outcome, and give an explicit way to",
+      "begin a new one — otherwise a returning visitor is stuck on the finished record:",
+      "  const state = useCapabilityState(<flowStore>);",
+      "  const finished = state.status === \"confirmed\" || state.status === \"cancelled\";",
+      "  {finished && <>",
+      "    <p>…show the reference and its final status…</p>",
+      "    <button onClick={() => <flowStore>.reset()}>Start a new <thing></button>",
+      "  </>}",
+      "  // reset() clears the durable record and returns the flow to its first step.",
+      "  // Never reset implicitly on load: that would silently discard a real outcome.",
+    ],
+  },
 });
 
 /**
