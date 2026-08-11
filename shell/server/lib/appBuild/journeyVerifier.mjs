@@ -1142,7 +1142,14 @@ async function runStep(page, step, {
   // durable-record judgement below, which is the stronger claim and the right one. A CRM whose
   // manage screen carries an edit form passed "reload the page ⇒ the updated lead is recovered"
   // on "3/4 fields hold values", proving only that a form was populated.
-  if (filledSomething && (found.length / wanted.length < 0.5 || fresh.length === 0)
+  //
+  // And NEVER for a step that claims a durable record. "enter a reference ⇒ the saved lead details
+  // are displayed" filled its one field and passed as "1/1 fields hold values" against an app that
+  // displayed nothing at all, because the expectation happens to contain the word "details". A step
+  // that looks a record up or recovers one is answerable only by that record.
+  const claimsDurableRecord = interactionFlows.some((flow) => ["recovery", "lookup"].includes(flow.kind));
+  if (filledSomething && !claimsDurableRecord
+    && (found.length / wanted.length < 0.5 || fresh.length === 0)
     && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
     const state = await page.evaluate(() => {
       const inputs = [...document.querySelectorAll("input, textarea, select")]

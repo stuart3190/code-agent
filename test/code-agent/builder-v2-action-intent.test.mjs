@@ -192,6 +192,45 @@ test("an invalid-value step that names no field keeps the intent on every field 
   for (const flow of inputs) assert.equal(flow.control.validity, "invalid", flow.control.logicalField);
 });
 
+// ── ADVERSARIAL PROSE — the five words that have each caused a defect, used as nouns ───────────
+
+test("a whole journey of descriptive prose derives no interaction at all", () => {
+  // Every sentence below contains a word that once created a phantom interaction. None of them
+  // asks anyone to do anything: they describe a record, a policy or a screen. A contract written
+  // like this must derive an empty interaction plan rather than a journey of imaginary controls.
+  const contract = {
+    summary: "generic", projectType: "web app", version: 1, auth: { required: false },
+    routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "record", fields: [{ name: "reference", type: "string" }] }],
+    operations: [],
+    journeys: [{ id: "prose", title: "prose", priority: "primary", steps: [
+      { action: "the booking policy is summarised on the page", target: "policy panel",
+        expect: "the booking policy text is visible" },
+      { action: "the cancellation window is described in the terms", target: "terms section",
+        expect: "the cancellation window is visible" },
+      { action: "the confirmation email wording is shown to the operator", target: "confirmation preview",
+        expect: "the confirmation wording is visible" },
+      { action: "the recovery procedure is documented for support staff", target: "recovery notes",
+        expect: "the recovery procedure is visible" },
+      { action: "an advancing queue position is displayed to the visitor", target: "queue panel",
+        expect: "the queue position is visible" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const plan = buildInteractionContract(contract);
+  assert.deepEqual(plan.flows.map((flow) => `${flow.stepIndex}:${flow.kind}`), [],
+    `prose derived interactions: ${JSON.stringify(plan.flows.map((f) => f.id))}`);
+});
+
+test("the same five words, used as verbs, do derive their intents", () => {
+  // The control side of the claim: the normaliser is not simply deaf to these words.
+  assert.equal(has("book the slot", "", ACTION_INTENT.CONFIRM), true);
+  assert.equal(has("cancel the reservation", "", ACTION_INTENT.CANCEL), true);
+  assert.equal(has("confirm the order", "", ACTION_INTENT.CONFIRM), true);
+  assert.equal(has("recover the draft", "", ACTION_INTENT.RECOVER), true);
+  assert.equal(has("advance to the payment step", "", ACTION_INTENT.ADVANCE), true);
+});
+
 test("commencement and progression need a verb in verb position", () => {
   assert.equal(commencesSomething({ action: "start the booking flow", target: "start booking control" }), true);
   assert.equal(commencesSomething({ action: "begin checkout", target: "start checkout control" }), true);

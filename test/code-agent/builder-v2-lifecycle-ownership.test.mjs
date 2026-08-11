@@ -254,6 +254,105 @@ test("an operation for a DIFFERENT entity never speaks for this lifecycle", () =
   assert.equal(spec.interactionContract.scenarios["update-existing-lead"].basis, "data-flow");
 });
 
+// ── ADVERSARIAL — a lifecycle with no CRM, booking or checkout vocabulary anywhere in it ───────
+
+const GENERIC = {
+  summary: "Meter readings", projectType: "web app", version: 1, auth: { required: false },
+  routes: [{ path: "/", name: "Readings" }],
+  entities: [{ name: "reading", fields: [
+    { name: "meterCode", type: "string" }, { name: "value", type: "number" },
+    { name: "comment", type: "string" }, { name: "reference", type: "string" },
+    { name: "status", type: "string" }] }],
+  operations: [
+    { id: "create-reading", entity: "reading", kind: "create", journey: "submit-reading" },
+    { id: "read-reading", entity: "reading", kind: "read", journey: "view-reading" },
+    { id: "update-reading", entity: "reading", kind: "update", journey: "correct-reading" },
+    { id: "delete-reading", entity: "reading", kind: "delete", journey: "withdraw-reading" },
+    { id: "create-then-correct", entity: "reading", kind: "create", journey: "submit-then-correct" },
+    { id: "correct-after-create", entity: "reading", kind: "update", journey: "submit-then-correct" }],
+  journeys: [
+    { id: "submit-reading", title: "An operator submits a reading", priority: "primary", steps: [
+      { action: "open the readings page", target: "/", expect: "the readings summary is shown" },
+      { action: "start a new reading", target: "new reading control", expect: "the entry step is shown" },
+      { action: "enter the meter code, value and comment", target: "reading form",
+        expect: "the entered meter code, value and comment are visible" },
+      { action: "confirm the new reading", target: "confirm reading control",
+        expect: "a stored reading reference and status Submitted are shown" },
+      { action: "reload the page", target: "browser reload",
+        expect: "the stored reading is recovered with the same reference" },
+    ] },
+    { id: "view-reading", title: "An operator views a stored reading", priority: "secondary", steps: [
+      { action: "open the readings lookup area", target: "/", expect: "a reference lookup form is visible" },
+      { action: "look up a stored reading by reference", target: "lookup form",
+        expect: "the reading details are displayed" },
+    ] },
+    { id: "correct-reading", title: "An operator corrects a stored reading", priority: "secondary", steps: [
+      { action: "look up a stored reading by reference", target: "lookup form",
+        expect: "the reading details are displayed" },
+      { action: "edit the value and comment", target: "reading form",
+        expect: "the edited value and comment are visible" },
+      { action: "update the reading", target: "save reading control",
+        expect: "the reading shows the edited value" },
+    ] },
+    { id: "withdraw-reading", title: "An operator withdraws a stored reading", priority: "secondary", steps: [
+      { action: "look up a stored reading by reference", target: "lookup form",
+        expect: "the reading details are displayed" },
+      { action: "delete the reading", target: "delete reading control",
+        expect: "the reading is shown as withdrawn" },
+    ] },
+    { id: "submit-then-correct", title: "An operator submits and immediately corrects", priority: "secondary", steps: [
+      { action: "start a new reading", target: "new reading control", expect: "the entry step is shown" },
+      { action: "enter the meter code and value", target: "reading form",
+        expect: "the entered meter code and value are visible" },
+      { action: "confirm the new reading", target: "confirm reading control",
+        expect: "a stored reading reference is shown" },
+      { action: "edit the value and comment", target: "reading form",
+        expect: "the edited value and comment are visible" },
+      { action: "update the reading", target: "save reading control",
+        expect: "the reading shows the corrected value" },
+    ] },
+    { id: "code-validation", title: "Meter code validation", priority: "secondary", steps: [
+      { action: "advance to the reading entry step", target: "reading flow",
+        expect: "the meter code field is visible" },
+      { action: "enter an invalid meter code", target: "meter code field",
+        expect: "a validation message is shown and the continue control remains disabled" },
+      { action: "enter a valid meter code", target: "meter code field",
+        expect: "the validation message clears" },
+    ] },
+  ],
+  acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+};
+
+test("ADVERSARIAL — every lifecycle kind classifies correctly on a domain nothing was built for", () => {
+  const spec = deriveBuildSpec(GENERIC);
+  assert.equal(spec.verdict.ok, true, JSON.stringify(spec.verdict.problems));
+  const scenarios = spec.interactionContract.scenarios;
+  assert.equal(scenarios["submit-reading"].role, "produces", "CREATE ⇒ producer");
+  assert.equal(scenarios["view-reading"].role, "consumes", "READ existing ⇒ consumer");
+  assert.equal(scenarios["correct-reading"].role, "consumes", "UPDATE existing ⇒ consumer");
+  assert.equal(scenarios["withdraw-reading"].role, "consumes", "DELETE existing ⇒ consumer");
+  assert.equal(scenarios["submit-then-correct"].role, "produces", "create then update ⇒ still producer");
+  assert.equal(scenarios["code-validation"].role, "independent", "no durable lifecycle ⇒ independent");
+  // The update journey supplies the entity's own declared fields and is STILL a consumer.
+  const commit = spec.interactionContract.flows
+    .find((flow) => flow.journeyId === "correct-reading" && flow.kind === "mutation");
+  const supplied = (commit.reads || []).map((path) => path.split(".draft.")[1])
+    .filter((field) => ["value", "comment"].includes(field));
+  assert.ok(supplied.length >= 1, `substantive edits: ${JSON.stringify(commit.reads)}`);
+  // And no booking vocabulary crept in through a capability binding.
+  assert.equal(scenarios["submit-reading"].lifecycle.includes("booking"), false);
+});
+
+test("ADVERSARIAL — the same journeys with the operations stripped land on the same roles", () => {
+  const scenarios = deriveBuildSpec({ ...GENERIC, operations: [] }).interactionContract.scenarios;
+  assert.equal(scenarios["submit-reading"].role, "produces");
+  assert.equal(scenarios["view-reading"].role, "consumes");
+  assert.equal(scenarios["correct-reading"].role, "consumes");
+  assert.equal(scenarios["withdraw-reading"].role, "consumes");
+  assert.equal(scenarios["submit-then-correct"].role, "produces");
+  assert.equal(scenarios["code-validation"].role, "independent");
+});
+
 test("one durable lifecycle identity is shared across producer and consumers", () => {
   const spec = specOf(DECLARED);
   const lifecycles = new Set(spec.interactionContract.flows
