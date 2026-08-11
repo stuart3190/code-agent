@@ -48,7 +48,7 @@ export const CAPABILITIES = Object.freeze({
   wizard: {
     name: "wizard", version: "1.0.0", package: "src/lib/capabilities/wizard.js",
     interface: ["makeWizardMachine", "makeWizardPersistence"],
-    systemInterface: ["getState", "subscribe", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
+    systemInterface: ["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
     entities: [],
     uiContract: ["step_progress", "selection", "validation", "confirmation", "cancelled", "restored"],
     upgradePolicy: "replace-on-iterate",
@@ -188,7 +188,7 @@ export function preferredAssemblyBrief(needs = {}) {
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
   booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
-  wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state + { getState, subscribe, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
+  wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe + { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
   newsletter: "makeNewsletter(...) → { subscribe(email) }",
 });

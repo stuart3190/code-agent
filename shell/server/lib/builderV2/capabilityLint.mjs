@@ -19,7 +19,7 @@ import { CAPABILITIES } from "./capabilityRegistry.mjs";
 export const FACTORY_METHODS = Object.freeze({
   makeEntityStore: ["list", "get", "create", "update", "remove", "count", "subscribe"],
   makeBookingSystem: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
-  makeWizardMachine: ["getState", "subscribe", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
+  makeWizardMachine: ["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
   makeWizardPersistence: ["save", "load", "clear"],
   makeContactForm: ["submitContact"],
   makeNewsletter: ["subscribe"],

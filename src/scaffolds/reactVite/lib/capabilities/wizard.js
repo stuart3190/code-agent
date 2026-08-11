@@ -61,10 +61,17 @@ export function makeWizardMachine({
     errors: {}, confirmation: null, cancelledAt: null, revision: 0,
   };
 
+  // Hydration state, reported in every snapshot. A durable wizard that has not yet read its own
+  // storage is not the same thing as a fresh one, and a component that cannot tell them apart
+  // renders step 1 of a booking the visitor already completed.
+  let hydration = { hydrated: !durable?.load, hydrating: false, error: null };
+  let hydrationFlight = null;
+
   const snapshot = () => ({
     ...clone(state), stepCount: ids.length,
     isFirst: state.stepIndex === 0, isLast: state.stepIndex === ids.length - 1,
     progress: (state.stepIndex + 1) / ids.length,
+    hydrated: hydration.hydrated, hydrating: hydration.hydrating, hydrationError: hydration.error,
   });
   const emit = () => {
     const next = snapshot();
@@ -92,25 +99,69 @@ export function makeWizardMachine({
     await save(); return emit();
   };
 
+  async function restoreState() {
+    if (!durable?.load) return snapshot();
+    const saved = await durable.load();
+    if (!saved || !ids.includes(saved.stepId) || !Number.isInteger(saved.stepIndex)) return snapshot();
+    const restoredStatus = Object.values(WIZARD_STATUS).includes(saved.status)
+      ? saved.status : WIZARD_STATUS.ACTIVE;
+    state = {
+      ...state, stepIndex: ids.indexOf(saved.stepId), stepId: saved.stepId,
+      values: clone(saved.values || {}), status: restoredStatus,
+      errors: clone(saved.errors || {}), confirmation: clone(saved.confirmation || null),
+      cancelledAt: saved.cancelledAt || null,
+      revision: Math.max(state.revision, Number(saved.revision || 0)),
+    };
+    return emit();
+  }
+
+  async function hydrateOnce() {
+    if (hydration.hydrated) return snapshot();
+    if (hydrationFlight) return hydrationFlight;
+    hydration = { ...hydration, hydrating: true, error: null };
+    emit();
+    hydrationFlight = (async () => {
+      try {
+        const restored = await restoreState();
+        hydration = { hydrated: true, hydrating: false, error: null };
+        emit();
+        return restored;
+      } catch (error) {
+        // Visible, never a silent reset: a storage failure that quietly restarted the flow would
+        // look exactly like a fresh visitor and lose a confirmed booking without saying so.
+        hydration = { hydrated: false, hydrating: false, error: error?.message || "hydration failed" };
+        emit();
+        throw error;
+      } finally {
+        hydrationFlight = null;
+      }
+    })();
+    return hydrationFlight;
+  }
+
   return {
     WIZARD_STATUS,
     getState: snapshot,
-    subscribe(listener) { listeners.add(listener); listener(snapshot()); return () => listeners.delete(listener); },
-    async restore() {
-      if (!durable?.load) return snapshot();
-      const saved = await durable.load();
-      if (!saved || !ids.includes(saved.stepId) || !Number.isInteger(saved.stepIndex)) return snapshot();
-      const restoredStatus = Object.values(WIZARD_STATUS).includes(saved.status)
-        ? saved.status : WIZARD_STATUS.ACTIVE;
-      state = {
-        ...state, stepIndex: ids.indexOf(saved.stepId), stepId: saved.stepId,
-        values: clone(saved.values || {}), status: restoredStatus,
-        errors: clone(saved.errors || {}), confirmation: clone(saved.confirmation || null),
-        cancelledAt: saved.cancelledAt || null,
-        revision: Math.max(state.revision, Number(saved.revision || 0)),
-      };
-      return emit();
+    /**
+     * Subscribing HYDRATES. A durable wizard used to restart from step one unless the application
+     * remembered to await restore() before rendering — an undocumented ritual, invisible when
+     * skipped, and the reason a live build's reload/recovery steps could not pass. Reading the
+     * store is now enough; the first subscriber triggers exactly one restore and every consumer
+     * sees the result through the normal emit.
+     *
+     * Single-flight: concurrent subscribers share one promise, so ten components mounting
+     * together perform one read, not ten. Idempotent: once hydrated it never re-reads, so a later
+     * subscriber cannot resurrect storage over live state the visitor has since changed.
+     */
+    subscribe(listener) {
+      listeners.add(listener);
+      listener(snapshot());
+      if (!hydration.hydrated && !hydration.hydrating) hydrateOnce().catch(() => {});
+      return () => listeners.delete(listener);
     },
+    /** Restore once, ever. Safe to call from anywhere; returns the same promise while in flight. */
+    async hydrate() { return hydrateOnce(); },
+    async restore() { return restoreState(); },
     setValue,
     select: setValue,
     validateCurrent() { active(); const ok = validateCurrent(); emit(); return { ok, errors: clone(state.errors) }; },

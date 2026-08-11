@@ -618,11 +618,61 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   };
 }
 
+// ── durable evidence: what recovery actually has to prove ─────────────────────────────────────
+//
+// A recovery step used to be judged on words — "recovered", "remains", "same" — so a correct app
+// failed for not narrating itself, and any page containing that vocabulary could have passed. The
+// requirement was never the copy. It is that the SAME durable state survived the reload.
+//
+// So the values are captured at the moment the mutation succeeds, and recovery is judged against
+// them. Nothing here is booking-specific: references are whatever reference-shaped tokens the app
+// itself printed, values are the exact ones this journey entered and selected.
+
+const REFERENCE_TOKEN = /\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,}\b/g;
+
+async function captureDurableEvidence(page, { enteredValues, selections, expect }) {
+  const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  const candidates = unique([...enteredValues.map((row) => row.value), ...selections]);
+  return {
+    captured: true,
+    // Only what is actually ON the confirmation: a value the app never showed cannot be evidence
+    // that it survived.
+    values: candidates.filter((value) => value && text.includes(value)),
+    references: [...new Set(text.match(REFERENCE_TOKEN) || [])].slice(0, 4),
+    statusWords: keywords(expect, 5).filter((word) => new RegExp(word, "i").test(text)),
+  };
+}
+
+/** Pure: did the durable state survive? Exported so the rule can be proven without a browser. */
+export function recoveryEvidenceVerdict(durable, textAfter) {
+  const text = String(textAfter || "");
+  if (!durable?.captured) return { checked: false };
+  const missingValues = (durable.values || []).filter((value) => !text.includes(value));
+  const missingStatus = (durable.statusWords || []).filter((word) => !new RegExp(word, "i").test(text));
+  const references = durable.references || [];
+  const survivingReference = references.find((reference) => text.includes(reference)) || null;
+  if (references.length && !survivingReference) {
+    return { checked: true, ok: false,
+      detail: `the durable reference did not survive (expected ${references.slice(0, 2).join(" or ")})` };
+  }
+  if (missingValues.length) {
+    return { checked: true, ok: false,
+      detail: `recovered state lost contracted values: ${missingValues.slice(0, 4).join(", ")}` };
+  }
+  if (missingStatus.length) {
+    return { checked: true, ok: false,
+      detail: `recovered state no longer shows: ${missingStatus.join(", ")}` };
+  }
+  return { checked: true, ok: true,
+    detail: `same durable state after recovery${survivingReference ? ` (reference ${survivingReference})` : ""}`
+      + `${durable.values?.length ? ` · ${durable.values.length} contracted value(s) intact` : ""}` };
+}
+
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
 async function runStep(page, step, {
   marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
-  writtenPaths = new Set(),
+  writtenPaths = new Set(), durable = { captured: false },
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
@@ -943,6 +993,21 @@ async function runStep(page, step, {
     if (reflect.checked && !reflect.ok) return { ...outcome, status: "fail", detail: reflect.detail };
     if (reflect.checked) outcome.detail += ` · reflects the selection (${reflect.matched})`;
   }
+  // A recovery or lookup step is judged on DURABLE STATE, never on whether the page narrates
+  // itself. The evidence was captured when the mutation succeeded; if it survived, the step
+  // passed however the app words it, and if it did not, no vocabulary can rescue it.
+  const recovers = interactionFlows.some((flow) => ["recovery", "lookup"].includes(flow.kind));
+  if (recovers && durable.captured) {
+    const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    const verdict = recoveryEvidenceVerdict(durable, textAfter);
+    if (verdict.checked) {
+      return { ...outcome, status: verdict.ok ? "pass" : "fail", detail: verdict.detail,
+        controlEvidence: { ...(controlEvidence || {}), durable } };
+    }
+  }
+  if (outcome.status === "pass" && interactionFlows.some((flow) => flow.kind === "mutation")) {
+    Object.assign(durable, await captureDurableEvidence(page, { enteredValues, selections, expect }));
+  }
   return controlEvidence ? { ...outcome, controlEvidence } : outcome;
 }
 
@@ -994,6 +1059,110 @@ export function expectationOutcome({
     };
   }
   return { drove, status: "fail", detail: `expected ${wanted.join(", ")}; found ${found.join(", ") || "none"}` };
+}
+
+// ── journey prerequisites ─────────────────────────────────────────────────────────────────────
+//
+// Contracted secondary journeys routinely begin mid-flow — "select a date and slot with limited
+// remaining seats", "advance to the contact details step" — while browser verification starts
+// from a clean load. Nothing told the driver how to reach that state, so two working journeys
+// were reported undriveable for starting somewhere impossible.
+//
+// The path is derived from the canonical interaction contract, never from prose: the PRIMARY
+// journey already states, in order, every contracted control that leads to each point in the
+// flow. A secondary journey's prerequisites are simply the primary's controls that come before
+// the first control the secondary drives itself.
+
+/** @returns {{controls: object[], requiresDurableRecord: boolean}} */
+export function journeyPrerequisites(flows, journeyId, primaryId) {
+  const controlKey = (flow) => semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
+  const ordered = (id) => flows.filter((flow) => flow.journeyId === id && flow.control)
+    .sort((a, b) => a.stepIndex - b.stepIndex);
+  const mine = ordered(journeyId);
+  const requiresDurableRecord = flows.some((flow) => flow.journeyId === journeyId
+    && (flow.reads || []).some((path) => /\.durable\./.test(path)));
+  if (journeyId === primaryId || !mine.length) return { controls: [], requiresDurableRecord };
+
+  const chain = ordered(primaryId);
+  // Entering the flow at all — "start booking control" and friends. Every journey that drives a
+  // contracted control inside the flow needs these, including one whose own first control is the
+  // very first selection.
+  const entry = chain.slice(0, Math.max(0, chain.findIndex((flow) => ["selection", "input"].includes(flow.kind))));
+  // A journey that works from an existing RECORD (lookup, cancellation) does not re-walk the
+  // wizard: its precondition is the durable row the primary journey already created.
+  if (requiresDurableRecord && flows.some((flow) => flow.journeyId === journeyId && flow.kind === "lookup")) {
+    return { controls: [], requiresDurableRecord };
+  }
+  const ownKeys = new Set(mine.map(controlKey));
+  const firstOwn = mine.map(controlKey).find((key) => chain.some((flow) => controlKey(flow) === key));
+  if (!firstOwn) return { controls: [], requiresDurableRecord };
+  const stop = chain.findIndex((flow) => controlKey(flow) === firstOwn);
+  if (stop <= 0) return { controls: entry, requiresDurableRecord };
+  // Everything the primary drives before that point, minus anything this journey drives itself.
+  return {
+    controls: chain.slice(0, stop).filter((flow) => !ownKeys.has(controlKey(flow))),
+    requiresDurableRecord,
+  };
+}
+
+/**
+ * Put the application into a journey's required starting state using ALREADY-PROVEN semantic
+ * interactions — the same identity-matched selection and contracted-field driving the journeys
+ * themselves use. Nothing is guessed: a prerequisite that cannot be established is reported as a
+ * machine-readable setup failure, and the journey is NOT_REACHED rather than failed.
+ */
+async function establishPrerequisites(page, controls, { marker, journeyFlows }) {
+  const performed = [];
+  for (const flow of controls) {
+    const label = flow.control.logicalField || flow.control.accessibleName;
+    if (flow.kind === "selection") {
+      let outcome = await driveSelection(page, { action: `select ${label}`, expect: flow.observable || "" },
+        flow, new Set(), journeyFlows);
+      for (let attempt = 0; !outcome && attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+        if (!(await advanceFlow(page)).advanced) break;
+        outcome = await driveSelection(page, { action: `select ${label}`, expect: flow.observable || "" },
+          flow, new Set(), journeyFlows);
+      }
+      if (!outcome || outcome.status !== "pass") {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: outcome ? outcome.detail : "the contracted control was not reachable" } };
+      }
+      performed.push({ control: label, kind: flow.kind, detail: outcome.detail });
+      continue;
+    }
+    if (flow.kind === "input") {
+      let result = await fillContractedFields(page, [flow], marker);
+      for (let attempt = 0; !result.complete && attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+        if (!(await advanceFlow(page)).advanced) break;
+        result = await fillContractedFields(page, [flow], marker);
+      }
+      if (!result.complete) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "field not fillable" } };
+      }
+      performed.push({ control: label, kind: flow.kind, detail: `filled ${label}` });
+      continue;
+    }
+    // A mutation/action control ("start booking control") — driven by its contracted accessible
+    // name only, never by a keyword sweep, so an unrelated button can never stand in for it.
+    let clicked = false;
+    for (const alias of controlAliases(flow.control)) {
+      for (const role of DRIVEABLE_ACTION_ROLES) {
+        const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
+        if (!(await candidate.count().catch(() => 0))) continue;
+        if (!(await candidate.isVisible().catch(() => false))) continue;
+        await candidate.click({ timeout: 5_000 }).catch(() => {});
+        clicked = true;
+        break;
+      }
+      if (clicked) break;
+    }
+    if (!clicked) {
+      return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "no contracted control matched" } };
+    }
+    await page.waitForTimeout(600);
+    performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
+  }
+  return { ok: true, performed };
 }
 
 // ── the journey ───────────────────────────────────────────────────────────────────────────────
@@ -1060,11 +1229,35 @@ export async function verifyJourneys({
       const selections = []; // what this journey actually chose — confirmations must reflect it
       const enteredValues = []; // exact contracted values; review must echo them
       const writtenPaths = new Set(); // contracted state this journey has already written
+      // What the durable record looked like when it was created — recovery is measured against it.
+      const durable = { captured: false };
       // The journey's whole contracted order. A selection that advances the flow proves it did so
       // by reaching the control the CONTRACT names next, which cannot be known from one step.
       const journeyFlows = [...((contract?.interactionContract?.flows) || [])]
         .filter((flow) => flow.journeyId === journey.id)
         .sort((a, b) => a.stepIndex - b.stepIndex);
+      // Reach the journey's required starting state before judging it. Setup outcomes are kept
+      // separate from the journey's own steps: establishing a precondition is not evidence that
+      // the contracted journey works.
+      const allFlows = (contract?.interactionContract?.flows) || [];
+      const primaryId = (ordered.find((j) => j.priority === "primary") || ordered[0])?.id;
+      const prerequisites = journeyPrerequisites(allFlows, journey.id, primaryId);
+      let setup = null;
+      if (prerequisites.controls.length) {
+        setup = await establishPrerequisites(page, prerequisites.controls, { marker, journeyFlows });
+        if (!setup.ok) {
+          results.push({
+            id: journey.id, title: journey.title, priority: journey.priority,
+            status: "not_reached", steps: (journey.steps || []).map((step) => ({
+              action: step.action, expect: step.expect, status: "not_reached",
+              detail: `not reached: the journey's required starting state could not be established (${setup.failure.control}: ${setup.failure.reason})`,
+            })),
+            failedSteps: 0, undriveableSteps: 0,
+            setup: { ok: false, ...setup, code: "journey_prerequisites_unmet" },
+          });
+          continue;
+        }
+      }
       let blockedBy = null;
       for (const [stepIndex, step] of (journey.steps || []).entries()) {
         if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
@@ -1076,7 +1269,7 @@ export async function verifyJourneys({
         }
         const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
         const outcome = await runStep(page, step, {
-          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths,
+          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
