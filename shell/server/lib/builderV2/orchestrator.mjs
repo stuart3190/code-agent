@@ -12,7 +12,7 @@
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches } from "./patchEngine.mjs";
+import { applyPatches, patchOutcomes } from "./patchEngine.mjs";
 import { completionEligibility, previewEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, scopeBuildSpec } from "./buildSpec.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
@@ -138,6 +138,11 @@ export function createOrchestrator({
   baseline = null,                  // protected-path baseline for the stage gate
   extraGateOptions = {},            // e.g. { nodeModules, log } for live runs — merged into every gate call
   maxCoreAttempts = 3,              // REAL generation failures only: unusable output or a tree that will not compile
+  // A dispatch that produced NO change to the tree is a protocol round, not a generation attempt.
+  // A live build spent two of its three attempts on 4-second replies that re-emitted the scaffold's
+  // own placeholder byte for byte, leaving ONE attempt to write an entire application. Bounded, so
+  // a model that will only ever answer with no-ops still fails — just for the right reason.
+  maxNoOpRetries = 2,
   events = {},                      // durable composition hooks: contract, patches, snapshot
   classifyContract = null,          // deterministic post-contract complexity refinement
   log = () => {},
@@ -224,13 +229,18 @@ export function createOrchestrator({
     // budget as a failed generation and exhaust a build in three rounds.
     let attempts = 0;
     let corrections = 0;
+    // Protocol rounds: dispatches that changed nothing at all. Counted, reported and bounded, but
+    // never charged against the substantive generation attempts.
+    let noOps = 0;
+    const attemptLedger = [];
     const spend = () => attempts + corrections;
     const maxDispatches = maxCoreAttempts + maxPrecompileCorrections;
-    const exhausted = () => attempts >= maxCoreAttempts || spend() >= maxDispatches;
+    const exhausted = () => attempts >= maxCoreAttempts || spend() >= maxDispatches
+      || noOps > maxNoOpRetries;
     const failure = (reason, extra = {}) => ({
       ok: false, reason, problems, advisory, advisoryFindings: advisory,
       candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope,
-      moduleCorrectionUsed, attempts, corrections, ...extra,
+      moduleCorrectionUsed, attempts, corrections, noOps, attemptLedger, ...extra,
     });
 
     while (!exhausted()) {
@@ -267,14 +277,32 @@ export function createOrchestrator({
       await events.patches?.({
         owner, projectId, buildId, step: dispatchStep, attempt, patches,
         outcome: applied.rejected.length ? "rejected" : "applied",
-        rejected: applied.rejected, filesChanged,
+        rejected: applied.rejected, applied: applied.applied,
+        outcomes: patchOutcomes(patches, applied), filesChanged,
       });
       if (applied.rejected.length) {
-        // Patches that will not apply leave no tree to run: a real generation failure.
         rejections = applied.rejected;
-        working = originalTree;
+        const classes = [...new Set(applied.rejected.map((row) => row.code).filter(Boolean))];
+        // RETAIN WHAT LANDED. applyPatches is per-patch, so the siblings of a bad patch are already
+        // in the tree; rolling back to the original threw them away. A live build wrote eight sound
+        // modules and one file with unbalanced braces, and lost all nine — then had to regenerate
+        // the whole application from nothing with its remaining attempt.
+        //
+        // Safety is unchanged: the malformed source was NEVER applied, the retained tree is a
+        // non-promotable candidate, and compile and browser verification still gate everything
+        // downstream. An incomplete tree simply fails to compile, which is the correct answer.
+        const retained = filesChanged.length > 0 && !applied.modularityFailed;
+        if (retained) {
+          working = applied.tree;
+          log(`${step}: ${applied.rejected.length} patch(es) rejected (${classes.join(", ")}); `
+            + `retaining ${filesChanged.length} file(s) that applied cleanly`);
+        } else {
+          working = originalTree;
+          log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
+        }
         attempts += 1;
-        log(`${step}: ${applied.rejected.length} patch op(s) rejected, feeding reasons back`);
+        attemptLedger.push({ attempt, dispatch: dispatchStep, class: classes[0] || "patch_not_applicable",
+          substantive: true, rejected: applied.rejected.length, retainedFiles: retained ? filesChanged : [] });
         continue;
       }
       if (activeScope) {
@@ -302,15 +330,26 @@ export function createOrchestrator({
       const changed = Object.keys(applied.tree).some((p) => applied.tree[p] !== working[p])
         || Object.keys(working).some((p) => !(p in applied.tree));
       if (!changed) {
+        // A PROTOCOL round, not a generation attempt. It cost provider tokens and credits — both
+        // still counted — but it produced no code, so charging it against the substantive attempts
+        // punishes the build for a round in which nothing was written.
         rejections = [{
+          code: patches.length ? "patch_noop" : "empty_patch_envelope",
           signature: "no-op",
-          reason: "your batch left every file byte-identical — re-emitting current content is not implementation. "
-            + "CREATE the required sections/pages as newFile entries (src/routes/…), register them in src/App.jsx, "
-            + "and make every journey outcome visible as real UI text",
+          file: null,
+          operation: null,
+          reason: patches.length
+            ? "your batch left every file byte-identical — re-emitting current content is not implementation. "
+              + "CREATE the required sections/pages as newFile entries (src/routes/…), register them in src/App.jsx, "
+              + "and make every journey outcome visible as real UI text"
+            : "you returned no patches at all — emit the files this step requires",
         }];
         working = originalTree;
-        attempts += 1;
-        log(`${step}: no-op batch rejected deterministically`);
+        noOps += 1;
+        attemptLedger.push({ attempt, dispatch: dispatchStep,
+          class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
+        log(`${step}: no-op batch rejected deterministically `
+          + `(protocol round ${noOps}/${maxNoOpRetries}, generation attempts still ${attempts}/${maxCoreAttempts})`);
         continue;
       }
 
@@ -434,7 +473,15 @@ export function createOrchestrator({
       rejections = [];
       working = originalTree;
       attempts += 1;
+      attemptLedger.push({ attempt, dispatch: dispatchStep, class: "compile_failed", substantive: true,
+        problems: gateProblems.length });
       log(`${step}: gate failed (${gateProblems.length} problem(s)), attempt ${attempts}/${maxCoreAttempts}`);
+    }
+    // Say WHICH ceiling ended the step. "No runnable tree in 3 attempts" read identically whether
+    // the model wrote three broken applications or none at all.
+    if (noOps > maxNoOpRetries) {
+      return failure(`no substantive generation: ${noOps} consecutive protocol round(s) changed nothing `
+        + `(generation attempts used: ${attempts}/${maxCoreAttempts})`, { code: "no_substantive_generation" });
     }
     return failure(attempts >= maxCoreAttempts
       ? `no runnable tree within ${maxCoreAttempts} generation attempts`

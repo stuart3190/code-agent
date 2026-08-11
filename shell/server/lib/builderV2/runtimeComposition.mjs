@@ -12,6 +12,7 @@ import { rm } from "node:fs/promises";
 
 import { clone, fromScaffold } from "../../../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
+import { patchOutcomes } from "./patchEngine.mjs";
 import { classifyComplexity } from "../appBuild/buildProfile.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 import { resolveBuildContext } from "../appBuild/buildContext.mjs";
@@ -439,12 +440,31 @@ export function createBuilderV2Runtime({
           ]);
           return stored;
         },
-        patches: async ({ owner: eventOwner, buildId, step, patches, outcome, rejected, filesChanged }) => {
+        patches: async ({ owner: eventOwner, buildId, step, patches, outcome, rejected, outcomes, filesChanged }) => {
           if (!patches.length) return;
-          const rows = patches.map((patch, index) => ({
-            id: uuid(), owner: eventOwner, build_id: buildId, step: `${step}:${index + 1}`,
-            patch, outcome, reject_reason: rejected?.[index]?.reason || null, files_changed: filesChanged,
-          }));
+          // Per-patch truth, correlated by SIGNATURE. Correlating by array position wrote twelve
+          // null reasons and attached the one real parse error to an unrelated patch.
+          const resolved = outcomes || patchOutcomes(patches, { rejected: rejected || [] });
+          const rows = patches.map((patch, index) => {
+            const row = resolved[index] || {};
+            const rejectedRow = (row.outcome || outcome) === "rejected";
+            return {
+              id: uuid(), owner: eventOwner, build_id: buildId, step: `${step}:${index + 1}`,
+              patch, outcome: row.outcome || outcome, files_changed: filesChanged,
+              // A rejected row without a reason is not an audit trail. The code is stable, the
+              // detail is readable, and the fallback still names the batch it died with.
+              reject_reason: rejectedRow
+                ? JSON.stringify({
+                  code: row.code || "rejected_in_batch",
+                  file: row.file ?? null,
+                  operation: row.operation ?? null,
+                  independentlyValid: row.independentlyValid === true,
+                  detail: row.reason
+                    || "rejected as part of a batch that could not be applied; no per-patch reason was recorded",
+                })
+                : null,
+            };
+          });
           const { error } = await client.from("bv2_patches").insert(rows);
           if (error) throw new Error(`Builder V2 patch trace: ${error.message}`);
         },

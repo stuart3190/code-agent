@@ -83,24 +83,52 @@ function opSignature(patch, op) {
 }
 
 /**
+ * Why a patch was refused. Stable codes — the readable reason may be reworded at any time, these
+ * may not, because attempt accounting and repair targeting both branch on them.
+ */
+export const REJECTION = Object.freeze({
+  SOURCE_PARSE_FAILED: "source_parse_failed",       // the content the model wrote is not parseable
+  PATCH_NOT_APPLICABLE: "patch_not_applicable",     // the target does not exist, or already does
+  INVALID_PATCH_OPERATION: "invalid_patch_operation", // the op itself is malformed or unknown
+  WRITE_SCOPE_VIOLATION: "write_scope_violation",   // protected platform path
+  TREE_INTEGRITY_FAILED: "tree_integrity_failed",   // the batch would break a structural invariant
+  BATCH_ATOMIC_ROLLBACK: "batch_atomic_rollback",   // valid on its own; discarded with its batch
+});
+
+/**
  * Apply a batch of patches to a tree, validating every operation against the CURRENT index
  * of the file it touches. Returns the new tree plus applied/rejected lists; the input tree
  * is never mutated. `contract` enables the modularity re-check on every changed file.
+ *
+ * PER-PATCH, NOT ATOMIC: a patch that cannot apply is skipped, and its siblings still apply. Only
+ * a modularity violation rejects the whole batch, because a tree that half-applied its way into a
+ * monolith is worse than a clean refusal.
  */
 export function applyPatches(tree, patches, { contract = null } = {}) {
   const working = { ...tree };
   const applied = [];
   const rejected = [];
-  const reject = (patch, op, reason) => rejected.push({ signature: opSignature(patch, op || {}), reason });
+  // Every rejection carries a STABLE CODE as well as its readable reason. A live build recorded
+  // twelve rejected patches with a null reason and one reason attached to the wrong patch, because
+  // the audit trail correlated rejections to patches by array position. A code, a file and an
+  // operation make each row answerable on its own.
+  const reject = (patch, op, reason, code = REJECTION.INVALID_PATCH_OPERATION) => rejected.push({
+    code,
+    signature: opSignature(patch, op || {}),
+    file: patch.newFile || patch.replaceFile || patch.deleteFile || patch.file || null,
+    operation: op?.op || (patch.newFile ? "newFile" : patch.replaceFile ? "replaceFile"
+      : patch.deleteFile ? "deleteFile" : null),
+    reason,
+  });
 
   for (const patch of patches || []) {
     // ── create ───────────────────────────────────────────────────────────────────────────
     if (patch.newFile) {
-      if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`); continue; }
-      if (isProtected(patch.newFile)) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`); continue; }
+      if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtected(patch.newFile)) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const probe = indexFile(patch.newFile, patch.content || "");
       if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
-        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`);
+        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED);
         continue;
       }
       working[patch.newFile] = String(patch.content || "");
@@ -110,12 +138,12 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── whole-file replace (the ONLY mutation path for index-opaque files like CSS) ──────
     if (patch.replaceFile) {
-      if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`); continue; }
-      if (isProtected(patch.replaceFile)) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`); continue; }
+      if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtected(patch.replaceFile)) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const content = String(patch.content || "");
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
-        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`); continue; }
+        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       }
       working[patch.replaceFile] = content;
       applied.push({ signature: opSignature(patch, {}), file: patch.replaceFile, kind: "replaceFile" });
@@ -124,10 +152,10 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── delete ───────────────────────────────────────────────────────────────────────────
     if (patch.deleteFile) {
-      if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`); continue; }
-      if (isProtected(patch.deleteFile)) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`); continue; }
+      if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtected(patch.deleteFile)) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       if (/^src\/(routes|data)\//.test(patch.deleteFile)) {
-        reject(patch, null, `deleteFile: ${patch.deleteFile} — route/data modules from earlier stages are never deleted by a patch (anti-collapse)`);
+        reject(patch, null, `deleteFile: ${patch.deleteFile} — route/data modules from earlier stages are never deleted by a patch (anti-collapse)`, REJECTION.WRITE_SCOPE_VIOLATION);
         continue;
       }
       delete working[patch.deleteFile];
@@ -137,26 +165,26 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── symbol ops on an existing file ───────────────────────────────────────────────────
     const file = patch.file;
-    if (!file || !(file in working)) { reject(patch, null, `file ${file} does not exist — use newFile to create files`); continue; }
-    if (isProtected(file)) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`); continue; }
+    if (!file || !(file in working)) { reject(patch, null, `file ${file} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+    if (isProtected(file)) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
 
     for (const op of patch.ops || []) {
       const current = String(working[file]);
       const index = indexFile(file, current);
-      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`); continue; }
+      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`, REJECTION.SOURCE_PARSE_FAILED); continue; }
 
       // Imports are lines, not symbols — two live runs burned whole rounds trying to name
       // an import statement as a symbol. add_import inserts after the file's last import.
       if (op.op === "add_import") {
         const statement = String(op.content || "").trim();
-        if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement"); continue; }
+        if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement", REJECTION.INVALID_PATCH_OPERATION); continue; }
         const lines = current.split("\n");
         let lastImport = -1;
         for (let i = 0; i < lines.length; i += 1) if (/^\s*import\b/.test(lines[i])) lastImport = i;
         lines.splice(lastImport + 1, 0, statement);
         const candidate = lines.join("\n");
         const probe = indexFile(file, candidate);
-        if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse"); continue; }
+        if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -165,9 +193,9 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       if (op.op === "append") {
         const candidate = `${current}\n${op.content || ""}`;
         const dupDefault = duplicateDefault(candidate);
-        if (dupDefault) { reject(patch, op, dupDefault); continue; }
+        if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
         const probe = indexFile(file, candidate);
-        if (probe.opaque) { reject(patch, op, "append: resulting file does not parse"); continue; }
+        if (probe.opaque) { reject(patch, op, "append: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -179,7 +207,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         const importHint = /^\s*import\b/.test(String(op.symbol || ""))
           ? ' — to ADD an import, use {op: "add_import", content: "import …"} instead of naming the statement as a symbol'
           : "";
-        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}${importHint}`);
+        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}${importHint}`, REJECTION.PATCH_NOT_APPLICABLE);
         continue;
       }
 
@@ -193,14 +221,14 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       } else if (op.op === "insert_before_symbol") {
         candidate = `${current.slice(0, symbol.start)}${op.content || ""}\n${current.slice(symbol.start)}`;
       } else {
-        reject(patch, op, `unknown op ${op.op}`);
+        reject(patch, op, `unknown op ${op.op}`, REJECTION.INVALID_PATCH_OPERATION);
         continue;
       }
 
       const dupDefault = duplicateDefault(candidate);
-      if (dupDefault) { reject(patch, op, dupDefault); continue; }
+      if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
       const probe = indexFile(file, candidate);
-      if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`); continue; }
+      if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       working[file] = candidate;
       applied.push({ signature: opSignature(patch, op), file, kind: op.op });
     }
@@ -215,9 +243,18 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       // The batch violated a structural invariant: the WHOLE batch is rejected — a tree that
       // half-applied its way into a monolith would be worse than a clean refusal.
       return {
-        tree, applied: [], rejected: [
+        tree,
+        applied: [],
+        rejected: [
           ...rejected,
-          ...modular.problems.map((p) => ({ signature: "modularity", reason: p })),
+          ...modular.problems.map((problem) => ({ code: REJECTION.TREE_INTEGRITY_FAILED,
+            signature: "modularity", file: null, operation: null, reason: problem })),
+          // Named individually, so the audit trail says which work was lost and that it was lost
+          // to a SIBLING rather than to anything wrong with itself.
+          ...applied.map((row) => ({ code: REJECTION.BATCH_ATOMIC_ROLLBACK, signature: row.signature,
+            file: row.file, operation: row.kind, independentlyValid: true,
+            reason: `${row.file} applied cleanly and was rolled back with its batch: `
+              + "the batch as a whole broke a structural invariant" })),
         ],
         modularityFailed: true,
       };
@@ -225,6 +262,39 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
   }
 
   return { tree: working, applied, rejected, modularityFailed: false };
+}
+
+/**
+ * The outcome of EACH patch in a batch, correlated by signature rather than by array position.
+ *
+ * The audit trail used to write `rejected[index].reason` against `patches[index]`. Those two lists
+ * are different lengths in different orders, so a live build recorded twelve rejected rows with a
+ * null reason and attached the one real reason — a parse failure in src/data/wizard.js — to an
+ * unrelated patch. A rejected row with no reason is not an audit trail.
+ */
+export function patchOutcomes(patches = [], { applied = [], rejected = [] } = {}) {
+  const bySignature = new Map();
+  for (const row of rejected) {
+    if (!bySignature.has(row.signature)) bySignature.set(row.signature, row);
+  }
+  const appliedSignatures = new Set(applied.map((row) => row.signature));
+  return (patches || []).map((patch) => {
+    const signatures = patch.newFile || patch.deleteFile || patch.replaceFile
+      ? [opSignature(patch, {})]
+      : (patch.ops || []).map((op) => opSignature(patch, op));
+    const refusal = signatures.map((signature) => bySignature.get(signature)).find(Boolean);
+    const landed = signatures.some((signature) => appliedSignatures.has(signature));
+    if (refusal) {
+      return { outcome: "rejected", code: refusal.code, reason: refusal.reason,
+        file: refusal.file ?? null, operation: refusal.operation ?? null,
+        independentlyValid: refusal.independentlyValid === true };
+    }
+    if (landed) return { outcome: "applied", code: null, reason: null, independentlyValid: true };
+    // No signature of this patch appears in either list: it contributed no operation at all.
+    return { outcome: "rejected", code: REJECTION.INVALID_PATCH_OPERATION, independentlyValid: false,
+      file: patch.file || patch.newFile || patch.replaceFile || patch.deleteFile || null, operation: null,
+      reason: "the patch carried no applicable operation (no ops, and no newFile/replaceFile/deleteFile)" };
+  });
 }
 
 /**
