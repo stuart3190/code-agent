@@ -36,33 +36,98 @@ export const IDENTITY_STOP_WORDS = Object.freeze(new Set([
 ]));
 
 /**
+ * WHAT A FIELD MEANS — one definition, shared by control identity, alias generation and value
+ * generation. Nothing else may re-decide it.
+ *
+ * A paid qualification died here. `semanticAliases("guestName")` returned
+ * ["guest Name","name","party size","guests","people"], because `/guest/` sat in the party-size
+ * branch alongside `party` and `quantity`. On a screen whose party size was an `<input
+ * type="number">`, the guest's NAME, EMAIL and PHONE all resolved to that one spinbutton;
+ * `valueFor` — which re-guessed meaning with its own `/guests?/` regex — generated "2" for
+ * guestName; and the contact step was reported undriveable against an application that was never
+ * given the chance to show its contact fields.
+ *
+ * The rule that prevents the whole family of that bug: a concept comes from a field's TOKENS, read
+ * right to left, never from a substring of the whole name. `guestName` ends in `name`; `guestCount`
+ * ends in `count`. "guest" QUALIFIES a concept — whose name, whose count — it never is one.
+ */
+const CONCEPT_BY_TOKEN = new Map([
+  ["email", "email"], ["mail", "email"],
+  ["phone", "phone"], ["telephone", "phone"], ["mobile", "phone"], ["tel", "phone"],
+  ["name", "name"], ["firstname", "name"], ["lastname", "name"], ["fullname", "name"], ["surname", "name"],
+  ["date", "date"], ["day", "date"],
+  ["slot", "slot"], ["time", "slot"],
+  ["password", "password"], ["passcode", "password"],
+  ["postcode", "postcode"], ["postalcode", "postcode"], ["zip", "postcode"],
+  // Quantities. A count is a count whether it counts people or items; who it counts is decided
+  // separately, below, because only a count OF PEOPLE answers to "party size".
+  ["count", "count"], ["quantity", "count"], ["qty", "count"], ["size", "count"],
+  ["number", "count"], ["total", "count"], ["seats", "count"], ["pax", "count"],
+  ["guests", "count"], ["people", "count"], ["adults", "count"], ["children", "count"],
+  ["attendees", "count"], ["persons", "count"],
+]);
+
+// Tokens that say WHO, not WHAT. They may qualify a concept; they can never supply one.
+const PERSON_TOKENS = new Set(["guest", "guests", "customer", "customers", "visitor", "visitors",
+  "attendee", "attendees", "person", "persons", "people", "party", "adult", "adults", "child",
+  "children", "diner", "diners", "passenger", "passengers", "patient", "patients", "member", "members"]);
+
+// A trailing identifier suffix names the same concept as the field it hangs off: `slotId` is a slot.
+const IDENTIFIER_TOKENS = new Set(["id", "ids", "uuid", "key"]);
+
+const fieldTokens = (field) => String(field || "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z]+/g) || [];
+
+/**
+ * The concept this field denotes, or null when it denotes nothing this platform knows about.
+ * Read right to left so the HEAD noun decides: `numberOfGuests` is a count, `guestName` is a name.
+ */
+export function semanticConcept(field) {
+  const tokens = fieldTokens(field);
+  while (tokens.length > 1 && IDENTIFIER_TOKENS.has(tokens.at(-1))) tokens.pop();
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const concept = CONCEPT_BY_TOKEN.get(tokens[index]);
+    if (concept) return concept;
+  }
+  return null;
+}
+
+/** Does this field count PEOPLE? Only such a count answers to "party size" and its synonyms. */
+export function countsPeople(field) {
+  if (semanticConcept(field) !== "count") return false;
+  return fieldTokens(field).some((token) => PERSON_TOKENS.has(token));
+}
+
+const CONCEPT_ALIASES = new Map([
+  ["email", ["email"]],
+  ["phone", ["phone", "telephone"]],
+  ["name", ["name"]],
+  ["date", ["date", "day"]],
+  ["slot", ["slot", "time"]],
+]);
+
+/**
  * Human-equivalent names for one logical field. Deliberately generous: a contract saying
- * `guestEmail` must match a control labelled "Email", and vice versa.
+ * `guestEmail` must match a control labelled "Email", and vice versa. Generous about SYNONYMS of
+ * the field's concept, never about a different concept that happens to share a word with it.
  */
 export function semanticAliases(field) {
   const raw = String(field || "").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
   if (!raw) return [];
-  const aliases = [raw];
-  const lower = raw.toLowerCase();
-  if (/name/.test(lower)) aliases.push("name");
-  if (/email/.test(lower)) aliases.push("email");
-  if (/phone|telephone|mobile/.test(lower)) aliases.push("phone", "telephone");
-  if (/slot|time/.test(lower)) aliases.push("slot", "time");
-  if (/date|day/.test(lower)) aliases.push("date", "day");
-  if (/party|quantity|guest|people|adult|child/.test(lower)) aliases.push("party size", "guests", "people");
+  const concept = semanticConcept(field);
+  const aliases = [raw, ...(CONCEPT_ALIASES.get(concept) || [])];
+  if (countsPeople(field)) aliases.push("party size", "guests", "people");
   return unique(aliases.map((value) => value.trim()));
 }
 
 /** Collapse a field name to the concept it denotes, so two spellings do not become two controls. */
 export function semanticKey(name) {
-  const value = normalized(name);
-  if (/date|day/.test(value)) return "date";
-  if (/slot|time/.test(value)) return "slot";
-  if (/party|quantity|people|guestcount|adult|child/.test(value)) return "partySize";
-  if (/email/.test(value)) return "email";
-  if (/phone|telephone|mobile/.test(value)) return "phone";
-  if (/name/.test(value)) return "name";
-  return value;
+  if (countsPeople(name)) return "partySize";
+  const concept = semanticConcept(name);
+  // A count of things rather than people keeps its own identity: an item count and a party size
+  // are both counts and are emphatically not the same control.
+  if (concept && concept !== "count") return concept;
+  return normalized(name);
 }
 
 /**

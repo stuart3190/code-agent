@@ -16,7 +16,8 @@
 import { createRequire } from "node:module";
 
 import {
-  ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases, semanticKey,
+  ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases,
+  semanticConcept, semanticKey,
 } from "../builderV2/controlIdentity.mjs";
 
 const requireCjs = createRequire(import.meta.url);
@@ -116,26 +117,32 @@ async function firstVisible(locators, deadline) {
  * calling whatever happens next a verdict.
  */
 export function invalidValueFor(label, inputTypes = []) {
-  const text = String(label || "").toLowerCase();
   const types = (inputTypes || []).map((type) => String(type).toLowerCase());
-  if (types.includes("email") || /e-?mail/.test(text)) return "not-an-email";
-  if (types.includes("number") || types.includes("spinbutton")) return "not-a-number";
+  const concept = semanticConcept(label);
+  if (types.includes("email") || concept === "email") return "not-an-email";
+  if (types.includes("number") || types.includes("spinbutton") || concept === "count") return "not-a-number";
   return null;
 }
 
+/**
+ * The value to type into a contracted field.
+ *
+ * Meaning comes from the SAME authority that decides which control the field is
+ * (controlIdentity.semanticConcept). It used to be re-derived here with a second, looser set of
+ * regexes, and the two disagreed in production: `/guests?/` matched `guestName`, so a guest's name
+ * was typed as the number "2". Two definitions of what a field means is one too many.
+ */
 function valueFor(label, marker) {
-  const text = String(label || "").toLowerCase();
-  if (/e-?mail/.test(text)) return `journey+${marker}@thrallo.dev`;
-  if (/phone|tel|mobile/.test(text)) return "07700900123";
-  if (/password/.test(text)) return `Jv-${marker}!9a`;
-  if (/date/.test(text)) {
-    const soon = new Date(Date.now() + 7 * 86_400_000);
-    return soon.toISOString().slice(0, 10);
+  switch (semanticConcept(label)) {
+    case "email": return `journey+${marker}@thrallo.dev`;
+    case "phone": return "07700900123";
+    case "password": return `Jv-${marker}!9a`;
+    case "date": return new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+    case "slot": return "10:00";
+    case "count": return "2";
+    case "postcode": return "SW1A 1AA";
+    default: return `Journey ${marker}`;
   }
-  if (/time/.test(text)) return "10:00";
-  if (/number|quantity|adults?|children|guests?|qty/.test(text)) return "2";
-  if (/postcode|zip/.test(text)) return "SW1A 1AA";
-  return `Journey ${marker}`;
 }
 
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1126,7 +1133,11 @@ async function runStep(page, step, {
   if (droveStepper && found.length / wanted.length >= 0.5) {
     const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     if (textAfter !== textBefore) {
-      return { drove, status: "pass", detail: `counter changed the page (${found.join(", ")} present)` };
+      // Carry the control facts the contracted fill already gathered. Returning without them threw
+      // away the only record of WHICH control a counter step drove — the exact evidence that
+      // identified the party-size collision after a paid run.
+      return { drove, status: "pass", controlEvidence,
+        detail: `counter changed the page (${found.join(", ")} present)` };
     }
   }
 
