@@ -175,7 +175,18 @@ export function phraseIntentMatches(phrase, mode = "clause") {
     counted[index] = intents;
     results.push({ token: tokens[index], index, position, intents });
   }
-  return results;
+  // "choose to cancel the booking", "choose to archive the lead" — an infinitive after a chooser
+  // is choosing an ACTION, not a value. Reading it as a value selection makes the derivation
+  // invent a field out of the verb, and the driver then hunts for an option group called
+  // "archive" that no correct application has. The step's real intent is the verb that follows.
+  const followedByAnInfinitiveAction = (match) => tokens[match.index + 1] === "to"
+    && results.some((other) => other.index === match.index + 2
+      && other.intents.some((intent) => intent !== ACTION_INTENT.SELECTION));
+  return results
+    .map((match) => (match.intents.includes(ACTION_INTENT.SELECTION) && followedByAnInfinitiveAction(match)
+      ? { ...match, intents: match.intents.filter((intent) => intent !== ACTION_INTENT.SELECTION) }
+      : match))
+    .filter((match) => match.intents.length);
 }
 
 // A step's action is a clause; its target names a control — unless the target is a ROUTE, which is

@@ -760,6 +760,9 @@ async function runStep(page, step, {
   // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
   // path never adds a second action on top of it.
   let contractDriven = false;
+  // Did THIS step put a value into a field? The form-state rule below is about a fill and may not
+  // answer for a step that performed none.
+  let filledSomething = false;
 
   // What was already on screen BEFORE this step. A word that was visible beforehand is no evidence
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
@@ -788,13 +791,18 @@ async function runStep(page, step, {
   // runs (and untold v1 submit steps) failed working apps on exactly this line.
   const navigated = drove;
 
-  if (/enter|type|fill|complete|provide/i.test(action)) {
-    // A field an EARLIER contracted step already wrote is not this step's to type into. The live
-    // contract derives party size as both a selection (its own step) and an input on the contact
-    // step; demanding a text box for it would fail a correct application for holding the value it
-    // was already given.
-    const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control
-      && !writtenPaths.has(flow.control.statePath));
+  // A field an EARLIER contracted step already wrote is not this step's to type into. The live
+  // contract derives party size as both a selection (its own step) and an input on the contact
+  // step; demanding a text box for it would fail a correct application for holding the value it
+  // was already given.
+  const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control
+    && !writtenPaths.has(flow.control.statePath));
+  // A step that WRITES contracted values is driven from the contract, not from whether its prose
+  // happens to contain a fill verb. "edit the contact name, email and notes" writes exactly the
+  // three fields "enter …" would, and a hardcoded verb list left every CRM edit step undriveable
+  // while the contract already named the controls. The blind form-filling fallback below stays
+  // prose-gated — that one IS a guess, and only prose can justify it.
+  if (contractedInputs.length || /enter|type|fill|complete|provide/i.test(action)) {
     // "select an account type" contains the word "type", so the contract derives BOTH a selection
     // and an input for the same field. Demanding a text box for it fails a correct chooser. When
     // every contracted input on this step is a field the same step also contracts as a SELECTION,
@@ -849,6 +857,7 @@ async function runStep(page, step, {
       enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
         .map((field) => ({ field: field.field, value: field.expectedValue })));
       drove = drove || result.filled.length > 0;
+      filledSomething = filledSomething || result.filled.length > 0;
       if (!result.complete) {
         const missing = result.evidence.fields.filter((field) => field.status !== "filled")
           .map((field) => `${field.field}:${field.status}`).join(", ");
@@ -858,6 +867,7 @@ async function runStep(page, step, {
     } else if (!inputsAreSelections) {
       const filled = await fillVisibleForm(page, marker);
       drove = drove || filled.length > 0;
+      filledSomething = filledSomething || filled.length > 0;
     }
     // inputsAreSelections: type nothing, and let the selection branch below drive the chooser.
   }
@@ -1041,6 +1051,20 @@ async function runStep(page, step, {
     }
   }
 
+  // A contracted ACTION step whose prose carries no click verb at all. The list above is a list of
+  // WORDS — "update the lead", "save the changes" and "archive the lead" are in nobody's list, and
+  // all three are durable commits whose control the contract has already named. So the contract
+  // activates it by identity, exactly as flow entry does. Additive by construction: it runs only
+  // when nothing else drove the step, so every step the keyword path already drives is untouched.
+  if (!navigated && !drove && !contractDriven) {
+    const contractedAction = interactionFlows.find((flow) => flow.control
+      && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+    if (contractedAction && await activateContractedControl(page, contractedAction.control)) {
+      drove = true;
+      contractDriven = true;
+    }
+  }
+
   // A contracted REVIEW step writes nothing, so nothing above drives it, and in a step-gated flow
   // its screen is one transition away. Advancing is allowed here for the same bounded reason as
   // above — and it cannot manufacture a pass, because a review is judged on whether it shows the
@@ -1112,7 +1136,14 @@ async function runStep(page, step, {
   // step filled something, ask the page the question the step was really asking. Applies BOTH
   // when the words are missing AND when they are all static (nothing fresh) — a live fill step
   // failed as "nothing changed" purely because its meta-words pre-existed on the page.
-  if ((found.length / wanted.length < 0.5 || fresh.length === 0) && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
+  //
+  // ONLY when this step actually filled something. The rule is about a fill, and it returns early,
+  // so an unfilled step reaching it takes a pass on inputs it never touched — and skips the
+  // durable-record judgement below, which is the stronger claim and the right one. A CRM whose
+  // manage screen carries an edit form passed "reload the page ⇒ the updated lead is recovered"
+  // on "3/4 fields hold values", proving only that a form was populated.
+  if (filledSomething && (found.length / wanted.length < 0.5 || fresh.length === 0)
+    && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
     const state = await page.evaluate(() => {
       const inputs = [...document.querySelectorAll("input, textarea, select")]
         .filter((el) => el.offsetParent !== null && !["hidden", "submit", "button"].includes(el.type));

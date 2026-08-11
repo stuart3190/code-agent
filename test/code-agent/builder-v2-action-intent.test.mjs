@@ -114,6 +114,84 @@ for (const [action, target, intent, why] of PROSE) {
   });
 }
 
+// ── choosing an ACTION is not choosing a value ─────────────────────────────────────────────────
+
+const INFINITIVE_ACTIONS = [
+  ["choose to cancel the booking", ACTION_INTENT.CANCEL],
+  ["choose to archive the lead", ACTION_INTENT.CONFIRM],
+  ["select to delete the record", ACTION_INTENT.CONFIRM],
+  ["choose to update the lead", ACTION_INTENT.CONFIRM],
+];
+
+for (const [phrase, intent] of INFINITIVE_ACTIONS) {
+  test(`"${phrase}" chooses an action, not a value`, () => {
+    // The verb after "to" is the step's real intent. Read as a selection, the derivation invents a
+    // FIELD out of the verb ("archive", "delete") and the driver hunts for an option group named
+    // after it — which no correct application has. A CRM archive journey was undriveable on
+    // exactly this, while booking survived only because "cancel" sat in a hardcoded stop-word list.
+    assert.equal(has(phrase, "", ACTION_INTENT.SELECTION), false,
+      `derived: ${intents(phrase).join(", ")}`);
+    assert.equal(has(phrase, "", intent), true, `derived: ${intents(phrase).join(", ")}`);
+  });
+}
+
+test("a genuine chooser is still a selection", () => {
+  for (const phrase of ["choose a party size within the remaining seats", "select a delivery speed",
+    "choose an item count", "pick a lead source", "select a date with availability"]) {
+    assert.equal(has(phrase, "", ACTION_INTENT.SELECTION), true, `derived: ${intents(phrase).join(", ")}`);
+  }
+  // "to" that is not an infinitive marker for an action leaves the selection alone.
+  assert.equal(has("choose a slot to suit the party", "", ACTION_INTENT.SELECTION), true);
+});
+
+// ── the validity intent belongs to the field the action NAMES ──────────────────────────────────
+
+test("an invalid-value step makes ONLY the field it names invalid", () => {
+  // "enter an invalid contact email" derives contactEmail AND contactName — naming the contact
+  // pulls the whole group in. Stamping the invalid intent on both asks the application to reject
+  // an ordinary name, which no correct app can do and which the driver reports as
+  // validation_intent_unsupported. One contracted intent, one contracted field.
+  const contract = {
+    summary: "generic", projectType: "web app", version: 1, auth: { required: false },
+    routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "person", fields: [{ name: "contactName", type: "string" },
+      { name: "contactEmail", type: "string" }, { name: "notes", type: "string" }] }],
+    operations: [],
+    journeys: [{ id: "journey", title: "journey", priority: "primary", steps: [
+      { action: "enter an invalid contact email", target: "contact fields",
+        expect: "a validation message is shown and the continue control remains disabled" },
+      { action: "enter a valid contact email and required details", target: "contact fields",
+        expect: "the validation message clears" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const plan = buildInteractionContract(contract);
+  const validity = Object.fromEntries(plan.flows.filter((flow) => flow.kind === "input" && flow.stepIndex === 0)
+    .map((flow) => [flow.control.logicalField, flow.control.validity]));
+  assert.ok(Object.keys(validity).length > 1, `the step derives several fields: ${JSON.stringify(validity)}`);
+  assert.equal(validity.contactEmail, "invalid");
+  assert.equal(validity.contactName, "unspecified");
+});
+
+test("an invalid-value step that names no field keeps the intent on every field it derives", () => {
+  // The single-field case every earlier contract had: nothing to disambiguate, so nothing changes.
+  const contract = {
+    summary: "generic", projectType: "web app", version: 1, auth: { required: false },
+    routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "guest", fields: [{ name: "guestEmail", type: "string" }] }],
+    operations: [],
+    journeys: [{ id: "journey", title: "journey", priority: "primary", steps: [
+      { action: "enter an invalid email address", target: "email field",
+        expect: "a validation message is shown and the continue control remains disabled" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const plan = buildInteractionContract(contract);
+  const inputs = plan.flows.filter((flow) => flow.kind === "input");
+  assert.ok(inputs.length >= 1);
+  for (const flow of inputs) assert.equal(flow.control.validity, "invalid", flow.control.logicalField);
+});
+
 test("commencement and progression need a verb in verb position", () => {
   assert.equal(commencesSomething({ action: "start the booking flow", target: "start booking control" }), true);
   assert.equal(commencesSomething({ action: "begin checkout", target: "start checkout control" }), true);

@@ -151,6 +151,29 @@ export function inputValidity(step) {
   return "unspecified";
 }
 
+/**
+ * WHICH field the validity intent is about.
+ *
+ * A step contracts one intent but may contract several fields: "enter an invalid contact email"
+ * derives contactEmail AND contactName, because naming the contact pulls the whole contact group
+ * in. Stamping the invalid intent on both asks the application to reject a perfectly ordinary
+ * name — a demand no correct app can satisfy and one the driver reports as
+ * `validation_intent_unsupported`. The action already says which value it means, by naming it.
+ *
+ * When the action names none of the step's fields the intent stays with all of them, which is the
+ * single-field case every earlier contract had ("enter an invalid email address").
+ */
+function validityFor(step, field, fields) {
+  const validity = inputValidity(step);
+  if (validity === "unspecified" || !field) return validity;
+  const names = (candidate) => semanticAliases(candidate).map(normalized).filter(Boolean);
+  const action = normalized(step?.action);
+  const named = (fields || []).filter((candidate) => candidate
+    && names(candidate).some((alias) => action.includes(alias)));
+  if (!named.length || named.includes(field)) return validity;
+  return "unspecified";
+}
+
 function fieldCandidates(contract, text, kind) {
   const haystack = normalized(text);
   const allDeclared = (contract?.entities || []).flatMap((entity) => entity?.fields || []);
@@ -281,7 +304,7 @@ export function buildInteractionContract(contract, {
             stateOwner,
             statePath: writes[0] || null,
             validationOwner: kind === "input" ? stateOwner : null,
-            ...(kind === "input" ? { validity: inputValidity(step) } : {}),
+            ...(kind === "input" ? { validity: validityFor(step, field, fields) } : {}),
           });
           flows.push({
             id: `${journey.id}:${stepIndex + 1}:${kind}${field ? `:${normalized(field)}` : ""}`,
