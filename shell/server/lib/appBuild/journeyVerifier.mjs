@@ -105,6 +105,24 @@ async function firstVisible(locators, deadline) {
 
 // Plausible values for a field, chosen from its own label so validation is satisfied rather than
 // tripped — the point is to complete the journey, not to fuzz it.
+/**
+ * A value that VIOLATES the rule the field's own type states, or null when the contract gives no
+ * rule to violate.
+ *
+ * Only rules the platform can actually derive: an email must contain a local part, an @ and a
+ * domain; a number field must hold a number; a required field must be non-empty. Anything else —
+ * a phone format, a card rule, a domain-specific constraint — is NOT invented here. Returning
+ * null makes the step report an unsupported validation intent instead of typing rubbish and
+ * calling whatever happens next a verdict.
+ */
+export function invalidValueFor(label, inputTypes = []) {
+  const text = String(label || "").toLowerCase();
+  const types = (inputTypes || []).map((type) => String(type).toLowerCase());
+  if (types.includes("email") || /e-?mail/.test(text)) return "not-an-email";
+  if (types.includes("number") || types.includes("spinbutton")) return "not-a-number";
+  return null;
+}
+
 function valueFor(label, marker) {
   const text = String(label || "").toLowerCase();
   if (/e-?mail/.test(text)) return `journey+${marker}@thrallo.dev`;
@@ -238,7 +256,18 @@ async function fillContractedFields(page, flows, marker) {
       evidence.fields.push({ ...fieldEvidence, status: "not_editable", facts });
       continue;
     }
-    const value = valueFor(logicalField, marker);
+    // A contracted negative-validation step must enter something the application should REJECT.
+    // When no rule can be derived from the contract, the field is left alone and the step reports
+    // an unsupported intent rather than guessing at a rule the contract never stated.
+    let value = valueFor(logicalField, marker);
+    if (flow.control.validity === "invalid") {
+      value = invalidValueFor(logicalField, flow.control.inputTypes);
+      if (value === null) {
+        evidence.fields.push({ ...fieldEvidence, status: "validation_intent_unsupported",
+          detail: `the contract asks for an invalid ${logicalField} but states no rule to violate` });
+        continue;
+      }
+    }
     await field.fill(value, { timeout: 3_000 }).catch(() => {});
     const observedValue = await field.inputValue().catch(() => "");
     const status = observedValue === value ? "filled" : "value_not_accepted";
@@ -505,6 +534,12 @@ async function semanticControlVisible(page, control) {
 /** Which control the contract expects AFTER this one, by contracted order. */
 function nextContractedControl(journeyFlows, flow) {
   if (!flow) return null;
+  // A transition step carries no control of its own, so "next" is simply the first contracted
+  // control after it.
+  if (!flow.control) {
+    return (journeyFlows || []).filter((row) => row.control && row.stepIndex > flow.stepIndex)
+      .sort((a, b) => a.stepIndex - b.stepIndex)[0]?.control || null;
+  }
   return (journeyFlows || [])
     .filter((row) => row.control && row.stepIndex >= flow.stepIndex)
     .find((row) => semanticKey(row.control.logicalField || row.control.accessibleName)
@@ -636,6 +671,10 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
  */
 export function durableRecordKey(flow) {
   if (!flow) return null;
+  // The contract stamps ONE lifecycle identity on every flow that touches a durable record, so a
+  // confirmation owned by the booking system and the reload that recovers it — owned by the
+  // wizard — resolve to the same record instead of to their own step owners.
+  if (flow.durableLifecycle) return flow.durableLifecycle;
   const entity = [...(flow.writes || []), ...(flow.reads || [])]
     .map((path) => String(path).match(/\.durable\.(\w+)/)?.[1]).find(Boolean) || "record";
   return `${flow.capability || "unknown"}:${entity}`;
@@ -661,7 +700,11 @@ export function recoveryEvidenceVerdict(durable, textAfter) {
   const text = String(textAfter || "");
   if (!durable?.captured) return { checked: false };
   const missingValues = (durable.values || []).filter((value) => !text.includes(value));
-  const missingStatus = (durable.statusWords || []).filter((word) => !new RegExp(word, "i").test(text));
+  // Status vocabulary belongs to the screen that created the record, not to the record. A manage
+  // view legitimately says "Status Confirmed" without saying "confirmation screen" or "durable",
+  // so those words are only held against a recovery of the SAME screen.
+  const missingStatus = durable.sameSurface === false ? []
+    : (durable.statusWords || []).filter((word) => !new RegExp(word, "i").test(text));
   const references = durable.references || [];
   const survivingReference = references.find((reference) => text.includes(reference)) || null;
   if (references.length && !survivingReference) {
@@ -748,6 +791,35 @@ async function runStep(page, step, {
       }
       if (advances.length) result.evidence.flowAdvances = advances;
       controlEvidence = result.evidence;
+
+      // A contracted INVALID step must prove REJECTION, not merely complaint. An application that
+      // shows a validation message and then accepts the value anyway is broken, and passing it on
+      // the message alone would be exactly the kind of false green this verifier exists to stop.
+      // Generic: either the advance control refuses to act, or acting leaves the flow on the same
+      // contracted control. No specific HTML validation implementation is required.
+      const invalidFlow = contractedInputs.find((flow) => flow.control.validity === "invalid");
+      if (result.complete && invalidFlow) {
+        const stillHere = async () => semanticControlVisible(page, invalidFlow.control);
+        let blocked = null;
+        for (const role of DRIVEABLE_ACTION_ROLES) {
+          const control = page.getByRole(role, { name: ADVANCE_ACTION_PATTERN }).first();
+          if (!(await control.count().catch(() => 0))) continue;
+          if (!(await control.isVisible().catch(() => false))) continue;
+          if (await control.isDisabled().catch(() => false)) { blocked = "the advance control is disabled"; break; }
+          await control.click({ timeout: 5_000 }).catch(() => {});
+          await page.waitForTimeout(700);
+          blocked = (await stillHere())
+            ? "the flow stayed on this step when advance was attempted"
+            : null;
+          break;
+        }
+        // No advance control at all: the flow cannot progress from here, which is itself blocking.
+        if (blocked === null && !(await stillHere())) {
+          return { drove: true, status: "fail", controlEvidence,
+            detail: `the application accepted an invalid ${invalidFlow.control.logicalField} and advanced anyway` };
+        }
+        controlEvidence = { ...result.evidence, blockedProgression: blocked || "no advance control was offered" };
+      }
       enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
         .map((field) => ({ field: field.field, value: field.expectedValue })));
       drove = drove || result.filled.length > 0;
@@ -762,6 +834,37 @@ async function runStep(page, step, {
       drove = drove || filled.length > 0;
     }
     // inputsAreSelections: type nothing, and let the selection branch below drive the chooser.
+  }
+
+  // A contracted TRANSITION step. It writes nothing, so there is no value to prove — the whole
+  // claim is that the flow moved from one contracted state to the next. It may therefore activate
+  // only a control that names itself with the generic advance vocabulary, and it passes only if
+  // the control the CONTRACT names next becomes observable. Clicking Continue and landing
+  // anywhere else is a failure, not a pass, and no DOM change on its own counts.
+  if (!navigated && interactionFlows.some((flow) => flow.kind === "flow_advance")) {
+    const advanceFlowSpec = interactionFlows.find((flow) => flow.kind === "flow_advance");
+    const target = nextContractedControl(journeyFlows, advanceFlowSpec);
+    const advances = [];
+    for (let attempt = 0; attempt < MAX_FLOW_ADVANCES; attempt += 1) {
+      if (target && await semanticControlVisible(page, target)) break;
+      const advance = await advanceFlow(page);
+      advances.push(advance);
+      if (!advance.advanced) break;
+      drove = true;
+    }
+    const label = target ? (target.logicalField || target.accessibleName) : null;
+    const arrived = target ? await semanticControlVisible(page, target) : false;
+    if (!target) {
+      return { drove, status: "undriveable", controlEvidence: { flowAdvances: advances },
+        detail: "the contract names no control after this transition, so nothing proves the flow advanced" };
+    }
+    return {
+      drove, status: arrived ? "pass" : "fail",
+      detail: arrived
+        ? `the flow advanced to the contracted next state (${label})`
+        : `the flow did not reach the contracted next state (${label})`,
+      controlEvidence: { flowAdvances: advances, contractedNext: label },
+    };
   }
 
   // Selection steps: judged on the SEMANTIC transition (selection must move to the clicked
@@ -1012,8 +1115,16 @@ async function runStep(page, step, {
   // Evidence may have been created by an EARLIER contracted journey — the primary makes the
   // booking, the recovery journey proves that same record survived. The link is canonical
   // (capability + durable entity), never prose, so one entity's record cannot answer for another.
-  const recoveryFlow = interactionFlows.find((flow) => ["recovery", "lookup"].includes(flow.kind));
-  const evidence = (recoveryFlow && runEvidence.get(durableRecordKey(recoveryFlow))) || durable;
+  // A step that merely OPENS the lookup area is navigation, not recovery: the record cannot be on
+  // screen before it has been asked for, and judging it on durable evidence failed a correct app
+  // at its first step. Only a step that actually recovers or looks up is measured that way.
+  // Narrow: a ROUTE navigation only. A reload IS the recovery step and must stay semantic.
+  const openedARoute = Boolean(route) && /open|go to|navigate|visit/i.test(action);
+  const recoveryFlow = openedARoute ? null
+    : interactionFlows.find((flow) => ["recovery", "lookup"].includes(flow.kind));
+  const shared = recoveryFlow ? runEvidence.get(durableRecordKey(recoveryFlow)) : null;
+  // Evidence from ANOTHER journey is about the record, not about the screen that made it.
+  const evidence = durable.captured ? durable : (shared ? { ...shared, sameSurface: false } : durable);
   const recovers = Boolean(recoveryFlow);
   if (recovers && evidence.captured) {
     const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
@@ -1145,7 +1256,17 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
         outcome = await driveSelection(page, { action: `select ${label}`, expect: flow.observable || "" },
           flow, new Set(), journeyFlows);
       }
-      if (!outcome || outcome.status !== "pass") {
+      // SETUP is judged on arrival, not on presentation. A prerequisite selection only has to put
+      // the flow where the journey needs it; whether that screen also narrates the contracted
+      // outcome is the JOURNEY's business, and holding setup to it made a reachable state
+      // unreachable. The contracted next control being visible is the arrival proof.
+      // "Next" means the next PREREQUISITE in this chain, not the next flow of the journey under
+      // test — the chain belongs to the producing journey, so asking the consumer's flows resolves
+      // to nothing and a reachable state reads as unreachable.
+      const nextInChain = controls[controls.indexOf(flow) + 1]?.control || null;
+      const arrived = outcome?.status === "pass"
+        || (outcome && nextInChain && await semanticControlVisible(page, nextInChain));
+      if (!arrived) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind,
           reason: outcome ? outcome.detail : "the contracted control was not reachable" } };
       }
@@ -1213,16 +1334,27 @@ export async function verifyJourneys({
   try {
     const { chromium } = requireCjs("playwright");
     browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const context = await browser.newContext({ viewport });
-    const page = await context.newPage();
-
-    page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
-    page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
-    page.on("response", (r) => {
-      if (r.status() >= 400 && !r.url().includes("favicon")) {
-        failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
-      }
-    });
+    // A journey runs in the browser state its SCENARIO calls for. An independent journey gets a
+    // fresh context — a legitimate first-time visitor, nothing deleted and nothing fabricated —
+    // because inheriting a previous scenario's terminal wizard is not a property of the app under
+    // test. Journeys that depend on a durable record stay in the context that created it, so the
+    // app's own visitor identity (and therefore RLS) still resolves the record through the normal
+    // runtime; no privileged state is ever injected.
+    const contexts = [];
+    const openContext = async () => {
+      const created = await browser.newContext({ viewport });
+      const opened = await created.newPage();
+      opened.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
+      opened.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
+      opened.on("response", (r) => {
+        if (r.status() >= 400 && !r.url().includes("favicon")) {
+          failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
+        }
+      });
+      contexts.push(created);
+      return opened;
+    };
+    let page = await openContext();
 
     // Is the preview actually there? Without this, an unreachable URL leaves a blank page, every
     // expectation goes unmet, and the run reports confident journey failures for an app it never
@@ -1251,6 +1383,13 @@ export async function verifyJourneys({
       if (Date.now() > deadline) {
         results.push({ id: journey.id, title: journey.title, priority: journey.priority, status: "skipped", steps: [] });
         continue;
+      }
+      // Scenario isolation. An independent journey opens the app as a brand-new visitor would;
+      // a journey that depends on a durable record keeps the identity that created it.
+      const scenario = contract?.interactionContract?.scenarios?.[journey.id]
+        || { role: "independent", startState: "fresh" };
+      if (scenario.role === "independent" || (scenario.role === "produces" && journey.priority !== "primary")) {
+        page = await openContext();
       }
       // Every journey starts from a clean load of the app, not from wherever the last one ended.
       await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});

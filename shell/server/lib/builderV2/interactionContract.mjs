@@ -75,6 +75,26 @@ function entersFlow(step, { laterStepsDriveControls = false, writesOwnValue = fa
   return COMMENCEMENT_VERB.test(`${step?.action || ""} ${step?.target || ""}`);
 }
 
+/**
+ * Does this step ADVANCE an established flow without writing anything itself?
+ *
+ * "advance to the contact details step" derived NO flow at all: it writes no value, names no
+ * route, and "advance" appears in no verb list — so the contract never represented the one thing
+ * the step exists to do, and the driver fell through to keyword clicking. The same hole swallows
+ * "continue to payment", "proceed to shipping" and "move to review".
+ *
+ * Structural, exactly like flow entry: a progression verb is necessary but never sufficient. The
+ * step must write no contracted value, must not target a route, and the journey must go on to
+ * drive contracted controls — otherwise "continue" in ordinary prose would become an action.
+ */
+const PROGRESSION_VERB = /\b(advance|proceed|continue|move on|go on)\b/i;
+
+function advancesFlow(step, { laterStepsDriveControls = false, writesOwnValue = false } = {}) {
+  if (!laterStepsDriveControls || writesOwnValue) return false;
+  if (/^\s*\//.test(String(step?.target || ""))) return false;
+  return PROGRESSION_VERB.test(`${step?.action || ""} ${step?.target || ""}`);
+}
+
 function actionKinds(step, context = {}) {
   const text = `${step?.action || ""} ${step?.target || ""}`.toLowerCase();
   const kinds = [];
@@ -91,9 +111,31 @@ function actionKinds(step, context = {}) {
   if (entersFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls, writesOwnValue })) {
     return unique(["flow_start", ...kinds.filter((kind) => !["mutation", "navigation", "action"].includes(kind))]);
   }
+  // A pure transition step: it writes nothing, so it is only ever the movement between two
+  // contracted states. Checked before the loose navigation/action fallbacks, which would
+  // otherwise swallow it as an untyped click.
+  if (!kinds.length && advancesFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls })) {
+    return ["flow_advance"];
+  }
   if (!kinds.length && /\b(open|navigate|visit|go to)\b/.test(text)) kinds.push("navigation");
   if (!kinds.length && /\b(click|press|tap|continue|next|back|use)\b/.test(text)) kinds.push("action");
   return unique(kinds);
+}
+
+/**
+ * Does the ACTION ask for a deliberately invalid value?
+ *
+ * A contracted negative-validation step ("enter an invalid email address") could not be driven:
+ * value generation always produced a realistic, VALID value, so a correct application's validation
+ * never fired and the step failed the app for working. Intent is read from the action alone —
+ * never from the expectation, or every step mentioning a validation message would start entering
+ * rubbish.
+ */
+export function inputValidity(step) {
+  const action = String(step?.action || "");
+  if (/\binvalid\b/i.test(action)) return "invalid";
+  if (/\bvalid\b/i.test(action)) return "valid";
+  return "unspecified";
 }
 
 function fieldCandidates(contract, text, kind) {
@@ -210,6 +252,8 @@ export function buildInteractionContract(contract, {
           } else if (["recovery", "lookup"].includes(kind)) {
             reads.push(durableRecord || `${journey.id}.durable.reference`);
             writes.push(`${journey.id}.restored`);
+          } else if (kind === "flow_advance") {
+            writes.push(`${journey.id}.advanced`);
           } else if (kind === "flow_start") {
             writes.push(`${journey.id}.flowStarted`);
           } else if (kind === "cancellation") {
@@ -223,6 +267,7 @@ export function buildInteractionContract(contract, {
             stateOwner,
             statePath: writes[0] || null,
             validationOwner: kind === "input" ? stateOwner : null,
+            ...(kind === "input" ? { validity: inputValidity(step) } : {}),
           });
           flows.push({
             id: `${journey.id}:${stepIndex + 1}:${kind}${field ? `:${normalized(field)}` : ""}`,
@@ -254,7 +299,57 @@ export function buildInteractionContract(contract, {
       && candidate.stepIndex > flow.stepIndex
       && (candidate.reads || []).some((path) => (flow.writes || []).includes(path))).map((candidate) => candidate.id));
   }
-  const plan = { version: 1, flows };
+  // ── durable lifecycle identity ──────────────────────────────────────────────────────────────
+  //
+  // One durable record must have ONE identity across every journey that touches it. Keying by the
+  // capability that happens to own a STEP does not do that: a booking's confirmation is owned by
+  // makeBookingSystem while the reload that recovers it is owned by makeWizardMachine, so the
+  // journey that created the record and the journey that recovers it keyed to different things
+  // and cross-journey recovery silently fell back to keyword matching.
+  //
+  // The lifecycle is therefore named once, from the contract's durable owner and its entity, and
+  // stamped on every flow that reads or writes durable state. Unrelated entities cannot collide
+  // because they resolve to different owners/entities.
+  const durableEntity = durableOwner?.capability
+    ? ((contract?.entities || []).find((entity) => (bindings || [])
+      .some((binding) => binding.name === durableOwner.capability
+        && binding.configuration?.entity === entity?.name))?.name
+      || contract?.entities?.[0]?.name || "record")
+    : contract?.entities?.[0]?.name || "record";
+  const lifecycle = `${durableOwner?.capability || "durable"}:${durableEntity}`;
+  for (const flow of flows) {
+    const touchesDurable = [...(flow.reads || []), ...(flow.writes || [])]
+      .some((path) => /\.durable\./.test(String(path)));
+    if (touchesDurable) flow.durableLifecycle = lifecycle;
+  }
+
+  // ── journey scenarios ───────────────────────────────────────────────────────────────────────
+  //
+  // Independent journeys were being driven in whatever state a previous journey left behind —
+  // after a confirmed-then-cancelled booking, a validation journey could not even reach step one.
+  // Classification is canonical: a journey that WRITES durable state produces the record, one that
+  // only READS it depends on that record, and one that touches no durable state at all is
+  // independent and must start as a fresh visitor would.
+  const scenarios = {};
+  for (const journey of contract?.journeys || []) {
+    const own = flows.filter((flow) => flow.journeyId === journey.id);
+    // CREATION is what produces a record. "confirm cancellation" derives a mutation too — the
+    // verb is the same — but a journey that also cancels, looks up or recovers is acting on a
+    // record it did not create, so depending wins over producing.
+    const dependsOnExisting = own.some((flow) => flow.durableLifecycle
+      && ["cancellation", "lookup", "recovery"].includes(flow.kind));
+    const produces = !dependsOnExisting
+      && own.some((flow) => flow.durableLifecycle && flow.kind === "mutation");
+    const consumes = own.some((flow) => flow.durableLifecycle
+      && (flow.reads || []).some((path) => /\.durable\./.test(String(path))));
+    scenarios[journey.id] = produces
+      ? { scenario: lifecycle, role: "produces", startState: "fresh", lifecycle }
+      : consumes
+        ? { scenario: lifecycle, role: "consumes", startState: "inherits", lifecycle }
+        : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null };
+  }
+
+  const plan = { version: 1, flows, scenarios };
   const verdict = validateInteractionContract(plan);
   return { ...plan, valid: verdict.ok, problems: verdict.problems };
 }

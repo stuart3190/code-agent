@@ -154,7 +154,7 @@ export function Flow() {
         {slotsFor(values.dateId).map((s) => (
           <button key={s.value} {...slot.optionProps(s.value, "slot Id " + s.label)}>
             <span style={{ display: "block" }}>Slot Id {s.label}</span>
-            <span style={{ display: "block" }}>{s.seats} remaining seats</span>
+            <span style={{ display: "block" }}>Slot card displays its remaining seat count: {s.seats} seats</span>
           </button>
         ))}
       </div>
@@ -199,8 +199,13 @@ export function Flow() {
 function Manage() {
   const [reference, setReference] = useState("");
   const [email, setEmail] = useState("");
+  // A visitor who has a booking sees it when they open Manage. Requiring a previous journey to
+  // have performed the lookup made one contracted journey depend on another having just run.
   const [found, setFound] = useState(() => {
-    try { return JSON.parse(sessionStorage.getItem("thrallo-fixture-found") || "null"); } catch { return null; }
+    try {
+      const remembered = JSON.parse(sessionStorage.getItem("thrallo-fixture-found") || "null");
+      return remembered || bookingStore.all()[0] || null;
+    } catch { return null; }
   });
   const [prompt, setPrompt] = useState(false);
   const referenceField = useSemanticField({ name: "bookingReference", value: reference, onChange: setReference });
@@ -229,7 +234,8 @@ function Manage() {
     <div><button type="button" onClick={lookup}>Look up booking</button></div>
     {found ? <section>
       <p>The booking details are displayed. Status {found.status}. Reference {found.reference}.</p>
-      <p>{found.guestName} · {found.guestEmail} · party of {String(found.partySize)}</p>
+      <p>{found.guestName} · {found.guestEmail} · {found.guestPhone} · {found.dietaryNote} · party of {String(found.partySize)}</p>
+      <p>Date {found.dateId} · slot {found.slotId}</p>
       {found.status === "Cancelled"
         ? <p>This booking reloads into an explicit Cancelled state with no active cancel control.</p>
         : <div><button type="button" onClick={() => setPrompt(true)}>Cancel booking</button></div>}
