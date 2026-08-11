@@ -51,7 +51,31 @@ const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
-function actionKinds(step) {
+/**
+ * Does this step ENTER a multi-step flow?
+ *
+ * A live contract derived no flow at all for "start the booking flow": the mutation test matched
+ * `\bbook\b`, "booking" is not "book", and nothing else applied. Two secondary journeys were then
+ * unreachable because the contract never said how the flow is entered. Adding "booking" to a word
+ * list would fix that one prose and leave "begin checkout", "create an order", "open onboarding"
+ * and "start a return" just as broken.
+ *
+ * Flow entry is therefore recognised STRUCTURALLY. A commencement verb is necessary but never
+ * sufficient: the step must also write no contracted value of its own, and the journey must go on
+ * to drive contracted controls. That is what distinguishes "begin checkout" (an entry action, with
+ * a flow behind it) from "the created order is displayed" (prose, with nothing behind it).
+ */
+const COMMENCEMENT_VERB = /\b(start|begin|open|launch|create|initiate|enter)\s+(a|an|the|new|my|your)?\s*[a-z]/i;
+
+function entersFlow(step, { laterStepsDriveControls = false, writesOwnValue = false } = {}) {
+  if (!laterStepsDriveControls || writesOwnValue) return false;
+  // A step whose target is a ROUTE is navigation — "open the booking application (/)" loads a
+  // page, it does not press the control that begins the flow.
+  if (/^\s*\//.test(String(step?.target || ""))) return false;
+  return COMMENCEMENT_VERB.test(`${step?.action || ""} ${step?.target || ""}`);
+}
+
+function actionKinds(step, context = {}) {
   const text = `${step?.action || ""} ${step?.target || ""}`.toLowerCase();
   const kinds = [];
   if (/\b(select|choose|pick)\b/.test(text)) kinds.push("selection");
@@ -61,6 +85,12 @@ function actionKinds(step) {
   if (/\b(reload|refresh|recover|restore|sign[ -]?in)\b/.test(text)) kinds.push("recovery");
   if (/\b(look ?up|find|search)\b/.test(text)) kinds.push("lookup");
   if (/\bcancel\b/.test(text)) kinds.push("cancellation");
+  // Flow entry outranks the mutation reading of the same verb: "create an order" that is followed
+  // by the steps which fill the order is the door, not the commit.
+  const writesOwnValue = kinds.includes("selection") || kinds.includes("input");
+  if (entersFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls, writesOwnValue })) {
+    return unique(["flow_start", ...kinds.filter((kind) => !["mutation", "navigation", "action"].includes(kind))]);
+  }
   if (!kinds.length && /\b(open|navigate|visit|go to)\b/.test(text)) kinds.push("navigation");
   if (!kinds.length && /\b(click|press|tap|continue|next|back|use)\b/.test(text)) kinds.push("action");
   return unique(kinds);
@@ -116,7 +146,7 @@ function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null
   if (["mutation", "cancellation", "lookup"].includes(kind)) {
     return unique([byFactory(durableOwner?.factory), visual]);
   }
-  if (["selection", "input", "review", "recovery", "action"].includes(kind)) {
+  if (["selection", "input", "review", "recovery", "action", "flow_start"].includes(kind)) {
     return unique([byFactory(draftOwner?.factory), visual]);
   }
   return unique([visual]);
@@ -133,6 +163,10 @@ function controlRequirement(kind, field, step) {
   }
   if (kind === "selection") return { purpose: name, roles: ["button", "radio", "option", "combobox"],
     logicalField: field || name, accessibleName: fieldAliases(name)[0], accessibleNames: fieldAliases(name), selectedState: true };
+  if (kind === "flow_start") {
+    return { purpose: name, roles: ["button", "link"], flowEntry: true,
+      accessibleName: String(step?.target || step?.action || name) };
+  }
   if (["mutation", "cancellation", "lookup", "action"].includes(kind)) {
     return { purpose: name, roles: ["button"], accessibleName: String(step?.target || step?.action || name) };
   }
@@ -150,8 +184,14 @@ export function buildInteractionContract(contract, {
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
     let durableRecord = null;
-    for (const [stepIndex, step] of (journey.steps || []).entries()) {
-      const kinds = actionKinds(step);
+    // Flow entry is a structural claim: a commencement verb only enters a flow if the journey
+    // actually goes on to drive contracted controls.
+    const stepsList = journey.steps || [];
+    const drivesControls = (from) => stepsList.slice(from).some((later) => (
+      /\b(select|choose|pick|enter|type|fill|provide|complete)\b/i.test(`${later?.action || ""} ${later?.target || ""}`)
+    ));
+    for (const [stepIndex, step] of stepsList.entries()) {
+      const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
       for (const kind of kinds) {
         const fields = ["selection", "input"].includes(kind)
           ? fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind) : [null];
@@ -170,6 +210,8 @@ export function buildInteractionContract(contract, {
           } else if (["recovery", "lookup"].includes(kind)) {
             reads.push(durableRecord || `${journey.id}.durable.reference`);
             writes.push(`${journey.id}.restored`);
+          } else if (kind === "flow_start") {
+            writes.push(`${journey.id}.flowStarted`);
           } else if (kind === "cancellation") {
             reads.push(durableRecord || `${journey.id}.durable.reference`);
             writes.push(`${journey.id}.durable.status`);

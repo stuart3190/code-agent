@@ -628,6 +628,19 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
 // them. Nothing here is booking-specific: references are whatever reference-shaped tokens the app
 // itself printed, values are the exact ones this journey entered and selected.
 
+/**
+ * Which durable record a flow is about, from the canonical build spec — the capability that owns
+ * the operation and the entity it writes. Never prose. Two journeys share evidence only when the
+ * contract says they act on the same durable thing, so a lead's record can never satisfy an
+ * order's recovery.
+ */
+export function durableRecordKey(flow) {
+  if (!flow) return null;
+  const entity = [...(flow.writes || []), ...(flow.reads || [])]
+    .map((path) => String(path).match(/\.durable\.(\w+)/)?.[1]).find(Boolean) || "record";
+  return `${flow.capability || "unknown"}:${entity}`;
+}
+
 const REFERENCE_TOKEN = /\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,}\b/g;
 
 async function captureDurableEvidence(page, { enteredValues, selections, expect }) {
@@ -672,7 +685,7 @@ export function recoveryEvidenceVerdict(durable, textAfter) {
 
 async function runStep(page, step, {
   marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
-  writtenPaths = new Set(), durable = { captured: false },
+  writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
@@ -996,17 +1009,26 @@ async function runStep(page, step, {
   // A recovery or lookup step is judged on DURABLE STATE, never on whether the page narrates
   // itself. The evidence was captured when the mutation succeeded; if it survived, the step
   // passed however the app words it, and if it did not, no vocabulary can rescue it.
-  const recovers = interactionFlows.some((flow) => ["recovery", "lookup"].includes(flow.kind));
-  if (recovers && durable.captured) {
+  // Evidence may have been created by an EARLIER contracted journey — the primary makes the
+  // booking, the recovery journey proves that same record survived. The link is canonical
+  // (capability + durable entity), never prose, so one entity's record cannot answer for another.
+  const recoveryFlow = interactionFlows.find((flow) => ["recovery", "lookup"].includes(flow.kind));
+  const evidence = (recoveryFlow && runEvidence.get(durableRecordKey(recoveryFlow))) || durable;
+  const recovers = Boolean(recoveryFlow);
+  if (recovers && evidence.captured) {
     const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    const verdict = recoveryEvidenceVerdict(durable, textAfter);
+    const verdict = recoveryEvidenceVerdict(evidence, textAfter);
     if (verdict.checked) {
       return { ...outcome, status: verdict.ok ? "pass" : "fail", detail: verdict.detail,
-        controlEvidence: { ...(controlEvidence || {}), durable } };
+        controlEvidence: { ...(controlEvidence || {}), durable: evidence } };
     }
   }
-  if (outcome.status === "pass" && interactionFlows.some((flow) => flow.kind === "mutation")) {
+  const mutationFlow = interactionFlows.find((flow) => flow.kind === "mutation");
+  if (outcome.status === "pass" && mutationFlow) {
     Object.assign(durable, await captureDurableEvidence(page, { enteredValues, selections, expect }));
+    // Run-scoped and canonically keyed, so a later contracted journey can prove this same record
+    // survived. It never outlives one verifyJourneys call, so nothing crosses a build or a user.
+    runEvidence.set(durableRecordKey(mutationFlow), { ...durable });
   }
   return controlEvidence ? { ...outcome, controlEvidence } : outcome;
 }
@@ -1145,7 +1167,13 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
     // A mutation/action control ("start booking control") — driven by its contracted accessible
     // name only, never by a keyword sweep, so an unrelated button can never stand in for it.
     let clicked = false;
-    for (const alias of controlAliases(flow.control)) {
+    // A contract names controls descriptively — "start booking control", "Confirm booking
+    // control" — while the button itself is labelled "Start booking". The generic control nouns
+    // are stripped as a second attempt, so the description still resolves to the real control
+    // without matching on prose.
+    const aliases = unique(controlAliases(flow.control).flatMap((alias) => [alias,
+      String(alias).replace(/\b(control|button|link|action)\b/gi, "").replace(/\s+/g, " ").trim()]));
+    for (const alias of aliases) {
       for (const role of DRIVEABLE_ACTION_ROLES) {
         const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
         if (!(await candidate.count().catch(() => 0))) continue;
@@ -1211,6 +1239,9 @@ export async function verifyJourneys({
     }
 
     const deadline = Date.now() + timeoutMs;
+    // Durable evidence for the WHOLE run: what each contracted journey created, so a later
+    // journey that depends on that record can prove it survived.
+    const runEvidence = new Map();
     // Primary first: if the run is going to time out, it should time out having proved the thing
     // that actually gates the preview.
     const ordered = [...(contract?.journeys || [])]
@@ -1269,7 +1300,7 @@ export async function verifyJourneys({
         }
         const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
         const outcome = await runStep(page, step, {
-          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable,
+          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));

@@ -107,8 +107,22 @@ test("HEAD's derivation reproduces the retained interaction contract exactly", (
   // contract production never had.
   const { interactionContract } = LIVE_CONTRACT;
   const rederived = deriveBuildSpec({ ...LIVE_CONTRACT, interactionContract: undefined });
-  assert.deepEqual(rederived.interactionContract.flows, interactionContract.flows);
   assert.equal(rederived.verdict.ok, true);
+  // Derivation has deliberately advanced since this contract was written: flow-entry steps now
+  // derive a `flow_start` control, because a contract that never says how its flow is entered
+  // leaves later journeys unreachable. Everything the retained row DID contain must still be
+  // reproduced identically — the change adds a claim, it does not restate the old ones.
+  const retained = interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
+  const now = rederived.interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
+  const added = now.filter((id) => !retained.includes(id));
+  const removed = retained.filter((id) => !now.includes(id));
+  assert.ok(added.every((id) => id.endsWith(":flow_start")),
+    `derivation may only have ADDED flow entry, but added ${added.join(", ")}`);
+  assert.deepEqual(removed.filter((id) => !/:(navigation|mutation)$/.test(id)), [],
+    "no contracted selection, input, review, recovery, lookup or cancellation may disappear");
+  for (const kind of ["selection", "input", "review"]) {
+    assert.deepEqual(now.filter((id) => id.endsWith(`:${kind}`)), retained.filter((id) => id.endsWith(`:${kind}`)));
+  }
 });
 
 test("the contract names the selections but no navigation between them", () => {

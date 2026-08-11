@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { verifyJourneys } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { buildTree, ensureDeps, workDirFor } from "../../harness/workspace.mjs";
@@ -32,7 +33,9 @@ const needsBrowser = { skip: playwrightAvailable ? false : "requires playwright"
 
 const RUN5 = JSON.parse(await readFile(
   path.join(HERE, "fixtures", "live-booking-2026-08-10T2220Z-run5.json"), "utf8"));
-const CONTRACT = RUN5.contract;
+// Re-derived with the CURRENT production derivation: the retained row embeds the interaction
+// contract as it was on the day, and this harness exists to test what derivation does now.
+const CONTRACT = deriveBuildSpec({ ...RUN5.contract, interactionContract: undefined }).contract;
 const CASE = "bv2-retained-flow-replay";
 
 let server = null;
