@@ -561,6 +561,29 @@ async function expectationBecameVisible(page, expect, textBefore) {
   return { met: found.length / wanted.length >= 0.5 && fresh.length > 0, found, fresh, wanted };
 }
 
+/**
+ * Activate a control the contract names, by its own declared identity.
+ *
+ * Contracts describe controls ("start checkout control", "Confirm order control") while the button
+ * is labelled "Start checkout" — so the generic control nouns are stripped as a second attempt.
+ * Shared by flow entry and prerequisite setup so both resolve a description the same way, and
+ * neither ever falls back to prose.
+ */
+async function activateContractedControl(page, control) {
+  const aliases = unique(controlAliases(control).flatMap((alias) => [alias,
+    String(alias).replace(/\b(control|button|link|action)\b/gi, "").replace(/\s+/g, " ").trim()]));
+  for (const alias of aliases) {
+    for (const role of DRIVEABLE_ACTION_ROLES) {
+      const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
+      if (!(await candidate.count().catch(() => 0))) continue;
+      if (!(await candidate.isVisible().catch(() => false))) continue;
+      await candidate.click({ timeout: 5_000 }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
 async function advanceFlow(page) {
   const before = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   for (const role of DRIVEABLE_ACTION_ROLES) {
@@ -734,6 +757,9 @@ async function runStep(page, step, {
   const action = String(step.action || "");
   const expect = String(step.expect || "");
   let drove = false;
+  // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
+  // path never adds a second action on top of it.
+  let contractDriven = false;
 
   // What was already on screen BEFORE this step. A word that was visible beforehand is no evidence
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
@@ -834,6 +860,30 @@ async function runStep(page, step, {
       drove = drove || filled.length > 0;
     }
     // inputsAreSelections: type nothing, and let the selection branch below drive the chooser.
+  }
+
+  // A contracted FLOW ENTRY step. The contract names the control that opens the flow, so it is
+  // activated by that identity — never by hoping the action prose contains a click verb. It only
+  // worked for "start the booking flow" because "booking" happens to contain "book"; "begin
+  // checkout" contains no verb the generic path recognises and the step was undriveable.
+  if (!navigated && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
+    const entry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control);
+    const activated = await activateContractedControl(page, entry.control);
+    drove = drove || activated;
+    if (!activated) {
+      return { drove, status: "undriveable",
+        detail: `the contracted flow-entry control was not offered (${entry.control.accessibleName})`,
+        controlEvidence: { contractedField: entry.control.accessibleName } };
+    }
+    await page.waitForTimeout(700);
+    // The contract named the control for this step, so the search for one is OVER. Falling through
+    // let the generic click path fire a SECOND action on the same step: "start the booking flow"
+    // matches the loose /book/ verb test, whose candidates include a link named "Look up booking",
+    // and the driver navigated out of the flow it had just opened. One contracted action kind
+    // drives at most one semantic action — only bounded multi-stage kinds like flow_advance may
+    // act more than once. The expectation below still decides the verdict; activation alone
+    // never passes a step.
+    contractDriven = true;
   }
 
   // A contracted TRANSITION step. It writes nothing, so there is no value to prove — the whole
@@ -945,7 +995,7 @@ async function runStep(page, step, {
 
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
-  if (!navigated && !droveStepper && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use/i.test(action)) {
+  if (!navigated && !droveStepper && !contractDriven && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use/i.test(action)) {
     // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
     // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
     // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"

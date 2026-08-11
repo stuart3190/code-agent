@@ -333,13 +333,36 @@ export function buildInteractionContract(contract, {
   const scenarios = {};
   for (const journey of contract?.journeys || []) {
     const own = flows.filter((flow) => flow.journeyId === journey.id);
-    // CREATION is what produces a record. "confirm cancellation" derives a mutation too — the
-    // verb is the same — but a journey that also cancels, looks up or recovers is acting on a
-    // record it did not create, so depending wins over producing.
-    const dependsOnExisting = own.some((flow) => flow.durableLifecycle
-      && ["cancellation", "lookup", "recovery"].includes(flow.kind));
-    const produces = !dependsOnExisting
-      && own.some((flow) => flow.durableLifecycle && flow.kind === "mutation");
+    // OWNERSHIP FROM THE DATA-FLOW GRAPH, never from verbs.
+    //
+    // Two verb-based attempts failed in opposite directions, both because natural-language tests
+    // are inflection-sensitive: `\bbook\b` does not match "booking" and `\bcancel\b` does not
+    // match "cancellation", so "confirm cancellation" derives a bare mutation indistinguishable
+    // from a real creation. Demoting on any recovery then made the journey that creates a record
+    // and reloads it a consumer; not demoting made every cancellation journey a producer.
+    //
+    // The graph already knows. You CREATE a record by supplying its contents: the creating
+    // mutation is fed by draft values this same journey gathered, and those values name the
+    // lifecycle entity's own declared fields. A cancellation's mutation reads a draft too, but it
+    // is an identifier the derivation invented from prose ("draft.order"), not a declared field —
+    // so it fails cleanly with no vocabulary involved.
+    const entityFields = new Set((contract?.entities || [])
+      .flatMap((entity) => (entity?.fields || []).map((field) => String(field?.name || ""))).filter(Boolean));
+    // Identity and lifecycle metadata are not record CONTENTS: knowing which record you mean is
+    // not the same as supplying what it contains, so a journey that reads only a reference or a
+    // status is operating on something that already exists.
+    const identityField = (name) => /^(id|reference|status)$/i.test(name)
+      || /^(created|updated|cancelled|archived)_?at$/i.test(name)
+      || (contract?.entities || []).some((entity) => new RegExp(`^${entity?.name}_?id$`, "i").test(name));
+    const ownDraftPaths = new Set(own.flatMap((flow) => (flow.writes || [])
+      .filter((path) => /\.draft\./.test(String(path)))));
+    const suppliesRecordContents = (flow) => (flow.reads || []).some((path) => {
+      if (!ownDraftPaths.has(path)) return false;
+      const field = String(path).split(".draft.")[1];
+      return Boolean(field) && entityFields.has(field) && !identityField(field);
+    });
+    const produces = own.some((flow) => flow.durableLifecycle && flow.kind === "mutation"
+      && suppliesRecordContents(flow));
     const consumes = own.some((flow) => flow.durableLifecycle
       && (flow.reads || []).some((path) => /\.durable\./.test(String(path))));
     scenarios[journey.id] = produces
