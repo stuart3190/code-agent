@@ -5,10 +5,14 @@
 
 import { parse } from "@babel/parser";
 
+import {
+  ACTION_INTENT, actionIntents, commencesSomething, progressesSomething,
+} from "./actionIntent.mjs";
 import { aggregateCapabilityFacts, FACTORY_METHODS } from "./capabilityLint.mjs";
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
 import { bindCapabilities, deriveModulePlan } from "./contractTiering.mjs";
 import { IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey } from "./controlIdentity.mjs";
+import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
 
 // A method name that changes a durable record. Domain-neutral vocabulary: it reads the
 // registry's real interfaces rather than naming any application's capability.
@@ -64,15 +68,16 @@ const unique = (values) => [...new Set(values.filter(Boolean))];
  * sufficient: the step must also write no contracted value of its own, and the journey must go on
  * to drive contracted controls. That is what distinguishes "begin checkout" (an entry action, with
  * a flow behind it) from "the created order is displayed" (prose, with nothing behind it).
+ *
+ * The language half of that test — is a commencement verb even present, in any inflection — is
+ * canonical (actionIntent.mjs); only the structure is decided here.
  */
-const COMMENCEMENT_VERB = /\b(start|begin|open|launch|create|initiate|enter)\s+(a|an|the|new|my|your)?\s*[a-z]/i;
-
 function entersFlow(step, { laterStepsDriveControls = false, writesOwnValue = false } = {}) {
   if (!laterStepsDriveControls || writesOwnValue) return false;
   // A step whose target is a ROUTE is navigation — "open the booking application (/)" loads a
   // page, it does not press the control that begins the flow.
   if (/^\s*\//.test(String(step?.target || ""))) return false;
-  return COMMENCEMENT_VERB.test(`${step?.action || ""} ${step?.target || ""}`);
+  return commencesSomething(step);
 }
 
 /**
@@ -87,24 +92,32 @@ function entersFlow(step, { laterStepsDriveControls = false, writesOwnValue = fa
  * step must write no contracted value, must not target a route, and the journey must go on to
  * drive contracted controls — otherwise "continue" in ordinary prose would become an action.
  */
-const PROGRESSION_VERB = /\b(advance|proceed|continue|move on|go on)\b/i;
-
 function advancesFlow(step, { laterStepsDriveControls = false, writesOwnValue = false } = {}) {
   if (!laterStepsDriveControls || writesOwnValue) return false;
   if (/^\s*\//.test(String(step?.target || ""))) return false;
-  return PROGRESSION_VERB.test(`${step?.action || ""} ${step?.target || ""}`);
+  return progressesSomething(step);
 }
 
+/**
+ * The contracted interaction kinds of one step, from its CANONICAL intents.
+ *
+ * Every language decision here comes from actionIntent.mjs, so "booking", "cancellation",
+ * "confirmation", "recovery" and "advancing" are understood as the same intents as their bare
+ * stems, and a record noun in ordinary prose is understood as neither.
+ */
 function actionKinds(step, context = {}) {
-  const text = `${step?.action || ""} ${step?.target || ""}`.toLowerCase();
+  const intents = actionIntents(step);
   const kinds = [];
-  if (/\b(select|choose|pick)\b/.test(text)) kinds.push("selection");
-  if (/\b(enter|type|fill|provide|complete)\b/.test(text)) kinds.push("input");
-  if (/\b(review|summary)\b/.test(text)) kinds.push("review");
-  if (/\b(confirm|submit|book|reserve|create)\b/.test(text)) kinds.push("mutation");
-  if (/\b(reload|refresh|recover|restore|sign[ -]?in)\b/.test(text)) kinds.push("recovery");
-  if (/\b(look ?up|find|search)\b/.test(text)) kinds.push("lookup");
-  if (/\bcancel\b/.test(text)) kinds.push("cancellation");
+  if (intents.has(ACTION_INTENT.SELECTION)) kinds.push("selection");
+  if (intents.has(ACTION_INTENT.INPUT)) kinds.push("input");
+  if (intents.has(ACTION_INTENT.REVIEW)) kinds.push("review");
+  if (intents.has(ACTION_INTENT.CONFIRM)) kinds.push("mutation");
+  if (intents.has(ACTION_INTENT.RECOVER)) kinds.push("recovery");
+  if (intents.has(ACTION_INTENT.LOOKUP)) kinds.push("lookup");
+  // A cancellation is its own durable transition. It rides ALONGSIDE the commit rather than
+  // replacing it: "confirm cancellation" both presses a commit control and cancels the record,
+  // and dropping either half loses a real contracted fact.
+  if (intents.has(ACTION_INTENT.CANCEL)) kinds.push("cancellation");
   // Flow entry outranks the mutation reading of the same verb: "create an order" that is followed
   // by the steps which fill the order is the door, not the commit.
   const writesOwnValue = kinds.includes("selection") || kinds.includes("input");
@@ -117,8 +130,8 @@ function actionKinds(step, context = {}) {
   if (!kinds.length && advancesFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls })) {
     return ["flow_advance"];
   }
-  if (!kinds.length && /\b(open|navigate|visit|go to)\b/.test(text)) kinds.push("navigation");
-  if (!kinds.length && /\b(click|press|tap|continue|next|back|use)\b/.test(text)) kinds.push("action");
+  if (!kinds.length && intents.has(ACTION_INTENT.NAVIGATE)) kinds.push("navigation");
+  if (!kinds.length && intents.has(ACTION_INTENT.ACTIVATE)) kinds.push("action");
   return unique(kinds);
 }
 
@@ -229,9 +242,10 @@ export function buildInteractionContract(contract, {
     // Flow entry is a structural claim: a commencement verb only enters a flow if the journey
     // actually goes on to drive contracted controls.
     const stepsList = journey.steps || [];
-    const drivesControls = (from) => stepsList.slice(from).some((later) => (
-      /\b(select|choose|pick|enter|type|fill|provide|complete)\b/i.test(`${later?.action || ""} ${later?.target || ""}`)
-    ));
+    const drivesControls = (from) => stepsList.slice(from).some((later) => {
+      const intents = actionIntents(later);
+      return intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
+    });
     for (const [stepIndex, step] of stepsList.entries()) {
       const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
       for (const kind of kinds) {
@@ -327,25 +341,28 @@ export function buildInteractionContract(contract, {
   //
   // Independent journeys were being driven in whatever state a previous journey left behind —
   // after a confirmed-then-cancelled booking, a validation journey could not even reach step one.
-  // Classification is canonical: a journey that WRITES durable state produces the record, one that
-  // only READS it depends on that record, and one that touches no durable state at all is
-  // independent and must start as a fresh visitor would.
+  //
+  // LIFECYCLE FIRST, GRAPH SECOND, LANGUAGE NEVER.
+  //
+  // The question is which of three things this journey does to a durable record: CREATE it, UPDATE
+  // an existing one, or CANCEL/ARCHIVE an existing one. Two verb-based attempts answered it in
+  // opposite directions and both failed, because natural-language tests are inflection-sensitive:
+  // `\bbook\b` does not match "booking" and `\bcancel\b` does not match "cancellation".
+  //
+  // The contract's DECLARED operations answer it exactly (lifecycleOperations.mjs): a journey whose
+  // operation kind is `create` produces the record; `update`, `delete` and `read` all act on a
+  // record that already exists. That is what makes generic case H — an existing record reference
+  // plus substantive edited fields plus UPDATE — a consumer rather than a producer, which no
+  // amount of field-overlap analysis could decide, because an edit legitimately supplies the same
+  // declared fields a creation does.
+  //
+  // The data-flow graph remains the fallback for a contract that declares no operation for a
+  // journey: you CREATE a record by supplying its contents (draft values this same journey
+  // gathered, naming the entity's own declared fields) WITHOUT first locating a record to act on.
+  // A journey that looks one up or recovers one before committing is editing, not creating.
   const scenarios = {};
   for (const journey of contract?.journeys || []) {
     const own = flows.filter((flow) => flow.journeyId === journey.id);
-    // OWNERSHIP FROM THE DATA-FLOW GRAPH, never from verbs.
-    //
-    // Two verb-based attempts failed in opposite directions, both because natural-language tests
-    // are inflection-sensitive: `\bbook\b` does not match "booking" and `\bcancel\b` does not
-    // match "cancellation", so "confirm cancellation" derives a bare mutation indistinguishable
-    // from a real creation. Demoting on any recovery then made the journey that creates a record
-    // and reloads it a consumer; not demoting made every cancellation journey a producer.
-    //
-    // The graph already knows. You CREATE a record by supplying its contents: the creating
-    // mutation is fed by draft values this same journey gathered, and those values name the
-    // lifecycle entity's own declared fields. A cancellation's mutation reads a draft too, but it
-    // is an identifier the derivation invented from prose ("draft.order"), not a declared field —
-    // so it fails cleanly with no vocabulary involved.
     const entityFields = new Set((contract?.entities || [])
       .flatMap((entity) => (entity?.fields || []).map((field) => String(field?.name || ""))).filter(Boolean));
     // Identity and lifecycle metadata are not record CONTENTS: knowing which record you mean is
@@ -356,20 +373,46 @@ export function buildInteractionContract(contract, {
       || (contract?.entities || []).some((entity) => new RegExp(`^${entity?.name}_?id$`, "i").test(name));
     const ownDraftPaths = new Set(own.flatMap((flow) => (flow.writes || [])
       .filter((path) => /\.draft\./.test(String(path)))));
-    const suppliesRecordContents = (flow) => (flow.reads || []).some((path) => {
-      if (!ownDraftPaths.has(path)) return false;
-      const field = String(path).split(".draft.")[1];
-      return Boolean(field) && entityFields.has(field) && !identityField(field);
-    });
-    const produces = own.some((flow) => flow.durableLifecycle && flow.kind === "mutation"
-      && suppliesRecordContents(flow));
-    const consumes = own.some((flow) => flow.durableLifecycle
-      && (flow.reads || []).some((path) => /\.durable\./.test(String(path))));
+    const draftFieldsRead = (flow) => (flow.reads || [])
+      .filter((path) => ownDraftPaths.has(path))
+      .map((path) => String(path).split(".draft.")[1])
+      .filter(Boolean);
+    const suppliesRecordContents = (flow) => draftFieldsRead(flow)
+      .some((field) => entityFields.has(field) && !identityField(field));
+    const readsDurable = (flow) => (flow.reads || []).some((path) => /\.durable\./.test(String(path)));
+
+    const commits = own.filter((flow) => flow.durableLifecycle && flow.kind === "mutation");
+    const firstCommit = commits.length ? Math.min(...commits.map((flow) => flow.stepIndex)) : Infinity;
+    // Locating a record BEFORE committing means the record already existed, so the commit is an
+    // edit however much of the record's contents it supplies. Ordered, which is what keeps generic
+    // case E — create, then update the record it just created, then reload — a producer.
+    //
+    // A journey that is HANDED an existing record's identity without a lookup step cannot be told
+    // apart structurally: field derivation legitimately writes a draft for an entity's id field
+    // from prose that merely names the entity ("select a lead source" → draft.leadId), so treating
+    // an identity draft as proof of an existing record turns every creation into a consumer. That
+    // shape is exactly what declared operations resolve, and it is the reason they are consulted
+    // first rather than as a tie-breaker.
+    const actsOnExistingRecord = own.some((flow) => flow.durableLifecycle
+      && ["lookup", "recovery", "cancellation"].includes(flow.kind)
+      && flow.stepIndex < firstCommit && readsDurable(flow));
+
+    const touchesDurable = own.some((flow) => flow.durableLifecycle);
+    const declared = declaredLifecycleRole(contract, journey, { entity: durableEntity });
+    const produces = touchesDurable && (declared
+      ? declared === "creates"
+      : commits.some(suppliesRecordContents) && !actsOnExistingRecord);
+    // Depending on a record it did not create: it READS durable state, or the contract declares
+    // that its operation acts on an existing record.
+    const consumes = !produces && touchesDurable
+      && (own.some((flow) => flow.durableLifecycle && readsDurable(flow)) || declared === "existing");
+    const basis = declared ? "declared-operation" : "data-flow";
     scenarios[journey.id] = produces
-      ? { scenario: lifecycle, role: "produces", startState: "fresh", lifecycle }
+      ? { scenario: lifecycle, role: "produces", startState: "fresh", lifecycle, basis }
       : consumes
-        ? { scenario: lifecycle, role: "consumes", startState: "inherits", lifecycle }
-        : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null };
+        ? { scenario: lifecycle, role: "consumes", startState: "inherits", lifecycle, basis }
+        : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null,
+          basis: touchesDurable ? basis : "data-flow" };
   }
 
   const plan = { version: 1, flows, scenarios };

@@ -108,16 +108,27 @@ test("HEAD's derivation reproduces the retained interaction contract exactly", (
   const { interactionContract } = LIVE_CONTRACT;
   const rederived = deriveBuildSpec({ ...LIVE_CONTRACT, interactionContract: undefined });
   assert.equal(rederived.verdict.ok, true);
-  // Derivation has deliberately advanced since this contract was written: flow-entry steps now
-  // derive a `flow_start` control, because a contract that never says how its flow is entered
-  // leaves later journeys unreachable. Everything the retained row DID contain must still be
-  // reproduced identically — the change adds a claim, it does not restate the old ones.
+  // Derivation has deliberately advanced since this contract was written, in three named ways:
+  //
+  //   flow_start   — a flow-entry step now derives the control that opens the flow, because a
+  //                  contract that never says how its flow is entered leaves later journeys
+  //                  unreachable.
+  //   cancellation — "confirm cancellation" now derives its cancellation as well as its commit.
+  //                  The retained row has only the commit, because `\bcancel\b` never matched
+  //                  "cancellation", which is exactly the inflection defect the canonical
+  //                  action-intent layer removes.
+  //   navigation   — "open the booking flow (/book)" now derives navigation instead of a booking
+  //                  COMMIT. The retained row's mutation came from the commit test matching the
+  //                  path segment in the target "/book"; a route is an address, not an action.
+  //
+  // Everything the retained row DID contain must still be reproduced identically — these changes
+  // add claims (and drop two that a route path spelled), they do not restate the old ones.
   const retained = interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
   const now = rederived.interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
   const added = now.filter((id) => !retained.includes(id));
   const removed = retained.filter((id) => !now.includes(id));
-  assert.ok(added.every((id) => id.endsWith(":flow_start")),
-    `derivation may only have ADDED flow entry, but added ${added.join(", ")}`);
+  assert.ok(added.every((id) => /:(flow_start|cancellation|navigation)$/.test(id)),
+    `derivation may only have ADDED flow entry, cancellation or navigation, but added ${added.join(", ")}`);
   assert.deepEqual(removed.filter((id) => !/:(navigation|mutation)$/.test(id)), [],
     "no contracted selection, input, review, recovery, lookup or cancellation may disappear");
   for (const kind of ["selection", "input", "review"]) {
