@@ -31,6 +31,14 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   // image disagreed about it, every contracted control would be addressed by an id the generated
   // app never wrote, and the skew guard would have called that pair compatible.
   "src/scaffolds/reactVite/lib/capabilities/react.js",
+  // WHICH controls a step drives is as verdict-deciding as how they are driven. A paid run failed
+  // because the derivation contracted a control the step only referenced; fixing it moved no hash
+  // in this list, so an image carrying the old derivation would have been reported compatible with
+  // a host carrying the new one. These four decide what the browser is asked to do at all.
+  "shell/server/lib/builderV2/interactionContract.mjs",
+  "shell/server/lib/builderV2/verificationManifest.mjs",
+  "shell/server/lib/builderV2/actionIntent.mjs",
+  "shell/server/lib/builderV2/lifecycleOperations.mjs",
 ]);
 
 /** The one whose staleness caused the incident, reported by name in every skew message. */
