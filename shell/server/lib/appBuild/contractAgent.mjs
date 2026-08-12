@@ -14,7 +14,9 @@ import {
   CONTRACT_VERSION, STAGES, validateContract, contractSummary,
 } from "../../../shared/implementationContract.mjs";
 
-const SYSTEM_PROMPT = `You convert an application request into a machine-readable IMPLEMENTATION
+// Exported so a test can hold the brief and the code that enforces it to the same statement:
+// the operand type confusion of 2026-08-12 was a disagreement between them.
+export const SYSTEM_PROMPT = `You convert an application request into a machine-readable IMPLEMENTATION
 CONTRACT. You do not write code and you do not call tools. You reply with ONE JSON object and
 nothing else — no prose, no markdown fence.
 
@@ -70,7 +72,9 @@ Rules:
   their declared entity field names. State the step merely DEPENDS on goes in "reads". A step that
   chooses a party size within a slot's capacity OPERATES partySize and READS slotId; naming the
   slot in "operates" would tell the verifier to re-open a control the previous step already used.
-  Every name in "operates"/"reads" must be a field or operation this contract declares.
+  "operates" names FIELDS ONLY — a control has to be able to hold the value. "reads" may name a
+  field OR an operation, because it is context. A step that only performs an operation (a confirm,
+  a cancel) names no field at all: give it a "target" control and leave "operates" out.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.

@@ -292,6 +292,12 @@ export function buildInteractionContract(contract, {
 } = {}) {
   const durableOwner = durableOperationOwner(bindings);
   const draftOwner = draftStateOwner(bindings);
+  // The only things a browser control can HOLD: the fields the contract's entities declare.
+  // Operations, entity names and routes are all legal contract references and none of them is a
+  // field, which is exactly the distinction that was missing.
+  const operableFields = new Set((contract?.entities || [])
+    .flatMap((entity) => (entity?.fields || []).map((field) => normalized(field?.name)))
+    .filter(Boolean));
   const flows = [];
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
@@ -310,8 +316,26 @@ export function buildInteractionContract(contract, {
       // OPERATES the party size and READS the slot; the prose reader saw both as operands,
       // re-contracted a control an earlier step had already consumed and unmounted, and killed a
       // paid run on it. `reads` never becomes a browser action — it is context, not a control.
-      const operands = Array.isArray(step?.operates)
+      //
+      // AND AN OPERAND HAS A TYPE. `operates` may name three different kinds of thing, and until
+      // 2026-08-12 all three became "a field to type into". A live contract said
+      // `operates: ["create-booking"]` on its confirm step — an OPERATION id, which the contract
+      // brief expressly permitted — so derivation built a textbox called "create-booking", the
+      // driver tried to type into it, and the commit button was never pressed.
+      //
+      // Naming an operation is not a mistake; it says what the step DOES. It just does not name a
+      // control that can hold a value, so it contributes no value control. An operand that names
+      // nothing operable at all is a contract error, refused before generation (see
+      // `implementationContract.validateContract`), never a control invented from the target text.
+      const declaredOperands = Array.isArray(step?.operates)
         ? step.operates.map((value) => String(value).split(".").pop()).filter(Boolean) : null;
+      const operands = declaredOperands?.length
+        ? declaredOperands.filter((name) => operableFields.has(normalized(name)))
+        : null;
+      // Operands that were ALL operations: the step performs them and writes no value of its own.
+      // Its commit/action control still comes from the kinds below — this only stops the invented
+      // textbox — and an empty `operates: []` means the same as omitting it.
+      const operandsAreOperations = Boolean(declaredOperands?.length) && !operands?.length;
       // With operands declared, one step drives ONE kind of control. The verb usually names the
       // primitive ("select"/"enter"); when it does not ("set the reorder quantity", "update the
       // status"), the CONTRACT decides — a declared operand means a control is operated whether or
@@ -324,6 +348,16 @@ export function buildInteractionContract(contract, {
       const effectiveKinds = operands && !kinds.includes(operandKind) ? [...kinds, operandKind] : kinds;
       for (const kind of effectiveKinds) {
         const drivesValues = ["selection", "input"].includes(kind);
+        // A step that performs an operation writes no value THROUGH A CONTROL of its own: the verb
+        // list may still read "confirm" as an input, and there is no field for it to fill.
+        if (drivesValues && operandsAreOperations) continue;
+        // Nor does a step that goes somewhere or comes back to it. "reload the page ⇒ the reference
+        // is visible again" OPERATES the reference in the sense that the step is about it, and a
+        // reload types nothing: deriving a text box there asks the browser to fill a control the
+        // app is right to render read-only. A LOOKUP still keeps its input — asking for a record by
+        // reference means typing the reference — so only these two kinds are excluded.
+        if (drivesValues && operands
+          && (kinds.includes("recovery") || /^\s*\//.test(String(step?.target || "")))) continue;
         // A second value-writing kind on a step whose operands are declared is an artefact of an
         // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
         if (drivesValues && operands && kind !== operandKind) continue;

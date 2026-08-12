@@ -131,6 +131,23 @@ export function contractReferences(contract) {
   return references;
 }
 
+/** The contract's declared entity names, and separately its field names — two different kinds. */
+export function entityNames(contract) {
+  return new Set((contract?.entities || []).map((entity) => normaliseReference(entity?.name)).filter(Boolean));
+}
+
+export function fieldNames(contract) {
+  const names = new Set();
+  for (const entity of contract?.entities || []) {
+    for (const field of entity?.fields || []) {
+      if (!field?.name) continue;
+      names.add(normaliseReference(field.name));
+      if (entity?.name) names.add(normaliseReference(`${entity.name}.${field.name}`));
+    }
+  }
+  return names;
+}
+
 export function validateContract(contract) {
   const problems = [];
   const warnings = [];
@@ -173,6 +190,20 @@ export function validateContract(contract) {
           if (!contractReferences(c).has(normaliseReference(reference))) {
             problems.push(`${where} step ${stepIndex + 1} ${key} "${reference}" is not a declared `
               + "entity field or operation — a step may only name things the contract defines");
+            continue;
+          }
+          // AN OPERAND HAS A TYPE. `reads` may name anything the contract declares — a field, an
+          // operation, a computed fact — because it is context. `operates` names what the step
+          // MANIPULATES, and the only thing a browser control can hold is a field.
+          //
+          // An operation there is meaningful and allowed: it says the step performs that operation,
+          // and derivation gives it the action control rather than inventing a text box. An ENTITY
+          // is not: "operates the booking" names no control and cannot be resolved to one, so it is
+          // refused here, before a single token of generation is spent.
+          if (key === "operates" && entityNames(c).has(normaliseReference(reference))
+            && !fieldNames(c).has(normaliseReference(reference))) {
+            problems.push(`${where} step ${stepIndex + 1} operates "${reference}", which is an entity, `
+              + "not a control — name the field(s) the step changes, or the operation it performs");
           }
         }
       }
