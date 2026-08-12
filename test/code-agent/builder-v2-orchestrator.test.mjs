@@ -8,6 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOrchestrator, lintAssetAttribution, memoryBuildStore, renderAssetData } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { browserPlan, deriveVerificationManifest } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { createAssetService } from "../../shell/server/lib/builderV2/assets/assetService.mjs";
 import { pexelsProvider, PEXELS_LICENSE_SNAPSHOT } from "../../shell/server/lib/builderV2/assets/pexelsProvider.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -592,10 +594,13 @@ test("H6 — Pexels API linking is a deterministic gate, not prompt-only guidanc
 // The pre-journey mechanics probe turns that into a defect with an address — control id, expected
 // mechanic, observed result — so it is charged where structural fixes are charged.
 
+// A REAL contracted control id: an invented one could never be resolved back to a field name, so
+// the test would prove nothing about the mapping it exists to check.
+const MECHANICS_CONTROL = deriveVerificationManifest(deriveBuildSpec(CONTRACT)).controls[0];
 const MECHANICS_FAILURE = {
   probed: 1, skipped: [],
-  failures: [{ id: "ctl_abcd1234", primitive: "textbox", expected: "Probe", observed: "",
-    detail: "the contracted textbox did not retain a probe value" }],
+  failures: [{ id: MECHANICS_CONTROL?.id || "ctl_abcd1234", primitive: "textbox", expected: "Probe",
+    observed: "", detail: "the contracted textbox did not retain a probe value" }],
 };
 
 /** A browser layer whose probe fails until `healAfter` verifications have run. */
@@ -631,14 +636,38 @@ test("MECHANICS — the correction is briefed with the control id and the observ
   const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys() });
   await orchestrator.runBuild({ owner: "o", projectId: "mech-2", request: "booking site" });
   const brief = (patchCalls.find((row) => row.originalStep === "repair" && row.step === "correction")?.problems || []).join(" ");
-  assert.match(brief, /ctl_abcd1234/, "the brief does not name the control");
+  assert.match(brief, new RegExp(MECHANICS_CONTROL.id), "the brief does not name the control");
   assert.match(brief, /textbox/);
   assert.match(brief, /observed ""/, "the brief does not say what the browser observed");
   assert.match(brief, /defaultValue|onChange/, "the brief offers no generic working pattern");
-  // A mechanic, never a field: the model is told a control cannot hold a value, not what the
-  // value would have meant.
-  for (const word of ["guest", "reservation", "email"]) {
-    assert.equal(new RegExp(`\b${word}\b`, "i").test(brief), false, `the brief leaks "${word}"`);
+  // …and it NAMES the control, in the vocabulary the model itself wrote.
+  //
+  // This assertion used to be its opposite — no business word anywhere — which conflated two
+  // different rules. The browser must stay domain-blind because a verifier that needs vocabulary
+  // gets unfamiliar domains wrong; that is asserted separately, below, and the two must be able to
+  // fail independently. A BRIEF is a message to the author of the contract, and a hand-wired
+  // control has no ctl_ handle it would recognise. Repair briefs have always carried journey ids
+  // and step prose for exactly this reason.
+  assert.match(brief, /the contracted "/, "the brief does not name the control the model wrote");
+});
+
+test("MECHANICS — the BROWSER still never receives the business mapping", () => {
+  // The other half of the split. Whatever the brief says, nothing that crosses into browserPlan
+  // may carry a business name: that boundary is what keeps verification working on domains the
+  // platform has never seen.
+  const spec = deriveBuildSpec(CONTRACT);
+  const manifest = deriveVerificationManifest(spec);
+  const plan = browserPlan(manifest);
+  assert.ok(Object.keys(manifest.mapping || {}).length, "the mapping exists platform-side");
+  assert.equal("mapping" in plan, false, "browserPlan carries the business mapping");
+  // The boundary is the MAPPING — the id→meaning dictionary the browser could reason with. Contract
+  // -supplied accessible names do cross, by design and by long-standing comment: they are strings
+  // the contract handed over for locating, not a table the platform can generalise from. That
+  // distinction is the whole basis of the locator ladder, and conflating the two here would forbid
+  // the thing the architecture permits while proving nothing about the thing it forbids.
+  for (const row of [...plan.controls, ...plan.actions]) {
+    assert.equal("logicalField" in row, false, `browserPlan row ${row.id} carries a logical field`);
+    assert.equal("journeyId" in row, false, `browserPlan row ${row.id} carries a business journey id`);
   }
 });
 

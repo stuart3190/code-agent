@@ -64,6 +64,20 @@ export function Flow() {
 
     <section>
       <h2>Who is coming?</h2>
+      {/* "handwired": the run #8 shape — a control with NO machine identity, reachable only by the
+          accessible name the contract supplied. "ambiguous": the same name on two visible controls,
+          which the probe must refuse rather than guess between. */}
+      {MODE === "handwired" ? <>
+        <label htmlFor="hw-name">Guest name</label>
+        <input id="hw-name" type="text" value={draft.guestName}
+          onChange={(event) => setDraft((current) => ({ ...current, guestName: event.target.value }))} />
+      </> : null}
+      {MODE === "ambiguous" ? <>
+        <label htmlFor="amb-1">Guest name</label>
+        <input id="amb-1" type="text" />
+        <label htmlFor="amb-2">Guest name</label>
+        <input id="amb-2" type="text" />
+      </> : null}
       {MODE === "broken" ? <>
         {/* A: a setter that mutates and never re-renders. */}
         <label htmlFor="guestName">Guest name</label>
@@ -76,7 +90,8 @@ export function Flow() {
         <label htmlFor="guestPhone">Guest phone</label>
         <input id="guestPhone" data-thrallo-control="\${ID.guestPhone}" type="tel"
           value={draft.guestPhone} readOnly />
-      </> : <>
+      </> : null}
+      {MODE === "corrected" ? <>
         {/* CORRECTED: the same three fields, wired so the value lands. */}
         <label htmlFor="guestName">Guest name</label>
         <input id="guestName" data-thrallo-control="\${ID.guestName}" type="text"
@@ -89,7 +104,7 @@ export function Flow() {
         {/* a custom wrapper the static scan cannot read through. */}
         <WrappedField id="\${ID.guestPhone}" label="Guest phone" type="tel"
           value={store.reduced} onValue={(value) => dispatch({ field: "reduced", value })} />
-      </>}
+      </> : null}
       {draft.guestName ? <p>The guest name {draft.guestName} is shown for review.</p> : null}
     </section>
 

@@ -1569,6 +1569,70 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
  * Returns `{ pass, journeys, failures, undriveable, consoleErrors, failedRequests }`.
  * `pass` reflects the PRIMARY journey only — that is the one the brief says gates the preview.
  */
+// The interactive descendants of a group that carries no attributes of its own.
+const OPTION_SELECTOR = 'button, [role="option"], [role="radio"], option';
+
+/**
+ * THE PROBE'S LOCATOR LADDER — the same two rungs the driver already climbs.
+ *
+ *   1. the opaque machine identity
+ *   2. the names the CONTRACT supplied for this control (browserPlan.fallbackNames)
+ *
+ * Rung 2 is what makes a hand-wired control visible. Run #8 rendered a date chooser with no machine
+ * identity; the probe addressed identities only, so it skipped in silence, while the driver found
+ * the very same element by name and failed on it eight steps later at a cost of 6.8 credits.
+ *
+ * `fallbackNames` are strings the CONTRACT handed over — not a platform table. That distinction is
+ * the whole lesson of 2026-08-11, when `semanticAliases` invented "party size" out of Thrallo's own
+ * vocabulary and drove three contact fields into a number input. This ladder must never reach for
+ * it, and a test asserts the probe path does not.
+ *
+ * Ambiguity is refused rather than guessed. One name matching several visible elements is exactly
+ * that failure shape, and a wrong probe result is worse than none: it would spend the bounded
+ * mechanics correction on a control that was never broken.
+ */
+async function locateForProbe(page, control) {
+  const visible = async (locator) => {
+    const total = await locator.count().catch(() => 0);
+    let seen = 0;
+    for (let index = 0; index < Math.min(total, 6); index += 1) {
+      if (await locator.nth(index).isVisible().catch(() => false)) seen += 1;
+    }
+    return seen;
+  };
+
+  // A SELECTION SHARES ITS IDENTITY BY DESIGN. The scaffold stamps the same id on the group and on
+  // every option, so counting raw matches would call every correctly-bound chooser ambiguous — the
+  // group is the addressable element, the options are its contents.
+  const byIdentity = control.primitive === "selection"
+    ? page.locator(`[data-thrallo-control="${control.id}"]:not([data-thrallo-option])`)
+    : page.locator(`[data-thrallo-control="${control.id}"]`);
+  const identityCount = await visible(byIdentity);
+  if (identityCount === 1) return { locator: byIdentity.first(), addressedBy: "identity" };
+  if (identityCount > 1) {
+    return { ambiguous: true, addressedBy: "identity", candidates: identityCount,
+      detail: `${identityCount} visible elements carry ${control.id}` };
+  }
+
+  for (const name of control.fallbackNames || []) {
+    const pattern = new RegExp(`^\\s*${escapeRegex(String(name))}\\s*$`, "i");
+    const roles = control.primitive === "textbox"
+      ? ["textbox", "spinbutton", "combobox"] : ["group", "radiogroup", "listbox", "combobox"];
+    // A UNION, not a sum. One input is found by its label AND by its role+name, and counting each
+    // strategy separately called that single element two candidates — reporting ambiguity for a
+    // control that was never ambiguous, which would suppress the very probe the ladder exists for.
+    let union = page.getByLabel(pattern);
+    for (const role of roles) union = union.or(page.getByRole(role, { name: pattern }));
+    const seen = await visible(union);
+    if (seen > 1) {
+      return { ambiguous: true, addressedBy: "fallback_name", candidates: seen,
+        detail: `the contracted name "${name}" matches ${seen} visible elements` };
+    }
+    if (seen === 1) return { locator: union.first(), addressedBy: "fallback_name", matchedName: name };
+  }
+  return { locator: null };
+}
+
 /**
  * THE MECHANICS PROBE — behavioural proof, before the expensive part.
  *
@@ -1593,16 +1657,35 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
 export async function probeControlMechanics(page, controls = []) {
   const failures = [];
   const skipped = [];
+  const outcomes = [];
   let probed = 0;
 
   for (const control of controls) {
-    const target = page.locator(`[data-thrallo-control="${control.id}"]`).first();
-    // Not mounted yet is not a verdict. Later steps live behind a flow, and reaching them is the
-    // journey's job, not the probe's: a control this cheap phase cannot see is simply left alone.
-    if (!(await target.count().catch(() => 0)) || !(await target.isVisible().catch(() => false))) {
-      skipped.push({ id: control.id, primitive: control.primitive, reason: "not_mounted_on_entry" });
+    const located = await locateForProbe(page, control);
+    if (located.ambiguous) {
+      // A WRONG probe result is worse than none: it would spend the bounded mechanics correction
+      // on a control that was never broken. This is the 2026-08-11 shape — one name, several
+      // plausible elements — and the only safe answer is to say so and touch nothing.
+      skipped.push({ id: control.id, primitive: control.primitive, reason: "ambiguous_identity",
+        candidates: located.candidates, addressedBy: located.addressedBy });
+      outcomes.push({ id: control.id, outcome: "ambiguous_identity", detail: located.detail });
       continue;
     }
+    if (!located.locator) {
+      // Not mounted yet is not a verdict. Later steps live behind a flow, and reaching them is the
+      // journey's job, not the probe's: a control this cheap phase cannot see is left alone.
+      skipped.push({ id: control.id, primitive: control.primitive, reason: "not_mounted_on_entry" });
+      outcomes.push({ id: control.id, outcome: "not_mounted_on_entry", detail: null });
+      continue;
+    }
+    if (located.addressedBy === "fallback_name") {
+      // Probed, and worth saying out loud: this control was reached only because the CONTRACT
+      // supplied a name to look for. It carries no machine identity, so it is invisible to every
+      // identity-addressed path — which is how run #8's hand-wired chooser skipped silently.
+      outcomes.push({ id: control.id, outcome: "identity_absent",
+        detail: "reached by a contract-supplied name; the element carries no machine identity" });
+    }
+    const target = located.locator;
 
     if (control.primitive === "textbox") {
       // An input the contract must WRITE and the browser cannot: proven, structurally, here.
@@ -1629,13 +1712,23 @@ export async function probeControlMechanics(page, controls = []) {
     }
 
     if (control.primitive === "selection") {
-      const options = page.locator(`[data-thrallo-control="${control.id}"][data-thrallo-option]`);
+      // An identity-addressed group exposes its options by attribute. A hand-wired group has no
+      // attributes at all, so its options are the interactive descendants of whatever the
+      // contract-supplied name found.
+      const options = located.addressedBy === "identity"
+        ? page.locator(`[data-thrallo-control="${control.id}"][data-thrallo-option]`)
+        : target.locator(OPTION_SELECTOR);
       const count = await options.count().catch(() => 0);
       if (!count) { skipped.push({ id: control.id, primitive: "selection", reason: "no_options_on_entry" }); continue; }
-      const before = await selectionSnapshot(page, control.id);
+      const snapshot = () => (located.addressedBy === "identity"
+        ? selectionSnapshot(page, control.id)
+        : options.evaluateAll((els) => els.map((el) => [el.getAttribute("aria-pressed") || "",
+          el.getAttribute("aria-selected") || "", el.getAttribute("data-selected") || "",
+          el.className || ""].join(":"))).catch(() => []));
+      const before = await snapshot();
       await options.first().click({ timeout: 5_000 }).catch(() => {});
       await page.waitForTimeout(200);
-      const after = await selectionSnapshot(page, control.id);
+      const after = await snapshot();
       probed += 1;
       // Gone entirely is legitimate — a chooser that advances its own flow. Present and unchanged
       // is not: nothing observable happened, so nothing can be verified through it later.
@@ -1645,7 +1738,7 @@ export async function probeControlMechanics(page, controls = []) {
       }
     }
   }
-  return { probed, failures, skipped };
+  return { probed, failures, skipped, outcomes };
 }
 
 // Values chosen by INPUT TYPE, which is a browser fact. Nothing here describes a business meaning.

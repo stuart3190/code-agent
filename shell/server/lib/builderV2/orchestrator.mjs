@@ -15,6 +15,7 @@ import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, patchOutcomes } from "./patchEngine.mjs";
 import { completionEligibility, previewEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, scopeBuildSpec } from "./buildSpec.mjs";
+import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
   lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
@@ -617,7 +618,16 @@ export function createOrchestrator({
         while (!eligibility.eligible && coreVerdicts.mechanics?.failures?.length
           && mechanicsCorrections < maxMechanicsCorrections) {
           const failures = coreVerdicts.mechanics.failures;
-          const evidence = failures.map((row) => `control ${row.id} (${row.primitive}) failed its `
+          // NAME THE CONTROL THE MODEL WROTE.
+          //
+          // `ctl_c2b1f3ae` is meaningless to the author of the app — especially for a hand-wired
+          // control, which never carried that id in the first place. The mapping back to the
+          // contracted field lives HERE, in the manifest the orchestrator derives and deliberately
+          // withholds from the browser, so the brief can say "eventDate" without the browser ever
+          // having known it. The model owns that name: it wrote the contract the name came from.
+          const mapping = deriveVerificationManifest(spec || deriveBuildSpec(contract)).mapping || {};
+          const named = (id) => (mapping[id]?.logicalField ? `${id} (the contracted "${mapping[id].logicalField}")` : id);
+          const evidence = failures.map((row) => `control ${named(row.id)} (${row.primitive}) failed its `
             + `mechanics probe: expected ${JSON.stringify(row.expected)}, observed ${JSON.stringify(row.observed)}`
             + ` — ${row.detail}. The control is present and located by its declared identity, so bind it `
             + "so a typed value lands in state and renders back: value + onChange writing through the "

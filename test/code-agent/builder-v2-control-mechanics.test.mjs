@@ -242,3 +242,71 @@ test("selection_state_unobservable carries a level, like every other interaction
       "a spread-bound chooser was PROVEN unobservable");
   }
 });
+
+// ── the locator ladder ─────────────────────────────────────────────────────────────────────────
+
+test("LADDER — a hand-wired control is probed via its contract-supplied name, and said so",
+  needsBrowser, async () => {
+    // Run #8's shape: no machine identity, so the identity rung finds nothing. Before the ladder
+    // this skipped in silence while the driver found the same element by name and failed on it
+    // eight steps later.
+    const { chromium } = requireCjs("playwright");
+    const probe = await open("handwired", async (url) => {
+      const browser = await chromium.launch({ args: ["--no-sandbox"] });
+      const page = await browser.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(600);
+      const result = await probeControlMechanics(page, PLAN);
+      await browser.close();
+      return result;
+    });
+    const identityAbsent = probe.outcomes.filter((row) => row.outcome === "identity_absent");
+    assert.ok(identityAbsent.some((row) => row.id === controlIdFor("guestName")),
+      `the hand-wired control was not reported identity_absent: ${JSON.stringify(probe.outcomes)}`);
+    // It was PROBED, not skipped — and it works, so it must not be reported as a failure.
+    assert.equal(probe.failures.some((row) => row.id === controlIdFor("guestName")), false,
+      "a working hand-wired control was failed");
+    assert.equal(probe.skipped.some((row) => row.id === controlIdFor("guestName")), false,
+      "the hand-wired control was skipped rather than probed");
+  });
+
+test("LADDER — one name on two visible controls is refused, not guessed", needsBrowser, async () => {
+  // The 2026-08-11 shape. A wrong probe result is worse than none: it would spend the bounded
+  // mechanics correction on a control that was never broken.
+  const { chromium } = requireCjs("playwright");
+  const probe = await open("ambiguous", async (url) => {
+    const browser = await chromium.launch({ args: ["--no-sandbox"] });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(600);
+    const result = await probeControlMechanics(page, PLAN);
+    await browser.close();
+    return result;
+  });
+  const ambiguous = probe.skipped.filter((row) => row.reason === "ambiguous_identity");
+  assert.ok(ambiguous.some((row) => row.id === controlIdFor("guestName")),
+    `ambiguity was not reported: ${JSON.stringify({ skipped: probe.skipped, outcomes: probe.outcomes })}`);
+  assert.equal(probe.failures.some((row) => row.id === controlIdFor("guestName")), false,
+    "an ambiguous control was probed and failed anyway");
+});
+
+test("LADDER — a bound control is unchanged: addressed by identity, never by name", needsBrowser, () => {
+  // The corrected build binds everything, so nothing should report identity_absent.
+  const probe = probes.get("corrected");
+  assert.deepEqual(probe.failures, []);
+  assert.equal((probe.outcomes || []).some((row) => row.outcome === "identity_absent"), false,
+    `a bound control was reached by name: ${JSON.stringify(probe.outcomes)}`);
+});
+
+test("LADDER — the probe path never reaches for the platform's alias table", async () => {
+  // `semanticAliases` invented "party size" out of Thrallo's own vocabulary and drove three contact
+  // fields into a number input on 2026-08-11. The ladder's second rung uses contract-supplied
+  // fallbackNames and nothing else; this holds the file to that.
+  const source = await readFile(new URL("../../shell/server/lib/appBuild/journeyVerifier.mjs", import.meta.url), "utf8");
+  const ladder = source.slice(source.indexOf("async function locateForProbe"),
+    source.indexOf("export async function probeControlMechanics"));
+  assert.ok(ladder.length > 200, "the ladder was not found in the verifier");
+  assert.equal(/semanticAliases|semanticKey/.test(ladder), false,
+    "the probe ladder reaches for the platform alias table");
+  assert.match(ladder, /fallbackNames/);
+});
