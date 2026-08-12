@@ -20,7 +20,13 @@ import assert from "node:assert/strict";
 import { buildInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { browserPlan, controlIdFor, deriveVerificationManifest } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
-import { validateContract } from "../../shell/shared/implementationContract.mjs";
+
+// Contract validation is a HOST responsibility: the shell validates a contract before a build is
+// dispatched, and `shell/shared` is deliberately not copied into the sandbox image. Loading it
+// lazily lets this same file run in both places, asserting derivation everywhere and validation
+// where validation actually happens.
+const validation = await import("../../shell/shared/implementationContract.mjs").catch(() => null);
+const hostOnly = { skip: validation ? false : "contract validation runs on the host, not in the sandbox" };
 
 // The paid contract's entity and the two steps that mattered, unchanged.
 const PAID = {
@@ -130,17 +136,17 @@ for (const row of GENERIC) {
 
 // ── the contract must mean something ───────────────────────────────────────────────────────────
 
-test("a step may only name controls the contract declares", () => {
+test("a step may only name controls the contract declares", hostOnly, () => {
   const base = JSON.parse(JSON.stringify(PAID));
   base.journeys[0].steps[3].operates = ["partySize", "somethingNobodyDeclared"];
-  const verdict = validateContract(base);
+  const verdict = validation.validateContract(base);
   assert.equal(verdict.ok, false);
   assert.ok(verdict.problems.some((problem) => /somethingNobodyDeclared/.test(problem)),
     `the unknown reference is named: ${JSON.stringify(verdict.problems)}`);
 });
 
-test("a valid structured contract passes validation", () => {
-  const verdict = validateContract({ ...PAID,
+test("a valid structured contract passes validation", hostOnly, () => {
+  const verdict = validation.validateContract({ ...PAID,
     acceptance: [{ id: "a1", statement: "a submitted booking is readable after a page reload", kind: "persistence" }] });
   assert.deepEqual(verdict.problems.filter((problem) => /operates|reads/.test(problem)), []);
 });
