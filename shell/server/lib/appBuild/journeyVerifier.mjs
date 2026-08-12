@@ -205,7 +205,7 @@ function contractedLocators(page, control) {
   // able to know, what the control MEANS. Everything below it is fallback for controls that carry
   // no identity — legacy trees, V1, and anything the model hand-wrote.
   if (control?.machineId) {
-    rows.push({ description: `machine=${control.machineId}`,
+    rows.push({ description: `machine=${control.machineId}`, machine: true,
       locator: page.locator(`[data-thrallo-control="${control.machineId}"]`) });
   }
   for (const alias of aliases) {
@@ -241,20 +241,35 @@ async function fillContractedFields(page, flows, marker) {
     evidence.attemptedLocators.push(...attempts.map((row) => `${logicalField}:${row.description}`));
     let field = null;
     let matchedBy = null;
+    let ambiguous = null;
     for (const attempt of attempts) {
       const count = Math.min(await attempt.locator.count().catch(() => 0), 3);
+      const visible = [];
       for (let index = 0; index < count; index += 1) {
         const candidate = attempt.locator.nth(index);
-        if (await candidate.isVisible().catch(() => false)) {
-          field = candidate;
-          matchedBy = attempt.description;
-          break;
-        }
+        if (await candidate.isVisible().catch(() => false)) visible.push(candidate);
       }
-      if (field) break;
+      if (!visible.length) continue;
+      // AN IDENTITY THAT MATCHES TWICE IS NOT AN IDENTITY. Taking the first visible match would be
+      // the positional guessing this architecture exists to remove — and it would be silent. Two
+      // controls that must both be driveable need distinct names (the scaffold accepts a `scope`,
+      // so `intake.notes` and `review.notes` are distinct); until then, this is reported.
+      if (attempt.machine && visible.length > 1) {
+        ambiguous = { description: attempt.description, matches: visible.length };
+        break;
+      }
+      [field] = visible;
+      matchedBy = attempt.description;
+      break;
     }
     const fieldEvidence = { field: logicalField, expectedStateOwner: flow.stateOwner, matchedBy,
       accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName] };
+    if (ambiguous) {
+      evidence.fields.push({ ...fieldEvidence, status: "ambiguous_identity", matchedBy: ambiguous.description,
+        detail: `${ambiguous.matches} visible controls share the machine identity ${flow.control.machineId} — `
+          + "give each one a distinct scoped name so the contract can address them separately" });
+      continue;
+    }
     if (!field) {
       evidence.fields.push({ ...fieldEvidence, status: "missing" });
       continue;

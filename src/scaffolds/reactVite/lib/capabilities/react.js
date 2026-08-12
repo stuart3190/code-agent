@@ -123,8 +123,14 @@ export const actionId = (name) => machineId(name, "act");
 export function useSemanticField({
   name, label = null, value = "", onChange = null, type = "text", required = false,
   invalid = false, describedBy = null, id = null,
+  // Two controls on one screen may legitimately hold the same KIND of value — a shipping address
+  // and a billing address, notes on two forms. `scope` makes each one addressable: the identity
+  // becomes scope.name, exactly as a contract that declares `shipping.address` would derive it.
+  // Without it, two same-named controls share an identity and verification reports the ambiguity
+  // rather than guessing which one you meant.
+  scope = null,
 } = {}) {
-  const fieldId = id || `field-${slug(name)}`;
+  const fieldId = id || `field-${slug(scope ? `${scope}-${name}` : name)}`;
   const accessibleName = label || titled(name);
   const handleChange = useCallback((event) => {
     if (!onChange) return;
@@ -142,7 +148,7 @@ export function useSemanticField({
       value: value ?? "",
       onChange: handleChange,
       required: required || undefined,
-      "data-thrallo-control": controlId(name),
+      "data-thrallo-control": controlId(scope ? `${scope}.${name}` : name),
       "aria-label": accessibleName,
       "aria-required": required || undefined,
       "aria-invalid": invalid || undefined,
