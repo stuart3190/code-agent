@@ -784,7 +784,8 @@ export const DIAGNOSTIC_LEVEL = Object.freeze({
 
 // Reasons whose evidence is structural and complete. Each is a fact about the element itself, not
 // an absence of something this scan is able to see.
-const PROVEN_REASONS = new Set(["disabled", "readonly", "controlled_without_change_handler", "invalid_control_type"]);
+const PROVEN_REASONS = new Set(["disabled", "readonly", "controlled_without_change_handler",
+  "invalid_control_type", "selected_state_unobservable"]);
 
 /**
  * A finding may only be PROVEN when the evidence is not defeated by what the scan cannot read.
@@ -862,8 +863,15 @@ export function lintInteractiveWorkflow(tree, { interactionContract, modulePlan 
         controls: candidates,
       });
     } else if (flow.control.selectedState && !matches.some((control) => control.selectedState || ["radio", "option", "combobox"].includes(control.role))) {
+      // LEVELLED, like every other interaction finding. A selection whose chosen state lives only
+      // in a closure can never be verified — nothing on the page changes when it is clicked — so
+      // where the elements are readable this is PROVEN. But `{...choice.optionProps(o)}` supplies
+      // aria-pressed at runtime, so a spread defeats it exactly as it defeats the others, and an
+      // unlabelled finding would eventually be promoted and start failing correct applications.
       reject("selection_state_unobservable", `${flow.id} selectable control does not expose selected state`, flow,
-        { files: unique(matches.map((row) => row.file)) });
+        { files: unique(matches.map((row) => row.file)),
+          reason: "selected_state_unobservable", controls: matches,
+          level: diagnosticLevel("selected_state_unobservable", matches) });
     }
   }
 

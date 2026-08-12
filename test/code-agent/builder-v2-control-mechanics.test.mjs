@@ -209,3 +209,36 @@ test("an uncontrolled native input is never PROVEN undriveable", () => {
     .filter((row) => row.level === DIAGNOSTIC_LEVEL.PROVEN);
   assert.deepEqual(proven, [], `an uncontrolled input was condemned: ${JSON.stringify(proven)}`);
 });
+
+test("selection_state_unobservable carries a level, like every other interaction finding", () => {
+  // A selection whose chosen state lives in a closure can never be verified: nothing on the page
+  // changes when it is clicked. Where the elements are readable that is PROVEN — but a spread
+  // supplies aria-pressed at runtime, so it must degrade like the rest. Unlabelled, this finding
+  // would eventually be promoted and start failing correct applications.
+  const readable = { "src/App.jsx": `export default function App() {
+    return <main>
+      <div role="group" aria-label="Date"><button id="dateId">14 Feb</button></div>
+      <label htmlFor="guestName">Guest name</label><input id="guestName" />
+    </main>;
+  }` };
+  const findings = lintInteractiveWorkflow(readable, { interactionContract: SPEC.interactionContract })
+    .findings.filter((row) => row.code === "selection_state_unobservable");
+  for (const finding of findings) {
+    assert.ok([DIAGNOSTIC_LEVEL.PROVEN, DIAGNOSTIC_LEVEL.SUSPECT].includes(finding.level),
+      `selection_state_unobservable still carries no level: ${JSON.stringify(finding)}`);
+  }
+
+  // …and a spread degrades it to SUSPECT rather than condemning a bound chooser.
+  const spread = { "src/App.jsx": `
+    import { useSemanticSelection } from "./lib/capabilities/react.js";
+    export default function App() {
+      const dates = useSemanticSelection({ name: "dateId", label: "Date" });
+      return <div {...dates.groupProps}><button {...dates.optionProps("a")}>A</button></div>;
+    }` };
+  const spreadFindings = lintInteractiveWorkflow(spread, { interactionContract: SPEC.interactionContract })
+    .findings.filter((row) => row.code === "selection_state_unobservable");
+  for (const finding of spreadFindings) {
+    assert.equal(finding.level, DIAGNOSTIC_LEVEL.SUSPECT,
+      "a spread-bound chooser was PROVEN unobservable");
+  }
+});
