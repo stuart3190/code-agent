@@ -31,6 +31,11 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   // image disagreed about it, every contracted control would be addressed by an id the generated
   // app never wrote, and the skew guard would have called that pair compatible.
   "src/scaffolds/reactVite/lib/capabilities/react.js",
+  // …and its export barrel: a stale one turns a new binding into an unresolved import at compile
+  // time. The brief belongs here for the mirror-image reason — an image whose prompt never teaches
+  // the forward control produces apps the new verifier correctly calls undriveable.
+  "src/scaffolds/reactVite/lib/capabilities/index.js",
+  "shell/server/lib/builderV2/capabilityRegistry.mjs",
   // WHICH controls a step drives is as verdict-deciding as how they are driven. A paid run failed
   // because the derivation contracted a control the step only referenced; fixing it moved no hash
   // in this list, so an image carrying the old derivation would have been reported compatible with

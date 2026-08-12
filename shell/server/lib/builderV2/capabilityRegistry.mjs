@@ -91,6 +91,8 @@ export const REACT_BINDINGS = [
   "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
   "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps } with a guaranteed accessible name",
   "useSemanticSelection({ name, value, onSelect }) → { groupProps, optionProps(option) }; keeps the native button role and reports selection via aria-pressed",
+  "useSemanticAction({ name, label, onActivate }) → { buttonProps } for a contracted action; label freely",
+  "useFlowAdvance({ label, onActivate, disabled }) → { buttonProps } for the control that moves a multi-step flow FORWARD; label freely",
   "useStatusRegion({ label }) → { statusProps } announcing a state transition",
 ];
 
@@ -114,6 +116,14 @@ const ASSEMBLY_PATTERNS = Object.freeze({
       "    {options.map((o) => <button key={o} {...choice.optionProps(o)}>{label(o)}</button>)}",
       "  </div>",
       "  // optionProps supplies the accessible name and aria-pressed; the element stays a button. Style it however you like.",
+    ],
+  },
+  flowAdvance: {
+    when: "a flow spans more than one step or screen, so later controls are reached by advancing",
+    lines: [
+      "FORWARD CONTROL — if the flow spans screens, every later control is behind this one:",
+      '  const advance = useFlowAdvance({ label: "<any wording>", disabled: !canContinue, onActivate: () => <next>() });',
+      '  <button {...advance.buttonProps}>{/* any label, icon or language */}</button>   // FORWARD only: back and commit stay useSemanticAction({ name })',
     ],
   },
   capabilityState: {

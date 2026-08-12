@@ -69,7 +69,7 @@ export const wizard = makeWizardMachine({
 `;
 
 const FLOW = `import { useState } from "react";
-import { useCapabilityState, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
+import { useCapabilityState, useFlowAdvance, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
 import { wizard, SPEEDS, CARDS, ITEM_COUNTS, speedOf, cardOf, validEmail, orderStore } from "../data/checkout.js";
 
 export function Flow() {
@@ -92,6 +92,7 @@ export function Flow() {
   const chosenCard = cardOf(values.cardBrand);
   const buyerValid = validEmail(values.buyerEmail);
   const continueDisabled = state.stepId === "buyer" && !buyerValid;
+  const advance = useFlowAdvance({ label: "Continue", disabled: continueDisabled, onActivate: () => { wizard.next(); } });
 
   if (state.status === "confirmed") {
     const reference = state.confirmation ? state.confirmation.reference : "";
@@ -164,7 +165,7 @@ export function Flow() {
       <div><button type="button" onClick={() => { wizard.confirm().catch(() => {}); }}>Confirm order</button></div>
     </section> : null}
 
-    <div><button type="button" disabled={continueDisabled} onClick={() => { wizard.next(); }}>Continue</button></div>
+    <div><button {...advance.buttonProps}>Continue</button></div>
     <div><a href="/manage">Look up order</a></div>
   </main>;
 }

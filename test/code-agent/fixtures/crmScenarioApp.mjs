@@ -74,7 +74,7 @@ export const wizard = makeWizardMachine({
 `;
 
 const FLOW = `import { useState } from "react";
-import { useCapabilityState, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
+import { useCapabilityState, useFlowAdvance, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
 import { wizard, SOURCES, PRIORITIES, sourceOf, priorityOf, validEmail, leadStore } from "../data/crm.js";
 
 const sourceText = (value) => "Source " + (sourceOf(value) ? sourceOf(value).label : "");
@@ -101,6 +101,8 @@ export function Flow() {
   const emailValid = validEmail(values.contactEmail);
   const continueDisabled = state.stepId === "contact" && !emailValid;
   const anyContact = Boolean(values.contactName || values.contactEmail || values.notes);
+
+  const advance = useFlowAdvance({ label: "Continue", disabled: continueDisabled, onActivate: () => { wizard.next(); } });
 
   if (state.status === "confirmed") {
     const reference = state.confirmation ? state.confirmation.reference : "";
@@ -164,7 +166,7 @@ export function Flow() {
       <div><button type="button" onClick={() => { wizard.confirm().catch(() => {}); }}>Confirm lead</button></div>
     </section> : null}
 
-    <div><button type="button" disabled={continueDisabled} onClick={() => { wizard.next(); }}>Continue</button></div>
+    <div><button {...advance.buttonProps}>Continue</button></div>
     <div><a href="/manage">Open lead records</a></div>
   </main>;
 }

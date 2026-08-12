@@ -14,8 +14,8 @@ export { makeContactForm, makeNewsletter, CONTACT_RESULT, NEWSLETTER_RESULT } fr
 // React bindings: subscribe to any capability store, and get accessible/driveable control props
 // without hand-wiring them. Domain-neutral and JSX-free — styling stays entirely yours.
 export {
-  actionId, controlId, useCapabilityState, useCapabilityAction, useSemanticAction, useSemanticField,
-  useSemanticSelection, useStatusRegion,
+  actionId, controlId, FLOW_ADVANCE, useCapabilityState, useCapabilityAction, useFlowAdvance,
+  useSemanticAction, useSemanticField, useSemanticSelection, useStatusRegion,
 } from "./react.js";
 
 export const CAPABILITY_VERSIONS = Object.freeze({

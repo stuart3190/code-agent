@@ -15,7 +15,7 @@ import {
   IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey, semanticQualifier,
 } from "./controlIdentity.mjs";
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
-import { actionIdFor, controlIdFor } from "./verificationManifest.mjs";
+import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 
 // A method name that changes a durable record. Domain-neutral vocabulary: it reads the
 // registry's real interfaces rather than naming any application's capability.
@@ -267,6 +267,15 @@ function controlRequirement(kind, field, step) {
     return { purpose: name, roles: ["button", "link"], flowEntry: true,
       machineId: actionIdFor(String(step?.target || step?.action || name)),
       accessibleName: String(step?.target || step?.action || name) };
+  }
+  // Moving a flow FORWARD is the one mechanical act every later control depends on, and the one
+  // the platform can name without knowing anything about the application: there is exactly one
+  // forward control per step, so it takes the canonical identity rather than one derived from
+  // whatever the step's prose happened to call it.
+  if (kind === "flow_advance") {
+    const named = String(step?.target || step?.action || name);
+    return { purpose: name, roles: ["button", "link"], flowAdvance: true,
+      machineId: ADVANCE_ACTION_ID, accessibleName: named, accessibleNames: [named] };
   }
   if (["mutation", "cancellation", "lookup", "action"].includes(kind)) {
     return { purpose: name, roles: ["button"],
@@ -549,6 +558,14 @@ export function assemblyNeeds(plan, bindings = []) {
     terminalReset: Boolean(draftStateOwner(bindings))
       && ["mutation", "cancellation"].some((kind) => kinds.has(kind)),
     status: ["mutation", "recovery", "cancellation", "lookup"].some((kind) => kinds.has(kind)),
+    // A flow that writes more than one value MAY paginate, and a paginated flow hides its later
+    // controls behind a forward control. Whether it does is a design choice; that the forward
+    // control must be identifiable if it exists is not. Counted per journey, from value-writing
+    // steps alone — no vocabulary, and the same for a wizard, a checkout or a multi-part form.
+    flowAdvance: kinds.has("flow_advance") || Boolean(draftStateOwner(bindings))
+      || [...new Set(controls.map((flow) => flow.journeyId))].some((journeyId) => new Set(controls
+        .filter((flow) => flow.journeyId === journeyId && ["input", "selection"].includes(flow.kind))
+        .map((flow) => flow.stepIndex)).size > 1),
   };
 }
 

@@ -19,6 +19,7 @@ import {
   ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases,
   semanticConcept, semanticKey,
 } from "../builderV2/controlIdentity.mjs";
+import { ADVANCE_ACTION_ID } from "../builderV2/verificationManifest.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -627,21 +628,54 @@ async function activateContractedControl(page, control) {
   return false;
 }
 
-async function advanceFlow(page) {
-  const before = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+/**
+ * Move a multi-step flow on by one step.
+ *
+ * Every control on a later step is unreachable until this succeeds, which is why the identity
+ * matters more here than anywhere else. A paid run reached a screen whose forward button read
+ * "Next to party size", found nothing in `ADVANCE_ACTION_PATTERN`'s word list that matched, and
+ * declared the journey undriveable one control short of the end.
+ *
+ * So the machine identity is the authority and the word list is only what remains for V1 builds
+ * that carry no identity at all. Where an identity is present the label is never consulted: it may
+ * be any phrase, any language, an icon or empty.
+ */
+async function advanceCandidates(page) {
+  const declared = page.locator(`[data-thrallo-action="${ADVANCE_ACTION_ID}"]`).first();
+  if (await declared.count().catch(() => 0) && await declared.isVisible().catch(() => false)) {
+    // Declared identity present: the search STOPS here. Whatever else the page calls "Next" is
+    // not the contracted forward control, and clicking it would be a guess.
+    return [{ locator: declared, via: "declared advance control", declared: true }];
+  }
+  const candidates = [];
   for (const role of DRIVEABLE_ACTION_ROLES) {
     const control = page.getByRole(role, { name: ADVANCE_ACTION_PATTERN }).first();
     if (!(await control.count().catch(() => 0))) continue;
     if (!(await control.isVisible().catch(() => false))) continue;
-    if (await control.isDisabled().catch(() => true)) continue;
-    const name = (await control.textContent().catch(() => "")) || role;
-    await control.click({ timeout: 5_000 }).catch(() => {});
+    const via = ((await control.textContent().catch(() => "")) || role).trim().slice(0, 30);
+    candidates.push({ locator: control, via, declared: false });
+  }
+  return candidates;
+}
+
+async function advanceFlow(page) {
+  const before = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  const moved = async (locator, via) => {
+    if (await locator.isDisabled().catch(() => true)) return null;
+    await locator.click({ timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(700);
     const after = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     // No observable change means the flow did NOT advance — for example a Continue that is
     // correctly refusing to move past an incomplete step. Report that, never assume it.
-    if (after === before) return { advanced: false, detail: `"${name.trim().slice(0, 30)}" did not advance the flow` };
-    return { advanced: true, via: name.trim().slice(0, 30) };
+    if (after === before) return { advanced: false, detail: `"${via}" did not advance the flow` };
+    return { advanced: true, via };
+  };
+
+  for (const candidate of await advanceCandidates(page)) {
+    const outcome = await moved(candidate.locator, candidate.via);
+    if (outcome) return outcome;
+    // Disabled. For a declared control that is a definite answer, not a reason to keep looking.
+    if (candidate.declared) return { advanced: false, detail: "the declared advance control is disabled" };
   }
   return { advanced: false, detail: "no flow-advance control was offered" };
 }
@@ -656,10 +690,15 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   const groups = await selectionGroups(page);
   if (!groups.length) return null;
 
+  // A group of "+"/"−" buttons is a STEPPER, not a selection — clicking one never yields a
+  // selected state, and judging it here misfired on "choose numbers of adults and children". It
+  // is a guess about an UNIDENTIFIED group, so it does not get to overrule the contract: a group
+  // carrying the contracted identity has already been declared a selection by the application,
+  // and short option labels are ordinary there ("2", "4", "6" — a party size, a rating, a size).
+  const identified = flow?.control?.machineId || null;
   const eligible = groups
-    // A group of "+"/"−" buttons is a STEPPER, not a selection — clicking one never yields a
-    // selected state, and judging it here misfired on "choose numbers of adults and children".
-    .filter((g) => g.options.some((o) => (o.text || "").length >= 3))
+    .filter((g) => (identified && g.machineId === identified)
+      || g.options.some((o) => (o.text || "").length >= 3))
     .map((g) => ({ ...g, key: groupKey(g) }))
     .filter((g) => !excludedKeys.has(g.key));
 
@@ -885,10 +924,7 @@ async function runStep(page, step, {
       if (result.complete && invalidFlow) {
         const stillHere = async () => semanticControlVisible(page, invalidFlow.control);
         let blocked = null;
-        for (const role of DRIVEABLE_ACTION_ROLES) {
-          const control = page.getByRole(role, { name: ADVANCE_ACTION_PATTERN }).first();
-          if (!(await control.count().catch(() => 0))) continue;
-          if (!(await control.isVisible().catch(() => false))) continue;
+        for (const { locator: control } of await advanceCandidates(page)) {
           if (await control.isDisabled().catch(() => false)) { blocked = "the advance control is disabled"; break; }
           await control.click({ timeout: 5_000 }).catch(() => {});
           await page.waitForTimeout(700);

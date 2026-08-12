@@ -231,6 +231,25 @@ export function useSemanticAction({ name, label = null, onActivate = null, disab
 }
 
 /**
+ * Props for the control that MOVES A MULTI-STEP FLOW ON — the next/continue button.
+ *
+ * Advancing is the one thing verification must be able to do in any application, because every
+ * later control is hidden behind it. It used to be found by reading the button's label against a
+ * list of English words; a build labelled its button "Next to party size", the list did not
+ * contain that phrase, and the flow could never reach its own party-size step.
+ *
+ * So the advance control gets the same treatment as every other contracted control: one fixed
+ * machine identity, emitted here. The label is yours — any wording, any language, an icon, or
+ * nothing at all. Use this for the control that goes FORWARD through a flow; a back control, a
+ * commit and any other action stay `useSemanticAction` with their own name.
+ */
+export const FLOW_ADVANCE = "advance";
+
+export function useFlowAdvance({ label = "Continue", onActivate = null, disabled = false } = {}) {
+  return useSemanticAction({ name: FLOW_ADVANCE, label, onActivate, disabled });
+}
+
+/**
  * Props for a live region announcing a state transition (confirmation, error, empty state).
  * A verifier — and a screen reader — sees the change because it is announced, not merely drawn.
  */

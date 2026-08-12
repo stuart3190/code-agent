@@ -39,6 +39,21 @@ export function controlIdFor(name, prefix = "ctl") {
 /** The same identity for an ACTION control (a button/link the contract names). */
 export const actionIdFor = (name) => controlIdFor(name, "act");
 
+/**
+ * THE CANONICAL ADVANCE IDENTITY.
+ *
+ * A multi-step flow hides its later controls behind a control that moves it on. The verifier used
+ * to find that control by reading its label against a list of English words — next, continue,
+ * proceed. A live build labelled its button "Next to party size", which is not in the list, so the
+ * party-size step was never reached and a paid run died one control short.
+ *
+ * Advancing is a MECHANICAL act, so it gets a mechanical identity like every other control: one
+ * well-known id the scaffold emits and the browser looks for. It is a convention, not a word — the
+ * button may say anything, in any language, or nothing at all.
+ */
+export const ADVANCE_ACTION_NAME = "advance";
+export const ADVANCE_ACTION_ID = actionIdFor(ADVANCE_ACTION_NAME);
+
 // Contracted interaction kinds → the browser primitive that drives them. The verifier switches on
 // THIS, never on what the value means.
 const PRIMITIVE_BY_KIND = Object.freeze({
@@ -119,7 +134,7 @@ export function deriveVerificationManifest(spec) {
       continue;
     }
 
-    const id = actionIdFor(flow.control.accessibleName || logical);
+    const id = primitive === "advance" ? ADVANCE_ACTION_ID : actionIdFor(flow.control.accessibleName || logical);
     mapping[id] = { logicalField: logical, journeyId: flow.journeyId, flowId: flow.id };
     actions.push({
       id,
@@ -130,6 +145,15 @@ export function deriveVerificationManifest(spec) {
       expected,
       accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName].filter(Boolean),
     });
+  }
+
+  // An advance action exists to REVEAL something. Naming what it should reveal turns "the button
+  // was clicked" into a checkable mechanical transition, and gives the browser a target to look
+  // for afterwards without knowing what any of it means.
+  for (const action of actions) {
+    if (action.primitive !== "advance") continue;
+    const next = controls.find((row) => row.journeyId === action.journeyId && row.stepIndex > action.stepIndex);
+    action.expectedNextControl = next?.id || null;
   }
 
   // ── durable outcomes ────────────────────────────────────────────────────────────────────────

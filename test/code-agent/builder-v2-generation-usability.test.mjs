@@ -329,7 +329,9 @@ test("GUIDANCE — nothing is added when the contract does not need it", () => {
   ], []);
   const spec = deriveBuildSpec(landing);
   const needs = assemblyNeeds(spec.interactionContract, spec.bindings);
-  assert.deepEqual(needs, { selection: false, field: false, entities: false, capabilityState: false, terminalReset: false, status: false });
+  // …including the forward control: a page with nothing to fill in has nowhere to advance to.
+  assert.deepEqual(needs, { selection: false, field: false, entities: false, capabilityState: false,
+    terminalReset: false, status: false, flowAdvance: false });
   assert.equal(preferredAssemblyBrief(needs), "", "a landing page pays no prompt cost");
 });
 

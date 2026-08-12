@@ -80,7 +80,7 @@ export const wizard = makeWizardMachine({
 `;
 
 const FLOW = `import { useState } from "react";
-import { useCapabilityState, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
+import { useCapabilityState, useFlowAdvance, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
 import { wizard, SOURCES, PRIORITIES, sourceOf, priorityOf, validEmail, leadStore, DEFECT } from "../data/crm.js";
 
 const sourceText = (value) => "Source " + (sourceOf(value) ? sourceOf(value).label : "");
@@ -109,6 +109,8 @@ export function Flow() {
   // DEFECT accepts-invalid: never disabled, and (see validate) advancing is not blocked either.
   const continueDisabled = DEFECT === "accepts-invalid"
     ? false : state.stepId === "contact" && !emailValid;
+  const advance = useFlowAdvance({ label: "Continue", disabled: continueDisabled,
+    onActivate: () => { if (DEFECT === "dom-only-advance") setCosmetic(cosmetic + 1); else wizard.next(); } });
   const anyContact = Boolean(values.contactName || values.contactEmail || values.notes);
 
   // DEFECT server-terminal: the flow is restored from state the SERVER holds, so every visitor —
@@ -190,10 +192,7 @@ export function Flow() {
     {/* DEFECT dom-only-advance: the control reacts — a counter moves, the page text changes — and
         the flow does not go anywhere. A driver that accepted "something changed" as progress would
         walk the rest of the journey in the wrong state. */}
-    <div><button type="button" disabled={continueDisabled}
-      onClick={() => { if (DEFECT === "dom-only-advance") setCosmetic(cosmetic + 1); else wizard.next(); }}>
-      Continue
-    </button></div>
+    <div><button {...advance.buttonProps}>Continue</button></div>
     {DEFECT === "dom-only-advance" ? <p>Interaction counter {cosmetic}.</p> : null}
     <div><a href="/manage">Open lead records</a></div>
   </main>;
