@@ -9,6 +9,7 @@ import {
   aggregateCapabilityFacts, lintCapabilitySafety, lintRequiredCapabilityBindings, lintRequiredModulePlan,
 } from "./capabilityLint.mjs";
 import { partitionFindings } from "./validationSeverity.mjs";
+import { lintControlBindings } from "./bindingLint.mjs";
 import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 
@@ -331,6 +332,14 @@ export function validateModuleConformance(tree, {
   // (The former sessionless_mutation dedupe is gone with the finding itself — session
   // establishment is a runtime invariant, not a generated-source obligation.)
   for (const issue of lintCapabilitySafety(tree, bindings).findings || []) add(issue);
+
+  // Is every contracted control ADDRESSABLE? Asked after emit and before the app is served, so a
+  // hand-wired control is named here rather than discovered part-way through a paid journey.
+  //
+  // Reported ALONGSIDE module conformance, never inside it: these are observations about binding,
+  // not facts a module contract promised, and folding them into a module's missing facts made a
+  // correctly-corrected module look non-conformant.
+  const controlBindings = lintControlBindings(tree, { interactionContract });
 
   const interactions = lintInteractiveWorkflow(tree, { interactionContract, modulePlan, bindings });
   for (const issue of interactions.findings || []) {

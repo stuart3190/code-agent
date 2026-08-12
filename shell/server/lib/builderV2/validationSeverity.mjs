@@ -59,6 +59,19 @@ export const BLOCKING_CODES = Object.freeze({
  * for something the browser tests directly and better.
  */
 export const ADVISORY_CODES = Object.freeze({
+  // ADDRESSABILITY. A contracted control with no machine identity is invisible to the browser's
+  // mechanics probe, so its defects can only surface part-way through a paid journey — run #8 died
+  // on step 2 of 8 exactly that way, and detecting it offline is worth having.
+  //
+  // These were built to BLOCK, and measurement said no. Against `builder-v2-false-rejection`, the
+  // corpus of known-WORKING implementations this platform keeps precisely to answer this question,
+  // blocking rejected 7 of 7. The binding inference is not accurate enough to gate a build: a
+  // correct app may bind through a wrapper, a store, a loop, or a component this walker cannot
+  // follow. Reported, therefore, and not enforced — until that suite scores zero.
+  contract_control_unbound: "a contracted control appears hand-wired; verification may not be able to address it",
+  contract_control_missing: "no element in the tree names this contracted control",
+  contract_control_coverage_undetermined: "the tree binds controls dynamically, so coverage cannot be decided offline",
+  uncontracted_control_unbound: "an interactive element carries no machine identity and matches no contracted control",
   required_method_unbound: "browser journeys prove whether the behaviour exists; AST cannot prove absence of use",
   required_method_uninvoked: "a method may legitimately be passed as a reference (useSyncExternalStore); the browser decides",
   required_method_unexported: "export shape is not behaviour",
