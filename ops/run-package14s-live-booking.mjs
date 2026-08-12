@@ -284,10 +284,13 @@ async function cleanup(state) {
     match: state.baseline[table].count === after[table].count
       && state.baseline[table].sha256 === after[table].sha256,
   }]));
-  state.cleanup = { at: new Date().toISOString(), preview, report, parity,
+  // Retention is announced in both places. It ran silently after run #9 — the files were on disk
+  // and nothing said so — and a forensic step nobody can see is one that stops working unnoticed,
+  // discovered only the next time it is needed, which is always after a failure.
+  state.cleanup = { at: new Date().toISOString(), preview, report, parity, retention,
     pass: Object.values(parity).every((row) => row.match) };
   await save(state);
-  await emit("cleanup_complete", { projectSurvivors: 0, preview, parity: state.cleanup.pass });
+  await emit("cleanup_complete", { projectSurvivors: 0, preview, parity: state.cleanup.pass, retention });
 }
 
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });

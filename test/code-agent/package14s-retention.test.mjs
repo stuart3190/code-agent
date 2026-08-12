@@ -1,0 +1,67 @@
+// THE EVIDENCE OF A FAILED PAID RUN, AND THE PROOF THAT IT IS ANNOUNCED.
+//
+// Runs #7 and #8 each cost about 6.8 credits, each failed on the generated application, and the
+// only artefact that could explain either was erased by the stand-down before anyone read it.
+// Run #9's source survived — and the retention ran SILENTLY: the files were on disk and neither
+// `state.cleanup.retention` nor the `cleanup_complete` event mentioned them. A forensic step nobody
+// can see is one that stops working unnoticed, discovered the next time it is needed, which is
+// always straight after a failure.
+//
+// The runner needs live credentials, so this reads its source instead of executing it. What is
+// asserted is therefore structural — but the properties that matter here ARE structural: retention
+// must happen BEFORE the erasure it precedes, it must be reported in both places, it must not fire
+// for a passing run, and it must never be able to stop the teardown.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const source = await readFile(new URL("../../ops/run-package14s-live-booking.mjs", import.meta.url), "utf8");
+const cleanup = source.slice(source.indexOf("async function cleanup(state)"),
+  source.indexOf("await mkdir(evidenceDir"));
+const retain = source.slice(source.indexOf("async function retainGeneratedSource"),
+  source.indexOf("async function cleanup(state)"));
+
+test("retention runs BEFORE the erasure it precedes", () => {
+  assert.ok(cleanup.length > 100, "the cleanup function was not found");
+  const retained = cleanup.indexOf("retainGeneratedSource(state)");
+  const erased = cleanup.indexOf("eraseProjectPermanently");
+  assert.notEqual(retained, -1, "cleanup never retains the generated source");
+  assert.notEqual(erased, -1, "cleanup never erases the project");
+  assert.ok(retained < erased,
+    "the source is retained AFTER the erasure that destroys it — the ordering is the whole point");
+});
+
+test("the retention result is announced in the state AND in the event", () => {
+  // Both, because they are read by different people at different times: the event is what a human
+  // watching the run sees, the state is what a later session reads back.
+  assert.match(cleanup, /state\.cleanup = \{[^}]*retention/s,
+    "state.cleanup does not carry the retention result");
+  assert.match(cleanup, /emit\("cleanup_complete", \{[^}]*retention/s,
+    "the cleanup_complete event does not carry the retention result");
+});
+
+test("a PASSING run retains nothing", () => {
+  // Retention exists to explain failures. A green run's tree is not evidence of anything, and
+  // keeping it would quietly widen what the stand-down leaves behind.
+  assert.match(retain, /result === "pass"/,
+    "retention does not exempt a passing run");
+});
+
+test("retention can never stop the teardown", () => {
+  // Forensics must not gate the erasure. A throw here would leave a project standing — the exact
+  // outcome the stand-down exists to prevent — in exchange for a diagnostic nicety.
+  assert.match(retain, /catch \(error\)/, "retention has no failure path");
+  assert.equal(/catch \(error\) \{[^}]*throw/s.test(retain), false,
+    "retention rethrows, so a forensic failure would block the erasure");
+  assert.match(retain, /return \{ retained: 0, error/, "a retention failure is not reported");
+});
+
+test("teardown itself is untouched: nothing is exempted from the erasure", () => {
+  // The alternative design — exempting snapshots and blobs from teardown — would have bought the
+  // same evidence by weakening a load-bearing guarantee. The manifest is still approved by hash and
+  // the survivor check still runs.
+  assert.match(cleanup, /buildProjectErasureManifest/);
+  assert.match(cleanup, /approvedManifestSha256/);
+  assert.match(cleanup, /Package 14S cleanup left the project/);
+});
