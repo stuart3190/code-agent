@@ -111,6 +111,26 @@ export function isVague(text) {
  * cannot drive verification and must be regenerated; a warning means it is thin but usable. A
  * contract that fails this is worse than none, because later stages would trust it.
  */
+/** Everything a step is allowed to name: the contract's own declared vocabulary, nothing else. */
+const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export function contractReferences(contract) {
+  const references = new Set();
+  for (const entity of contract?.entities || []) {
+    if (entity?.name) references.add(normaliseReference(entity.name));
+    for (const field of entity?.fields || []) {
+      if (!field?.name) continue;
+      references.add(normaliseReference(field.name));
+      // A step may name a field on its entity ("booking.slotId") as readably as on its own.
+      if (entity?.name) references.add(normaliseReference(`${entity.name}.${field.name}`));
+    }
+  }
+  for (const operation of contract?.operations || []) {
+    for (const key of [operation?.id, operation?.name]) if (key) references.add(normaliseReference(key));
+  }
+  return references;
+}
+
 export function validateContract(contract) {
   const problems = [];
   const warnings = [];
@@ -133,6 +153,28 @@ export function validateContract(contract) {
       // `expect` is the whole point: a step with no expectation cannot fail, so it cannot verify.
       if (!step?.expect || isVague(step.expect)) {
         problems.push(`${where} step ${stepIndex + 1} has no observable expectation ("${String(step?.expect || step?.action || "").slice(0, 60)}")`);
+      }
+      // OPERANDS AND DEPENDENCIES. `operates` names the controls this step actually manipulates;
+      // `reads` names state it merely depends on. A live run failed because "select a party size
+      // that does not exceed the slot's remaining capacity" was read as operating the SLOT as well
+      // — prose cannot tell a verb's object from its subordinate clause, and it should not have to.
+      // A reference to something the contract never declared is caught here, before generation.
+      for (const [key, values] of [["operates", step?.operates], ["reads", step?.reads]]) {
+        if (values === undefined || values === null) continue;
+        if (!Array.isArray(values)) {
+          problems.push(`${where} step ${stepIndex + 1} declares "${key}" that is not a list`);
+          continue;
+        }
+        for (const reference of values) {
+          if (typeof reference !== "string" || !reference.trim()) {
+            problems.push(`${where} step ${stepIndex + 1} names an empty ${key} reference`);
+            continue;
+          }
+          if (!contractReferences(c).has(normaliseReference(reference))) {
+            problems.push(`${where} step ${stepIndex + 1} ${key} "${reference}" is not a declared `
+              + "entity field or operation — a step may only name things the contract defines");
+          }
+        }
       }
     }
     if (journey.stage && !STAGES.includes(journey.stage)) problems.push(`${where} names unknown stage "${journey.stage}"`);

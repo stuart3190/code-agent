@@ -296,9 +296,31 @@ export function buildInteractionContract(contract, {
     });
     for (const [stepIndex, step] of stepsList.entries()) {
       const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
-      for (const kind of kinds) {
-        const fields = ["selection", "input"].includes(kind)
-          ? fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind) : [null];
+      // WHICH CONTROLS THIS STEP OPERATES is a structured fact the contract states, not a reading
+      // of its prose. "select a party size that does not exceed the slot's remaining capacity"
+      // OPERATES the party size and READS the slot; the prose reader saw both as operands,
+      // re-contracted a control an earlier step had already consumed and unmounted, and killed a
+      // paid run on it. `reads` never becomes a browser action — it is context, not a control.
+      const operands = Array.isArray(step?.operates)
+        ? step.operates.map((value) => String(value).split(".").pop()).filter(Boolean) : null;
+      // With operands declared, one step drives ONE kind of control. The verb usually names the
+      // primitive ("select"/"enter"); when it does not ("set the reorder quantity", "update the
+      // status"), the CONTRACT decides — a declared operand means a control is operated whether or
+      // not the platform's verb list happens to contain that word. `primitive` states it outright.
+      const declaredPrimitive = step?.primitive === "selection" ? "selection"
+        : ["textbox", "input"].includes(step?.primitive) ? "input" : null;
+      const operandKind = operands
+        ? (declaredPrimitive || kinds.find((row) => ["selection", "input"].includes(row)) || "input")
+        : null;
+      const effectiveKinds = operands && !kinds.includes(operandKind) ? [...kinds, operandKind] : kinds;
+      for (const kind of effectiveKinds) {
+        const drivesValues = ["selection", "input"].includes(kind);
+        // A second value-writing kind on a step whose operands are declared is an artefact of an
+        // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
+        if (drivesValues && operands && kind !== operandKind) continue;
+        const fields = drivesValues
+          ? (operands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind))
+          : [null];
         for (const field of fields.length ? fields : [null]) {
           const writes = [];
           const reads = [];

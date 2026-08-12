@@ -41,9 +41,10 @@ Shape:
       "stage": "primary_journey",        // work before the preview may be shown. Others: "secondary".
       "steps": [
         { "action": "open the booking page", "target": "/book", "expect": "the list of services is visible" },
-        { "action": "select a service and an available slot", "target": "service picker", "expect": "the chosen slot is highlighted and the continue control becomes enabled" },
-        { "action": "enter name, email and phone and submit", "target": "details form", "expect": "a confirmation with a booking reference is shown" },
-        { "action": "reload the page and look the booking up by reference", "target": "manage booking", "expect": "the booking is still there after the reload" }
+        { "action": "select a service and an available slot", "target": "service picker", "operates": ["serviceId", "slotId"], "expect": "the chosen slot is highlighted and the continue control becomes enabled" },
+        { "action": "choose a party size within the slot's remaining capacity", "target": "party size control", "operates": ["partySize"], "reads": ["slotId", "slotCapacity"], "expect": "the chosen party size is displayed" },
+        { "action": "enter name, email and phone and submit", "target": "details form", "operates": ["guestName", "guestEmail", "guestPhone"], "expect": "a confirmation with a booking reference is shown" },
+        { "action": "reload the page and look the booking up by reference", "target": "manage booking", "reads": ["reference"], "expect": "the booking is still there after the reload" }
       ],
       "acceptance": ["a booking made in the browser survives a full page reload"]
     }
@@ -65,6 +66,12 @@ Shape:
 
 Rules:
 - EVERY journey has at least two steps, and every step has an "expect" naming something visible.
+- A step that manipulates controls lists them in "operates" — the fields it actually changes, by
+  their declared entity field names. State the step merely DEPENDS on goes in "reads". A step that
+  chooses a party size within a slot's capacity OPERATES partySize and READS slotId; naming the
+  slot in "operates" would tell the verifier to re-open a control the previous step already used.
+  Every name in "operates"/"reads" must be a field or operation this contract declares.
+- Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.
@@ -105,7 +112,19 @@ function normalise(contract, { prompt }) {
     ...journey,
     id: journey.id || `journey-${index + 1}`,
     stage: STAGES.includes(journey.stage) ? journey.stage : "primary_journey",
-    steps: Array.isArray(journey.steps) ? journey.steps : [],
+    // A model that omits operates/reads leaves them ABSENT rather than empty: absent means "this
+    // contract predates the structured schema, fall back to reading the prose", while an empty
+    // list would mean "this step operates nothing", and the two must not be confused.
+    steps: (Array.isArray(journey.steps) ? journey.steps : []).map((step) => {
+      const list = (value) => (Array.isArray(value) ? value.map(String).filter(Boolean) : null);
+      const operates = list(step?.operates);
+      const reads = list(step?.reads);
+      return {
+        ...step,
+        ...(operates?.length ? { operates } : {}),
+        ...(reads?.length ? { reads } : {}),
+      };
+    }),
     acceptance: Array.isArray(journey.acceptance) ? journey.acceptance : [],
   }));
   // Exactly one primary, decided here rather than trusted: a contract with none would fail
