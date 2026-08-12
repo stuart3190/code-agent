@@ -733,6 +733,13 @@ export function collectInteractionControls(tree) {
         disabled: staticBooleanAttr(opening, "disabled"), readOnly: staticBooleanAttr(opening, "readOnly"),
         controlled: Boolean(attrRow(opening, "value") || attrRow(opening, "checked")),
         hasChangeHandler: Boolean(changeHandlerSource), changeHandlerSource, resolvedHandlerSource, valueSource,
+        // WHAT THIS SCAN CANNOT SEE. `<input {...field.inputProps} />` carries its value, its
+        // change handler and its accessible name in an object this file never evaluates, so every
+        // attribute-based conclusion about such an element is a guess. Recording that explicitly is
+        // what separates "I can prove this control is dead" from "I cannot tell" — and the second
+        // one fired on a WORKING application in the 2026-08-12 run #6, which is why the whole
+        // finding had to stay advisory. Now only the provable half is allowed to block.
+        hasSpread: (opening.attributes || []).some((row) => row?.type === "JSXSpreadAttribute"),
         selectedState: ["aria-pressed", "aria-selected", "checked"].some((key) => attrRow(opening, key) !== null),
       });
     });
@@ -757,12 +764,51 @@ function stateConnection(control, flow) {
   return named && (!control.controlled || generic);
 }
 
+/**
+ * TWO DIFFERENT CLAIMS, WHICH USED TO SHARE ONE CODE.
+ *
+ * `interaction_control_undriveable` meant both "this control provably cannot accept the contracted
+ * interaction" and "I looked and could not tell". Run #6 fired the second on three fields that
+ * worked perfectly; run #7 fired it on three that did not. Identical output, opposite truths — so
+ * the finding could never be allowed to stop a build, and a real defect went to a paid browser run.
+ *
+ * PROVEN_UNDRIVEABLE is now reserved for structure that settles the question: an element the
+ * contract needs to edit that is disabled, read-only, or holds a value with no way to change it.
+ * Everything else is SUSPECT_INTERACTION — a shape worth reporting and worth PROBING, never worth
+ * failing on. Unknown is not broken.
+ */
+export const DIAGNOSTIC_LEVEL = Object.freeze({
+  PROVEN: "PROVEN_UNDRIVEABLE",
+  SUSPECT: "SUSPECT_INTERACTION",
+});
+
+// Reasons whose evidence is structural and complete. Each is a fact about the element itself, not
+// an absence of something this scan is able to see.
+const PROVEN_REASONS = new Set(["disabled", "readonly", "controlled_without_change_handler", "invalid_control_type"]);
+
+/**
+ * A finding may only be PROVEN when the evidence is not defeated by what the scan cannot read.
+ * An element carrying a spread holds its props somewhere else, so nothing absent from its
+ * attributes proves anything about it.
+ */
+export function diagnosticLevel(reason, controls = []) {
+  if (!PROVEN_REASONS.has(String(reason))) return DIAGNOSTIC_LEVEL.SUSPECT;
+  const rows = Array.isArray(controls) ? controls : [controls];
+  if (rows.length && rows.some((control) => control?.hasSpread)) return DIAGNOSTIC_LEVEL.SUSPECT;
+  return DIAGNOSTIC_LEVEL.PROVEN;
+}
+
 /** Generic pre-browser lint: driveability plus obvious review/confirmation/cancellation breaks. */
 export function lintInteractiveWorkflow(tree, { interactionContract, modulePlan = [], bindings = [] } = {}) {
   const findings = [];
   const controls = collectInteractionControls(tree);
   const reject = (code, message, flow = null, details = {}) => findings.push({ code, message,
-    journeyId: flow?.journeyId || null, interactionId: flow?.id || null, ...details });
+    journeyId: flow?.journeyId || null, interactionId: flow?.id || null,
+    // Every interaction finding now says how strong its evidence is, so a consumer never has to
+    // infer that from the message.
+    ...(code === "interaction_control_undriveable"
+      ? { level: diagnosticLevel(details.reason, details.controls) } : {}),
+    ...details });
 
   for (const flow of interactionContract?.flows || []) {
     if (!flow.control) continue;

@@ -19,7 +19,9 @@ import {
   ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases,
   semanticConcept, semanticKey,
 } from "../builderV2/controlIdentity.mjs";
-import { ADVANCE_ACTION_ID } from "../builderV2/verificationManifest.mjs";
+import {
+  ADVANCE_ACTION_ID, browserPlan, deriveVerificationManifest,
+} from "../builderV2/verificationManifest.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -1567,6 +1569,96 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
  * Returns `{ pass, journeys, failures, undriveable, consoleErrors, failedRequests }`.
  * `pass` reflects the PRIMARY journey only — that is the one the brief says gates the preview.
  */
+/**
+ * THE MECHANICS PROBE — behavioural proof, before the expensive part.
+ *
+ * Static analysis cannot decide whether a control accepts input. `<input {...field.inputProps} />`
+ * hides its handler in an object; a hand-wired `value={draft.x}` with a setter that never lands
+ * looks identical to one that does. Run #6 and run #7 produced the SAME static finding for fields
+ * that worked and fields that did not, and the difference only showed up eight steps into a paid
+ * booking journey.
+ *
+ * So where structure cannot answer, ask the page — with the cheapest possible question, before any
+ * journey runs. Type a probe value into a contracted textbox and read it back. Click one option of
+ * a contracted selection and see whether anything became selected. That is the whole test.
+ *
+ * It is DOMAIN-BLIND by construction: it receives opaque control ids and browser primitives, and
+ * nothing else. It does not know what a guest, an email or a booking is, and cannot: the probe
+ * value is a fixed generic string, chosen to be typeable into anything.
+ *
+ * @param {object} page                 an open page on the app's entry route
+ * @param {Array}  controls             browserPlan controls: { id, primitive, inputType }
+ * @returns {{ probed: number, failures: Array, skipped: Array }}
+ */
+export async function probeControlMechanics(page, controls = []) {
+  const failures = [];
+  const skipped = [];
+  let probed = 0;
+
+  for (const control of controls) {
+    const target = page.locator(`[data-thrallo-control="${control.id}"]`).first();
+    // Not mounted yet is not a verdict. Later steps live behind a flow, and reaching them is the
+    // journey's job, not the probe's: a control this cheap phase cannot see is simply left alone.
+    if (!(await target.count().catch(() => 0)) || !(await target.isVisible().catch(() => false))) {
+      skipped.push({ id: control.id, primitive: control.primitive, reason: "not_mounted_on_entry" });
+      continue;
+    }
+
+    if (control.primitive === "textbox") {
+      // An input the contract must WRITE and the browser cannot: proven, structurally, here.
+      if (await target.isDisabled().catch(() => false)) {
+        failures.push({ id: control.id, primitive: "textbox", expected: "value_accepted",
+          observed: "disabled", detail: "the contracted textbox is disabled on entry" });
+        continue;
+      }
+      // `type` decides what a value even is: a number input refuses letters and an email input is
+      // free to normalise. The probe value comes from the PRIMITIVE, never from meaning.
+      const value = PROBE_VALUE[control.inputType] || PROBE_VALUE.text;
+      await target.fill(value, { timeout: 5_000 }).catch(() => {});
+      await page.waitForTimeout(120);
+      const readBack = await target.inputValue().catch(() => null);
+      probed += 1;
+      if (readBack !== value) {
+        failures.push({ id: control.id, primitive: "textbox", expected: value,
+          observed: readBack === null ? "unreadable" : readBack,
+          detail: "the contracted textbox did not retain a probe value" });
+      }
+      // Leave nothing behind: the journeys that follow write their own values.
+      await target.fill("", { timeout: 2_000 }).catch(() => {});
+      continue;
+    }
+
+    if (control.primitive === "selection") {
+      const options = page.locator(`[data-thrallo-control="${control.id}"][data-thrallo-option]`);
+      const count = await options.count().catch(() => 0);
+      if (!count) { skipped.push({ id: control.id, primitive: "selection", reason: "no_options_on_entry" }); continue; }
+      const before = await selectionSnapshot(page, control.id);
+      await options.first().click({ timeout: 5_000 }).catch(() => {});
+      await page.waitForTimeout(200);
+      const after = await selectionSnapshot(page, control.id);
+      probed += 1;
+      // Gone entirely is legitimate — a chooser that advances its own flow. Present and unchanged
+      // is not: nothing observable happened, so nothing can be verified through it later.
+      if (after.length && before.join("|") === after.join("|")) {
+        failures.push({ id: control.id, primitive: "selection", expected: "selection_state_changed",
+          observed: "unchanged", detail: "clicking a contracted option produced no selected state" });
+      }
+    }
+  }
+  return { probed, failures, skipped };
+}
+
+// Values chosen by INPUT TYPE, which is a browser fact. Nothing here describes a business meaning.
+const PROBE_VALUE = Object.freeze({
+  text: "Probe", email: "probe@example.com", tel: "07700900123", number: "2",
+  search: "Probe", url: "https://example.com", password: "Probe-1234", textarea: "Probe",
+});
+
+const selectionSnapshot = (page, id) => page.evaluate((controlId) => [...document
+  .querySelectorAll(`[data-thrallo-control="${controlId}"][data-thrallo-option]`)]
+  .map((el) => `${el.getAttribute("aria-pressed") || ""}:${el.getAttribute("aria-selected") || ""}`
+    + `:${el.getAttribute("data-selected") || ""}:${el.className || ""}`), id).catch(() => []);
+
 export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
 }) {
@@ -1575,6 +1667,8 @@ export async function verifyJourneys({
   const failedRequests = [];
   const marker = String(Date.now()).slice(-6);
   let browser = null;
+  // The mechanics phase runs inside the try and is reported outside it.
+  let mechanics = null;
 
   try {
     const { chromium } = requireCjs("playwright");
@@ -1616,6 +1710,21 @@ export async function verifyJourneys({
     }
 
     const deadline = Date.now() + timeoutMs;
+
+    // MECHANICS BEFORE MEANING. Contracted controls that are already on screen get the cheap
+    // question first — does this thing accept the interaction its primitive implies — so a build
+    // whose fields cannot hold a value says so in seconds, with the control's own id, instead of
+    // eight steps into a journey. Costs one fill per visible control and changes no verdict on its
+    // own: the journeys below still run, and still decide.
+    const probePlan = browserPlan(deriveVerificationManifest(contract)).controls
+      .filter((row) => ["textbox", "selection"].includes(row.primitive));
+    mechanics = probePlan.length ? await probeControlMechanics(page, probePlan) : null;
+    if (mechanics?.failures?.length) {
+      // Reload so the probe's own interactions are not part of the state the journeys inherit.
+      await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await page.waitForTimeout(400);
+    }
+
     // Durable evidence for the WHOLE run: what each contracted journey created, so a later
     // journey that depends on that record can prove it survived.
     const runEvidence = new Map();
@@ -1705,7 +1814,7 @@ export async function verifyJourneys({
     }
   } catch (error) {
     return {
-      pass: null, journeys: results, error: error.message,
+      pass: null, journeys: results, error: error.message, mechanics,
       consoleErrors, failedRequests,
       // A verifier that cannot start must not be read as "the app is broken".
       unavailable: true,
@@ -1721,6 +1830,10 @@ export async function verifyJourneys({
     journeys: results,
     failures: results.filter((j) => j.status === "fail"),
     undriveable: results.filter((j) => j.status === "undriveable"),
+    // Behavioural mechanics evidence, reported whatever the journeys concluded: it names each
+    // control by its opaque id and says what the browser observed, which is what a targeted
+    // correction needs and what a journey failure eight steps later does not supply.
+    mechanics,
     consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
     failedRequests: [...new Set(failedRequests)].slice(0, 10),
   };

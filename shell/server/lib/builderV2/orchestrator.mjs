@@ -193,6 +193,9 @@ export function createOrchestrator({
       }),
     ];
     return { journeys: merged, plan, platformDefects, blockingErrors,
+      // The pre-journey mechanics probe's verdict travels with the journey verdicts, so a repair
+      // brief can lead with the control that provably cannot hold a value.
+      mechanics: driven.mechanics || null,
       consoleErrors: driven.consoleErrors || [], failedRequests: driven.failedRequests || [] };
   }
 
@@ -606,6 +609,17 @@ export function createOrchestrator({
               return [...journeyEvidence, ...attributionEvidence];
             }),
             ...structuredInteractionEvidence,
+            // MECHANICS EVIDENCE FIRST. A journey failure says "step 5 was undriveable"; the probe
+            // says which control, by its own id, what mechanic was expected and what the browser
+            // actually observed. Run #7 spent both its rounds on the second kind of message and
+            // fixed nothing. Named as a MECHANIC, never as a field: the model is being told a
+            // control cannot hold a value, not what the value would have meant.
+            ...(coreVerdicts.mechanics?.failures || []).map((row) => `control ${row.id} (${row.primitive}) `
+              + `failed its mechanics probe: expected ${JSON.stringify(row.expected)}, observed `
+              + `${JSON.stringify(row.observed)} — ${row.detail}. The control is present and located by `
+              + "its declared identity, so bind it so a typed value lands in state and renders back, "
+              + "for example: value={state.field} with onChange writing state through the setter, or "
+              + "the capability field binding, or an uncontrolled input with defaultValue."),
             ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
             ...coreVerdicts.blockingErrors,
             // Shape findings that did not stop the build ride along as CONTEXT for a repair
