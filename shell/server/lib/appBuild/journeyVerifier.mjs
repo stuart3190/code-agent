@@ -1885,12 +1885,33 @@ export async function verifyJourneys({
           continue;
         }
         const interactionFlows = interactionFlowsFor(contract, journey.id, stepIndex);
+        // WHAT THE PAGE SAID WHEN IT FAILED.
+        //
+        // Run #9's commit was refused by the generated app, and the retained source showed three
+        // branches that could have refused it: two return a state the UI renders SILENTLY, one
+        // renders "Error: …". The step's verdict — five expected words, one found — could not tell
+        // them apart, and neither could the source, so diagnosing a 5.7-credit failure stopped at
+        // "the mutation failed, cause unknown".
+        //
+        // So a failing step now keeps what was on screen, and what the browser complained about
+        // while it ran. Evidence only: captured after the verdict, never an input to it, and
+        // bounded so a page of text cannot bloat the record.
+        const consoleBefore = consoleErrors.length;
+        const requestsBefore = failedRequests.length;
         const outcome = await runStep(page, step, {
           marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
         if (outcome.selectedText) selections.push(outcome.selectedText);
+        if (!["pass", "skipped", "not_reached"].includes(outcome.status)) {
+          outcome.observation = {
+            text: (await page.evaluate(() => document.body?.innerText || "").catch(() => ""))
+              .replace(/\s+/g, " ").trim().slice(0, 600),
+            consoleSince: consoleErrors.slice(consoleBefore, consoleBefore + 5),
+            requestsSince: failedRequests.slice(requestsBefore, requestsBefore + 5),
+          };
+        }
         steps.push({ action: step.action, expect: step.expect, ...outcome });
         if (!["pass", "skipped"].includes(outcome.status)) blockedBy = { stepIndex, status: outcome.status };
       }

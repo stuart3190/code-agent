@@ -310,3 +310,36 @@ test("LADDER — the probe path never reaches for the platform's alias table", a
     "the probe ladder reaches for the platform alias table");
   assert.match(ladder, /fallbackNames/);
 });
+
+// ── what the page said when it failed ──────────────────────────────────────────────────────────
+
+test("a failing step keeps what was on screen, and what the browser complained about",
+  needsBrowser, () => {
+    // Run #9's commit was refused by the app. Three branches in the retained source could have
+    // refused it — two render nothing at all, one renders "Error: …" — and the verdict ("five words
+    // expected, one found") could not tell them apart. Neither could the source. A 5.7-credit
+    // failure was diagnosable only as far as "the mutation failed, cause unknown".
+    const journey = (runs.get("broken").journeys || [])[0];
+    const failed = (journey.steps || []).find((row) => !["pass", "skipped", "not_reached"].includes(row.status));
+    assert.ok(failed, "the broken build produced no failing step to observe");
+    assert.ok(failed.observation, "a failing step carries no observation");
+    assert.equal(typeof failed.observation.text, "string");
+    assert.ok(failed.observation.text.length > 0, "nothing of the page was captured");
+    // Bounded: a long page must not bloat the retained record.
+    assert.ok(failed.observation.text.length <= 600, `observation text is ${failed.observation.text.length} chars`);
+    assert.ok(Array.isArray(failed.observation.consoleSince));
+    assert.ok(Array.isArray(failed.observation.requestsSince));
+    // It captures what was actually rendered, not a summary of the verdict.
+    assert.match(failed.observation.text, /Who is coming|Supper club/);
+  });
+
+test("the observation is evidence, never an input to the verdict", needsBrowser, () => {
+  // Captured after the status is decided, and only for steps that did not pass — so it cannot
+  // widen or narrow what counts as success, and a green run carries none of it.
+  const corrected = (runs.get("corrected").journeys || [])[0];
+  for (const step of corrected.steps || []) {
+    if (step.status === "pass") {
+      assert.equal("observation" in step, false, `a passing step carried an observation: ${step.action}`);
+    }
+  }
+});
