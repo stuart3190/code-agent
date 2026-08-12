@@ -339,9 +339,27 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
     });
   }
 
+  // COVERAGE IS A CLAIM THIS WALKER OFTEN CANNOT MAKE.
+  //
+  // Three of the four ways a correct app binds a control — a wrapper component, a store, a factory
+  // called with a variable — are structurally outside the reach of a static reader. Where any of
+  // them is present, "no contracted control was found unbound" is not a statement about the app;
+  // it is a statement about what could be seen. The report says so at TREE level, so a consumer
+  // cannot mistake a quiet result for a proof, and so that driving the false-rejection rate to
+  // zero could never be achieved by simply ceasing to fire wherever indirection appears.
+  const unresolved = elements.filter((row) => row.binding === BINDING.UNRESOLVED);
+  const undeterminedReasons = [
+    ...(dynamicBindings.length ? [`${dynamicBindings.length} control(s) bound dynamically: ${dynamicBindings[0]}`] : []),
+    ...(unresolved.length ? [`${unresolved.length} element(s) carry a spread this walker cannot follow `
+      + `(${unresolved[0].file}:${unresolved[0].line})`] : []),
+  ];
+
   return {
     ok: !findings.some((row) => row.fails),
     findings, elements, coverage,
+    // True whenever ANY binding in the tree was unreadable — not merely for the controls affected.
+    coverageUndetermined: undeterminedReasons.length > 0,
+    undeterminedReasons,
     // STATED WITH THE RESULT, EVERY TIME. The intersection depends on a TEXTUAL match between an
     // element's accessible name, id or label and the contracted control's semantic key. A control
     // labelled divergently from its key — "Choose your evening" against `eventDate` — matches

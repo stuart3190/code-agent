@@ -220,8 +220,56 @@ async function runLifecycle(state, { stage, mode, prompt, ceiling, v2Input = nul
   return state.stages[stage];
 }
 
+/**
+ * RETAIN THE GENERATED SOURCE OF A FAILED RUN, BEFORE THE PROJECT IS ERASED.
+ *
+ * Runs #7 and #8 each cost about 6.8 credits, each failed on the generated application, and in
+ * both cases the only artefact that could explain — or validate a rule written in response — was
+ * destroyed by this very stage before it could be read. `bv2_snapshots` and `bv2_blobs` were zero
+ * by the time anyone looked.
+ *
+ * Teardown itself is UNCHANGED: nothing is exempted, the project is still erased completely, and
+ * the baseline parity proof still has to pass. This copies the tree OUT first. An exemption would
+ * have weakened a load-bearing guarantee to buy the same evidence.
+ *
+ * Scope: failed runs only, the retained working/candidate tree, written beside the run's own
+ * evidence at mode 0700. These are synthetic operator-owned applications containing no customer
+ * data; they expire when the evidence directory is pruned. Nothing here runs for a customer
+ * project — this file is the qualification runner.
+ */
+async function retainGeneratedSource(state) {
+  const booking = state.stages?.booking;
+  if (!booking || booking.result === "pass") return null;
+  const bv2 = booking.evidence?.publicBuild?.result?._worker?.bv2 || {};
+  const ids = [...new Set([bv2.workingSnapshotId, bv2.candidateSnapshotId].filter(Boolean))];
+  if (!ids.length) return { retained: 0, reason: "the failed build left no snapshot" };
+
+  try {
+    const [{ createSnapshotStore }, { supabaseSnapshotStorage }] = await Promise.all([
+      import("../shell/server/lib/builderV2/snapshotStore.mjs"),
+      import("../shell/server/lib/builderV2/supabaseTwins.mjs"),
+    ]);
+    const store = createSnapshotStore(supabaseSnapshotStorage({ client }));
+    let files = 0;
+    for (const id of ids) {
+      const tree = await store.materialize(state.owner, id);
+      for (const [relative, content] of Object.entries(tree || {})) {
+        const target = path.join(evidenceDir, "generated-source", id, relative);
+        await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+        await writeFile(target, String(content), { mode: 0o600 });
+        files += 1;
+      }
+    }
+    return { retained: ids.length, files, snapshots: ids };
+  } catch (error) {
+    // Retention is forensics, never a gate: a failure here must not stop the erasure it precedes.
+    return { retained: 0, error: String(error?.message || error).slice(0, 160) };
+  }
+}
+
 async function cleanup(state) {
   if (state.cleanup) throw new Error("cleanup already completed");
+  const retention = await retainGeneratedSource(state);
   const preview = await previewProvider().stop(state.project.id);
   const manifest = await buildProjectErasureManifest(state.owner, state.project.id, { client });
   const report = await eraseProjectPermanently(state.owner, state.project.id, {

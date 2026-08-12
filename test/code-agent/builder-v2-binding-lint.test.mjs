@@ -239,3 +239,52 @@ test("a control bound DYNAMICALLY is never reported missing", () => {
   assert.equal(undetermined.every((row) => row.fails === false), true);
   assert.match(undetermined[0].message, /dynamically/);
 });
+
+// ── a quiet result is not a proof ──────────────────────────────────────────────────────────────
+
+test("a tree the walker cannot fully read is marked coverage-UNDETERMINED", () => {
+  // Three of the four ways a correct app binds a control — a wrapper, a store, a factory called
+  // with a variable — are outside a static reader's reach. Where any is present, "nothing was
+  // found unbound" describes what could be SEEN, not what the app does, and the report must say so
+  // at tree level. Otherwise a green lint reads as coverage, and the only way to reach zero false
+  // rejections would be to stop firing wherever indirection appears.
+  const dynamic = { "src/components/Flow.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    const NAMES = ["eventDate", "guestName"];
+    export function Flow() {
+      const fields = Object.fromEntries(NAMES.map((name) => [name, useSemanticField({ name })]));
+      return <main>{NAMES.map((name) => <input key={name} {...fields[name].inputProps} />)}</main>;
+    }` };
+  const result = lint(dynamic);
+  assert.equal(result.ok, true);
+  assert.equal(result.coverageUndetermined, true, "a dynamically-bound tree was reported as determined");
+  assert.match(result.undeterminedReasons.join(" "), /dynamically/);
+  // …and the residual gap still ships alongside it.
+  assert.match(result.residualGap, /not a proof/i);
+});
+
+test("an unfollowable wrapper also makes coverage undetermined", () => {
+  const wrapped = { "src/components/Field.jsx": `
+    export function Field(props) { return <input {...props} aria-label="Guest name" />; }
+    export function Chooser({ groupProps }) {
+      return <div {...groupProps} id="eventDate"><button role="option">A</button></div>;
+    }` };
+  const result = lint(wrapped);
+  assert.equal(result.coverageUndetermined, true);
+  assert.match(result.undeterminedReasons.join(" "), /cannot follow/i);
+});
+
+test("a fully readable tree is NOT marked undetermined", () => {
+  const readable = { "src/components/Flow.jsx": `
+    import { useSemanticField, useSemanticSelection } from "../lib/capabilities/react.js";
+    export function Flow() {
+      const dates = useSemanticSelection({ name: "eventDate", label: "Date" });
+      const name = useSemanticField({ name: "guestName", label: "Guest name" });
+      return <main><div {...dates.groupProps}><button {...dates.optionProps("a")}>A</button></div>
+        <input {...name.inputProps} /></main>;
+    }` };
+  const result = lint(readable);
+  assert.equal(result.ok, true);
+  assert.equal(result.coverageUndetermined, false,
+    `a readable tree was marked undetermined: ${JSON.stringify(result.undeterminedReasons)}`);
+});
