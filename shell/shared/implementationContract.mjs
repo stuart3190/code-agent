@@ -211,6 +211,28 @@ export function validateContract(contract) {
     if (journey.stage && !STAGES.includes(journey.stage)) problems.push(`${where} names unknown stage "${journey.stage}"`);
   }
 
+  // AN OPERATION'S REFERENCES MUST POINT AT SOMETHING TOO.
+  //
+  // Steps have been reference-checked since the operand schema landed; operations never were, and
+  // they are load-bearing in two places. `journey` is how a lifecycle role is declared — an id that
+  // matches nothing silently drops the declaration and lets ownership fall back to guessing from
+  // data flow, which is the misclassification that produced case H. `entity` is what a durable
+  // outcome is proved against — an entity that does not exist puts a phantom in the manifest.
+  // Neither failure announces itself; both are one comparison to catch.
+  const declaredJourneys = new Set((c.journeys || []).map((journey) => journey?.id).filter(Boolean));
+  const declaredEntities = entityNames(c);
+  for (const [index, operation] of (c.operations || []).entries()) {
+    const where = operation?.id || `operation ${index + 1}`;
+    if (operation?.journey && !declaredJourneys.has(operation.journey)) {
+      problems.push(`operation "${where}" names journey "${operation.journey}", which this contract `
+        + "does not declare — its lifecycle role would be silently lost");
+    }
+    if (operation?.entity && !declaredEntities.has(normaliseReference(operation.entity))) {
+      problems.push(`operation "${where}" writes entity "${operation.entity}", which this contract `
+        + "does not declare — there would be no record to prove it against");
+    }
+  }
+
   // Exactly one primary journey: the thing that must work before a preview may be called complete.
   const primary = (c.journeys || []).filter((j) => j.priority === "primary");
   if (!primary.length) problems.push("no journey is marked primary — nothing defines what must work");

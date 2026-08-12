@@ -169,6 +169,76 @@ test("operating an operation is ALLOWED — it says what the step does", hostOnl
   assert.deepEqual(verdict.problems.filter((problem) => /operates/.test(problem)), []);
 });
 
+// ── JOURNEY ARRANGEMENT — the second unbounded input ───────────────────────────────────────────
+//
+// A secondary journey routinely starts mid-flow ("cancel the confirmed booking") while browser
+// verification always starts from a clean load, so the way in is derived from the PRIMARY
+// journey's ordered controls. The model is not bound by the assumptions in that derivation.
+
+const PRIMARY = { id: "book", title: "A guest books a seat", priority: "primary", steps: [
+  { action: "open the booking page", target: "/", expect: "the booking page is visible" },
+  { action: "select a date", target: "date picker", operates: ["dateId"], expect: "the date is highlighted" },
+  { action: "select a slot", target: "slot picker", operates: ["slotId"], expect: "the slot is highlighted" },
+  { action: "choose a party size", target: "party size", operates: ["partySize"], expect: "the size is shown" },
+  { action: "enter the guest name", target: "form", operates: ["guestName"], expect: "the name is shown" },
+  { action: "confirm the booking", target: "confirm booking control", expect: "a booking reference is shown" },
+] };
+
+const withJourneys = (journeys, operations = [{ id: "create-booking", entity: "booking", kind: "create", journey: "book" }]) =>
+  ({ ...BASE, operations, journeys: [PRIMARY, ...journeys] });
+
+const prerequisitesFor = async (contract, journeyId) => {
+  const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const flows = deriveBuildSpec(contract).interactionContract?.flows || [];
+  return journeyPrerequisites(flows, journeyId, "book").controls
+    .map((flow) => flow.control?.logicalField || flow.control?.accessibleName);
+};
+
+test("a secondary that starts mid-flow is driven to its own starting point", async () => {
+  const contract = withJourneys([{ id: "capacity", title: "Capacity is enforced", priority: "secondary", steps: [
+    { action: "choose a party size above the remaining seats", target: "party size",
+      operates: ["partySize"], expect: "the oversized party size is refused" },
+    { action: "choose a party size that fits", target: "party size", operates: ["partySize"],
+      expect: "the chosen size is shown" }] }]);
+  assert.deepEqual(await prerequisitesFor(contract, "capacity"), ["dateId", "slotId"]);
+});
+
+test("LIVE-SHAPED REGRESSION — an out-of-order secondary still gets the WHOLE way in", async () => {
+  // "amend the guest name, then change the date" enters at the guest name, so the date and slot
+  // before it are required to get there. Subtracting every control the journey drives ANYWHERE
+  // dropped the date — leaving the setup to select a slot on a screen that has no date yet, and
+  // the journey NOT_REACHED for a reason that was nothing to do with the application.
+  const contract = withJourneys([{ id: "amend", title: "A guest amends the booking", priority: "secondary", steps: [
+    { action: "enter the guest name", target: "form", operates: ["guestName"], expect: "the new name is shown" },
+    { action: "select a date", target: "date picker", operates: ["dateId"], expect: "the new date is highlighted" }] }]);
+  assert.deepEqual(await prerequisitesFor(contract, "amend"), ["dateId", "slotId", "partySize"],
+    "the setup skipped a control the journey needs before it can start");
+});
+
+test("a journey that works from an existing record walks no wizard", async () => {
+  const contract = withJourneys([{ id: "cancel", title: "A guest cancels", priority: "secondary", steps: [
+    { action: "look the booking up by reference", target: "lookup", operates: ["reference"],
+      expect: "the saved booking is displayed" },
+    { action: "cancel the booking", target: "cancel booking control", expect: "the status is Cancelled" }] }]);
+  assert.deepEqual(await prerequisitesFor(contract, "cancel"), []);
+});
+
+test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {
+  const verdict = validation.validateContract(withJourneys([], [
+    { id: "create-booking", entity: "booking", kind: "create", journey: "book" },
+    { id: "cancel-booking", entity: "booking", kind: "update", journey: "a-journey-nobody-declared" }]));
+  assert.equal(verdict.ok, false);
+  assert.ok(verdict.problems.some((problem) => /names journey "a-journey-nobody-declared"/.test(problem)),
+    `the dangling journey reference is named: ${JSON.stringify(verdict.problems)}`);
+});
+
+test("an operation writing an entity that does not exist is refused before generation", hostOnly, () => {
+  const verdict = validation.validateContract(withJourneys([], [
+    { id: "create-invoice", entity: "invoice", kind: "create", journey: "book" }]));
+  assert.equal(verdict.ok, false);
+  assert.ok(verdict.problems.some((problem) => /writes entity "invoice"/.test(problem)));
+});
+
 // ── the brief the model is given must say the same thing the code enforces ─────────────────────
 
 test("the contract brief tells the model operands are fields", async () => {

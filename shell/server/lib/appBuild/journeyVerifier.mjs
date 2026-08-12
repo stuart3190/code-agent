@@ -1470,16 +1470,17 @@ export function journeyPrerequisites(flows, journeyId, primaryId) {
   if (requiresDurableRecord && flows.some((flow) => flow.journeyId === journeyId && flow.kind === "lookup")) {
     return { controls: [], requiresDurableRecord };
   }
-  const ownKeys = new Set(mine.map(controlKey));
   const firstOwn = mine.map(controlKey).find((key) => chain.some((flow) => controlKey(flow) === key));
   if (!firstOwn) return { controls: [], requiresDurableRecord };
   const stop = chain.findIndex((flow) => controlKey(flow) === firstOwn);
   if (stop <= 0) return { controls: entry, requiresDurableRecord };
-  // Everything the primary drives before that point, minus anything this journey drives itself.
-  return {
-    controls: chain.slice(0, stop).filter((flow) => !ownKeys.has(controlKey(flow))),
-    requiresDurableRecord,
-  };
+  // EVERYTHING the primary drives before that point. It used to subtract whatever this journey
+  // drives itself, which is wrong whenever the journey drives it LATER: "amend the guest name,
+  // then change the date" enters at the guest name, so the date and slot before it are still
+  // required to get there — and dropping the date left the setup selecting a slot on a screen that
+  // has no date yet. A control this journey re-drives after entry is simply driven twice, which
+  // costs a click and proves the same thing.
+  return { controls: chain.slice(0, stop), requiresDurableRecord };
 }
 
 /**
