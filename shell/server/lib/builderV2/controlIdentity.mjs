@@ -120,6 +120,24 @@ export function semanticAliases(field) {
   return unique(aliases.map((value) => value.trim()));
 }
 
+/**
+ * WHOSE concept this is — the tokens left once the concept and any identifier suffix are removed.
+ *
+ * `date`, `dateId` and `dateLabel` are one control described three ways: same concept, and no
+ * competing qualifier. `guestName` and `leadName` are two controls: same concept, different
+ * qualifiers. Collapsing by concept alone silently dropped one of every such pair.
+ */
+export function semanticQualifier(field) {
+  const tokens = fieldTokens(field);
+  while (tokens.length > 1 && IDENTIFIER_TOKENS.has(tokens.at(-1))) tokens.pop();
+  const concept = semanticConcept(field);
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    if (CONCEPT_BY_TOKEN.get(tokens[index]) === concept) { tokens.splice(index, 1); break; }
+  }
+  // "label"/"text" describe how a value is shown, not whose it is.
+  return tokens.filter((token) => !["label", "text", "value", "code"].includes(token)).join(" ");
+}
+
 /** Collapse a field name to the concept it denotes, so two spellings do not become two controls. */
 export function semanticKey(name) {
   if (countsPeople(name)) return "partySize";

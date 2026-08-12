@@ -11,8 +11,11 @@ import {
 import { aggregateCapabilityFacts, FACTORY_METHODS } from "./capabilityLint.mjs";
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
 import { bindCapabilities, deriveModulePlan } from "./contractTiering.mjs";
-import { IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey } from "./controlIdentity.mjs";
+import {
+  IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey, semanticQualifier,
+} from "./controlIdentity.mjs";
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
+import { actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 
 // A method name that changes a durable record. Domain-neutral vocabulary: it reads the
 // registry's real interfaces rather than naming any application's capability.
@@ -201,13 +204,22 @@ function fieldCandidates(contract, text, kind) {
     || declared.some((declaredName) => normalized(declaredName) === normalized(name)));
   const fallback = words(text).filter((word) => !STOP.has(word)).slice(0, 2);
   const candidates = unique([...declared, ...semantic, ...(declared.length || semantic.length ? [] : fallback)]);
-  const seen = new Set();
-  return candidates.filter((name) => {
+  // One control per CONCEPT AND QUALIFIER. `date`, `dateId` and `dateLabel` are one control
+  // described three ways, and `guestName` beside a generic `name` is still one control — those
+  // must not multiply. But `guestName` and `leadName` are two different boxes, and collapsing
+  // them by concept alone dropped one of every such pair before it ever reached the contract.
+  const kept = [];
+  for (const name of candidates) {
     const key = semanticKey(name);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, kind === "input" ? 8 : 4);
+    const qualifier = semanticQualifier(name);
+    const sameControl = kept.some((existing) => {
+      if (semanticKey(existing) !== key) return false;
+      const other = semanticQualifier(existing);
+      return !other || !qualifier || other === qualifier;
+    });
+    if (!sameControl) kept.push(name);
+  }
+  return kept.slice(0, kind === "input" ? 8 : 4);
 }
 
 // One shared vocabulary with the browser verifier — see controlIdentity.mjs.
@@ -230,23 +242,36 @@ function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null
   return unique([visual]);
 }
 
+/**
+ * What the browser must find, and — first — the OPAQUE MACHINE IDENTITY it should find it by.
+ *
+ * `machineId` is computed from the control's own name by the same pure function the generated app
+ * uses (verificationManifest.controlIdFor ↔ the scaffold's controlId), so the two agree without a
+ * registry and without the model being told an id. Accessible names remain, but as a FALLBACK for
+ * controls that carry no machine identity — never as the primary way to recognise meaning.
+ */
 function controlRequirement(kind, field, step) {
   const name = field || String(step?.target || step?.action || "control");
   if (kind === "input") {
     const aliases = fieldAliases(name);
     const inputTypes = /email/i.test(name) ? ["email"] : /phone|telephone/i.test(name)
       ? ["tel", "text"] : /party|quantity|number/i.test(name) ? ["number", "text"] : ["text"];
-    return { purpose: name, logicalField: field || name, roles: ["textbox", "spinbutton", "combobox"],
+    return { purpose: name, logicalField: field || name, machineId: controlIdFor(field || name),
+      roles: ["textbox", "spinbutton", "combobox"],
       inputTypes, accessibleName: aliases[0], accessibleNames: aliases, editable: true };
   }
   if (kind === "selection") return { purpose: name, roles: ["button", "radio", "option", "combobox"],
-    logicalField: field || name, accessibleName: fieldAliases(name)[0], accessibleNames: fieldAliases(name), selectedState: true };
+    logicalField: field || name, machineId: controlIdFor(field || name),
+    accessibleName: fieldAliases(name)[0], accessibleNames: fieldAliases(name), selectedState: true };
   if (kind === "flow_start") {
     return { purpose: name, roles: ["button", "link"], flowEntry: true,
+      machineId: actionIdFor(String(step?.target || step?.action || name)),
       accessibleName: String(step?.target || step?.action || name) };
   }
   if (["mutation", "cancellation", "lookup", "action"].includes(kind)) {
-    return { purpose: name, roles: ["button"], accessibleName: String(step?.target || step?.action || name) };
+    return { purpose: name, roles: ["button"],
+      machineId: actionIdFor(String(step?.target || step?.action || name)),
+      accessibleName: String(step?.target || step?.action || name) };
   }
   return null;
 }

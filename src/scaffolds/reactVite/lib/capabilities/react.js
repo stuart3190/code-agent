@@ -85,6 +85,31 @@ const titled = (value) => {
 };
 
 /**
+ * A stable, opaque MACHINE IDENTITY for a contracted control, emitted as a data attribute.
+ *
+ * Verification targets this, not your labels. Rename a button, translate the page, reorder the
+ * DOM or ship an icon-only control and the identity is unchanged — while a verifier that had to
+ * recognise "Guest name" from prose would have to be taught every application's vocabulary, and
+ * once drove a party-size number input because a field was called guestName.
+ *
+ * FNV-1a over the control's name, matching verificationManifest.controlIdFor on the platform side,
+ * so both compute the same id from the same name with nothing to keep in sync. Accessibility is
+ * still required on its own merits: this attribute is for machines, a label is for people.
+ */
+const machineId = (name, prefix) => {
+  const text = String(name || "").trim().toLowerCase();
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${prefix}_${hash.toString(16).padStart(8, "0")}`;
+};
+
+export const controlId = (name) => machineId(name, "ctl");
+export const actionId = (name) => machineId(name, "act");
+
+/**
  * Props for a labelled, driveable text-like input.
  *
  * Returns `{ labelProps, inputProps }` guaranteeing an accessible name (label/htmlFor), a
@@ -117,6 +142,7 @@ export function useSemanticField({
       value: value ?? "",
       onChange: handleChange,
       required: required || undefined,
+      "data-thrallo-control": controlId(name),
       "aria-label": accessibleName,
       "aria-required": required || undefined,
       "aria-invalid": invalid || undefined,
@@ -158,6 +184,10 @@ export function useSemanticSelection({ name, value = null, onSelect = null, labe
       id: `${slug(groupName)}-${slug(optionValue)}`,
       name: groupName,
       value: String(optionValue ?? ""),
+      // Every option of a group carries the GROUP's identity, so the group is addressable as one
+      // thing however its options are labelled, ordered or re-rendered.
+      "data-thrallo-control": controlId(groupName),
+      "data-thrallo-option": slug(optionValue),
       "aria-pressed": selected,
       "aria-label": text,
       "data-selected": selected ? "true" : "false",
@@ -167,10 +197,30 @@ export function useSemanticSelection({ name, value = null, onSelect = null, labe
 
   return {
     // `group` keeps the set announced without changing what its children are.
-    groupProps: { role: "group", "aria-label": accessibleName },
+    groupProps: { role: "group", "aria-label": accessibleName, "data-thrallo-control": controlId(groupName) },
     optionProps,
     selected: value,
     accessibleName,
+  };
+}
+
+/**
+ * Props for a contracted ACTION control — the button or link a journey step activates.
+ *
+ * Same machine identity as a field, for the same reason: verification should not have to read
+ * "Confirm booking" and infer that it commits a booking. Style and label it however you like.
+ */
+export function useSemanticAction({ name, label = null, onActivate = null, disabled = false } = {}) {
+  const accessibleName = label || titled(name);
+  return {
+    accessibleName,
+    buttonProps: {
+      type: "button",
+      "data-thrallo-action": actionId(name),
+      "aria-label": accessibleName,
+      disabled: disabled || undefined,
+      onClick: () => onActivate?.(),
+    },
   };
 }
 

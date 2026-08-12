@@ -200,6 +200,14 @@ function contractedLocators(page, control) {
   const aliases = controlAliases(control);
   const rows = [];
   const loose = [];
+  // MACHINE IDENTITY FIRST. An opaque id the generated app computed from the control's own name
+  // says "this is the control the contract meant" without the browser layer knowing, or being
+  // able to know, what the control MEANS. Everything below it is fallback for controls that carry
+  // no identity — legacy trees, V1, and anything the model hand-wrote.
+  if (control?.machineId) {
+    rows.push({ description: `machine=${control.machineId}`,
+      locator: page.locator(`[data-thrallo-control="${control.machineId}"]`) });
+  }
   for (const alias of aliases) {
     const pattern = new RegExp(`^\\s*${escapeRegex(alias)}\\s*$`, "i");
     for (const role of control?.roles || ["textbox"]) {
@@ -450,6 +458,10 @@ async function selectionGroups(page) {
       if (els.length < 2) continue;
       groups.push({
         groupId: id,
+        // The group's OPAQUE identity, if its options carry one. Position-independent and
+        // label-independent by construction: renaming every option, translating the page or
+        // reordering the DOM cannot change it.
+        machineId: els.map((el) => el.getAttribute("data-thrallo-control")).find(Boolean) || null,
         identities: [...new Set(identitiesOf(parent, els))],
         contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
         options: els.map((el, i) => {
@@ -577,6 +589,15 @@ async function expectationBecameVisible(page, expect, textBefore) {
  * neither ever falls back to prose.
  */
 async function activateContractedControl(page, control) {
+  // The contract's own opaque identity, when the app emitted one: no prose, no aliasing, and
+  // immune to the label being renamed, translated or replaced by an icon.
+  if (control?.machineId) {
+    const byIdentity = page.locator(`[data-thrallo-action="${control.machineId}"]`).first();
+    if (await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
+      await byIdentity.click({ timeout: 5_000 }).catch(() => {});
+      return true;
+    }
+  }
   const aliases = unique(controlAliases(control).flatMap((alias) => [alias,
     String(alias).replace(/\b(control|button|link|action)\b/gi, "").replace(/\s+/g, " ").trim()]));
   for (const alias of aliases) {
@@ -634,8 +655,15 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     // slot step AND for the party step, and both "passed" because selection did move — within
     // the wrong group. There is deliberately NO prose fallback here: if the contracted group is
     // not on screen the step is undriveable, which is the truth, rather than a false pass.
-    const target = semanticKey(flow.control.logicalField || flow.control.accessibleName);
-    group = eligible.find((g) => g.identities.some((identity) => semanticKey(identity) === target)) || null;
+    // MACHINE IDENTITY FIRST: an exact, opaque match needs no vocabulary at all. The semantic-key
+    // comparison below it is the fallback for groups that carry no identity.
+    group = flow.control.machineId
+      ? eligible.find((g) => g.machineId === flow.control.machineId) || null
+      : null;
+    if (!group) {
+      const target = semanticKey(flow.control.logicalField || flow.control.accessibleName);
+      group = eligible.find((g) => g.identities.some((identity) => semanticKey(identity) === target)) || null;
+    }
     if (!group) return null;
   } else {
     const scored = eligible
