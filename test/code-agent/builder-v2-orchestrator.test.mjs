@@ -172,7 +172,7 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
   const orchestrator = createOrchestrator({
     contractFn: async () => contract,
     patchesFn: async (ctx) => {
-      patchCalls.push({ step: ctx.step, rejections: ctx.rejections.length, problems: ctx.problems });
+      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, rejections: ctx.rejections.length, problems: ctx.problems });
       // A pre-compile `correction` is a scoped re-emission of its originating step.
       const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
       return plan[stage](ctx);
@@ -579,4 +579,83 @@ test("H6 — Pexels API linking is a deterministic gate, not prompt-only guidanc
     export const Footer = () => <footer><a href="https://www.pexels.com">Pexels</a>
       {ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer>`;
   assert.deepEqual(lintAssetAttribution({ "src/Footer.jsx": compliant }, assets), { ok: true, problems: [] });
+});
+
+// ── a dead control is a CORRECTION, not a repair round ─────────────────────────────────────────
+//
+// The reservation layer has always counted two allowances separately: `repair` is a round briefed
+// by observed journey failure, `correction` is a named structural fix. Run #7 (2026-08-12) blurred
+// them — three contact textboxes that could not hold a value produced "step 5 was undriveable",
+// both repair rounds were spent restating that, nothing was fixed, and the build ended with no
+// allowance left for whatever the journeys might have found next.
+//
+// The pre-journey mechanics probe turns that into a defect with an address — control id, expected
+// mechanic, observed result — so it is charged where structural fixes are charged.
+
+const MECHANICS_FAILURE = {
+  probed: 1, skipped: [],
+  failures: [{ id: "ctl_abcd1234", primitive: "textbox", expected: "Probe", observed: "",
+    detail: "the contracted textbox did not retain a probe value" }],
+};
+
+/** A browser layer whose probe fails until `healAfter` verifications have run. */
+const mechanicsJourneys = ({ healAfter = Infinity } = {}) => {
+  let verifications = 0;
+  return async ({ journeys }) => {
+    verifications += 1;
+    const broken = verifications < healAfter;
+    return {
+      journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority,
+        status: broken && j.priority === "primary" ? "undriveable" : "pass" })),
+      mechanics: broken ? MECHANICS_FAILURE : { probed: 1, skipped: [], failures: [] },
+    };
+  };
+};
+
+test("MECHANICS — a probe-proven dead control is charged to the correction allowance", async () => {
+  const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys() });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "mech-1", request: "booking site" });
+
+  // The build still blocks — nothing in this harness repairs the control — but WHERE the round was
+  // charged is the claim.
+  assert.equal(result.state, "blocked", JSON.stringify(result).slice(0, 160));
+  const mechanicsRounds = patchCalls.filter((row) => row.originalStep === "repair" && row.step === "correction");
+  assert.equal(mechanicsRounds.length, 1,
+    `dispatch identities: ${JSON.stringify(patchCalls.map((row) => `${row.originalStep || row.step}→${row.step}`))}`);
+  assert.equal(result.mechanicsCorrections, 1);
+  // It ran BEFORE the repair tier and did not exhaust it.
+  assert.equal(result.mechanicsFailures.length, 1);
+});
+
+test("MECHANICS — the correction is briefed with the control id and the observed mechanic", async () => {
+  const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys() });
+  await orchestrator.runBuild({ owner: "o", projectId: "mech-2", request: "booking site" });
+  const brief = (patchCalls.find((row) => row.originalStep === "repair" && row.step === "correction")?.problems || []).join(" ");
+  assert.match(brief, /ctl_abcd1234/, "the brief does not name the control");
+  assert.match(brief, /textbox/);
+  assert.match(brief, /observed ""/, "the brief does not say what the browser observed");
+  assert.match(brief, /defaultValue|onChange/, "the brief offers no generic working pattern");
+  // A mechanic, never a field: the model is told a control cannot hold a value, not what the
+  // value would have meant.
+  for (const word of ["guest", "reservation", "email"]) {
+    assert.equal(new RegExp(`\b${word}\b`, "i").test(brief), false, `the brief leaks "${word}"`);
+  }
+});
+
+test("MECHANICS — a correction that works leaves the repair tier untouched", async () => {
+  // The probe fails once, the correction lands, and the journeys go green: no repair round runs.
+  const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys({ healAfter: 2 }) });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "mech-3", request: "booking site" });
+  assert.equal(patchCalls.filter((row) => row.originalStep === "repair" && row.step === "repair").length, 0,
+    "a browser-informed repair round was spent on a control the correction had already fixed");
+  assert.equal(result.mechanicsCorrections, 1);
+});
+
+test("MECHANICS — the allowance is bounded and hands over to the repair tier", async () => {
+  const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys() });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "mech-4", request: "booking site" });
+  assert.equal(result.mechanicsCorrections, 1, "the mechanics loop span on a control that never heals");
+  // …and the repair tier still got its turn afterwards, which is the point of separating them.
+  assert.ok(patchCalls.some((row) => row.originalStep === "repair" && row.step === "repair"),
+    `no repair round followed: ${JSON.stringify(patchCalls.map((row) => `${row.originalStep}→${row.step}`))}`);
 });

@@ -133,6 +133,7 @@ export function createOrchestrator({
   backendProbeFn = null,            // D4 row check: async ({owner, projectId, contract, tiers}) → [{journeyId, detail}]
   maxJourneyRepairs = 2,            // V2-20 repair tier: targeted rounds against verified browser failures
   maxPrecompileCorrections = 2,     // deterministic pre-compile corrections; SEPARATE from the repair tier
+  maxMechanicsCorrections = 1,      // probe-proven dead controls: a correction, never a repair round
   compile = async () => ({ ok: true }),
   baseTree,                         // () → scaffold tree (injected so tests pin the real REACT_VITE)
   baseline = null,                  // protected-path baseline for the stage gate
@@ -206,7 +207,13 @@ export function createOrchestrator({
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
     editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
-    parentSnapshotId = null, signal = null, spec = null }) {
+    parentSnapshotId = null, signal = null, spec = null,
+    // Which ALLOWANCE this increment draws on, when the caller already knows. The reservation
+    // layer counts `repair` and `correction` separately on purpose: a repair is a round briefed by
+    // observed journey failure, a correction is a named structural fix. A mechanics failure is the
+    // second kind — the browser proved one control cannot hold a value, which is a defect with an
+    // address — so it must not spend the one browser-informed repair slot.
+    dispatchAs = null }) {
     // A CORRECTION continues from the retained candidate; an ATTEMPT redoes the work from the
     // increment's starting tree. Keeping the distinction explicit stops a fresh generation from
     // colliding with files the discarded candidate already created.
@@ -251,7 +258,8 @@ export function createOrchestrator({
       const attempt = spend() + 1;
       // Pre-compile corrections dispatch under their own step identity so they draw on the
       // correction allowance, never on the single browser-informed repair slot.
-      const dispatchStep = repairScope ? "correction" : contractCorrectionScope ? "correction" : step;
+      const dispatchStep = dispatchAs
+        || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
@@ -593,6 +601,60 @@ export function createOrchestrator({
         let repairsAttempted = 0;
         let repairExhausted = false;
         let repairLimit = null;
+
+        // MECHANICS CORRECTIONS, BEFORE THE REPAIR TIER.
+        //
+        // The pre-journey probe answers one question — can this contracted control hold the value
+        // its primitive implies — and a failure is a structural defect with an address: a control
+        // id, an expected mechanic, an observed result. That is a CORRECTION, not a browser-informed
+        // journey repair, and the reservation layer already counts the two separately.
+        //
+        // Run #7 spent both repair rounds on "step 5 was undriveable" and fixed nothing, then had
+        // no allowance left for anything else. A build should be able to fix three dead textboxes
+        // and still have its repair tier intact for whatever the journeys then find.
+        let mechanicsCorrections = 0;
+        let mechanicsLimit = null;
+        while (!eligibility.eligible && coreVerdicts.mechanics?.failures?.length
+          && mechanicsCorrections < maxMechanicsCorrections) {
+          const failures = coreVerdicts.mechanics.failures;
+          const evidence = failures.map((row) => `control ${row.id} (${row.primitive}) failed its `
+            + `mechanics probe: expected ${JSON.stringify(row.expected)}, observed ${JSON.stringify(row.observed)}`
+            + ` — ${row.detail}. The control is present and located by its declared identity, so bind it `
+            + "so a typed value lands in state and renders back: value + onChange writing through the "
+            + "setter, the capability field binding, or an uncontrolled input with defaultValue.");
+          await setState(`mechanics_correction:${mechanicsCorrections + 1}`);
+          log(`mechanics correction ${mechanicsCorrections + 1}/${maxMechanicsCorrections}: `
+            + `${failures.length} control(s) cannot hold a value [${failures.map((row) => row.id).join(", ")}]`);
+          mechanicsCorrections += 1;
+          let corrected;
+          try {
+            corrected = await buildIncrement({
+              step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
+              journeys: essentialJourneys, initialProblems: evidence,
+              checkpointReason: `working:mechanics:${mechanicsCorrections}`,
+              parentSnapshotId: workingSnapshot?.id || null, signal, spec,
+              // …drawing on the CORRECTION allowance, which is the whole point.
+              dispatchAs: "correction",
+            });
+          } catch (error) {
+            if (error?.code !== "correction_limit_reached") throw error;
+            mechanicsLimit = { code: error.code, correctionsDispatched: error.correctionsDispatched,
+              maxCorrections: error.maxCorrections };
+            break;
+          }
+          if (!corrected.ok) break;
+          tree = corrected.tree;
+          workingSnapshot = corrected.snapshot;
+          workingReason = `working:mechanics:${mechanicsCorrections}`;
+          coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+            journeys: essentialJourneys, tree, snapshotId: null, signal });
+          backendRowFailures = backendProbeFn ? await backendProbeFn({
+            owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
+          }) : [];
+          eligibility = previewEligibility({ tiers, gates: { ok: true },
+            journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures,
+            blockingErrors: coreVerdicts.blockingErrors });
+        }
         for (let round = 1; !eligibility.eligible && round <= maxRepairs; round += 1) {
           const structuredInteractionEvidence = interactionFailureDiagnostics({
             contract, interactionContract, journeyResults: coreVerdicts, tree,
@@ -662,6 +724,10 @@ export function createOrchestrator({
           failureClassification: "contracted_journeys_red",
           repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
           repairLimit,
+          // Reported beside the repair tier and counted apart from it, because they are two
+          // allowances answering two different kinds of evidence.
+          mechanicsCorrections, mechanicsLimit,
+          mechanicsFailures: coreVerdicts.mechanics?.failures || [],
           finalJourneyVerdicts: coreVerdicts.journeys,
           finalVerificationDiagnostics: interactionFailureDiagnostics({
             contract, interactionContract, journeyResults: coreVerdicts, tree,
@@ -750,6 +816,9 @@ export function createOrchestrator({
           shipped,
           pendingIncrements,
           providerCalls,
+          // A green build that needed a mechanics correction should say so: it is the difference
+          // between "the model got it right" and "the model was told which control was dead".
+          mechanicsCorrections,
         });
       } catch (error) {
         const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
