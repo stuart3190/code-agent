@@ -41,7 +41,10 @@ const SPEC = deriveBuildSpec(ADVANCE_CONTRACT);
 const CASE = "bv2-flow-advance";
 
 // Every one of these must drive the flow to the end. The label is not an input to that.
-const DRIVEABLE = ["live", "next", "continue", "arrow", "icon", "french", "renamed", "decoy", "reordered"];
+const DRIVEABLE = ["live", "next", "continue", "arrow", "icon", "french", "renamed", "decoy", "reordered",
+  // A confirmation that shows a status and a reference and nothing else — the 2026-08-12 paid
+  // failure. Its step asked for exactly that, so it must drive to the end like any other.
+  "bareconfirm"];
 // Neither of these may be driven — and neither may be faked.
 const UNDRIVEABLE = ["wrongIdentity", "missing"];
 
@@ -150,6 +153,29 @@ for (const presentation of UNDRIVEABLE) {
       assert.equal(/dead end/i.test(detail), false, "the driver wandered off the flow");
     });
 }
+
+// ── the prose-rule audit: a confirmation is judged on what its step asked for ───────────────────
+
+test("LIVE REGRESSION — a status-and-reference confirmation is not failed for omitting selections",
+  needsBrowser, () => {
+    // Qualification #5 died here: the step asked for "status Confirmed and a durable booking
+    // reference", the app rendered exactly that, PASSED the expectation check, and was then failed
+    // by a second rule armed on the word "confirmation" for not echoing 14 / 2026 / 6:00 / 1.
+    const report = runs.get("bareconfirm");
+    const journey = journeyOf(report);
+    const confirm = (journey.steps || []).at(-1);
+    assert.equal(confirm.status, "pass",
+      `the confirmation was failed for a requirement its step never made: ${confirm.detail || ""}`);
+    assert.equal(journey.status, "pass", journey.detail || "");
+    // The observation survives as evidence for a repair prompt — it just no longer decides.
+    assert.match(String(confirm.detail || ""), /note: the confirmation shows none of the selected values/,
+      `the observation was dropped instead of demoted: ${confirm.detail || ""}`);
+  });
+
+test("what a step is judged on does not depend on the adjectives in its expectation", needsBrowser, () => {
+  // Same application, same steps, same verdicts — the rules above now key on contracted kinds.
+  assert.deepEqual(stepStatuses(runs.get("bareconfirm")), stepStatuses(runs.get("live")));
+});
 
 // ── derivation: the identity exists before any browser opens ───────────────────────────────────
 

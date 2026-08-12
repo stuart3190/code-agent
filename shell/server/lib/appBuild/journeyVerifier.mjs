@@ -815,6 +815,14 @@ export function recoveryEvidenceVerdict(durable, textAfter) {
   // Status vocabulary belongs to the screen that created the record, not to the record. A manage
   // view legitimately says "Status Confirmed" without saying "confirmation screen" or "durable",
   // so those words are only held against a recovery of the SAME screen.
+  //
+  // RETAINED DELIBERATELY in the 2026-08-12 prose audit, and it is the one prose-fed rule that
+  // survived. It does not invent a requirement: the words come from the expectation of the step
+  // that created the record, which the app HAD to satisfy to get here, and this only asks that
+  // reloading the same screen does not contradict it. Nothing structured replaces it — the
+  // contract types a `durable.status` path but never its value — and the adversarial matrix
+  // proves it is load-bearing: without it, a confirmed record that reloads as Cancelled, and a
+  // cancelled record answering for a confirmed one, both pass.
   const missingStatus = durable.sameSurface === false ? []
     : (durable.statusWords || []).filter((word) => !new RegExp(word, "i").test(text));
   const references = durable.references || [];
@@ -867,7 +875,10 @@ async function runStep(page, step, {
     drove = true;
   }
 
-  if (/reload|refresh/i.test(action)) {
+  // A RECOVERY step means "this survives coming back to it", so the reload is the step, whatever
+  // words the contract used for it. Prose still answers for contracts that typed nothing.
+  const isRecoveryStep = interactionFlows.some((flow) => flow.kind === "recovery");
+  if (isRecoveryStep || /reload|refresh/i.test(action)) {
     await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     drove = true;
   }
@@ -1187,7 +1198,10 @@ async function runStep(page, step, {
   let fresh = [];
   // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
   // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
-  const pollBudget = !drove ? 0 : /submit|send|confirm|book|reserve|pay/i.test(action) ? 20_000 : 10_000;
+  const commits = interactionFlows.length
+    ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
+    : /submit|send|confirm|book|reserve|pay/i.test(action);
+  const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   for (;;) {
     found = [];
@@ -1237,10 +1251,18 @@ async function runStep(page, step, {
   // are displayed" filled its one field and passed as "1/1 fields hold values" against an app that
   // displayed nothing at all, because the expectation happens to contain the word "details". A step
   // that looks a record up or recovers one is answerable only by that record.
+  //
+  // WHICH steps this applies to is a structured question, not a lexical one. It used to be armed
+  // by finding one of field/detail/input/form/accept/valid/enabled/complete in the expectation,
+  // so whether a correct application passed depended on the adjective the contract happened to
+  // use. The contract already says, structurally, that this step operates input controls.
   const claimsDurableRecord = interactionFlows.some((flow) => ["recovery", "lookup"].includes(flow.kind));
-  if (filledSomething && !claimsDurableRecord
-    && (found.length / wanted.length < 0.5 || fresh.length === 0)
-    && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect)) {
+  const fillsContractedFields = contractedInputs.length > 0
+    // V1 and any contract that typed nothing for this step: prose is all there is, so it still
+    // answers here. It no longer answers for anything the contract DID type.
+    || (!interactionFlows.length && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect));
+  if (filledSomething && !claimsDurableRecord && fillsContractedFields
+    && (found.length / wanted.length < 0.5 || fresh.length === 0)) {
     const state = await page.evaluate(() => {
       const inputs = [...document.querySelectorAll("input, textarea, select")]
         .filter((el) => el.offsetParent !== null && !["hidden", "submit", "button"].includes(el.type));
@@ -1252,8 +1274,18 @@ async function runStep(page, step, {
     if (state && state.inputs > 0 && state.filled >= Math.ceil(state.inputs / 2)) {
       return { drove, status: "pass", detail: `${state.filled}/${state.inputs} fields hold values`, controlEvidence };
     }
-    if (state && /enabled/i.test(expect) && state.enabledButtons > 0) {
-      return { drove, status: "pass", detail: `${state.enabledButtons} control(s) enabled` };
+    // "Progression becomes possible" has a machine meaning now: the declared forward control is
+    // on screen and no longer refuses. Reading the word "enabled" out of the expectation proved
+    // the same thing for one phrasing and nothing for any other.
+    if (state && state.enabledButtons > 0) {
+      const forward = page.locator(`[data-thrallo-action="${ADVANCE_ACTION_ID}"]`).first();
+      const ready = await forward.count().catch(() => 0)
+        && await forward.isVisible().catch(() => false)
+        && !(await forward.isDisabled().catch(() => true));
+      if (ready) return { drove, status: "pass", detail: "the declared advance control is enabled" };
+      if (!interactionFlows.length && /enabled/i.test(expect)) {
+        return { drove, status: "pass", detail: `${state.enabledButtons} control(s) enabled` };
+      }
     }
   }
 
@@ -1268,6 +1300,11 @@ async function runStep(page, step, {
   const outcome = expectationOutcome({
     wanted, found, fresh, drove, action, urlChanged,
     reviewWithValues: isReviewStep && enteredValues.length > 0,
+    // A whole page arrives at once for a navigation or a reload, so nothing in it can be "new".
+    // Typed by the contract where the contract typed the step.
+    navigational: interactionFlows.length
+      ? interactionFlows.some((flow) => ["navigation", "recovery"].includes(flow.kind))
+      : null,
   });
 
   if (outcome.status === "pass" && isReviewStep && enteredValues.length) {
@@ -1279,13 +1316,33 @@ async function runStep(page, step, {
     outcome.detail += ` · review contains ${enteredValues.length} exact entered value(s)`;
   }
 
-  // A passing confirmation must reflect what was actually selected earlier in the journey — the
-  // numbers in a chosen date/slot survive any formatting.
-  if (outcome.status === "pass" && selections.length && /confirmation|reference|summary|booking details/i.test(expect)) {
+  // A step that CONSUMES earlier values must show them — the numbers in a chosen date or slot
+  // survive any formatting.
+  //
+  // Which steps consume them is the contract's statement, not a guess from its wording. This rule
+  // used to arm on confirmation/reference/summary/booking details appearing in the expectation,
+  // and on 2026-08-12 it ended a paid run: the app rendered exactly what its step asked for — a
+  // confirmation with status Confirmed and a durable reference — passed that check, and was then
+  // failed for omitting values the step never said it displayed. The step read the OPERATION
+  // (`create-booking`); the review step before it read the six draft fields and was verified on
+  // them, and the recovery step after it would have proved durability properly, had this rule not
+  // blocked the journey first. So: the values are demanded of the steps whose declared reads are
+  // those values, and of no others.
+  // There is no structured fact that says a COMMIT step must render what it commits. Its reads are
+  // the values it writes, which every mutation has, so keying the rule on them fails exactly the
+  // steps the word list failed. The contract states the display requirement in two places, and
+  // both are already judged from structure: the REVIEW step, verified above against the exact
+  // entered values, and the RECOVERY step, verified below against the durable record. So this is
+  // now evidence, not a verdict — a repair prompt still learns that the confirmation showed none
+  // of the selections, and a correct application is no longer failed for it.
+  if (outcome.status === "pass" && selections.length) {
     const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     const reflect = confirmationReflectsSelections(textAfter, selections);
-    if (reflect.checked && !reflect.ok) return { ...outcome, status: "fail", detail: reflect.detail };
-    if (reflect.checked) outcome.detail += ` · reflects the selection (${reflect.matched})`;
+    if (reflect.checked) {
+      outcome.detail += reflect.ok
+        ? ` · reflects the selection (${reflect.matched})`
+        : ` · note: ${reflect.detail}`;
+    }
   }
   // A recovery or lookup step is judged on DURABLE STATE, never on whether the page narrates
   // itself. The evidence was captured when the mutation succeeded; if it survived, the step
@@ -1297,7 +1354,10 @@ async function runStep(page, step, {
   // screen before it has been asked for, and judging it on durable evidence failed a correct app
   // at its first step. Only a step that actually recovers or looks up is measured that way.
   // Narrow: a ROUTE navigation only. A reload IS the recovery step and must stay semantic.
-  const openedARoute = Boolean(route) && /open|go to|navigate|visit/i.test(action);
+  // Structured when the contract typed the step, prose only for contracts that typed nothing.
+  const openedARoute = Boolean(route) && (interactionFlows.length
+    ? interactionFlows.some((flow) => flow.kind === "navigation")
+    : /open|go to|navigate|visit/i.test(action));
   const recoveryFlow = openedARoute ? null
     : interactionFlows.find((flow) => ["recovery", "lookup"].includes(flow.kind));
   const shared = recoveryFlow ? runEvidence.get(durableRecordKey(recoveryFlow)) : null;
@@ -1336,6 +1396,7 @@ async function runStep(page, step, {
  */
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
+  navigational: declaredNavigational = null,
 }) {
   const ratio = found.length / wanted.length;
   // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
@@ -1354,7 +1415,12 @@ export function expectationOutcome({
   // jump/scroll/navigation joined the navigational class after a live run: a single-page
   // app renders every section statically, so "use the navigation to jump to services" can
   // never produce FRESH words — static presence at ≥half the keywords is the right bar.
-  const navigational = urlChanged || /open|go to|navigate|navigation|visit|reload|refresh|jump|scroll/i.test(action);
+  // Whether a step is navigational is a fact the contract types (navigation, recovery, a route
+  // primitive). The caller passes that in; the word list below answers only for contracts that
+  // typed nothing, and a URL change always answers for itself.
+  const navigational = urlChanged || (declaredNavigational === null
+    ? /open|go to|navigate|navigation|visit|reload|refresh|jump|scroll/i.test(action)
+    : declaredNavigational);
   if (ratio >= 0.5 && (navigational || fresh.length > 0)) {
     return { drove, status: "pass", detail: `found: ${found.join(", ")}${fresh.length ? ` (new: ${fresh.join(", ")})` : ""}` };
   }

@@ -43,6 +43,7 @@ const ADVANCE_LABEL = {
   reordered: "Bananas",
   wrongIdentity: "Next to party size",
   missing: "Next to party size",
+  bareconfirm: "Continue",
 };
 
 const DATES = ["2026-09-01", "2026-09-02"];
@@ -117,9 +118,18 @@ export function Flow() {
       <h2>Who is coming?</h2>
       <label {...name.labelProps} />
       <input {...name.inputProps} />
-      {guestName ? <p>The guest name {guestName} is shown for review.</p> : null}
+      {/* "bareconfirm" keeps this screen free of every digit, so the reflection check has a real
+          absence to observe rather than a coincidental single-character match. */}
+      {guestName ? (PRESENTATION === "bareconfirm"
+        ? <p>The guest name is shown for review.</p>
+        : <p>The guest name {guestName} is shown for review.</p>) : null}
       <button {...commit.buttonProps}>Confirm booking</button>
-      {reference ? <p>The booking is confirmed with reference {reference}.</p> : null}
+      {/* "bareconfirm": a confirmation that shows exactly what its step asked for — a status and a
+          durable reference — and none of the earlier selections. This is what the 2026-08-12 paid
+          run rendered, and it must not be failed for omitting what it never claimed to show. */}
+      {reference ? (PRESENTATION === "bareconfirm"
+        ? <p>Status Confirmed. The booking is confirmed with reference XQ-PLAIN.</p>
+        : <p>The booking is confirmed with reference {reference}.</p>) : null}
     </section> : null}
 
     {PRESENTATION === "reordered" ? null : <div>{forward}</div>}
