@@ -10,6 +10,7 @@ import { resolveBuildContext } from "../../shell/server/lib/appBuild/buildContex
 import {
   resolveProviderPolicy, permittedAlternatives, usesManagedCredits, preflightSummary, BILLING_LANES,
 } from "../../shell/server/lib/appBuild/providerPolicy.mjs";
+import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 
 const codexResolver = async () => ({ provider: "codex", secret: null });
 
@@ -84,11 +85,23 @@ test("RETRIES — a retry re-resolves under the same active connection, preservi
 });
 
 test("BYOK settlement never debits managed credits", async () => {
-  const { readFileSync } = await import("node:fs");
-  // BYOK settle path never debits managed credits: settle() short-circuits on byok.
-  const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
-  assert.match(jobs, /if \(byok\) \{\s*\n?\s*serverLog\(job, `billing: BYOK/,
-    "the BYOK settle path bills the owner's provider, not managed credits");
+  const reservations = memoryModelReservations();
+  const held = await reservations.reserve({
+    owner: "owner-1", projectId: "project-1", buildId: "build-1", callKey: "generate:1:test",
+    step: "generate", provider: "anthropic", model: "claude-sonnet-4-5", billingLane: "byok_api",
+    usageResponsibility: "customer_request", reservedCredits: 4, ceilingCredits: 8,
+    accountBalance: { included: 0, purchased: 0 }, maxRepairs: 2, maxCorrections: 2,
+  });
+  assert.equal(held.includedReservedCredits, 0);
+  assert.equal(held.purchasedReservedCredits, 0);
+  assert.equal(held.platformReservedCredits, 0);
+
+  const settled = await reservations.settle("owner-1", held.id, {
+    actualCredits: 3, usage: { total: 1200 }, providerRequestIds: ["req-byok-1"],
+  });
+  assert.equal(settled.includedActualCredits, 0);
+  assert.equal(settled.purchasedActualCredits, 0);
+  assert.equal(settled.platformActualCredits, 0);
 });
 
 test("FAIL CLOSED — credential lookup failure cannot silently select managed", async () => {

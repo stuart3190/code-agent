@@ -83,8 +83,9 @@ test("PAUSE — every managed lane consults the same kill switch", () => {
 
   // Source-pinned coverage: build jobs, the lead agent, background repo agents and inline
   // completions all gate managed dispatch. BYOK/Codex lanes pass — they cannot fall to managed.
-  const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
-  assert.match(jobs, /THRALLO_MANAGED_SETTLEMENT_PAUSED/);
+  const builderRuntime = readFileSync("shell/server/lib/builderV2/runtimeComposition.mjs", "utf8");
+  assert.match(builderRuntime, /managedSettlementPaused/);
+  assert.match(builderRuntime, /usesManagedCredits\(context\.policy\) && managedSettlementPaused\(\)/);
   assert.match(LEAD, /managedSettlementPaused/);
   assert.match(readFileSync("shell/server/lib/codeAgentService.mjs", "utf8"), /managedSettlementPaused/);
   assert.match(readFileSync("shell/server/lib/completions.mjs", "utf8"), /managedSettlementPaused/);
