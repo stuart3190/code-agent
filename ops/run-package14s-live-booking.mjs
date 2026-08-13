@@ -371,11 +371,33 @@ if (STAGE === "preflight") {
   await runLifecycle(state, { stage: "repair", mode: "resume_repair",
     prompt: "Repair only the exact failed contracted booking journeys from the retained working checkpoint; do not regenerate the application.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, problems } });
+} else if (STAGE === "reverify") {
+  if (state.stages.reverify) throw new Error("the zero-model platform re-verification was already used");
+  const repaired = state.stages.repair;
+  if (!repaired?.terminal || repaired.result === "pass" || Number(repaired.stageCredits || 0) <= 0) {
+    throw new Error("reverify requires one completed paid checkpoint repair that remained red");
+  }
+  const reservations = repaired.evidence?.reservations || [];
+  if (reservations.length !== 1 || reservations[0].state !== "settled") {
+    throw new Error("reverify requires exactly one settled repair provider call");
+  }
+  const v2 = repaired.evidence?.v2Builds?.at(-1);
+  const bv2Result = repaired.evidence?.publicBuild?.result?._worker?.bv2 || {};
+  if (!v2?.id || !bv2Result.workingSnapshotId) {
+    throw new Error("paid repair left no checkpoint to re-verify");
+  }
+  const current = await spend(state.project.id);
+  const remaining = round(TOTAL_CEILING - current.credits);
+  if (!(remaining > 0)) throw new Error("no approved Package 14S headroom remains");
+  await runLifecycle(state, { stage: "reverify", mode: "resume_verify",
+    prompt: "Re-verify the retained paid repair against the current protected platform runtime; make no model call and no generated-source change.",
+    ceiling: remaining, v2Input: { sourceBuildId: v2.id, maxRepairs: 0 } });
 } else if (STAGE === "report") {
   const current = state.project ? await spend(state.project.id) : { credits: 0, calls: 0 };
   await emit("report", { credits: current.credits, calls: current.calls,
     booking: state.stages.booking?.result || "not-run", repair: state.stages.repair?.result || "not-used",
-    finalPass: state.stages.repair?.result === "pass" || state.stages.booking?.result === "pass" });
+    finalPass: state.stages.reverify?.result === "pass"
+      || state.stages.repair?.result === "pass" || state.stages.booking?.result === "pass" });
 } else if (STAGE === "cleanup") {
   await cleanup(state);
 } else {

@@ -76,3 +76,12 @@ test("one zero-spend pre-dispatch repair may be archived, but never a provider a
   assert.match(archive, /state\.stages\.repair_predispatch_1/,
     "the archive must be single-use rather than an unbounded retry loop");
 });
+
+test("post-repair platform re-verification is zero-model and single-use", () => {
+  const branch = source.slice(source.indexOf('} else if (STAGE === "reverify")'),
+    source.indexOf('} else if (STAGE === "report")'));
+  assert.match(branch, /state\.stages\.reverify/);
+  assert.match(branch, /reservations\.length !== 1/);
+  assert.match(branch, /mode: "resume_verify"/);
+  assert.match(branch, /maxRepairs: 0/);
+});

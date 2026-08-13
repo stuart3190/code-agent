@@ -164,6 +164,22 @@ export function createOrchestrator({
     });
   };
 
+  // Protected platform runtime upgrades with the worker. A checkpoint intentionally preserves
+  // generated application source, but it must not preserve an old capability implementation:
+  // doing so made a repaired app continue running the exact controlled-input bug the host had
+  // already fixed. This is the same adoption rule used by edits, shared here so the paths cannot
+  // drift again.
+  const refreshPlatformRuntime = (tree) => {
+    const refreshed = { ...tree };
+    const currentPlatform = baseTree();
+    for (const [path, source] of Object.entries(currentPlatform)) {
+      if (/^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$)/.test(path)) {
+        refreshed[path] = source;
+      }
+    }
+    return refreshed;
+  };
+
   async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal }) {
     abortIfRequested(signal);
     const graph = memoryGraph(owner, projectId, indexTree(tree));
@@ -884,6 +900,7 @@ export function createOrchestrator({
         abortIfRequested(signal);
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
+        source.tree = refreshPlatformRuntime(source.tree);
         const spec = deriveBuildSpec(contract, { userCritical });
         contract = spec.contract;
         const { tiers, bindings } = spec;
@@ -924,6 +941,78 @@ export function createOrchestrator({
     },
 
     /**
+     * Re-run deterministic gates and browser journeys for a retained checkpoint after a platform
+     * runtime upgrade. No model seam is called and no provider reservation is created. This is
+     * deliberately separate from repair: it may prove a platform fix, never invent app changes.
+     */
+    async runVerifyFromCheckpoint({ owner, projectId, sourceBuildId, request, contract,
+      userCritical = [], signal = null }) {
+      const buildId = await buildStore.create({
+        owner, project_id: projectId, profile: "verify", request, state: "created",
+        max_repair_dispatches: 0, started_at: new Date().toISOString(),
+      });
+      await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_verify", sourceBuildId });
+      const finish = async (state, extra = {}) => {
+        const patch = { state, finished_at: new Date().toISOString() };
+        for (const key of ["error", "final_snapshot"]) if (key in extra) patch[key] = extra[key];
+        try { await buildStore.update(buildId, patch); } catch (error) { log(`verify row update failed: ${error.message}`); }
+        return { buildId, state, sourceBuildId, ...extra };
+      };
+      try {
+        abortIfRequested(signal);
+        const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
+        if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
+        const tree = refreshPlatformRuntime(source.tree);
+        const spec = deriveBuildSpec(contract, { userCritical });
+        contract = spec.contract;
+        const journeys = contract.journeys || [];
+        const conformance = validateModuleConformance(tree, {
+          contract, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+          interactionContract: spec.interactionContract, bindings: spec.bindings,
+        });
+        const persistence = partitionFindings(lintDurablePersistence(tree, {
+          contract, journeys, modulePlan: spec.modulePlan,
+        }).findings || []);
+        const blocking = [...(conformance.blocking || []), ...persistence.blocking];
+        if (blocking.length) return finish("blocked", {
+          error: `platform re-verification found ${blocking.length} blocking deterministic issue(s): `
+            + blocking.map((finding) => finding.message || finding.code).join("; "),
+        });
+        const gate = await verifyStage(tree, gateOptions(contract, "runtime-refresh", journeys, {
+          owner, projectId, buildId, step: "runtime-refresh", attempt: 0, signal,
+        }));
+        if (!gate.ok) return finish("blocked", {
+          error: (gate.layers?.d0d2?.problems || ["runtime refresh did not compile"]).join("; "),
+        });
+        let checkpoint = await snapshotStore.createSnapshot(owner, projectId, gate.tree, {
+          buildId, parent: source.snapshotId, reason: "candidate:runtime-refresh",
+          assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+        });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: gate.tree, reason: "candidate:runtime-refresh", promotable: false });
+        const verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+          journeys, tree: gate.tree, snapshotId: checkpoint.id, signal });
+        const eligibility = completionEligibility({ contract, gates: { ok: true },
+          journeyResults: { journeys: verdicts.journeys }, blockingErrors: verdicts.blockingErrors });
+        if (!eligibility.eligible) return finish("blocked", {
+          error: eligibility.failures.join("; "), workingSnapshotId: checkpoint.id,
+        });
+        checkpoint = await snapshotStore.markCandidateValidated(owner, projectId, checkpoint.id,
+          { reason: "working:runtime-refresh" });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: gate.tree, reason: "working:runtime-refresh", promotable: false });
+        await events.snapshot?.({ owner, projectId, buildId, snapshot: checkpoint,
+          tree: gate.tree, reason: "runtime-refresh" });
+        await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
+        return finish("green", { final_snapshot: checkpoint.id, snapshotId: checkpoint.id,
+          parentSnapshotId: source.snapshotId, providerCalls: 0 });
+      } catch (error) {
+        const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
+        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
+      }
+    },
+
+    /**
      * The EDIT path (finish plan WP-10 / V2-18): adopt the green snapshot → patch → gate →
      * DIFFERENTIAL journey verification (unchanged owners reuse their cached PASS verdicts;
      * only journeys whose owning modules changed are re-driven) → new snapshot promoted
@@ -955,12 +1044,7 @@ export function createOrchestrator({
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption
         // gains new reliable behaviours without asking a model to recreate protected code.
-        const currentPlatform = baseTree();
-        for (const [path, source] of Object.entries(currentPlatform)) {
-          if (/^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$)/.test(path)) {
-            ctx.tree[path] = source;
-          }
-        }
+        ctx.tree = refreshPlatformRuntime(ctx.tree);
         const { tiers, bindings } = spec;
         const journeys = contract.journeys || [];
 

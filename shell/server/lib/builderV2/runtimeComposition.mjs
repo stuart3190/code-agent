@@ -585,6 +585,10 @@ export function createBuilderV2Runtime({
             owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract,
             initialProblems: Array.isArray(input.problems) ? input.problems : [], maxRepairs, signal,
           })
+          : mode === "resume_verify"
+            ? await orchestrator.runVerifyFromCheckpoint({
+              owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract, signal,
+            })
           : await orchestrator.runEdit({ owner, projectId, request, contract, maxRepairs, signal });
 
       if (result.state !== "green") {
@@ -610,6 +614,8 @@ export function createBuilderV2Runtime({
             ? "Builder V2 created and verified the application."
             : mode === "resume_repair"
               ? "Builder V2 resumed the failed build and verified the targeted repair."
+              : mode === "resume_verify"
+                ? "Builder V2 re-verified the retained application against the current platform runtime."
               : "Builder V2 applied and verified the change.",
           tree, buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],

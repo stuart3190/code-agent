@@ -275,6 +275,37 @@ test("14S crash recovery locates a candidate checkpoint and resumes repair witho
   assert.equal(compileCalls, 1);
 });
 
+test("14S platform re-verification refreshes protected runtime and makes zero model calls", async () => {
+  const snapshots = createSnapshotStore();
+  const oldTree = { ...candidateTree(correctedBookingFlow),
+    "src/lib/capabilities/wizard.js": "// stale runtime" };
+  await snapshots.createSnapshot("owner", "project", oldTree, {
+    buildId: "paid-repair", reason: "working:resumed-repair",
+  });
+  let patchCalls = 0;
+  const current = fromScaffold(REACT_VITE);
+  const orchestrator = createOrchestrator({
+    contractFn: async () => { throw new Error("contract must not replay"); },
+    patchesFn: async () => { patchCalls += 1; throw new Error("model must not run"); },
+    assetService: { async resolveIntents() { throw new Error("assets must not replay"); },
+      async assetManifestFor() { return []; } },
+    snapshotStore: snapshots, buildStore: memoryBuildStore(), baseTree: () => current,
+    baseline: current, compile: async (tree) => {
+      assert.equal(tree["src/lib/capabilities/wizard.js"], current["src/lib/capabilities/wizard.js"]);
+      return { ok: true, tree };
+    },
+    journeysFn: async ({ journeys, tree }) => {
+      assert.equal(tree["src/lib/capabilities/wizard.js"], current["src/lib/capabilities/wizard.js"]);
+      return { journeys: journeys.map((journey) => ({ ...journey, status: "pass", steps: [] })) };
+    },
+  });
+  const result = await orchestrator.runVerifyFromCheckpoint({ owner: "owner", projectId: "project",
+    sourceBuildId: "paid-repair", request: "platform re-verification", contract: BOOKING });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(result.providerCalls, 0);
+  assert.equal(patchCalls, 0);
+});
+
 test("14S deterministically corrected retained candidate compiles without weakening persistence", async () => {
   const modulePlan = deriveModulePlan(BOOKING, BOOKING.journeys);
   const tree = candidateTree(correctedBookingFlow);
