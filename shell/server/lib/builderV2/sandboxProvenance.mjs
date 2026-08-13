@@ -31,6 +31,10 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   // image disagreed about it, every contracted control would be addressed by an id the generated
   // app never wrote, and the skew guard would have called that pair compatible.
   "src/scaffolds/reactVite/lib/capabilities/react.js",
+  // Wizard mutations decide whether controlled values remain observable while durable persistence
+  // is in flight. A stale image/scaffold pairing can therefore turn a driveable field into a red
+  // journey even when the verifier itself is current.
+  "src/scaffolds/reactVite/lib/capabilities/wizard.js",
   // …and its export barrel: a stale one turns a new binding into an unresolved import at compile
   // time. The brief belongs here for the mirror-image reason — an image whose prompt never teaches
   // the forward control produces apps the new verifier correctly calls undriveable.
@@ -69,6 +73,15 @@ export async function computeSandboxIdentity({ root = process.cwd(), commit = nu
   }
   const identity = hash(SANDBOX_IDENTITY_FILES.map((name) => `${name}:${files[name]}`).join("\n"));
   return { identity, commit: commit || null, verifier: files[VERIFIER_PATH], files };
+}
+
+/** Resolve the deployed host revision without trusting a short, malformed or absent marker. */
+export async function readDeploymentCommit({ root = process.cwd(), env = process.env } = {}) {
+  const configured = String(env?.THRALLO_DEPLOY_COMMIT || "").trim().toLowerCase();
+  if (/^[0-9a-f]{40}$/.test(configured)) return configured;
+  const marker = await readFile(path.join(root, "DEPLOYED_COMMIT"), "utf8")
+    .then((value) => String(value).trim().toLowerCase()).catch(() => "");
+  return /^[0-9a-f]{40}$/.test(marker) ? marker : null;
 }
 
 /** The provenance baked into an image at build time, or null when it predates this mechanism. */

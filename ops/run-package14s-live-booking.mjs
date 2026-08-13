@@ -267,6 +267,26 @@ async function retainGeneratedSource(state) {
   }
 }
 
+async function archiveZeroSpendPreDispatchRepair(state) {
+  const row = state.stages?.repair;
+  const evidence = row?.evidence || {};
+  const v2Builds = evidence.v2Builds || [];
+  const eligible = row?.terminal && row.result === "fail" && Number(row.stageCredits || 0) === 0
+    && !(evidence.reservations || []).length && !(evidence.aiRequests || []).length
+    && /cannot fit a useful response inside approved headroom/i.test(evidence.publicBuild?.error || "")
+    && v2Builds.length > 0 && v2Builds.every((build) => build.state === "failed");
+  if (!eligible) throw new Error("the single targeted repair was already used");
+  if (state.stages.repair_predispatch_1) {
+    throw new Error("the bounded zero-spend repair pre-dispatch retry was already used");
+  }
+  state.stages.repair_predispatch_1 = row;
+  delete state.stages.repair;
+  await save(state);
+  await emit("repair_predispatch_archived", {
+    code: "budget_ceiling", credits: 0, calls: 0, v2Builds: v2Builds.length,
+  });
+}
+
 async function cleanup(state) {
   if (state.cleanup) throw new Error("cleanup already completed");
   const retention = await retainGeneratedSource(state);
@@ -327,7 +347,7 @@ if (STAGE === "preflight") {
   if (!state.project) throw new Error("run preflight first");
   await runLifecycle(state, { stage: "booking", mode: "build", prompt: BOOKING_REQUEST, ceiling: TOTAL_CEILING });
 } else if (STAGE === "repair") {
-  if (state.stages.repair) throw new Error("the single targeted repair was already used");
+  if (state.stages.repair) await archiveZeroSpendPreDispatchRepair(state);
   const first = state.stages.booking;
   if (!first?.terminal || first.result === "pass") throw new Error("repair requires one completed red booking build");
   const v2 = first.evidence?.v2Builds?.at(-1);

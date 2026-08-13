@@ -41,6 +41,7 @@ import { supabaseVerificationCache } from "./verification.mjs";
 import { scopeInteractionContract } from "./interactionContract.mjs";
 import {
   compareSandboxIdentity, computeSandboxIdentity, sandboxSkewSummary,
+  readDeploymentCommit,
 } from "./sandboxProvenance.mjs";
 import { assertExecutableCandidate } from "../modelCatalogue.mjs";
 
@@ -282,7 +283,9 @@ export function createBuilderV2Runtime({
     // nothing to prove. Skew is a property of shipping the code somewhere else.
     if (process.env.THRALLO_BUILD_SANDBOX === "process") return { compatible: true, code: null, inProcess: true };
     sandboxIdentityPromise ||= (async () => {
-      const host = await computeSandboxIdentity({ root: repoRoot });
+      const host = await computeSandboxIdentity({
+        root: repoRoot, commit: await readDeploymentCommit({ root: repoRoot }),
+      });
       const outcome = await isolated({
         id: `${workJob.id}-sandbox-provenance`, durable_job_id: workJob.id,
         job_type: "sandbox_provenance", attempts: workJob.attempts || 1,

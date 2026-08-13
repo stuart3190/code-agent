@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   compareSandboxIdentity, computeSandboxIdentity, sandboxSkewSummary,
-  SANDBOX_IDENTITY_FILES, VERIFIER_PATH, readBakedProvenance, PROVENANCE_FILENAME,
+  SANDBOX_IDENTITY_FILES, VERIFIER_PATH, readBakedProvenance, readDeploymentCommit,
+  PROVENANCE_FILENAME,
 } from "../../shell/server/lib/builderV2/sandboxProvenance.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -35,6 +36,26 @@ test("the identity covers the verifier and the files that decide a verdict with 
     "the verifier's shared semantic vocabulary decides verdicts too");
   assert.ok(SANDBOX_IDENTITY_FILES.includes("build-worker/sandbox.mjs"),
     "the entrypoint that chooses which verifier to call");
+  assert.ok(SANDBOX_IDENTITY_FILES.includes("src/scaffolds/reactVite/lib/capabilities/wizard.js"),
+    "the primitive that makes contracted controlled values observable");
+});
+
+test("the host revision comes from a full configured SHA or the pinned deployment marker", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-deployed-commit-"));
+  try {
+    const marker = "1".repeat(40);
+    await writeFile(path.join(root, "DEPLOYED_COMMIT"), `${marker}\n`, "utf8");
+    assert.equal(await readDeploymentCommit({ root, env: {} }), marker);
+    const configured = "A".repeat(40);
+    assert.equal(await readDeploymentCommit({ root, env: { THRALLO_DEPLOY_COMMIT: configured } }),
+      configured.toLowerCase());
+    assert.equal(await readDeploymentCommit({ root, env: { THRALLO_DEPLOY_COMMIT: "short" } }), marker,
+      "a malformed environment value must not hide the valid pinned marker");
+    await writeFile(path.join(root, "DEPLOYED_COMMIT"), "also-short\n", "utf8");
+    assert.equal(await readDeploymentCommit({ root, env: {} }), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("this checkout can compute its own identity", async () => {

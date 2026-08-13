@@ -136,6 +136,69 @@ export function moduleGenerationContractsBrief(moduleContracts) {
   ].join("\n");
 }
 
+/**
+ * Compact the already-enforced module contracts for a browser-informed repair.
+ *
+ * Full generation needs the complete machine contract. A targeted repair already has a compiled
+ * tree plus exact browser evidence, and the same full contracts are re-run deterministically after
+ * its patch. Repeating every flow and capability-owner rule inside every module made one live
+ * repair prompt 160 KB and unable to fit even its minimum useful response under the six-credit
+ * per-call ceiling. This summary preserves the responsibilities needed to patch safely while the
+ * validators remain the authoritative, unchanged gate.
+ */
+export function moduleGenerationContractsRepairBrief(moduleContracts) {
+  const specifications = moduleContracts?.specifications || [];
+  if (!specifications.length) return "PER-MODULE REPAIR CONTRACT SUMMARY: none for this scope.";
+  const ownership = new Map();
+  for (const specification of specifications) {
+    for (const rule of specification.forbiddenCapabilityBypasses || []) {
+      const key = JSON.stringify([rule.entity, rule.operationOwner, rule.capability]);
+      if (!ownership.has(key)) ownership.set(key, {
+        entity: rule.entity,
+        operationOwner: rule.operationOwner,
+        capability: rule.capability,
+        requiredOperations: rule.requiredOperations || [],
+      });
+    }
+  }
+  const compact = {
+    version: moduleContracts.version || 1,
+    specifications: specifications.map((specification) => ({
+      path: specification.path,
+      role: specification.role,
+      ownedJourneys: specification.ownedJourneys || [],
+      requiredImports: specification.requiredImports || [],
+      capabilities: (specification.requiredCapabilities || []).map((capability) => ({
+        capability: capability.capability,
+        factory: capability.factory,
+        methods: (capability.methods || []).map((method) => method.method),
+      })),
+      controls: (specification.semanticInteractions || []).map((control) => ({
+        logicalField: control.logicalField,
+        roles: control.roles || [],
+        inputTypes: control.inputTypes || [],
+        accessibleNames: control.accessibleNames || [],
+        stateOwner: control.stateOwner || null,
+      })),
+      dataFlow: {
+        consumes: specification.downstream?.consumes || [],
+        produces: specification.downstream?.produces || [],
+      },
+      state: specification.state || null,
+      persistenceOwner: specification.persistence?.owner || null,
+      requiredExports: specification.requiredExports || [],
+      moduleSizeBoundary: specification.moduleSizeBoundary,
+    })),
+    capabilityOwnership: [...ownership.values()],
+  };
+  return [
+    "PER-MODULE REPAIR CONTRACT SUMMARY (the full contracts remain machine-enforced after this patch):",
+    JSON.stringify(compact, null, 2),
+    "ENFORCED: preserve capability ownership, durable state, module boundaries and every currently passing journey.",
+    "Browser/process-local persistence and lower-level writes around capability-owned operations remain forbidden.",
+  ].join("\n");
+}
+
 function location(source, index, length) {
   return {
     line: String(source).slice(0, index).split("\n").length,

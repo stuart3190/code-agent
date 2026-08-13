@@ -21,7 +21,9 @@ import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 import { modelCallKey } from "./modelReservations.mjs";
 import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
 import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
-import { moduleGenerationContractsBrief } from "./moduleContracts.mjs";
+import {
+  moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
+} from "./moduleContracts.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -267,7 +269,9 @@ export function renderPatchPrompt({
       "Keep styling, layout, typography and component composition original to this app.",
     ].join("\n") : "REQUIRED MODULE PLAN: none for this scope.",
     "",
-    moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
+    step === "repair"
+      ? moduleGenerationContractsRepairBrief(moduleCorrectionScope?.moduleContracts || moduleContracts)
+      : moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
     "",
     persistencePlan
       ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(persistencePlan, null, 2)}`

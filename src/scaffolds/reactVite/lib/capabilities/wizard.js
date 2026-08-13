@@ -96,7 +96,13 @@ export function makeWizardMachine({
   const setValue = async (key, value) => {
     active(); state = { ...state, values: { ...state.values, [key]: value }, errors: {}, status: WIZARD_STATUS.ACTIVE,
       revision: state.revision + 1 };
-    await save(); return emit();
+    // Controlled React inputs must observe the new value before durable persistence yields to the
+    // network. Waiting for save() first lets React re-render the old controlled value in response
+    // to the input event, so the browser sees the character it just typed immediately disappear.
+    // The durable write still remains part of the operation and is still awaited by callers.
+    const next = emit();
+    await save();
+    return next;
   };
 
   async function restoreState() {

@@ -47,6 +47,28 @@ test("wizard persistence restores state and cancellation is idempotent", async (
   assert.equal(clears, 0, "cancelled state remains durable until an explicit reset");
 });
 
+test("wizard controlled values emit before durable persistence settles", async () => {
+  let releaseSave;
+  let saveStarted;
+  const started = new Promise((resolve) => { saveStarted = resolve; });
+  const persistence = {
+    async save() {
+      saveStarted();
+      await new Promise((resolve) => { releaseSave = resolve; });
+    },
+  };
+  const machine = makeWizardMachine({ steps: ["details", "review"], persistence });
+  const snapshots = [];
+  machine.subscribe((snapshot) => snapshots.push(snapshot));
+
+  const pending = machine.setValue("email", "user@example.test");
+  await started;
+  assert.equal(snapshots.at(-1).values.email, "user@example.test",
+    "a controlled input must not revert while its durable write is in flight");
+  releaseSave();
+  await pending;
+});
+
 test("booking-only contracts bind booking without imposing a wizard", () => {
   const booking = bindCapabilities({
     entities: [{ name: "booking" }], journeys: [{ id: "book", title: "Book a visit",

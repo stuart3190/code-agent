@@ -65,3 +65,14 @@ test("teardown itself is untouched: nothing is exempted from the erasure", () =>
   assert.match(cleanup, /approvedManifestSha256/);
   assert.match(cleanup, /Package 14S cleanup left the project/);
 });
+
+test("one zero-spend pre-dispatch repair may be archived, but never a provider attempt", () => {
+  const archive = source.slice(source.indexOf("async function archiveZeroSpendPreDispatchRepair"),
+    source.indexOf("async function cleanup(state)"));
+  assert.match(archive, /stageCredits \|\| 0\) === 0/);
+  assert.match(archive, /!\(evidence\.reservations \|\| \[\]\)\.length/);
+  assert.match(archive, /!\(evidence\.aiRequests \|\| \[\]\)\.length/);
+  assert.match(archive, /cannot fit a useful response inside approved headroom/);
+  assert.match(archive, /state\.stages\.repair_predispatch_1/,
+    "the archive must be single-use rather than an unbounded retry loop");
+});

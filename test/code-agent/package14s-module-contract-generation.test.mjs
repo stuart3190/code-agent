@@ -5,6 +5,7 @@ import { bindCapabilities, deriveModulePlan, tierContract } from "../../shell/se
 import { buildInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import {
   buildModuleGenerationContracts, moduleCorrectionScope, moduleGenerationContractsBrief,
+  moduleGenerationContractsRepairBrief,
   validateModuleConformance, validateModulePatchScope,
 } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
@@ -88,6 +89,25 @@ test("per-module generation specifications carry capability, identity, ownership
   assert.match(prompt, /PER-MODULE GENERATION CONTRACTS/);
   assert.match(prompt, /"semanticInteractions"/);
   assert.match(prompt, /"forbiddenCapabilityBypasses"/);
+});
+
+test("browser-informed repair gets a compact contract summary while full enforcement remains", () => {
+  const full = moduleGenerationContractsBrief(CONTRACTS);
+  const compact = moduleGenerationContractsRepairBrief(CONTRACTS);
+  assert.match(compact, /full contracts remain machine-enforced/);
+  assert.match(compact, /makeWizardMachine/);
+  assert.match(compact, /partySize/);
+  assert.match(compact, /capabilityOwnership/);
+  assert.ok(Buffer.byteLength(compact) < Buffer.byteLength(full) * 0.6,
+    "repair summary must remove the repeated full-contract payload");
+
+  const prompt = renderPatchPrompt({ step: "repair",
+    contract: { ...BOOKING, interactionContract: INTERACTIONS }, tiers: tierContract(BOOKING),
+    tree: CORRECT, modulePlan: PLAN, moduleContracts: CONTRACTS,
+    problems: ["guest email control did not retain its value"] });
+  assert.match(prompt, /PER-MODULE REPAIR CONTRACT SUMMARY/);
+  assert.doesNotMatch(prompt, /"forbiddenCapabilityBypasses"/,
+    "capability ownership is deduplicated instead of repeated in every module");
 });
 
 test("retained candidate A: a capability method held as a reference is ADVISORY, not a rejection", () => {
