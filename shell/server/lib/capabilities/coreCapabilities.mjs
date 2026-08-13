@@ -9,7 +9,7 @@ import {
 } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { showPreview, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
+import { showPreview, exportProject, runQaSweep } from "../appBuild/appDeliveryService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";

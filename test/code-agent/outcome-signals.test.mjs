@@ -122,12 +122,12 @@ test("an unknown signal is refused", async () => {
 
 // ── Where the producers are wired ───────────────────────────────────────────────────────
 
-test("export, publish and checkpoint restore each produce their signal", async () => {
-  const build = await read("../../shell/server/lib/appBuild/appBuildService.mjs");
+test("export and publish each produce their signal", async () => {
+  const build = await read("../../shell/server/lib/appBuild/appDeliveryService.mjs");
   const publish = await read("../../shell/server/lib/appBuild/appPublishService.mjs");
 
   // exported — only AFTER the artifact is proven free of secrets.
-  const exportFn = build.slice(build.indexOf("export async function exportProject"), build.indexOf("async function persistBuildResult"));
+  const exportFn = build.slice(build.indexOf("export async function exportProject"));
   assert.match(exportFn, /signal: "exported"/);
   assert.ok(exportFn.indexOf("assertNoPlatformSecrets") < exportFn.indexOf('signal: "exported"'),
     "a failed safety check must not record a successful export");
@@ -147,14 +147,10 @@ test("export, publish and checkpoint restore each produce their signal", async (
   assert.ok(publishFn.indexOf("provisiond(\"/publish\"") < publishFn.indexOf('signal: "deployed"'),
     "the signal must follow the actual publish, not precede it");
 
-  // rolled_back — only when a restore actually happened.
-  const stopFn = build.slice(build.indexOf("async function stopWithMessage"), build.indexOf("async function handleProviderSwitch"));
-  assert.match(stopFn, /signal: "rolled_back"/);
-  assert.match(stopFn, /if \(restored\?\.restored\)/, "no restore means no signal");
 });
 
 test("preview_opened is deliberately NOT produced", async () => {
-  const build = await read("../../shell/server/lib/appBuild/appBuildService.mjs");
+  const build = await read("../../shell/server/lib/appBuild/appDeliveryService.mjs");
   const publish = await read("../../shell/server/lib/appBuild/appPublishService.mjs");
   for (const source of [build, publish]) {
     assert.doesNotMatch(source, /signal: "preview_opened"/,
@@ -164,7 +160,7 @@ test("preview_opened is deliberately NOT produced", async () => {
 });
 
 test("regenerated is deliberately NOT produced, because it would double-count", async () => {
-  const build = await read("../../shell/server/lib/appBuild/appBuildService.mjs");
+  const build = await read("../../shell/server/lib/appBuild/appDeliveryService.mjs");
   assert.doesNotMatch(build, /signal: "regenerated"/);
 
   // The two candidate events are already represented, and emitting `regenerated` for either

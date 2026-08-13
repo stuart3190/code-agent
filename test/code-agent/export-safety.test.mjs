@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  scrubTree, stripExportNoise, assertNoPlatformSecrets, findPlatformSecrets,
+  stripExportNoise, assertNoPlatformSecrets, findPlatformSecrets,
   PLATFORM_SECRET_MARKERS, SECRET_PATH, EXCLUDED_FROM_EXPORT,
 } from "../../shell/server/lib/secretScrub.mjs";
 import { buildProjectZip, safeZipFilename } from "../../shell/server/lib/exportProject.mjs";
@@ -94,22 +94,10 @@ test("a user's own provider key never travels either", () => {
   assert.deepEqual(findPlatformSecrets(APP.tree), []);
 });
 
-test("checkpoints and export share ONE rule set", async () => {
-  // The consolidation this PR performed: buildCheckpoints re-exports the shared scrubTree, and
-  // exportProject delegates to the shared assertion. A marker added once protects both.
-  const checkpoints = await import("../../shell/server/lib/appBuild/buildCheckpoints.mjs");
-  assert.equal(checkpoints.scrubTree, scrubTree, "checkpoints must use the shared scrubber");
-
+test("export delegates to the canonical platform-secret marker list", async () => {
   const exportModule = await import("../../shell/server/lib/exportProject.mjs");
   assert.deepEqual(exportModule._internal.REQUIRED_SECRET_MARKERS, PLATFORM_SECRET_MARKERS,
     "export must use the shared marker list");
-
-  // And the shared scrubber is actually wired into checkpoint creation, not merely exported —
-  // `export { x } from "…"` creates no local binding, which silently breaks the call site.
-  const store = checkpoints.createCheckpointStore();
-  const entry = store.create({ tree: { "a.js": "ok", ".env": "K=sk-live-1" }, attempt: 1 });
-  assert.ok(!(".env" in entry.tree), "checkpoint creation must apply the scrubber");
-  assert.equal(entry.fileCount, 1);
 });
 
 test("export filenames are safe and Thrallo-branded", () => {

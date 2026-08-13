@@ -44,7 +44,6 @@ import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentServic
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
-import { startCheckpointSweeper, stopCheckpointSweeper, recoverInterruptedLifecycles } from "./lib/appBuild/checkpointRecovery.mjs";
 import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
 import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownloads.mjs";
 import {
@@ -1095,19 +1094,14 @@ server.listen(PORT, HOST, () => {
    * never a statement about whether Thrallo builds exist.
    */
   // Every one of these needs the database. Without it there are no job rows to sweep, and calling
-  // them anyway only produces noise — or, before the guard inside startCheckpointSweeper, a
-  // synchronous throw out of this handler that killed the server at boot.
+  // them anyway only produces noise.
   if (haveSupabaseEnv()) {
     sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
     sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
     sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
   }
-  // Repair checkpoints that outlived their retention window, plus the last-known-good restore for
-  // lifecycles this server killed mid-build (see recoverInterruptedLifecycles).
-  if (haveSupabaseEnv()) startCheckpointSweeper();
   // And keep sweeping: a build that wedges while the server stays up was never caught before.
   if (haveSupabaseEnv()) startStaleJobSweeper();
-  if (haveSupabaseEnv()) recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
   // The action worker drives integrations for the apps CUSTOMERS build, which is a Buildr101-era
   // surface Thrallo does not mount — it stays behind the flag, unlike the job sweeps above.
   if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();
@@ -1155,7 +1149,6 @@ async function shutdown(signal) {
   stopAnalyticsRollup();
   stopGeoipUpdater();
   stopHealthMonitor();
-  stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();
   stopAutomationSweeper();
