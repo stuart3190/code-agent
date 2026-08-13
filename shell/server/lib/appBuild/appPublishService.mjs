@@ -11,7 +11,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { serviceClient } from "../supabase.mjs";
 import { optionalEnv } from "../env.mjs";
 import { ensureDeps, buildTree, workDirFor } from "../../../../harness/workspace.mjs";
-import { slugify } from "../../routes/publish.mjs";
+import { slugifySiteName } from "../publishing/siteSlug.mjs";
 import { notifyOwner } from "../notifications/notificationService.mjs";
 import { logProject } from "../logs/projectLog.mjs";
 import { packagePublishTree } from "../publishBuildWorker.mjs";
@@ -124,7 +124,7 @@ export async function claimSlug(ownerId, projectId, wanted, { productId = null, 
     }
   }
 
-  const base = slugify(wanted || "") || null;
+  const base = slugifySiteName(wanted || "") || null;
   if (!base) return { slug: null, supersedes: null };
   for (let n = 0; n < 20; n += 1) {
     const candidate = n === 0 ? base : `${base}-${n + 1}`;
@@ -406,9 +406,9 @@ async function latestBuildRunId(owner, projectId) {
 /**
  * Put an earlier deployment back.
  *
- * `rollbackLiveRelease` in lib/environments.mjs was the obvious thing to route through, and it
- * cannot be: it reads `project_releases` and `project_environments`, Buildr101-era tables that do
- * not exist in Thrallo's database, behind a `requireFeature(owner, "environments")` gate for a
+ * The retired Buildr environment rollback reads Buildr-era `project_releases` and
+ * `project_environments` tables that do not exist in Thrallo's database, behind a
+ * `requireFeature(owner, "environments")` gate for a
  * tier Thrallo does not sell. It would throw on the first line of real work. So rollback is built
  * on the deployment record and Thrallo's own publish primitives instead — the same build and the
  * same provisiond call the normal publish uses, not a third publish path.

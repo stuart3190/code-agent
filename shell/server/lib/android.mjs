@@ -16,7 +16,7 @@ import { pwaColors } from "./pwa.mjs";
 import { createStoredZip } from "./exportProject.mjs";
 import { packageIdFor } from "./androidLinks.mjs";
 import { ensureAppIdentity } from "./appIdentity.mjs";
-import { materializeAndPublish } from "../routes/publish.mjs";
+import { materializeAndPublish } from "./publishing/materializePublish.mjs";
 import { runProcess } from "../../../build-worker/processTree.mjs";
 
 const IMAGE = "buildr-android:latest";
