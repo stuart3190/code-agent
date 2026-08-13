@@ -289,6 +289,7 @@ test("14R repair dispatch selects the durable checkpoint when a new project has 
     request: "repair the failed verification", kind: "repair",
   }, { deps: {
     workerEnabled: () => true, client,
+    requireWorkerAdmission: async () => ({ workerId: "worker-package14r" }),
     resolveBuildContext: async () => ({ byok: true, providerLabel: "codex",
       policy: { primaryProvider: "codex", billingLane: "connected_allowance" } }),
     startDiagSessionSafe: async () => ({ id: "diag", flush: async () => {},

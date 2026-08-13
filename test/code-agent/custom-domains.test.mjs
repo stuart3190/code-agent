@@ -433,7 +433,7 @@ test("connecting a domain never falls back to another project", async () => {
   const client = {
     from: () => {
       const api = {
-        select: () => api, eq: () => api, not: () => api, order: () => api,
+        select: () => api, eq: () => api, not: () => api, or: () => api, order: () => api,
         limit: () => Promise.resolve({ data: projects }),
         maybeSingle: async () => ({ data: null }),
       };

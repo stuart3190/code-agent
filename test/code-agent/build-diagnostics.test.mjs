@@ -216,14 +216,46 @@ test("explainBuildFailure quotes stored logs; without a provider it returns the 
   session.step({ kind: "compiler", label: "npm run build", status: "failed", output: "Rollup failed: 'checkout' is not exported by src/cart.js" });
   session.finish("failed");
   await settle(session);
+  let balanceReads = 0;
+  const { memoryDirectModelReservations } = await import("../../shell/server/lib/directModelReservations.mjs");
+  const reservations = memoryDirectModelReservations({
+    balanceResolver: async () => { balanceReads += 1; throw new Error("platform work cannot read customer balance"); },
+  });
+  let diagnosticCalls = 0;
   const fakeProvider = {
+    id: "openai",
+    model: "gpt-5.6-luna",
     turn: async ({ input }) => {
+      diagnosticCalls += 1;
       assert.match(input, /'checkout' is not exported/, "model receives the ACTUAL stored log");
-      return { text: "The compiler output shows:\n```\nRollup failed: 'checkout' is not exported by src/cart.js\n```\nExport `checkout` from src/cart.js." };
+      return {
+        id: `req_diagnostic_${diagnosticCalls}`,
+        text: "The compiler output shows:\n```\nRollup failed: 'checkout' is not exported by src/cart.js\n```\nExport `checkout` from src/cart.js.",
+        usage: { inputTokens: 20, outputTokens: 12, totalTokens: 32 },
+      };
     },
   };
-  const explained = await explainBuildFailure(OWNER, session.id, { client: db, provider: fakeProvider });
+  const explained = await explainBuildFailure(OWNER, session.id, {
+    client: db,
+    provider: fakeProvider,
+    reservationStoreFactory: () => reservations,
+  });
   assert.match(explained.explanation, /'checkout' is not exported/, "explanation quotes the stored output");
+  const [reservation] = reservations.rows();
+  assert.equal(balanceReads, 0);
+  assert.equal(reservation.kind, "diagnostic_explanation");
+  assert.equal(reservation.usageResponsibility, "platform_failure");
+  assert.equal(reservation.state, "settled");
+  assert.equal(reservation.includedActualCredits, 0);
+  assert.deepEqual(reservation.providerRequestIds, ["req_diagnostic_1"]);
+  await explainBuildFailure(OWNER, session.id, {
+    client: db,
+    provider: fakeProvider,
+    reservationStoreFactory: () => reservations,
+  });
+  assert.equal(reservations.rows().length, 2,
+    "each customer-requested explanation is a fresh platform-funded call identity");
+  assert.ok(reservations.rows().every((row) => row.state === "settled"));
 
   // Failed run with NO failing steps recorded -> explicit platform-bug statement.
   const bare = await createDiagSession({ owner: OWNER, kind: "app_build", prompt: "y", client: db });

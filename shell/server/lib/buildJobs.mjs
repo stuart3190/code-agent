@@ -243,7 +243,7 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null, routingMode = null, v2Input = null }) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null, routingMode = null, v2Input = null, budgetApprovalId = null }) {
   if (!["v1", "v2"].includes(pipelineVersion)) throw new Error(`unknown builder pipeline ${pipelineVersion}`);
   if (pipelineVersion === "v2" && !buildWorkerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the durable build worker; dispatch is disabled."), {
@@ -299,6 +299,7 @@ export async function createJob({ owner, projectId, mode, prompt, tree, plan, kn
     id: job.id, owner: owner.id, project_id: projectId, mode,
     status: "queued", phase: "queued", server_id: SERVER_ID, pipeline_version: pipelineVersion,
     diag_run_id: diag?.sessionId || null,
+    budget_approval_id: budgetApprovalId,
   });
   if (error) {
     if (pipelineVersion === "v2" && error.code === "23505") {
@@ -368,6 +369,27 @@ export async function activeBuildFor(ownerId, projectId) {
   const { data } = await db().select("*").eq("owner", ownerId).eq("project_id", projectId)
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   return data ? rowToJob(data) : null;
+}
+
+export async function activeBuildsFor(ownerId, projectIds, { client = null } = {}) {
+  const ids = [...new Set((projectIds || []).filter(Boolean).map(String))];
+  if (!ids.length) return new Map();
+  const byProject = new Map();
+  for (const job of jobs.values()) {
+    if (job.owner.id !== ownerId || !ids.includes(String(job.projectId))
+        || !["queued", "running"].includes(job.status)) continue;
+    const prior = byProject.get(String(job.projectId));
+    if (!prior || job.createdAt > prior.createdAt) byProject.set(String(job.projectId), job);
+  }
+  const { data, error } = await db(client).select("*").eq("owner", ownerId)
+    .in("project_id", ids).in("status", ["queued", "running"])
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`active build summary: ${error.message}`);
+  for (const row of data || []) {
+    const key = String(row.project_id);
+    if (!byProject.has(key)) byProject.set(key, rowToJob(row));
+  }
+  return new Map([...byProject].map(([projectId, job]) => [projectId, publicJob(job)]));
 }
 
 function rowToJob(row) {

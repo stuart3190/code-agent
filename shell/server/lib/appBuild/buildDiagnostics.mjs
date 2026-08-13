@@ -13,6 +13,10 @@
 import { randomUUID } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { serviceClient } from "../supabase.mjs";
+import {
+  createManagedDirectDispatchAccounting, directModelReservations,
+} from "../directModelReservations.mjs";
+import { managedSettlementPaused } from "./providerPolicy.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 
 const GZ_THRESHOLD = 16 * 1024;      // inline text beyond this is stored gzip+base64
@@ -437,7 +441,11 @@ export function failingSteps(run) {
     && ["compiler", "test", "lint", "runtime", "verification", "terminal"].includes(step.kind));
 }
 
-export async function explainBuildFailure(owner, runId, { client = null, provider = null } = {}) {
+export async function explainBuildFailure(owner, runId, {
+  client = null,
+  provider = null,
+  reservationStoreFactory = directModelReservations,
+} = {}) {
   const run = await getDiagRun(owner, runId, { client, full: true });
   if (!run) return { found: false, explanation: "That Build ID has no stored diagnostics for your account." };
 
@@ -457,25 +465,52 @@ export async function explainBuildFailure(owner, runId, { client = null, provide
     `── ${step.label} (${step.kind}, round ${step.round}) ──\n${tail(step.output, 60, 6000)}`).join("\n\n");
   const quoted = `Exact stored output responsible:\n\n${evidence}`;
 
-  if (!provider) {
+  if (!provider && !managedSettlementPaused()) {
     try {
       const { createCodingModel } = await import("../modelGateway.mjs");
       provider = createCodingModel("auto");
     } catch { provider = null; }
   }
-  if (provider) {
+  if (provider && !managedSettlementPaused()) {
+    const candidate = {
+      provider: provider.provider || provider.id || "managed",
+      model: provider.model || "diagnostic-explanation",
+    };
+    const accounting = createManagedDirectDispatchAccounting({
+      owner,
+      kind: "diagnostic_explanation",
+      subjectId: randomUUID(),
+      reservations: reservationStoreFactory(),
+      maxOutputTokens: 1_000,
+      usageResponsibility: "platform_failure",
+      metadata: { diagnosticRunId: runId },
+    });
+    const hooks = accounting.forTurn(1);
+    const turnArgs = {
+      instructions: [
+        "You are explaining a failed software build to its owner using ONLY the stored diagnostic logs provided.",
+        "Rules: quote the exact failing lines verbatim (in code blocks) as your evidence; never speculate beyond what the logs show;",
+        "if the logs are insufficient to determine a cause, say exactly that. Keep it under 250 words, plain language, and end with the most likely smallest fix IF the logs support one.",
+      ].join(" "),
+      input: `Original request: ${String(run.prompt || "").slice(0, 500)}\nFinal status: ${run.status} after ${run.repair_rounds || 0} repair round(s).\n\nSTORED FAILING OUTPUT:\n${evidence}`,
+      tools: [],
+      maxOutputTokens: 1_000,
+      maxProviderRetries: 0,
+      allowParameterRetry: false,
+    };
+    let hold = null;
+    let providerCompleted = false;
     try {
-      const turn = await provider.turn({
-        instructions: [
-          "You are explaining a failed software build to its owner using ONLY the stored diagnostic logs provided.",
-          "Rules: quote the exact failing lines verbatim (in code blocks) as your evidence; never speculate beyond what the logs show;",
-          "if the logs are insufficient to determine a cause, say exactly that. Keep it under 250 words, plain language, and end with the most likely smallest fix IF the logs support one.",
-        ].join(" "),
-        input: `Original request: ${String(run.prompt || "").slice(0, 500)}\nFinal status: ${run.status} after ${run.repair_rounds || 0} repair round(s).\n\nSTORED FAILING OUTPUT:\n${evidence}`,
-        tools: [],
-      });
+      hold = await hooks.beforeDispatch(candidate, { attemptOrder: 1, args: turnArgs });
+      const turn = await provider.turn(turnArgs);
+      providerCompleted = true;
+      await hooks.afterDispatch(hold, candidate, turn);
       if (turn?.text?.trim()) return { found: true, explanation: turn.text.trim(), evidence: quoted };
     } catch (error) {
+      if (hold && !providerCompleted) {
+        try { await hooks.dispatchFailed(hold, candidate, error); }
+        catch (accountingError) { error = accountingError; }
+      }
       console.error("[diag] explain model call failed:", error.message);
     }
   }

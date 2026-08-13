@@ -172,7 +172,9 @@ export function normalizeXaiError(payload, status) {
   return error;
 }
 
-const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+// Only explicit HTTP rejections that guarantee no provider work may retry inside the adapter.
+// Ambiguous 5xx responses and transport timeouts must return to the reservation-aware caller.
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429]);
 
 // ── Shared transport: one POST to /responses with retries, timeout, cancellation ────────
 
@@ -182,7 +184,8 @@ function unsupportedParameter(error) {
   return /does not support parameter\s+(\w+)/i.exec(String(error?.message || ""))?.[1] || null;
 }
 
-async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, maxRetries }) {
+async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, maxRetries,
+  allowParameterRetry = true }) {
   let lastError;
   let retries = 0;
   if (body?.model && NO_REASONING.has(body.model)) delete body.reasoning;
@@ -207,7 +210,7 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
         // Self-correcting capability discovery: strip the rejected parameter and retry
         // immediately (this attempt doesn't count against the retry budget).
         const unsupported = unsupportedParameter(error);
-        if (unsupported && unsupported in body) {
+        if (allowParameterRetry && unsupported && unsupported in body) {
           if (unsupported === "reasoning" && body.model) NO_REASONING.add(body.model);
           delete body[unsupported];
           attempt -= 1;
@@ -234,7 +237,6 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
         const timeoutError = new Error("xAI request timed out.");
         timeoutError.code = "xai_timeout";
         timeoutError.status = 408;
-        if (attempt < maxRetries) { lastError = timeoutError; retries += 1; continue; }
         throw providerFailure(timeoutError, { state: DISPATCH_STATES.ambiguous });
       }
       if (error.status && RETRYABLE_STATUS.has(error.status) && attempt < maxRetries) {
@@ -287,15 +289,19 @@ export function createXaiProvider({
   return {
     provider: "xai",
     model: executableModel,
-    async turn({ instructions, input, tools, safetyIdentifier }) {
+    async turn({ instructions, input, tools, safetyIdentifier, maxOutputTokens = null,
+      maxProviderRetries = maxRetries, allowParameterRetry = true }) {
       void safetyIdentifier; // xAI has no safety-identifier field; never forward user ids
       const { payload, retries } = await xaiResponsesCall({
-        apiKey: key, fetchImpl, signal, timeoutMs, maxRetries,
+        apiKey: key, fetchImpl, signal, timeoutMs,
+        maxRetries: Math.max(0, Math.min(maxRetries, Number(maxProviderRetries) || 0)),
+        allowParameterRetry,
         body: {
           model: executableModel, instructions, input, tools,
           ...(supportsReasoning(executableModel) ? { reasoning: { effort } } : {}),
           parallel_tool_calls: false,
           store: false,
+          ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
         },
       });
       return {
@@ -340,10 +346,11 @@ export function createXaiEngineProvider({
   const maxRetries = xaiPolicy().maxRetries;
 
   async function runTurn({ systemPrompt, messages, tools, signal: callSignal = null, maxOutputTokens = null,
-    maxProviderRetries = maxRetries }) {
+    maxProviderRetries = maxRetries, allowParameterRetry = true }) {
     const { payload, retries } = await xaiResponsesCall({
       apiKey: key, fetchImpl, signal: callSignal || signal, timeoutMs,
       maxRetries: Math.max(0, Math.min(maxRetries, Number(maxProviderRetries) || 0)),
+      allowParameterRetry,
       body: {
         model: executableModel,
         instructions: systemPrompt,

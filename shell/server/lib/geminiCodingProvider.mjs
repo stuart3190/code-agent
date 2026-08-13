@@ -39,7 +39,7 @@ export function createGeminiCodingProvider({
   return {
     id: "gemini",
     model: executableModel,
-    async turn({ instructions, input, tools = [] }) {
+    async turn({ instructions, input, tools = [], maxOutputTokens: turnMaxOutputTokens = null }) {
       const body = {
         model: executableModel,
         input: toGeminiInput(input),
@@ -48,7 +48,8 @@ export function createGeminiCodingProvider({
         store: false,
       };
       if (!body.tools.length) delete body.tools;
-      if (maxOutputTokens) body.generation_config = { max_output_tokens: maxOutputTokens };
+      const boundedOutput = turnMaxOutputTokens || maxOutputTokens;
+      if (boundedOutput) body.generation_config = { max_output_tokens: Math.max(1, Math.floor(boundedOutput)) };
 
       let response;
       try { response = await fetchImpl(endpoint, {

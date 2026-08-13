@@ -143,12 +143,12 @@ test("retry-safe managed fallback stays within its lane and records failed attem
   else process.env.OPENAI_API_KEY = previousOpenAI;
 });
 
-test("adapter: usage normalization, internal retry bills once, cancellation stops generation", async () => {
-  // Retry: first attempt 503, second succeeds -> ONE usage result, retries counted.
+test("adapter: usage normalization, safe rejection retry bills once, cancellation stops generation", async () => {
+  // Retry: an explicit 429 rejection guarantees no provider work, then one success is billed.
   let calls = 0;
   const flaky = async () => {
     calls += 1;
-    if (calls === 1) return { ok: false, status: 503, json: async () => ({ error: { message: "overloaded" } }) };
+    if (calls === 1) return { ok: false, status: 429, json: async () => ({ error: { message: "rate limited" } }) };
     return okResponse();
   };
   const provider = createXaiProvider({ apiKey: "xai-k-000000000000000000", model: "grok-4.5", fetchImpl: flaky });
@@ -320,6 +320,40 @@ test("the adapter self-corrects when a model rejects a parameter it was told to 
   const before = calls;
   await provider.turn({ instructions: "i", input: [], tools: [] });
   assert.equal(calls - before, 1, "no wasted request second time around");
+});
+
+test("an ambiguous xAI timeout is never retried inside one BYOK call", async () => {
+  let calls = 0;
+  const provider = createXaiProvider({
+    apiKey: "xai-k-000000000000000000", model: "grok-4.5", maxRetries: 2,
+    fetchImpl: async () => {
+      calls += 1;
+      throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    },
+  });
+  await assert.rejects(provider.turn({ instructions: "i", input: [], tools: [] }),
+    (error) => error.code === "xai_timeout" && error.dispatchState === "provider_dispatch_ambiguous");
+  assert.equal(calls, 1);
+});
+
+test("accounted xAI calls never retry a provider request inside one reservation", async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return {
+      ok: false, status: 400,
+      headers: { get: () => "req-rejected-parameter" },
+      json: async () => ({ error: { message: "Model grok-4.5 does not support parameter reasoning." } }),
+    };
+  };
+  const provider = createXaiProvider({
+    apiKey: "xai-k-000000000000000000", model: "grok-4.5", reasoningEffort: "high", fetchImpl,
+  });
+  await assert.rejects(provider.turn({
+    instructions: "i", input: [], tools: [],
+    maxProviderRetries: 0, allowParameterRetry: false,
+  }));
+  assert.equal(calls, 1);
 });
 
 test("the catalog only lists models proven to exist on a live account", () => {

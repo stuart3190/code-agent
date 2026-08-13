@@ -10,11 +10,14 @@ import { resolveBuildContext } from "../appBuild/buildContext.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { normalizeByokSafety } from "../appBuild/byokSafety.mjs";
-import { managedAffordableCreditLimit } from "../billingLimits.mjs";
+import { MANAGED_FINAL_JOB_GRACE_CREDITS, managedAffordableCreditLimit } from "../billingLimits.mjs";
 import { createJob, subscribe } from "../buildJobs.mjs";
 import { buildWorkerEnabled } from "../buildWorkQueue.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { killSwitchActive, flagOn, flagOnFor } from "./featureFlags.mjs";
+import { requireFreshWorkerAdmission } from "./workerAdmission.mjs";
+import { classifyComplexity, profileFor } from "../appBuild/buildProfile.mjs";
+import { buildBudgetApprovals } from "./buildBudgetApprovals.mjs";
 
 export async function v2BuildEligible(owner, options = {}) {
   try {
@@ -35,7 +38,7 @@ const PHASES = Object.freeze({
   failed: ["Builder", "The verified build stopped."],
 });
 
-async function buildCeiling(owner, mode, deps) {
+async function buildCeiling(owner, mode, deps, { maxCredits = null } = {}) {
   const context = await deps.resolveBuildContext(owner);
   if (usesManagedCredits(context.policy) && managedSettlementPaused()) {
     throw Object.assign(new Error("Managed Builder V2 dispatch is paused; no project or provider call was created."), {
@@ -43,7 +46,7 @@ async function buildCeiling(owner, mode, deps) {
     });
   }
   if (context.byok) {
-    const platformCeiling = Number(process.env.THRALLO_BV2_DEFAULT_BUILD_CEILING || 60);
+    const platformCeiling = Number(maxCredits || process.env.THRALLO_BV2_DEFAULT_BUILD_CEILING || 60);
     const userCeiling = normalizeByokSafety(context.byokSafety, { provider: context.providerLabel }).maxCostPerBuild;
     return {
       ceiling: userCeiling == null ? platformCeiling : Math.min(platformCeiling, userCeiling),
@@ -55,8 +58,12 @@ async function buildCeiling(owner, mode, deps) {
     };
   }
   const balance = await deps.budgetLedger().getBalance(owner);
+  const standard = managedAffordableCreditLimit({ balance: balance.total, mode });
+  const approved = Number(maxCredits) > standard
+    ? Math.min(Number(maxCredits), Math.max(0, Number(balance.total) || 0) + MANAGED_FINAL_JOB_GRACE_CREDITS)
+    : standard;
   return {
-    ceiling: managedAffordableCreditLimit({ balance: balance.total, mode }),
+    ceiling: maxCredits == null ? standard : Math.min(approved, Number(maxCredits)),
     providerSelection: {
       provider: context.policy?.primaryProvider || "managed",
       billingLane: context.policy?.billingLane || "managed",
@@ -108,19 +115,23 @@ function productionDeps(overrides = {}) {
     startDiagSessionSafe: (spec) => createDiagSession({ ...spec, strictWrites: true }),
     resolveBuildContext,
     budgetLedger: createBudgetLedger, workerEnabled: buildWorkerEnabled,
+    requireWorkerAdmission: requireFreshWorkerAdmission,
     ...overrides,
   };
 }
 
 async function dispatch(ctx, {
   project, mode, prompt, kind, trigger = "user", taskHint = null, deps: overrides = {}, preflight = null,
-  v2Input = null,
+  v2Input = null, budgetApprovalId = null,
 }) {
   const deps = productionDeps(overrides);
   if (!deps.workerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the isolated build worker; no diagnostic or job was created."), {
       code: "worker_required",
     });
+  }
+  if (!preflight?.workerAdmission) {
+    await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   }
   const checked = preflight || await buildCeiling(ctx.owner, mode, deps);
   const ceiling = checked.ceiling;
@@ -143,7 +154,7 @@ async function dispatch(ctx, {
       budgetAllowance: ceiling, pipelineVersion: "v2",
       providerSelection: checked.providerSelection,
       manualModel: checked.providerSelection?.manualModel || null,
-      v2Input,
+      v2Input, budgetApprovalId,
     }));
   } catch (error) {
     await diag.finish?.("failed");
@@ -188,38 +199,95 @@ export async function startAppBuildV2(ctx, input, options = {}) {
     });
   }
   const deps = productionDeps(options.deps);
-  const preflight = await buildCeiling(ctx.owner, "build", deps);
-  const name = String(input.productName || "").trim() || null;
-  let productId = ctx.conversation.product_id || null;
-  if (name) {
-    const product = await ctx.conversations.upsertProduct(ctx.owner, name.slice(0, 120));
-    productId = product.id;
-    if (!ctx.conversation.product_id) {
-      await ctx.conversations.updateConversation(ctx.conversation, { product_id: product.id });
+  const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
+  const complexity = classifyComplexity({ prompt: String(input.description) });
+  const profile = profileFor(complexity.level);
+  const configuredAdvancedCeiling = Number(process.env.THRALLO_BV2_MAX_APPROVED_BUILD_CEILING || 0);
+  const classCeiling = complexity.level === "advanced" && configuredAdvancedCeiling > profile.maxCredits
+    ? configuredAdvancedCeiling : profile.maxCredits;
+  const preflight = {
+    ...(await buildCeiling(ctx.owner, "build", deps, { maxCredits: classCeiling })), workerAdmission,
+  };
+  let approvals = null;
+  let consumedApproval = null;
+  if (complexity.level === "advanced") {
+    approvals = options.deps?.approvalStore || buildBudgetApprovals({ client: deps.client });
+    if (!options.approvalId) {
+      const approval = await approvals.create(ctx.owner, ctx.conversation.id, input, {
+        ceilingCredits: preflight.ceiling,
+      });
+      await ctx.emit("budget_approval_required", approval);
+      return {
+        handled: true,
+        result: {
+          waitingForApproval: true,
+          approval,
+          note: "This larger build is ready and waiting for budget approval.",
+        },
+      };
     }
+    consumedApproval = await approvals.consume(ctx.owner, options.approvalId, {
+      conversationId: ctx.conversation.id, input,
+    });
+    preflight.ceiling = Math.min(preflight.ceiling, consumedApproval.ceilingCredits);
   }
-  const { data: project, error } = await deps.client.from("projects").insert({
-    owner: ctx.owner, name: name || String(input.description).slice(0, 120), product_id: productId,
-  }).select("*").single();
-  if (error) throw new Error(`Builder V2 project creation failed: ${error.message}`);
+
+  let project = null;
   try {
+    const name = String(input.productName || "").trim() || null;
+    let productId = ctx.conversation.product_id || null;
+    if (name) {
+      const product = await ctx.conversations.upsertProduct(ctx.owner, name.slice(0, 120));
+      productId = product.id;
+      if (!ctx.conversation.product_id) {
+        await ctx.conversations.updateConversation(ctx.conversation, { product_id: product.id });
+      }
+    }
+    const created = await deps.client.from("projects").insert({
+      owner: ctx.owner, name: name || String(input.description).slice(0, 120), product_id: productId,
+      budget_approval_id: consumedApproval?.approvalId || null,
+    }).select("*").single();
+    if (created.error) throw new Error(`Builder V2 project creation failed: ${created.error.message}`);
+    project = created.data;
     const result = await dispatch(ctx, {
       project, mode: "build", prompt: String(input.description), kind: "app_build_v2",
       deps: options.deps, preflight,
+      budgetApprovalId: consumedApproval?.approvalId || null,
     });
+    if (consumedApproval) {
+      await approvals.attachDispatch(ctx.owner, consumedApproval.approvalId, {
+        projectId: result.projectId, jobId: result.jobId,
+      });
+      await ctx.emit("budget_approval_resolved", { ...consumedApproval, status: "consumed" });
+    }
     return { handled: true, result: { ...result, note: "Builder V2 dispatched to the isolated worker." } };
   } catch (error) {
     // This row was created solely for this dispatch. Delete it only when no durable build record
     // exists; an SSE/relay failure after enqueue must never delete the project beneath its worker.
+    let provedNoDurableJob = project == null;
     try {
-      const { data: durable } = await deps.client.from("build_jobs").select("id")
-        .eq("project_id", project.id).eq("owner", ctx.owner).limit(1);
-      if (!durable?.length) {
+      if (project) {
+        const { data: durable, error: durableError } = await deps.client.from("build_jobs").select("id")
+          .eq("project_id", project.id).eq("owner", ctx.owner).limit(1);
+        if (durableError) throw durableError;
+        provedNoDurableJob = !durable?.length;
+      }
+      if (project && provedNoDurableJob) {
         const cleanup = await deps.client.from("projects").delete().eq("id", project.id).eq("owner", ctx.owner);
-        if (cleanup?.error) console.error(`[bv2 dispatch] empty project cleanup failed: ${cleanup.error.message}`);
+        if (cleanup?.error) {
+          provedNoDurableJob = false;
+          console.error(`[bv2 dispatch] empty project cleanup failed: ${cleanup.error.message}`);
+        }
       }
     } catch (cleanupError) {
       console.error(`[bv2 dispatch] preserved project because cleanup proof failed: ${cleanupError.message}`);
+    }
+    if (consumedApproval && provedNoDurableJob) {
+      try {
+        await approvals.reopen(ctx.owner, consumedApproval.approvalId);
+      } catch (reopenError) {
+        throw new AggregateError([error, reopenError], "Builder dispatch failed and its budget approval could not be reopened.");
+      }
     }
     throw error;
   }
@@ -237,6 +305,7 @@ export async function startExistingAppWorkV2(ctx, {
     });
   }
   const deps = productionDeps(options.deps);
+  const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   let mode = "iterate";
   let v2Input = null;
   if (kind === "repair" && !project.bv2_green_snapshot_id) {
@@ -252,6 +321,7 @@ export async function startExistingAppWorkV2(ctx, {
   const result = await dispatch(ctx, {
     project, mode, prompt: String(request), kind: `${kind}_v2`, trigger, taskHint,
     deps: options.deps, v2Input,
+    preflight: { ...(await buildCeiling(ctx.owner, mode, deps)), workerAdmission },
   });
   return { handled: true, result: { ...result, note: `Builder V2 ${kind} dispatched to the isolated worker.` } };
 }

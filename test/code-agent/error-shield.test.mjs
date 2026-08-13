@@ -111,6 +111,10 @@ test("classification separates safe retries from user-actionable and unexpected 
   assert.equal(classifyFailure({ message: "duplicate key value violates unique constraint" }).retryable, true);
   assert.equal(classifyFailure({ status: 503, message: "upstream overloaded" }).retryable, true);
   assert.equal(classifyFailure({ status: 429, message: "rate limited" }).retryable, true);
+  assert.equal(classifyFailure({ status: 503, message: "upstream overloaded",
+    dispatchState: "provider_dispatch_ambiguous", retrySafe: false }).retryable, false);
+  assert.equal(classifyFailure({ status: 429, message: "rate limited",
+    dispatchState: "provider_rejected", retrySafe: true }).retryable, true);
   assert.equal(classifyFailure({ message: "Your monthly managed allowance is used up" }).kind, "needs_user");
   assert.equal(classifyFailure({ message: "Cannot read properties of undefined" }).retryable, false);
 });
@@ -223,6 +227,10 @@ test("recoverable Lead Agent failures retry automatically and continue the origi
       if (attempt === 1) {
         const error = new Error('duplicate key value violates unique constraint "ca_conversation_events_pkey"');
         error.code = "23505";
+        // Automatic replay is safe only when the provider explicitly proves that the request
+        // never left Thrallo. An unclassified transport failure is intentionally ambiguous.
+        error.dispatchState = "before_dispatch";
+        error.retrySafe = true;
         throw error;
       }
       return { text: "Shop built.", output: [], usage: {} };

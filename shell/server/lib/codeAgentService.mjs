@@ -22,11 +22,14 @@ import {
   aiCredentialStorageConfigured,
   refreshCodexAuth,
 } from "./aiCredentialStore.mjs";
-import { assertRunWithinBudget } from "./usageBudgets.mjs";
+import { assertRunWithinBudget, repositoryRunBudgetProvider } from "./usageBudgets.mjs";
 import { planCatalog } from "./subscriptionPlans.mjs";
 import { thralloStripeConfigured } from "./subscriptionBilling.mjs";
 import { retentionDays } from "./retentionService.mjs";
 import { createRoutedCodingModel, modelCatalog } from "./modelRouting.mjs";
+import {
+  createManagedDirectDispatchAccounting, directModelReservations,
+} from "./directModelReservations.mjs";
 import { embeddingsConfigured, embeddingModel } from "./embeddingProvider.mjs";
 import {
   augmentPromptWithContext,
@@ -161,12 +164,18 @@ export async function processRun(run, {
   publisher = publishDaytonaRun,
   reviewPoster = createPullRequestReview,
   automationResolver = defaultAutomationResolver,
+  reservationStoreFactory = directModelReservations,
+  managedMaxOutputTokens = Math.max(
+    1,
+    Math.min(Number(optionalEnv("CODE_AGENT_MAX_OUTPUT_TOKENS", "8000")) || 8000, 32_000),
+  ),
 } = {}) {
   const store = codeAgentStore();
   const emit = (type, payload) => store.appendEvent(run, type, payload);
   let runner = null;
   let preserveRunner = false;
   let billingSource = "unknown";
+  let managedAccounting = null;
   let resumedRun = null;
   const executionStarted = Date.now();
   try {
@@ -175,7 +184,11 @@ export async function processRun(run, {
     const agent = await store.getAgent(run.owner, run.agent_id);
     // A queued run can outlive the allowance that admitted it; re-check before spending.
     const credentialProvider = await providerNameResolver(run.owner).catch(() => "managed");
-    const budget = await budgetGuard(run.owner, { credentialProvider, store })
+    // Direct managed reservations are the canonical model-spend admission gate and include
+    // purchased credits. The legacy run guard still enforces run-count and sandbox-compute
+    // limits, but must not reject a run merely because its included model allowance is spent.
+    const budgetCredentialProvider = repositoryRunBudgetProvider(credentialProvider);
+    await budgetGuard(run.owner, { credentialProvider: budgetCredentialProvider, store })
       .catch((error) => { throw withCode(new Error(error.message), "budget_exhausted"); });
 
     // Codex executes its own tooling inside the sandbox and needs the network; an offline
@@ -268,6 +281,15 @@ export async function processRun(run, {
     if (billingSource === "managed") {
       const { managedSettlementPaused, MANAGED_PAUSED_MESSAGE } = await import("./appBuild/providerPolicy.mjs");
       if (managedSettlementPaused()) throw new Error(MANAGED_PAUSED_MESSAGE);
+      managedAccounting = createManagedDirectDispatchAccounting({
+        owner: run.owner,
+        kind: "coding_agent",
+        subjectId: run.id,
+        runId: run.id,
+        reservations: reservationStoreFactory({ runStore: store }),
+        maxOutputTokens: managedMaxOutputTokens,
+        metadata: { repositoryId: run.repository_id, mode: run.mode },
+      });
     }
     await emit("model.selected", {
       provider: credential.provider,
@@ -309,9 +331,12 @@ export async function processRun(run, {
         prompt: executionPrompt,
         commandPolicy: agent?.command_policy || "standard",
         ...(run.mode === "review" ? { instructions: REVIEW_INSTRUCTIONS, tools: reviewTools() } : {}),
-        tokenBudget: billingSource === "managed"
-          ? budget.budgets.managedTokens.remaining
-          : null,
+        dispatchAccounting: managedAccounting,
+        maxOutputTokens: billingSource === "managed" ? managedMaxOutputTokens : null,
+        // Per-dispatch credit holds enforce included + purchased affordability. The output cap
+        // above bounds each call independently; a remaining-included-token cap would reject
+        // valid top-up-funded work midway through a run.
+        tokenBudget: null,
       });
     }
     if (result.cancelled) {
@@ -319,14 +344,14 @@ export async function processRun(run, {
         state: "cancelled", result, usage: result.usage, sandbox_state: "discarded",
         finished_at: new Date().toISOString(),
       });
-      await persistUsage(store, run, result, executionStarted, billingSource);
+      await persistUsage(store, run, result, executionStarted, billingSource, managedAccounting);
       await emit("run.cancelled", { message: "Run cancelled" });
       return run;
     }
     if (run.mode === "review") {
       const review = parseReviewOutput(result.summary);
       await persistReviewOutputs(store, run, result, review, reviewDiff);
-      await persistUsage(store, run, result, executionStarted, billingSource);
+      await persistUsage(store, run, result, executionStarted, billingSource, managedAccounting);
       const reviewResult = {
         review: true,
         verdict: review.verdict,
@@ -389,7 +414,7 @@ export async function processRun(run, {
       return run;
     }
     await persistRunOutputs(store, run, result);
-    await persistUsage(store, run, result, executionStarted, billingSource);
+    await persistUsage(store, run, result, executionStarted, billingSource, managedAccounting);
     const durableResult = {
       summary: result.summary,
       status: result.status,
@@ -455,7 +480,7 @@ export async function processRun(run, {
     return run;
   } catch (error) {
     if (error.usage) {
-      await persistUsage(store, run, { usage: error.usage }, executionStarted, billingSource)
+      await persistUsage(store, run, { usage: error.usage }, executionStarted, billingSource, managedAccounting)
         .catch((usageError) => console.error("[code-agent] usage persistence:", usageError));
     }
     // Keep the workspace so the owner can resume instead of restarting from a clean clone.
@@ -635,7 +660,18 @@ async function persistRunOutputs(store, run, result) {
   }
 }
 
-async function persistUsage(store, run, result, executionStarted, billingSource = "unknown") {
+async function persistUsage(
+  store,
+  run,
+  result,
+  executionStarted,
+  billingSource = "unknown",
+  managedAccounting = null,
+) {
+  // Managed calls are written per provider dispatch by reservation settlement. Skipping by the
+  // presence of accounting (not by successful-call count) prevents ambiguous calls from falling
+  // through to an unsafe post-hoc aggregate write.
+  if (billingSource === "managed" && managedAccounting) return;
   const usage = result.usage || {};
   await store.recordUsage(run, {
     provider: result.provider || "unknown",

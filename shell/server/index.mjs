@@ -71,7 +71,7 @@ import {
 import { byokConfigured } from "./lib/byokStore.mjs";
 import {
   handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
-  handleOpsTelemetry, handlePlanSelect,
+  handleOpsTelemetry, handlePlanSelect, handleTopupCheckout,
 } from "./routes/subscription.mjs";
 import { thralloStripeConfigured, thralloWebhookConfigured } from "./lib/subscriptionBilling.mjs";
 import { handlePublishState, handleProjectUnpublish } from "./routes/publishState.mjs";
@@ -110,6 +110,15 @@ import {
   notificationChannels, vapidPublicKey, saveSubscription, removeSubscription,
 } from "./lib/notifications/notificationService.mjs";
 import { startLeadAgentRecovery, stopLeadAgentRecovery } from "./lib/leadAgentService.mjs";
+import {
+  handleBuildBudgetApprovalGet, handleBuildBudgetApprovalResolve,
+} from "./routes/buildBudgetApprovals.mjs";
+import {
+  startModelReservationReconciler, stopModelReservationReconciler,
+} from "./lib/modelReservationReconciler.mjs";
+import {
+  startBuildBudgetApprovalReconciler, stopBuildBudgetApprovalReconciler,
+} from "./lib/builderV2/buildBudgetApprovals.mjs";
 import { startAutomationSweeper, stopAutomationSweeper } from "./lib/automationService.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -933,6 +942,18 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handlePublishState(req, res, owner);
     }
+    const budgetApprovalMatch = p.match(/^\/api\/v1\/build-budget-approvals\/([0-9a-f-]{36})(?:\/(approve|decline))?$/i);
+    if (budgetApprovalMatch) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (method === "GET" && !budgetApprovalMatch[2]) {
+        return await handleBuildBudgetApprovalGet(req, res, { owner, approvalId: budgetApprovalMatch[1] });
+      }
+      if (method === "POST" && budgetApprovalMatch[2]) {
+        return await handleBuildBudgetApprovalResolve(req, res, {
+          owner, approvalId: budgetApprovalMatch[1], action: budgetApprovalMatch[2] === "approve" ? "approve" : "decline",
+        });
+      }
+    }
     if (p === "/api/v1/billing" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleBillingOverview(req, res, owner);
@@ -948,6 +969,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/billing/portal" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleBillingPortal(req, res, owner);
+    }
+    if (p === "/api/v1/billing/topup" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleTopupCheckout(req, res, owner);
     }
     // Cancel at period end, or undo a scheduled cancellation. Not a portal re-implementation:
     // portal cancellation is an account-wide Stripe setting and this account is shared with
@@ -1105,6 +1130,8 @@ server.listen(PORT, HOST, () => {
   startDiagnosticsSweeper();
   startAutomationSweeper();
   startLeadAgentRecovery();
+  startModelReservationReconciler();
+  startBuildBudgetApprovalReconciler();
   // Last, so it reports the state AFTER every subsystem has had its chance to load: which optional
   // capabilities are on, which are off, and what each one costs when off. A missing PEXELS_API_KEY
   // used to be visible only inside individual builds, so production shipped photo-less apps for an
@@ -1133,6 +1160,8 @@ async function shutdown(signal) {
   stopDiagnosticsSweeper();
   stopAutomationSweeper();
   stopLeadAgentRecovery();
+  stopModelReservationReconciler();
+  stopBuildBudgetApprovalReconciler();
   stopStaleJobSweeper();
   await stopCodexLoginSessions();
   if (!CODE_AGENT_STANDALONE) {

@@ -115,6 +115,24 @@ export function createLedger(client) {
     return { ok: true, idempotent: false, credits: r4(credits), bucket, ref, id: data[0].id };
   }
 
+  // Signed billing webhooks use append-only negative adjustments for refunds/disputes. A
+  // reversal may intentionally make the purchased bucket negative after credits were spent;
+  // future availability clamps at zero until that debt is covered by another purchase.
+  async function adjust({ owner, credits, bucket, ref }) {
+    if (!owner || !ref) throw new Error("adjust: owner and ref are required.");
+    if (!Number.isFinite(Number(credits)) || Number(credits) === 0) {
+      throw new Error(`adjust: credits must be non-zero (got ${credits}).`);
+    }
+    if (bucket !== "bundle" && bucket !== "topup") throw new Error(`adjust: bad bucket ${bucket}.`);
+    const row = { owner, delta: r4(Number(credits)), bucket, kind: "adjust", ref };
+    const { data, error } = await table().insert(row).select();
+    if (error) {
+      if (isDup(error)) return { ok: true, idempotent: true, credits: row.delta, bucket, ref };
+      throw error;
+    }
+    return { ok: true, idempotent: false, credits: row.delta, bucket, ref, id: data[0].id };
+  }
+
   // ── debit (a generation turn) ────────────────────────────────────────────────────────────────
   // need = creditsForTurn({tokens, model})  (model-WEIGHTED, from costModel — never re-derived here).
   // Guards, in order:
@@ -233,6 +251,7 @@ export function createLedger(client) {
     setEntitlement,
     ownerForStripeCustomer,
     grant,
+    adjust,
     debit,
     rolloverJob,
     _client: client,

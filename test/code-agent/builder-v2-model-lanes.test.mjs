@@ -296,11 +296,52 @@ test("ambiguous V2 transport failure settles known usage and blocks replay", asy
   assert.ok(seenOptions.every((options) => options.signal === controller.signal));
 });
 
+test("a stale managed allowance snapshot is refreshed before the only provider dispatch", async () => {
+  let balanceReads = 0;
+  let reserves = 0;
+  let providerCalls = 0;
+  const reservations = {
+    budget: async () => ({ approvedCeilingCredits: 5, consumedCredits: 0, reservedCredits: 0, remainingCredits: 5 }),
+    reserve: async (input) => {
+      reserves += 1;
+      if (reserves === 1) throw Object.assign(new Error("stale"), { code: "allowance_snapshot_stale" });
+      assert.equal(input.accountBalance.usageRowCount, 2);
+      return { id: "hold-refreshed", acquired: true };
+    },
+    settle: async () => ({}),
+  };
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return { text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+        usage: { input: 10, output: 5, total: 15 } };
+    },
+  };
+  const lanes = createModelLanes({
+    provider,
+    providerForStep: async () => ({ provider, decision: { billingLane: "managed", estimatedCredits: 1 } }),
+    ceilingCredits: 5,
+    reservations,
+    knowledgeStore: memoryKnowledgeStore(),
+    accountCreditResolver: async () => ({ included: 5, purchased: 0, usageRowCount: ++balanceReads }),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  });
+  assert.equal(balanceReads, 2);
+  assert.equal(reserves, 2);
+  assert.equal(providerCalls, 1);
+});
+
 test("a successful provider response with failed settlement stops without rewriting telemetry", async () => {
   let settles = 0;
+  const ambiguous = [];
   const reservations = {
     reserve: async () => ({ id: "hold-1" }),
     settle: async () => { settles += 1; throw new Error("settlement unavailable"); },
+    markAmbiguous: async (owner, id, input) => { ambiguous.push({ owner, id, input }); },
   };
   const provider = {
     model: "gpt-5.5",
@@ -315,6 +356,37 @@ test("a successful provider response with failed settlement stops without rewrit
   await assert.rejects(lanes.patchesFn({
     owner: "owner", projectId: "project", buildId: "build", step: "core",
     contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
-  }), /settlement unavailable/);
+  }), (error) => error.code === "provider_replay_unsafe"
+    && error.providerRequestId === "req-success");
   assert.equal(settles, 1, "a settlement acknowledgement failure is not settled again as empty provider telemetry");
+  assert.deepEqual(ambiguous, [{
+    owner: "owner", id: "hold-1", input: {
+      reason: "provider completed but settlement failed: settlement unavailable",
+      providerRequestIds: ["req-success"],
+    },
+  }]);
+});
+
+test("qualification correction calls retain qualification funding responsibility", async () => {
+  const reserved = [];
+  const reservations = {
+    reserve: async (input) => { reserved.push(input); return { id: "qualification-hold" }; },
+    settle: async () => ({}),
+  };
+  const provider = {
+    model: "gpt-5.5",
+    runTurn: async () => ({
+      text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+      usage: { input: 10, output: 5, total: 15, providerRequestId: "req-qualification" },
+    }),
+  };
+  const lanes = createModelLanes({
+    provider, ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(),
+    defaultUsageResponsibility: "qualification",
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "correction",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  });
+  assert.equal(reserved[0].usageResponsibility, "qualification");
 });

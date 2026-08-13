@@ -5,9 +5,12 @@
 // Uses its own env names so Buildr101's Stripe account can never be reused by accident.
 
 import Stripe from "stripe";
+import crypto from "node:crypto";
 import { optionalEnv } from "./env.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { ownerSubscription } from "./usageBudgets.mjs";
+import { createLedger } from "../../../src/billing/ledger.mjs";
+import { serviceClient } from "./supabase.mjs";
 
 let cachedClient = null;
 
@@ -48,18 +51,27 @@ export function stripeConfigMistake() {
 export function thralloStripeConfigured() {
   const mistake = stripeConfigMistake();
   if (mistake) console.error(`[thrallo-billing] ${mistake}`);
-  return !!(optionalEnv("THRALLO_STRIPE_SECRET_KEY") && priceEnv("starter") && priceEnv("pro"));
+  return !!(optionalEnv("THRALLO_STRIPE_SECRET_KEY")
+    && optionalEnv("THRALLO_STRIPE_WEBHOOK_SECRET")
+    && priceEnv("starter") && priceEnv("pro"));
 }
 
 export function thralloWebhookConfigured() {
   return !!(optionalEnv("THRALLO_STRIPE_SECRET_KEY") && optionalEnv("THRALLO_STRIPE_WEBHOOK_SECRET"));
 }
 
+export function thralloTopupConfigured() {
+  return !!(optionalEnv("THRALLO_STRIPE_SECRET_KEY")
+    && optionalEnv("THRALLO_STRIPE_WEBHOOK_SECRET")
+    && optionalEnv("THRALLO_STRIPE_TOPUP_PRICE_ID")
+    && Number(optionalEnv("THRALLO_STRIPE_TOPUP_CREDITS")) > 0);
+}
+
 function stripeClient() {
   if (cachedClient) return cachedClient;
   const key = optionalEnv("THRALLO_STRIPE_SECRET_KEY");
   if (!key) throw notConfigured();
-  cachedClient = new Stripe(key);
+  cachedClient = new Stripe(key, { apiVersion: "2026-06-24.dahlia" });
   return cachedClient;
 }
 
@@ -77,6 +89,12 @@ function priceToPlan(priceId) {
 
 function appOrigin() {
   return optionalEnv("THRALLO_APP_ORIGIN", "https://app.thrallo.com").replace(/\/$/, "");
+}
+
+function integrationIdentifier(kind, seed) {
+  const bytes = crypto.createHash("sha256").update(String(seed)).digest().subarray(0, 8);
+  const suffix = [...bytes].map((byte) => String.fromCharCode(97 + (byte % 26))).join("");
+  return `thrallo_${kind}_${suffix}`;
 }
 
 // Plans are ordered so a change can be classified as an upgrade or a downgrade.
@@ -206,7 +224,7 @@ export async function startPlanCheckout(owner, planId, {
   if (!["starter", "pro"].includes(planId)) {
     throw billingError("Choose the Starter or Pro plan", 400, "invalid_plan");
   }
-  if (!thralloStripeConfigured()) throw notConfigured();
+  if (!thralloStripeConfigured() || !thralloWebhookConfigured()) throw notConfigured();
   const client = stripe || stripeClient();
 
   return withOwnerLock(owner, async () => {
@@ -231,6 +249,7 @@ async function createCheckoutSession(client, owner, planId, customerId) {
     subscription_data: { metadata: { thrallo_owner: owner, thrallo_plan: planId } },
     success_url: `${appOrigin()}/?billing=success`,
     cancel_url: `${appOrigin()}/?billing=cancelled`,
+    integration_identifier: integrationIdentifier("plan", `${owner}:${customerId}:${price}`),
   }, {
     // A double click, or the same page open in two tabs, returns the SAME session rather than two.
     // Without this, paying in both tabs buys two subscriptions.
@@ -243,6 +262,59 @@ async function createCheckoutSession(client, owner, planId, customerId) {
     idempotencyKey: `thrallo:checkout:${owner}:${customerId}:${price}:${Math.floor(Date.now() / 3_600_000)}`,
   });
   return session.url;
+}
+
+const TOPUP_CONTRACT_VERSION = "v1";
+
+function topupContract({ owner, customerId, price, credits, requestKey }) {
+  return crypto.createHmac("sha256", optionalEnv("THRALLO_STRIPE_WEBHOOK_SECRET"))
+    .update([TOPUP_CONTRACT_VERSION, owner, customerId, price, String(credits), requestKey].join(":"))
+    .digest("hex");
+}
+
+function validRequestKey(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+export async function startTopupCheckout(owner, {
+  store = codeAgentStore(), stripe = null, requestKey = crypto.randomUUID(),
+} = {}) {
+  if (!thralloTopupConfigured()) {
+    throw billingError("Additional build credits are not available yet.", 409, "topup_not_configured");
+  }
+  if (!validRequestKey(requestKey)) {
+    throw billingError("Invalid additional-credit purchase request.", 400, "invalid_topup_request");
+  }
+  const client = stripe || stripeClient();
+  return withOwnerLock(owner, async () => {
+    const record = await ownerSubscription(owner, { store });
+    const customerId = await ensureCustomer(client, store, owner, record);
+    const price = optionalEnv("THRALLO_STRIPE_TOPUP_PRICE_ID");
+    const credits = Number(optionalEnv("THRALLO_STRIPE_TOPUP_CREDITS"));
+    const contract = topupContract({ owner, customerId, price, credits, requestKey });
+    const metadata = {
+      thrallo_owner: owner,
+      thrallo_purchase: "build_credits",
+      thrallo_credit_contract: TOPUP_CONTRACT_VERSION,
+      thrallo_credit_price: price,
+      thrallo_credit_amount: String(credits),
+      thrallo_purchase_request: requestKey,
+      thrallo_credit_signature: contract,
+    };
+    const session = await client.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      customer: customerId,
+      client_reference_id: owner,
+      line_items: [{ price, quantity: 1 }],
+      metadata,
+      payment_intent_data: { metadata },
+      success_url: `${appOrigin()}/?billing=topup-success`,
+      cancel_url: `${appOrigin()}/?billing=topup-cancelled`,
+      integration_identifier: integrationIdentifier("topup", `${owner}:${customerId}:${price}:${requestKey}`),
+    }, { idempotencyKey: `thrallo:topup:${owner}:${requestKey}` });
+    return { url: session.url };
+  });
 }
 
 // Modify the subscription the customer already has.
@@ -412,18 +484,88 @@ export async function startBillingPortal(owner, { store = codeAgentStore(), stri
 export async function handleSubscriptionEvent(rawBody, signature, {
   store = codeAgentStore(),
   stripe = null,
+  ledger = null,
 } = {}) {
   const secret = optionalEnv("THRALLO_STRIPE_WEBHOOK_SECRET");
   if (!secret) throw notConfigured();
   const client = stripe || stripeClient();
   const event = client.webhooks.constructEvent(rawBody, signature, secret);
 
-  if (event.type === "checkout.session.completed") {
+  if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type)) {
     const session = event.data.object;
     const owner = session.client_reference_id;
+    if (session.mode === "payment" && session.metadata?.thrallo_purchase === "build_credits") {
+      const contract = await validateTopupSession({ client, store, session });
+      if (!contract || session.payment_status !== "paid") {
+        return { received: true, ignored: "unpaid or unrecognised topup" };
+      }
+      const creditLedger = ledger || createLedger(serviceClient());
+      await creditLedger.grant({
+        owner: contract.owner,
+        credits: contract.credits,
+        bucket: "topup",
+        ref: `stripe-checkout:${session.id}`,
+      });
+      return { received: true, owner: contract.owner, creditsGranted: contract.credits };
+    }
     if (!owner || !session.subscription) return { received: true, ignored: "no owner or subscription" };
+    const ownerRecord = await ownerSubscription(owner, { store });
+    if (!ownerRecord.stripe_customer_id || ownerRecord.stripe_customer_id !== String(session.customer || "")) {
+      return { received: true, ignored: "subscription customer does not match owner" };
+    }
     const subscription = await client.subscriptions.retrieve(session.subscription);
+    if (subscription.metadata?.thrallo_owner && subscription.metadata.thrallo_owner !== owner) {
+      return { received: true, ignored: "subscription owner metadata mismatch" };
+    }
+    if (String(subscription.customer || "") !== ownerRecord.stripe_customer_id) {
+      return { received: true, ignored: "subscription customer mismatch" };
+    }
     return applySubscription(store, owner, subscription);
+  }
+
+  if (["refund.created", "refund.updated"].includes(event.type)) {
+    if (event.data.object.status !== "succeeded") {
+      return { received: true, ignored: "topup refund is not settled" };
+    }
+    const reversal = await topupReversalContract({ client, store, event });
+    if (!reversal) return { received: true, ignored: "unrecognised topup reversal" };
+    const creditLedger = ledger || createLedger(serviceClient());
+    await creditLedger.adjust({
+      owner: reversal.owner,
+      credits: -reversal.credits,
+      bucket: "topup",
+      ref: `stripe-refund:${event.data.object.id}`,
+    });
+    return { received: true, owner: reversal.owner, creditsReversed: reversal.credits };
+  }
+
+  if (["charge.dispute.created", "charge.dispute.closed"].includes(event.type)) {
+    const won = event.type === "charge.dispute.closed" && event.data.object.status === "won";
+    if (event.type === "charge.dispute.closed" && !won) {
+      return { received: true, ignored: "topup dispute remained reversed" };
+    }
+    const reversal = await topupReversalContract({ client, store, event });
+    if (!reversal) return { received: true, ignored: "unrecognised topup reversal" };
+    const creditLedger = ledger || createLedger(serviceClient());
+    if (won) {
+      // Webhooks may be delivered out of order. Establish the dispute reversal before restoring
+      // it so a lone `closed: won` event can never mint credits that were not first removed.
+      await creditLedger.adjust({
+        owner: reversal.owner,
+        credits: -reversal.credits,
+        bucket: "topup",
+        ref: `stripe-dispute:${event.data.object.id}`,
+      });
+    }
+    await creditLedger.adjust({
+      owner: reversal.owner,
+      credits: won ? reversal.credits : -reversal.credits,
+      bucket: "topup",
+      ref: won ? `stripe-dispute-won:${event.data.object.id}` : `stripe-dispute:${event.data.object.id}`,
+    });
+    return won
+      ? { received: true, owner: reversal.owner, creditsRestored: reversal.credits }
+      : { received: true, owner: reversal.owner, creditsReversed: reversal.credits };
   }
 
   if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {
@@ -451,6 +593,52 @@ export async function handleSubscriptionEvent(rawBody, signature, {
   }
 
   return { received: true, ignored: event.type };
+}
+
+async function validateTopupMetadata({ store, metadata = {}, customer }) {
+  const owner = metadata.thrallo_owner;
+  const price = metadata.thrallo_credit_price;
+  const credits = Number(metadata.thrallo_credit_amount);
+  const requestKey = metadata.thrallo_purchase_request;
+  if (!owner || metadata.thrallo_purchase !== "build_credits"
+      || metadata.thrallo_credit_contract !== TOPUP_CONTRACT_VERSION
+      || !price || !(credits > 0) || !validRequestKey(requestKey) || !customer) return null;
+  const expected = topupContract({ owner, customerId: String(customer), price, credits, requestKey });
+  const supplied = String(metadata.thrallo_credit_signature || "");
+  if (supplied.length !== expected.length
+      || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) return null;
+  const subscription = await ownerSubscription(owner, { store });
+  if (!subscription.stripe_customer_id || subscription.stripe_customer_id !== String(customer)) return null;
+  return { owner, price, credits, requestKey, customerId: String(customer) };
+}
+
+async function validateTopupSession({ client, store, session }) {
+  if (session.client_reference_id !== session.metadata?.thrallo_owner) return null;
+  const contract = await validateTopupMetadata({ store, metadata: session.metadata, customer: session.customer });
+  if (!contract) return null;
+  const lines = await client.checkout.sessions.listLineItems(session.id, { limit: 10 });
+  const matches = (lines.data || []).filter((line) => line.price?.id === contract.price
+    && Number(line.quantity || 0) === 1);
+  return matches.length === 1 ? contract : null;
+}
+
+async function topupReversalContract({ client, store, event }) {
+  const object = event.data.object;
+  let paymentIntentId = typeof object.payment_intent === "string" ? object.payment_intent : object.payment_intent?.id;
+  if (!paymentIntentId && object.charge) {
+    const charge = await client.charges.retrieve(typeof object.charge === "string" ? object.charge : object.charge.id);
+    paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+  }
+  if (!paymentIntentId) return null;
+  const paymentIntent = await client.paymentIntents.retrieve(paymentIntentId);
+  const contract = await validateTopupMetadata({
+    store, metadata: paymentIntent.metadata, customer: paymentIntent.customer,
+  });
+  if (!contract) return null;
+  const paid = Math.max(1, Number(paymentIntent.amount_received || paymentIntent.amount || 0));
+  const reversed = event.type === "refund.created"
+    ? Number(object.amount || 0) : Number(object.amount || paid);
+  return { ...contract, credits: Math.min(contract.credits, contract.credits * (reversed / paid)) };
 }
 
 async function applySubscription(store, owner, subscription) {

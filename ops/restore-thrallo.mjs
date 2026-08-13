@@ -60,9 +60,15 @@ export const RESTORE_ORDER = [
   "ca_conversations",
   "ca_conversation_turns",
   "ca_conversation_events",
+  "ca_lead_model_reservations",
+  "ca_direct_model_reservations", // optional run_id references ca_runs, restored above
   "ca_owner_profile",
   "ca_memories",
   "projects",     // references ca_products -> restore after it
+  "credit_ledger",
+  // Approval rows reference projects and conversations. Restore them before build_jobs, withholding
+  // the nullable dispatch_job_id until jobs exist; build_jobs.budget_approval_id can then remain intact.
+  "bv2_build_budget_approvals",
   "build_jobs",
   "build_work_payloads",
   "build_work_jobs",
@@ -118,6 +124,10 @@ export const RESTORE_ORDER = [
   "bv2_contracts",
   "bv2_builds",
   "bv2_model_reservations", // references projects + bv2_builds
+  // Global provider-response identities are canonical deduplication evidence. They carry logical
+  // reservation ids rather than physical FKs, but restoring them after both reservation tables
+  // keeps the evidence boundary explicit.
+  "ca_model_call_identities",
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",
@@ -127,6 +137,14 @@ export const RESTORE_ORDER = [
 ];
 
 const BATCH = 500;
+export const IMMUTABLE_INSERT_TABLES = Object.freeze(new Set([
+  "ca_model_call_identities",
+  "credit_ledger",
+]));
+
+export function restoreWriteMethod(table) {
+  return IMMUTABLE_INSERT_TABLES.has(table) ? "insert" : "upsert";
+}
 
 async function loadRows(dir, name) {
   const bytes = await readFile(path.join(dir, `${name}.json.gz`));
@@ -135,7 +153,8 @@ async function loadRows(dir, name) {
 
 async function insertRows(svc, table, rows) {
   for (let from = 0; from < rows.length; from += BATCH) {
-    const { error } = await svc.from(table).upsert(rows.slice(from, from + BATCH));
+    const writer = svc.from(table);
+    const { error } = await writer[restoreWriteMethod(table)](rows.slice(from, from + BATCH));
     if (error) throw new Error(`${table}: ${error.message}`);
   }
 }

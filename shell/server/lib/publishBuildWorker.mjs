@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { buildWorkerEnabled, enqueueBuildWork, awaitBuildWork } from "./buildWorkQueue.mjs";
+import { requireFreshWorkerAdmission } from "./builderV2/workerAdmission.mjs";
 
 const ROOT = () => path.resolve(process.env.THRALLO_BUILD_ARTIFACT_ROOT || "/var/lib/thrallo-build-worker");
 
@@ -27,6 +28,7 @@ export async function packagePublishTree({
   renderIcons = false, idempotencyKey, client = null,
 }) {
   if (!buildWorkerEnabled() || process.env.THRALLO_PROCESS_ROLE === "build-worker") return null;
+  await requireFreshWorkerAdmission({ ...(client ? { client } : {}), jobType: "publish_package" });
   const work = await enqueueBuildWork({
     owner, projectId, buildId, jobType: "publish_package",
     payload: { tree, appName, iconGlyph, renderIcons }, idempotencyKey,

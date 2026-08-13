@@ -545,6 +545,7 @@ export function createModelLanes({
   maxOutputTokens = 16_000,
   maxRepairs = 2,
   maxCorrections = 2,
+  defaultUsageResponsibility = "customer_request",
 }) {
   if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
@@ -594,21 +595,36 @@ export function createModelLanes({
             budget,
           });
           const callKey = modelCallKey({ buildId: context.buildId, step, sequence });
-          const accountAvailableCredits = (selected.decision?.billingLane || billingLane) === "managed"
-            ? Number(await accountCreditResolver?.(context.owner)) : null;
-          const hold = await reservations.reserve({
+          const usageResponsibility = ["qualification", "platform_failure"].includes(defaultUsageResponsibility)
+            ? defaultUsageResponsibility
+            : ["repair", "correction"].includes(step) ? "thrallo_repair" : defaultUsageResponsibility;
+          let accountBalance = (selected.decision?.billingLane || billingLane) === "managed"
+            && usageResponsibility === "customer_request"
+            ? await accountCreditResolver?.(context.owner) : null;
+          const reservationInput = () => ({
             owner: context.owner, projectId: context.projectId, buildId: context.buildId,
             callKey, step,
             provider: selected.provider.provider || selected.provider.providerId || selected.decision?.provider || selected.provider.model,
             model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
             reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
-            accountAvailableCredits,
+            accountBalance,
+            usageResponsibility,
             maxRepairs, maxCorrections,
             metadata: {
               routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
               budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
             },
           });
+          let hold;
+          try {
+            hold = await reservations.reserve(reservationInput());
+          } catch (error) {
+            const customerManaged = (selected.decision?.billingLane || billingLane) === "managed"
+              && usageResponsibility === "customer_request";
+            if (error.code !== "allowance_snapshot_stale" || !customerManaged) throw error;
+            accountBalance = await accountCreditResolver?.(context.owner);
+            hold = await reservations.reserve(reservationInput());
+          }
           assertModelDispatchAcquired(hold);
           let turn;
           try {
@@ -617,6 +633,7 @@ export function createModelLanes({
               // V2 owns retries outside transports so every network dispatch receives its own
               // reservation and telemetry identity. Provider-internal retries would be invisible.
               maxProviderRetries: 0,
+              allowParameterRetry: false,
             });
           } catch (error) {
             const usage = error?.usage || {};
@@ -629,12 +646,30 @@ export function createModelLanes({
                 });
               } else if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
                 await reservations.release(context.owner, hold.id);
+              } else {
+                await reservations.markAmbiguous(context.owner, hold.id, {
+                  reason: error?.message || "provider dispatch ambiguous",
+                  providerRequestIds: requestIds(usage, [error?.providerRequestId]),
+                });
               }
             } catch (settlementError) {
-              throw Object.assign(new AggregateError(
+              const providerRequestIds = requestIds(usage, [error?.providerRequestId]);
+              const accountingError = Object.assign(new AggregateError(
                 [error, settlementError],
                 `Provider call failed and its usage could not be settled: ${settlementError.message}`,
               ), { code: "billing_settlement_failed", providerError: error });
+              try {
+                await reservations.markAmbiguous(context.owner, hold.id, {
+                  reason: accountingError.message,
+                  providerRequestIds,
+                });
+              } catch (reconciliationError) {
+                accountingError.reconciliationError = reconciliationError;
+              }
+              throw replayUnsafe(accountingError, {
+                reservationId: hold.id,
+                providerRequestId: providerRequestIds[0] || null,
+              });
             }
             if (failure.state === "before_dispatch" || failure.state === "provider_rejected") throw error;
             throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
@@ -643,9 +678,25 @@ export function createModelLanes({
           // do not reinterpret that database failure as a provider failure or invoke settlement a
           // second time with empty telemetry. The reservation remains the reconciliation authority.
           const actualCredits = creditsForUsage({ usage: turn.usage || {}, model: selected.provider.model });
-          await reservations.settle(context.owner, hold.id, {
-            actualCredits, usage: turn.usage || {}, providerRequestIds: requestIds(turn.usage),
-          });
+          const providerRequestIds = requestIds(turn.usage);
+          try {
+            await reservations.settle(context.owner, hold.id, {
+              actualCredits, usage: turn.usage || {}, providerRequestIds,
+            });
+          } catch (error) {
+            try {
+              await reservations.markAmbiguous(context.owner, hold.id, {
+                reason: `provider completed but settlement failed: ${error?.message || "unknown error"}`,
+                providerRequestIds,
+              });
+            } catch (reconciliationError) {
+              error.reconciliationError = reconciliationError;
+            }
+            throw replayUnsafe(error, {
+              reservationId: hold.id,
+              providerRequestId: providerRequestIds[0] || null,
+            });
+          }
           return turn;
         },
       },

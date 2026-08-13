@@ -7,7 +7,7 @@
 import { optionalEnv } from "./env.mjs";
 import { automationsStore, nextRunAt } from "./automationsStore.mjs";
 import { codeAgentStore } from "./codeAgentStore.mjs";
-import { assertRunWithinBudget, assertWithinRateLimits } from "./usageBudgets.mjs";
+import { assertRunWithinBudget, assertWithinRateLimits, repositoryRunBudgetProvider } from "./usageBudgets.mjs";
 import { activeAiProviderName } from "./aiCredentialStore.mjs";
 
 let timer = null;
@@ -130,7 +130,9 @@ async function createAutomationRun(automation, { repository, runStore, store, in
   try {
     const credentialProvider = await activeAiProviderName(automation.owner).catch(() => "managed");
     await assertWithinRateLimits(automation.owner, { store: runStore });
-    await assertRunWithinBudget(automation.owner, { credentialProvider, store: runStore });
+    await assertRunWithinBudget(automation.owner, {
+      credentialProvider: repositoryRunBudgetProvider(credentialProvider), store: runStore,
+    });
     const agent = await findOrCreateAgent(runStore, automation, repository, input.mode);
     const run = await runStore.createRun(automation.owner, agent, repository, {
       ...input,

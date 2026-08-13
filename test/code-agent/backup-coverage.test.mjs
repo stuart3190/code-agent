@@ -9,16 +9,20 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { CA_TABLES, canonicalSqlHash, loadMigrationLedgerEvidence } from "../../ops/backup-thrallo.mjs";
-import { RESTORE_ORDER, prepareRowsForRestore } from "../../ops/restore-thrallo.mjs";
+import {
+  RESTORE_ORDER, prepareRowsForRestore, restoreWriteMethod,
+} from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
 import {
   EPHEMERAL_RUNTIME_TABLES,
   PRODUCTION_PUBLIC_FK_PAIRS_68,
   PRODUCTION_PUBLIC_FK_PAIRS_70,
+  PRODUCTION_PUBLIC_FK_PAIRS_75,
   PRODUCTION_PUBLIC_TABLES_68,
   PRODUCTION_PUBLIC_TABLES_69,
   PRODUCTION_PUBLIC_TABLES_70,
+  PRODUCTION_PUBLIC_TABLES_75,
   backupTablesToVerify,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
@@ -105,6 +109,11 @@ test("the restore order covers exactly the backed-up tables", () => {
   assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
   assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_checks"));
+  assert.ok(RESTORE_ORDER.indexOf("projects") < RESTORE_ORDER.indexOf("bv2_build_budget_approvals"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_build_budget_approvals") < RESTORE_ORDER.indexOf("build_jobs"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
+  assert.ok(RESTORE_ORDER.indexOf("ca_lead_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
+  assert.ok(RESTORE_ORDER.indexOf("ca_direct_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
 });
 
 test("a forward-deployed verifier only requires tables present in a historical backup", () => {
@@ -321,8 +330,17 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 14);
   assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 74);
-  assert.deepEqual(result.pending, []);
+  assert.equal(result.active, 76);
+  assert.deepEqual(result.pending, [
+    { version: "20260813095526", name: "v2_customer_accounting_and_approvals" },
+    { version: "20260813183000", name: "retire_legacy_bv2_accounting_rpcs" },
+  ]);
+});
+
+test("append-only accounting evidence restores without requiring UPDATE privilege", () => {
+  assert.equal(restoreWriteMethod("credit_ledger"), "insert");
+  assert.equal(restoreWriteMethod("ca_model_call_identities"), "insert");
+  assert.equal(restoreWriteMethod("projects"), "upsert");
 });
 
 test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
@@ -360,15 +378,17 @@ test("generated runtime project ids are omitted from backup and restore writes",
 });
 
 test("the current runtime catalog and backup manifest are exactly aligned", () => {
-  assert.equal(PRODUCTION_PUBLIC_TABLES_70.length, 86);
-  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_70, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_75.length, 91);
+  assert.ok(PRODUCTION_PUBLIC_TABLES_75.includes("ca_direct_model_reservations"));
+  assert.ok(PRODUCTION_PUBLIC_TABLES_75.includes("ca_model_call_identities"));
+  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_75, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
     missingFromBackup: [], missingFromCatalog: [],
   });
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_70, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_75, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes historical ledgers and the current 74-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current 76-migration catalog", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
@@ -379,11 +399,14 @@ test("backup/restore recognizes historical ledgers and the current 74-migration 
   assert.equal(runtimeCatalogEvidence(72).tables.length, 86);
   assert.equal(runtimeCatalogEvidence(73).tables.length, 86);
   assert.equal(runtimeCatalogEvidence(74).tables.length, 86);
-  assert.throws(() => runtimeCatalogEvidence(75), /unsupported production migration count/);
+  assert.equal(runtimeCatalogEvidence(75).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(76).tables.length, 91);
+  assert.throws(() => runtimeCatalogEvidence(77), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_70.length, 84);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_75.length, 91);
   assert.deepEqual(validateRestoreOrder(RESTORE_ORDER), { missingTables: [], violations: [] });
   const broken = RESTORE_ORDER.filter((table) => table !== "bv2_model_reservations");
   assert.deepEqual(validateRestoreOrder(broken).missingTables, ["bv2_model_reservations"]);
@@ -392,11 +415,27 @@ test("the restore order satisfies the complete production FK graph or explicitly
 test("all forward and cyclic runtime links are restored through bounded post-parent patches", () => {
   const rows = [{
     id: "job", bv2_build_id: "build", diag_run_id: "diag", project_id: "project",
+    budget_approval_id: "approval",
   }];
   const deferred = collectDeferredRestorePatches("build_jobs", rows);
-  assert.deepEqual(deferred.rows, [{ id: "job", bv2_build_id: null, diag_run_id: null, project_id: "project" }]);
+  assert.deepEqual(deferred.rows, [{
+    id: "job", bv2_build_id: null, diag_run_id: null, project_id: "project",
+    budget_approval_id: "approval",
+  }]);
   assert.deepEqual(deferred.patches.map(({ field, value }) => [field, value]), [
     ["bv2_build_id", "build"], ["diag_run_id", "diag"],
+  ]);
+
+  const approvals = collectDeferredRestorePatches("bv2_build_budget_approvals", [{
+    id: "approval", conversation_id: "conversation", dispatch_project_id: "project",
+    dispatch_job_id: "job",
+  }]);
+  assert.deepEqual(approvals.rows, [{
+    id: "approval", conversation_id: "conversation", dispatch_project_id: "project",
+    dispatch_job_id: null,
+  }]);
+  assert.deepEqual(approvals.patches.map(({ field, value }) => [field, value]), [
+    ["dispatch_job_id", "job"],
   ]);
 });
 

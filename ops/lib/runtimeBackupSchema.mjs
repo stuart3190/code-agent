@@ -46,6 +46,13 @@ export const PRODUCTION_PUBLIC_TABLES_69 = Object.freeze(PRODUCTION_PUBLIC_TABLE
 export const PRODUCTION_PUBLIC_TABLES_69_SHA256 =
   "ef88486af70c561af24030058ce1d1392f90bf32e3bc614f8664767eadb6ef0d";
 
+export const PRODUCTION_PUBLIC_TABLES_75 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_70,
+  "bv2_build_budget_approvals", "ca_direct_model_reservations", "ca_lead_model_reservations",
+  "ca_model_call_identities", "credit_ledger",
+].sort());
+export const PRODUCTION_PUBLIC_TABLES_75_SHA256 =
+  "7097037e4415b0adae4c134bd597ad0e4358ca8ca672ba5dfa0c716b07ffafc5";
+
 // Distinct child->parent table pairs from pg_constraint. Composite constraints are represented
 // once because this list validates restore ordering, while PostgreSQL remains the authority for
 // the complete column-level constraints during the isolated restore.
@@ -94,6 +101,13 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_70 = Object.freeze([
 
 export const PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256 =
   "5b3a759507cf89247e387ab08256ae0a6e230bde0866da7c37a946841f2c2f77";
+export const PRODUCTION_PUBLIC_FK_PAIRS_75 = Object.freeze([...PRODUCTION_PUBLIC_FK_PAIRS_70,
+  "build_jobs->bv2_build_budget_approvals", "bv2_build_budget_approvals->build_jobs",
+  "bv2_build_budget_approvals->ca_conversations", "bv2_build_budget_approvals->projects",
+  "ca_direct_model_reservations->ca_runs", "ca_lead_model_reservations->ca_conversations",
+  "projects->bv2_build_budget_approvals",
+].sort());
+export const PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256 = "c2f1a76051b5a3b54acf5afe27a396b8609bacce724fcaf8f84ca58eb9b719d4";
 export const PRODUCTION_PUBLIC_FK_PAIRS_68 = Object.freeze(PRODUCTION_PUBLIC_FK_PAIRS_70.filter((pair) =>
   pair !== "data_erasure_events->data_erasure_jobs"));
 export const PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256 =
@@ -111,6 +125,10 @@ export function runtimeCatalogEvidence(migrationCount) {
   if ([70, 71, 72, 73, 74].includes(Number(migrationCount))) return {
     migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_70, tablesSha256: PRODUCTION_PUBLIC_TABLES_70_SHA256,
     fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  };
+  if ([75, 76].includes(Number(migrationCount))) return {
+    migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_75, tablesSha256: PRODUCTION_PUBLIC_TABLES_75_SHA256,
+    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_75, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256,
   };
   throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
 }
@@ -130,22 +148,24 @@ export const DEFERRED_RESTORE_FIELDS = Object.freeze({
   build_jobs: Object.freeze(["bv2_build_id", "diag_run_id"]),
   build_work_jobs: Object.freeze(["result_ref"]),
   bv2_contracts: Object.freeze(["build_id"]),
+  bv2_build_budget_approvals: Object.freeze(["dispatch_job_id"]),
   bv2_project_knowledge: Object.freeze(["source_build"]),
   bv2_snapshots: Object.freeze(["build_id", "parent_snapshot"]),
   ca_automations: Object.freeze(["last_run_id"]),
   ca_runs: Object.freeze(["resumed_from_run_id"]),
   deployments: Object.freeze(["rolled_back_from"]),
-  projects: Object.freeze(["bv2_green_snapshot_id"]),
+  projects: Object.freeze(["bv2_green_snapshot_id", "budget_approval_id"]),
   publish_releases: Object.freeze(["previous_release_id"]),
   published_sites: Object.freeze(["active_publish_release_id"]),
 });
 
 export const DEFERRED_RESTORE_PAIRS = new Set([
   "build_jobs->bv2_builds", "build_jobs->diag_runs",
-  "build_work_jobs->build_work_results", "bv2_contracts->bv2_builds",
+  "build_work_jobs->build_work_results", "bv2_build_budget_approvals->build_jobs",
+  "bv2_contracts->bv2_builds",
   "bv2_project_knowledge->bv2_builds", "bv2_snapshots->bv2_builds",
   "bv2_snapshots->bv2_snapshots", "ca_automations->ca_runs", "ca_runs->ca_runs",
-  "deployments->deployments", "projects->bv2_snapshots",
+  "deployments->deployments", "projects->bv2_build_budget_approvals", "projects->bv2_snapshots",
   "publish_releases->publish_releases", "published_sites->publish_releases",
 ]);
 
@@ -177,7 +197,7 @@ export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTable
   };
 }
 
-export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_70) {
+export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_75) {
   const position = new Map(order.map((table, index) => [table, index]));
   const missingTables = [...new Set(pairs.flatMap((pair) => pair.split("->")))]
     .filter((table) => !position.has(table)).sort();

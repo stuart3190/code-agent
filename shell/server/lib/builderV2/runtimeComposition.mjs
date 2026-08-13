@@ -247,7 +247,7 @@ export function createBuilderV2Runtime({
   snapshots = null,
   reservations = null,
   historyResolver = routingHistory,
-  accountCreditResolver = async (owner) => (await createBudgetLedger().getBalance(owner)).total,
+  accountCreditResolver = async (owner) => createBudgetLedger().getBalance(owner),
   runtimePreflight = null,
   requireWorker = true,
   log = console.log,
@@ -491,6 +491,10 @@ export function createBuilderV2Runtime({
         providerForStep, ceilingCredits, diag, log: (line) => emit("stdout", line),
         reservations: reservationStore, billingLane: context.policy.billingLane, strictKnowledge: true,
         recordRetrieval, accountCreditResolver, maxRepairs,
+        defaultUsageResponsibility: workJob.payload.usageResponsibility === "platform_failure"
+          ? "platform_failure"
+          : /qualification/i.test(String(workJob.payload.trigger || ""))
+            ? "qualification" : "customer_request",
       });
       const compile = async (tree, execution = {}) => isolated({
         id: `${workJob.id}-compile-${execution.step || "step"}-${execution.attempt || 0}`,
@@ -607,7 +611,7 @@ export function createBuilderV2Runtime({
       if (!previewResult?.url) throw new Error("verified Builder V2 snapshot has no healthy preview");
       await snapshotStore.promote(owner, projectId, "preview", result.snapshotId);
       const { error: projectError } = await client.from("projects").update({
-        tree, builder_version: "v2", bv2_green_snapshot_id: result.snapshotId,
+        builder_version: "v2", bv2_green_snapshot_id: result.snapshotId,
         preview_ref: previewResult.url, updated_at: new Date().toISOString(),
       }).eq("id", projectId).eq("owner", owner);
       if (projectError) throw new Error(`verified project projection: ${projectError.message}`);
@@ -622,7 +626,7 @@ export function createBuilderV2Runtime({
               : mode === "resume_verify"
                 ? "Builder V2 re-verified the retained application against the current platform runtime."
               : "Builder V2 applied and verified the change.",
-          tree, buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
+          buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],
         },
         contract: contract || diag.contract || null,

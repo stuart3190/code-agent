@@ -5,6 +5,7 @@ import { ownedProject, serviceClient } from "./supabase.mjs";
 import { auditEvent } from "./projectState.mjs";
 import { buildWorkerEnabled, enqueueBuildWork } from "./buildWorkQueue.mjs";
 import { resolveVerifiedProjectTree } from "./builderV2/projectSource.mjs";
+import { requireFreshWorkerAdmission } from "./builderV2/workerAdmission.mjs";
 import { withRuntimeEnv } from "./runtimeEnv.mjs";
 
 const active = new Set();
@@ -54,6 +55,9 @@ export async function createQaRun(owner, projectId, client = serviceClient()) {
   const { data: existing } = await client.from("qa_runs").select("id,status")
     .eq("owner", owner.id).eq("project_id", projectId).in("status", ["queued", "running"]).maybeSingle();
   if (existing) return existing;
+  if (workerEnabled) {
+    await requireFreshWorkerAdmission({ client, jobType: "qa_browser" });
+  }
 
   const row = { id: crypto.randomUUID(), owner: owner.id, project_id: projectId, status: "queued" };
   const { error } = await client.from("qa_runs").insert(row);

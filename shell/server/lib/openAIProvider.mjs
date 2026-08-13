@@ -44,7 +44,7 @@ export function createOpenAIProvider({
   return {
     id: "openai",
     model: executableModel,
-    async turn({ instructions, input, tools, safetyIdentifier }) {
+    async turn({ instructions, input, tools, safetyIdentifier, maxOutputTokens = null }) {
       let response;
       try { response = await fetchImpl(endpoint, {
         method: "POST",
@@ -59,6 +59,7 @@ export function createOpenAIProvider({
           parallel_tool_calls: false,
           store: false,
           truncation: "auto",
+          ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
           safety_identifier: hashIdentifier(safetyIdentifier),
         }),
       }); } catch (error) { throw providerFailure(error, { state: DISPATCH_STATES.ambiguous }); }

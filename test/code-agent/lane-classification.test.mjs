@@ -53,21 +53,19 @@ test("SPLIT-BRAIN — an API key with no secret fails closed without changing bi
 
 // ── 2. the lead agent lane ────────────────────────────────────────────────────────────────────
 
-test("LEAD AGENT — the silent codex→managed rewrite is gone; the lane stops before spending", () => {
+test("LEAD AGENT — the silent codex→managed rewrite is gone and Codex executes in its own lane", () => {
   const live = LEAD.split("\n").filter((l) => !l.trim().startsWith("//"));
   assert.ok(!live.some((l) => /codex.*credential = \{ provider: "managed"/.test(l) && !/allowManagedFallback/.test(l)),
     "no unconditional rewrite may remain");
-  // The stop is policy-gated and worded for a human.
-  assert.match(LEAD, /allowManagedFallback/);
-  assert.match(LEAD, /won't quietly bill your managed credits/);
-  // And the pause covers the lane.
+  assert.match(LEAD, /credential\.provider \|\| "managed"/);
+  assert.doesNotMatch(LEAD, /orchestrator can't run on Codex yet/);
+  // The managed-only pause remains, but it is not applied to connected allowance.
   assert.match(LEAD, /managedSettlementPaused\(\)/);
 });
 
-test("LEAD AGENT — with Codex selected, zero managed dispatch and zero gpt-5.6 anywhere", async () => {
-  // Replay the lane decision with a fake resolver: policy says stop, so no model factory runs.
+test("LEAD AGENT — with Codex selected, zero managed dispatch and zero managed fallback", async () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
-  assert.equal(policy.allowManagedFallback, false, "the stop branch is the one that executes");
+  assert.equal(policy.allowManagedFallback, false);
   // The build side, same account: six stages, all codex, no gpt-5.6.
   const context = await resolveBuildContext("o", { credentialResolver: async () => ({ provider: "codex" }) });
   for (const intent of ["generate", "edit"]) {

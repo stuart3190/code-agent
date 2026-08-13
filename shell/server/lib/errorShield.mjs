@@ -55,6 +55,14 @@ const USER_ACTIONABLE = /(allowance|budget|quota|not connected|sign in|unauthor|
 export function classifyFailure(error) {
   const text = `${error?.code || ""} ${error?.message || ""}`;
   const status = Number(error?.status || 0);
+  if (["provider_replay_unsafe", "billing_settlement_failed"].includes(error?.code)) {
+    return { kind: "unexpected", retryable: false };
+  }
+  if (error?.dispatchState) {
+    const provenRetrySafe = error.retrySafe === true
+      && ["before_dispatch", "provider_rejected"].includes(error.dispatchState);
+    if (!provenRetrySafe) return { kind: "unexpected", retryable: false };
+  }
   if (USER_ACTIONABLE.test(text)) return { kind: "needs_user", retryable: false };
   if (RETRYABLE.test(text) || status === 429 || status >= 500 || status === 409) {
     return { kind: "transient", retryable: true };

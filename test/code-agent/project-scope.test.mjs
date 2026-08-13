@@ -36,6 +36,7 @@ function fakeDb({ projects = [], products = [] } = {}) {
         select() { return api; },
         eq(c, v) { f[c] = v; return api; },
         not(c, _op, v) { f[`not_${c}`] = v; return api; },
+        or(value) { f.or = value; return api; },
         ilike(c, v) { f[`ilike_${c}`] = v; return api; },
         order() { return api; },
         limit(n) { f.limit = n; return api; },
@@ -47,7 +48,7 @@ function fakeDb({ projects = [], products = [] } = {}) {
         },
         then(resolve) {
           seen.push(f);
-          let rows = projects.filter((p) => p.owner === f.owner && p.tree);
+          let rows = projects.filter((p) => p.owner === f.owner && (p.tree || p.bv2_green_snapshot_id));
           if (f.id) rows = rows.filter((p) => String(p.id) === String(f.id));
           if (f.product_id) rows = rows.filter((p) => String(p.product_id) === String(f.product_id));
           rows = [...rows].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)).slice(0, f.limit || 50);
@@ -150,10 +151,18 @@ test("every lookup is owner-scoped, including the explicit-id path", async () =>
   for (const query of client.seen) assert.equal(query.owner, OWNER);
 });
 
-test("projects without a tree are never resolved", async () => {
+test("projects without either a legacy tree or a green snapshot are never resolved", async () => {
   const client = fakeDb({ projects: [project({ id: "a", tree: null })] });
   const { project: resolved } = await resolveConversationProject(conversation(PRODUCT_A), { client });
   assert.equal(resolved, null, "an unbuilt project cannot be published, repaired or exported");
+});
+
+test("snapshot-only V2 projects remain resolvable after mutable tree projection is retired", async () => {
+  const client = fakeDb({ projects: [project({
+    id: "v2", tree: null, builder_version: "v2", bv2_green_snapshot_id: "snapshot-1",
+  })] });
+  const { project: resolved } = await resolveConversationProject(conversation(PRODUCT_A), { client });
+  assert.equal(resolved.id, "v2");
 });
 
 test("projectsForProduct is owner-scoped and newest first", async () => {

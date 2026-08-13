@@ -136,6 +136,41 @@ test("a genuine business question pauses the conversation for the user", async (
   assert.equal((await store.getConversation(OWNER, conversation.id)).state, "waiting_user");
 });
 
+test("Lead Agent marks a completed provider call ambiguous once when settlement acknowledgement fails", async () => {
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, {});
+  await store.claimConversationThinking(conversation);
+  await store.appendTurn(conversation, { role: "user", content: "Tell me what you can build." });
+  let settles = 0;
+  const ambiguous = [];
+  await processConversation(conversation, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    credentialResolver: async () => ({ provider: "managed", routing: {} }),
+    modelFactory: async () => stubModel([{
+      ...finalMessage("I can build it."),
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, providerRequestId: "req-lead-success" },
+    }]),
+    reservationStoreFactory: () => ({
+      reserve: async () => ({ id: "lead-hold", billingLane: "managed", acquired: true }),
+      settle: async () => { settles += 1; throw new Error("settlement acknowledgement lost"); },
+      markAmbiguous: async (owner, id, input) => { ambiguous.push({ owner, id, input }); },
+    }),
+  });
+  assert.equal(settles, 1, "a completed provider response is never classified as a provider failure");
+  assert.deepEqual(ambiguous, [{
+    owner: OWNER,
+    id: "lead-hold",
+    input: {
+      reason: "provider completed but settlement failed: settlement acknowledgement lost",
+      providerRequestIds: ["req-lead-success"],
+    },
+  }]);
+});
+
 test("memory round-trip: remember writes, the next conversation is briefed", async () => {
   resetLeadAgentForTests();
   resetCapabilityRegistryForTests();

@@ -19,6 +19,36 @@ export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) 
 const total = (rows, state, field) => rows.filter((row) => row.state === state)
   .reduce((sum, row) => sum + Number(row[field] || 0), 0);
 
+const responsibilityFor = (input) => input.usageResponsibility || "customer_request";
+const customerFunded = (input) => input.billingLane === "managed"
+  && responsibilityFor(input) === "customer_request";
+
+function allocationFor(input, ownerHeld = { included: 0, purchased: 0 }) {
+  if (!customerFunded(input)) {
+    return {
+      includedReservedCredits: 0,
+      purchasedReservedCredits: 0,
+      platformReservedCredits: input.billingLane === "managed" ? Number(input.reservedCredits) : 0,
+    };
+  }
+  const balance = input.accountBalance || {
+    included: input.accountAvailableCredits,
+    purchased: 0,
+  };
+  const includedAvailable = Math.max(0, Number(balance.included ?? balance.bundle ?? 0) - ownerHeld.included);
+  const purchasedAvailable = Math.max(0, Number(balance.purchased ?? balance.topup ?? 0) - ownerHeld.purchased);
+  const includedReservedCredits = Math.min(Number(input.reservedCredits), includedAvailable);
+  const purchasedReservedCredits = Number(input.reservedCredits) - includedReservedCredits;
+  if (purchasedReservedCredits > purchasedAvailable + 1e-9) {
+    throw Object.assign(new Error("Builder V2 managed account reservation exceeds available credits"), {
+      code: "account_budget", requested: input.reservedCredits,
+      ownerHeld: ownerHeld.included + ownerHeld.purchased,
+      available: includedAvailable + purchasedAvailable,
+    });
+  }
+  return { includedReservedCredits, purchasedReservedCredits, platformReservedCredits: 0 };
+}
+
 /**
  * Read-only planning view. The reserve RPC remains the atomic authority; this view lets a caller
  * size its next call to actual remaining build headroom instead of treating a stage target as a
@@ -72,7 +102,9 @@ export function memoryModelReservations() {
       if (existing) {
         const same = ["projectId", "step", "provider", "model", "billingLane", "reservedCredits"]
           .every((field) => existing[field] === input[field]);
-        if (!same) throw new Error("Builder V2 call key was reused with different reservation identity");
+        if (!same || responsibilityFor(existing) !== responsibilityFor(input)) {
+          throw new Error("Builder V2 call key was reused with different reservation identity");
+        }
         if (existing.state !== "released") {
           const dispatched = (step) => [...rows.values()].filter((row) => row.owner === input.owner
             && row.buildId === input.buildId && row.step === step
@@ -106,19 +138,16 @@ export function memoryModelReservations() {
           code: "budget_ceiling", spent, held, requested: input.reservedCredits, ceiling: input.ceilingCredits,
         });
       }
-      if (input.billingLane === "managed") {
-        const ownerHeld = [...rows.values()]
-          .filter((row) => row.owner === input.owner && row.billingLane === "managed" && row.state === "held")
-          .reduce((sum, row) => sum + row.reservedCredits, 0);
-        if (!(input.accountAvailableCredits >= 0)
-            || ownerHeld + input.reservedCredits > input.accountAvailableCredits) {
-          throw Object.assign(new Error("Builder V2 managed account reservation exceeds available credits"), {
-            code: "account_budget", ownerHeld, requested: input.reservedCredits,
-            available: input.accountAvailableCredits,
-          });
-        }
-      }
-      const row = existing || { id: `reservation-${++serial}`, actualCredits: null, ...input };
+      const ownerHeld = [...rows.values()]
+        .filter((row) => row.owner === input.owner && row.billingLane === "managed" && row.state === "held")
+        .reduce((sum, row) => ({
+          included: sum.included + Number(row.includedReservedCredits || 0),
+          purchased: sum.purchased + Number(row.purchasedReservedCredits || 0),
+        }), { included: 0, purchased: 0 });
+      const allocation = allocationFor(input, ownerHeld);
+      const normalized = { ...input, usageResponsibility: responsibilityFor(input), ...allocation };
+      const row = existing || { id: `reservation-${++serial}`, actualCredits: null, ...normalized };
+      Object.assign(row, normalized);
       Object.assign(row, { state: "held", releasedAt: null });
       rows.set(key, row);
       return { ...row, acquired: true,
@@ -142,7 +171,17 @@ export function memoryModelReservations() {
           && stable(candidate.providerRequestIds) === stable(providerRequestIds));
         if (duplicate) throw new Error("provider request telemetry is already settled to another reservation");
       }
-      Object.assign(row, { state: "settled", actualCredits, usage, providerRequestIds });
+      const includedActualCredits = row.billingLane === "managed" && row.usageResponsibility === "customer_request"
+        ? Math.min(actualCredits, Number(row.includedReservedCredits || 0)) : 0;
+      const purchasedActualCredits = row.billingLane === "managed" && row.usageResponsibility === "customer_request"
+        ? Math.min(actualCredits - includedActualCredits, Number(row.purchasedReservedCredits || 0)) : 0;
+      const platformActualCredits = row.billingLane === "managed"
+        ? Math.max(0, actualCredits - includedActualCredits - purchasedActualCredits) : 0;
+      Object.assign(row, {
+        state: "settled", actualCredits, usage, providerRequestIds,
+        includedActualCredits, purchasedActualCredits, platformActualCredits,
+        reconciliationState: "provider_settled",
+      });
       return row;
     },
     async release(owner, id) {
@@ -151,6 +190,31 @@ export function memoryModelReservations() {
       if (row.state === "released") return row;
       if (row.state !== "held") throw new Error("settled Builder V2 reservation cannot release");
       row.state = "released";
+      row.reconciliationState = "provider_rejected";
+      return row;
+    },
+    async markAmbiguous(owner, id, { reason = null, providerRequestIds = [] } = {}) {
+      const row = [...rows.values()].find((candidate) => candidate.id === id && candidate.owner === owner);
+      if (!row || row.state !== "held") throw new Error("held Builder V2 reservation not found");
+      row.reconciliationState = "pending";
+      row.reconciliationReason = reason;
+      row.providerRequestIds = providerRequestIds;
+      row.ambiguousAt = new Date().toISOString();
+      return row;
+    },
+    async absorbAmbiguous(owner, id, reason = null) {
+      const row = [...rows.values()].find((candidate) => candidate.id === id && candidate.owner === owner);
+      if (!row || row.state !== "held" || row.reconciliationState !== "pending") {
+        throw new Error("pending Builder V2 reservation not found");
+      }
+      Object.assign(row, {
+        usageResponsibility: row.billingLane === "managed" ? "platform_failure" : row.usageResponsibility,
+        includedReservedCredits: 0,
+        purchasedReservedCredits: 0,
+        platformReservedCredits: row.billingLane === "managed" ? row.reservedCredits : 0,
+        reconciliationState: "platform_assumed",
+        reconciliationReason: reason,
+      });
       return row;
     },
     rows: () => [...rows.values()].map((row) => ({ ...row })),
@@ -158,9 +222,15 @@ export function memoryModelReservations() {
 }
 
 export function supabaseModelReservations(client = serviceClient()) {
+  const publicCode = (code) => ({
+    P14R1: "repair_limit_reached",
+    P14S1: "allowance_snapshot_stale",
+    P14A1: "account_budget",
+    P14C1: "budget_ceiling",
+  })[code] || code;
   const unwrap = ({ data, error }, action) => {
     if (error) throw Object.assign(new Error(`${action}: ${error.message}`), {
-      code: error.code === "P14R1" ? "repair_limit_reached" : error.code,
+      code: publicCode(error.code),
       databaseCode: error.code,
     });
     return data;
@@ -174,18 +244,27 @@ export function supabaseModelReservations(client = serviceClient()) {
       return reservationBudget(rows, { owner, buildId, ceilingCredits });
     },
     async reserve(input) {
-      const result = unwrap(await client.rpc("reserve_bv2_model_call_v2", {
+      const balance = input.accountBalance || {};
+      const result = unwrap(await client.rpc("reserve_bv2_model_call_v3", {
         p_owner: input.owner, p_project_id: input.projectId, p_build_id: input.buildId,
         p_call_key: input.callKey, p_step: input.step, p_provider: input.provider,
         p_model: input.model, p_billing_lane: input.billingLane,
         p_reserved_credits: input.reservedCredits, p_ceiling_credits: input.ceilingCredits,
-        p_account_available_credits: input.accountAvailableCredits ?? null,
+        p_usage_responsibility: responsibilityFor(input),
+        p_included_available_credits: customerFunded(input)
+          ? Number(balance.included ?? balance.bundle ?? input.accountAvailableCredits) : null,
+        p_usage_period_start: customerFunded(input) ? balance.periodStart : null,
+        p_usage_row_count: customerFunded(input) ? Number(balance.usageRowCount) : null,
         p_metadata: input.metadata || {},
       }), "reserve Builder V2 model call");
       const row = result.reservation;
       return {
         ...row, buildId: row.build_id, projectId: row.project_id, callKey: row.call_key,
         billingLane: row.billing_lane, reservedCredits: Number(row.reserved_credits),
+        usageResponsibility: row.usage_responsibility,
+        includedReservedCredits: Number(row.included_reserved_credits || 0),
+        purchasedReservedCredits: Number(row.purchased_reserved_credits || 0),
+        platformReservedCredits: Number(row.platform_reserved_credits || 0),
         actualCredits: row.actual_credits == null ? null : Number(row.actual_credits),
         acquired: result.acquired === true,
         repairDispatchCount: Number(result.repair_dispatch_count || 0),
@@ -198,7 +277,7 @@ export function supabaseModelReservations(client = serviceClient()) {
       };
     },
     async settle(owner, id, { actualCredits, usage = {}, providerRequestIds = [] }) {
-      return unwrap(await client.rpc("settle_bv2_model_call", {
+      return unwrap(await client.rpc("settle_bv2_model_call_v2", {
         p_owner: owner, p_reservation_id: id, p_actual_credits: actualCredits,
         p_usage: usage, p_provider_request_ids: providerRequestIds,
       }), "settle Builder V2 model call");
@@ -207,6 +286,17 @@ export function supabaseModelReservations(client = serviceClient()) {
       return unwrap(await client.rpc("release_bv2_model_call", {
         p_owner: owner, p_reservation_id: id,
       }), "release Builder V2 model call");
+    },
+    async markAmbiguous(owner, id, { reason = null, providerRequestIds = [] } = {}) {
+      return unwrap(await client.rpc("mark_bv2_model_call_ambiguous", {
+        p_owner: owner, p_reservation_id: id, p_reason: reason,
+        p_provider_request_ids: providerRequestIds,
+      }), "mark Builder V2 model call ambiguous");
+    },
+    async absorbAmbiguous(owner, id, reason = null) {
+      return unwrap(await client.rpc("absorb_ambiguous_bv2_model_call", {
+        p_owner: owner, p_reservation_id: id, p_reason: reason,
+      }), "transfer ambiguous Builder V2 model call to platform");
     },
   };
 }
