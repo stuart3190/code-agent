@@ -122,13 +122,12 @@ test("there is one build pipeline, not a template engine", async () => {
   const gallery = await readCode("../../shell/web/src/start/StarterGallery.jsx");
   // A starter must reach the builder by the same road a typed sentence does.
   assert.doesNotMatch(gallery, /scaffold|template_id|applyTemplate|createFromTemplate/i);
-  // routes/templates.mjs exists as retired Buildr101 code and is deliberately unmounted — the
-  // route manifest records that decision. What matters is that nothing MOUNTS it, so a starter
-  // cannot reach the builder by any road but the ordinary one.
+  // The retired Buildr101 template route is physically gone, so a starter cannot reach the
+  // builder by any road but the ordinary one.
   const index = await readCode("../../shell/server/index.mjs");
   assert.doesNotMatch(index, /routes\/templates\.mjs/, "no template route is mounted");
   const manifest = await readCode("../../test/code-agent/route-manifest.test.mjs");
-  assert.match(manifest, /"templates\.mjs":/, "and its retirement stays recorded");
+  assert.match(manifest, /"templates\.mjs",/, "and its deletion stays guarded");
 });
 
 // ── History is the existing record, exposed ─────────────────────────────────────────────
