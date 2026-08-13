@@ -119,3 +119,15 @@ test("one zero-spend pre-execution reverify may be archived, but never a started
   assert.match(archive, /state\.stages\.reverify_preexecution_1/,
     "the infrastructure retry must be bounded to one archived attempt");
 });
+
+test("an ambiguous final provider incident permits only one zero-model checkpoint re-verification", () => {
+  const branch = source.slice(source.indexOf('} else if (STAGE === "reverify2")'),
+    source.indexOf('} else if (STAGE === "report")'));
+  assert.match(branch, /state\.stages\.reverify2/);
+  assert.match(branch, /provider dispatch may have occurred/);
+  assert.match(branch, /reservations\[0\]\?\.state === "held"/);
+  assert.match(branch, /!\(attemptedEvidence\.aiRequests \|\| \[\]\)\.length/);
+  assert.match(branch, /!\(attemptedEvidence\.patches \|\| \[\]\)\.length/);
+  assert.match(branch, /mode: "resume_verify"/);
+  assert.match(branch, /maxRepairs: 0/);
+});

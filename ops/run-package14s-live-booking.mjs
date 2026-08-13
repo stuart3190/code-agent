@@ -455,12 +455,36 @@ if (STAGE === "preflight") {
   await runLifecycle(state, { stage: "repair2", mode: "resume_repair",
     prompt: "Apply one final bounded repair to only the exact remaining failed contracted journeys; preserve the working application and do not regenerate it.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, problems } });
+} else if (STAGE === "reverify2") {
+  if (state.stages.reverify2) throw new Error("the post-incident zero-model re-verification was already used");
+  const attempted = state.stages.repair2;
+  const attemptedEvidence = attempted?.evidence || {};
+  const ambiguous = attempted?.terminal && attempted.result === "fail" && Number(attempted.stageCredits || 0) === 0
+    && /provider dispatch may have occurred/i.test(attemptedEvidence.publicBuild?.error || "")
+    && (attemptedEvidence.reservations || []).length === 1
+    && attemptedEvidence.reservations[0]?.state === "held"
+    && !(attemptedEvidence.aiRequests || []).length
+    && !(attemptedEvidence.patches || []).length;
+  if (!ambiguous) throw new Error("reverify2 requires one ambiguous zero-telemetry provider attempt with no patch");
+  const verified = state.stages.reverify;
+  const v2 = verified?.evidence?.v2Builds?.at(-1);
+  const bv2Result = verified?.evidence?.publicBuild?.result?._worker?.bv2 || {};
+  if (!v2?.id || !bv2Result.workingSnapshotId) {
+    throw new Error("the last deterministic verification left no checkpoint to re-verify");
+  }
+  const current = await spend(state.project.id);
+  const remaining = round(TOTAL_CEILING - current.credits);
+  if (!(remaining > 0)) throw new Error("no approved Package 14S headroom remains");
+  await runLifecycle(state, { stage: "reverify2", mode: "resume_verify",
+    prompt: "Re-verify the unchanged retained checkpoint against the current protected platform after the ambiguous provider incident; make no model call and no generated-source change.",
+    ceiling: remaining, v2Input: { sourceBuildId: v2.id, maxRepairs: 0 } });
 } else if (STAGE === "report") {
   const current = state.project ? await spend(state.project.id) : { credits: 0, calls: 0 };
   await emit("report", { credits: current.credits, calls: current.calls,
     booking: state.stages.booking?.result || "not-run", repair: state.stages.repair?.result || "not-used",
     reverify: state.stages.reverify?.result || "not-used", repair2: state.stages.repair2?.result || "not-used",
-    finalPass: state.stages.repair2?.result === "pass" || state.stages.reverify?.result === "pass"
+    reverify2: state.stages.reverify2?.result || "not-used",
+    finalPass: state.stages.reverify2?.result === "pass" || state.stages.repair2?.result === "pass" || state.stages.reverify?.result === "pass"
       || state.stages.repair?.result === "pass" || state.stages.booking?.result === "pass" });
 } else if (STAGE === "cleanup") {
   await cleanup(state);
