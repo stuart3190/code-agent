@@ -23,6 +23,16 @@ export function createWorkerQueue(client) {
       if (error) throw new Error(`worker node state: ${error.message}`);
       return data?.state || null;
     },
+    async retireStaleNodes(workerId, staleBefore) {
+      const { data, error } = await client.from("build_worker_nodes")
+        .update({ state: "stopped", current_job_id: null })
+        .neq("worker_id", workerId)
+        .in("state", ["active", "paused", "draining"])
+        .lt("heartbeat_at", staleBefore)
+        .select("worker_id");
+      if (error) throw new Error(`stale worker node retirement: ${error.message}`);
+      return data || [];
+    },
     async lease(workerId, jobTypes, leaseSeconds) {
       const { data, error } = await client.rpc("build_work_lease", {
         p_worker_id: workerId, p_job_types: jobTypes, p_lease_seconds: leaseSeconds,

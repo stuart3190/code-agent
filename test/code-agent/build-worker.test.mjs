@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { buildWorkerEnabled, limitsFor, workIdempotencyKey } from "../../shell/server/lib/buildWorkQueue.mjs";
 import { runProcess } from "../../build-worker/processTree.mjs";
 import { safeChildEnvironment } from "../../build-worker/sandboxRunner.mjs";
+import { createWorkerQueue } from "../../build-worker/queue.mjs";
 
 const slowScript = (phase, ms = 1_200) => `console.log(${JSON.stringify(`${phase}:stdout`)}); console.error(${JSON.stringify(`${phase}:stderr`)}); setTimeout(()=>{},${ms});`;
 
@@ -108,6 +109,29 @@ test("C7 idempotency includes tenant, project, build and payload", () => {
   const b = workIdempotencyKey({ jobType: "compile", owner: "b", projectId: "p", buildId: "b", payload: { x: 1 } });
   const c = workIdempotencyKey({ jobType: "compile", owner: "a", projectId: "p", buildId: "b", payload: { x: 2 } });
   assert.notEqual(a, b); assert.notEqual(a, c);
+});
+
+test("C7 worker retires only stale peer registrations and clears their dead job pointer", async () => {
+  const calls = [];
+  const query = {
+    neq(field, value) { calls.push(["neq", field, value]); return this; },
+    in(field, value) { calls.push(["in", field, value]); return this; },
+    lt(field, value) { calls.push(["lt", field, value]); return this; },
+    async select(field) { calls.push(["select", field]); return { data: [{ worker_id: "stale" }], error: null }; },
+  };
+  const client = { from(table) { calls.push(["from", table]); return {
+    update(value) { calls.push(["update", value]); return query; },
+  }; } };
+  const retired = await createWorkerQueue(client).retireStaleNodes("current", "2026-08-13T00:00:00.000Z");
+  assert.deepEqual(retired, [{ worker_id: "stale" }]);
+  assert.deepEqual(calls, [
+    ["from", "build_worker_nodes"],
+    ["update", { state: "stopped", current_job_id: null }],
+    ["neq", "worker_id", "current"],
+    ["in", "state", ["active", "paused", "draining"]],
+    ["lt", "heartbeat_at", "2026-08-13T00:00:00.000Z"],
+    ["select", "worker_id"],
+  ]);
 });
 
 test("C7 Builder V1 behavior remains unchanged while the worker flag is disabled", async () => {

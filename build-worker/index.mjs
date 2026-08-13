@@ -46,6 +46,7 @@ let paused = process.env.THRALLO_BUILD_WORKER_PAUSED === "1";
 let current = null;
 let currentAbort = null;
 let lastReconcile = 0;
+let lastNodeRetirement = 0;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const tail = (value, max = 16_384) => redactDiagnosticText(String(value || "")).slice(-max);
@@ -225,6 +226,12 @@ async function runJob(job) {
 }
 
 async function tick() {
+  if (Date.now() - lastNodeRetirement > 60_000) {
+    const staleBefore = new Date(Date.now() - Math.max(120_000, LEASE_SECONDS * 3_000)).toISOString();
+    const retired = await queue.retireStaleNodes(WORKER_ID, staleBefore);
+    lastNodeRetirement = Date.now();
+    if (retired.length) console.warn(`[build-worker] retired ${retired.length} stale worker node registration(s)`);
+  }
   if (Date.now() - lastReconcile > 30_000) {
     const reconciled = await reconcileOrphanSandboxes(client);
     lastReconcile = Date.now();
