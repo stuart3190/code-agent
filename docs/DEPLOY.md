@@ -63,8 +63,10 @@ curl -fsS https://app.thrallo.com/api/v1/capabilities
 After a code or environment update, rebuild the web application and restart only
 `thrallo-shell`. Do not restart Buildr101 services for a Thrallo-only change.
 
-Use the full root lockfile install (`npm ci`) before restart. The legacy shell still imports its QA
-runner at startup, so `npm ci --omit=dev` is not currently a valid production install.
+Install both locked packages before rebuilding: `npm ci` at the repository root, followed by
+`npm --prefix shell/web ci`. The web application has its own lockfile and a clean checkout has no
+Vite binary until that second install runs. The legacy shell still imports its QA runner at
+startup, so `npm ci --omit=dev` is not currently a valid production install.
 
 The durable C7 build worker has a separate, approval-gated deployment sequence in
 `docs/BUILD-WORKER-DEPLOYMENT.md`. Do not install/start that unit or set
