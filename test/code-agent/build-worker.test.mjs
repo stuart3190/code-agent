@@ -123,7 +123,8 @@ test("C7 browser verification is durably linked so cancellation survives shell r
   const jobs = await readFile(new URL("../../shell/server/lib/buildJobs.mjs", import.meta.url), "utf8");
   assert.match(appBuild, /update\(\{ work_job_id: work\.id \}\)/);
   assert.match(jobs, /if \(!work \|\| BUILD_WORK_TERMINAL\.has\(work\.state\)\)/);
-  assert.match(jobs, /requestBuildWorkCancel\(ownerId, job\.workJobId\)/);
+  assert.match(jobs, /requestBuildWorkCancel\(ownerId, job\.workJobId, \{ client \}\)/,
+    "cancellation must keep the same injected database authority through the work queue");
   assert.match(jobs, /\.is\("work_job_id", null\)\.select\("id"\)/);
   assert.match(jobs, /!job\.workJobId && !TERMINAL\.has\(job\.status\)/);
 });
