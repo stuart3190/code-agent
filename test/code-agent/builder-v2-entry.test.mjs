@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { createJob } from "../../shell/server/lib/buildJobs.mjs";
+import { createJob, executeBuildPipelineWork } from "../../shell/server/lib/buildJobs.mjs";
 import { startAppBuildV2, startExistingAppWorkV2 } from "../../shell/server/lib/builderV2/entry.mjs";
 
 test("accepted Builder V2 dispatch is durable-worker-only and returns handled:true", async () => {
@@ -165,6 +165,32 @@ test("new V2 build refuses before creating a project when the worker is disabled
     },
   }), (error) => error.code === "worker_required");
   assert.equal(inserted, false);
+});
+
+test("public-job creation and worker execution reject every non-V2 pipeline before durable work", async () => {
+  await assert.rejects(createJob({
+    owner: { id: "owner" }, projectId: "project", mode: "build", prompt: "x", pipelineVersion: "v1",
+  }), (error) => error.code === "builder_v1_retired");
+  await assert.rejects(createJob({
+    owner: { id: "owner" }, projectId: "project", mode: "build", prompt: "x",
+  }), (error) => error.code === "builder_v1_retired");
+  await assert.rejects(executeBuildPipelineWork({
+    id: "work", owner: "owner", project_id: "project", build_id: "build", payload: {},
+  }), (error) => error.code === "builder_v1_retired" && error.retryable === false);
+});
+
+test("worker execution rechecks the V2 kill switch before runtime composition", async () => {
+  const prior = process.env.THRALLO_BV2_KILL;
+  process.env.THRALLO_BV2_KILL = "1";
+  try {
+    await assert.rejects(executeBuildPipelineWork({
+      id: "work", owner: "owner", project_id: "project", build_id: "build",
+      payload: { pipelineVersion: "v2" },
+    }), (error) => error.code === "builder_v2_killed" && error.retryable === false);
+  } finally {
+    if (prior === undefined) delete process.env.THRALLO_BV2_KILL;
+    else process.env.THRALLO_BV2_KILL = prior;
+  }
 });
 
 test("V2-only kill switch refuses before worker admission or project creation", async () => {

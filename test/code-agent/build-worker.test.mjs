@@ -134,12 +134,14 @@ test("C7 worker retires only stale peer registrations and clears their dead job 
   ]);
 });
 
-test("C7 Builder V1 behavior remains unchanged while the worker flag is disabled", async () => {
+test("C7 cutover leaves no shell fallback and rejects non-V2 worker payloads", async () => {
   assert.equal(buildWorkerEnabled({}), false);
   assert.equal(buildWorkerEnabled({ THRALLO_BUILD_WORKER_ENABLED: "0" }), false);
   const source = await readFile(new URL("../../shell/server/lib/buildJobs.mjs", import.meta.url), "utf8");
-  assert.match(source, /if \(buildWorkerEnabled\(\)\)/);
-  assert.match(source, /waiting\.push\(job\.id\);\s*schedule\(\);/);
+  const worker = await readFile(new URL("../../build-worker/index.mjs", import.meta.url), "utf8");
+  assert.match(source, /pipelineVersion !== "v2"[\s\S]*builder_v1_retired/);
+  assert.match(source, /payload\.pipelineVersion !== "v2"[\s\S]*builder_v1_retired/);
+  assert.match(worker, /THRALLO_BV2_KILL[\s\S]*payload\?\.pipelineVersion !== "v2"/);
 });
 
 test("C7 browser verification is durably linked so cancellation survives shell restart", async () => {

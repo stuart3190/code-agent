@@ -243,9 +243,13 @@ export function activeJobFor(ownerId, projectId) {
   return null;
 }
 
-export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = "v1", manualModel = null, providerSelection = null, routingMode = null, v2Input = null, budgetApprovalId = null }) {
-  if (!["v1", "v2"].includes(pipelineVersion)) throw new Error(`unknown builder pipeline ${pipelineVersion}`);
-  if (pipelineVersion === "v2" && !buildWorkerEnabled()) {
+export async function createJob({ owner, projectId, mode, prompt, tree, plan, knowledge, style, designProfile, redesign, diag = null, trigger = "user", taskHint = null, budgetAllowance = null, byokCostLimit = null, providerOverride = null, pipelineVersion = null, manualModel = null, providerSelection = null, routingMode = null, v2Input = null, budgetApprovalId = null }) {
+  if (pipelineVersion !== "v2") {
+    throw Object.assign(new Error("Builder V1 dispatch is retired; only Builder V2 jobs are accepted."), {
+      code: "builder_v1_retired",
+    });
+  }
+  if (!buildWorkerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the durable build worker; dispatch is disabled."), {
       code: "worker_required",
     });
@@ -1550,7 +1554,17 @@ export async function executeBuildPipelineWork(workJob, {
   onEvent = null,
 } = {}) {
   const payload = workJob.payload || {};
-  if (payload.pipelineVersion === "v2") {
+  if (payload.pipelineVersion !== "v2") {
+    throw Object.assign(new Error("The durable worker refused a non-V2 Builder payload."), {
+      code: "builder_v1_retired", retryable: false,
+    });
+  }
+  if (process.env.THRALLO_BV2_KILL === "1") {
+    throw Object.assign(new Error("Builder V2 is disabled by its emergency kill switch."), {
+      code: "builder_v2_killed", retryable: false,
+    });
+  }
+  {
     const { executeBuilderV2PipelineWork } = await import("./builderV2/runtimeComposition.mjs");
     const outcome = await executeBuilderV2PipelineWork(workJob, { signal, onEvent });
     const publicOutcome = outcome.result || null;

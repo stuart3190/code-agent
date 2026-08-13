@@ -102,6 +102,16 @@ async function runJob(job) {
   try {
     let outcome;
     if (job.job_type === "builder_pipeline") {
+      if (process.env.THRALLO_BV2_KILL === "1") {
+        throw Object.assign(new Error("Builder V2 is disabled by its emergency kill switch."), {
+          code: "builder_v2_killed", retryable: false,
+        });
+      }
+      if (job.payload?.pipelineVersion !== "v2") {
+        throw Object.assign(new Error("The durable worker refused a non-V2 Builder payload."), {
+          code: "builder_v1_retired", retryable: false,
+        });
+      }
       const { error } = await client.from("build_jobs").update({
         status: "running", phase: "running", updated_at: new Date().toISOString(),
       }).eq("id", job.build_id).eq("owner", job.owner)
