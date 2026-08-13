@@ -61,7 +61,10 @@ test("FAULT 1 — an invalid lucide icon is caught and corrected before any buil
   assert.equal(correction.from, "Instagram");
   assert.equal(correction.kind, "substituted_export");
   assert.match(correction.message, /does not export it/);
-  assert.match(correction.message, /1\.28\.0/, "the correction records the version it checked against");
+  const checkedVersion = await installedVersion("lucide-react", { nodeModules });
+  assert.ok(checkedVersion);
+  assert.ok(correction.message.includes(checkedVersion),
+    `the correction records the installed version it checked against (${checkedVersion})`);
 
   // Aliased, not renamed — the JSX below is untouched and still compiles.
   assert.match(result.tree["src/App.jsx"], /import \{ Camera as Instagram, Clock \} from "lucide-react"/);

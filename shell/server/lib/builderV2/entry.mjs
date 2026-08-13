@@ -101,7 +101,10 @@ function relay(ctx, job) {
 
 function productionDeps(overrides = {}) {
   return {
-    client: serviceClient(), createJob,
+    // Dependency injection must be evaluated before the production default. Eagerly constructing
+    // serviceClient() here made a supplied in-memory client useless and forced tests, tooling, and
+    // offline diagnostics to possess production Supabase credentials they never read.
+    client: Object.hasOwn(overrides, "client") ? overrides.client : serviceClient(), createJob,
     startDiagSessionSafe: (spec) => createDiagSession({ ...spec, strictWrites: true }),
     resolveBuildContext,
     budgetLedger: createBudgetLedger, workerEnabled: buildWorkerEnabled,

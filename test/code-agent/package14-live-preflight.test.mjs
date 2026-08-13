@@ -7,6 +7,7 @@ import { canonicalModelIdentity, selectionValue } from "../../shell/server/lib/m
 import { conservativeCallReservation, createModelLanes } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { stepOutputPolicy } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
+import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 
 const jwt = (exp) => `x.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.y`;
 
@@ -95,6 +96,7 @@ test("Package 14 step output policy bounds the network request and reservation",
       estimatedCredits: 0.2, callCeilingCredits: 1, maxOutputTokens: 2_000,
     } }),
     ceilingCredits: 2, reservations, billingLane: "connected_allowance",
+    knowledgeStore: memoryKnowledgeStore(),
   });
   await lanes.contractFn({ owner: "o", projectId: "p", buildId: "b", request: "one page" });
   assert.ok(seen.length >= 1);
