@@ -110,6 +110,34 @@ test("browser-informed repair gets a compact contract summary while full enforce
     "capability ownership is deduplicated instead of repeated in every module");
 });
 
+test("browser repair prompt includes every failed journey but only their failed interaction steps", () => {
+  const secondary = {
+    id: "validate-contact", title: "Validate contact", priority: "secondary", steps: [
+      { action: "open booking", target: "/book", expect: "contact form visible" },
+      { action: "enter an invalid email", target: "email", expect: "validation message visible" },
+    ],
+  };
+  const contract = { ...BOOKING, journeys: [...BOOKING.journeys, secondary] };
+  const plan = deriveModulePlan(contract, contract.journeys);
+  const bindings = bindCapabilities(contract);
+  const interactions = buildInteractionContract(contract, { modulePlan: plan, bindings });
+  const moduleContracts = buildModuleGenerationContracts({
+    contract, modulePlan: plan, interactionContract: interactions, bindings,
+  });
+  const prompt = renderPatchPrompt({ step: "repair",
+    contract: { ...contract, interactionContract: interactions }, tiers: tierContract(contract),
+    tree: CORRECT, modulePlan: plan, moduleContracts,
+    problems: ["journey validate-contact: enter an invalid email: email control could not be driven"],
+  });
+  assert.match(prompt, /JOURNEY .*Validate contact/);
+  assert.match(prompt, /enter an invalid email/);
+  const interactionSection = prompt.slice(prompt.indexOf("INTERACTION CONTRACT"),
+    prompt.indexOf("PROJECT KNOWLEDGE"));
+  assert.doesNotMatch(interactionSection, /open booking/,
+    "passing interaction steps must not be repeated in the repair contract");
+  assert.ok(Buffer.byteLength(prompt) < 45_000, "targeted repair prompt must stay bounded");
+});
+
 test("retained candidate A: a capability method held as a reference is ADVISORY, not a rejection", () => {
   // `const cancel = wizard.cancel;` hands the method to a consumer. That is legitimate usage —
   // the same shape React's own store contract requires — so it must never fail a candidate.

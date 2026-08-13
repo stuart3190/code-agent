@@ -307,6 +307,26 @@ async function archiveZeroSpendPreExecutionReverify(state) {
   return true;
 }
 
+async function archiveZeroSpendPreDispatchRepair2(state) {
+  const row = state.stages?.repair2;
+  const evidence = row?.evidence || {};
+  const v2Builds = evidence.v2Builds || [];
+  const eligible = row?.terminal && row.result === "fail" && Number(row.stageCredits || 0) === 0
+    && !(evidence.reservations || []).length && !(evidence.aiRequests || []).length
+    && /cannot fit a useful response inside approved headroom/i.test(evidence.publicBuild?.error || "")
+    && v2Builds.length > 0 && v2Builds.every((build) => build.state === "failed");
+  if (!eligible) throw new Error("the final bounded browser-informed repair was already used");
+  if (state.stages.repair2_predispatch_1) {
+    throw new Error("the bounded zero-spend final repair retry was already used");
+  }
+  state.stages.repair2_predispatch_1 = row;
+  delete state.stages.repair2;
+  await save(state);
+  await emit("repair2_predispatch_archived", {
+    code: "budget_ceiling", credits: 0, calls: 0, v2Builds: v2Builds.length,
+  });
+}
+
 async function cleanup(state) {
   if (state.cleanup) throw new Error("cleanup already completed");
   const retention = await retainGeneratedSource(state);
@@ -414,7 +434,7 @@ if (STAGE === "preflight") {
     prompt: "Re-verify the retained paid repair against the current protected platform runtime; make no model call and no generated-source change.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, maxRepairs: 0 } });
 } else if (STAGE === "repair2") {
-  if (state.stages.repair2) throw new Error("the final bounded browser-informed repair was already used");
+  if (state.stages.repair2) await archiveZeroSpendPreDispatchRepair2(state);
   const verified = state.stages.reverify;
   if (!verified?.terminal || verified.result === "pass" || Number(verified.stageCredits || 0) !== 0) {
     throw new Error("repair2 requires a completed zero-spend platform re-verification that remained red");

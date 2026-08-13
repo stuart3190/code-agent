@@ -98,6 +98,17 @@ test("the final browser-informed repair is checkpointed, provider-bounded, and s
   assert.match(branch, /sourceBuildId: v2\.id/);
 });
 
+test("one zero-spend pre-dispatch final repair may be archived, but never a provider attempt", () => {
+  const archive = source.slice(source.indexOf("async function archiveZeroSpendPreDispatchRepair2"),
+    source.indexOf("async function cleanup(state)"));
+  assert.match(archive, /stageCredits \|\| 0\) === 0/);
+  assert.match(archive, /!\(evidence\.reservations \|\| \[\]\)\.length/);
+  assert.match(archive, /!\(evidence\.aiRequests \|\| \[\]\)\.length/);
+  assert.match(archive, /cannot fit a useful response inside approved headroom/);
+  assert.match(archive, /state\.stages\.repair2_predispatch_1/,
+    "the archive must be single-use rather than an unbounded retry loop");
+});
+
 test("one zero-spend pre-execution reverify may be archived, but never a started verification", () => {
   const archive = source.slice(source.indexOf("async function archiveZeroSpendPreExecutionReverify"),
     source.indexOf("async function cleanup(state)"));

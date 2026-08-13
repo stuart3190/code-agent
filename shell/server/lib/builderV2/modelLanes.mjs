@@ -226,11 +226,51 @@ export function renderPatchPrompt({
 }) {
   const isEdit = step === "edit";
   const isRepair = step === "repair" || step === "correction";
+  const browserRepair = step === "repair" && !repairScope && !moduleCorrectionScope;
+  const repairFailures = browserRepair ? (problems || []).map((problem) => {
+    const match = String(problem).match(/^journey ([^:]+): (.*?): /);
+    return match ? { journeyId: match[1], action: match[2] } : null;
+  }).filter(Boolean) : [];
+  const failedJourneyIds = new Set(repairFailures.map((failure) => failure.journeyId));
   const scopedJourneys = step === "core" || isRepair
-    ? (contract.journeys || []).filter((j) => tiers.essential.journeys.includes(j.id))
+    ? (contract.journeys || []).filter((j) => browserRepair && failedJourneyIds.size
+      ? failedJourneyIds.has(j.id) : tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
   const scopedInteractions = scopeInteractionContract(contract.interactionContract, scopedJourneys);
+  const failedActions = new Set(repairFailures.map((failure) => `${failure.journeyId}\n${failure.action}`));
+  const matchedRepairFlows = browserRepair && failedActions.size
+    ? (scopedInteractions.flows || []).filter((flow) => failedActions.has(`${flow.journeyId}\n${flow.action}`))
+    : [];
+  // Exact verifier actions normally select the small failing slice. If an older/custom verifier
+  // emits a different label, retain the full failed-journey contract instead of silently sending
+  // no interaction requirements.
+  const repairFlows = browserRepair && matchedRepairFlows.length
+    ? matchedRepairFlows : scopedInteractions.flows || [];
+  const repairInteractionPlan = browserRepair ? {
+    version: scopedInteractions.version,
+    flows: repairFlows.map((flow) => ({
+      id: flow.id, journeyId: flow.journeyId, stepIndex: flow.stepIndex, kind: flow.kind,
+      action: flow.action, reads: flow.reads || [], writes: flow.writes || [],
+      control: flow.control ? {
+        roles: flow.control.roles || [], logicalField: flow.control.logicalField || null,
+        inputTypes: flow.control.inputTypes || [], accessibleNames: flow.control.accessibleNames || [],
+        editable: flow.control.editable === true, stateOwner: flow.control.stateOwner || null,
+      } : null,
+      capability: flow.capability || null, observable: flow.observable || null,
+      stateOwner: flow.stateOwner || null, responsibleModules: flow.responsibleModules || [],
+    })),
+  } : scopedInteractions;
+  const repairFocusPaths = browserRepair ? [...new Set(repairFlows.flatMap((flow) => [
+    ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
+  ]).filter((value) => typeof value === "string" && value.startsWith("src/")))] : [];
+  const repairPersistencePlan = browserRepair ? {
+    durableJourneys: persistencePlan?.durableJourneys || [],
+    forbiddenBusinessPersistence: persistencePlan?.forbiddenBusinessPersistence || [],
+    owners: persistencePlan?.owners || [],
+    modules: (persistencePlan?.modules || []).filter((module) => repairFocusPaths.includes(module.path))
+      .map(({ forbiddenPersistence: _forbiddenPersistence, ...module }) => module),
+  } : persistencePlan;
   const capabilityPaths = bindCapabilities(contract)
     .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
   const advisoryNotes = (advisory || []).length ? [
@@ -270,15 +310,16 @@ export function renderPatchPrompt({
     ].join("\n") : "REQUIRED MODULE PLAN: none for this scope.",
     "",
     step === "repair"
-      ? moduleGenerationContractsRepairBrief(moduleCorrectionScope?.moduleContracts || moduleContracts)
+      ? moduleGenerationContractsRepairBrief(moduleCorrectionScope?.moduleContracts || moduleContracts,
+        { focusPaths: repairFocusPaths })
       : moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
     "",
-    persistencePlan
-      ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(persistencePlan, null, 2)}`
+    repairPersistencePlan
+      ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(repairPersistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
     "",
-    interactionContractBrief(scopedInteractions),
-    preferredAssemblyBrief(assemblyNeeds(scopedInteractions, bindCapabilities(contract))),
+    interactionContractBrief(repairInteractionPlan),
+    preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),
     "",
     repairScope ? [
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",

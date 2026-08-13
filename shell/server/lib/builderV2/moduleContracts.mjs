@@ -146,8 +146,12 @@ export function moduleGenerationContractsBrief(moduleContracts) {
  * per-call ceiling. This summary preserves the responsibilities needed to patch safely while the
  * validators remain the authoritative, unchanged gate.
  */
-export function moduleGenerationContractsRepairBrief(moduleContracts) {
-  const specifications = moduleContracts?.specifications || [];
+export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPaths = [] } = {}) {
+  const focused = new Set((focusPaths || []).filter(Boolean));
+  const allSpecifications = moduleContracts?.specifications || [];
+  const specifications = focused.size
+    ? allSpecifications.filter((specification) => focused.has(specification.path))
+    : allSpecifications;
   if (!specifications.length) return "PER-MODULE REPAIR CONTRACT SUMMARY: none for this scope.";
   const ownership = new Map();
   for (const specification of specifications) {
@@ -161,6 +165,7 @@ export function moduleGenerationContractsRepairBrief(moduleContracts) {
       });
     }
   }
+  const uniqueRows = (rows) => [...new Map((rows || []).map((row) => [JSON.stringify(row), row])).values()];
   const compact = {
     version: moduleContracts.version || 1,
     specifications: specifications.map((specification) => ({
@@ -173,17 +178,13 @@ export function moduleGenerationContractsRepairBrief(moduleContracts) {
         factory: capability.factory,
         methods: (capability.methods || []).map((method) => method.method),
       })),
-      controls: (specification.semanticInteractions || []).map((control) => ({
+      controls: uniqueRows((specification.semanticInteractions || []).map((control) => ({
         logicalField: control.logicalField,
         roles: control.roles || [],
         inputTypes: control.inputTypes || [],
         accessibleNames: control.accessibleNames || [],
         stateOwner: control.stateOwner || null,
-      })),
-      dataFlow: {
-        consumes: specification.downstream?.consumes || [],
-        produces: specification.downstream?.produces || [],
-      },
+      }))),
       state: specification.state || null,
       persistenceOwner: specification.persistence?.owner || null,
       requiredExports: specification.requiredExports || [],
