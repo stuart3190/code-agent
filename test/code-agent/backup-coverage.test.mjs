@@ -527,6 +527,25 @@ test("a migrated-but-unbacked table is caught on its own", () => {
   });
 });
 
+test("migration drift accepts only the declared ephemeral backup exclusion", async () => {
+  const { findDrift } = await import("../../ops/migration-drift.mjs");
+  const excluded = new Set(EPHEMERAL_RUNTIME_TABLES);
+  assert.ok(excluded.has("http_rate_limit_buckets"));
+  assert.deepEqual(findDrift({
+    live: new Set(["http_rate_limit_buckets"]),
+    migrated: new Set(["http_rate_limit_buckets"]),
+    backedUp: new Set(),
+    backupExcluded: excluded,
+  }), [], "short-lived admission counters are intentionally reset after restore");
+  assert.deepEqual(findDrift({
+    live: new Set(["unmigrated_ephemeral"]),
+    migrated: new Set(),
+    backedUp: new Set(),
+    backupExcluded: new Set(["unmigrated_ephemeral"]),
+  }).map((problem) => /NO migration/.test(problem)), [true],
+  "a backup exclusion must never hide schema drift");
+});
+
 test("a fully reconciled database reports nothing, and Supabase's own tables are ignored", async () => {
   const { findDrift } = await import("../../ops/migration-drift.mjs");
   assert.deepEqual(findDrift({

@@ -18,6 +18,7 @@ import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { CA_TABLES } from "./backup-thrallo.mjs";
+import { EPHEMERAL_RUNTIME_TABLES } from "./lib/runtimeBackupSchema.mjs";
 import { PROJECT_SCOPED_TABLES, NOT_PURGED } from "../shell/server/lib/projectTeardown.mjs";
 
 loadEnv();
@@ -74,7 +75,7 @@ async function liveTables(svc) {
  */
 export function findDrift({
   live, migrated, backedUp, purged = null, purgeExcluded = null, projectScoped = null,
-  databaseCascadePurged = new Set(),
+  databaseCascadePurged = new Set(), backupExcluded = new Set(),
 }) {
   const problems = [];
   for (const table of live) {
@@ -82,7 +83,7 @@ export function findDrift({
     if (!migrated.has(table)) {
       problems.push(`${table}: exists in production with NO migration — the database cannot be rebuilt from the repo`);
     }
-    if (!backedUp.has(table)) {
+    if (!backedUp.has(table) && !backupExcluded.has(table)) {
       problems.push(`${table}: exists in production and is NOT backed up`);
     }
     // Teardown coverage. CI checks this against migrations, which cannot tell whether a legacy
@@ -129,6 +130,7 @@ async function main() {
       purged: new Set(PROJECT_SCOPED_TABLES.map((t) => t.table)),
       purgeExcluded: NOT_PURGED,
       databaseCascadePurged: DATABASE_CASCADE_PURGED,
+      backupExcluded: new Set(EPHEMERAL_RUNTIME_TABLES),
     }));
   } else {
     problems.push("could not enumerate live tables (thrallo_public_tables RPC missing) — deploy it, or this check only verifies reachability below");
