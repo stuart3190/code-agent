@@ -219,14 +219,6 @@ export function subscribe(job, fn) {
   return () => { stopped = true; clearInterval(timer); };
 }
 
-// V2 jobs are durable worker work. Shell restarts and stale in-process loops therefore have
-// nothing to interrupt; the queue's lease/retry reconciliation owns recovery.
-export async function sweepInterrupted() { return 0; }
-export async function sweepStaleJobs() { return 0; }
-export function startStaleJobSweeper() {}
-export function stopStaleJobSweeper() {}
-export async function interruptLiveJobs() { return 0; }
-
 function usageBucket() {
   const total = { turns: 0, input: 0, output: 0, reasoning: 0, cached: 0, cacheWrite: 0, total: 0 };
   return {

@@ -369,7 +369,7 @@ test("14R a per-build AUTO qualification is durable and does not require changin
   const source = await readFile(new URL("../../shell/server/lib/buildJobs.mjs", import.meta.url), "utf8");
   const runtime = await readFile(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8");
   assert.match(source, /providerSelection, routingMode/);
-  assert.match(source, /pipelineVersion, manualModel, providerSelection, routingMode/);
+  assert.match(source, /pipelineVersion: "v2", manualModel, providerSelection, routingMode/);
   assert.match(runtime, /workJob\.payload\.routingMode === "auto"/);
   assert.match(runtime, /manualModel: workJob\.payload\.manualModel/);
 });

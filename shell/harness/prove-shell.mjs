@@ -85,7 +85,7 @@ async function waitHealth(deadlineMs = 30000) {
 // drain the job's coarse event stream to its terminal frame, exactly as the browser does. The
 // terminal `result` is the whitelisted payload {finalText, tree, buildOk, previewUrl, need,
 // balance} — engine internals (model, telemetry, tool calls) intentionally never reach here, so
-// debit-exactness is checked by balance delta below (and independently in prove-jobs / the unit
+// debit-exactness is checked by balance delta below (and independently in the unit
 // billing suite). Returns { done } where done = { mode, ...result }.
 async function generate(token, body) {
   const res = await fetch(`${BASE}/api/generate`, {

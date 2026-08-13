@@ -29,7 +29,9 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
     "the browser worker receives the machine-readable contract rather than English journeys alone");
   assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
   assert.match(verification, /backendEvidence: outcome\.backendEvidence \|\| null/);
-  assert.match(runtime, /!\["build", "resume_repair", "resume_verify"\]\.includes\(mode\)/,
+  assert.match(runtime, /mode === "resume_verify"[\s\S]*runVerifyFromCheckpoint/,
+    "checkpoint verification must resume directly from immutable V2 state");
+  assert.doesNotMatch(runtime, /adoptLegacyTree|projects\.tree/,
     "checkpoint verification must not require legacy project-tree adoption");
 });
 

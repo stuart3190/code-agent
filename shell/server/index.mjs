@@ -20,9 +20,6 @@ import {
   sharedRatePolicy, staticCacheControl,
 } from "./lib/httpSecurity.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
-import {
-  interruptLiveJobs, startStaleJobSweeper, stopStaleJobSweeper, sweepInterrupted, sweepStaleJobs,
-} from "./lib/buildJobs.mjs";
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
 import { handleExport } from "./routes/export.mjs";
@@ -1080,27 +1077,11 @@ server.listen(PORT, HOST, () => {
   console.log(`[shell] server on http://${HOST || "localhost"}:${PORT}`);
   const cfg = publicConfig();
   console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · thrallo stripe: ${thralloStripeConfigured()} · webhook: ${thralloWebhookConfigured()}`);
-  /**
-   * Any job rows THIS server left non-terminal are dead — their loop died with the process — so
-   * mark them interrupted rather than leaving a build showing "building" forever. Scoped by
-   * server_id, so a second server's live jobs are never touched.
-   *
-   * These ran only when CODE_AGENT_STANDALONE was OFF, and production runs with it ON. Thrallo's
-   * own app_build path calls createJob() and writes build_jobs regardless of that flag, so the one
-   * sweep whose entire purpose is "no build shows building forever" never ran in production: five
-   * jobs were found stuck in queued/running for eleven and thirteen hours, from restarts that
-   * happened days earlier. The flag says whether the legacy Buildr101 surface is mounted; it was
-   * never a statement about whether Thrallo builds exist.
-   */
-  // Every one of these needs the database. Without it there are no job rows to sweep, and calling
-  // them anyway only produces noise.
+  // QA has its own database lifecycle. Builder V2 recovery belongs to the durable worker lease
+  // protocol, so the shell deliberately owns no in-process build recovery loop.
   if (haveSupabaseEnv()) {
-    sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
-    sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
     sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
   }
-  // And keep sweeping: a build that wedges while the server stays up was never caught before.
-  if (haveSupabaseEnv()) startStaleJobSweeper();
   startCodeAgentWorker();
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
@@ -1150,11 +1131,7 @@ async function shutdown(signal) {
   stopLeadAgentRecovery();
   stopModelReservationReconciler();
   stopBuildBudgetApprovalReconciler();
-  stopStaleJobSweeper();
   await stopCodexLoginSessions();
-  if (!CODE_AGENT_STANDALONE) {
-    await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
-  }
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
