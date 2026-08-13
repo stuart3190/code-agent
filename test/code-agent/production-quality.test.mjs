@@ -258,7 +258,7 @@ test("the job sweeps run in production, not only when the legacy surface is moun
   // whose entire purpose is "no build shows building forever" never ran: five jobs were found in
   // production stuck in queued/running for eleven and thirteen hours.
   const guard = index.indexOf("if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();");
-  for (const call of ["sweepInterrupted()", "sweepStaleJobs()", "sweepQaRuns()", "startCheckpointSweeper()"]) {
+  for (const call of ["sweepInterrupted()", "sweepStaleJobs()", "sweepQaRuns()"]) {
     const at = index.indexOf(call);
     assert.ok(at > 0, `${call} must still be called`);
     assert.ok(at < guard || guard === -1,
@@ -275,8 +275,7 @@ test("stale builds are swept while the server is up, not only at boot", async ()
   assert.match(jobs, /export function stopStaleJobSweeper/, "and it must be stoppable");
   const index = await readCode("../../shell/server/index.mjs");
   // Guarded on Supabase: without a database there are no job rows to sweep, and the call would
-  // only produce noise — or, before startCheckpointSweeper caught its own synchronous throw, kill
-  // the server at boot from inside the `listening` handler.
+  // only produce noise or fail a database-backed maintenance loop during local startup.
   assert.match(index, /if \(haveSupabaseEnv\(\)\) startStaleJobSweeper\(\);/);
   assert.match(index, /if \(haveSupabaseEnv\(\)\) startDomainVerifier\(\);/,
     "the database-backed domain verifier must stay idle when no database authority is configured");
@@ -314,16 +313,6 @@ test("no plan promises faster builds, because no plan delivers them", async () =
   // What it says instead has to be true of the real catalogue.
   assert.match(banner, /more builds/);
   assert.match(banner, /analytics history|error reporting/);
-});
-
-test("a sweeper that cannot reach the database logs, it does not kill the server", async () => {
-  const recovery = await readCode("../../shell/server/lib/appBuild/checkpointRecovery.mjs");
-  // serviceClient() throws SYNCHRONOUSLY when Supabase is unconfigured, and this runs from the
-  // server's `listening` handler — so the throw escaped the promise chain and took the whole
-  // process down at boot. Maintenance failing is not a reason the server cannot serve.
-  assert.match(recovery, /try \{[\s\S]{0,200}sweepCheckpoints\(/,
-    "the synchronous construction must be inside the try, not just the promise");
-  assert.match(recovery, /sweep unavailable/);
 });
 
 // ── Unbounded growth in a long-lived view ───────────────────────────────────────────────

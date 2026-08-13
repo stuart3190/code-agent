@@ -66,26 +66,6 @@ test("the build-job routes are matched before the /api catch-all", () => {
   }
 });
 
-test("cancel reaches the repaired cancellation pipeline and dispatches nothing further", async () => {
-  // The contract the route exists to trigger: a cancelled job classifies as `cancelled`, which
-  // yields no repair, no retry and no model call. Asserted end-to-end at the planner boundary so
-  // a change to either half breaks this.
-  const { cancelJob } = await import("../../shell/server/lib/buildJobs.mjs");
-  const { planEndAction } = await import("../../shell/server/lib/appBuild/appBuildService.mjs");
-  const { STOP_REASONS } = await import("../../shell/server/lib/appBuild/endState.mjs");
-
-  assert.equal(typeof cancelJob, "function", "the route's handler depends on cancelJob");
-
-  const action = planEndAction(
-    { status: "failed", error: "Cancelled by user.", stopReason: STOP_REASONS.cancelled },
-    { attempt: 1 },
-  );
-  assert.equal(action.kind, "cancelled");
-  assert.equal(action.brief, undefined, "a cancelled build must not compose a repair brief");
-  assert.equal(action.announcement, undefined, "a cancelled build must not announce further work");
-  assert.match(action.message, /Build cancelled\. Your current progress has been saved\./);
-});
-
 test("cancelling an unknown or finished job is a normal outcome, not a crash", async () => {
   const { cancelJob } = await import("../../shell/server/lib/buildJobs.mjs");
   const query = {

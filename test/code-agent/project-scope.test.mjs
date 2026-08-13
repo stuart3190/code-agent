@@ -180,7 +180,7 @@ test("projectsForProduct is owner-scoped and newest first", async () => {
 test("no capability resolves a project by 'the owner's newest' any more", async () => {
   // The defect was five copies of one query. A sixth copy would reintroduce it silently, so this
   // asserts the pattern is gone rather than asserting five call sites individually.
-  for (const file of ["appBuildService.mjs", "appPublishService.mjs"]) {
+  for (const file of ["appDeliveryService.mjs", "appPublishService.mjs"]) {
     const source = await readFile(
       fileURLToPath(new URL(`../../shell/server/lib/appBuild/${file}`, import.meta.url)), "utf8",
     );
@@ -190,11 +190,12 @@ test("no capability resolves a project by 'the owner's newest' any more", async 
   }
 });
 
-test("publish, repair, preview, QA, export and domains all go through the scoped resolver", async () => {
-  const build = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appBuildService.mjs", import.meta.url)), "utf8");
+test("publish, V2 edit/repair, preview, QA, export and domains all use the scoped resolver", async () => {
+  const delivery = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appDeliveryService.mjs", import.meta.url)), "utf8");
   const publish = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
-  // repair, preview, QA, export
-  assert.equal((build.match(/resolveConversationProject\(ctx/g) || []).length, 4);
+  const core = await readFile(fileURLToPath(new URL("../../shell/server/lib/capabilities/coreCapabilities.mjs", import.meta.url)), "utf8");
+  assert.equal((delivery.match(/resolveConversationProject\(ctx/g) || []).length, 3);
+  assert.equal((core.match(/resolveConversationProject\(ctx/g) || []).length, 2);
   // publish, connectDomain
   assert.equal((publish.match(/resolveConversationProject\(ctx/g) || []).length, 2);
 });

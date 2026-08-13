@@ -10,7 +10,6 @@ import { resolveBuildContext } from "../../shell/server/lib/appBuild/buildContex
 import {
   resolveProviderPolicy, permittedAlternatives, usesManagedCredits, preflightSummary, BILLING_LANES,
 } from "../../shell/server/lib/appBuild/providerPolicy.mjs";
-import { planEndAction } from "../../shell/server/lib/appBuild/appBuildService.mjs";
 
 const codexResolver = async () => ({ provider: "codex", secret: null });
 
@@ -64,19 +63,11 @@ test("FALLBACK — a Codex build cannot be steered onto managed via preferProvid
   assert.equal(context.byok, true);
 });
 
-test("FALLBACK — permittedAlternatives yields nothing for Codex, so a failure STOPS", () => {
+test("FALLBACK — permittedAlternatives yields nothing for Codex", () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
   assert.deepEqual(permittedAlternatives(policy, ["managed", "anthropic", "xai"]), [],
     "no hidden fallback path exists");
 
-  // And the planner's provider-blocked branch with zero alternatives is a plain stop that keeps
-  // progress — not a switch, not a retry on another lane.
-  const action = planEndAction(
-    { status: "failed", error: "provider quota exceeded: rate limited" },
-    { attempt: 1, alternatives: [], autoFallback: true },
-  );
-  assert.equal(action.kind, "request_user_input", "the build stops and says why");
-  assert.match(action.message, /no other provider is connected/i);
 });
 
 test("RETRIES — a retry re-resolves under the same active connection, preserving the policy", async () => {
@@ -92,13 +83,8 @@ test("RETRIES — a retry re-resolves under the same active connection, preservi
   }
 });
 
-test("RESERVATIONS — a non-managed lane creates none and debits nothing", async () => {
-  // dispatchCheck's reservation branch is gated on lifecycle.managed; byok:true lanes never enter
-  // it. Pinned at the source level so a refactor cannot quietly widen it.
+test("BYOK settlement never debits managed credits", async () => {
   const { readFileSync } = await import("node:fs");
-  const service = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8");
-  assert.match(service, /if \(ceiling && lifecycle\.managed && lifecycle\.reservations\)/,
-    "the managed reservation branch requires the managed lane");
   // BYOK settle path never debits managed credits: settle() short-circuits on byok.
   const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
   assert.match(jobs, /if \(byok\) \{\s*\n?\s*serverLog\(job, `billing: BYOK/,

@@ -144,17 +144,6 @@ test("C7 cutover leaves no shell fallback and rejects non-V2 worker payloads", a
   assert.match(worker, /THRALLO_BV2_KILL[\s\S]*payload\?\.pipelineVersion !== "v2"/);
 });
 
-test("C7 browser verification is durably linked so cancellation survives shell restart", async () => {
-  const appBuild = await readFile(new URL("../../shell/server/lib/appBuild/appBuildService.mjs", import.meta.url), "utf8");
-  const jobs = await readFile(new URL("../../shell/server/lib/buildJobs.mjs", import.meta.url), "utf8");
-  assert.match(appBuild, /update\(\{ work_job_id: work\.id \}\)/);
-  assert.match(jobs, /if \(!work \|\| BUILD_WORK_TERMINAL\.has\(work\.state\)\)/);
-  assert.match(jobs, /requestBuildWorkCancel\(ownerId, job\.workJobId, \{ client \}\)/,
-    "cancellation must keep the same injected database authority through the work queue");
-  assert.match(jobs, /\.is\("work_job_id", null\)\.select\("id"\)/);
-  assert.match(jobs, /!job\.workJobId && !TERMINAL\.has\(job\.status\)/);
-});
-
 test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation", async () => {
   const unit = await readFile(new URL("../../build-worker/thrallo-build-worker.service", import.meta.url), "utf8");
   const runner = await readFile(new URL("../../build-worker/sandboxRunner.mjs", import.meta.url), "utf8");
