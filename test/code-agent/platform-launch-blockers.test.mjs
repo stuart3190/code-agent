@@ -13,7 +13,7 @@ import {
   canonicalDeploymentIdentity, validateDeploymentIdentity,
 } from "../../shell/server/lib/deploymentIdentity.mjs";
 import { ownerFromToken } from "../../shell/server/lib/supabase.mjs";
-import { removeCanonicalDirectories } from "../../shell/server/lib/erasureService.mjs";
+import { canonicalErasureRows, removeCanonicalDirectories } from "../../shell/server/lib/erasureService.mjs";
 import { evaluateDrSignals } from "../../ops/dr-health.mjs";
 import crypto from "node:crypto";
 
@@ -159,6 +159,15 @@ test("erasure artifact cleanup refuses symlinks and removes only bounded regular
   await symlink(os.tmpdir(), path.join(root, "job-link"), "junction");
   await assert.rejects(() => removeCanonicalDirectories(root, ["job-link"]), /unexpected artifact symlink/);
   await assert.rejects(() => removeCanonicalDirectories(root, [".."]), /escapes its canonical root/);
+});
+
+test("erasure manifest rows are canonical regardless of database return order", () => {
+  const rows = [
+    { id: "b", nested: { z: 2, a: 1 } },
+    { id: "a", nested: { z: 1, a: 2 } },
+  ];
+  assert.deepEqual(canonicalErasureRows(rows), canonicalErasureRows([...rows].reverse()));
+  assert.deepEqual(rows.map((row) => row.id), ["b", "a"], "canonicalisation never mutates query evidence");
 });
 
 test("browser logs use authenticated streaming fetch and never native EventSource or bearer query strings", async () => {

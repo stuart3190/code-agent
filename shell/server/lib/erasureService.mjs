@@ -18,6 +18,13 @@ function canonical(value) {
 }
 const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" ? value : canonical(value)).digest("hex");
 
+// PostgREST does not promise row order without an explicit order clause. Erasure manifests are
+// approvals over a set of rows, so their identity must not change merely because the database
+// returned that same set in a different order between approval and execution.
+export function canonicalErasureRows(values) {
+  return [...(values || [])].sort((left, right) => canonical(left).localeCompare(canonical(right)));
+}
+
 function auditKey() {
   const key = process.env.THRALLO_ERASURE_AUDIT_KEY || process.env.PLATFORM_ENC_KEY;
   if (!key) throw new Error("THRALLO_ERASURE_AUDIT_KEY or PLATFORM_ENC_KEY is required for pseudonymous erasure evidence");
@@ -74,7 +81,7 @@ export async function buildProjectErasureManifest(ownerId, projectId, { client =
   for (const { table, column, ownerScoped } of PROJECT_SCOPED_TABLES) {
     const filters = { [column]: String(projectId), ...(ownerScoped ? { owner: ownerId } : {}) };
     const found = await rows(client, table, "*", filters);
-    database[table] = { count: found.length, rowsSha256: sha256(found) };
+    database[table] = { count: found.length, rowsSha256: sha256(canonicalErasureRows(found)) };
   }
   const appUsers = await rows(client, "app_users", "auth_user_id", { app_id: String(projectId) });
   const workJobs = await rows(client, "build_work_jobs", "id", { owner: ownerId, project_id: String(projectId) });
@@ -93,7 +100,7 @@ export async function buildAccountErasureManifest(ownerId, { client = serviceCli
   const direct = {};
   for (const [table, column] of ACCOUNT_DIRECT_TABLES) {
     const found = await rows(client, table, "*", { [column]: ownerId });
-    direct[table] = { count: found.length, rowsSha256: sha256(found) };
+    direct[table] = { count: found.length, rowsSha256: sha256(canonicalErasureRows(found)) };
   }
   const artifacts = await rows(client, "ca_artifacts", "storage_key", { owner: ownerId });
   const candidateKeys = [...new Set(artifacts.map((row) => row.storage_key).filter(Boolean))];
