@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { flagValue, flagOn, flagOnFor, setFlag, killSwitchActive, __resetFlagCacheForTests } from "../../shell/server/lib/builderV2/featureFlags.mjs";
+import { killSwitchActive } from "../../shell/server/lib/builderV2/cutoverPolicy.mjs";
 import { validateFact, recordFact, recordFacts, getKnowledge, knowledgeBrief, memoryKnowledgeStore, FACT_KINDS } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { indexFile, indexTree, diffIndex, treeHashOf } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
@@ -19,43 +19,12 @@ const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtur
 const MONOLITH_TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run178f7fc8-tree.json"), "utf8"));
 const MODULAR_TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run17b6513f-tree.json"), "utf8"));
 
-// ── C: feature flags ──────────────────────────────────────────────────────────────────────────
+// ── C: V2-only cutover policy ────────────────────────────────────────────────────────────────
 
-function fakeFlagClient(rows) {
-  return { from: () => ({ select: async () => ({ data: rows, error: null }), upsert: async (row) => { rows.push(row); return { error: null }; } }) };
-}
-
-test("C — flags: kill switch beats DB, unknown is false, cache respects TTL", async () => {
-  __resetFlagCacheForTests();
-  const rows = [{ key: "bv2.enabled", value: true }, { key: "bv2.owners", value: ["o-1"] }];
-  const client = fakeFlagClient(rows);
-  let clock = 0;
-  const now = () => clock;
-
-  assert.equal(await flagOn("bv2.enabled", { client, now }), true);
-  assert.equal(await flagOn("bv2.never_set", { client, now }), false, "unknown flag is FALSE — v2 is opt-in");
-  assert.equal(await flagOnFor("bv2.owners", "o-1", { client, now }), true);
-  assert.equal(await flagOnFor("bv2.owners", "o-2", { client, now }), false);
-
-  // Cache: mutating rows is invisible until the TTL passes.
-  rows.length = 0;
-  assert.equal(await flagOn("bv2.enabled", { client, now }), true, "cached within TTL");
-  clock += 61_000;
-  assert.equal(await flagOn("bv2.enabled", { client, now }), false, "TTL expiry refetches");
-
-  // The kill switch needs no TTL and no DB.
-  process.env.THRALLO_BV2_KILL = "1";
-  try {
-    assert.equal(killSwitchActive(), true);
-    assert.equal(await flagOn("bv2.enabled", { client, now }), false, "kill beats everything, instantly");
-  } finally {
-    delete process.env.THRALLO_BV2_KILL;
-  }
-
-  // A broken flags table means everything off — v2 fails closed, v1 unaffected.
-  __resetFlagCacheForTests();
-  const broken = { from: () => ({ select: async () => ({ data: null, error: { message: "boom" } }) }) };
-  assert.equal(await flagOn("bv2.enabled", { client: broken, now: () => 10_000_000 }), false);
+test("C — the V2-only emergency kill switch is immediate and database-independent", () => {
+  assert.equal(killSwitchActive({}), false);
+  assert.equal(killSwitchActive({ THRALLO_BV2_KILL: "0" }), false);
+  assert.equal(killSwitchActive({ THRALLO_BV2_KILL: "1" }), true);
 });
 
 // ── D: project knowledge ──────────────────────────────────────────────────────────────────────

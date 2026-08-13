@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { previewProvider } from "../preview/index.mjs";
-import { runQaBrowser } from "./qaRunner.mjs";
 import { ownedProject, serviceClient } from "./supabase.mjs";
 import { auditEvent } from "./projectState.mjs";
 import { buildWorkerEnabled, enqueueBuildWork } from "./buildWorkQueue.mjs";
@@ -8,46 +7,20 @@ import { resolveVerifiedProjectTree } from "./builderV2/projectSource.mjs";
 import { requireFreshWorkerAdmission } from "./builderV2/workerAdmission.mjs";
 import { withRuntimeEnv } from "./runtimeEnv.mjs";
 
-const active = new Set();
-
-async function finish(client, id, patch) {
-  await client.from("qa_runs").update({ ...patch, finished_at: new Date().toISOString() }).eq("id", id);
-}
-
-async function execute(run, tree, client) {
-  active.add(run.id);
-  try {
-    await client.from("qa_runs").update({ status: "running", started_at: new Date().toISOString() }).eq("id", run.id);
-    const preview = await previewProvider().start(run.project_id, tree);
-    await client.from("qa_runs").update({ preview_url: preview.url }).eq("id", run.id);
-    const report = await runQaBrowser({ previewUrl: preview.url, runId: run.id });
-    await finish(client, run.id, {
-      status: report.issueCount ? "issues_found" : "passed",
-      report, passed_count: report.passedCount, issue_count: report.issueCount, error: null,
-    });
-  } catch (error) {
-    console.error(`[qa ${run.id.slice(0, 8)}] ${error?.stack || error}`);
-    await finish(client, run.id, { status: "failed", error: "Browser testing could not finish. Please try again." });
-  } finally {
-    active.delete(run.id);
-  }
-}
-
 export async function createQaRun(owner, projectId, client = serviceClient()) {
   // Gating lives in the capability registry (requirements()), not the retired Buildr101
   // feature-flag matrix: that read a `feature_flags` table Thrallo never created and an
   // entitlement from the retired credit ledger, so it denied every caller unconditionally.
-  const project = await ownedProject(owner.id, projectId, "id,tree,builder_version,bv2_green_snapshot_id", client);
+  const project = await ownedProject(owner.id, projectId, "id,builder_version,bv2_green_snapshot_id", client);
   if (!project) return null;
   const source = await resolveVerifiedProjectTree(owner.id, project, { client });
   if (!source.tree || typeof source.tree !== "object") throw Object.assign(new Error("Build the app before testing it."), { code: "no_app" });
   const runtimeTree = withRuntimeEnv(source.tree, projectId);
-  const workerEnabled = buildWorkerEnabled();
-  const previews = workerEnabled ? previewProvider() : null;
-  if (project.builder_version === "v2" && !workerEnabled) {
+  if (!buildWorkerEnabled()) {
     throw Object.assign(new Error("Builder V2 browser QA requires the isolated build worker."), { code: "worker_required" });
   }
-  if (project.builder_version === "v2" && previews.mode !== "vps") {
+  const previews = previewProvider();
+  if (previews.mode !== "vps") {
     throw Object.assign(new Error("Builder V2 QA requires the isolated production provisioner."), {
       code: "preview_isolation_required",
     });
@@ -55,25 +28,19 @@ export async function createQaRun(owner, projectId, client = serviceClient()) {
   const { data: existing } = await client.from("qa_runs").select("id,status")
     .eq("owner", owner.id).eq("project_id", projectId).in("status", ["queued", "running"]).maybeSingle();
   if (existing) return existing;
-  if (workerEnabled) {
-    await requireFreshWorkerAdmission({ client, jobType: "qa_browser" });
-  }
+  await requireFreshWorkerAdmission({ client, jobType: "qa_browser" });
 
   const row = { id: crypto.randomUUID(), owner: owner.id, project_id: projectId, status: "queued" };
   const { error } = await client.from("qa_runs").insert(row);
   if (error) throw new Error(`qa run create: ${error.message}`);
-  if (workerEnabled) {
-    const preview = await previews.start(projectId, runtimeTree);
-    await client.from("qa_runs").update({ preview_url: preview.url }).eq("id", row.id);
-    const work = await enqueueBuildWork({
-      owner: owner.id, projectId, jobType: "qa_browser",
-      payload: { previewUrl: preview.url, runId: row.id },
-      idempotencyKey: `qa-browser:${row.id}`, priority: 10, maxAttempts: 2, client,
-    });
-    await client.from("qa_runs").update({ status: "queued", worker_job_id: work.id }).eq("id", row.id);
-  } else {
-    execute(row, runtimeTree, client);
-  }
+  const preview = await previews.start(projectId, runtimeTree);
+  await client.from("qa_runs").update({ preview_url: preview.url }).eq("id", row.id);
+  const work = await enqueueBuildWork({
+    owner: owner.id, projectId, jobType: "qa_browser",
+    payload: { previewUrl: preview.url, runId: row.id },
+    idempotencyKey: `qa-browser:${row.id}`, priority: 10, maxAttempts: 2, client,
+  });
+  await client.from("qa_runs").update({ status: "queued", worker_job_id: work.id }).eq("id", row.id);
   await auditEvent({ owner: owner.id, projectId, action: "project.qa.started", target: row.id }, client).catch(() => {});
   return { id: row.id, status: row.status };
 }

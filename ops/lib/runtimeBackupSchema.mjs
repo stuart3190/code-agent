@@ -126,7 +126,7 @@ export function runtimeCatalogEvidence(migrationCount) {
     migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_70, tablesSha256: PRODUCTION_PUBLIC_TABLES_70_SHA256,
     fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
   };
-  if ([75, 76].includes(Number(migrationCount))) return {
+  if ([75, 76, 77].includes(Number(migrationCount))) return {
     migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_75, tablesSha256: PRODUCTION_PUBLIC_TABLES_75_SHA256,
     fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_75, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256,
   };

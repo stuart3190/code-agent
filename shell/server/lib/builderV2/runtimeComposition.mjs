@@ -139,12 +139,7 @@ async function loadProjectContract(client, owner, projectId) {
     .eq("owner", owner).eq("project_id", projectId)
     .order("version", { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error(`Builder V2 contract load: ${error.message}`);
-  if (stored?.contract) return stored.contract;
-  const { data: legacy, error: legacyError } = await client.from("diag_runs").select("contract")
-    .eq("owner", owner).eq("project_id", projectId).not("contract", "is", null)
-    .order("started_at", { ascending: false }).limit(1).maybeSingle();
-  if (legacyError) throw new Error(`legacy contract adoption: ${legacyError.message}`);
-  return legacy?.contract || null;
+  return stored?.contract || null;
 }
 
 function changedModuleCount(context = {}) {
@@ -333,20 +328,6 @@ export function createBuilderV2Runtime({
       });
     }
     return parity;
-  }
-
-  async function adoptLegacyTree(owner, projectId, workJob, events) {
-    if (await snapshotStore.pointer(owner, projectId, "green")) return;
-    const { data: project, error } = await client.from("projects").select("tree,builder_version")
-      .eq("id", projectId).eq("owner", owner).maybeSingle();
-    if (error) throw new Error(`legacy project adoption: ${error.message}`);
-    if (!project?.tree || !Object.keys(project.tree).length) throw new Error("project has no verified source tree to adopt");
-    const snapshot = await snapshotStore.createSnapshot(owner, projectId, project.tree, {
-      reason: "legacy_v1_adoption", assetManifest: await assetService.assetManifestFor(owner, projectId),
-    });
-    await events.snapshot({ owner, projectId, buildId: null, snapshot, tree: project.tree, reason: "legacy_v1_adoption" });
-    await snapshotStore.promote(owner, projectId, "green", snapshot.id);
-    log(`[bv2] adopted legacy project ${projectId} at snapshot ${snapshot.id}`);
   }
 
   return {
@@ -573,19 +554,11 @@ export function createBuilderV2Runtime({
 
       const contract = mode === "build" ? null : await loadProjectContract(client, owner, projectId);
       if (mode !== "build" && !contract) {
-        throw Object.assign(new Error("This legacy project has no implementation contract to verify; V2 adoption needs an explicit qualification build."), {
-          code: "legacy_contract_missing",
+        throw Object.assign(new Error("This Builder V2 project has no durable implementation contract."), {
+          code: "v2_contract_missing",
         });
       }
-      if (contract) tierContract(contract); // reject malformed legacy diagnostics before spend
-      // Validate the adoption contract before creating/promoting any snapshot. An unsupported
-      // legacy project must remain byte-for-byte V1 until its explicit qualification build.
-      // Checkpoint-backed repair and verification materialise their own retained source. Sending
-      // either through legacy adoption first incorrectly requires projects.tree/a green pointer
-      // and prevents the checkpoint path from running at all.
-      if (!["build", "resume_repair", "resume_verify"].includes(mode)) {
-        await adoptLegacyTree(owner, projectId, workJob, events);
-      }
+      if (contract) tierContract(contract); // reject malformed durable contracts before spend
       const result = mode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
           budgetCredits: ceilingCredits, maxRepairs, signal })

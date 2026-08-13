@@ -1,9 +1,14 @@
 # Builder V2 graph shadow runbook
 
-Builder V1 remains the production build path until the separately approved V2 cutover. Shadow indexing runs after a
-completed V1 build, is feature-flagged by `bv2.shadow`, and catches every failure so it cannot
-change the V1 result. A clean shadow result is evidence about the persisted Builder V2 graph; it
-is not permission to route customer builds to Builder V2.
+> **Historical runbook — retired 2026-08-13.** Builder V2 is now the exclusive production builder.
+> The shadow writer, checker, rollout flags and their operational scripts were removed after the
+> approved V1 project retirement. The database tables are retained as forensic evidence and the
+> shadow RPC write grants are revoked. Commands below document the former process and are not
+> current operational instructions.
+
+Before cutover, shadow indexing ran after a completed V1 build and could not change the V1 result.
+A clean shadow result was evidence about the persisted Builder V2 graph; it was never independent
+permission to route customer builds to Builder V2.
 
 ## Why the 2026-08-06 shadow period is invalid
 

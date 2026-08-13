@@ -1,7 +1,9 @@
 # Publishing operations
 
-The C8 path is not deployed or enabled by this branch. All commands below require an approved
-commit, a current validated backup, the reviewed migration, and explicit production approval.
+> **Cutover history and current recovery controls.** Atomic immutable publishing is the only
+> supported production path as of 2026-08-13. The dark-deployment/adopt-legacy steps below are
+> retained as forensic history and must not be run; their code paths have been removed. The
+> inspect, pause, reconcile, integrity, rollback and retention commands remain current.
 
 ## Inspect and control
 

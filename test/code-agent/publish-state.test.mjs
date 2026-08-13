@@ -158,21 +158,20 @@ test("an unpublished site reports offline and stops claiming an update", async (
 test("unpublishing preserves the record instead of deleting it", async () => {
   const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
   const fn = source.slice(source.indexOf("export async function unpublishApp"));
-  assert.match(fn, /unpublished_at: new Date\(\)/, "it stamps the row");
+  assert.match(fn, /atomicUnpublish/, "the atomic transaction stamps the durable site row");
   // Specifically the SITE record. Unpublishing does now delete health_status — a dead site has
   // nothing to report on — so a blanket "no deletes" assertion would forbid correct behaviour
   // while still not saying what actually matters here.
   assert.doesNotMatch(fn, /from\("published_sites"\)\s*\n?\s*\.delete\(\)/,
     "the site record must survive — history and the claimed slug live in it");
-  assert.ok(fn.indexOf('provisiond("/unpublish"') < fn.indexOf("unpublished_at: new Date()"),
-    "the files come down before the record says they did");
+  assert.doesNotMatch(fn, /provisiond\("\/unpublish"/, "there is no direct legacy filesystem path");
 });
 
 test("republishing clears the offline stamp", async () => {
   const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
   const publishFn = source.slice(source.indexOf("export async function publishApp"), source.indexOf("export async function connectDomain"));
-  assert.match(publishFn, /unpublished_at: null/,
-    "without this a republished site would still show as unpublished while serving");
+  assert.match(publishFn, /finalizeAndActivateRelease/,
+    "the atomic completion transaction clears unpublished_at only after pointer activation");
 });
 
 // ── Isolation and resilience ────────────────────────────────────────────────────────────

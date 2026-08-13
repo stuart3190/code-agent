@@ -121,21 +121,19 @@ test("another product's site is never inherited", async () => {
   } finally { globalThis.fetch = original; }
 });
 
-test("the site record is MOVED, never deleted and recreated", async () => {
-  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
-  const fn = source.slice(source.indexOf("async function transferSite"), source.indexOf("export async function publishApp"));
-  assert.match(fn, /\.update\(/, "a move preserves created_at — the date the product first went live");
-  assert.doesNotMatch(fn, /\.delete\(/,
-    "delete-then-insert would lose the first-published date and can leave two rows on a unique slug");
+test("the atomic database activation moves the site record without recreating it", async () => {
+  const migration = await readFile(fileURLToPath(new URL("../../supabase/migrations/20260808164259_c8_nonretryable_stale_cas.sql", import.meta.url)), "utf8");
+  const complete = migration.slice(migration.indexOf("create or replace function public.complete_publish_activation"));
+  assert.match(complete, /update public\.published_sites[\s\S]*set project_id = v_release\.project_id/,
+    "the existing site row moves transactionally and preserves created_at");
+  assert.doesNotMatch(complete, /delete from public\.published_sites/);
 });
 
-test("the transfer happens BEFORE the site is published", async () => {
-  // published_sites.slug is unique. Upserting the new project's row while the old one still holds
-  // the slug would fail, so the move must come first.
-  const source = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
-  const fn = source.slice(source.indexOf("export async function publishApp"));
-  assert.ok(fn.indexOf("if (claim.supersedes) await transferSite") < fn.indexOf('provisiond("/publish"'),
-    "the record must be moved before the upload, not after");
+test("site ownership changes only after the release pointer is proven switched", async () => {
+  const migration = await readFile(fileURLToPath(new URL("../../supabase/migrations/20260808164259_c8_nonretryable_stale_cas.sql", import.meta.url)), "utf8");
+  const complete = migration.slice(migration.indexOf("create or replace function public.complete_publish_activation"));
+  assert.ok(complete.indexOf("v_intent.state <> 'pointer_switched'") < complete.indexOf("set project_id = v_release.project_id"),
+    "the site row cannot move before the durable pointer proof");
 });
 
 test("publish reads the slug from the claim result, not from a bare string", async () => {

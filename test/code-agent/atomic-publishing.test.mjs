@@ -281,12 +281,12 @@ test("C8-19 cleanup preserves every retained release", { skip: !linux }, async (
   assert.equal(existsSync(path.join(root, ".thrallo", "releases", OWNER, PROJECT, id(19))), true);
 });
 
-test("C8-20 Builder V1 remains on legacy path while atomic flag is disabled", async () => {
+test("C8-20 V2 publishing has no legacy or in-process fallback", async () => {
   const publish = await readFile(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url), "utf8");
-  assert.match(publish, /const useAtomic = atomicPublishEnabled\(\)/);
-  assert.match(publish, /useAtomic \? await finalizeAndActivateRelease/);
-  assert.match(publish, /: await provisiond\("\/publish"/);
-  assert.match(publish, /project\.builder_version === "v2" && !useAtomic/);
+  assert.match(publish, /const atomic = await finalizeAndActivateRelease/);
+  assert.match(publish, /if \(!packaged\)/);
+  assert.doesNotMatch(publish, /provisiond\("\/publish"/);
+  assert.doesNotMatch(publish, /useAtomic|transferSite/);
   assert.equal(normalizeArtifactPath("assets/app.js"), "assets/app.js");
 });
 
@@ -318,6 +318,10 @@ test("atomic publisher proves runtime identity and refuses an in-process build f
     assert.throws(() => proveRuntimeConfig(runtime.replace(PROJECT, id(44)), PROJECT), /identity/);
     assert.throws(() => proveRuntimeConfig("", PROJECT), /missing/);
 
+    process.env.THRALLO_ATOMIC_PUBLISH_ENABLED = "0";
+    process.env.THRALLO_BUILD_WORKER_ENABLED = "1";
+    process.env.THRALLO_PUBLISHER_PAUSED = "0";
+    assert.throws(() => assertPublishIntakeReady(), (error) => error.code === "atomic_publish_required");
     process.env.THRALLO_ATOMIC_PUBLISH_ENABLED = "1";
     process.env.THRALLO_BUILD_WORKER_ENABLED = "0";
     process.env.THRALLO_PUBLISHER_PAUSED = "0";

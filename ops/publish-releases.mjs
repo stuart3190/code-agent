@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import {
-  activateRetainedRelease, adoptLegacyPublishedSite, publisherPauseFile, reconcilePendingActivations, sweepPublishReleaseRetention,
+  activateRetainedRelease, publisherPauseFile, reconcilePendingActivations, sweepPublishReleaseRetention,
   verifyRetainedRelease,
 } from "../shell/server/lib/publishing/atomicPublisher.mjs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -46,10 +46,6 @@ else if (command === "drain") {
 else if (command === "integrity") {
   if (!value("owner") || !value("release")) throw new Error("--owner and --release required");
   result = await verifyRetainedRelease({ owner: value("owner"), releaseId: value("release"), client });
-}
-else if (command === "adopt-legacy") {
-  if (!value("owner") || !value("project")) throw new Error("--owner and --project required");
-  result = await adoptLegacyPublishedSite({ owner: value("owner"), projectId: value("project"), client });
 }
 else if (command === "activate" || command === "rollback") {
   for (const required of ["owner", "project", "release"]) if (!value(required)) throw new Error(`--${required} required`);

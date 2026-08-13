@@ -1,16 +1,10 @@
-// publishApp: the conversational publish path (Phase 22). Lean by design — the legacy
-// materializeAndPublish carries tier gates, releases, app-identity generation, and Android
-// concerns that stay behind until they earn their place. This one does the essentials with
-// full progress choreography (docs/DESIGN.md: silence must never be mistakable for
-// inactivity): claim a friendly slug, build the project's tree for production, ship the
-// dist to Thrallo's provisiond, record it, and hand back https://<slug>.app.thrallo.com.
+// The V2-only conversational publish path. It resolves only the verified green snapshot,
+// packages only in the durable worker and activates only an immutable atomic release. Progress
+// choreography keeps silence from being mistaken for inactivity.
 
-import path from "node:path";
 import crypto from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { serviceClient } from "../supabase.mjs";
 import { optionalEnv } from "../env.mjs";
-import { ensureDeps, buildTree, workDirFor } from "../../../../harness/workspace.mjs";
 import { slugify } from "../../routes/publish.mjs";
 import { notifyOwner } from "../notifications/notificationService.mjs";
 import { logProject } from "../logs/projectLog.mjs";
@@ -19,10 +13,10 @@ import { packagePublishTree } from "../publishBuildWorker.mjs";
 // so there is no second path that could skip verification.
 import { addDomain, normalizeDomain } from "../customDomains.mjs";
 import {
-  openDeployment, markBuilt, markLive, markFailed, getDeployment, assertBelongsTo, DEPLOY_STATUS,
+  openDeployment, markBuilt, markFailed, getDeployment, assertBelongsTo, DEPLOY_STATUS,
 } from "../deployments/deploymentService.mjs";
 import {
-  activateRetainedRelease, assertPublishIntakeReady, atomicPublishEnabled, atomicUnpublish, finalizeAndActivateRelease,
+  activateRetainedRelease, assertPublishIntakeReady, atomicUnpublish, finalizeAndActivateRelease,
 } from "../publishing/atomicPublisher.mjs";
 import { resolveVerifiedProjectTree } from "../builderV2/projectSource.mjs";
 
@@ -47,17 +41,6 @@ async function provisiond(route, { method = "POST", body } = {}) {
     throw error;
   }
   return out;
-}
-
-async function readDistAsBase64(dir, base = "") {
-  const files = {};
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const rel = base ? `${base}/${entry.name}` : entry.name;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) Object.assign(files, await readDistAsBase64(full, rel));
-    else files[rel] = (await readFile(full)).toString("base64");
-  }
-  return files;
 }
 
 // Analytics is added to the artifact at publish time rather than built into the app, so it stays
@@ -142,25 +125,6 @@ export async function claimSlug(ownerId, projectId, wanted, { productId = null, 
   throw error;
 }
 
-// Move an existing site record onto the project that now backs it, rather than deleting and
-// re-inserting. This keeps created_at — the date the product first went live, which deployment
-// history depends on — and avoids ever having two rows claiming one slug (it is unique).
-async function transferSite(ownerId, fromProjectId, toProjectId, client = serviceClient()) {
-  // The product travels with the row. Moving the record between two projects of the same product
-  // must not leave product_id pointing at where it used to be, or the one-live-row-per-product
-  // index would be guarding the wrong group.
-  const { data: target } = await client.from("projects")
-    .select("product_id").eq("id", String(toProjectId)).eq("owner", ownerId).maybeSingle();
-  const { error } = await client.from("published_sites")
-    .update({
-      project_id: String(toProjectId),
-      product_id: target?.product_id ? String(target.product_id) : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("project_id", String(fromProjectId)).eq("owner", ownerId);
-  if (error) throw new Error(`could not transfer the published site record: ${error.message}`);
-}
-
 // The old `resolveProject` lived here and resolved "the owner's newest project with a tree",
 // ignoring the conversation entirely. It is deleted rather than left unused: it is a one-line
 // reach away from reintroducing the bug, and lib/appBuild/projectScope.mjs replaces it everywhere.
@@ -177,7 +141,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   const { resolveConversationProject } = await import("./projectScope.mjs");
   const { project, productId, scope } = await resolveConversationProject(ctx, {
     projectId, productName,
-    columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
+    columns: "id,name,product_id,updated_at,builder_version,bv2_green_snapshot_id",
   });
   if (!project) {
     const error = new Error(scope === "unknown_product"
@@ -185,12 +149,6 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
       : "There's no built app to publish yet — build something first and I'll take it live.");
     error.code = "nothing_to_publish";
     throw error;
-  }
-  const useAtomic = atomicPublishEnabled();
-  if (project.builder_version === "v2" && !useAtomic) {
-    throw Object.assign(new Error("Builder V2 publishing requires immutable atomic releases; the cutover path is disabled."), {
-      code: "atomic_publish_required",
-    });
   }
   const source = await resolveVerifiedProjectTree(ctx.owner, project);
 
@@ -216,11 +174,6 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   try {
     const claim = await claimSlug(ctx.owner, project.id, siteName || project.name, { productId });
     const slug = claim.slug;
-    // A rebuild of this product inherits the live address. Move the record onto this project
-    // BEFORE publishing, so the unique slug is never held by two rows and the site keeps its
-    // first-published date.
-    if (claim.supersedes && !useAtomic) await transferSite(ctx.owner, claim.supersedes, project.id);
-
     // A tree with no package.json cannot be built, and npm's answer to that is a wall of ENOENT
     // naming a path inside Thrallo's own work directory. Observed in production: a project whose
     // tree held two stray files failed twice with that dump as its failure reason, which is now
@@ -236,23 +189,14 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     }
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Building for production…" });
-    const caseName = `pub-${project.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
     const runtimeTree = withRuntimeEnv(source.tree, project.id);
     const packaged = await packagePublishTree({
       owner: ctx.owner, projectId: project.id, tree: runtimeTree, appName: project.name || slug,
       idempotencyKey: `conversation-publish:${deployment.id}:${crypto.createHash("sha256").update(JSON.stringify(runtimeTree)).digest("hex")}`,
     });
-    if (!packaged && project.builder_version === "v2") {
+    if (!packaged) {
       throw Object.assign(new Error("Builder V2 publish packaging did not run in the durable worker."), { code: "worker_required" });
-    }
-    if (!packaged) await ensureDeps(() => {});
-    const build = packaged ? { ok: true, stderr: "" } : await buildTree(runtimeTree, caseName, () => {});
-    if (!build.ok) {
-      const error = new Error("The production build failed — I can fix the app and retry.");
-      error.code = "build_failed";
-      error.stderr = (build.stderr || "").slice(-2000);
-      throw error;
     }
     // The build is done and the deploy begins here, so the two durations are measured rather than
     // one total split by guesswork. The tree is stored as it was built: the project moves on, and
@@ -260,36 +204,19 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     await markBuilt(deployment.id, { sourceTree: source.tree });
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Uploading to the edge…" });
-    const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
+    const built = packaged.files;
     // The slug is the app id analytics reports under, and it is already claimed by this point.
     const files = slug ? await withAnalytics(built, slug) : built;
-    const atomic = useAtomic ? await finalizeAndActivateRelease({
+    const atomic = await finalizeAndActivateRelease({
       owner: ctx.owner, projectId: project.id, productId: project.product_id || null,
       buildId: deployment.build_run_id || null, deploymentId: deployment.id, slug,
       url: `https://${slug}.app.thrallo.com/`, files,
       runtimeConfig: runtimeTree[".env"],
-      metadata: { workerJobId: packaged?.workJobId || null, artifactRef: packaged?.artifactRef || null },
-    }) : null;
-    const out = atomic
-      ? { id: slug, url: atomic.url, files: atomic.files, bytes: atomic.bytes, releaseId: atomic.releaseId }
-      : await provisiond("/publish", { body: { projectId: project.id, files, slug: slug || undefined } });
+      metadata: { workerJobId: packaged.workJobId || null, artifactRef: packaged.artifactRef || null },
+    });
+    const out = { id: slug, url: atomic.url, files: atomic.files, bytes: atomic.bytes, releaseId: atomic.releaseId };
 
     await ctx.emit("agent_status", { agent: "Publisher", status: "Going live…" });
-    const { error: upsertError } = atomic ? { error: null } : await serviceClient().from("published_sites").upsert({
-      owner: ctx.owner, project_id: String(project.id), slug: out.id, url: out.url,
-      // Carried onto the row so the database can hold "one live record per product" itself. A rule
-      // that lives only in application code is a rule the next writer can forget.
-      product_id: project.product_id ? String(project.product_id) : null,
-      updated_at: new Date().toISOString(),
-      // Republishing after an unpublish returns the site to live. Without clearing this the
-      // project would show as unpublished while its URL was serving again.
-      unpublished_at: null,
-    }, { onConflict: "project_id" });
-    if (upsertError) console.error(`[publish] record failed: ${upsertError.message}`);
-
-    // Live, and everything that was live for this app before it becomes history rather than being
-    // overwritten. This is the step that gives "what was live last Tuesday" an answer.
-    if (!atomic) await markLive(deployment.id, { url: out.url, slug: out.id });
 
     // Outcome evidence: a site that went live is the strongest signal a build was kept.
     // Recorded after the site is actually serving, and never allowed to fail the publish.
@@ -421,22 +348,12 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
   if (!publishConfigured()) {
     throw Object.assign(new Error("Publishing infrastructure is not configured."), { code: "not_configured", status: 503 });
   }
+  assertPublishIntakeReady();
   const client = serviceClient();
   const target = await getDeployment(owner, deploymentId, { client });
   // Owner scoping alone would still let someone roll one of their apps back onto another's
   // address by pasting an id.
   const project = await assertBelongsTo(owner, target, projectId, { client });
-  const useAtomic = atomicPublishEnabled();
-  if (project.builder_version === "v2" && !useAtomic) {
-    throw Object.assign(new Error("Builder V2 rollback requires a retained immutable release; the atomic path is disabled."), {
-      code: "atomic_publish_required", status: 503,
-    });
-  }
-
-  if (!target.source_tree && !useAtomic) {
-    throw Object.assign(new Error("That deployment's source is no longer stored, so it cannot be restored."),
-      { code: "source_unavailable", status: 409 });
-  }
   if (target.status === DEPLOY_STATUS.live) {
     throw Object.assign(new Error("That deployment is already live."), { code: "already_live", status: 409 });
   }
@@ -462,80 +379,27 @@ export async function rollbackToDeployment(owner, projectId, deploymentId, { emi
 
   try {
     await emit?.("agent_status", { agent: "Publisher", status: `Restoring deployment #${target.number}…` });
-    if (useAtomic) {
-      const { data: retained, error: retainedError } = await client.from("publish_releases")
-        .select("id").eq("deployment_id", target.id).eq("owner", owner).maybeSingle();
-      if (retainedError) throw retainedError;
-      if (!retained) throw Object.assign(new Error("That deployment has no retained immutable artifact."), {
-        code: "artifact_unavailable", status: 409,
-      });
-      // No compilation and no dependency installation. The new deployment row records the
-      // activation event while the retained release keeps its original bytes and identity.
-      await markBuilt(deployment.id, { client, sourceTree: target.source_tree || null });
-      const restored = await activateRetainedRelease({
-        owner, projectId: String(projectId), releaseId: retained.id,
-        activationDeploymentId: deployment.id, client,
-      });
-      logProject({
-        owner, projectId, source: "deploy", level: "warning",
-        message: `Rolled back to deployment #${target.number}`,
-        detail: `Deployment #${deployment.number} activated retained release ${retained.id} without rebuilding.`,
-        refType: "deployment", refId: deployment.id,
-      });
-      return { deploymentNumber: deployment.number, restoredFrom: target.number,
-        releaseId: retained.id, url: restored.url, slug: restored.slug };
-    }
-    const caseName = `rb-${deployment.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
-    const runtimeTree = withRuntimeEnv(target.source_tree, projectId);
-    const packaged = await packagePublishTree({
-      owner, projectId, tree: runtimeTree, appName: project.name || site.slug,
-      idempotencyKey: `rollback-package:${deployment.id}:${crypto.createHash("sha256").update(JSON.stringify(runtimeTree)).digest("hex")}`,
+    const { data: retained, error: retainedError } = await client.from("publish_releases")
+      .select("id").eq("deployment_id", target.id).eq("owner", owner).maybeSingle();
+    if (retainedError) throw retainedError;
+    if (!retained) throw Object.assign(new Error("That deployment has no retained immutable artifact."), {
+      code: "artifact_unavailable", status: 409,
     });
-    if (!packaged) await ensureDeps(() => {});
-    const build = packaged ? { ok: true, stderr: "" } : await buildTree(runtimeTree, caseName, () => {});
-    if (!build.ok) {
-      throw Object.assign(new Error("That deployment's source no longer builds, so it was not restored."), {
-        code: "build_failed", stderr: (build.stderr || "").slice(-2000),
-      });
-    }
-    await markBuilt(deployment.id, { client, sourceTree: target.source_tree });
-
-    const built = packaged?.files || await readDistAsBase64(path.join(workDirFor(caseName), "dist"));
-    // The same slug, so the address, the custom domains and the analytics app id all stay put.
-    const files = await withAnalytics(built, site.slug);
-    const out = await provisiond("/publish", { body: { projectId: String(projectId), files, slug: site.slug } });
-
-    // published_sites is stamped so publish state, health and the dashboard follow. The slug and
-    // the first-published date are untouched.
-    await client.from("published_sites")
-      .update({ updated_at: new Date().toISOString(), unpublished_at: null })
-      .eq("project_id", String(projectId)).eq("owner", owner);
-
-    // The deployment being rolled back AWAY from is marked rolled_back rather than superseded:
-    // they are different things and the list should not pretend otherwise.
-    await markLive(deployment.id, {
-      url: out.url || site.url, slug: site.slug, client,
-      supersededStatus: DEPLOY_STATUS.rolledBack,
+    // No compilation and no dependency installation. The new deployment row records the
+    // activation event while the retained release keeps its original bytes and identity.
+    await markBuilt(deployment.id, { client, sourceTree: target.source_tree || null });
+    const restored = await activateRetainedRelease({
+      owner, projectId: String(projectId), releaseId: retained.id,
+      activationDeploymentId: deployment.id, client,
     });
-
     logProject({
       owner, projectId, source: "deploy", level: "warning",
       message: `Rolled back to deployment #${target.number}`,
-      detail: `Deployment #${deployment.number} restored the source published as #${target.number}. `
-        + `${site.url} and any custom domains are unchanged.`,
+      detail: `Deployment #${deployment.number} activated retained release ${retained.id} without rebuilding.`,
       refType: "deployment", refId: deployment.id,
     });
-    notifyOwner(owner, {
-      title: "Rolled back",
-      body: `Your site is serving deployment #${target.number} again.`,
-      url: site.url, tag: `rollback-${projectId}`,
-    }).catch(() => {});
-
-    return {
-      deploymentNumber: deployment.number, restoredFrom: target.number,
-      url: out.url || site.url, slug: site.slug,
-    };
+    return { deploymentNumber: deployment.number, restoredFrom: target.number,
+      releaseId: retained.id, url: restored.url, slug: restored.slug };
   } catch (error) {
     await markFailed(deployment.id, error?.stderr || error?.message || String(error), { client });
     logProject({
@@ -563,36 +427,8 @@ export async function unpublishApp(owner, projectId) {
     .select("id,builder_version").eq("id", String(projectId)).eq("owner", owner).maybeSingle();
   if (projectError) throw new Error(`unpublish project lookup: ${projectError.message}`);
   if (!project) throw Object.assign(new Error("That project could not be found."), { code: "project_missing" });
-  const useAtomic = atomicPublishEnabled();
-  if (project.builder_version === "v2" && !useAtomic) {
-    throw Object.assign(new Error("Builder V2 unpublish requires the atomic deployment state machine; the path is disabled."), {
-      code: "atomic_publish_required", status: 503,
-    });
-  }
-  if (useAtomic) {
-    const result = await atomicUnpublish({ owner, projectId, client });
-    logProject({ owner, projectId, source: "deploy", level: "warning",
-      message: "Site unpublished", detail: `${result.url} is no longer served; immutable releases were retained.` });
-    return result;
-  }
-  const { data: site } = await client.from("published_sites")
-    .select("project_id,slug,url,unpublished_at")
-    .eq("project_id", String(projectId)).eq("owner", owner).maybeSingle();
-  if (!site) {
-    const error = new Error("That project isn't published.");
-    error.code = "not_published";
-    throw error;
-  }
-  if (site.unpublished_at) return { url: site.url, alreadyOffline: true };
-
-  await provisiond("/unpublish", { body: { projectId: String(projectId), slug: site.slug } });
-
-  const { error: updateError } = await client.from("published_sites")
-    .update({ unpublished_at: new Date().toISOString() })
-    .eq("project_id", String(projectId)).eq("owner", owner);
-  // The files are already gone, so the site IS offline. Failing the request here would tell the
-  // user it did not work while their site was down — the worst of both.
-  if (updateError) console.error(`[unpublish] record failed: ${updateError.message}`);
+  assertPublishIntakeReady();
+  const result = await atomicUnpublish({ owner, projectId, client });
 
   // A site that is offline must not leave other surfaces claiming otherwise. Without this the
   // Domains tab kept saying "Active · Live and secured with HTTPS" while the hostname 404'd, and
@@ -616,9 +452,9 @@ export async function unpublishApp(owner, projectId) {
 
   logProject({
     owner, projectId, source: "deploy", level: "warning",
-    message: "Site unpublished", detail: `${site.url} is no longer served.`,
+    message: "Site unpublished", detail: `${result.url} is no longer served; immutable releases were retained.`,
   });
-  return { url: site.url, alreadyOffline: false, domainsDetached: (domains || []).length };
+  return { ...result, domainsDetached: (domains || []).length };
 }
 
 // Caddy learns about a custom hostname through provisiond. Exported so the domain verifier can

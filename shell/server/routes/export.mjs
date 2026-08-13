@@ -19,7 +19,7 @@ export async function handleExport(req, res, body, owner) {
 
   const { data, error } = await serviceClient()
     .from("projects")
-    .select("id,name,tree,history,builder_version,bv2_green_snapshot_id")
+    .select("id,name,history,builder_version,bv2_green_snapshot_id")
     .eq("id", projectId)
     .eq("owner", owner.id)
     .maybeSingle();

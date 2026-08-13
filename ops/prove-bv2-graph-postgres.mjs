@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { indexTree } from "../shell/server/lib/builderV2/indexer.mjs";
 import { compareGraphIndexes, manifestOf } from "../shell/server/lib/builderV2/graphParity.mjs";
-import { beginShadowRun, loadIndex, persistIndex } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
+import { loadIndex, persistIndex } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
 
 if (process.env.BV2_GRAPH_PROOF !== "1") throw new Error("BV2_GRAPH_PROOF=1 is required");
 const url = process.env.API_URL;
@@ -171,9 +171,6 @@ try {
   assert.equal(parity.clean, true, JSON.stringify(parity.mismatches));
   proof.parity = parity.actualCounts;
 
-  const shadowTree = indexTree({ "src/gc.js": "export function gc() { return 1; }\n" });
-  await persistIndex(OWNER_A, PROJECT_A, shadowTree, { client });
-  await beginShadowRun(OWNER_A, PROJECT_A, "proof-shadow", shadowTree, { client });
   const snapshotTree = indexTree({ "src/gc.js": "export function gc() { return 2; }\n" });
   await persistIndex(OWNER_A, PROJECT_A, snapshotTree, { client });
   const snapshotHash = manifestOf(snapshotTree)["src/gc.js"];
@@ -194,7 +191,7 @@ try {
     p_owner: OWNER_A, p_project_id: PROJECT_A, p_before: new Date().toISOString(),
   }), "graph gc");
   assert.equal(deleted, 0);
-  proof.gc = "shadow_and_snapshot_pins_preserved";
+  proof.gc = "snapshot_pins_preserved";
 
   console.log(JSON.stringify({ ok: true, ...proof }));
 } finally {
@@ -204,7 +201,6 @@ try {
   }
   unwrap(await client.from("bv2_snapshot_files").delete().eq("snapshot_id", "92000000-0000-4000-8000-000000000001"), "cleanup snapshot files");
   unwrap(await client.from("bv2_snapshots").delete().eq("id", "92000000-0000-4000-8000-000000000001"), "cleanup snapshot");
-  unwrap(await client.from("bv2_shadow_runs").delete().eq("owner", OWNER_A), "cleanup shadow runs");
   unwrap(await client.from("bv2_file_revisions").delete().eq("owner", OWNER_A), "cleanup owner A graph");
   unwrap(await client.from("bv2_file_revisions").delete().eq("owner", OWNER_B), "cleanup owner B graph");
   unwrap(await client.from("bv2_migration_state").delete().eq("owner", OWNER_A), "cleanup migration state");

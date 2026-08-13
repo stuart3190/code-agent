@@ -158,37 +158,6 @@ export async function supabaseGraph(owner, projectId, manifest, { client = servi
   return memoryGraph(owner, projectId, loaded);
 }
 
-export async function beginShadowRun(owner, projectId, buildId, treeIndex, { client = serviceClient() } = {}) {
-  return unwrap(await client.rpc("bv2_begin_shadow_run", {
-    p_owner: owner,
-    p_project_id: projectId,
-    p_build_id: buildId,
-    p_tree_hash: treeIndex.treeHash,
-    p_manifest: manifestOf(treeIndex),
-  }), "begin shadow run");
-}
-
-export async function recordShadowCheck(owner, projectId, shadowRunId, status, evidence, { client = serviceClient() } = {}) {
-  return unwrap(await client.rpc("bv2_record_shadow_check", {
-    p_owner: owner,
-    p_project_id: projectId,
-    p_shadow_run_id: shadowRunId,
-    p_status: status,
-    p_evidence: evidence,
-  }), "record shadow check");
-}
-
-export async function loadShadowRunIndex(owner, projectId, shadowRunId, { client = serviceClient() } = {}) {
-  const run = unwrap(await client.from("bv2_shadow_runs").select("*")
-    .eq("id", shadowRunId).eq("owner", owner).eq("project_id", projectId).maybeSingle(), "shadow run load");
-  if (!run) throw new Error("shadow run does not belong to owner/project");
-  const rows = unwrap(await client.from("bv2_shadow_run_files").select("path,content_hash")
-    .eq("shadow_run_id", shadowRunId).eq("owner", owner).eq("project_id", projectId), "shadow manifest load");
-  const manifest = Object.fromEntries(rows.map((row) => [row.path, row.content_hash]));
-  const index = await loadIndex(owner, projectId, manifest, { client });
-  return { run, manifest, index };
-}
-
 // ── snapshot persistence (commit J) ───────────────────────────────────────────────────────────
 
 /**

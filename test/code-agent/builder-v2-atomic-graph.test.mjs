@@ -7,13 +7,11 @@ import { test } from "node:test";
 import { indexTree } from "../../shell/server/lib/builderV2/indexer.mjs";
 import { compareGraphIndexes, manifestOf } from "../../shell/server/lib/builderV2/graphParity.mjs";
 import {
-  beginShadowRun,
   loadIndex,
   persistIndex,
   supabaseGraph,
 } from "../../shell/server/lib/builderV2/supabaseTwins.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
-import { runShadowDriftCheck } from "../../ops/bv2-shadow-drift.mjs";
 import { createFakeBv2Supabase } from "./helpers/fake-bv2-supabase.mjs";
 
 const OWNER_A = "00000000-0000-4000-8000-000000000001";
@@ -126,7 +124,7 @@ const mutationCases = [
 ];
 
 for (const [label, expectedKind, mutate] of mutationCases) {
-  test(`H3 — full shadow validation detects ${label}`, async () => {
+  test(`H3 — full persisted-graph parity detects ${label}`, async () => {
     const { memory, persisted } = await roundTrip();
     const actual = cloneIndex(persisted);
     mutate(actual);
@@ -136,73 +134,7 @@ for (const [label, expectedKind, mutate] of mutationCases) {
   });
 }
 
-test("H3 — stale shadow age is blocking evidence", async () => {
-  const { memory, persisted } = await roundTrip();
-  const now = Date.parse("2026-08-06T22:00:00.000Z");
-  const proof = compareGraphIndexes(memory, persisted, {
-    owner: OWNER_A,
-    projectId: PROJECT,
-    shadowAt: "2026-08-04T00:00:00.000Z",
-    maxAgeMs: 36 * 60 * 60 * 1000,
-    now,
-  });
-  assert.equal(proof.clean, false);
-  assert.ok(proof.mismatches.some((mismatch) => mismatch.kind === "stale_shadow_run"));
-});
-
-test("H3 — a missing shadow run is persisted as exact gap evidence and fails ops", async () => {
-  const client = createFakeBv2Supabase();
-  client.table("bv2_migration_state").push({
-    owner: OWNER_A,
-    project_id: PROJECT,
-    state: "shadow",
-    last_shadow_at: "2026-08-06T00:00:00.000Z",
-    notes: { buildId: "missing-build" },
-  });
-  const result = await runShadowDriftCheck({
-    client,
-    windowStart: "2026-08-06T00:00:00.000Z",
-    now: Date.parse("2026-08-06T22:00:00.000Z"),
-    log: () => {},
-  });
-  assert.equal(result.clean, false);
-  assert.equal(result.drift, 1);
-  const check = client.table("bv2_shadow_checks")[0];
-  assert.equal(check.shadow_run_id, null);
-  assert.equal(check.evidence.mismatches[0].kind, "missing_shadow_run");
-});
-
-test("H3 — a completed V1 build with no shadow callback is blocking daily evidence", async () => {
-  const client = createFakeBv2Supabase();
-  client.table("build_jobs").push({
-    id: "20000000-0000-4000-8000-000000000001",
-    owner: OWNER_A,
-    project_id: PROJECT,
-    status: "complete",
-    updated_at: "2026-08-06T01:00:00.000Z",
-  });
-  const lines = [];
-  const result = await runShadowDriftCheck({
-    client,
-    windowStart: "2026-08-06T00:00:00.000Z",
-    now: Date.parse("2026-08-06T22:00:00.000Z"),
-    log: (line) => lines.push(line),
-  });
-  assert.equal(result.clean, false);
-  assert.equal(result.summary.projectsExpected, 1);
-  assert.equal(result.summary.missingCount, 1);
-  assert.equal(result.evidence[0].mismatches[0].kind, "missing_shadow_for_completed_build");
-  assert.ok(lines.some((line) => line.includes('"type":"daily_shadow_summary"')));
-});
-
-test("H3 — an unconfigured shadow window is unhealthy instead of silently green", async () => {
-  const client = createFakeBv2Supabase();
-  const result = await runShadowDriftCheck({ client, log: () => {} });
-  assert.equal(result.clean, false);
-  assert.deepEqual(result.summary.errors, ["shadow_window_not_configured"]);
-});
-
-test("C4/H3 — complete persisted production fixture reload equals every memory graph answer", async () => {
+test("C4 — complete persisted production fixture reload equals every memory graph answer", async () => {
   const { memory, persisted } = await roundTrip(PRODUCTION_TREE);
   const proof = compareGraphIndexes(memory, persisted, { owner: OWNER_A, projectId: PROJECT });
   assert.equal(proof.clean, true, JSON.stringify(proof.mismatches));
@@ -218,8 +150,12 @@ test("C4 — garbage collection preserves revisions pinned by valid shadow and s
   const client = createFakeBv2Supabase();
   const shadowIndex = indexTree({ "src/a.js": "export function a() { return 1; }\n" });
   await persistIndex(OWNER_A, PROJECT, shadowIndex, { client });
-  const shadowRunId = await beginShadowRun(OWNER_A, PROJECT, "build-1", shadowIndex, { client });
-  assert.ok(shadowRunId);
+  const historicalRevision = client.table("bv2_file_revisions")[0];
+  client.table("bv2_shadow_run_files").push({
+    shadow_run_id: "historical-shadow", owner: OWNER_A, project_id: PROJECT,
+    path: historicalRevision.path, content_hash: historicalRevision.content_hash,
+    revision_id: historicalRevision.id,
+  });
   const snapshotIndex = indexTree({ "src/a.js": "export function a() { return 2; }\n" });
   await persistIndex(OWNER_A, PROJECT, snapshotIndex, { client });
   const snapshotRevision = client.table("bv2_file_revisions").find((row) => row.content_hash === manifestOf(snapshotIndex)["src/a.js"]);

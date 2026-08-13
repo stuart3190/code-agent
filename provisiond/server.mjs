@@ -25,7 +25,7 @@ import {
   containerExists,
 } from "./docker.mjs";
 import {
-  activateRelease, adoptLegacyRelease, cleanupReleases, finalizeRelease, inspectPointer, listReleaseFiles,
+  activateRelease, cleanupReleases, finalizeRelease, inspectPointer, listReleaseFiles,
   purgeProjectReleases, unpublishPointer, verifyRelease,
 } from "./releases.mjs";
 
@@ -367,12 +367,6 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: "releaseId, owner, projectId, files and proof required" });
       }
       return send(res, 200, await finalizeRelease(body));
-    }
-    if (p === "/releases/adopt-legacy" && req.method === "POST") {
-      const body = await readJson(req);
-      const adopted = await adoptLegacyRelease(body);
-      for (const domain of body.domains || []) await attachDomain(domain, body.slug);
-      return send(res, 200, adopted);
     }
     if (p === "/releases/activate" && req.method === "POST") {
       const body = await readJson(req);

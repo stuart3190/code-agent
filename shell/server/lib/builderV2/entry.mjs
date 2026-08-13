@@ -14,7 +14,7 @@ import { MANAGED_FINAL_JOB_GRACE_CREDITS, managedAffordableCreditLimit } from ".
 import { createJob, subscribe } from "../buildJobs.mjs";
 import { buildWorkerEnabled } from "../buildWorkQueue.mjs";
 import { serviceClient } from "../supabase.mjs";
-import { killSwitchActive } from "./featureFlags.mjs";
+import { killSwitchActive } from "./cutoverPolicy.mjs";
 import { requireFreshWorkerAdmission } from "./workerAdmission.mjs";
 import { classifyComplexity, profileFor } from "../appBuild/buildProfile.mjs";
 import { buildBudgetApprovals } from "./buildBudgetApprovals.mjs";
@@ -313,6 +313,11 @@ export async function startExistingAppWorkV2(ctx, {
   const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   let mode = "iterate";
   let v2Input = null;
+  if (kind !== "repair" && !project.bv2_green_snapshot_id) {
+    throw Object.assign(new Error("This project has no verified Builder V2 green snapshot."), {
+      code: "no_green_snapshot",
+    });
+  }
   if (kind === "repair" && !project.bv2_green_snapshot_id) {
     const resumable = await resumableBuild(deps.client, ctx.owner, project.id);
     if (!resumable) {

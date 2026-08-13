@@ -171,17 +171,6 @@ export async function activateRelease(options) {
   return withSiteLock(options.slug, () => activateReleaseUnlocked(options));
 }
 
-export async function adoptLegacyRelease({ releaseId, owner, projectId, slug }) {
-  const legacy = inside(PUBLISH_ROOT, path.join(PUBLISH_ROOT, safeReleaseSegment(slug, "slug")));
-  const info = await lstat(legacy).catch(() => null);
-  if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error("legacy site directory is missing");
-  const files = await filesFromDir(legacy);
-  const proof = createArtifactManifest(files);
-  const finalized = await finalizeRelease({ releaseId, owner, projectId, files, proof });
-  const pointer = await activateRelease({ slug, owner, projectId, releaseId, expectedPreviousReleaseId: null });
-  return { ...finalized, pointer, legacyPath: safeReleaseSegment(slug, "slug") };
-}
-
 export async function unpublishPointer({ slug, expectedPreviousReleaseId = null }) {
   return withSiteLock(slug, async () => {
     const current = await inspectPointer(slug);

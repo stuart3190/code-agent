@@ -17,7 +17,10 @@ export function assertPublishIntakeReady() {
   if (publisherPaused()) {
     throw Object.assign(new Error("Publishing is temporarily paused for maintenance."), { code: "publisher_paused" });
   }
-  if (atomicPublishEnabled() && optionalEnv("THRALLO_BUILD_WORKER_ENABLED", "0") !== "1") {
+  if (!atomicPublishEnabled()) {
+    throw Object.assign(new Error("Immutable atomic publishing is not enabled."), { code: "atomic_publish_required" });
+  }
+  if (optionalEnv("THRALLO_BUILD_WORKER_ENABLED", "0") !== "1") {
     throw Object.assign(new Error("Atomic publishing requires the isolated build worker."), { code: "build_worker_required" });
   }
 }
@@ -307,50 +310,6 @@ export async function verifyRetainedRelease({ owner, releaseId, client = service
     throw new Error("retained release integrity mismatch");
   }
   return verified;
-}
-
-export async function adoptLegacyPublishedSite({ owner, projectId, client = serviceClient() }) {
-  if (!atomicPublishEnabled()) throw new Error("atomic publishing must be enabled on the dark provisiond endpoint");
-  const { data: site, error: siteError } = await client.from("published_sites")
-    .select("id,owner,project_id,product_id,slug,url,activation_version,active_publish_release_id,unpublished_at")
-    .eq("owner", owner).eq("project_id", String(projectId)).maybeSingle();
-  rpcError("legacy published site", siteError);
-  if (!site || site.unpublished_at || site.active_publish_release_id) throw new Error("site is not an unadopted live legacy site");
-  const { data: deployment, error: deploymentError } = await client.from("deployments")
-    .select("id,build_run_id").eq("owner", owner).eq("project_id", String(projectId)).eq("status", "live")
-    .order("deployed_at", { ascending: false }).limit(1).maybeSingle();
-  rpcError("legacy live deployment", deploymentError);
-  const { data: domains, error: domainsError } = await client.from("custom_domains")
-    .select("domain,status,ssl_status").eq("owner", owner).eq("project_id", String(projectId));
-  rpcError("legacy domain bindings", domainsError);
-  const releaseId = crypto.randomUUID();
-  const adopted = await provisiond("/releases/adopt-legacy", { body: {
-    releaseId, owner, projectId: String(projectId), slug: site.slug,
-    domains: (domains || []).map((row) => row.domain),
-  } });
-  const registered = await client.rpc("register_verified_publish_release", {
-    p_release_id: releaseId, p_owner: owner, p_project_id: String(projectId), p_product_id: site.product_id,
-    p_slug: site.slug, p_url: site.url, p_build_id: deployment?.build_run_id || null,
-    p_snapshot_id: null, p_deployment_id: deployment?.id || null,
-    p_artifact_hash: adopted.artifactHash, p_manifest_hash: adopted.manifestHash,
-    p_artifact_path: adopted.artifactPath, p_artifact_bytes: adopted.bytes,
-    p_file_count: adopted.fileCount, p_manifest: adopted.manifest,
-    p_domains: domains || [], p_metadata: { adoptedLegacy: true, legacyPath: adopted.legacyPath },
-  });
-  rpcError("register adopted release", registered.error);
-  const requested = await client.rpc("request_publish_activation", {
-    p_owner: owner, p_release_id: releaseId, p_expected_version: site.activation_version,
-    p_operation: "activate", p_activation_deployment_id: deployment?.id || null,
-  });
-  rpcError("request adopted activation", requested.error);
-  const marked = await client.rpc("mark_publish_pointer_switched", {
-    p_intent_id: requested.data.id, p_observed_release_id: releaseId,
-  });
-  rpcError("record adopted pointer", marked.error);
-  const completed = await client.rpc("complete_publish_activation", { p_intent_id: requested.data.id });
-  rpcError("complete adopted activation", completed.error);
-  return { releaseId, siteId: site.id, slug: site.slug, artifactHash: adopted.artifactHash,
-    manifestHash: adopted.manifestHash, domains: (domains || []).map((row) => row.domain) };
 }
 
 export async function reconcileActivation(intent, { client = serviceClient() } = {}) {
