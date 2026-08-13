@@ -137,6 +137,12 @@ test("the qualification operator repair is exact, one-file, zero-model, and immu
     source.indexOf("async function cleanup(state)"));
   assert.match(repair, /failures\.length !== 1/);
   assert.match(repair, /capacity-is-enforced: expected date, choices, current, availability, copy; found date, choices/);
+  assert.match(repair, /source\.includes\("\\r\\n"\) \? "\\r\\n" : "\\n"/,
+    "the exact guarded edit must tolerate only the source snapshot's line-ending representation");
+  assert.match(repair, /source\.split\(anchor\)\.length !== 2/,
+    "the exact guarded edit requires one and only one source anchor");
+  assert.match(repair, /source\.includes\(replacement\)/,
+    "similar availability copy elsewhere must not look like this exact insertion");
   assert.match(repair, /source\.replace\(anchor, replacement\)/);
   assert.match(repair, /filesChanged: \[target\]/);
   assert.match(repair, /reason: "working:package14s-operator-capacity-copy"/);

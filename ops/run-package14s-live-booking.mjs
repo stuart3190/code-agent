@@ -349,10 +349,11 @@ async function applyQualificationCapacityCopy(state) {
   const store = createSnapshotStore(supabaseSnapshotStorage({ client }));
   const tree = await store.materialize(state.owner, sourceSnapshotId);
   const target = "src/components/reserve-recover-and-cancel/ReserveRecoverAndCancelFlow.jsx";
-  const anchor = "<section className=\"ember-panel\">\n        <h2>Date choices</h2>";
-  const replacement = `${anchor}\n        <p>Current availability copy: choose a date to see live remaining capacity for every supper slot.</p>`;
   const source = String(tree[target] || "");
-  if (!source.includes(anchor) || source.includes("Current availability copy:")) {
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const anchor = `<section className="ember-panel">${newline}        <h2>Date choices</h2>`;
+  const replacement = `${anchor}${newline}        <p>Current availability copy: choose a date to see live remaining capacity for every supper slot.</p>`;
+  if (source.split(anchor).length !== 2 || source.includes(replacement)) {
     throw new Error("operator repair source anchor is missing or already changed");
   }
   const patched = source.replace(anchor, replacement);
