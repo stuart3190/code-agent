@@ -155,9 +155,8 @@ test("Package 13 production canary is statically bounded away from providers, St
 
 test("Package 13 capability runtime validates models and blocks managed dispatch while settlement is paused", () => {
   const runtime = readFileSync(new URL("../../shell/server/lib/capabilityRuntime.mjs", import.meta.url), "utf8");
-  const configuration = readFileSync(new URL("../../shell/server/lib/capabilities.mjs", import.meta.url), "utf8");
-  assert.match(configuration, /assertCapabilityModel/);
   assert.match(runtime, /assertCapabilityModel/);
+  assert.match(runtime, /RUNTIME_CAPABILITY_OPERATIONS/);
   const pauseGuard = runtime.indexOf('action.execution_mode === "managed" && managedSettlementPaused()');
   const dispatch = runtime.indexOf("return await finishJob(client, job, action, await execute(action, job, client))");
   assert.ok(pauseGuard > 0 && dispatch > pauseGuard, "managed pause must be checked before capability provider dispatch");

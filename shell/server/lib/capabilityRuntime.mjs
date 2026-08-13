@@ -18,6 +18,19 @@ const MANAGED_MARGIN = 1.1;
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const PRIVATE_V4 = [/^10\./, /^127\./, /^169\.254\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^0\./];
 
+// Canonical operations accepted by the generated-app runtime. Builder V1's retired
+// configuration route used to own a second, UI-only preset catalogue; keeping the executable
+// contract here prevents that dead configuration surface from becoming a runtime dependency.
+export const RUNTIME_CAPABILITY_OPERATIONS = Object.freeze({
+  openai: Object.freeze(["text", "structured", "image", "embeddings"]),
+  replicate: Object.freeze(["prediction"]),
+  http: Object.freeze(["request"]),
+  media: Object.freeze(["compose", "image_convert"]),
+  document: Object.freeze(["pdf_extract", "pdf_merge", "archive"]),
+  knowledge: Object.freeze(["ingest", "search"]),
+  meta: Object.freeze(["accounts", "page_post", "create_ad"]),
+});
+
 function isPrivateAddress(address) {
   const value = String(address || "").toLowerCase();
   if (value === "::1" || value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
@@ -513,6 +526,9 @@ async function runMeta(action, job, client) {
 }
 
 async function execute(action, job, client) {
+  if (!RUNTIME_CAPABILITY_OPERATIONS[action.provider]?.includes(action.operation)) {
+    throw new Error(`Unsupported runtime operation '${action.provider}:${action.operation}'.`);
+  }
   if (action.provider === "openai") return runOpenAI(action, job, client);
   if (action.provider === "replicate") return runReplicate(action, job, client);
   if (action.provider === "http") return runHttp(action, job, client);

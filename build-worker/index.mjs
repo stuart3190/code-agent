@@ -22,7 +22,7 @@ const LEASE_SECONDS = Math.max(15, Math.min(300, Number(process.env.THRALLO_BUIL
 const POLL_MS = Math.max(250, Math.min(10_000, Number(process.env.THRALLO_BUILD_POLL_MS || 1000)));
 const JOB_TYPES = (process.env.THRALLO_BUILD_JOB_TYPES || [
   "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
-  "image_optimise", "publish_package", "android_package", "proof_slow",
+  "image_optimise", "publish_package", "proof_slow",
 ].join(",")).split(",").map((v) => v.trim()).filter(Boolean);
 
 let previewIsolation = { status: "not_required" };
@@ -123,19 +123,6 @@ async function runJob(job) {
       const optimiser = createOptimiser({ client });
       const result = await optimiser.optimise(job.owner, job.payload || {});
       outcome = { ok: true, exitCode: 0, result, stdout: "", stderr: "" };
-    } else if (job.job_type === "android_package") {
-      const { buildAndroid } = await import("../shell/server/lib/android.mjs");
-      const built = await buildAndroid({
-        owner: { id: job.owner }, projectId: job.project_id,
-        slug: job.payload.slug, tree: job.payload.tree, appName: job.payload.appName,
-        log: (line) => event("stdout", line),
-      });
-      const artifactRoot = path.resolve(process.env.THRALLO_BUILD_ARTIFACT_ROOT || "/var/lib/thrallo-build-worker");
-      const artifactDir = path.join(artifactRoot, job.id);
-      await mkdir(artifactDir, { recursive: true });
-      const artifactRef = path.join(artifactDir, built.filename);
-      await writeFile(artifactRef, built.zip, { flag: "wx" });
-      outcome = { ok: true, exitCode: 0, result: { filename: built.filename, bytes: built.zip.length }, artifactRef, stdout: "", stderr: "" };
     } else {
       outcome = await runSandboxJob(job, {
         signal: currentAbort.signal,

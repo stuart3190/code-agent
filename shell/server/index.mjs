@@ -28,7 +28,6 @@ import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./route
 import { handleExport } from "./routes/export.mjs";
 import { handleQaStart, handleQaGet, handleQaList, handleQaArtifact } from "./routes/qa.mjs";
 import { sweepQaRuns } from "./lib/qaRuns.mjs";
-import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import {
   handleAgents, handleAgentUpdate, handleCodeAgentCapabilities, handleLatestRunGet,
   handleRepositories, handleRunCancel,
@@ -1108,9 +1107,6 @@ server.listen(PORT, HOST, () => {
   // And keep sweeping: a build that wedges while the server stays up was never caught before.
   if (haveSupabaseEnv()) startStaleJobSweeper();
   if (haveSupabaseEnv()) recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
-  // The action worker drives integrations for the apps CUSTOMERS build, which is a Buildr101-era
-  // surface Thrallo does not mount — it stays behind the flag, unlike the job sweeps above.
-  if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();
   startCodeAgentWorker();
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
@@ -1145,7 +1141,6 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[shell] ${signal} - marking active builds interrupted`);
   server.close();
-  stopActionWorker();
   stopCodeAgentWorker();
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();

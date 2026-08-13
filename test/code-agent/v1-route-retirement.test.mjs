@@ -13,26 +13,16 @@ test("the shared publishing slug normalizer preserves the retired route contract
   assert.equal(slugifySiteName(`  ${"A".repeat(45)}---`), "a".repeat(40));
 });
 
-test("Android packaging depends on route-independent publishing support", async () => {
+test("the retired Android mutable-tree packaging surface is physically absent", async () => {
   const worker = await readCode("../../build-worker/index.mjs");
-  assert.match(worker, /job\.job_type === "android_package"/);
-  assert.match(worker, /import\("\.\.\/shell\/server\/lib\/android\.mjs"\)/);
-
-  const android = await readCode("../../shell/server/lib/android.mjs");
-  assert.match(android, /from "\.\/publishing\/materializePublish\.mjs"/);
-  assert.doesNotMatch(android, /routes\/publish\.mjs/);
-
-  const publisher = await readCode("../../shell/server/lib/publishing/materializePublish.mjs");
-  assert.match(publisher, /export async function materializeAndPublish/);
-  for (const required of [
-    "packagePublishTree",
-    "withPwaAssets",
-    "assetlinksJson",
-    "finalizeAndActivateRelease",
-    "recordRelease",
-  ]) {
-    assert.ok(publisher.includes(required), `shared publisher lost ${required}`);
-  }
+  assert.doesNotMatch(worker, /android_package|lib\/android\.mjs/);
+  const queue = await readCode("../../shell/server/lib/buildWorkQueue.mjs");
+  assert.doesNotMatch(queue, /android_package/);
+  const migration = await readCode("../../supabase/migrations/20260813194500_enforce_v2_only_builder_contract.sql");
+  assert.match(migration, /retired Android work rows remain/);
+  const activeChecks = migration.split("drop constraint if exists build_work_payloads_job_type_check")[1];
+  assert.ok(activeChecks, "V2-only migration must replace both durable-work type constraints");
+  assert.doesNotMatch(activeChecks, /android_package/);
 });
 
 test("the live Builder V2 publisher imports only the shared slug utility", async () => {

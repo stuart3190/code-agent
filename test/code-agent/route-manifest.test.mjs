@@ -31,6 +31,20 @@ const REMOVED_ROUTE_MODULES = new Set([
   "publish.mjs",
   "templates.mjs",
   "visualBrand.mjs",
+  "analytics.mjs",
+  "capabilities.mjs",
+  "connectWebhook.mjs",
+  "connectors.mjs",
+  "domains.mjs",
+  "features.mjs",
+  "github.mjs",
+  "integrations.mjs",
+  "ownerConsole.mjs",
+  "runtimeCheckout.mjs",
+  "runtimeConnectors.mjs",
+  "runtimeWebhook.mjs",
+  "saasPayments.mjs",
+  "stripeWebhook.mjs",
 ]);
 
 // Modules whose handlers MUST be mounted. These are Thrallo's live product surface.
@@ -59,24 +73,7 @@ const MUST_BE_MOUNTED = new Set([
   "onboarding.mjs",      // Phase 8 — first-run state
 ]);
 
-// Modules deliberately NOT mounted, each with the reason. A bare list would rot; a reason makes
-// the next legacy sweep reviewable instead of guesswork.
-const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
-  "analytics.mjs": "Buildr101 per-app analytics connector; not part of the Thrallo product surface",
-  "capabilities.mjs": "Buildr101 connector capability runtime; superseded by the Capability Registry",
-  "connectWebhook.mjs": "Stripe Connect webhook for generated-app payments; unmounted until payments return",
-  "connectors.mjs": "Buildr101 connector hub; superseded by the Capability Registry",
-  "domains.mjs": "legacy custom-domain management; Thrallo serves its own ask-gate via previewDomainCheck.mjs",
-  "features.mjs": "Buildr101 feature-flag matrix; Thrallo gates on plan + capability requirements",
-  "github.mjs": "legacy PAT-based GitHub export; deliberately replaced by the GitHub App (githubApp.mjs)",
-  "integrations.mjs": "Buildr101 integrations; superseded by the Capability Registry",
-  "ownerConsole.mjs": "Buildr101 owner console; superseded by Thrallo admin analytics",
-  "runtimeCheckout.mjs": "Buildr101 generated-app checkout runtime",
-  "runtimeConnectors.mjs": "Buildr101 generated-app connector runtime",
-  "runtimeWebhook.mjs": "Buildr101 generated-app webhook runtime",
-  "saasPayments.mjs": "Buildr101 generated-app payments",
-  "stripeWebhook.mjs": "legacy platform billing webhook; superseded by the Thrallo billing webhook",
-}));
+const DELIBERATELY_UNMOUNTED = new Map();
 
 async function routeModules() {
   const modules = new Map();
@@ -88,7 +85,7 @@ async function routeModules() {
   return modules;
 }
 
-test("every route module is classified as mounted or deliberately unmounted", async () => {
+test("every remaining route module is mounted", async () => {
   const modules = await routeModules();
   const unclassified = [...modules.keys()]
     .filter((file) => !MUST_BE_MOUNTED.has(file) && !DELIBERATELY_UNMOUNTED.has(file));
@@ -130,7 +127,7 @@ test("every handler of a live route module is actually mounted, not merely impor
     `these handlers are imported but never dispatched — the route body was deleted: ${importedButUnused.join(", ")}`);
 });
 
-test("a deliberately retired route cannot be revived without updating the manifest", async () => {
+test("no deliberately unmounted route modules remain", async () => {
   const modules = await routeModules();
   const index = await readFile(indexPath, "utf8");
   const revived = [];
@@ -146,6 +143,7 @@ test("a deliberately retired route cannot be revived without updating the manife
 });
 
 test("every retirement carries a written reason", () => {
+  assert.equal(DELIBERATELY_UNMOUNTED.size, 0);
   for (const [file, reason] of DELIBERATELY_UNMOUNTED) {
     assert.ok(reason && reason.length > 25, `${file}: retirement needs a real justification`);
   }
