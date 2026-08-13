@@ -8,10 +8,14 @@ import { startAppBuildV2, startExistingAppWorkV2 } from "../../shell/server/lib/
 test("accepted Builder V2 dispatch is durable-worker-only and returns handled:true", async () => {
   const calls = [];
   const project = { id: "project-1", name: "Test" };
+  let projectInput = null;
   const client = {
     from(table) {
       assert.equal(table, "projects");
-      return { insert: () => ({ select: () => ({ single: async () => ({ data: project, error: null }) }) }) };
+      return { insert: (input) => {
+        projectInput = input;
+        return { select: () => ({ single: async () => ({ data: project, error: null }) }) };
+      } };
     },
   };
   const diag = { id: "diag-1", recorderForJob: () => ({ sessionId: "diag-1" }) };
@@ -33,6 +37,7 @@ test("accepted Builder V2 dispatch is durable-worker-only and returns handled:tr
     },
   });
   assert.equal(accepted.handled, true);
+  assert.equal(projectInput.builder_version, "v2", "a queued project is V2-owned before its first green snapshot");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].pipelineVersion, "v2");
   assert.deepEqual(calls[0].providerSelection, { provider: "unknown", billingLane: "byok_api", manualModel: null });
@@ -162,6 +167,22 @@ test("new V2 build refuses before creating a project when the worker is disabled
   assert.equal(inserted, false);
 });
 
+test("V2-only kill switch refuses before worker admission or project creation", async () => {
+  let touched = false;
+  const ctx = {
+    owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+    conversations: {}, emit: async () => {},
+  };
+  await assert.rejects(startAppBuildV2(ctx, { description: "x" }, {
+    env: { THRALLO_BV2_KILL: "1" },
+    deps: {
+      workerEnabled: () => { touched = true; return true; },
+      client: { from: () => { touched = true; throw new Error("must not write"); } },
+    },
+  }), (error) => error.code === "builder_v2_killed");
+  assert.equal(touched, false);
+});
+
 test("existing V2 work refuses before creating diagnostics when the worker is disabled", async () => {
   let diagnosticsStarted = false;
   await assert.rejects(startExistingAppWorkV2({ owner: "owner", conversation: { id: "conversation" } }, {
@@ -179,8 +200,8 @@ test("the accepted V2 capability path has no handled:false fallback", async () =
     readFile(new URL("../../shell/server/lib/capabilities/coreCapabilities.mjs", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(entry, /handled:\s*false/);
-  assert.match(capabilities, /if \(!shadow\.handled\) throw/);
-  assert.doesNotMatch(capabilities, /eligible owner declined/);
+  assert.match(capabilities, /startAppBuildV2\(ctx, input\)/);
+  assert.doesNotMatch(capabilities, /v2BuildEligible|startAppBuild\(|repairApp\(/);
 });
 
 test("runtime composition migration preserves V1 defaults and adds explicit V2 links", async () => {

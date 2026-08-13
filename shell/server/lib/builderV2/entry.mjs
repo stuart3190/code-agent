@@ -14,20 +14,23 @@ import { MANAGED_FINAL_JOB_GRACE_CREDITS, managedAffordableCreditLimit } from ".
 import { createJob, subscribe } from "../buildJobs.mjs";
 import { buildWorkerEnabled } from "../buildWorkQueue.mjs";
 import { serviceClient } from "../supabase.mjs";
-import { killSwitchActive, flagOn, flagOnFor } from "./featureFlags.mjs";
+import { killSwitchActive } from "./featureFlags.mjs";
 import { requireFreshWorkerAdmission } from "./workerAdmission.mjs";
 import { classifyComplexity, profileFor } from "../appBuild/buildProfile.mjs";
 import { buildBudgetApprovals } from "./buildBudgetApprovals.mjs";
 
-export async function v2BuildEligible(owner, options = {}) {
-  try {
-    if (killSwitchActive(options.env || process.env)) return { eligible: false, reason: "THRALLO_BV2_KILL is set" };
-    if (!(await flagOn("bv2.enabled", options))) return { eligible: false, reason: "bv2.enabled is off" };
-    if (!(await flagOnFor("bv2.owners", owner, options))) return { eligible: false, reason: "owner is not enrolled in bv2.owners" };
-    return { eligible: true, reason: "kill switch clear, bv2.enabled on, owner enrolled" };
-  } catch (error) {
-    return { eligible: false, reason: `flag read failed (fails closed): ${error.message}` };
+export async function v2BuildEligible(_owner, options = {}) {
+  if (killSwitchActive(options.env || process.env)) {
+    return { eligible: false, reason: "THRALLO_BV2_KILL is set" };
   }
+  return { eligible: true, reason: "Builder V2 is the exclusive application builder" };
+}
+
+function requireV2CutoverAvailable(env = process.env) {
+  if (!killSwitchActive(env)) return;
+  throw Object.assign(new Error(
+    "Builder V2 is temporarily unavailable because its emergency kill switch is active.",
+  ), { code: "builder_v2_killed" });
 }
 
 const PHASES = Object.freeze({
@@ -192,6 +195,7 @@ async function resumableBuild(client, owner, projectId) {
 
 /** Accept a new application build. An exception remains a V2 failure; callers must not fallback. */
 export async function startAppBuildV2(ctx, input, options = {}) {
+  requireV2CutoverAvailable(options.env || process.env);
   const workerEnabled = options.deps?.workerEnabled || buildWorkerEnabled;
   if (!workerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the isolated build worker; no project was created."), {
@@ -245,7 +249,7 @@ export async function startAppBuildV2(ctx, input, options = {}) {
     }
     const created = await deps.client.from("projects").insert({
       owner: ctx.owner, name: name || String(input.description).slice(0, 120), product_id: productId,
-      budget_approval_id: consumedApproval?.approvalId || null,
+      budget_approval_id: consumedApproval?.approvalId || null, builder_version: "v2",
     }).select("*").single();
     if (created.error) throw new Error(`Builder V2 project creation failed: ${created.error.message}`);
     project = created.data;
@@ -297,6 +301,7 @@ export async function startAppBuildV2(ctx, input, options = {}) {
 export async function startExistingAppWorkV2(ctx, {
   project, request, kind = "edit", trigger = "user", taskHint = null,
 }, options = {}) {
+  requireV2CutoverAvailable(options.env || process.env);
   if (!project?.id) throw new Error("Builder V2 needs an owner-scoped project");
   const workerEnabled = options.deps?.workerEnabled || buildWorkerEnabled;
   if (!workerEnabled()) {

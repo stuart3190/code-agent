@@ -351,45 +351,16 @@ test("WP8 — rebuilds are cache-warm: second build makes ZERO provider calls an
     "the index rebuilds deterministically from the snapshot");
 });
 
-test("WP8 — the pre-cutover V2 entry is triple-gated and fails closed in every direction", async () => {
+test("WP8 — the V2-only entry admits every owner unless the emergency kill switch is active", async () => {
   const { v2BuildEligible } = await import("../../shell/server/lib/builderV2/entry.mjs");
-  const { __resetFlagCacheForTests } = await import("../../shell/server/lib/builderV2/featureFlags.mjs");
-  const flagClient = (rows) => ({ from: () => ({ select: async () => ({ data: rows, error: null }) }) });
-  const brokenClient = { from: () => ({ select: async () => ({ data: null, error: { message: "db down" } }) }) };
-  const opts = (client) => ({ client, env: {}, now: Date.now });
-
-  __resetFlagCacheForTests();
-  assert.equal((await v2BuildEligible("owner-1", opts(flagClient([])))).eligible, false, "unset flags = off");
-
-  __resetFlagCacheForTests();
-  const enrolled = await v2BuildEligible("owner-1", opts(flagClient([
-    { key: "bv2.enabled", value: true }, { key: "bv2.owners", value: ["owner-1"] },
-  ])));
-  assert.equal(enrolled.eligible, true);
-
-  __resetFlagCacheForTests();
-  const notEnrolled = await v2BuildEligible("owner-2", opts(flagClient([
-    { key: "bv2.enabled", value: true }, { key: "bv2.owners", value: ["owner-1"] },
-  ])));
-  assert.equal(notEnrolled.eligible, false, "allowlists are exact");
-
-  // The kill switch beats flags that are ON, with no cache in the way.
-  __resetFlagCacheForTests();
+  assert.equal((await v2BuildEligible("owner-1", { env: {} })).eligible, true);
+  assert.equal((await v2BuildEligible("owner-2", { env: {} })).eligible, true,
+    "V2-only cutover has no owner cohort or database flag dependency");
   const killed = await v2BuildEligible("owner-1", {
-    client: flagClient([{ key: "bv2.enabled", value: true }, { key: "bv2.owners", value: true }]),
-    env: { THRALLO_BV2_KILL: "1" }, now: Date.now,
+    env: { THRALLO_BV2_KILL: "1" },
   });
   assert.equal(killed.eligible, false);
   assert.match(killed.reason, /THRALLO_BV2_KILL/);
-
-  // Storage failure = closed, never thrown.
-  __resetFlagCacheForTests();
-  const broken = await v2BuildEligible("owner-1", opts(brokenClient));
-  assert.equal(broken.eligible, false);
-
-  // Dispatch itself is covered separately. This gate remains only as a temporary engineering
-  // rollback control; an accepted V2 request no longer has a handled:false V1 fallback.
-  __resetFlagCacheForTests();
 });
 
 test("WP9 regression — the REAL bv2_builds column set survives green AND blocked end states", async () => {

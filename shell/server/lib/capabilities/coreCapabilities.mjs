@@ -9,11 +9,11 @@ import {
 } from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild, showPreview, repairApp, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
+import { showPreview, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
-import { v2BuildEligible, startAppBuildV2, startExistingAppWorkV2 } from "../builderV2/entry.mjs";
+import { startAppBuildV2, startExistingAppWorkV2 } from "../builderV2/entry.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
@@ -70,18 +70,9 @@ export function registerCoreCapabilities() {
           throw error;
         }
       }
-      // Temporary engineering cutover gate. Non-eligible owners stay on the rollback path;
-      // an accepted V2 request is never retried through V1.
-      const v2 = await v2BuildEligible(ctx.owner);
-      if (v2.eligible) {
-        const shadow = await startAppBuildV2(ctx, input);
-        if (!shadow.handled) throw new Error("Builder V2 eligibility was accepted but dispatch declined");
-        return shadow.result;
-      }
-      return startAppBuild(ctx, {
-        description: String(input.description),
-        productName: input.productName || null,
-      });
+      const accepted = await startAppBuildV2(ctx, input);
+      if (!accepted.handled) throw new Error("Builder V2 dispatch declined");
+      return accepted.result;
     },
   });
 
@@ -107,15 +98,10 @@ export function registerCoreCapabilities() {
         error.code = "nothing_to_edit";
         throw error;
       }
-      const v2 = await v2BuildEligible(ctx.owner);
-      if (v2.eligible) {
-        const accepted = await startExistingAppWorkV2(ctx, {
-          project, request: String(input.request), kind: "edit", trigger: "user", taskHint: String(input.request),
-        });
-        return accepted.result;
-      }
-      // Temporary engineering rollback only. This branch is removed at V2 cutover.
-      return repairApp(ctx, { issue: String(input.request), productName: input.productName || null });
+      const accepted = await startExistingAppWorkV2(ctx, {
+        project, request: String(input.request), kind: "edit", trigger: "user", taskHint: String(input.request),
+      });
+      return accepted.result;
     },
   });
 
@@ -131,29 +117,25 @@ export function registerCoreCapabilities() {
     }),
     requirements: () => ({ ok: true }),
     async invoke(ctx, input) {
-      const v2 = await v2BuildEligible(ctx.owner);
-      if (v2.eligible) {
-        const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
-        const { project } = await resolveConversationProject(ctx, {
-          productName: input.productName || null,
-          columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
-        });
-        if (!project) {
-          const error = new Error("There's no existing app to repair — describe what you want built instead.");
-          error.code = "nothing_to_repair";
-          throw error;
-        }
-        const request = [
-          `Repair only this reported problem in the existing app "${project.name}":`,
-          String(input.issue),
-          "Preserve the established product and visual design; make the smallest verified change.",
-        ].join("\n\n");
-        const accepted = await startExistingAppWorkV2(ctx, {
-          project, request, kind: "repair", trigger: "user", taskHint: String(input.issue),
-        });
-        return accepted.result;
+      const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
+      const { project } = await resolveConversationProject(ctx, {
+        productName: input.productName || null,
+        columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
+      });
+      if (!project) {
+        const error = new Error("There's no existing app to repair — describe what you want built instead.");
+        error.code = "nothing_to_repair";
+        throw error;
       }
-      return repairApp(ctx, { issue: String(input.issue), productName: input.productName || null });
+      const request = [
+        `Repair only this reported problem in the existing app "${project.name}":`,
+        String(input.issue),
+        "Preserve the established product and visual design; make the smallest verified change.",
+      ].join("\n\n");
+      const accepted = await startExistingAppWorkV2(ctx, {
+        project, request, kind: "repair", trigger: "user", taskHint: String(input.issue),
+      });
+      return accepted.result;
     },
   });
 
