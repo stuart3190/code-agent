@@ -2,6 +2,29 @@ function previewIsolationError(message) {
   return Object.assign(new Error(message), { code: "preview_isolation_required" });
 }
 
+export const SUPPORTED_BUILD_JOB_TYPES = Object.freeze([
+  "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
+  "image_optimise", "publish_package", "proof_slow",
+]);
+
+export function resolveWorkerJobTypes(value = process.env.THRALLO_BUILD_JOB_TYPES) {
+  const requested = String(value || SUPPORTED_BUILD_JOB_TYPES.join(","))
+    .split(",").map((jobType) => jobType.trim()).filter(Boolean);
+  const unique = [...new Set(requested)];
+  if (!unique.length) {
+    throw Object.assign(new Error("The build worker must advertise at least one supported job type."), {
+      code: "worker_job_types_required",
+    });
+  }
+  const unsupported = unique.filter((jobType) => !SUPPORTED_BUILD_JOB_TYPES.includes(jobType));
+  if (unsupported.length) {
+    throw Object.assign(new Error(`Unsupported build worker job type(s): ${unsupported.join(", ")}.`), {
+      code: "unsupported_worker_job_type",
+    });
+  }
+  return unique;
+}
+
 export function workerPreviewConfiguration(env = process.env) {
   const mode = String(env.PREVIEW_MODE || "local").trim().toLowerCase();
   if (mode !== "vps") {

@@ -10,7 +10,7 @@ import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.
 import { createWorkerQueue, serialiseWorkerFailure } from "./queue.mjs";
 import { proveWorkerPreviewIsolation } from "./previewIsolationPreflight.mjs";
 import { reconcileOrphanSandboxes, runSandboxJob } from "./sandboxRunner.mjs";
-import { assertWorkerCredentialAuthority } from "./runtimeConfig.mjs";
+import { assertWorkerCredentialAuthority, resolveWorkerJobTypes } from "./runtimeConfig.mjs";
 import { previewProvider } from "../shell/server/preview/index.mjs";
 
 loadEnv();
@@ -20,10 +20,7 @@ const VERSION = process.env.THRALLO_BUILD_WORKER_VERSION || "c7/1";
 const WORKER_ID = process.env.THRALLO_BUILD_WORKER_ID || `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 const LEASE_SECONDS = Math.max(15, Math.min(300, Number(process.env.THRALLO_BUILD_LEASE_SECONDS || 45)));
 const POLL_MS = Math.max(250, Math.min(10_000, Number(process.env.THRALLO_BUILD_POLL_MS || 1000)));
-const JOB_TYPES = (process.env.THRALLO_BUILD_JOB_TYPES || [
-  "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
-  "image_optimise", "publish_package", "proof_slow",
-].join(",")).split(",").map((v) => v.trim()).filter(Boolean);
+const JOB_TYPES = resolveWorkerJobTypes();
 
 let previewIsolation = { status: "not_required" };
 try {

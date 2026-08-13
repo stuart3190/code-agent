@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertWorkerCredentialAuthority } from "../../build-worker/runtimeConfig.mjs";
+import {
+  assertWorkerCredentialAuthority,
+  resolveWorkerJobTypes,
+  SUPPORTED_BUILD_JOB_TYPES,
+} from "../../build-worker/runtimeConfig.mjs";
+
+test("worker job types default to the supported V2-only set", () => {
+  assert.deepEqual(resolveWorkerJobTypes(), [...SUPPORTED_BUILD_JOB_TYPES]);
+  assert.ok(SUPPORTED_BUILD_JOB_TYPES.includes("builder_pipeline"));
+  assert.ok(!SUPPORTED_BUILD_JOB_TYPES.includes("android_package"));
+});
+
+test("worker job types preserve supported subsets and reject retired or unknown types", () => {
+  assert.deepEqual(resolveWorkerJobTypes("proof_slow,publish_package,proof_slow"), [
+    "proof_slow", "publish_package",
+  ]);
+  assert.throws(
+    () => resolveWorkerJobTypes("builder_pipeline,android_package"),
+    (error) => error?.code === "unsupported_worker_job_type" && /android_package/.test(error.message),
+  );
+  assert.throws(
+    () => resolveWorkerJobTypes(", ,"),
+    (error) => error?.code === "worker_job_types_required",
+  );
+});
 
 test("non-pipeline dark workers do not require provider credential authority", () => {
   assert.doesNotThrow(() => assertWorkerCredentialAuthority(["proof_slow"], {}));
