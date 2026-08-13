@@ -21,8 +21,9 @@ import {
   SPECIALIST_HUES, agentInitials, beginChips,
 } from "./conversationState.js";
 import {
-  ACTIVITY_STATE, activityLabel, isActiveActivity, projectActivity, reconstructProjectActivities,
+  ACTIVITY_STATE, activityFromJob, activityLabel, isActiveActivity, normalizeProjectSummary, projectActivity,
 } from "./activityState.js";
+import BuildBudgetApprovalCard from "./BuildBudgetApprovalCard.jsx";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
@@ -230,12 +231,10 @@ function Workspace({ user }) {
     if (!silent) setListBusy(true);
     try {
       const result = await listConversations({ tab, q, sort, favourites, archived, offset, limit });
-      // The list's progress copy is historical. Confirm each claimed activity against the durable
-      // owner-scoped job before allowing it to animate, badge, or enter the In progress group.
-      const reconstructed = await reconstructProjectActivities(result.conversations || [], projectBuildStatus);
+      const summaries = (result.conversations || []).map(normalizeProjectSummary);
       setConversations((current) => (append
-        ? [...current, ...reconstructed]
-        : reconstructed));
+        ? [...current, ...summaries]
+        : summaries));
       setListing({ counts: result.counts || {}, page: result.page || null, sorts: result.sorts || [] });
       setListError("");
     } catch (error) {
@@ -292,11 +291,43 @@ function Workspace({ user }) {
     buildStreamAbort.current?.abort();
     const controller = new AbortController();
     buildStreamAbort.current = controller;
-    streamBuildEvents(build.jobId, (_name, data) => {
-      setView((current) => applyBuildUpdate(current, data));
-    }, { signal: controller.signal }).catch(() => {
-      // No snapshot means no proof of live work. The reducer deliberately remains idle.
-    });
+    const expectedJobId = String(build.jobId);
+    const projectId = build.projectId || null;
+    (async () => {
+      while (!controller.signal.aborted) {
+        let latest = null;
+        try {
+          await streamBuildEvents(expectedJobId, (_name, data) => {
+            latest = data;
+            setView((current) => applyBuildUpdate(current, data));
+          }, { signal: controller.signal });
+        } catch {
+          if (controller.signal.aborted) return;
+        }
+        if (controller.signal.aborted) return;
+        if (latest?.status && !isActiveActivity(activityFromJob(latest).state)) return;
+
+        // A proxy or network break is not a build result. Re-read the durable job, settle the UI
+        // if it finished while disconnected, then reattach to the same identity if it is live.
+        if (projectId) {
+          try {
+            const result = await projectBuildStatus(projectId);
+            const job = result?.job || null;
+            if (job && String(job.jobId) !== expectedJobId) return;
+            if (job) {
+              setView((current) => applyBuildUpdate(current, job));
+              if (!isActiveActivity(activityFromJob(job).state)) return;
+            }
+          } catch {
+            // Read failure is not terminal evidence. Retry the authenticated stream below.
+          }
+        }
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 1_500);
+          controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
+      }
+    })();
   }, []);
 
   // Live channel: replay history from seq 0, then keep streaming with `after` resume.
@@ -304,7 +335,17 @@ function Workspace({ user }) {
     streamAbort.current?.abort();
     buildStreamAbort.current?.abort();
     setActive(conversation);
-    setView(emptyConversationView());
+    const initialView = emptyConversationView();
+    if (conversation.activeBuild?.jobId) {
+      initialView.buildReference = {
+        jobId: conversation.activeBuild.jobId,
+        projectId: conversation.activeBuild.projectId || null,
+      };
+      setView(applyBuildUpdate(initialView, conversation.activeBuild));
+      watchBuild(conversation.activeBuild);
+    } else {
+      setView(initialView);
+    }
     setPending(null);
     setMobilePreview(false);
     const controller = new AbortController();
@@ -1659,6 +1700,9 @@ function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false
         </div>
       </div>
     );
+  }
+  if (item.kind === "budget_approval") {
+    return <BuildBudgetApprovalCard approval={item.approval} />;
   }
   if (item.kind === "receipt") {
     return <div className="ct-receipt"><span className="ct-rcheck">✓</span> {item.text}</div>;

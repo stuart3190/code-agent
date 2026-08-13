@@ -110,6 +110,10 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
   method: "POST", body: JSON.stringify(body),
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
+export const startTopupCheckout = (idempotencyKey = null) => request("/api/v1/billing/topup", {
+  method: "POST",
+  body: JSON.stringify(idempotencyKey ? { idempotencyKey } : {}),
+});
 // Everything Settings needs, in one read — see shell/server/routes/settings.mjs.
 export const accountSettings = () => request("/api/v1/settings");
 export const accountErasureManifest = () => request("/api/v1/account/erasure-manifest");
@@ -200,6 +204,12 @@ export const sendConversationMessage = (conversationId, text, workspaceContext =
 export const listModels = () => request("/api/v1/models");
 export const setConversationModel = (conversationId, value) =>
   request(`/api/v1/conversations/${conversationId}/model`, { method: "POST", body: JSON.stringify({ value }) });
+export const getBuildBudgetApproval = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}`);
+export const approveBuildBudget = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}/approve`, { method: "POST" });
+export const declineBuildBudget = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}/decline`, { method: "POST" });
 export const setPreviewPlan = (plan) => request("/api/v1/owner/preview-plan", {
   method: "POST", body: JSON.stringify({ plan }),
 });

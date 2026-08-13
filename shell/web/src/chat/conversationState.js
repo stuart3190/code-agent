@@ -143,6 +143,46 @@ export function applyEvent(view, event) {
       next.waiting = true;
       next.thinking = false;
       break;
+    case "budget_approval_required":
+      push({
+        kind: "budget_approval",
+        approval: {
+          approvalId: payload.approvalId || null,
+          requestSummary: payload.requestSummary || payload.summary || "",
+          complexity: payload.complexity || "advanced",
+          ceilingCredits: payload.ceilingCredits ?? 0,
+          availableCredits: payload.availableCredits || { included: 0, purchased: 0 },
+          expiresAt: payload.expiresAt || null,
+          status: payload.status || "pending",
+        },
+      });
+      next.waiting = true;
+      next.thinking = false;
+      break;
+    case "budget_approval_resolved": {
+      let matched = false;
+      next.items = next.items.map((item) => {
+        if (item.kind !== "budget_approval" || item.approval?.approvalId !== payload.approvalId) return item;
+        matched = true;
+        return { ...item, approval: { ...item.approval, ...payload } };
+      });
+      // A compacted stream may start at the resolution. It remains useful as a durable receipt
+      // even when its original approval card is outside the retained event window.
+      if (!matched) {
+        push({
+          kind: "receipt",
+          text: payload.status === "approved" || payload.status === "consumed"
+            ? "Large build budget approved."
+            : payload.status === "expired"
+              ? "Large build approval expired — nothing was started."
+              : payload.status === "cancelled"
+                ? "Large build request cancelled — nothing was started."
+                : "Large build request declined — nothing was started.",
+        });
+      }
+      next.waiting = false;
+      break;
+    }
     // Recovery states: subtle, honest, never technical. "failed" is handled by lead_error.
     case "recovery":
       if (payload.state && payload.state !== "failed") {

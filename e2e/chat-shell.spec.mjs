@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 function supabaseRef() {
   try {
+    const configured = process.env.VITE_SUPABASE_URL;
+    if (configured) return new URL(configured).hostname.split(".")[0] || null;
     const env = readFileSync(fileURLToPath(new URL("../shell/web/.env", import.meta.url)), "utf8");
     const url = env.match(/VITE_SUPABASE_URL\s*=\s*(\S+)/)?.[1] || "";
     return new URL(url).hostname.split(".")[0] || null;
@@ -197,7 +199,14 @@ test("background navigation: leave a running build, start another, return — st
       return route.fulfill({ json: { conversation: { id: "c2", title: "Second Project", state: "thinking" } } });
     }
     return route.fulfill({ json: { conversations: [
-      { id: "c9", title: "Atlas", activity: { agent: "Builder", status: "Writing the schema…", projectId: "p9" } },
+      {
+        id: "c9", title: "Atlas",
+        activity: { agent: "Builder", status: "Writing the schema…", projectId: "p9" },
+        activeBuild: atlasRunning
+          ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+          : null,
+        ...(atlasRunning ? {} : { verified: true, hasPreview: true }),
+      },
       ...(created ? [{ id: "c2", title: "Second Project" }] : []),
     ] } });
   });

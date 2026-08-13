@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACTIVITY_STATE, activityFromJob, projectActivity, reconstructProjectActivity,
+  ACTIVITY_STATE, activityFromJob, activityLabel, normalizeProjectSummary, projectActivity, reconstructProjectActivity,
 } from "../../shell/web/src/chat/activityState.js";
 import {
   applyBuildUpdate, emptyConversationView, replayEvents,
@@ -40,6 +40,24 @@ test("a genuine running update remains active even when an older preview is read
 
   assert.equal(projectActivity(project).state, ACTIVITY_STATE.finishing);
   assert.equal(project.activity.status, "Finishing up…");
+});
+
+test("dashboard summaries use their durable activeBuild without a per-card read", () => {
+  const project = {
+    id: "c-summary", verified: true, hasPreview: true,
+    activity: { agent: "Builder", status: "historical copy" },
+    activeBuild: { jobId: "j-summary", projectId: "p-summary", status: "running", phase: "quality-checking" },
+  };
+  assert.equal(projectActivity(project).state, ACTIVITY_STATE.checking,
+    "a live update outranks the older green preview");
+  assert.equal(projectActivity({ ...project, activeBuild: null }).state, ACTIVITY_STATE.ready,
+    "the project settles as soon as the summary no longer carries a live job");
+
+  const live = normalizeProjectSummary(project);
+  assert.equal(live.activity.status, activityLabel(ACTIVITY_STATE.checking));
+  assert.equal(live.activity.jobId, "j-summary");
+  const settled = normalizeProjectSummary({ ...project, activeBuild: null });
+  assert.equal(settled.activity, null, "historical event copy cannot keep badges or grouping active");
 });
 
 test("only a genuine non-terminal job displays ordinary customer activity", async () => {

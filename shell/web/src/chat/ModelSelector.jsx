@@ -111,8 +111,12 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
   };
 
   const { value: currentValue } = parsePref(value);
-  const selectedUnavailable = currentValue !== "auto" && currentValue !== "codex" && catalog?.options
+  const selectedUnavailable = currentValue !== "auto" && catalog?.options
     && !catalog.options.some((o) => o.value === currentValue && o.available);
+  const selectedProvider = currentValue.split(":").length >= 3
+    ? currentValue.split(":")[1]
+    : currentValue.split(":")[0];
+  const selectedForbidsFallback = selectedProvider === "codex";
 
   const choose = (val, mode) => {
     onChange(mode && mode !== "balanced" ? `${val}#${mode}` : val);
@@ -146,7 +150,9 @@ export default function ModelSelector({ value, onChange, onOpenSettings, compact
           {selectedUnavailable && (
             <div className="ct-model-warnrow">
               Your selected model isn't available any more. Pick another below or switch to Auto
-              {catalog?.allowFallback ? " — automatic fallback is on, so requests keep working meanwhile." : "."}
+              {catalog?.allowFallback && !selectedForbidsFallback
+                ? " — automatic fallback is on, so requests keep working meanwhile."
+                : "."}
             </div>
           )}
 

@@ -54,6 +54,10 @@ export function activityFromJob(job) {
 }
 
 export function projectActivity(project) {
+  // Conversation summaries carry the owner-scoped durable job directly. This is the dashboard
+  // authority: unlike historical specialist events it survives refresh and cannot leave a
+  // completed build looking live.
+  if (project?.activeBuild) return activityFromJob(project.activeBuild);
   if (project?.activityState) {
     return { state: project.activityState, label: activityLabel(project.activityState) };
   }
@@ -72,6 +76,30 @@ export function projectActivity(project) {
     return { state: ACTIVITY_STATE.idle, label: "Waiting for your input" };
   }
   return { state: ACTIVITY_STATE.idle, label: activityLabel(ACTIVITY_STATE.idle) };
+}
+
+// The server has already done the owner-scoped build lookup in the conversation-list query. Keep
+// the specialist name as presentation only, but discard its historical activity claim unless the
+// attached durable job is genuinely live. Dashboard badges and grouping still consume `activity`.
+export function normalizeProjectSummary(project) {
+  const reported = project?.activity || null;
+  const job = project?.activeBuild || null;
+  const resolved = activityFromJob(job);
+  if (!job || !isActiveActivity(resolved.state)) {
+    return { ...project, reportedActivity: reported, activity: null, buildJob: null };
+  }
+  return {
+    ...project,
+    reportedActivity: reported,
+    buildJob: job,
+    activityState: resolved.state,
+    activity: {
+      agent: reported?.agent || null,
+      status: resolved.label,
+      projectId: job.projectId || reported?.projectId || null,
+      jobId: job.jobId || null,
+    },
+  };
 }
 
 /**
