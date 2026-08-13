@@ -4,7 +4,9 @@
 
 import { registerCapability } from "../capabilityRegistry.mjs";
 import { codeAgentStore } from "../codeAgentStore.mjs";
-import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
+import {
+  assertRunWithinBudget, assertWithinRateLimits, budgetOverview, repositoryRunBudgetProvider,
+} from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
 import { startAppBuild, showPreview, repairApp, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
@@ -12,6 +14,7 @@ import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPub
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
 import { v2BuildEligible, startAppBuildV2, startExistingAppWorkV2 } from "../builderV2/entry.mjs";
+import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
 // is expressed as a nullable type, and invokes treat null as absent.
@@ -60,7 +63,8 @@ export function registerCoreCapabilities() {
       const credentialProvider = await activeAiProviderName(ctx.owner);
       if (credentialProvider === "managed") {
         const overview = await budgetOverview(ctx.owner, { store: codeAgentStore() });
-        if (!overview.unlimited && overview.budgets.managedTokens.remaining <= 0) {
+        const balance = await createBudgetLedger({ store: codeAgentStore() }).getBalance(ctx.owner);
+        if (!overview.unlimited && balance.total <= 0) {
           const error = new Error("The monthly managed-model allowance is used up; builds need budget or a BYOK key.");
           error.code = "budget_exceeded";
           throw error;
@@ -413,7 +417,9 @@ async function dispatchRun(ctx, input, mode) {
   const store = codeAgentStore();
   const credentialProvider = await activeAiProviderName(ctx.owner).catch(() => "managed");
   await assertWithinRateLimits(ctx.owner, { store });
-  await assertRunWithinBudget(ctx.owner, { credentialProvider, store });
+  await assertRunWithinBudget(ctx.owner, {
+    credentialProvider: repositoryRunBudgetProvider(credentialProvider), store,
+  });
 
   const repositories = await store.listRepositories(ctx.owner);
   const ready = repositories.filter((repo) => repo.status === "ready");

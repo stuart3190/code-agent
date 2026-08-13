@@ -2,6 +2,7 @@ import { CodeAgentInputError } from "../lib/codeAgentContracts.mjs";
 import { conversationStore } from "../lib/conversationStore.mjs";
 import { postUserMessage } from "../lib/leadAgentService.mjs";
 import { resolvePublishState } from "../../shared/publishResolution.mjs";
+import { activeBuildsFor } from "../lib/buildJobs.mjs";
 
 const PAGE_SIZE = 20;
 const MAX_PAGE = 100;
@@ -18,7 +19,7 @@ const TAB_STATUSES = Object.freeze({
 
 // The event types a project card actually renders. Everything else is a large payload nobody reads.
 const CARD_EVENT_TYPES = Object.freeze([
-  "agent_spawned", "agent_status", "agent_done", "verification", "lead_error", "preview_ready",
+  "agent_spawned", "agent_status", "agent_done", "verification", "lead_error", "preview_ready", "build_started",
 ]);
 
 /**
@@ -148,6 +149,20 @@ export async function handleConversations(req, res, { owner, method, body, url =
       console.error(`[conversations] activity unavailable: ${error?.message || error}`);
     }
 
+    const projectByConversation = new Map();
+    for (const [conversationId, events] of eventsByConversation) {
+      for (const event of events) {
+        const projectId = event.payload?.projectId;
+        if (projectId) projectByConversation.set(conversationId, String(projectId));
+      }
+    }
+    let activeBuildByProject = new Map();
+    try {
+      activeBuildByProject = await activeBuildsFor(owner.id, [...projectByConversation.values()]);
+    } catch (error) {
+      console.error(`[conversations] active build summaries unavailable: ${error?.message || error}`);
+    }
+
     // Workspace home: each conversation carries its live activity (who's working + on
     // what), derived from the durable event stream — the same truth the thread shows.
     const conversations = page.map(({ row, status, site }) => {
@@ -163,6 +178,8 @@ export async function handleConversations(req, res, { owner, method, body, url =
       // Today's traffic, where there is any. Absent rather than zero when nothing was collected —
       // a site published an hour ago has not had "0 visitors today", it has had no day yet.
       summary.today = site ? visitorsByProject.get(String(site.projectId)) || null : null;
+      summary.projectId = projectByConversation.get(String(row.id)) || site?.projectId || null;
+      summary.activeBuild = summary.projectId ? activeBuildByProject.get(String(summary.projectId)) || null : null;
 
       const working = new Map();
       let lastStatus = null;

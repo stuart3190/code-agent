@@ -53,6 +53,7 @@ export async function budgetOverview(owner, { store = codeAgentStore(), now = ne
       managedTokens: meter(usage.managedTokens, budget.managedTokens),
       computeSeconds: meter(Math.round(usage.computeSeconds), budget.computeSeconds),
     },
+    usageRowCount: Number(usage.rowCount || 0),
   };
 }
 
@@ -109,6 +110,12 @@ export async function assertRunWithinBudget(owner, {
     );
   }
   return overview;
+}
+
+// Managed repository model calls are admitted by the durable direct-reservation RPC, which also
+// sees purchased credits. Run admission still checks run-count and sandbox-compute limits.
+export function repositoryRunBudgetProvider(credentialProvider) {
+  return credentialProvider === "managed" ? "direct_reserved" : credentialProvider;
 }
 
 export async function remainingManagedTokens(owner, { store = codeAgentStore(), now = new Date() } = {}) {

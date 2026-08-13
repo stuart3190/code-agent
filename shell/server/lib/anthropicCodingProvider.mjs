@@ -32,11 +32,12 @@ export function createAnthropicCodingProvider({
   return {
     id: "anthropic",
     model,
-    async turn({ instructions, input, tools }) {
+    async turn({ instructions, input, tools, maxOutputTokens = null }) {
       const result = await provider.runTurn({
         systemPrompt: instructions,
         messages: toNeutralMessages(input),
         tools: tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        maxOutputTokens,
       });
       const output = [];
       if (result.text) {
@@ -59,6 +60,7 @@ export function createAnthropicCodingProvider({
           outputTokens: result.usage?.output || 0,
           reasoningTokens: result.usage?.reasoning || 0,
           totalTokens: result.usage?.total || 0,
+          providerRequestId: result.usage?.providerRequestId || null,
         },
       };
     },

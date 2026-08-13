@@ -25,6 +25,7 @@ const MUST_BE_MOUNTED = new Set([
   "apiTokens.mjs",
   "automations.mjs",
   "builds.mjs",          // restored 2026-08-01 — the incident this guard exists for
+  "buildBudgetApprovals.mjs",
   "codeAgent.mjs",
   "conversations.mjs",
   "diagnostics.mjs",

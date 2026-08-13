@@ -201,7 +201,7 @@ test("14S contract and core calls never consume the canonical repair allowance",
   assert.equal(repair.repairDispatchCount, 1);
 });
 
-test("14S Supabase reservation adapter uses the atomic v2 dispatch authority", async () => {
+test("14S Supabase reservation adapter uses the atomic customer-accounting dispatch authority", async () => {
   const calls = [];
   const client = { rpc: async (name, args) => {
     calls.push({ name, args });
@@ -213,7 +213,8 @@ test("14S Supabase reservation adapter uses the atomic v2 dispatch authority", a
   const row = await supabaseModelReservations(client).reserve(dispatchInput({
     callKey: "repair-key", step: "repair",
   }));
-  assert.equal(calls[0].name, "reserve_bv2_model_call_v2");
+  assert.equal(calls[0].name, "reserve_bv2_model_call_v3");
+  assert.equal(calls[0].args.p_usage_responsibility, "customer_request");
   assert.equal(row.acquired, true);
   assert.equal(row.repairDispatchCount, 1);
   assert.equal(row.maxRepairs, 1);
@@ -230,4 +231,11 @@ test("14S additive migration pins and atomically enforces the durable repair cou
   assert.match(sql, /'code', 'repair_limit_reached'/i);
   assert.match(sql, /revoke execute on function public\.reserve_bv2_model_call\([\s\S]+from service_role/i);
   assert.match(sql, /grant execute on function public\.reserve_bv2_model_call_v2/i);
+
+  const accountingSql = await readFile(new URL(
+    "../../supabase/migrations/20260813095526_v2_customer_accounting_and_approvals.sql", import.meta.url,
+  ), "utf8");
+  assert.match(accountingSql, /create or replace function public\.reserve_bv2_model_call_v3/i);
+  assert.match(accountingSql, /p_usage_responsibility text/i);
+  assert.match(accountingSql, /grant execute on function public\.reserve_bv2_model_call_v3[\s\S]+to service_role/i);
 });

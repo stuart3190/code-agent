@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,12 +12,16 @@ import {
 } from "../../ops/lib/remediationBaseline.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const KNOWN_GREEN_V2_BASELINE = "4785cb53dde39bf09d0dc2e5d12d98e62a0b0b81";
 
-test("PR-01 — audited main is still the implementation base", () => {
+test("PR-01 — the implementation branch descends from the known-green V2 baseline", () => {
   const state = collectGitBaseline(ROOT);
   assert.equal(state.originMain, AUDITED_MAIN_COMMIT);
   assert.equal(state.matchesAuditedCommit, true);
-  assert.match(state.branch, /^remediation\/builder-v2-production$/);
+  assert.ok(state.branch, "validation must run on a named integration branch");
+  execFileSync("git", ["merge-base", "--is-ancestor", KNOWN_GREEN_V2_BASELINE, "HEAD"], {
+    cwd: ROOT, stdio: "ignore",
+  });
 });
 
 test("PR-01 — safety evidence reveals only state, never environment values or owner ids", () => {

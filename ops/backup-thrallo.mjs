@@ -63,9 +63,12 @@ export const CA_TABLES = [
   "ca_conversations",
   "ca_conversation_turns",
   "ca_conversation_events",
+  "ca_lead_model_reservations",
+  "ca_direct_model_reservations",
   "ca_owner_profile",
   "ca_memories",
   "projects",
+  "credit_ledger",
   "build_jobs",
   "build_work_payloads",
   "build_work_jobs",
@@ -131,6 +134,8 @@ export const CA_TABLES = [
   // Durable pre-dispatch reservations are canonical billing evidence. Losing them could either
   // reopen spent budget after restore or make an already-settled provider call untraceable.
   "bv2_model_reservations",
+  "bv2_build_budget_approvals",
+  "ca_model_call_identities",
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",

@@ -13,7 +13,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 
-export const DEFAULT_COLUMNS = "id, name, tree, product_id, updated_at";
+export const DEFAULT_COLUMNS = "id, name, tree, product_id, updated_at, builder_version, bv2_green_snapshot_id";
 
 /**
  * Resolve the project a capability should act on.
@@ -41,7 +41,7 @@ export async function resolveConversationProject(ctx, {
   if (!owner) return { project: null, scope: "no_owner", productId: null };
 
   const select = () => client.from("projects").select(columns)
-    .eq("owner", owner).not("tree", "is", null)
+    .eq("owner", owner).or("tree.not.is.null,bv2_green_snapshot_id.not.is.null")
     .order("updated_at", { ascending: false }).limit(1);
 
   if (projectId) {

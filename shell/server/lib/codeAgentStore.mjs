@@ -707,7 +707,7 @@ export class SupabaseCodeAgentStore {
     let cursor = null;
     for (;;) {
       let query = this.client.from("ca_usage_records")
-        .select("id,billing_source,model,input_tokens,cached_tokens,output_tokens,reasoning_tokens,compute_seconds,created_at")
+        .select("id,billing_source,model,input_tokens,cached_tokens,output_tokens,reasoning_tokens,compute_seconds,metadata,created_at")
         .eq("owner", owner).gte("created_at", sinceIso)
         .order("created_at", { ascending: true }).order("id", { ascending: true })
         .limit(pageSize);
@@ -799,7 +799,7 @@ function artifactBucket() {
 }
 
 function sumBudgetUsage(rows) {
-  const totals = { managedTokens: 0, totalTokens: 0, computeSeconds: 0 };
+  const totals = { managedTokens: 0, totalTokens: 0, computeSeconds: 0, rowCount: rows.length };
   for (const row of rows) {
     const tokens = Number(row.input_tokens || 0) + Number(row.output_tokens || 0);
     totals.totalTokens += tokens;
@@ -808,14 +808,17 @@ function sumBudgetUsage(rows) {
       // Managed allowances are denominated in credit-equivalent tokens. Price every stored call
       // with the same cache- and model-aware function used by reservation settlement; otherwise
       // cached prompt bytes consume a full fresh-token allowance and recreate incident 83883309.
-      totals.managedTokens += creditsForUsage({
+      const authoritativeCredits = Number(row.metadata?.charge_credits);
+      totals.managedTokens += (Number.isFinite(authoritativeCredits)
+        ? Math.max(0, authoritativeCredits)
+        : creditsForUsage({
         usage: {
           input: Number(row.input_tokens || 0), cached: Number(row.cached_tokens || 0),
           output: Number(row.output_tokens || 0), reasoning: Number(row.reasoning_tokens || 0),
           total: tokens,
         },
         model: row.model,
-      }) * TOKENS_PER_CREDIT;
+      })) * TOKENS_PER_CREDIT;
     }
   }
   return totals;

@@ -54,24 +54,42 @@ export async function createRoutedCodingModel({
   let activeIndex = 0;
   const providers = new Map();
   const routed = {
+    supportsDispatchAccounting: true,
     id: candidates[0].provider,
     model: candidates[0].model,
     candidates,
     // Why Auto chose this — measured, quotable, and null when evidence is insufficient.
     intelligence: candidates[0].intelligence || null,
     async turn(args) {
+      const {
+        beforeDispatch = null,
+        afterDispatch = null,
+        dispatchFailed = null,
+        ...providerArgs
+      } = args;
       const firstIndex = activeIndex;
       let lastError;
       for (let index = firstIndex; index < candidates.length; index += 1) {
         const candidate = candidates[index];
         const started = Date.now();
+        let dispatchContext = null;
+        let accountingSettled = false;
+        let providerCompleted = false;
         try {
           let provider = providers.get(candidate.key);
           if (!provider) {
             provider = providerFactory(candidate, credential, providerOptionsForMode(candidate.provider, policy.mode));
             providers.set(candidate.key, provider);
           }
-          const response = await provider.turn(args);
+          dispatchContext = await beforeDispatch?.(candidate, { attemptOrder: index + 1, args: providerArgs });
+          const response = await provider.turn(beforeDispatch ? {
+            ...providerArgs,
+            maxProviderRetries: 0,
+            allowParameterRetry: false,
+          } : providerArgs);
+          providerCompleted = true;
+          await afterDispatch?.(dispatchContext, candidate, response);
+          accountingSettled = true;
           const latencyMs = Date.now() - started;
           await recordAttempt(store, owner, run, candidate, index + 1, {
             status: "success",
@@ -81,7 +99,7 @@ export async function createRoutedCodingModel({
             total_tokens: response.usage?.totalTokens || 0,
             error_code: null,
             retryable: false,
-          });
+          }).catch((error) => console.error(`[model-routing] success telemetry: ${error.message}`));
           activeIndex = index;
           routed.id = candidate.provider;
           routed.model = candidate.model;
@@ -97,6 +115,16 @@ export async function createRoutedCodingModel({
           };
         } catch (error) {
           lastError = error;
+          if (providerCompleted && !accountingSettled) {
+            throw Object.assign(error, { code: error.code || "billing_settlement_failed" });
+          }
+          if (dispatchContext && !accountingSettled) {
+            try {
+              await dispatchFailed?.(dispatchContext, candidate, error);
+            } catch (accountingError) {
+              throw Object.assign(accountingError, { code: accountingError.code || "billing_settlement_failed" });
+            }
+          }
           const retryable = isRetryableProviderError(error);
           await recordAttempt(store, owner, run, candidate, index + 1, {
             status: "error",
@@ -106,7 +134,7 @@ export async function createRoutedCodingModel({
             total_tokens: 0,
             error_code: String(error.code || `http_${error.status || "unknown"}`).slice(0, 120),
             retryable,
-          });
+          }).catch((telemetryError) => console.error(`[model-routing] failure telemetry: ${telemetryError.message}`));
           const mayFallback = policy.allowFallback !== false && requested === "auto" && retryable;
           if (!mayFallback || index === candidates.length - 1) throw error;
         }

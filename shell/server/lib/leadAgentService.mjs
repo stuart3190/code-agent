@@ -16,6 +16,12 @@ import { activeAiCredential } from "./aiCredentialStore.mjs";
 import { createRoutedCodingModel } from "./modelRouting.mjs";
 import { budgetOverview } from "./usageBudgets.mjs";
 import { notifyOwnerIfAway } from "./notifications/notificationService.mjs";
+import {
+  estimateLeadReservation, leadModelCallKey, leadModelReservations,
+} from "./leadModelReservations.mjs";
+import { creditsForUsage } from "../../../src/billing/costModel.mjs";
+import { classifyProviderFailure, replayUnsafe } from "./providerOutcome.mjs";
+import { createBudgetLedger } from "./appBuild/budgetLedger.mjs";
 
 const MAX_TURNS = 12;
 const HISTORY_TURNS = 30;
@@ -127,6 +133,7 @@ export async function processConversation(conversation, {
   modelFactory = null,
   overviewResolver = budgetOverview,
   credentialStoreFactory = null,
+  reservationStoreFactory = leadModelReservations,
   // Private recovery state — carried across automatic retries, never user-visible.
   recovery = { attempt: 0, fingerprints: [], briefings: [] },
 } = {}) {
@@ -136,25 +143,8 @@ export async function processConversation(conversation, {
     let credential = await credentialResolver(conversation.owner)
       .catch(() => ({ provider: "managed", secret: null, routing: {} }));
 
-    // The line this replaces read: `if (provider === "codex") credential = { provider: "managed" }`.
-    // A silent lane rewrite — during a Codex-only verification build it ran four managed
-    // orchestration turns that bypassed both the provider policy and the settlement pause. The
-    // conversation orchestrator has no Codex adapter yet, and a lane the chosen policy cannot
-    // reach must STOP before spending, never switch billing lanes on the owner's behalf.
-    if (credential.provider === "codex") {
-      const { resolveProviderPolicy } = await import("./appBuild/providerPolicy.mjs");
-      if (!resolveProviderPolicy({ provider: "codex" }).allowManagedFallback) {
-        await finishWithMessage(store, conversation,
-          "Your AI connection is set to Codex, which powers your builds. The conversation "
-          + "orchestrator can't run on Codex yet, and I won't quietly bill your managed credits "
-          + "instead — switch your active connection (or add an API key) to chat, or keep Codex "
-          + "and use builds directly.");
-        return;
-      }
-      credential = { provider: "managed", secret: null, routing: {} };
-    }
-
-    let billingSource = credential.provider === "managed" ? "managed" : "byok";
+    let billingSource = credential.provider === "managed" ? "managed"
+      : credential.provider === "codex" ? "codex" : "byok";
     if (billingSource === "managed") {
       // The settlement kill switch covers EVERY managed dispatch in the product, not only
       // buildJobs — this lane's four paused-era turns are why that sentence has to exist.
@@ -164,7 +154,8 @@ export async function processConversation(conversation, {
         return;
       }
       const overview = await overviewResolver(conversation.owner, { store: runStore });
-      if (overview.budgets.managedTokens.remaining <= 0 && !overview.unlimited) {
+      const managedBalance = await createBudgetLedger({ store: runStore, overviewResolver }).getBalance(conversation.owner);
+      if (managedBalance.total <= 0 && !overview.unlimited) {
         // Exhausted — but a hard stop is the LAST resort. If the owner has another
         // provider connected, move the work there and carry on from this step.
         const quota = await import("./providerQuota.mjs");
@@ -241,7 +232,7 @@ export async function processConversation(conversation, {
     // Provider fuel gauge: warn early and in plain language, offer the alternatives this
     // owner can actually reach, and show which model is doing the work.
     const quota = await import("./providerQuota.mjs");
-    const activeProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
+    const activeProvider = credential.provider || "managed";
     await announceQuotaState({
       store, conversation, emit, quota, owner: conversation.owner, provider: activeProvider,
       overviewResolver, runStore,
@@ -271,14 +262,138 @@ export async function processConversation(conversation, {
       await emit("agent_spawned", { agent: "Lead Agent", status: "Understanding request…" });
     }
 
+    // Every network dispatch receives a durable identity, including BYOK and connected Codex.
+    // Non-managed lanes allocate zero Thrallo credits but still need replay-safe ambiguity state.
+    const reservationStore = reservationStoreFactory({ runStore });
+    const requestTurn = (await store.listTurns(conversation.owner, conversation.id, { limit: 30 }) || [])
+      .filter((item) => item.role === "user").at(-1);
+    const requestIdentity = requestTurn?.id || `${requestTurn?.sequence || 0}:${requestTurn?.created_at || "unknown"}`;
     for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
-      const response = await model.turn({
-        instructions: await leadInstructions(store, conversation),
-        input,
-        tools,
-        safetyIdentifier: conversation.owner,
-      });
-      await meterUsage(runStore, conversation.owner, response.usage, billingSource);
+      const instructions = await leadInstructions(store, conversation);
+      const maxOutputTokens = Math.max(1, Math.min(
+        Number(optionalEnv("LEAD_AGENT_MAX_OUTPUT_TOKENS", "8000")) || 8000,
+        32_000,
+      ));
+      const reservations = reservationStore;
+      let settledBillingLane = billingSource === "managed" ? "managed"
+        : billingSource === "codex" ? "connected_allowance" : "byok_api";
+      const beforeDispatch = async (candidate, { attemptOrder }) => {
+          const billingLane = leadBillingLane(candidate, billingSource);
+          const callKey = leadModelCallKey({
+            conversationId: conversation.id,
+            requestIdentity,
+            turn,
+            recoveryAttempt: recovery.attempt,
+            provider: candidate.provider,
+            model: candidate.model,
+            attemptOrder,
+          });
+          const hold = await reservations.reserve({
+            owner: conversation.owner,
+            conversationId: conversation.id,
+            callKey,
+            provider: candidate.provider,
+            model: candidate.model,
+            billingLane,
+            usageResponsibility: recovery.attempt > 0 && billingLane === "managed"
+              ? "platform_failure" : "customer_request",
+            reservedCredits: estimateLeadReservation({ instructions, input, tools, model: candidate.model, maxOutputTokens }),
+            metadata: { turn, recoveryAttempt: recovery.attempt, attemptOrder },
+          });
+          if (hold.acquired === false) throw replayUnsafe(new Error("Lead Agent provider dispatch identity was already used"), {
+            reservationId: hold.id,
+          });
+          return hold;
+        };
+      const afterDispatch = async (hold, candidate, result) => {
+          const usage = normalizeLeadUsage(result.usage);
+          const providerRequestIds = leadRequestIds(result);
+          try {
+            await reservations.settle(conversation.owner, hold.id, {
+              actualCredits: creditsForUsage({ usage, model: candidate.model }),
+              usage,
+              providerRequestIds,
+            });
+          } catch (error) {
+            try {
+              await reservations.markAmbiguous(conversation.owner, hold.id, {
+                reason: `provider completed but settlement failed: ${error?.message || "unknown error"}`,
+                providerRequestIds,
+              });
+            } catch (reconciliationError) {
+              error.reconciliationError = reconciliationError;
+            }
+            throw replayUnsafe(error, {
+              reservationId: hold.id,
+              providerRequestId: providerRequestIds[0] || null,
+            });
+          }
+          settledBillingLane = hold.billingLane || leadBillingLane(candidate, billingSource);
+        };
+      const dispatchFailed = async (hold, candidate, error) => {
+          const failure = classifyProviderFailure(error);
+          const usage = normalizeLeadUsage(error?.usage);
+          if (failure.hasUsage) {
+            const providerRequestIds = leadRequestIds(error);
+            try {
+              await reservations.settle(conversation.owner, hold.id, {
+                actualCredits: creditsForUsage({ usage, model: candidate.model }),
+                usage,
+                providerRequestIds,
+              });
+            } catch (settlementError) {
+              try {
+                await reservations.markAmbiguous(conversation.owner, hold.id, {
+                  reason: `provider returned usage but settlement failed: ${settlementError?.message || "unknown error"}`,
+                  providerRequestIds,
+                });
+              } catch (reconciliationError) {
+                settlementError.reconciliationError = reconciliationError;
+              }
+              throw replayUnsafe(settlementError, {
+                reservationId: hold.id,
+                providerRequestId: providerRequestIds[0] || null,
+              });
+            }
+            throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+          }
+          if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
+            await reservations.release(conversation.owner, hold.id);
+            return;
+          }
+          await reservations.markAmbiguous(conversation.owner, hold.id, {
+            reason: error?.message || "provider dispatch ambiguous",
+            providerRequestIds: leadRequestIds(error),
+          });
+          throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+        };
+      const turnInput = { instructions, input, tools, safetyIdentifier: conversation.owner, maxOutputTokens };
+      let response;
+      if (model.supportsDispatchAccounting === true) {
+        response = await model.turn({ ...turnInput, beforeDispatch, afterDispatch, dispatchFailed });
+      } else {
+        // The production router accounts around each candidate. An injected single-provider model
+        // still uses the same pre-dispatch contract so it cannot become an unreserved escape hatch.
+        const candidate = { provider: model.id || model.provider || "managed", model: model.model || "conversation" };
+        const hold = await beforeDispatch(candidate, { attemptOrder: 1, args: turnInput });
+        let providerCompleted = false;
+        try {
+          response = await model.turn(turnInput);
+          providerCompleted = true;
+          await afterDispatch(hold, candidate, response);
+        } catch (error) {
+          if (!providerCompleted) await dispatchFailed(hold, candidate, error);
+          throw error;
+        }
+      }
+      if (settledBillingLane !== "managed") {
+        try {
+          await meterUsage(runStore, conversation.owner, response.usage,
+            settledBillingLane === "connected_allowance" ? "codex" : "byok");
+        } catch (error) {
+          throw replayUnsafe(error, { providerRequestId: response?.usage?.providerRequestId || response?.id || null });
+        }
+      }
 
       // The router falls back between providers on its own; surface that as a calm
       // sentence, record WHY privately, and carry on from this exact step — the loop
@@ -399,7 +514,8 @@ export async function processConversation(conversation, {
       const claimed = await store.claimConversationThinking(conversation).catch(() => conversation);
       await new Promise((resolve) => setTimeout(resolve, 400 * next.attempt));
       await processConversation(claimed || conversation, {
-        store, runStore, credentialResolver, modelFactory, overviewResolver, recovery: next,
+        store, runStore, credentialResolver, modelFactory, overviewResolver,
+        credentialStoreFactory, reservationStoreFactory, recovery: next,
       });
       await markIncidentResolved(incident.id, "recovered automatically");
       return;
@@ -596,7 +712,39 @@ async function meterUsage(runStore, owner, usage = {}, billingSource) {
     amount_gbp: 0,
     billing_source: billingSource,
     metadata: { kind: "conversation", total_tokens: usage.totalTokens || 0 },
-  }).catch(() => {});
+  });
+}
+
+function leadBillingLane(candidate = {}, fallbackSource = "managed") {
+  if (["managed", "byok_api", "connected_allowance"].includes(candidate.billingLane)) {
+    return candidate.billingLane;
+  }
+  const provider = String(candidate.provider || "").toLowerCase();
+  if (provider === "managed") return "managed";
+  if (provider === "codex") return "connected_allowance";
+  if (fallbackSource === "managed" && !provider) return "managed";
+  return fallbackSource === "codex" ? "connected_allowance" : "byok_api";
+}
+
+function normalizeLeadUsage(usage = {}) {
+  const input = Number(usage.input ?? usage.inputTokens ?? 0);
+  const cached = Number(usage.cached ?? usage.cachedTokens ?? 0);
+  const output = Number(usage.output ?? usage.outputTokens ?? 0);
+  const reasoning = Number(usage.reasoning ?? usage.reasoningTokens ?? 0);
+  return {
+    input, cached, output, reasoning,
+    total: Number(usage.total ?? usage.totalTokens ?? input + output),
+  };
+}
+
+function leadRequestIds(value = {}) {
+  const usage = value.usage || value;
+  return [...new Set([
+    ...(Array.isArray(usage.providerRequestIds) ? usage.providerRequestIds : []),
+    usage.providerRequestId,
+    value.providerRequestId,
+    value.id,
+  ].filter(Boolean).map(String))].sort();
 }
 
 let recoveryTimer = null;

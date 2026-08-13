@@ -28,6 +28,7 @@ test("accepted Builder V2 dispatch is durable-worker-only and returns handled:tr
       budgetLedger: () => ({ getBalance: async () => ({ total: 60 }) }),
       startDiagSessionSafe: async () => diag,
       workerEnabled: () => true,
+      requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
       createJob: async (input) => { calls.push(input); return { job }; },
     },
   });
@@ -35,6 +36,102 @@ test("accepted Builder V2 dispatch is durable-worker-only and returns handled:tr
   assert.equal(calls.length, 1);
   assert.equal(calls[0].pipelineVersion, "v2");
   assert.deepEqual(calls[0].providerSelection, { provider: "unknown", billingLane: "byok_api", manualModel: null });
+});
+
+test("new V2 build requires a fresh compatible worker before creating a project", async () => {
+  let inserted = false;
+  const ctx = {
+    owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+    conversations: {}, emit: async () => {},
+  };
+  await assert.rejects(startAppBuildV2(ctx, { description: "x" }, { deps: {
+    workerEnabled: () => true,
+    requireWorkerAdmission: async () => {
+      throw Object.assign(new Error("stale"), { code: "worker_version_mismatch" });
+    },
+    client: { from: () => { inserted = true; throw new Error("must not write"); } },
+  } }), (error) => error.code === "worker_version_mismatch");
+  assert.equal(inserted, false);
+});
+
+test("advanced V2 builds pause for an explicit durable budget approval before project creation", async () => {
+  let inserted = false;
+  const events = [];
+  const approval = { approvalId: "approval-1", complexity: "advanced", ceilingCredits: 60, status: "pending" };
+  const result = await startAppBuildV2({
+    owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+    conversations: {}, emit: async (type, payload) => events.push({ type, payload }),
+  }, { description: "Build a collaborative IDE with a Monaco code editor and node graph" }, { deps: {
+    workerEnabled: () => true,
+    requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
+    resolveBuildContext: async () => ({ byok: true }),
+    client: { from: () => { inserted = true; throw new Error("must not write a project"); } },
+    approvalStore: { create: async () => approval },
+  } });
+  assert.equal(inserted, false);
+  assert.equal(result.result.waitingForApproval, true);
+  assert.deepEqual(events, [{ type: "budget_approval_required", payload: approval }]);
+});
+
+test("a configured advanced ceiling can request a larger explicitly approved budget", async () => {
+  const prior = process.env.THRALLO_BV2_MAX_APPROVED_BUILD_CEILING;
+  process.env.THRALLO_BV2_MAX_APPROVED_BUILD_CEILING = "120";
+  let requestedCeiling = null;
+  try {
+    await startAppBuildV2({
+      owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+      conversations: {}, emit: async () => {},
+    }, { description: "Build a collaborative IDE with a Monaco code editor and node graph" }, { deps: {
+      workerEnabled: () => true,
+      requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
+      resolveBuildContext: async () => ({ byok: true }),
+      client: { from: () => { throw new Error("must not write a project"); } },
+      approvalStore: { create: async (_owner, _conversation, _input, options) => {
+        requestedCeiling = options.ceilingCredits;
+        return { approvalId: "approval", status: "pending", ceilingCredits: options.ceilingCredits };
+      } },
+    } });
+    assert.equal(requestedCeiling, 120);
+  } finally {
+    if (prior === undefined) delete process.env.THRALLO_BV2_MAX_APPROVED_BUILD_CEILING;
+    else process.env.THRALLO_BV2_MAX_APPROVED_BUILD_CEILING = prior;
+  }
+});
+
+test("a consumed large-build approval reopens when dispatch fails before any durable job exists", async () => {
+  const approval = { approvalId: "approval-1", complexity: "advanced", ceilingCredits: 60, status: "consumed" };
+  const reopened = [];
+  let projectInput = null;
+  const approvalStore = {
+    consume: async () => approval,
+    reopen: async (owner, id) => { reopened.push({ owner, id }); return { ...approval, status: "approved" }; },
+  };
+  const ctx = {
+    owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+    conversations: {}, emit: async () => {},
+  };
+  await assert.rejects(startAppBuildV2(ctx, {
+    description: "Build a collaborative IDE with a Monaco code editor and node graph",
+  }, {
+    approvalId: approval.approvalId,
+    deps: {
+      workerEnabled: () => true,
+      requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
+      resolveBuildContext: async () => ({ byok: true }),
+      approvalStore,
+      client: {
+        from(table) {
+          assert.equal(table, "projects");
+          return { insert: (input) => { projectInput = input; return ({ select: () => ({ single: async () => ({
+            data: null, error: { message: "database unavailable" },
+          }) }) }); } };
+        },
+      },
+    },
+  }), /project creation failed/);
+  assert.equal(projectInput.budget_approval_id, "approval-1",
+    "a crash after project insert remains traceable to the consumed approval");
+  assert.deepEqual(reopened, [{ owner: "owner-1", id: "approval-1" }]);
 });
 
 test("createJob refuses V2 before writing when worker dispatch is disabled", async () => {

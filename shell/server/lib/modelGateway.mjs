@@ -56,18 +56,55 @@ function modelLaneError(expected, actual) {
   });
 }
 
+export function toCodexLeadMessages(input = []) {
+  return input.flatMap((item) => {
+    if (item?.type === "function_call") {
+      return [{ role: "assistant", toolCalls: [{
+        id: item.call_id, name: item.name, arguments: item.arguments || "{}",
+      }] }];
+    }
+    if (item?.type === "function_call_output") {
+      return [{ role: "tool", toolCallId: item.call_id, name: item.name || null, output: String(item.output || "") }];
+    }
+    if (item?.role === "user") {
+      return [{ role: "user", content: typeof item.content === "string"
+        ? item.content : (item.content || []).map((part) => part.text || "").join("") }];
+    }
+    if (item?.role === "assistant") return [{ role: "assistant", content: String(item.content || "") }];
+    return [];
+  });
+}
+
 function codexLeadAdapter(provider) {
   return {
     id: "codex", model: provider.model,
-    async turn({ instructions, input = [], tools = [] }) {
+    async turn({ instructions, input = [], tools = [], maxOutputTokens = null }) {
       const result = await provider.runTurn({
         systemPrompt: instructions,
-        messages: input.map((item) => item.role === "user"
-          ? { role: "user", content: typeof item.content === "string" ? item.content : (item.content || []).map((p) => p.text || "").join("") }
-          : item),
+        messages: toCodexLeadMessages(input),
         tools,
+        maxOutputTokens,
       });
-      return { text: result.text, output: [], usage: result.usage, providerRequestId: result.usage?.providerRequestId };
+      const toolCalls = (result.toolCalls || []).map((call) => ({
+        type: "function_call",
+        call_id: call.id,
+        name: call.name,
+        arguments: call.rawArguments || JSON.stringify(call.arguments || {}),
+      }));
+      const usage = result.usage || {};
+      return {
+        text: result.text,
+        output: toolCalls,
+        usage: {
+          inputTokens: Number(usage.input || usage.inputTokens || 0),
+          cachedTokens: Number(usage.cached || usage.cachedTokens || 0),
+          outputTokens: Number(usage.output || usage.outputTokens || 0),
+          reasoningTokens: Number(usage.reasoning || usage.reasoningTokens || 0),
+          totalTokens: Number(usage.total || usage.totalTokens || 0),
+          providerRequestId: usage.providerRequestId || null,
+        },
+        providerRequestId: usage.providerRequestId || null,
+      };
     },
   };
 }

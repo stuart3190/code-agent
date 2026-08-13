@@ -3,6 +3,10 @@ import { activeAiCredential } from "./aiCredentialStore.mjs";
 import { aiRoutingStore } from "./aiRoutingStore.mjs";
 import { decryptSecret, encryptSecret } from "./secretCrypto.mjs";
 import {
+  createManagedDirectDispatchAccounting, directModelReservations,
+} from "./directModelReservations.mjs";
+import { managedSettlementPaused, MANAGED_PAUSED_MESSAGE } from "./appBuild/providerPolicy.mjs";
+import {
   createProviderForCandidate,
   isRetryableProviderError,
   modelCatalog,
@@ -12,11 +16,13 @@ import {
 const EVALUATION_INSTRUCTIONS = `You are evaluating an AI coding model for Thrallo.
 Answer the user's coding question directly and accurately in at most 200 words.
 Do not use tools. State any important assumption.`;
+const MAX_OUTPUT_TOKENS = 1_000;
 
 export async function runModelEvaluation(owner, input = {}, {
   credentialResolver = activeAiCredential,
   store = aiRoutingStore(),
   providerFactory = createProviderForCandidate,
+  reservationStoreFactory = directModelReservations,
 } = {}) {
   const prompt = String(input.prompt || "").trim();
   if (!prompt || prompt.length > 2_000) throw evaluationError("Enter an evaluation prompt of 2,000 characters or fewer.");
@@ -24,6 +30,9 @@ export async function runModelEvaluation(owner, input = {}, {
   const credential = await credentialResolver(owner);
   if (credential.provider === "codex") {
     throw evaluationError("Provider comparisons use managed AI or an API-key connection. Select one first.", 409);
+  }
+  if (credential.provider === "managed" && managedSettlementPaused()) {
+    throw Object.assign(new Error(MANAGED_PAUSED_MESSAGE), { code: "managed_paused", status: 503 });
   }
   const health = await store.listRecentAttempts(owner, 200);
   const candidates = evaluationCandidates({
@@ -41,18 +50,58 @@ export async function runModelEvaluation(owner, input = {}, {
     requested_models: candidates.map(({ provider, model }) => ({ provider, model })),
     status: "running",
   });
+  const accounting = credential.provider === "managed"
+    ? createManagedDirectDispatchAccounting({
+      owner,
+      kind: "model_evaluation",
+      subjectId: evaluation.id,
+      reservations: reservationStoreFactory(),
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      metadata: { evaluationId: evaluation.id },
+    })
+    : null;
 
   let successes = 0;
-  for (const candidate of candidates) {
+  for (const [candidateIndex, candidate] of candidates.entries()) {
     const started = Date.now();
+    let mustAbortEvaluation = false;
     try {
-      const provider = providerFactory(candidate, credential, { maxOutputTokens: 1_000 });
-      const response = await provider.turn({
+      const provider = providerFactory(candidate, credential, { maxOutputTokens: MAX_OUTPUT_TOKENS });
+      const turnArgs = {
         instructions: EVALUATION_INSTRUCTIONS,
         input: [{ role: "user", content: prompt }],
         tools: [],
         safetyIdentifier: owner,
-      });
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        maxProviderRetries: 0,
+        allowParameterRetry: false,
+      };
+      let response;
+      if (accounting) {
+        const hooks = accounting.forTurn(candidateIndex + 1);
+        let hold = null;
+        let providerCompleted = false;
+        try {
+          hold = await hooks.beforeDispatch(candidate, { attemptOrder: 1, args: turnArgs });
+          response = await provider.turn(turnArgs);
+          providerCompleted = true;
+          await hooks.afterDispatch(hold, candidate, response);
+        } catch (error) {
+          if (providerCompleted || !hold) {
+            mustAbortEvaluation = true;
+            throw error;
+          }
+          try {
+            await hooks.dispatchFailed(hold, candidate, error);
+          } catch (accountingError) {
+            mustAbortEvaluation = true;
+            throw accountingError;
+          }
+          throw error;
+        }
+      } else {
+        response = await provider.turn(turnArgs);
+      }
       const latencyMs = Date.now() - started;
       const output = String(response.text || "").trim();
       successes += output ? 1 : 0;
@@ -111,6 +160,13 @@ export async function runModelEvaluation(owner, input = {}, {
         error_code: String(error.code || "evaluation_failed").slice(0, 120),
         retryable: isRetryableProviderError(error),
       });
+      if (mustAbortEvaluation) {
+        await store.updateEvaluation(owner, evaluation.id, {
+          status: "failed",
+          completed_at: new Date().toISOString(),
+        });
+        throw error;
+      }
     }
   }
   await store.updateEvaluation(owner, evaluation.id, {

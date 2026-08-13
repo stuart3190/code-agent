@@ -9,6 +9,8 @@ const { processRun } = await import("../../shell/server/lib/codeAgentService.mjs
 const { handleRunResume, handleRunArtifactContent } =
   await import("../../shell/server/routes/codeAgent.mjs");
 const { publicRun } = await import("../../shell/server/lib/codeAgentContracts.mjs");
+const { memoryDirectModelReservations } = await import("../../shell/server/lib/directModelReservations.mjs");
+const { DISPATCH_STATES, providerFailure } = await import("../../shell/server/lib/providerOutcome.mjs");
 
 const SUCCESS_RESULT = {
   summary: "Done",
@@ -118,6 +120,111 @@ test("a failed run preserves and stops its sandbox for resume", async () => {
   assert.equal(stopped, true);
   assert.equal(disposed, false);
   assert.equal(publicRun(finished).resumable, true);
+});
+
+test("an ambiguous managed run never writes aggregate post-hoc usage around its durable hold", async () => {
+  const { store, run } = await seed();
+  const reservations = memoryDirectModelReservations();
+  const finished = await processRun(run, {
+    ...passthrough,
+    runnerFactory: async () => fakeRunner(),
+    credentialResolver: async () => ({
+      provider: "managed", routing: { routingMode: "balanced", allowFallback: true },
+    }),
+    providerNameResolver: async () => "managed",
+    budgetGuard: async () => ({ budgets: { managedTokens: { remaining: 10_000 } } }),
+    reservationStoreFactory: () => reservations,
+    agentRunner: async ({ dispatchAccounting }) => {
+      const candidate = { provider: "openai", model: "gpt-5.6-luna" };
+      const hooks = dispatchAccounting.forTurn(1);
+      const hold = await hooks.beforeDispatch(candidate, {
+        attemptOrder: 1,
+        args: { instructions: "work", input: [], tools: [], maxOutputTokens: 400 },
+      });
+      try {
+        await hooks.dispatchFailed(hold, candidate, providerFailure(new Error("socket ended"), {
+          state: DISPATCH_STATES.ambiguous,
+          providerRequestId: "req_run_ambiguous",
+        }));
+      } catch (error) {
+        error.usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120 };
+        throw error;
+      }
+    },
+  });
+  assert.equal(finished.state, "failed");
+  assert.equal(finished.error_code, "provider_replay_unsafe");
+  const [hold] = reservations.rows();
+  assert.equal(hold.reconciliationState, "pending");
+  assert.equal([...store.usageRecords.values()].length, 0,
+    "managed aggregate usage must not bypass the unresolved direct reservation");
+});
+
+test("managed repository work uses purchased credits after included allowance is exhausted", async () => {
+  const { store, run } = await seed({ installation: null });
+  await store.upsertSubscription("owner", { managed_token_limit_override: 10 });
+  await store.recordStandaloneUsage("owner", {
+    billing_source: "managed", input_tokens: 10, output_tokens: 0, compute_seconds: 0,
+  });
+  const usageBefore = [...store.usageRecords.values()].length;
+  const reservations = memoryDirectModelReservations({
+    balanceResolver: async () => ({ included: 0, purchased: 100 }),
+  });
+  let providerCalls = 0;
+  const finished = await processRun(run, {
+    ...passthrough,
+    runnerFactory: async () => fakeRunner(),
+    credentialResolver: async () => ({
+      provider: "managed", routing: { routingMode: "balanced", allowFallback: true },
+    }),
+    providerNameResolver: async () => "managed",
+    reservationStoreFactory: () => reservations,
+    modelFactory: async () => ({
+      id: "openai", model: "gpt-5.6-luna",
+      async turn(args) {
+        providerCalls += 1;
+        assert.equal(args.maxOutputTokens, 8_000);
+        return {
+          id: "req_repo_topup", text: "Done",
+          output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }],
+          usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+        };
+      },
+    }),
+  });
+  assert.equal(finished.state, "succeeded");
+  assert.equal(providerCalls, 1);
+  const [reservation] = reservations.rows();
+  assert.equal(reservation.state, "settled");
+  assert.equal(reservation.includedReservedCredits, 0);
+  assert.ok(reservation.purchasedReservedCredits > 0);
+  assert.equal([...store.usageRecords.values()].length, usageBefore,
+    "per-turn purchased settlement must not be followed by aggregate managed usage");
+});
+
+test("managed repository work with no included or purchased credits fails before provider dispatch", async () => {
+  const { store, run } = await seed({ installation: null });
+  const reservations = memoryDirectModelReservations({
+    balanceResolver: async () => ({ included: 0, purchased: 0 }),
+  });
+  let providerCalls = 0;
+  const finished = await processRun(run, {
+    ...passthrough,
+    runnerFactory: async () => fakeRunner(),
+    credentialResolver: async () => ({
+      provider: "managed", routing: { routingMode: "balanced", allowFallback: true },
+    }),
+    providerNameResolver: async () => "managed",
+    reservationStoreFactory: () => reservations,
+    modelFactory: async () => ({
+      id: "openai", model: "gpt-5.6-luna",
+      async turn() { providerCalls += 1; return { text: "must not happen", output: [], usage: {} }; },
+    }),
+  });
+  assert.equal(finished.state, "failed");
+  assert.equal(finished.error_code, "account_budget");
+  assert.equal(providerCalls, 0);
+  assert.equal([...store.usageRecords.values()].length, 0);
 });
 
 test("resume reattaches the preserved sandbox and briefs the agent", async () => {
