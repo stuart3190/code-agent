@@ -14,6 +14,9 @@ import { deriveModulePlan } from "../shell/server/lib/builderV2/contractTiering.
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { buildProjectErasureManifest, eraseProjectPermanently } from "../shell/server/lib/erasureService.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
+import { supabaseBuildStore } from "../shell/server/lib/builderV2/orchestrator.mjs";
+import { createSnapshotStore } from "../shell/server/lib/builderV2/snapshotStore.mjs";
+import { supabaseSnapshotStorage } from "../shell/server/lib/builderV2/supabaseTwins.mjs";
 import { previewProvider } from "../shell/server/preview/index.mjs";
 import { requireFreshWorkerPreviewProof } from "../build-worker/previewIsolationPreflight.mjs";
 
@@ -327,6 +330,56 @@ async function archiveZeroSpendPreDispatchRepair2(state) {
   });
 }
 
+async function applyQualificationCapacityCopy(state) {
+  if (state.stages.operatorRepair) throw new Error("the qualification-only operator repair was already used");
+  const verified = state.stages.reverify2;
+  if (!verified?.terminal || verified.result === "pass" || Number(verified.stageCredits || 0) !== 0
+    || (verified.evidence?.reservations || []).length || (verified.evidence?.aiRequests || []).length) {
+    throw new Error("operator repair requires a completed zero-model re-verification that remained red");
+  }
+  const failures = (verified.evidence?.verdicts || []).flatMap((row) => (row.verdict?.steps || [])
+    .filter((step) => step.status === "fail").map((step) => `${row.journey_id}: ${step.detail}`));
+  if (failures.length !== 1 || !/^capacity-is-enforced: expected date, choices, current, availability, copy; found date, choices$/i.test(failures[0])) {
+    throw new Error(`operator repair refuses unexpected live findings: ${failures.join(" | ")}`);
+  }
+  const sourceBuild = verified.evidence?.v2Builds?.at(-1);
+  const sourceSnapshotId = verified.evidence?.publicBuild?.result?._worker?.bv2?.workingSnapshotId;
+  if (!sourceBuild?.id || !sourceSnapshotId) throw new Error("operator repair has no verified immutable source checkpoint");
+
+  const store = createSnapshotStore(supabaseSnapshotStorage({ client }));
+  const tree = await store.materialize(state.owner, sourceSnapshotId);
+  const target = "src/components/reserve-recover-and-cancel/ReserveRecoverAndCancelFlow.jsx";
+  const anchor = "<section className=\"ember-panel\">\n        <h2>Date choices</h2>";
+  const replacement = `${anchor}\n        <p>Current availability copy: choose a date to see live remaining capacity for every supper slot.</p>`;
+  const source = String(tree[target] || "");
+  if (!source.includes(anchor) || source.includes("Current availability copy:")) {
+    throw new Error("operator repair source anchor is missing or already changed");
+  }
+  const patched = source.replace(anchor, replacement);
+  if (patched === source || patched.replace(replacement, anchor) !== source) {
+    throw new Error("operator repair did not produce the one approved source change");
+  }
+  tree[target] = patched;
+
+  const builds = supabaseBuildStore(client);
+  const buildId = await builds.create({
+    owner: state.owner, project_id: state.project.id, profile: "repair",
+    request: "Package 14S qualification-only operator capacity-copy correction; zero model calls.",
+    state: "blocked", max_repair_dispatches: 0, started_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  });
+  const snapshot = await store.createSnapshot(state.owner, state.project.id, tree, {
+    buildId, parent: sourceSnapshotId, reason: "working:package14s-operator-capacity-copy",
+  });
+  state.stages.operatorRepair = {
+    at: new Date().toISOString(), sourceBuildId: sourceBuild.id, buildId,
+    sourceSnapshotId, snapshotId: snapshot.id, filesChanged: [target],
+    sourceSha256: sha256(source), patchedSha256: sha256(patched), providerCalls: 0, credits: 0,
+  };
+  await save(state);
+  await emit("operator_repair_checkpointed", state.stages.operatorRepair);
+}
+
 async function cleanup(state) {
   if (state.cleanup) throw new Error("cleanup already completed");
   const retention = await retainGeneratedSource(state);
@@ -478,13 +531,30 @@ if (STAGE === "preflight") {
   await runLifecycle(state, { stage: "reverify2", mode: "resume_verify",
     prompt: "Re-verify the unchanged retained checkpoint against the current protected platform after the ambiguous provider incident; make no model call and no generated-source change.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, maxRepairs: 0 } });
+} else if (STAGE === "operator-repair") {
+  await applyQualificationCapacityCopy(state);
+} else if (STAGE === "reverify3") {
+  if (state.stages.reverify3) throw new Error("the final operator-checkpoint re-verification was already used");
+  const repaired = state.stages.operatorRepair;
+  if (!repaired?.buildId || repaired.providerCalls !== 0 || repaired.credits !== 0
+    || repaired.filesChanged?.length !== 1) {
+    throw new Error("reverify3 requires the single zero-model qualification operator checkpoint");
+  }
+  const current = await spend(state.project.id);
+  const remaining = round(TOTAL_CEILING - current.credits);
+  if (!(remaining > 0)) throw new Error("no approved Package 14S headroom remains");
+  await runLifecycle(state, { stage: "reverify3", mode: "resume_verify",
+    prompt: "Verify the qualification-only operator checkpoint against the current protected platform; make no model call and no generated-source change.",
+    ceiling: remaining, v2Input: { sourceBuildId: repaired.buildId, maxRepairs: 0 } });
 } else if (STAGE === "report") {
   const current = state.project ? await spend(state.project.id) : { credits: 0, calls: 0 };
   await emit("report", { credits: current.credits, calls: current.calls,
     booking: state.stages.booking?.result || "not-run", repair: state.stages.repair?.result || "not-used",
     reverify: state.stages.reverify?.result || "not-used", repair2: state.stages.repair2?.result || "not-used",
     reverify2: state.stages.reverify2?.result || "not-used",
-    finalPass: state.stages.reverify2?.result === "pass" || state.stages.repair2?.result === "pass" || state.stages.reverify?.result === "pass"
+    operatorRepair: state.stages.operatorRepair ? "checkpointed" : "not-used",
+    reverify3: state.stages.reverify3?.result || "not-used",
+    finalPass: state.stages.reverify3?.result === "pass" || state.stages.reverify2?.result === "pass" || state.stages.repair2?.result === "pass" || state.stages.reverify?.result === "pass"
       || state.stages.repair?.result === "pass" || state.stages.booking?.result === "pass" });
 } else if (STAGE === "cleanup") {
   await cleanup(state);

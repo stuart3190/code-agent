@@ -131,3 +131,26 @@ test("an ambiguous final provider incident permits only one zero-model checkpoin
   assert.match(branch, /mode: "resume_verify"/);
   assert.match(branch, /maxRepairs: 0/);
 });
+
+test("the qualification operator repair is exact, one-file, zero-model, and immutable", () => {
+  const repair = source.slice(source.indexOf("async function applyQualificationCapacityCopy"),
+    source.indexOf("async function cleanup(state)"));
+  assert.match(repair, /failures\.length !== 1/);
+  assert.match(repair, /capacity-is-enforced: expected date, choices, current, availability, copy; found date, choices/);
+  assert.match(repair, /source\.replace\(anchor, replacement\)/);
+  assert.match(repair, /filesChanged: \[target\]/);
+  assert.match(repair, /reason: "working:package14s-operator-capacity-copy"/);
+  assert.match(repair, /providerCalls: 0, credits: 0/);
+  assert.doesNotMatch(repair, /createJob|runLifecycle|runTurn/,
+    "the operator patch must not gain a provider or public-job path");
+});
+
+test("the operator checkpoint receives one final zero-model verification", () => {
+  const branch = source.slice(source.indexOf('} else if (STAGE === "reverify3")'),
+    source.indexOf('} else if (STAGE === "report")'));
+  assert.match(branch, /state\.stages\.reverify3/);
+  assert.match(branch, /filesChanged\?\.length !== 1/);
+  assert.match(branch, /mode: "resume_verify"/);
+  assert.match(branch, /sourceBuildId: repaired\.buildId/);
+  assert.match(branch, /maxRepairs: 0/);
+});

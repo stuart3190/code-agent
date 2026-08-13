@@ -52,7 +52,7 @@ const CONFUSING_JOURNEY = {
 };
 
 const APP = String.raw`
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 function Choices({ title, values, value, onChange }) {
   return <fieldset><legend>{title}</legend><div>
@@ -62,12 +62,19 @@ function Choices({ title, values, value, onChange }) {
 }
 
 export default function App() {
+  const [routeReady, setRouteReady] = useState(window.location.pathname !== "/book");
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState("");
   const [partySize, setPartySize] = useState("");
   const [contact, setContact] = useState({ name: "", email: "", phone: "" });
   const [review, setReview] = useState(false);
   const ready = date && slot && partySize;
+  useEffect(() => {
+    if (routeReady) return undefined;
+    const timer = setTimeout(() => setRouteReady(true), 450);
+    return () => clearTimeout(timer);
+  }, [routeReady]);
+  if (!routeReady) return <main><p>Loading booking availability</p></main>;
   const update = (field) => (event) => setContact((current) => ({ ...current, [field]: event.target.value }));
   return <main>
     <Choices title="Choose date" values={["Friday 14 Feb", "Friday 21 Feb"]} value={date} onChange={setDate} />
@@ -131,7 +138,7 @@ test("the same compiled candidate is driveable with exact contracted control ide
   assert.match(result.journeys[0].steps[3].detail, /review contains 3 exact entered value/);
 });
 
-test("a route-targeted composite step navigates and then drives every declared selection", async () => {
+test("a route-targeted composite step waits for async controls and drives every declared selection", async () => {
   const result = await verifyJourneys({ previewUrl, contract: ROUTED_COMPOSITE, timeoutMs: 60_000 });
   assert.equal(result.pass, true, JSON.stringify(result, null, 2));
   const step = result.journeys[0].steps[0];

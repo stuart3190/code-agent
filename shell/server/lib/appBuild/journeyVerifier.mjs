@@ -767,6 +767,16 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   };
 }
 
+async function driveSelectionAfterNavigation(page, step, flow, excludedKeys, journeyFlows) {
+  const deadline = Date.now() + 5_000;
+  let outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows);
+  while (!outcome && Date.now() < deadline) {
+    await page.waitForTimeout(200);
+    outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows);
+  }
+  return outcome;
+}
+
 // ── durable evidence: what recovery actually has to prove ─────────────────────────────────────
 //
 // A recovery step used to be judged on words — "recovered", "remains", "same" — so a correct app
@@ -1051,7 +1061,13 @@ async function runStep(page, step, {
       const used = new Set();
       const advances = [];
       for (const flow of selectionFlows) {
-        let outcome = await driveSelection(page, step, flow, used, journeyFlows);
+        // A route navigation waits only for DOMContentLoaded. Generated apps commonly fetch
+        // availability before rendering their first semantic option group, so an immediate query
+        // observes the loading shell and falsely declares the contracted control absent. Poll only
+        // after this step actually navigated; ordinary selection failures keep their fast path.
+        let outcome = navigated
+          ? await driveSelectionAfterNavigation(page, step, flow, used, journeyFlows)
+          : await driveSelection(page, step, flow, used, journeyFlows);
         // The contracted group may belong to a step the flow has not reached. Advance and retry,
         // bounded, and only while advancing actually changes the page. The retry re-locates the
         // group by IDENTITY, so advancing can never hand this step a different group's controls.
