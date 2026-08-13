@@ -88,7 +88,12 @@ test("cancel reaches the repaired cancellation pipeline and dispatches nothing f
 
 test("cancelling an unknown or finished job is a normal outcome, not a crash", async () => {
   const { cancelJob } = await import("../../shell/server/lib/buildJobs.mjs");
-  const result = await cancelJob("owner-that-owns-nothing", JOB);
+  const query = {
+    select() { return this; }, eq() { return this; },
+    async maybeSingle() { return { data: null, error: null }; },
+  };
+  const client = { from(table) { assert.equal(table, "build_jobs"); return query; } };
+  const result = await cancelJob("owner-that-owns-nothing", JOB, { client });
   assert.equal(result.ok, false);
   assert.match(result.error, /not found/);
 });

@@ -462,8 +462,28 @@ test("systemd units and the runbook ship with the repository", async () => {
   const timer = await readFile(new URL("../../ops/thrallo-backup.timer", import.meta.url), "utf8");
   assert.match(timer, /OnCalendar=/);
   assert.match(timer, /Persistent=true/);
-  const restoreMode = execFileSync("git", ["ls-files", "-s", "ops/run-latest-isolated-restore-drill.sh"], { encoding: "utf8" });
-  assert.match(restoreMode, /^100755 /, "the systemd restore entrypoint must be executable in the release archive");
+  const restorePath = fileURLToPath(new URL("../../ops/run-latest-isolated-restore-drill.sh", import.meta.url));
+  const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
+  let repositoryRoot = "";
+  try {
+    repositoryRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: sourceRoot, encoding: "utf8",
+    }).trim();
+  } catch {}
+  if (repositoryRoot && path.resolve(repositoryRoot) === path.resolve(sourceRoot)) {
+    const restoreMode = execFileSync("git", ["ls-files", "-s", "ops/run-latest-isolated-restore-drill.sh"], {
+      cwd: sourceRoot, encoding: "utf8",
+    });
+    assert.match(restoreMode, /^100755 /, "the systemd restore entrypoint must be executable in the release archive");
+  } else if (process.platform !== "win32") {
+    const mode = (await (await import("node:fs/promises")).stat(restorePath)).mode;
+    assert.notEqual(mode & 0o111, 0, "the extracted release entrypoint must remain executable");
+  } else {
+    // NTFS extraction cannot represent a POSIX executable bit. The archive verifier checks the tar
+    // header; here we can still prove this is a directly executable shell entrypoint, not a text
+    // substitute accidentally shipped at that path.
+    assert.match(await readFile(restorePath, "utf8"), /^#!\/usr\/bin\/env bash\r?\n/);
+  }
   const runbook = await readFile(new URL("../../docs/DISASTER-RECOVERY.md", import.meta.url), "utf8");
   assert.match(runbook, /PLATFORM_ENC_KEY/);
   assert.match(runbook, /restore-thrallo\.mjs/);

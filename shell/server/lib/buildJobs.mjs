@@ -107,7 +107,7 @@ export class CancelledError extends Error {
 const jobs = new Map();   // jobId -> job (live source of truth while this process runs)
 const waiting = [];       // FIFO of queued jobIds (in-process only — no external queue)
 
-function db() { return serviceClient().from("build_jobs"); }
+function db(client = null) { return (client || serviceClient()).from("build_jobs"); }
 
 function serverLog(job, line) {
   console.log(`[job ${job.id.slice(0, 8)}] ${String(line)}`);
@@ -386,23 +386,23 @@ function rowToJob(row) {
   };
 }
 
-export async function cancelJob(ownerId, jobId) {
+export async function cancelJob(ownerId, jobId, { client = null } = {}) {
   let job = jobs.get(jobId);
   if (!job) {
-    const { data } = await db().select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
+    const { data } = await db(client).select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
     if (data) job = rowToJob(data);
   }
   if (!job || job.owner.id !== ownerId) return { ok: false, error: "not found" };
   if (TERMINAL.has(job.status)) {
     if (!job.workJobId) return { ok: false, error: "already finished" };
-    const work = await getBuildWork(ownerId, job.workJobId, { includeResult: false });
+    const work = await getBuildWork(ownerId, job.workJobId, { client, includeResult: false });
     if (!work || BUILD_WORK_TERMINAL.has(work.state)) return { ok: false, error: "already finished" };
-    await requestBuildWorkCancel(ownerId, job.workJobId);
+    await requestBuildWorkCancel(ownerId, job.workJobId, { client });
     job.cancelled = true;
     return { ok: true };
   }
   if (job.workJobId) {
-    await requestBuildWorkCancel(ownerId, job.workJobId);
+    await requestBuildWorkCancel(ownerId, job.workJobId, { client });
     job.cancelled = true;
     return { ok: true };
   }

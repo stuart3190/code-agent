@@ -181,12 +181,13 @@ async function resumableBuild(client, owner, projectId) {
 
 /** Accept a new application build. An exception remains a V2 failure; callers must not fallback. */
 export async function startAppBuildV2(ctx, input, options = {}) {
-  const deps = productionDeps(options.deps);
-  if (!deps.workerEnabled()) {
+  const workerEnabled = options.deps?.workerEnabled || buildWorkerEnabled;
+  if (!workerEnabled()) {
     throw Object.assign(new Error("Builder V2 requires the isolated build worker; no project was created."), {
       code: "worker_required",
     });
   }
+  const deps = productionDeps(options.deps);
   const preflight = await buildCeiling(ctx.owner, "build", deps);
   const name = String(input.productName || "").trim() || null;
   let productId = ctx.conversation.product_id || null;
@@ -229,6 +230,12 @@ export async function startExistingAppWorkV2(ctx, {
   project, request, kind = "edit", trigger = "user", taskHint = null,
 }, options = {}) {
   if (!project?.id) throw new Error("Builder V2 needs an owner-scoped project");
+  const workerEnabled = options.deps?.workerEnabled || buildWorkerEnabled;
+  if (!workerEnabled()) {
+    throw Object.assign(new Error("Builder V2 requires the isolated build worker; no diagnostic or job was created."), {
+      code: "worker_required",
+    });
+  }
   const deps = productionDeps(options.deps);
   let mode = "iterate";
   let v2Input = null;
