@@ -1034,15 +1034,18 @@ async function runStep(page, step, {
   // gating on the word "selected" sent exactly that step back to the text path, which refused
   // the default-selected date all over again. When no selectable group matches, the generic
   // path below still applies.
-  if (!navigated && /\b(choose|select|pick)\b/i.test(action) && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
+  const declaredSelections = interactionFlows.filter((flow) => flow.kind === "selection"
+    && flow.control && !identifiesNothing(flow.control.logicalField || flow.control.accessibleName));
+  if ((!navigated || declaredSelections.length)
+    && (declaredSelections.length || /\b(choose|select|pick)\b/i.test(action))
+    && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
     // "choose to cancel the booking" derives a SELECTION whose field is the bare verb `cancel`,
     // because the step says "choose". There is no option group called cancel — it is a button —
     // and demanding one made a working cancellation undriveable. controlIdentity already names
     // these words as identifying no control on their own; a selection over one of them is an
     // artefact of the verb, and the step's real action kind is handled below.
     const cancels = interactionFlows.some((flow) => flow.kind === "cancellation");
-    const selectionFlows = cancels ? [] : interactionFlows.filter((flow) => flow.kind === "selection"
-      && flow.control && !identifiesNothing(flow.control.logicalField || flow.control.accessibleName));
+    const selectionFlows = cancels ? [] : declaredSelections;
     if (selectionFlows.length) {
       const outcomes = [];
       const used = new Set();

@@ -351,13 +351,16 @@ export function buildInteractionContract(contract, {
         // A step that performs an operation writes no value THROUGH A CONTROL of its own: the verb
         // list may still read "confirm" as an input, and there is no field for it to fill.
         if (drivesValues && operandsAreOperations) continue;
-        // Nor does a step that goes somewhere or comes back to it. "reload the page ⇒ the reference
-        // is visible again" OPERATES the reference in the sense that the step is about it, and a
-        // reload types nothing: deriving a text box there asks the browser to fill a control the
-        // app is right to render read-only. A LOOKUP still keeps its input — asking for a record by
-        // reference means typing the reference — so only these two kinds are excluded.
-        if (drivesValues && operands
-          && (kinds.includes("recovery") || /^\s*\//.test(String(step?.target || "")))) continue;
+        // A recovery step types nothing: "reload the page ⇒ the reference is visible again"
+        // OPERATES the reference only in the sense that the step is about it, and deriving a text
+        // box there asks the browser to fill a control the app is right to render read-only. A
+        // navigation target is different only when the action itself declares the value act: a
+        // composite step may open /book AND make its declared selections after navigation. A
+        // navigation-only step with a stray operand must remain read-only; the inferred fallback
+        // input in `effectiveKinds` is not authority to type after changing routes.
+        const routeWithoutValueIntent = /^\s*\//.test(String(step?.target || ""))
+          && !kinds.includes(kind);
+        if (drivesValues && operands && (kinds.includes("recovery") || routeWithoutValueIntent)) continue;
         // A second value-writing kind on a step whose operands are declared is an artefact of an
         // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
         if (drivesValues && operands && kind !== operandKind) continue;

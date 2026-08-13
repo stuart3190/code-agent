@@ -144,6 +144,29 @@ test("a genuine chooser is still a selection", () => {
   assert.equal(has("choose a slot to suit the party", "", ACTION_INTENT.SELECTION), true);
 });
 
+test("a composite make-selection clause carries selection intent", () => {
+  assert.equal(has("open the booking experience and make a date, slot, and party size selection",
+    "/book", ACTION_INTENT.SELECTION), true);
+});
+
+test("a routed composite selection retains every structured chooser operand", () => {
+  const contract = {
+    summary: "booking", projectType: "web app", version: 1, auth: { required: false },
+    routes: [{ path: "/book", name: "Book" }],
+    entities: [{ name: "booking", fields: [
+      { name: "dateId", type: "string" }, { name: "slotId", type: "string" },
+      { name: "partySize", type: "number" },
+    ] }],
+    operations: [], journeys: [{ id: "contact-validation", title: "contact validation", priority: "primary",
+      steps: [{ action: "open the booking experience and make a date, slot, and party size selection",
+        target: "/book", operates: ["booking.dateId", "booking.slotId", "booking.partySize"],
+        expect: "contact fields become visible" }],
+    }], acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const flows = buildInteractionContract(contract).flows.filter((flow) => flow.kind === "selection");
+  assert.deepEqual(flows.map((flow) => flow.valueWritten), ["dateId", "slotId", "partySize"]);
+});
+
 // ── the validity intent belongs to the field the action NAMES ──────────────────────────────────
 
 test("an invalid-value step makes ONLY the field it names invalid", () => {

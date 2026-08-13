@@ -413,11 +413,34 @@ if (STAGE === "preflight") {
   await runLifecycle(state, { stage: "reverify", mode: "resume_verify",
     prompt: "Re-verify the retained paid repair against the current protected platform runtime; make no model call and no generated-source change.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, maxRepairs: 0 } });
+} else if (STAGE === "repair2") {
+  if (state.stages.repair2) throw new Error("the final bounded browser-informed repair was already used");
+  const verified = state.stages.reverify;
+  if (!verified?.terminal || verified.result === "pass" || Number(verified.stageCredits || 0) !== 0) {
+    throw new Error("repair2 requires a completed zero-spend platform re-verification that remained red");
+  }
+  if ((verified.evidence?.reservations || []).length || (verified.evidence?.aiRequests || []).length) {
+    throw new Error("repair2 refuses a re-verification that made a provider call");
+  }
+  const v2 = verified.evidence?.v2Builds?.at(-1);
+  const bv2Result = verified.evidence?.publicBuild?.result?._worker?.bv2 || {};
+  if (!v2?.id || !bv2Result.workingSnapshotId) throw new Error("re-verification left no checkpoint for final repair");
+  const problems = (verified.evidence?.verdicts || []).flatMap((row) => (row.verdict?.steps || [])
+    .filter((step) => !["pass", "skipped", "not_reached"].includes(step.status))
+    .map((step) => `journey ${row.journey_id}: ${step.action}: ${step.detail}`));
+  if (!problems.length) throw new Error("re-verification recorded no actionable browser failures");
+  const current = await spend(state.project.id);
+  const remaining = round(TOTAL_CEILING - current.credits);
+  if (!(remaining > 0)) throw new Error("no approved Package 14S headroom remains for final repair");
+  await runLifecycle(state, { stage: "repair2", mode: "resume_repair",
+    prompt: "Apply one final bounded repair to only the exact remaining failed contracted journeys; preserve the working application and do not regenerate it.",
+    ceiling: remaining, v2Input: { sourceBuildId: v2.id, problems } });
 } else if (STAGE === "report") {
   const current = state.project ? await spend(state.project.id) : { credits: 0, calls: 0 };
   await emit("report", { credits: current.credits, calls: current.calls,
     booking: state.stages.booking?.result || "not-run", repair: state.stages.repair?.result || "not-used",
-    finalPass: state.stages.reverify?.result === "pass"
+    reverify: state.stages.reverify?.result || "not-used", repair2: state.stages.repair2?.result || "not-used",
+    finalPass: state.stages.repair2?.result === "pass" || state.stages.reverify?.result === "pass"
       || state.stages.repair?.result === "pass" || state.stages.booking?.result === "pass" });
 } else if (STAGE === "cleanup") {
   await cleanup(state);

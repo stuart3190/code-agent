@@ -103,6 +103,33 @@ test("WP5 — cancellation is a visible STATUS TRANSITION that releases capacity
   assert.deepEqual([wrong.ok, wrong.reason], [false, "not_found"], "no cross-email cancellation");
 });
 
+test("WP5 - declared booking field aliases and direct-record consumers remain compatible", async () => {
+  const { makeBookingSystem, CREATE_RESULT } = await CAP("booking.js");
+  const system = makeBookingSystem({ slots: SLOTS, deps: memoryBackend() });
+
+  const created = await system.createBooking({
+    dateId: "2026-08-13", slotId: "morning", partySize: 2,
+    guestName: "Grace Hopper", guestEmail: "Grace@Example.com ", guestPhone: "555-0113",
+    status: "Confirmed",
+  });
+  assert.equal(created.result, CREATE_RESULT.OK);
+  assert.equal(created.booking.reference, created.reference, "wrapper and direct-record APIs share one reference");
+  assert.equal(created.date, "2026-08-13", "the canonical date is retained for capacity checks");
+  assert.equal(created.email, "grace@example.com", "the canonical email is normalised");
+  assert.equal(created.name, "Grace Hopper", "the canonical name is retained");
+  assert.equal(created.status, "Confirmed", "the declared compatibility status remains visible");
+  assert.equal(await system.remaining("2026-08-13", "morning"), 2,
+    "a Confirmed compatibility record consumes capacity just like an Active record");
+
+  const recovered = await system.getBooking(created.reference);
+  assert.equal(recovered.id, created.id, "visitor-scoped recovery supports reference-only consumers");
+  const cancelled = await system.cancelBooking(created.reference, { status: "Cancelled" });
+  assert.equal(cancelled.ok, true);
+  assert.equal(cancelled.reference, created.reference, "direct-record cancellation consumers retain the reference");
+  assert.equal(cancelled.booking.status, "Cancelled", "the canonical wrapper remains available");
+  assert.equal(await system.remaining("2026-08-13", "morning"), 4, "cancellation releases capacity");
+});
+
 test("WP5 — newsletter returns the exact states the UI contract demands", async () => {
   const { makeNewsletter, NEWSLETTER_RESULT } = await CAP("forms.js");
   const newsletter = makeNewsletter({ deps: memoryBackend() });

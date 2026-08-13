@@ -206,6 +206,12 @@ export function actionIntents(step) {
       for (const intent of match.intents) found.add(intent);
     }
   }
+  // "make a date, slot, and party-size selection" is a composite selection clause. `selection`
+  // is correctly a noun there, but `make` makes that noun the act; without this canonical form a
+  // step whose structured `operates` named three chooser fields was reduced to navigation only.
+  if (/\bmake\b[\s\S]*\bselections?\b/i.test(String(step?.action || ""))) {
+    found.add(ACTION_INTENT.SELECTION);
+  }
   return found;
 }
 

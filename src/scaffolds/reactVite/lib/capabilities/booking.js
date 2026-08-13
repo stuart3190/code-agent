@@ -17,6 +17,7 @@ export const CREATE_RESULT = Object.freeze({ OK: "ok", INVALID: "invalid", OVER_
 
 const flatten = (row) => (row ? { id: row.id, createdAt: row.created_at, ...(row.data || {}) } : null);
 const emailOk = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+const bookingResult = (result, booking) => ({ ...(booking || {}), result, booking });
 
 function makeReference() {
   const raw = (globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, "");
@@ -35,7 +36,7 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
 
   async function activeFor(date, slotId) {
     const rows = await store().list({ filters: { date, slotId }, limit: 500 });
-    return rows.map(flatten).filter((b) => b.status === BOOKING_STATUS.ACTIVE);
+    return rows.map(flatten).filter((b) => [BOOKING_STATUS.ACTIVE, "Confirmed"].includes(b.status));
   }
 
   /**
@@ -66,26 +67,36 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
    * the concurrent-create test); ranking admits exactly the rows that fit.
    */
   async function createBooking(values = {}) {
+    // The capability originally required the compact { date, email, name } vocabulary while the
+    // contracts it serves commonly expose explicit entity fields such as dateId/guestEmail/
+    // guestName. Accept both at this platform boundary. The canonical fields remain present in
+    // storage, so existing consumers and capacity checks keep their exact semantics.
+    const date = values.date ?? values.dateId;
+    const email = values.email ?? values.guestEmail;
+    const name = values.name ?? values.guestName;
+    const status = values.status === "Confirmed" ? "Confirmed" : BOOKING_STATUS.ACTIVE;
     const partySize = Number(values.partySize) || 1;
-    if (!values.date || !values.slotId || !emailOk(values.email) || !String(values.name || "").trim()) {
-      return { result: CREATE_RESULT.INVALID, booking: null };
+    if (!date || !values.slotId || !emailOk(email) || !String(name || "").trim()) {
+      return bookingResult(CREATE_RESULT.INVALID, null);
     }
-    if (await remaining(values.date, values.slotId) < partySize) {
-      return { result: CREATE_RESULT.OVER_CAPACITY, booking: null };
+    if (await remaining(date, values.slotId) < partySize) {
+      return bookingResult(CREATE_RESULT.OVER_CAPACITY, null);
     }
     await ensureSession();
     const reference = makeReference();
     const row = await store().create({
       ...values,
+      date,
+      email: String(email).trim().toLowerCase(),
+      name: String(name).trim(),
       partySize,
-      email: String(values.email).trim().toLowerCase(),
       reference,
-      status: BOOKING_STATUS.ACTIVE,
+      status,
       createdAt: new Date().toISOString(),
     });
     // The re-rank: with every racer's row now visible, does OUR row fit within capacity in
     // the deterministic admission order?
-    const active = (await activeFor(values.date, values.slotId))
+    const active = (await activeFor(date, values.slotId))
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
     let admitted = 0;
     let ours = false;
@@ -96,14 +107,17 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
     }
     if (!ours) {
       await store().delete(row.id);
-      return { result: CREATE_RESULT.OVER_CAPACITY, booking: null };
+      return bookingResult(CREATE_RESULT.OVER_CAPACITY, null);
     }
-    return { result: CREATE_RESULT.OK, booking: flatten(row) };
+    return bookingResult(CREATE_RESULT.OK, flatten(row));
   }
 
   async function getBooking(reference, email) {
     const rows = await store().list({ filters: { reference: String(reference || "").trim().toUpperCase() }, limit: 5 });
-    const match = rows.map(flatten).find((b) => b.email === String(email || "").trim().toLowerCase());
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    // The generated backend already scopes rows to the current visitor and app. Email remains a
+    // supported additional check, but is not required to recover a reference inside that scope.
+    const match = rows.map(flatten).find((b) => !normalizedEmail || b.email === normalizedEmail);
     return match || null;
   }
 
@@ -114,11 +128,12 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
   /** CANCELLATION: a status TRANSITION the UI must render — never a silent delete. */
   async function cancelBooking(reference, email) {
     const booking = await getBooking(reference, email);
-    if (!booking) return { ok: false, reason: "not_found" };
-    if (booking.status === BOOKING_STATUS.CANCELLED) return { ok: false, reason: "already_cancelled", booking };
+    if (!booking) return { ok: false, reason: "not_found", booking: null };
+    if (booking.status === BOOKING_STATUS.CANCELLED) return { ...booking, ok: false, reason: "already_cancelled", booking };
     const { id, createdAt, ...fields } = booking;
     const updated = await store().update(booking.id, { ...fields, status: BOOKING_STATUS.CANCELLED, cancelledAt: new Date().toISOString() });
-    return { ok: true, booking: flatten(updated) };
+    const flattened = flatten(updated);
+    return { ...flattened, ok: true, booking: flattened };
   }
 
   return { createBooking, getBooking, listBookings, cancelBooking, remaining, BOOKING_STATUS, CREATE_RESULT };

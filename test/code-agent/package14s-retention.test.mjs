@@ -79,11 +79,23 @@ test("one zero-spend pre-dispatch repair may be archived, but never a provider a
 
 test("post-repair platform re-verification is zero-model and single-use", () => {
   const branch = source.slice(source.indexOf('} else if (STAGE === "reverify")'),
-    source.indexOf('} else if (STAGE === "report")'));
+    source.indexOf('} else if (STAGE === "repair2")'));
   assert.match(branch, /state\.stages\.reverify/);
   assert.match(branch, /reservations\.length !== 1/);
   assert.match(branch, /mode: "resume_verify"/);
   assert.match(branch, /maxRepairs: 0/);
+});
+
+test("the final browser-informed repair is checkpointed, provider-bounded, and single-use", () => {
+  const branch = source.slice(source.indexOf('} else if (STAGE === "repair2")'),
+    source.indexOf('} else if (STAGE === "report")'));
+  assert.match(branch, /state\.stages\.repair2/);
+  assert.match(branch, /stageCredits \|\| 0\) !== 0/);
+  assert.match(branch, /evidence\?\.reservations/);
+  assert.match(branch, /evidence\?\.aiRequests/);
+  assert.match(branch, /TOTAL_CEILING - current\.credits/);
+  assert.match(branch, /mode: "resume_repair"/);
+  assert.match(branch, /sourceBuildId: v2\.id/);
 });
 
 test("one zero-spend pre-execution reverify may be archived, but never a started verification", () => {

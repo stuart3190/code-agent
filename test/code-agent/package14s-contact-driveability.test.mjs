@@ -27,6 +27,16 @@ const BASE_CONTRACT = {
   journeys: [CLEAN_JOURNEY],
 };
 const interactionContract = buildInteractionContract(BASE_CONTRACT, { modulePlan: [] });
+const ROUTED_COMPOSITE = {
+  ...BASE_CONTRACT,
+  routes: [{ path: "/book", name: "Book" }],
+  journeys: [{ id: "contact-validation", title: "Validate contact details", priority: "primary", steps: [{
+    action: "open the booking experience and make a date, slot, and party size selection",
+    target: "/book", operates: ["booking.date", "booking.slot", "booking.partySize"],
+    expect: "the contact fields are visible",
+  }] }],
+};
+ROUTED_COMPOSITE.interactionContract = buildInteractionContract(ROUTED_COMPOSITE, { modulePlan: [] });
 
 // This deliberately reproduces the retained browser evidence shape: broad prose contains date
 // words in later selection steps. The pre-repair verifier therefore moves the DATE group for
@@ -119,4 +129,13 @@ test("the same compiled candidate is driveable with exact contracted control ide
   ]);
   assert.ok(contact.controlEvidence.fields.every((field) => field.expectedValue === field.observedValue));
   assert.match(result.journeys[0].steps[3].detail, /review contains 3 exact entered value/);
+});
+
+test("a route-targeted composite step navigates and then drives every declared selection", async () => {
+  const result = await verifyJourneys({ previewUrl, contract: ROUTED_COMPOSITE, timeoutMs: 60_000 });
+  assert.equal(result.pass, true, JSON.stringify(result, null, 2));
+  const step = result.journeys[0].steps[0];
+  assert.equal(step.status, "pass");
+  assert.deepEqual(step.controlEvidence.selections.map((entry) => entry.contractedField),
+    ["date", "slot", "partySize"]);
 });
