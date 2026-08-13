@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   assertQueuedProviderSelection, journeyRequiresPersistentMutation, prepareBuilderV2PipelineAttempt,
 } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
+import { serialiseWorkerFailure } from "../../build-worker/queue.mjs";
 
 test("V2 runtime distinguishes persistent journeys from read-only navigation", () => {
   assert.equal(journeyRequiresPersistentMutation({
@@ -28,6 +29,19 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
     "the browser worker receives the machine-readable contract rather than English journeys alone");
   assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
   assert.match(verification, /backendEvidence: outcome\.backendEvidence \|\| null/);
+  assert.match(runtime, /!\["build", "resume_repair", "resume_verify"\]\.includes\(mode\)/,
+    "checkpoint verification must not require legacy project-tree adoption");
+});
+
+test("worker failures retain Error messages after classification", () => {
+  const failure = Object.assign(new Error("project has no verified source tree to adopt"), {
+    retryable: false,
+  });
+  assert.deepEqual(serialiseWorkerFailure(failure, "worker_error"), {
+    classification: "worker_error",
+    message: "project has no verified source tree to adopt",
+    retryable: false,
+  });
 });
 
 test("V2 refuses a queued job if its provider or billing lane changed before dispatch", () => {

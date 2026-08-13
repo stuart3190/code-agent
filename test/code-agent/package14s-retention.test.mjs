@@ -85,3 +85,14 @@ test("post-repair platform re-verification is zero-model and single-use", () => 
   assert.match(branch, /mode: "resume_verify"/);
   assert.match(branch, /maxRepairs: 0/);
 });
+
+test("one zero-spend pre-execution reverify may be archived, but never a started verification", () => {
+  const archive = source.slice(source.indexOf("async function archiveZeroSpendPreExecutionReverify"),
+    source.indexOf("async function cleanup(state)"));
+  assert.match(archive, /stageCredits \|\| 0\) !== 0/);
+  assert.match(archive, /evidence\.reservations \|\| \[\]\)\.length/);
+  assert.match(archive, /evidence\.aiRequests \|\| \[\]\)\.length/);
+  assert.match(archive, /evidence\.v2Builds \|\| \[\]\)\.length/);
+  assert.match(archive, /state\.stages\.reverify_preexecution_1/,
+    "the infrastructure retry must be bounded to one archived attempt");
+});

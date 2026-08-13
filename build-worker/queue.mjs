@@ -1,3 +1,16 @@
+export function serialiseWorkerFailure(error, classification) {
+  const message = typeof error?.message === "string" && error.message.trim()
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : String(error);
+  return {
+    classification,
+    message,
+    retryable: error?.retryable === true || ["worker_crash", "spawn_error"].includes(classification),
+  };
+}
+
 export function createWorkerQueue(client) {
   const rpc = async (name, args) => {
     const { data, error } = await client.rpc(name, args);

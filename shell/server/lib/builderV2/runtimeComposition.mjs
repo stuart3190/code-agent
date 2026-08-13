@@ -576,7 +576,12 @@ export function createBuilderV2Runtime({
       if (contract) tierContract(contract); // reject malformed legacy diagnostics before spend
       // Validate the adoption contract before creating/promoting any snapshot. An unsupported
       // legacy project must remain byte-for-byte V1 until its explicit qualification build.
-      if (mode !== "build" && mode !== "resume_repair") await adoptLegacyTree(owner, projectId, workJob, events);
+      // Checkpoint-backed repair and verification materialise their own retained source. Sending
+      // either through legacy adoption first incorrectly requires projects.tree/a green pointer
+      // and prevents the checkpoint path from running at all.
+      if (!["build", "resume_repair", "resume_verify"].includes(mode)) {
+        await adoptLegacyTree(owner, projectId, workJob, events);
+      }
       const result = mode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
           budgetCredits: ceilingCredits, maxRepairs, signal })

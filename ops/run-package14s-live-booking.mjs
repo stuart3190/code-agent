@@ -287,6 +287,26 @@ async function archiveZeroSpendPreDispatchRepair(state) {
   });
 }
 
+async function archiveZeroSpendPreExecutionReverify(state) {
+  const attempt = state.stages.reverify;
+  if (!attempt || state.stages.reverify_preexecution_1) return false;
+  const evidence = attempt.evidence || {};
+  if (Number(attempt.stageCredits || 0) !== 0
+    || (evidence.reservations || []).length
+    || (evidence.aiRequests || []).length
+    || (evidence.v2Builds || []).length
+    || attempt.workState !== "failed") return false;
+  state.stages.reverify_preexecution_1 = attempt;
+  delete state.stages.reverify;
+  await save(state);
+  await emit("reverify_zero_spend_preexecution_archived", {
+    publicBuildId: attempt.publicBuildId,
+    workJobId: attempt.workJobId,
+    reason: "worker stopped before checkpoint verification began",
+  });
+  return true;
+}
+
 async function cleanup(state) {
   if (state.cleanup) throw new Error("cleanup already completed");
   const retention = await retainGeneratedSource(state);
@@ -372,6 +392,7 @@ if (STAGE === "preflight") {
     prompt: "Repair only the exact failed contracted booking journeys from the retained working checkpoint; do not regenerate the application.",
     ceiling: remaining, v2Input: { sourceBuildId: v2.id, problems } });
 } else if (STAGE === "reverify") {
+  await archiveZeroSpendPreExecutionReverify(state);
   if (state.stages.reverify) throw new Error("the zero-model platform re-verification was already used");
   const repaired = state.stages.repair;
   if (!repaired?.terminal || repaired.result === "pass" || Number(repaired.stageCredits || 0) <= 0) {

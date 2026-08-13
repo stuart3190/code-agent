@@ -7,7 +7,7 @@ import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { redactDiagnosticText } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
 import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
-import { createWorkerQueue } from "./queue.mjs";
+import { createWorkerQueue, serialiseWorkerFailure } from "./queue.mjs";
 import { proveWorkerPreviewIsolation } from "./previewIsolationPreflight.mjs";
 import { reconcileOrphanSandboxes, runSandboxJob } from "./sandboxRunner.mjs";
 import { assertWorkerCredentialAuthority } from "./runtimeConfig.mjs";
@@ -193,10 +193,8 @@ async function runJob(job) {
         }).eq("id", job.payload?.runId).eq("owner", job.owner);
       } catch {}
     }
-    const failedWork = await queue.fail(job, WORKER_ID, {
-      ...error, classification,
-      retryable: error.retryable === true || ["worker_crash", "spawn_error"].includes(classification),
-    }).catch((failure) => {
+    const failedWork = await queue.fail(job, WORKER_ID,
+      serialiseWorkerFailure(error, classification)).catch((failure) => {
       console.error(`[build-worker] fail persistence ${job.id}: ${failure.message}`);
       return null;
     });
