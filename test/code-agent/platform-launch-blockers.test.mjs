@@ -5,12 +5,14 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  createSharedRateLimiter, requestRateIdentity, resolveClientNetwork, sharedRatePolicy,
+  createMemoryRateLimitClient, createSharedRateLimiter, requestRateIdentity, resolveClientNetwork,
+  sharedRatePolicy,
 } from "../../shell/server/lib/httpSecurity.mjs";
 import { handleAnalyticsCollect, handleAnalyticsPreflight, validateAnalyticsOrigin } from "../../shell/server/routes/thralloAnalytics.mjs";
 import {
   canonicalDeploymentIdentity, validateDeploymentIdentity,
 } from "../../shell/server/lib/deploymentIdentity.mjs";
+import { ownerFromToken } from "../../shell/server/lib/supabase.mjs";
 import { removeCanonicalDirectories } from "../../shell/server/lib/erasureService.mjs";
 import { evaluateDrSignals } from "../../ops/dr-health.mjs";
 import crypto from "node:crypto";
@@ -39,6 +41,33 @@ test("shared limiter survives process replacement and coordinates two shell inst
   assert.equal((await b(request, policy)).allowed, true);
   const restarted = createSharedRateLimiter({ clientFactory: () => limiterClient(authority) });
   assert.equal((await restarted(request, policy)).allowed, false);
+});
+
+test("memory limiter enforces and resets local standalone request buckets", async () => {
+  let now = 1_000;
+  const client = createMemoryRateLimitClient({ now: () => now });
+  const limiter = createSharedRateLimiter({ clientFactory: () => client, now: () => now });
+  const request = { socket: { remoteAddress: "203.0.113.7" }, headers: {} };
+  const policy = { routeClass: "tls_ask", limit: 2, networkLimit: 99, windowMs: 60_000 };
+  assert.equal((await limiter(request, policy)).allowed, true);
+  assert.equal((await limiter(request, policy)).allowed, true);
+  assert.equal((await limiter(request, policy)).allowed, false);
+  now += 60_000;
+  assert.equal((await limiter(request, policy)).allowed, true);
+});
+
+test("missing Supabase authority fails authentication closed without a server error", async () => {
+  const names = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE"];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) delete process.env[name];
+    assert.equal(await ownerFromToken("unverifiable-token"), null);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
 });
 
 test("trusted proxies cannot be spoofed and authenticated NAT users get separate actor buckets", () => {

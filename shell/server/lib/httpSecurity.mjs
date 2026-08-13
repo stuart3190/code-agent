@@ -252,3 +252,39 @@ export function createSharedRateLimiter({ clientFactory, now = () => Date.now() 
     return one(identity.actor, policy.routeClass, policy.limit, policy.windowMs);
   };
 }
+
+export function createMemoryRateLimitClient({ now = () => Date.now() } = {}) {
+  const buckets = new Map();
+  return {
+    async rpc(name, args = {}) {
+      if (name !== "consume_http_rate_limit") {
+        return { data: null, error: { message: `unsupported memory RPC: ${name}` } };
+      }
+      const routeClass = String(args.p_route_class || "");
+      const keyHash = String(args.p_key_hash || "");
+      const limit = Number(args.p_limit);
+      const windowSeconds = Number(args.p_window_seconds);
+      if (!routeClass || !keyHash || !Number.isInteger(limit) || limit < 1
+        || !Number.isInteger(windowSeconds) || windowSeconds < 1) {
+        return { data: null, error: { message: "invalid memory rate-limit arguments" } };
+      }
+      const at = now();
+      const key = `${routeClass}:${keyHash}`;
+      let bucket = buckets.get(key);
+      if (!bucket || bucket.startedAt + windowSeconds * 1000 <= at) {
+        bucket = { count: 0, startedAt: at };
+      }
+      bucket.count += 1;
+      buckets.set(key, bucket);
+      return {
+        data: [{
+          allowed: bucket.count <= limit,
+          remaining: Math.max(0, limit - bucket.count),
+          retry_after_seconds: Math.max(1, Math.ceil((bucket.startedAt + windowSeconds * 1000 - at) / 1000)),
+          current_count: bucket.count,
+        }],
+        error: null,
+      };
+    },
+  };
+}

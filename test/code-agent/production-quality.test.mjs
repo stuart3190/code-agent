@@ -278,6 +278,8 @@ test("stale builds are swept while the server is up, not only at boot", async ()
   // only produce noise — or, before startCheckpointSweeper caught its own synchronous throw, kill
   // the server at boot from inside the `listening` handler.
   assert.match(index, /if \(haveSupabaseEnv\(\)\) startStaleJobSweeper\(\);/);
+  assert.match(index, /if \(haveSupabaseEnv\(\)\) startDomainVerifier\(\);/,
+    "the database-backed domain verifier must stay idle when no database authority is configured");
   assert.match(index, /  stopStaleJobSweeper\(\);/, "started and stopped, like every other sweeper");
 });
 

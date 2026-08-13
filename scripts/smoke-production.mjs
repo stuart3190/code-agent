@@ -40,7 +40,7 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/analytics/export?format=csv", expect: [401], why: "analytics export" },
   { method: "POST", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/rollback", expect: [401], why: "rollback" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/download", expect: [401], why: "deployment source download" },
-  { method: "POST", path: "/api/analytics/collect", expect: [204], why: "the public beacon must always answer 204" },
+  { method: "POST", path: "/api/analytics/collect", expect: [415], why: "the public beacon rejects an invalid media type without disappearing" },
   { method: "GET", path: "/api/v1/ai/connections", expect: [401], why: "AI connections" },
   { method: "GET", path: "/api/v1/diagnostics", expect: [401], why: "build diagnostics" },
   { method: "GET", path: "/api/v1/tokens", expect: [401], why: "API tokens" },

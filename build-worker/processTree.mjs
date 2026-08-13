@@ -15,7 +15,19 @@ export async function terminateProcessTree(child, { graceMs = 2_000 } = {}) {
       const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
         windowsHide: true, stdio: "ignore",
       });
-      killer.once("exit", resolve); killer.once("error", resolve);
+      // taskkill is the authority for descendants, but on a saturated Windows host it can spend
+      // several seconds starting. Cancellation must still acknowledge promptly, so give it one
+      // second to walk the tree and then kill the owned parent directly while taskkill continues
+      // cleaning any descendants it already discovered.
+      const fallback = setTimeout(() => {
+        if (child.exitCode === null) {
+          try { child.kill("SIGKILL"); } catch {}
+        }
+      }, Math.min(graceMs, 1_000));
+      fallback.unref?.();
+      const done = () => { clearTimeout(fallback); resolve(); };
+      killer.once("exit", done); killer.once("error", done);
+      killer.unref?.();
     });
     return;
   }
@@ -112,4 +124,3 @@ export function runProcess(command, args = [], {
     });
   });
 }
-

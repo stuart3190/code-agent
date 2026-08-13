@@ -303,14 +303,14 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 70", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 74", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 70);
+  assert.equal(ledger.migrations.length, 74);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260808180841",
-    "20260808180845",
+    "20260813005422",
+    "20260813005509",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 70);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 74);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
 });
 
@@ -319,9 +319,9 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 10);
-  assert.equal(result.effectiveApplied, 70);
-  assert.equal(result.active, 70);
+  assert.equal(result.appliedOverlay, 14);
+  assert.equal(result.effectiveApplied, 74);
+  assert.equal(result.active, 74);
   assert.deepEqual(result.pending, []);
 });
 
@@ -368,14 +368,18 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes the pre-Package-12 ledger without weakening the 70-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current 74-migration catalog", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
   assert.equal(PRODUCTION_PUBLIC_TABLES_69.length, 85);
   assert.equal(runtimeCatalogEvidence(69).tables.length, 85);
   assert.equal(runtimeCatalogEvidence(70).tables.length, 86);
-  assert.throws(() => runtimeCatalogEvidence(71), /unsupported production migration count/);
+  assert.equal(runtimeCatalogEvidence(71).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(72).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(73).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(74).tables.length, 86);
+  assert.throws(() => runtimeCatalogEvidence(75), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {

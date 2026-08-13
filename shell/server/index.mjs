@@ -16,7 +16,8 @@ import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { resolveStaticPath } from "./lib/staticPath.mjs";
 import {
   BODY_LIMITS, HttpInputError, allowedOrigins, applyCors, applySecurityHeaders,
-  createSharedRateLimiter, parseJson, readBody, resolveClientNetwork, sharedRatePolicy, staticCacheControl,
+  createMemoryRateLimitClient, createSharedRateLimiter, parseJson, readBody, resolveClientNetwork,
+  sharedRatePolicy, staticCacheControl,
 } from "./lib/httpSecurity.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
 import {
@@ -124,7 +125,16 @@ const WEB_DIST = path.join(SHELL_DIR, "web", "dist");
 const CORS_ORIGINS = allowedOrigins(optionalEnv("APP_URL", "http://localhost:5173"));
 CORS_ORIGINS.add(`http://127.0.0.1:${PORT}`);
 CORS_ORIGINS.add(`http://localhost:${PORT}`);
-const consumeRate = createSharedRateLimiter({ clientFactory: serviceClient });
+const CODE_AGENT_STORE = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
+// Local standalone mode must be usable and testable without production credentials. Its limiter
+// remains bounded but is deliberately process-local; durable Supabase mode retains the shared,
+// restart-safe limiter used in production.
+const rateLimitClientFactory = CODE_AGENT_STANDALONE && CODE_AGENT_STORE === "memory"
+  ? (() => createMemoryRateLimitClient())()
+  : null;
+const consumeRate = createSharedRateLimiter({
+  clientFactory: rateLimitClientFactory ? () => rateLimitClientFactory : serviceClient,
+});
 
 function applyRuntimeCors(res, origin) {
   try {
@@ -171,9 +181,8 @@ async function deepHealth() {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
   ]);
-  const store = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
   const table = CODE_AGENT_STANDALONE ? "ca_runs" : "projects";
-  const supabase = CODE_AGENT_STANDALONE && store === "memory"
+  const supabase = CODE_AGENT_STANDALONE && CODE_AGENT_STORE === "memory"
     ? true
     : await bounded(serviceClient().from(table).select("id").limit(1))
       .then(({ error }) => !error).catch(() => false);
@@ -1082,7 +1091,7 @@ server.listen(PORT, HOST, () => {
   startRepositoryIndexWorker();
   startRetentionSweeper();
   // DNS propagates on its own schedule; without this a user would have to sit pressing Retry.
-  startDomainVerifier();
+  if (haveSupabaseEnv()) startDomainVerifier();
   startPublishReconciler();
   // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
   // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.

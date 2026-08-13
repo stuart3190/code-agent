@@ -1,0 +1,48 @@
+{
+  "source": "Supabase MCP schema_migrations ledger on zczgvcsokfafuyognvwx after live advisor remediation",
+  "capturedAt": "2026-08-13T00:56:30.163Z",
+  "baseVersion": "20260808180845",
+  "ledgerCount": 74,
+  "migrations": [
+    {
+      "appliedOrder": 71,
+      "version": "20260808235700",
+      "name": "bv2_snapshot_asset_identity",
+      "filename": "20260808235700_bv2_snapshot_asset_identity.sql",
+      "statementCount": 3,
+      "sqlSha256": "b4f69b13fd19d7d321c38b31b542f872a99008226834c193557ad8db343538fc",
+      "canonicalSqlSha256": "b4f69b13fd19d7d321c38b31b542f872a99008226834c193557ad8db343538fc",
+      "localCanonicalSqlSha256": "6106088752da9226c00538a5fe2014b18edfde8a0078a189bf63b20863335c75"
+    },
+    {
+      "appliedOrder": 72,
+      "version": "20260809155622",
+      "name": "bv2_repair_dispatch_limit",
+      "filename": "20260809155622_bv2_repair_dispatch_limit.sql",
+      "statementCount": 8,
+      "sqlSha256": "05716b60b0ee9c8dfbf97a999e9a32c32ce2212ce790e00666f4ad43144c62dc",
+      "canonicalSqlSha256": "05716b60b0ee9c8dfbf97a999e9a32c32ce2212ce790e00666f4ad43144c62dc",
+      "localCanonicalSqlSha256": "db1b86b1ba8dc3e11a51fdf8fce5590a055b5f920e528bffc77cb8aa3f7e749f"
+    },
+    {
+      "appliedOrder": 73,
+      "version": "20260813005422",
+      "name": "database_advisor_safe_remediations",
+      "filename": "20260813005422_database_advisor_safe_remediations.sql",
+      "statementCount": 1,
+      "sqlSha256": "132043b20e2c97ea17459fb93a3bab6e3c1dac45ab0a4ccc0d4ffc6007530990",
+      "canonicalSqlSha256": "132043b20e2c97ea17459fb93a3bab6e3c1dac45ab0a4ccc0d4ffc6007530990",
+      "localCanonicalSqlSha256": "2322124c3a9dcca9c2747b8dac94353bc50603adefafb7d34ef01581663a4811"
+    },
+    {
+      "appliedOrder": 74,
+      "version": "20260813005509",
+      "name": "reject_anonymous_owner_policies",
+      "filename": "20260813005509_reject_anonymous_owner_policies.sql",
+      "statementCount": 1,
+      "sqlSha256": "422d4f8e24bb50e07c8958f179b992b616b160934433c710090ecd41d9d52a65",
+      "canonicalSqlSha256": "422d4f8e24bb50e07c8958f179b992b616b160934433c710090ecd41d9d52a65",
+      "localCanonicalSqlSha256": "1288ac86aae27404527eee0eb9e3404df0f90e53e5beafcde6f422dffebda188"
+    }
+  ]
+}

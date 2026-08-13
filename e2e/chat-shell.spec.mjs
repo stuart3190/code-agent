@@ -82,7 +82,24 @@ async function stubApi(page) {
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 
+const PROJECT_DRAWER_BREAKPOINT = 1024;
+
+async function revealProjects(page) {
+  if ((page.viewportSize()?.width ?? 0) > PROJECT_DRAWER_BREAKPOINT) return;
+  const layout = page.locator(".ct-home-layout");
+  if (!await layout.evaluate((element) => element.classList.contains("sidebar-open"))) {
+    await page.getByRole("button", { name: /^Projects/ }).click();
+  }
+  await expect(layout).toHaveClass(/sidebar-open/);
+}
+
+async function openProject(page, name) {
+  await revealProjects(page);
+  await page.getByRole("button", { name }).click();
+}
+
 async function deleteFirstProject(page) {
+  await revealProjects(page);
   const project = page.locator(".ct-project:not(.ct-recent)").first();
   await project.getByRole("button", { name: /Project actions for/ }).click();
   await project.getByRole("menuitem", { name: "Delete project" }).click();
@@ -206,7 +223,7 @@ test("background navigation: leave a running build, start another, return — st
   await page.goto("/");
 
   // 1. Open the long-running build. The back affordance is plainly visible mid-build.
-  await page.getByRole("button", { name: /Open Atlas/ }).click();
+  await openProject(page, /Open Atlas/);
   await expect(page.getByText("Build me a big CRM called Atlas")).toBeVisible();
   await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
   const back = page.getByRole("button", { name: /Back to your projects/ });
@@ -231,7 +248,7 @@ test("background navigation: leave a running build, start another, return — st
 
   // 5. Return to the original project via ← Projects → its card.
   await back.click();
-  await page.getByRole("button", { name: /Open Atlas/ }).click();
+  await openProject(page, /Open Atlas/);
 
   // 6. Everything restored — history, plan, team state, preview — PLUS the work that
   // happened while we were away, proving the stream and build continued.
@@ -616,7 +633,7 @@ test("Stop build: contextual control, reaches the mounted cancel route, dispatch
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /Open Booking/ }).click();
+  await openProject(page, /Open Booking/);
   await expect(page.getByText("Build me a booking system")).toBeVisible();
 
   // Present while the team is working — and addressed to the running job.
@@ -655,7 +672,7 @@ test("Stop build is absent when no build is running, and a completion race is no
     body: `event: snapshot\ndata: ${JSON.stringify({ jobId: "job-88", projectId: "p-88", status: "complete", phase: "complete" })}\n\n`,
   }));
   await page.goto("/");
-  await page.getByRole("button", { name: /Open Chat/ }).click();
+  await openProject(page, /Open Chat/);
   await expect(page.getByText("Just chatting")).toBeVisible();
   // The team finished: nothing to stop, so the control is gone.
   await expect(page.getByTestId("cancel-build")).toHaveCount(0);

@@ -32,7 +32,10 @@ function anonClient() {
 
 // Verify a bearer token and return { id, email } or null. The uuid is the RLS subject (auth.uid()).
 export async function ownerFromToken(accessToken) {
-  if (!accessToken) return null;
+  // Memory-mode/local shells are allowed to boot without a Supabase authority. Treat a token that
+  // cannot be verified in that mode as unauthenticated instead of turning every protected read
+  // into a 500. Durable deployments still require and use all three Supabase credentials.
+  if (!accessToken || !haveSupabaseEnv()) return null;
   const { data, error } = await anonClient().auth.getUser(accessToken);
   if (error || !data?.user) return null;
   return { id: data.user.id, email: data.user.email ?? null };

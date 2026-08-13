@@ -24,8 +24,9 @@ function sendJson(res, code, value) {
  * The beacon endpoint. Called by every visitor to every published site, so it is unauthenticated
  * by necessity — the project is resolved from the app id server-side, never trusted from the body.
  *
- * It always answers 204, whatever happened. A visitor's browser must never see an error caused by
- * analytics, and telling a caller whether an app id exists would be a way to enumerate them.
+ * A valid beacon from a registered origin answers 204 even if recording fails, so analytics can
+ * never break a visitor's page. Malformed requests are rejected before any site lookup, and origin
+ * failures use one generic response so callers cannot enumerate app ids.
  */
 export async function validateAnalyticsOrigin(origin, appId, client = serviceClient()) {
   let parsed;

@@ -17,6 +17,8 @@ const subscriptionsMigrationPath = new URL("../../supabase/migrations/2026073009
 const phase8MigrationPath = new URL("../../supabase/migrations/20260730100937_approval_policies_resume_artifacts.sql", import.meta.url);
 const phase9MigrationPath = new URL("../../supabase/migrations/20260730102731_egress_command_policies_retention.sql", import.meta.url);
 const apiTokensMigrationPath = new URL("../../supabase/migrations/20260730104416_api_tokens.sql", import.meta.url);
+const advisorRemediationMigrationPath = new URL("../../supabase/migrations/20260813005422_database_advisor_safe_remediations.sql", import.meta.url);
+const anonymousOwnerPolicyMigrationPath = new URL("../../supabase/migrations/20260813005509_reject_anonymous_owner_policies.sql", import.meta.url);
 
 test("control-plane migration enables RLS and keeps sensitive tables server-only", async () => {
   const sql = await readFile(migrationPath, "utf8");
@@ -130,6 +132,31 @@ test("owner metadata policies reject anonymous Supabase identities", async () =>
   }
   assert.equal((sql.match(/auth\.jwt\(\)->>'is_anonymous'/g) || []).length, 8);
   assert.equal((sql.match(/= 'false'/g) || []).length, 8);
+});
+
+test("database advisor remediations preserve policy semantics and remove only the duplicate index", async () => {
+  const sql = await readFile(advisorRemediationMigrationPath, "utf8");
+  assert.match(sql, /alter function public\.deployment_scope\(uuid, text\) set search_path = pg_catalog/i);
+  for (const policy of [
+    "ca_repositories_owner_read", "ca_agents_owner_read", "ca_runs_owner_read",
+    "ca_run_events_owner_read", "ca_checkpoints_owner_read", "ca_artifacts_owner_read",
+    "ca_usage_owner_read", "ca_github_installations_owner_read",
+  ]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"[\\s\\S]*?\\(\\(select auth\\.jwt\\(\\)\\) ->> 'is_anonymous'\\) = 'false'`, "i"));
+  }
+  for (const policy of ["entities_owner_all", "app_notifications_owner_all", "deployments_owner_read"]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"[\\s\\S]*?select auth\\.uid\\(\\)`, "i"));
+  }
+  assert.match(sql, /drop index if exists public\.ca_subscriptions_stripe_customer_uniq/i);
+  assert.doesNotMatch(sql, /drop index[^;]*ca_subscriptions_stripe_customer_idx/i);
+});
+
+test("platform owner policies reject anonymous Supabase identities", async () => {
+  const sql = await readFile(anonymousOwnerPolicyMigrationPath, "utf8");
+  for (const policy of ["entities_owner_all", "app_notifications_owner_all", "deployments_owner_read"]) {
+    assert.match(sql, new RegExp(`alter policy "${policy}"`, "i"));
+  }
+  assert.equal((sql.match(/\(\(select auth\.jwt\(\)\) ->> 'is_anonymous'\) = 'false'/g) || []).length, 5);
 });
 
 test("repository hybrid index encrypts source and exposes search to service role only", async () => {
