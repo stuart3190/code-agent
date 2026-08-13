@@ -205,4 +205,8 @@ test("the deployment marker is generated from the pin, never hand-maintained", a
   // The image is built from a subset of the tree, so the record distinguishes the two commits
   // instead of claiming the image is as new as the checkout.
   assert.match(source, /sandboxImageSourceCommit: imageCommit/);
+  assert.match(pinBlock, /THRALLO_BUILD_WORKER_VERSION=\$\{commit\}\$\{channel\}/,
+    "the atomic pin also refreshes the operator-visible worker source identity");
+  assert.match(pinBlock, /endsWith\("-dark"\) \? "-dark" : ""/,
+    "refreshing source identity preserves the explicit deployment channel");
 });

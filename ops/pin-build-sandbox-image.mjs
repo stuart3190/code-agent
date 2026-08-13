@@ -85,13 +85,22 @@ if (flag("pin")) {
   // so the two can be run in either order without one clobbering the other.
   const current = await readFile(envPath, "utf8");
   const stats = await stat(envPath);
-  let seen = false;
+  let imageSeen = false;
+  let workerVersionSeen = false;
   const rows = current.split(/\r?\n/).map((line) => {
-    if (!line.startsWith("THRALLO_BUILD_SANDBOX_IMAGE=")) return line;
-    seen = true;
-    return `THRALLO_BUILD_SANDBOX_IMAGE=${digest}`;
+    if (line.startsWith("THRALLO_BUILD_SANDBOX_IMAGE=")) {
+      imageSeen = true;
+      return `THRALLO_BUILD_SANDBOX_IMAGE=${digest}`;
+    }
+    if (line.startsWith("THRALLO_BUILD_WORKER_VERSION=")) {
+      workerVersionSeen = true;
+      const channel = line.slice(line.indexOf("=") + 1).trim().endsWith("-dark") ? "-dark" : "";
+      return `THRALLO_BUILD_WORKER_VERSION=${commit}${channel}`;
+    }
+    return line;
   });
-  if (!seen) rows.push(`THRALLO_BUILD_SANDBOX_IMAGE=${digest}`);
+  if (!imageSeen) rows.push(`THRALLO_BUILD_SANDBOX_IMAGE=${digest}`);
+  if (!workerVersionSeen) rows.push(`THRALLO_BUILD_WORKER_VERSION=${commit}`);
   const temporary = `${envPath}.pin.tmp`;
   await writeFile(temporary, `${rows.filter((line, index, all) => index < all.length - 1 || line).join("\n")}\n`,
     { encoding: "utf8", mode: 0o640 });
