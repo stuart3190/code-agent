@@ -107,6 +107,16 @@ async function firstVisible(locators, deadline) {
   return null;
 }
 
+async function waitForFirstVisible(locators, deadline) {
+  do {
+    const visible = await firstVisible(locators, deadline);
+    if (visible) return visible;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() <= deadline);
+  return null;
+}
+
 // Plausible values for a field, chosen from its own label so validation is satisfied rather than
 // tripped — the point is to complete the journey, not to fuzz it.
 /**
@@ -994,10 +1004,13 @@ export function shouldSubmitContractedForm(action = "") {
 /** Drive a real visible account form; never inject or fabricate a session. */
 async function driveAuthenticationForm(page, marker, { mode = "create", credentials = null } = {}) {
   const deadline = Date.now() + 20_000;
-  const email = await firstVisible([
+  // Authentication surfaces are client-rendered after the contracted landing action. A single
+  // immediate scan races that navigation; wait only at this asynchronous boundary, without
+  // making ordinary missing controls consume their whole journey timeout.
+  const email = await waitForFirstVisible([
     page.getByLabel(/e-?mail/i), page.getByPlaceholder(/e-?mail/i), page.locator('input[type="email"]'),
   ], deadline);
-  const password = await firstVisible([
+  const password = await waitForFirstVisible([
     page.getByLabel(/password/i), page.getByPlaceholder(/password/i), page.locator('input[type="password"]'),
   ], deadline);
   if (!email || !password) return { attempted: false, reason: "the account form did not expose email and password controls" };

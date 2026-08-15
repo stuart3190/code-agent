@@ -257,6 +257,61 @@ test("isolated durable setup waits for its asynchronously refreshed consumer ent
   body = WORKING;
 });
 
+test("isolated durable setup waits for a client-rendered authentication form", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <button data-thrallo-action="act-account">Create account account form</button>
+    <script>
+      const renderEditor = () => {
+        document.body.innerHTML = '<form id="generator"><label>Prompt <input data-thrallo-control="ctl-prompt"></label>'
+          + '<button data-thrallo-action="act-generate" type="submit">Generate</button></form>'
+          + '<p id="saved"></p><div id="history"></div><p id="opened"></p>';
+        document.getElementById('generator').onsubmit = (event) => {
+          event.preventDefault();
+          const value = document.querySelector('[data-thrallo-control="ctl-prompt"]').value;
+          document.getElementById('saved').textContent = 'Named saved asset ' + value;
+          document.getElementById('history').innerHTML = '<button data-thrallo-action="act-history">History item</button>';
+          document.querySelector('[data-thrallo-action="act-history"]').onclick = () => {
+            document.getElementById('opened').textContent = 'Asset preview hierarchy properties panel current version validation panel';
+          };
+        };
+      };
+      document.querySelector('[data-thrallo-action="act-account"]').onclick = () => setTimeout(() => {
+        document.body.innerHTML = '<form id="auth"><label>Email <input type="email"></label>'
+          + '<label>Password <input type="password"></label><button type="submit">Create account</button></form>';
+        document.getElementById('auth').onsubmit = (event) => {
+          event.preventDefault(); history.pushState({}, '', '/app'); renderEditor();
+        };
+      }, 1200);
+    </script>
+  </body></html>`;
+  const primary = { id: "primary", title: "Create an asset", priority: "primary", steps: [] };
+  const secondary = { id: "edit", title: "Edit an existing asset", priority: "secondary", steps: [{
+    action: "open a saved generation",
+    expect: "the asset preview, hierarchy, properties panel, current version, and validation panel are visible",
+  }] };
+  const primaryFlows = [
+    { id: "primary:auth", journeyId: "primary", stepIndex: 0, kind: "flow_start",
+      control: { purpose: "account form", accessibleName: "account form", machineId: "act-account", roles: ["button"] } },
+    { id: "primary:input", journeyId: "primary", stepIndex: 1, kind: "input",
+      control: { logicalField: "prompt", accessibleName: "Prompt", accessibleNames: ["Prompt"],
+        machineId: "ctl-prompt", roles: ["textbox"], statePath: "primary.draft.prompt" } },
+    { id: "primary:mutation", journeyId: "primary", stepIndex: 1, kind: "mutation",
+      durableLifecycle: "crud:asset", observable: "a named saved asset appears",
+      control: { accessibleName: "Generate", machineId: "act-generate", roles: ["button"] },
+      writes: ["primary.durable.record"] },
+  ];
+  const secondaryFlows = [{ id: "edit:start", journeyId: "edit", stepIndex: 0, kind: "flow_start",
+    observable: secondary.steps[0].expect,
+    control: { accessibleName: "history item", machineId: "act-history", roles: ["button"], flowEntry: true } }];
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [secondary], allJourneys: [primary, secondary],
+    prerequisiteInteractionContract: { flows: [...primaryFlows, ...secondaryFlows] },
+    interactionContract: { flows: secondaryFlows },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  body = WORKING;
+});
+
 test("sign out is proved by the public auth entry replacing the private surface", needsBrowser, async () => {
   body = `<!doctype html><html><body><main id="private">Private editor history
     <button id="signout">Sign out</button></main><script>
