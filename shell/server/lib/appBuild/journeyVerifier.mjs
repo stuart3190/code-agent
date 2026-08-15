@@ -858,6 +858,49 @@ export function recoveryEvidenceVerdict(durable, textAfter) {
 
 // ── running one step ──────────────────────────────────────────────────────────────────────────
 
+function isAuthenticationFlow(entry, step) {
+  const text = [entry?.control?.purpose, entry?.control?.accessibleName,
+    step?.action, step?.target].filter(Boolean).join(" ");
+  return /\b(account form|auth(?:entication)?|sign[ -]?in|sign[ -]?up|create account|register)\b/i.test(text);
+}
+
+/** Drive a real visible account form; never inject or fabricate a session. */
+async function driveAuthenticationForm(page, marker) {
+  const deadline = Date.now() + 20_000;
+  const email = await firstVisible([
+    page.getByLabel(/e-?mail/i), page.getByPlaceholder(/e-?mail/i), page.locator('input[type="email"]'),
+  ], deadline);
+  const password = await firstVisible([
+    page.getByLabel(/password/i), page.getByPlaceholder(/password/i), page.locator('input[type="password"]'),
+  ], deadline);
+  if (!email || !password) return { attempted: false, reason: "the account form did not expose email and password controls" };
+
+  const createModes = page.getByRole("button", { name: /create account|sign ?up|register/i });
+  for (let index = 0; index < await createModes.count(); index += 1) {
+    const candidate = createModes.nth(index);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const isSubmit = await candidate.evaluate((element) => element.type === "submit").catch(() => false);
+    if (!isSubmit) { await candidate.click({ timeout: 5_000 }); break; }
+  }
+
+  const submittedEmail = `journey+${marker}-${Math.random().toString(36).slice(2, 8)}@thrallo.dev`;
+  await email.fill(submittedEmail);
+  await password.fill(`Jv-${marker}!9a`);
+  const before = page.url();
+  const formSubmit = page.locator('form button[type="submit"], form input[type="submit"]').first();
+  const namedSubmit = page.getByRole("button", { name: /create account|sign ?up|register|continue|open .*workspace/i }).first();
+  const submit = await formSubmit.isVisible().catch(() => false) ? formSubmit : namedSubmit;
+  if (!await submit.isVisible().catch(() => false)) {
+    return { attempted: true, submitted: false, email: submittedEmail, reason: "the account form exposed no submit control" };
+  }
+  await submit.click({ timeout: 5_000 });
+  await Promise.race([
+    page.waitForURL((url) => url.href !== before, { timeout: 20_000 }),
+    password.waitFor({ state: "hidden", timeout: 20_000 }),
+  ]).catch(() => {});
+  return { attempted: true, submitted: true, email: submittedEmail, urlChanged: page.url() !== before };
+}
+
 async function runStep(page, step, {
   marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
@@ -889,7 +932,11 @@ async function runStep(page, step, {
 
   // A RECOVERY step means "this survives coming back to it", so the reload is the step, whatever
   // words the contract used for it. Prose still answers for contracts that typed nothing.
-  const isRecoveryStep = interactionFlows.some((flow) => flow.kind === "recovery");
+  // A planner may attach recovery metadata to the same step that first opens an account or
+  // workflow surface. The explicit flow entry is the action; reloading before it makes the entry
+  // unreachable and proves neither authentication nor recovery.
+  const hasFlowStart = interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control);
+  const isRecoveryStep = !hasFlowStart && interactionFlows.some((flow) => flow.kind === "recovery");
   if (isRecoveryStep || /reload|refresh/i.test(action)) {
     await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     drove = true;
@@ -995,6 +1042,11 @@ async function runStep(page, step, {
         controlEvidence: { contractedField: entry.control.accessibleName } };
     }
     await page.waitForTimeout(700);
+    if (isAuthenticationFlow(entry, step)) {
+      const authentication = await driveAuthenticationForm(page, marker);
+      controlEvidence = { ...(controlEvidence || {}), authentication };
+      drove = drove || authentication.submitted === true;
+    }
     // The contract named the control for this step, so the search for one is OVER. Falling through
     // let the generic click path fire a SECOND action on the same step: "start the booking flow"
     // matches the loose /book/ verb test, whose candidates include a link named "Look up booking",
