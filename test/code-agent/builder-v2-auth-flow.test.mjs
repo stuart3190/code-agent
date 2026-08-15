@@ -23,10 +23,11 @@ export default function App() {
   const [created, setCreated] = useState(false);
   const [authMode, setAuthMode] = useState("signin");
   const go = (next) => { window.history.pushState({}, "", next); setPath(next); };
+  const completeAuth = (next) => { window.history.pushState({}, "", next); setTimeout(() => setPath(next), 250); };
   if (path === "/auth") return <main><h1>Authentication</h1>
     <button type="button" onClick={() => setAuthMode("signin")}>Use existing account</button>
     <button type="button" onClick={() => setAuthMode("create")}>Use new account</button>
-    <form onSubmit={(event) => { event.preventDefault(); go("/app"); }}>
+    <form onSubmit={(event) => { event.preventDefault(); completeAuth("/app"); }}>
       <label>Email<input type="email" /></label><label>Password<input type="password" /></label>
       <button type="submit">{authMode === "create" ? "Create account" : "Sign in"}</button>
     </form></main>;

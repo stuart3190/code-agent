@@ -11,6 +11,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import { expectationOutcome } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 
@@ -69,6 +70,24 @@ test("navigation keeps its own exemption, independent of review", () => {
   const outcome = expectationOutcome({ ...base, action: "open the booking page", reviewWithValues: false });
   assert.equal(outcome.status, "pass");
   assert.equal(outcome.reviewExempt, undefined);
+});
+
+test("an isolated journey may assert the durable state its setup just established", () => {
+  const visible = expectationOutcome({
+    ...base, action: "open the saved record", navigational: false, establishedState: true,
+  });
+  assert.equal(visible.status, "pass");
+
+  const missing = expectationOutcome({
+    ...base, found: ["review"], action: "open the saved record", navigational: false,
+    establishedState: true,
+  });
+  assert.equal(missing.status, "fail", "setup never substitutes for missing contracted evidence");
+});
+
+test("the container verifier uses Chromium's bounded shared-memory path", async () => {
+  const source = await readFile(new URL("../../shell/server/lib/appBuild/journeyVerifier.mjs", import.meta.url), "utf8");
+  assert.match(source, /chromium\.launch\(\{ args: \["--disable-dev-shm-usage", "--no-sandbox"\] \}\)/);
 });
 
 test("an undriveable step is never rescued by the exemption", () => {

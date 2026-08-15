@@ -940,6 +940,14 @@ async function driveAuthenticationForm(page, marker, { mode = "create", credenti
   const errorText = formStillVisible
     ? await page.locator('[role="status"]').first().textContent().catch(() => null) : null;
   const authenticated = page.url() !== before || !formStillVisible;
+  if (authenticated) {
+    // Client-side auth changes the URL before the protected React surface has necessarily
+    // committed. Reading the expectation or the next prerequisite in that gap made a successful
+    // account creation look like an empty editor, and made its first editor field "not fillable".
+    // Wait for the browser's own network/paint work; no product copy or route is assumed here.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
   return {
     attempted: true, submitted: true, authenticated, email: submittedEmail,
     urlChanged: page.url() !== before,
@@ -1003,7 +1011,7 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
 async function runStep(page, step, {
   marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
-  authState = { accounts: [], active: null },
+  authState = { accounts: [], active: null }, allowEstablishedState = false,
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
@@ -1585,6 +1593,10 @@ async function runStep(page, step, {
     navigational: interactionFlows.length
       ? interactionFlows.some((flow) => ["navigation", "recovery"].includes(flow.kind))
       : null,
+    // Isolated verification has just reconstructed this secondary journey's durable prerequisite.
+    // Its first step often asserts that starting state. The contracted evidence must still be
+    // present, but it cannot also be newly added after the setup that made it present.
+    establishedState: allowEstablishedState,
   });
 
   if (outcome.status === "pass" && isReviewStep && enteredValues.length) {
@@ -1676,7 +1688,7 @@ async function runStep(page, step, {
  */
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
-  navigational: declaredNavigational = null,
+  navigational: declaredNavigational = null, establishedState = false,
 }) {
   const ratio = found.length / wanted.length;
   // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
@@ -1701,7 +1713,7 @@ export function expectationOutcome({
   const navigational = urlChanged || (declaredNavigational === null
     ? /open|go to|navigate|navigation|visit|reload|refresh|jump|scroll/i.test(action)
     : declaredNavigational);
-  if (ratio >= 0.5 && (navigational || fresh.length > 0)) {
+  if (ratio >= 0.5 && (navigational || fresh.length > 0 || establishedState)) {
     return { drove, status: "pass", detail: `found: ${found.join(", ")}${fresh.length ? ` (new: ${fresh.join(", ")})` : ""}` };
   }
   if (!drove) return { drove, status: "undriveable", detail: `could not drive: ${action.slice(0, 80)}` };
@@ -2065,7 +2077,10 @@ export async function verifyJourneys({
 
   try {
     const { chromium } = requireCjs("playwright");
-    browser = await chromium.launch({ args: ["--no-sandbox"] });
+    // Browser verification runs inside Docker. A real WebGL app across isolated contexts can
+    // exhaust the container's small /dev/shm mount, yielding ERR_INSUFFICIENT_RESOURCES and then
+    // Page crashed. The sandbox's other Chromium seam already uses this disk-backed path.
+    browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     // A journey runs in the browser state its SCENARIO calls for. An independent journey gets a
     // fresh context — a legitimate first-time visitor, nothing deleted and nothing fabricated —
     // because inheriting a previous scenario's terminal wizard is not a property of the app under
@@ -2221,7 +2236,7 @@ export async function verifyJourneys({
         const requestsBefore = failedRequests.length;
         const outcome = await runStep(page, step, {
           marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
-          authState,
+          authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));
