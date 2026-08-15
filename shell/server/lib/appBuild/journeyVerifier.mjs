@@ -129,6 +129,35 @@ export function invalidValueFor(label, inputTypes = []) {
   return null;
 }
 
+// When several real controls share one verb (for example "Duplicate asset" in a history panel
+// and "Duplicate selected object" in an editor), DOM order is not intent. Rank visible action
+// controls by how much of the step's target + action their accessible name actually identifies.
+// This stays generic: the contract supplies the vocabulary and the page supplies the names.
+async function bestVisibleAction(page, description, deadline) {
+  const wanted = keywords(description, 8);
+  if (!wanted.length || Date.now() > deadline) return null;
+  const controls = page.locator([
+    "button:visible", "a[href]:visible", "input[type=button]:visible", "input[type=submit]:visible",
+    '[role="button"]:visible', '[role="link"]:visible', '[role="menuitem"]:visible', '[role="tab"]:visible',
+  ].join(","));
+  const count = Math.min(await controls.count().catch(() => 0), 80);
+  let best = null;
+  for (let index = 0; index < count; index += 1) {
+    if (Date.now() > deadline) break;
+    const locator = controls.nth(index);
+    if (await locator.isDisabled().catch(() => true)) continue;
+    const name = await locator.evaluate((el) => el.getAttribute("aria-label")
+      || el.getAttribute("title") || el.value || el.innerText || "").catch(() => "");
+    const normalized = String(name).toLowerCase();
+    const matched = wanted.filter((word) => normalized.includes(word));
+    if (!matched.length) continue;
+    const score = matched.length * 10 + (matched.length === wanted.length ? 5 : 0)
+      - Math.max(0, wordsOf(normalized).length - matched.length);
+    if (!best || score > best.score) best = { locator, score };
+  }
+  return best?.locator || null;
+}
+
 /**
  * The value to type into a contracted field.
  *
@@ -600,6 +629,10 @@ export function groupKey(group) {
  */
 async function semanticControlVisible(page, control) {
   if (!control) return false;
+  if (control.machineId) {
+    const machine = page.locator(`[data-thrallo-control="${control.machineId}"]:visible`).first();
+    if (await machine.count().catch(() => 0)) return true;
+  }
   const target = semanticKey(control.logicalField || control.accessibleName);
   if (!target) return false;
   const identities = await page.evaluate(() => {
@@ -1521,7 +1554,9 @@ async function runStep(page, step, {
       if (await formSubmit.count().catch(() => 0)) target = formSubmit;
     }
     if (!target && !isReviewObservation) {
-      target = await firstVisible(candidatesFor(page, `${step.target || ""} ${action}`), deadline);
+      const description = `${step.target || ""} ${action}`;
+      target = await bestVisibleAction(page, description, deadline)
+        || await firstVisible(candidatesFor(page, description), deadline);
     }
     if (target) {
       await target.click({ timeout: 5_000 }).catch(() => {});

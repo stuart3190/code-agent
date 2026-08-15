@@ -156,6 +156,54 @@ test("invalid input tests only its owning form and never an unrelated page actio
   body = WORKING;
 });
 
+test("opaque control identity proves an invalid field remains mounted", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <form id="properties"><input data-thrallo-control="ctl-size" value="2, 2, 2">
+      <button>Save property changes</button></form><p id="validation"></p>
+    <script>
+      const input = document.querySelector('[data-thrallo-control="ctl-size"]');
+      input.addEventListener('input', () => {
+        const invalid = input.value.split(/[ ,]+/).some((value) => Number(value) <= 0);
+        document.querySelector('button').disabled = invalid;
+        document.getElementById('validation').textContent = invalid
+          ? 'Readable validation message: export controls are disabled until corrected' : '';
+      });
+    </script>
+  </body></html>`;
+  const control = { logicalField: "size", accessibleName: "size", accessibleNames: ["size"],
+    machineId: "ctl-size", roles: ["textbox"], inputTypes: ["text"], validity: "invalid",
+    statePath: "asset.draft.size" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "invalid", title: "Reject invalid size", priority: "primary",
+      steps: [{ action: "enter an invalid size value", target: "size", operates: ["size"],
+        expect: "a readable validation message is shown and export controls are disabled until corrected" }] }],
+    interactionContract: { flows: [{ journeyId: "invalid", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[0].controlEvidence?.fields?.[0]?.matchedBy, "machine=ctl-size");
+  body = WORKING;
+});
+
+test("generic action driving chooses the control whose name best matches the contracted target", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <aside><button id="asset">Duplicate asset</button></aside>
+    <main><button id="object">Duplicate selected object</button><p id="status"></p></main>
+    <script>
+      document.getElementById('asset').onclick = () => { document.getElementById('status').textContent = 'History asset copied'; };
+      document.getElementById('object').onclick = () => { document.getElementById('status').textContent = 'A second object with a distinct name appears in the hierarchy and the part count increases'; };
+    </script>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "duplicate", title: "Duplicate a selected object", priority: "primary",
+      steps: [{ action: "duplicate the selected object", target: "duplicate object control",
+        reads: ["objectId"],
+        expect: "a second object with a distinct name appears in the hierarchy and the part count increases" }] }],
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.match(result.journeys[0].steps[0].detail || "", /second|distinct|name/i);
+  body = WORKING;
+});
+
 test("sign out is proved by the public auth entry replacing the private surface", needsBrowser, async () => {
   body = `<!doctype html><html><body><main id="private">Private editor history
     <button id="signout">Sign out</button></main><script>
