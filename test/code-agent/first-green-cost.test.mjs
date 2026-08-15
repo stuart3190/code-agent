@@ -181,8 +181,8 @@ test("R3 — Builder V2 keeps its shared system prefix separate from stage-varyi
     "each patch turn reuses the shared rules and canonical capability catalogue");
   assert.match(source, /messages: \[\{ role: "user", content: prompt \}\]/,
     "contract, journey, retrieval, and repair context remain in the user message");
-  assert.match(source, /"IMPLEMENTATION CONTRACT:"[\s\S]*contractBrief\(contract\)/,
-    "the durable contract is rendered deterministically into stage-varying context");
+  assert.match(source, /"IMPLEMENTATION CONTRACT:"[\s\S]*contractBrief\(scopedContract\)/,
+    "the deterministically scoped durable contract is rendered into stage-varying context");
   assert.doesNotMatch(source, /systemPrompt: `[^`]*\$\{prompt\}/,
     "stage-varying context cannot contaminate the system prefix");
 });

@@ -242,8 +242,13 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     if (!modular.ok) {
       // The batch violated a structural invariant: the WHOLE batch is rejected — a tree that
       // half-applied its way into a monolith would be worse than a clean refusal.
+      const structuralDetail = modular.problems.join("; ");
       return {
         tree,
+        // Non-promotable recovery evidence only. Callers must explicitly classify the structural
+        // findings before using this tree; the ordinary result remains the untouched input tree.
+        provisionalTree: working,
+        structuralProblems: modular.problems,
         applied: [],
         rejected: [
           ...rejected,
@@ -254,14 +259,14 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
           ...applied.map((row) => ({ code: REJECTION.BATCH_ATOMIC_ROLLBACK, signature: row.signature,
             file: row.file, operation: row.kind, independentlyValid: true,
             reason: `${row.file} applied cleanly and was rolled back with its batch: `
-              + "the batch as a whole broke a structural invariant" })),
+              + `the batch as a whole broke a structural invariant (${structuralDetail})` })),
         ],
         modularityFailed: true,
       };
     }
   }
 
-  return { tree: working, applied, rejected, modularityFailed: false };
+  return { tree: working, provisionalTree: null, structuralProblems: [], applied, rejected, modularityFailed: false };
 }
 
 /**

@@ -148,7 +148,10 @@ test("scoped packages resolve to the scope, not the first segment", async () => 
     "package.json": manifest({ "@tanstack/react-query": "5.0.0" }),
     "src/App.jsx": `import { useQuery } from "@tanstack/react-query";\nimport x from "@missing/thing";\n`,
   }, { nodeModules });
-  assert.deepEqual(result.problems.map((p) => p.package), ["@missing/thing"]);
+  assert.deepEqual(result.problems.map((p) => p.package), ["@tanstack/react-query", "@missing/thing"]);
+  assert.equal(result.problems[0].kind, "dependency_not_installed",
+    "a correctly parsed declaration is still unusable when the offline compiler does not contain it");
+  assert.equal(result.problems[1].kind, "missing_dependency");
 });
 
 test("substituteFor only makes moves it is certain about", () => {

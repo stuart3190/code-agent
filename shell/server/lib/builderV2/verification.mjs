@@ -112,7 +112,7 @@ export async function verifyStage(tree, options = {}) {
   }
   return {
     ok: gate.ok,
-    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems } },
+    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems, failure: gate.failure || null } },
     advisory: gate.advisory || [],
     tree: gate.tree,
     deterministicRepair: gate.deterministicRepair || null,

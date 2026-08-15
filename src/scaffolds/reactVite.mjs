@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { GENERATED_DEPENDENCIES } from "./dependencyCatalog.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const sdk = (rel) => readFileSync(path.join(HERE, "reactVite", rel), "utf8");
@@ -47,6 +48,7 @@ export const REACT_VITE = {
         "lucide-react": "^1.23.0",
         "tailwind-merge": "^2.6.0",
         "tailwindcss-animate": "^1.0.7",
+        ...GENERATED_DEPENDENCIES,
       },
       devDependencies: {
         "@vitejs/plugin-react": "^4.3.1",

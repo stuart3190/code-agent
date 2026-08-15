@@ -24,6 +24,7 @@ import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } fro
 import {
   moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
 } from "./moduleContracts.mjs";
+import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -128,12 +129,14 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
   const interfaces = [...new Set([
     ...(repairScope?.adapterInterfaces || []), ...(repairScope?.capabilityPaths || []),
   ])].filter((path) => !files.includes(path)).sort();
+  const mayCreateMissing = ["module_contract", "runtime_dependency", "imports", "structural_modularity"]
+    .includes(repairScope?.kind);
   for (const path of files) {
-    if (typeof tree?.[path] !== "string" && repairScope?.kind !== "module_contract") {
+    if (typeof tree?.[path] !== "string" && !mayCreateMissing) {
       throw new Error(`pre-compile repair source is missing: ${path}`);
     }
   }
-  if (repairScope?.kind === "module_contract" && files.some((path) => typeof tree?.[path] !== "string")) {
+  if (mayCreateMissing && files.some((path) => typeof tree?.[path] !== "string")) {
     tree = { ...tree };
     for (const path of files) {
       if (typeof tree[path] !== "string") tree[path] = "// REQUIRED PLANNED MODULE IS MISSING; create it with newFile";
@@ -220,7 +223,7 @@ function renderJourneyBrief(journeys) {
 }
 
 export function renderPatchPrompt({
-  step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
+  step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
   repairScope = null, moduleCorrectionScope = null, advisory = [],
 }) {
@@ -232,10 +235,26 @@ export function renderPatchPrompt({
     return match ? { journeyId: match[1], action: match[2] } : null;
   }).filter(Boolean) : [];
   const failedJourneyIds = new Set(repairFailures.map((failure) => failure.journeyId));
-  const scopedJourneys = step === "core" || isRepair
+  const correctingIncrement = isRepair && String(originalStep || "").startsWith("increment:");
+  const scopedJourneys = step === "core" || (isRepair && !correctingIncrement)
     ? (contract.journeys || []).filter((j) => browserRepair && failedJourneyIds.size
       ? failedJourneyIds.has(j.id) : tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
+  const scopedJourneyIds = new Set(scopedJourneys.map((row) => row?.id).filter(Boolean));
+  const scopedOperations = (contract.operations || []).filter((operation) => (
+    !operation?.journey || scopedJourneyIds.has(operation.journey)
+  ));
+  const scopedEntityNames = new Set([
+    ...scopedOperations.map((operation) => operation.entity).filter(Boolean),
+    ...(step === "core" ? tiers.essential.entities : []),
+  ]);
+  const scopedContract = {
+    ...contract,
+    journeys: scopedJourneys,
+    operations: scopedOperations,
+    entities: (contract.entities || []).filter((entity) => scopedEntityNames.has(entity.name)),
+    dependencyPlan: scopeDependencyPlan(contract.dependencyPlan, scopedJourneys),
+  };
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
   const scopedInteractions = scopeInteractionContract(contract.interactionContract, scopedJourneys);
   const failedActions = new Set(repairFailures.map((failure) => `${failure.journeyId}\n${failure.action}`));
@@ -294,9 +313,10 @@ export function renderPatchPrompt({
           : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
     "",
     "IMPLEMENTATION CONTRACT:",
-    contractBrief(contract),
+    contractBrief(scopedContract),
     "",
-    capabilityRequirementsBrief(contract),
+    capabilityRequirementsBrief(scopedContract),
+    dependencyPlanBrief(scopedContract.dependencyPlan),
     modulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
       + " application is never rejected for naming a file differently):",
@@ -325,12 +345,16 @@ export function renderPatchPrompt({
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",
       repairScope.instruction,
       `Allowed files: [${repairScope.allowedFiles.join(", ")}]`,
+      ...(repairScope.allowedPrefixes?.length
+        ? [`New supporting modules may be created only under: [${repairScope.allowedPrefixes.join(", ")}]`] : []),
       `Validator findings: ${JSON.stringify(repairScope.findings)}`,
     ].join("\n") : "",
     moduleCorrectionScope ? [
       "MODULE-SCOPED CORE CORRECTION (write boundary is machine-enforced):",
       moduleCorrectionScope.instruction,
       `Allowed files: [${moduleCorrectionScope.allowedFiles.join(", ")}]`,
+      ...(moduleCorrectionScope.allowedPrefixes?.length
+        ? [`New supporting modules may be created only under: [${moduleCorrectionScope.allowedPrefixes.join(", ")}]`] : []),
       `Module conformance findings: ${JSON.stringify(moduleCorrectionScope.findings)}`,
     ].join("\n") : "",
     repairScope || moduleCorrectionScope ? "" : null,
@@ -387,9 +411,14 @@ export const STEP_ROUTING = Object.freeze({
 /** Steps whose write scope is bounded by the validator, so output is sized from that scope. */
 export const SCOPED_STEPS = Object.freeze(new Set(["repair", "correction"]));
 
-export function routeForStep(step) {
+export function routeForStep(step, { repairScope = null, moduleCorrectionScope = null } = {}) {
   const kind = String(step || "").startsWith("increment:") ? "increment" : String(step || "");
-  return STEP_ROUTING[kind] || STEP_ROUTING.core;
+  const routed = STEP_ROUTING[kind] || STEP_ROUTING.core;
+  const correctionKind = repairScope?.kind || moduleCorrectionScope?.kind || null;
+  if (kind === "correction" && ["structural_modularity", "runtime_dependency", "compile"].includes(correctionKind)) {
+    return { ...routed, reasoningEffort: "medium" };
+  }
+  return routed;
 }
 
 /**
@@ -590,6 +619,7 @@ export function createModelLanes({
               retrievedFileCount: Number(context.affectedModules || 1),
               retrievalTokens: Number(context.retrievalTokens || 0),
               problemCount: Array.isArray(context.problems) ? context.problems.length : 1,
+              expectedPatchTokens: Number(context.expectedPatchTokens || 0) || null,
             } : null,
             fundingPolicy: selected.decision?.fundingPolicy || "request_owner",
             budget,
@@ -762,13 +792,13 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, contract, tiers, tree, journey, rejections, problems, editRequest,
+    patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
       advisory = [], signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope ? null : await loadKnowledge(owner, projectId);
       let retrievalTrace = null;
       const prompt = renderPatchPrompt({
-        step, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
+        step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
         moduleContracts, repairScope, moduleCorrectionScope, advisory,
         onRetrieval: (trace) => { retrievalTrace = trace; },
       });
@@ -785,6 +815,7 @@ export function createModelLanes({
           ...(retrievalTrace?.included || []).map((entry) => entry.path).filter(Boolean),
           ...Object.keys(tree || {}).filter((path) => (problems || []).some((problem) => String(problem).includes(path))),
         ]).size),
+        expectedPatchTokens: repairScope?.expectedPatchTokens || moduleCorrectionScope?.expectedPatchTokens || null,
       });
       // ONE retry on transport-shaped failures: a dropped SSE stream ("terminated") killed
       // a live booking attempt 24 minutes in. Model/tool errors never retry — only the wire.
@@ -795,7 +826,7 @@ export function createModelLanes({
         toolChoice: { type: "function", name: EMIT_PATCHES_SCHEMA.name },
         // The first live run produced an 82-token no-op with zero reasoning; a forced tool
         // call still needs thinking room — how much is the per-step routing table's call.
-        reasoningEffort: routeForStep(step).reasoningEffort,
+        reasoningEffort: routeForStep(step, { repairScope, moduleCorrectionScope }).reasoningEffort,
       });
       let turn;
       try {

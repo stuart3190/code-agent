@@ -38,6 +38,8 @@ test("the identity covers the verifier and the files that decide a verdict with 
     "the entrypoint that chooses which verifier to call");
   assert.ok(SANDBOX_IDENTITY_FILES.includes("src/scaffolds/reactVite/lib/capabilities/wizard.js"),
     "the primitive that makes contracted controlled values observable");
+  assert.ok(SANDBOX_IDENTITY_FILES.includes("src/scaffolds/dependencyCatalog.mjs"),
+    "the exact specialist packages baked into the offline compiler are part of sandbox identity");
 });
 
 test("the host revision comes from a full configured SHA or the pinned deployment marker", async () => {

@@ -271,6 +271,16 @@ export async function preflightImports(tree, { nodeModules, autoCorrect = true }
       }
 
       // 3. named imports — only when the surface is KNOWN, and only for the package root.
+      // Declaring a package is not installing it. Production compilation is offline and links the
+      // fixed sandbox node_modules tree, so an arbitrary package.json edit cannot make a package
+      // available. Refuse the mismatch before entering the compiler.
+      if (nodeModules && !(await isInstalled(packageName, nodeModules))) {
+        problems.push({
+          kind: "dependency_not_installed", file, line, specifier, package: packageName,
+          message: `${file}:${line} imports "${specifier}" and declares "${packageName}", but that package is not installed in the isolated compiler.`,
+        });
+        continue;
+      }
       if (!named.length || specifier !== packageName || !nodeModules) continue;
       const surface = await exportSurface(packageName, { nodeModules });
       if (!surface) continue; // unreadable or CJS — unknown, so say nothing

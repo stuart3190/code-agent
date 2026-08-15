@@ -29,6 +29,7 @@ import { persistContract, tierContract } from "./contractTiering.mjs";
 import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
 import { createModelLanes } from "./modelLanes.mjs";
+import { generationPolicyFor } from "./generationPolicy.mjs";
 import { supabaseModelReservations } from "./modelReservations.mjs";
 import { createOrchestrator, supabaseBuildStore } from "./orchestrator.mjs";
 import { recordFacts } from "./knowledge.mjs";
@@ -373,6 +374,14 @@ export function createBuilderV2Runtime({
       const candidates = candidateSet(context);
       const history = await historyResolver(client, owner, projectId);
       const complexity = classifyComplexity({ prompt: request }).level;
+      let generationProfile = complexity;
+      if (mode === "resume_repair" && input.sourceBuildId) {
+        const { data: sourceBuild, error: sourceBuildError } = await client.from("bv2_builds")
+          .select("profile").eq("id", String(input.sourceBuildId)).eq("owner", owner).maybeSingle();
+        if (sourceBuildError) throw new Error(`Builder V2 source-build profile read: ${sourceBuildError.message}`);
+        generationProfile = sourceBuild?.profile || complexity;
+      }
+      const generationPolicy = generationPolicyFor(generationProfile);
       const providerForStep = async ({ step, ...stepContext }) => {
         const routedStep = String(step).startsWith("increment:") ? "increment" : step;
         const stepComplexity = classifyComplexity({ prompt: request, contract: stepContext.contract || null }).level;
@@ -472,6 +481,7 @@ export function createBuilderV2Runtime({
         providerForStep, ceilingCredits, diag, log: (line) => emit("stdout", line),
         reservations: reservationStore, billingLane: context.policy.billingLane, strictKnowledge: true,
         recordRetrieval, accountCreditResolver, maxRepairs,
+        maxCorrections: generationPolicy.maxCandidateCorrections,
         defaultUsageResponsibility: workJob.payload.usageResponsibility === "platform_failure"
           ? "platform_failure"
           : /qualification/i.test(String(workJob.payload.trigger || ""))

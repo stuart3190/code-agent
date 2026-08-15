@@ -14,6 +14,7 @@ import { honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
 import { expectationKeywords } from "./journeyVerifier.mjs";
 import { modularityCheck, modularitySummary } from "./modularity.mjs";
+import { validateDependencyPlan } from "../builderV2/dependencyPlan.mjs";
 
 // Files the generated app must not lose or corrupt. A stage that deletes vite.config.js compiles
 // nothing afterwards, and the resulting error names a missing module rather than the real cause.
@@ -48,6 +49,19 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
     if (!manifest.scripts?.build) problems.push("package.json has no build script");
     if (manifest.type && manifest.type !== "module") {
       problems.push(`package.json sets "type": "${manifest.type}" — the scaffold is ESM`);
+    }
+  }
+
+  if (manifest && baseline?.["package.json"]) {
+    let baselineManifest = null;
+    try { baselineManifest = JSON.parse(baseline["package.json"]); } catch {}
+    for (const section of ["dependencies", "devDependencies"]) {
+      const installed = baselineManifest?.[section] || {};
+      for (const [name, version] of Object.entries(manifest?.[section] || {})) {
+        if (installed[name] === version) continue;
+        problems.push(`package.json requests ${name}@${version}, but the network-isolated compiler only `
+          + `contains ${installed[name] ? `${name}@${installed[name]}` : "the approved scaffold dependency catalogue"}`);
+      }
     }
   }
 
@@ -113,6 +127,7 @@ export async function runStageGate(tree, {
       return {
         ok: false, checks, tree: working, corrections,
         problems: preflight.problems.map((p) => p.message),
+        failure: { kind: "imports", findings: preflight.problems },
       };
     }
   } catch (error) {
@@ -123,7 +138,18 @@ export async function runStageGate(tree, {
   // 2. build configuration — also cheap, and produces a far clearer message than the compiler will.
   const config = validateBuildConfig(working, { baseline });
   if (!record("config", config.ok, config.ok ? "intact" : config.problems.join("; "))) {
-    return { ok: false, checks, tree: working, corrections, problems: config.problems };
+    return { ok: false, checks, tree: working, corrections, problems: config.problems,
+      failure: { kind: "config", findings: config.problems.map((message) => ({ file: "package.json", message })) } };
+  }
+
+  if (contract?.dependencyPlan) {
+    const dependencies = validateDependencyPlan(working, contract.dependencyPlan);
+    if (!record("dependencies", dependencies.ok,
+      dependencies.ok ? "approved runtime capabilities present" : `${dependencies.problems.length} runtime dependency problem(s)`)) {
+      return { ok: false, checks, tree: working, corrections,
+        problems: dependencies.problems.map((finding) => finding.message),
+        failure: { kind: "runtime_dependency", findings: dependencies.problems } };
+    }
   }
 
   // 2b. modularity — static and instant. The monolith shape (one App.jsx owning every journey)
@@ -134,7 +160,8 @@ export async function runStageGate(tree, {
     const modular = modularityCheck(working, { contract, previousGreen });
     for (const flag of modular.flags) log(`stage-gate: modularity exception — ${flag}`);
     if (!record("modularity", modular.ok, modular.ok ? modularitySummary(modular) : `${modular.problems.length} structural problem(s)`)) {
-      return { ok: false, checks, tree: working, corrections, problems: modular.problems };
+      return { ok: false, checks, tree: working, corrections, problems: modular.problems,
+        failure: { kind: "modularity", findings: modular.problems.map((message) => ({ message })) } };
     }
   }
 
@@ -165,6 +192,7 @@ export async function runStageGate(tree, {
       return {
         ok: false, checks, tree: working, corrections, deterministicRepair,
         problems: scan.findings.map((f) => f.message),
+        failure: { kind: "honesty", findings: scan.findings },
       };
     }
   }
@@ -197,7 +225,8 @@ export async function runStageGate(tree, {
         : `${absent.length} outcome(s) with no trace in the UI${expectationsAdvisory ? " (advisory)" : ""}`);
     if (!passed) {
       if (!expectationsAdvisory) {
-        return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+        return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent,
+          failure: { kind: "expectations", findings: absent.map((message) => ({ message })) } };
       }
       advisory.push(...absent.map((message) => ({ code: "expectation_copy_absent", message })));
     }
@@ -211,6 +240,7 @@ export async function runStageGate(tree, {
         ok: false, checks, tree: working, corrections,
         problems: ["the project does not compile"],
         stderr: built.stderr || "",
+        failure: { kind: "compile", findings: [], stderr: built.stderr || "" },
       };
     }
   }

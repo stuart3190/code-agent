@@ -8,7 +8,9 @@
 import { CAPABILITIES, validateBindings } from "./capabilityRegistry.mjs";
 import { serviceClient } from "../supabase.mjs";
 
-const words = (text) => new Set(String(text || "").toLowerCase().match(/[a-z]{4,}/g) || []);
+const words = (text) => new Set(String(text || "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+  .toLowerCase().match(/[a-z0-9]{3,}/g) || []);
 const journeyText = (j) => `${j.id} ${j.title} ${(j.steps || []).map((s) => `${s.action} ${s.expect}`).join(" ")}`;
 const overlaps = (setA, setB) => [...setA].some((w) => setB.has(w));
 
@@ -66,12 +68,18 @@ export function tierContract(contract, { userCritical = [] } = {}) {
     .map((j) => j.id);
   const essentialText = words(journeys.filter((j) => essentialJourneys.includes(j.id)).map(journeyText).join(" "));
 
-  const essentialEntities = (contract?.entities || [])
-    .filter((e) => essentialText.has(String(e.name).toLowerCase()) || overlaps(words(e.name), essentialText))
-    .map((e) => e.name);
   const essentialOperations = (contract?.operations || [])
-    .filter((op) => overlaps(words(`${op.id} ${op.description || ""}`), essentialText))
+    .filter((op) => essentialJourneys.includes(op?.journey)
+      || (!op?.journey && overlaps(words(`${op.id} ${op.description || ""}`), essentialText)))
     .map((op) => op.id);
+  const operationEntities = new Set((contract?.operations || [])
+    .filter((operation) => essentialOperations.includes(operation.id))
+    .map((operation) => operation.entity).filter(Boolean));
+  const essentialEntities = (contract?.entities || [])
+    .filter((entity) => operationEntities.has(entity.name)
+      || essentialText.has(String(entity.name).toLowerCase())
+      || overlaps(words(entity.name), essentialText))
+    .map((entity) => entity.name);
 
   return {
     essential: {
@@ -197,6 +205,18 @@ export function persistenceOwnershipPlan(contract, journeys = contract?.journeys
       ...(binding.configuration?.persistence === "platform" ? { persistence: "platform" } : {}),
     };
   }).filter((owner) => owner.capability);
+  // Generic entity-backed applications bind CRUD without a domain-specific required-method list.
+  // Their adapter still owns durable records. Omitting it produced a contradictory live prompt:
+  // four persisted entities and ten operations, but `owners: []` and `modules: []`.
+  for (const module of plan) {
+    if (!module.factory || !module.stateOwnership?.approvedPersistence) continue;
+    if (owners.some((owner) => owner.module === module.path || owner.capability === module.factory)) continue;
+    owners.push({
+      state: module.stateOwnership.owns || "contracted durable records and status",
+      capability: module.factory,
+      module: module.path,
+    });
+  }
   return {
     durableJourneys: durableJourneys.map((journey) => journey.id),
     forbiddenBusinessPersistence: [...FORBIDDEN_DURABLE_PERSISTENCE],
@@ -231,13 +251,18 @@ const pascal = (value) => String(value || "")
  * repair a vocabulary, but a working application is never rejected for naming a file
  * differently.
  */
-export function deriveModulePlan(contract, journeys = contract?.journeys || []) {
+export function deriveModulePlan(contract, journeys = contract?.journeys || [], { dependencyPlan = null } = {}) {
   const scopedContract = { ...contract, journeys };
   const all = bindCapabilities(contract);
   const scopedBindings = bindingsForJourneys(contract, all, journeys);
   // Plan modules only where the work is genuinely multi-part: a durable owner plus a journey
   // that walks through several observable states. A one-step form needs no prescribed layout.
-  if (!requiresWizard(scopedContract)) return [];
+  const coordinatedFlow = (journeys || []).some((journey) => (journey?.steps || []).length >= 3
+    && journeyStepKinds(journey).some((kind) => (
+      ["input", "selection", "mutation", "recovery", "lookup", "output", "presentation"].includes(kind)
+    )));
+  if (!requiresWizard(scopedContract) && !coordinatedFlow
+      && !(dependencyPlan?.requirements || []).length) return [];
 
   // Capabilities the contract requires methods from own their own adapters. A contract that
   // requires none — an ordinary entity-backed CRM, inventory or admin app — falls back to the
@@ -249,7 +274,7 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || []) 
   });
   const owners = scopedBindings.filter((binding) => binding.requiredMethods?.length);
   const planned = owners.length ? owners : ((contract?.entities || []).length ? genericStore : []);
-  if (!planned.length) return [];
+  if (!planned.length && !coordinatedFlow && !(dependencyPlan?.requirements || []).length) return [];
 
   const plan = [];
   const adapterOwners = [];
@@ -269,12 +294,13 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || []) 
       },
     });
   }
-  if (!plan.length) return [];
+  if (!plan.length && !coordinatedFlow && !(dependencyPlan?.requirements || []).length) return [];
 
   const durableStateOwner = adapterOwners.join(" + ");
   for (const journey of journeys) {
     const kinds = new Set(journeyStepKinds(journey));
-    if (!kinds.has("mutation") && !kinds.has("selection") && !kinds.has("input")) continue;
+    if (!["mutation", "selection", "input", "output", "presentation"]
+      .some((kind) => kinds.has(kind))) continue;
     const name = pascal(journey.id);
     const directory = `src/components/${String(journey.id).replace(/[^a-zA-Z0-9-]+/g, "-").toLowerCase()}`;
     plan.push({ path: `${directory}/${name}Flow.jsx`, role: "step navigation and flow composition",
@@ -287,10 +313,27 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || []) 
       plan.push({ path: `${directory}/${name}Confirmation.jsx`, role: "confirmation and reference presentation",
         stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
     }
+    if (kinds.has("output")) {
+      plan.push({ path: `${directory}/${name}Output.jsx`, role: "format serialization and download responsibility",
+        stateOwnership: { owns: "ephemeral export preparation only", survivesReload: false, durableStateOwner } });
+    }
     if (kinds.has("cancellation") || kinds.has("recovery") || kinds.has("lookup")) {
       plan.push({ path: `${directory}/${name}Status.jsx`, role: "restored and cancelled status presentation",
         stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
     }
+  }
+  for (const requirement of dependencyPlan?.requirements || []) {
+    if (!requirement.ownerModule || plan.some((module) => module.path === requirement.ownerModule)) continue;
+    plan.push({
+      path: requirement.ownerModule,
+      role: `${requirement.capability.replace(/_/g, " ")} specialist rendering module`,
+      requiredImports: [requirement.package],
+      stateOwnership: {
+        owns: "ephemeral rendered scene and interaction state",
+        survivesReload: false,
+        durableStateOwner,
+      },
+    });
   }
   return plan;
 }
@@ -306,10 +349,12 @@ export function journeyStepKinds(journey) {
     if (/\b(select|choose|pick)\b/.test(text)) kinds.push("selection");
     if (/\b(enter|type|fill|provide|complete)\b/.test(text)) kinds.push("input");
     if (/\b(review|summary)\b/.test(text)) kinds.push("review");
-    if (/\b(confirm|submit|book|reserve|create)\b/.test(text)) kinds.push("mutation");
+    if (/\b(confirm|submit|book|reserve|create|save|rename|duplicate|delete|undo|redo|apply)\b/.test(text)) kinds.push("mutation");
     if (/\b(reload|refresh|recover|restore|sign[ -]?in)\b/.test(text)) kinds.push("recovery");
     if (/\b(look ?up|find|search)\b/.test(text)) kinds.push("lookup");
     if (/\bcancel\b/.test(text)) kinds.push("cancellation");
+    if (/\b(download|export|serialize|file)\b/.test(text)) kinds.push("output");
+    if (/\b(responsive|viewport|mobile|tablet|desktop|layout)\b/.test(text)) kinds.push("presentation");
   }
   return [...new Set(kinds)];
 }

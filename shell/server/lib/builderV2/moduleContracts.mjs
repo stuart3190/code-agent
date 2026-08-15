@@ -222,10 +222,12 @@ function patchPath(patch) {
 
 /** Reject writes outside a module-scoped correction before patch application. */
 export function validateModulePatchScope(patches, scope) {
-  if (!scope?.allowedFiles?.length) return { ok: true, findings: [] };
-  const allowed = new Set(scope.allowedFiles);
-  const findings = (patches || []).map(patchPath).filter((path) => path && !allowed.has(path)).map((path) => ({
-    code: "module_correction_scope_exceeded", module: path, allowedFiles: [...allowed].sort(),
+  if (!scope?.allowedFiles?.length && !scope?.allowedPrefixes?.length) return { ok: true, findings: [] };
+  const allowed = new Set(scope.allowedFiles || []);
+  const prefixes = [...new Set(scope.allowedPrefixes || [])];
+  const withinScope = (path) => allowed.has(path) || prefixes.some((prefix) => path.startsWith(prefix));
+  const findings = (patches || []).map(patchPath).filter((path) => path && !withinScope(path)).map((path) => ({
+    code: "module_correction_scope_exceeded", module: path, allowedFiles: [...allowed].sort(), allowedPrefixes: prefixes,
     message: `module-scoped correction may not change ${path}`,
   }));
   return { ok: findings.length === 0, findings };

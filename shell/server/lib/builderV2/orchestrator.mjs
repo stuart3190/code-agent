@@ -29,6 +29,7 @@ import {
 } from "./verification.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
+import { generationPolicyFor } from "./generationPolicy.mjs";
 
 // ── build persistence (bv2_builds twin pattern) ───────────────────────────────────────────────
 
@@ -119,6 +120,59 @@ const treesEqual = (a, b) => {
   const right = Object.keys(b || {}).sort();
   return left.length === right.length && left.every((path, index) => path === right[index] && a[path] === b[path]);
 };
+const TARGETED_CANDIDATE_MAX_FILES = 3;
+const sourcePaths = (values) => [...new Set((values || []).flatMap((value) => (
+  String(value || "").match(/src\/[a-zA-Z0-9_./-]+\.(?:jsx?|tsx?|json|css)/g) || []
+)).map((path) => path.replace(/[):,;]+$/, "")))].sort();
+const directoryPrefix = (path) => path.includes("/") ? `${path.slice(0, path.lastIndexOf("/") + 1)}` : "";
+
+function targetedGateCorrection(gate, tree) {
+  const failure = gate?.layers?.d0d2?.failure;
+  if (!failure?.kind || failure.kind === "expectations") return null;
+  const findings = failure.findings || [];
+  let files = [...new Set(findings.map((finding) => finding?.file).filter((file) => /^src\//.test(file)))];
+  files = [...new Set([...files, ...sourcePaths([
+    ...(gate.layers?.d0d2?.problems || []), failure.stderr || "",
+  ])])].sort();
+  if (failure.kind === "config" && !files.length) files = ["package.json"];
+  if (!files.length || files.length > TARGETED_CANDIDATE_MAX_FILES) return null;
+  const missing = files.filter((path) => typeof tree?.[path] !== "string");
+  const allowedPrefixes = ["imports", "modularity", "runtime_dependency"].includes(failure.kind)
+    ? [...new Set(files.map(directoryPrefix).filter((prefix) => prefix.startsWith("src/")))] : [];
+  const sourceTokens = files.reduce((sum, path) => sum + Math.ceil(String(tree?.[path] || "").length / 4), 0);
+  return {
+    kind: failure.kind,
+    files,
+    allowedFiles: files,
+    allowedPrefixes,
+    findings,
+    expectedPatchTokens: Math.min(8_000, Math.max(1_200, Math.ceil(sourceTokens * 1.2))),
+    instruction: `Retain the candidate and correct the bounded ${failure.kind} failure in `
+      + `[${files.join(", ")}]. ${missing.length ? `Create the missing module(s) [${missing.join(", ")}] `
+        + "inside the allowed directory boundary. " : ""}`
+      + "Do not regenerate the application or change unrelated working modules.",
+  };
+}
+
+function structuralCandidateCorrection(applied) {
+  if (!applied?.modularityFailed || !applied.provisionalTree) return null;
+  const files = sourcePaths(applied.structuralProblems || []);
+  if (!files.length || files.length > TARGETED_CANDIDATE_MAX_FILES) return null;
+  const sourceTokens = files.reduce((sum, path) => (
+    sum + Math.ceil(String(applied.provisionalTree?.[path] || "").length / 4)
+  ), 0);
+  return {
+    kind: "structural_modularity",
+    files,
+    allowedFiles: files,
+    allowedPrefixes: [...new Set(files.map(directoryPrefix).filter((prefix) => prefix.startsWith("src/")))],
+    findings: (applied.structuralProblems || []).map((message) => ({ code: "tree_integrity_failed", message })),
+    expectedPatchTokens: Math.min(8_000, Math.max(1_500, Math.ceil(sourceTokens * 1.2))),
+    instruction: "The candidate parses and its sibling patches are valid, but the named module is structurally too broad. "
+      + "Split its distinct responsibilities into focused sibling modules under the allowed directory, keep the existing "
+      + "route/data/shell work, and leave final correctness gates unchanged.",
+  };
+}
 
 // ── the orchestrator ──────────────────────────────────────────────────────────────────────────
 
@@ -224,7 +278,7 @@ export function createOrchestrator({
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
     editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
-    parentSnapshotId = null, signal = null, spec = null,
+    parentSnapshotId = null, signal = null, spec = null, attemptPolicy = null, initialRepairScope = null,
     // Which ALLOWANCE this increment draws on, when the caller already knows. The reservation
     // layer counts `repair` and `correction` separately on purpose: a repair is a round briefed by
     // observed journey failure, a correction is a named structural fix. A mechanics failure is the
@@ -239,7 +293,7 @@ export function createOrchestrator({
     let rejections = [];
     let problems = initialProblems;
     let lastSignature = null;
-    let repairScope = null;
+    let repairScope = initialRepairScope;
     let contractCorrectionScope = null;
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
@@ -261,8 +315,13 @@ export function createOrchestrator({
     let noOps = 0;
     const attemptLedger = [];
     const spend = () => attempts + corrections;
-    const maxDispatches = maxCoreAttempts + maxPrecompileCorrections;
-    const exhausted = () => attempts >= maxCoreAttempts || spend() >= maxDispatches
+    const policy = attemptPolicy || generationPolicyFor("simple", {
+      simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
+    });
+    const maxGenerationAttempts = policy.maxGenerationAttempts;
+    const maxCandidateCorrections = policy.maxCandidateCorrections;
+    const maxDispatches = maxGenerationAttempts + maxCandidateCorrections;
+    const exhausted = () => attempts >= maxGenerationAttempts || spend() >= maxDispatches
       || noOps > maxNoOpRetries;
     const failure = (reason, extra = {}) => ({
       ok: false, reason, problems, advisory, advisoryFindings: advisory,
@@ -294,13 +353,15 @@ export function createOrchestrator({
         working = originalTree;
         attempts += 1;
         log(`${step}: scoped correction attempted ${patchScope.findings.length} out-of-scope write(s); `
-          + `retrying unscoped (attempt ${attempts}/${maxCoreAttempts})`);
+          + `retrying unscoped (attempt ${attempts}/${maxGenerationAttempts})`);
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
+      const evidenceTree = applied.modularityFailed && applied.provisionalTree
+        ? applied.provisionalTree : applied.tree;
       const filesChanged = [...new Set([
-        ...Object.keys(applied.tree).filter((path) => applied.tree[path] !== working[path]),
-        ...Object.keys(working).filter((path) => !(path in applied.tree)),
+        ...Object.keys(evidenceTree).filter((path) => evidenceTree[path] !== working[path]),
+        ...Object.keys(working).filter((path) => !(path in evidenceTree)),
       ])].sort();
       await events.patches?.({
         owner, projectId, buildId, step: dispatchStep, attempt, patches,
@@ -311,6 +372,35 @@ export function createOrchestrator({
       if (applied.rejected.length) {
         rejections = applied.rejected;
         const classes = [...new Set(applied.rejected.map((row) => row.code).filter(Boolean))];
+        const structuralScope = structuralCandidateCorrection(applied);
+        if (structuralScope && corrections < maxCandidateCorrections) {
+          const signature = problemSignature(applied.structuralProblems);
+          if (signature === lastSignature) {
+            return failure("the same structural defect survived a scoped correction (stop rule)", {
+              problems: applied.structuralProblems,
+            });
+          }
+          lastSignature = signature;
+          problems = [...applied.structuralProblems];
+          latestCandidate = await snapshotStore.createSnapshot(owner, projectId, applied.provisionalTree, {
+            buildId, parent: latestCandidate?.id || parentSnapshotId,
+            reason: `candidate:${step}:${attempt}:structural`,
+            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
+            tree: applied.provisionalTree, reason: `candidate:${step}:${attempt}:structural`, promotable: false });
+          await events.candidateFindings?.({ owner, projectId, buildId, step, attempt,
+            snapshotId: latestCandidate.id, advisory: [], blocking: structuralScope.findings });
+          working = await snapshotStore.materialize(owner, latestCandidate.id);
+          repairScope = structuralScope;
+          contractCorrectionScope = null;
+          corrections += 1;
+          attemptLedger.push({ attempt, dispatch: dispatchStep, class: "structural_candidate_correction",
+            substantive: true, rejected: applied.rejected.length, retainedFiles: filesChanged });
+          log(`${step}: retained structurally invalid candidate ${latestCandidate.id}; correcting only `
+            + `[${structuralScope.files.join(", ")}] instead of regenerating ${filesChanged.length} valid file(s)`);
+          continue;
+        }
         // RETAIN WHAT LANDED. applyPatches is per-patch, so the siblings of a bad patch are already
         // in the tree; rolling back to the original threw them away. A live build wrote eight sound
         // modules and one file with unbalanced braces, and lost all nine — then had to regenerate
@@ -322,6 +412,13 @@ export function createOrchestrator({
         const retained = filesChanged.length > 0 && !applied.modularityFailed;
         if (retained) {
           working = applied.tree;
+          latestCandidate = await snapshotStore.createSnapshot(owner, projectId, working, {
+            buildId, parent: latestCandidate?.id || parentSnapshotId,
+            reason: `candidate:${step}:${attempt}:partial`,
+            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
+            tree: working, reason: `candidate:${step}:${attempt}:partial`, promotable: false });
           log(`${step}: ${applied.rejected.length} patch(es) rejected (${classes.join(", ")}); `
             + `retaining ${filesChanged.length} file(s) that applied cleanly`);
         } else {
@@ -334,7 +431,8 @@ export function createOrchestrator({
         continue;
       }
       if (activeScope) {
-        const outsideScope = filesChanged.filter((path) => !activeScope.allowedFiles.includes(path));
+        const outsideScope = filesChanged.filter((path) => !(activeScope.allowedFiles || []).includes(path)
+          && !(activeScope.allowedPrefixes || []).some((prefix) => path.startsWith(prefix)));
         if (outsideScope.length) {
           // A correction that reached wider than its boundary is not a reason to abandon a
           // build: drop back to an unscoped attempt with the boundary explained, rather than
@@ -349,7 +447,7 @@ export function createOrchestrator({
           contractCorrectionScope = null;
           working = originalTree;
           attempts += 1;
-          log(`${step}: correction exceeded its boundary; retrying unscoped (attempt ${attempts}/${maxCoreAttempts})`);
+          log(`${step}: correction exceeded its boundary; retrying unscoped (attempt ${attempts}/${maxGenerationAttempts})`);
           continue;
         }
       }
@@ -377,7 +475,7 @@ export function createOrchestrator({
         attemptLedger.push({ attempt, dispatch: dispatchStep,
           class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
         log(`${step}: no-op batch rejected deterministically `
-          + `(protocol round ${noOps}/${maxNoOpRetries}, generation attempts still ${attempts}/${maxCoreAttempts})`);
+          + `(protocol round ${noOps}/${maxNoOpRetries}, generation attempts still ${attempts}/${maxGenerationAttempts})`);
         continue;
       }
 
@@ -420,7 +518,7 @@ export function createOrchestrator({
           return failure("the same blocking defect survived a scoped correction (stop rule)",
             { problems: blockingProblems });
         }
-        if (corrections >= maxPrecompileCorrections) {
+        if (corrections >= maxCandidateCorrections) {
           return failure("blocking pre-compile findings remain after the correction allowance",
             { problems: blockingProblems });
         }
@@ -450,7 +548,7 @@ export function createOrchestrator({
           working = originalTree;
           attempts += 1;
           log(`${step}: ${blocking.length} widespread or unmapped blocking defect(s) require a whole-core `
-            + `retry (attempt ${attempts}/${maxCoreAttempts})`);
+            + `retry (attempt ${attempts}/${maxGenerationAttempts})`);
           continue;
         }
         contractCorrectionScope = scope;
@@ -490,7 +588,6 @@ export function createOrchestrator({
           candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope,
           moduleCorrectionUsed, advisory, advisoryFindings: advisory, attempts, corrections };
       }
-      // Compilation/protected-path failure: the tree cannot run, so this IS a real attempt.
       const gateProblems = gate.layers.d0d2.problems || [];
       const signature = problemSignature(gateProblems);
       if (signature === lastSignature) {
@@ -499,20 +596,42 @@ export function createOrchestrator({
       lastSignature = signature;
       problems = gateProblems;
       rejections = [];
+      const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree);
+      if (gateScope && corrections < maxCandidateCorrections) {
+        if (!treesEqual(applied.tree, gate.tree)) {
+          latestCandidate = await snapshotStore.createSnapshot(owner, projectId, gate.tree, {
+            buildId, parent: latestCandidate.id, reason: `candidate:${step}:${attempt}:deterministic`,
+            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
+            tree: gate.tree, reason: `candidate:${step}:${attempt}:deterministic`, promotable: false });
+        }
+        working = await snapshotStore.materialize(owner, latestCandidate.id);
+        repairScope = gateScope;
+        contractCorrectionScope = null;
+        corrections += 1;
+        attemptLedger.push({ attempt, dispatch: dispatchStep, class: `${gateScope.kind}_candidate_correction`,
+          substantive: true, problems: gateProblems.length, retainedFiles: gateScope.files });
+        log(`${step}: retained candidate ${latestCandidate.id}; bounded ${gateScope.kind} failure will correct only `
+          + `[${gateScope.files.join(", ")}] (${corrections}/${maxCandidateCorrections} corrections)`);
+        continue;
+      }
+      // No honest bounded repair scope exists. This is a real full-generation failure.
       working = originalTree;
       attempts += 1;
-      attemptLedger.push({ attempt, dispatch: dispatchStep, class: "compile_failed", substantive: true,
+      attemptLedger.push({ attempt, dispatch: dispatchStep,
+        class: gate.layers.d0d2.failure?.kind || "gate_failed", substantive: true,
         problems: gateProblems.length });
-      log(`${step}: gate failed (${gateProblems.length} problem(s)), attempt ${attempts}/${maxCoreAttempts}`);
+      log(`${step}: gate failed (${gateProblems.length} problem(s)), attempt ${attempts}/${maxGenerationAttempts}`);
     }
     // Say WHICH ceiling ended the step. "No runnable tree in 3 attempts" read identically whether
     // the model wrote three broken applications or none at all.
     if (noOps > maxNoOpRetries) {
       return failure(`no substantive generation: ${noOps} consecutive protocol round(s) changed nothing `
-        + `(generation attempts used: ${attempts}/${maxCoreAttempts})`, { code: "no_substantive_generation" });
+        + `(generation attempts used: ${attempts}/${maxGenerationAttempts})`, { code: "no_substantive_generation" });
     }
-    return failure(attempts >= maxCoreAttempts
-      ? `no runnable tree within ${maxCoreAttempts} generation attempts`
+    return failure(attempts >= maxGenerationAttempts
+      ? `no runnable tree within ${maxGenerationAttempts} generation attempts`
       : `no runnable tree within ${maxDispatches} dispatches (${attempts} attempt(s), ${corrections} correction(s))`);
   }
 
@@ -564,6 +683,12 @@ export function createOrchestrator({
         const { contract, tiers, bindings, interactionContract } = spec;
         const intents = spec.imageIntents;
         const refinedProfile = await classifyContract?.({ request, contract, profile }) || profile;
+        const buildAttemptPolicy = generationPolicyFor(refinedProfile, {
+          simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
+        });
+        log(`generation policy: ${buildAttemptPolicy.profile} â€” ${buildAttemptPolicy.maxGenerationAttempts} `
+          + `full attempts, ${buildAttemptPolicy.maxCandidateCorrections} retained-candidate corrections; `
+          + "the approved build credit ceiling remains authoritative");
         if (refinedProfile !== profile) {
           try { await buildStore.update(buildId, { profile: refinedProfile }); }
           catch (error) { log(`profile refinement failed: ${error.message}`); }
@@ -593,6 +718,7 @@ export function createOrchestrator({
         const core = await buildIncrement({
           step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
           journeys: essentialJourneys, checkpointReason: "working:core", signal, spec,
+          attemptPolicy: buildAttemptPolicy,
         });
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems,
           advisoryFindings: core.advisory || [],
@@ -661,6 +787,7 @@ export function createOrchestrator({
               parentSnapshotId: workingSnapshot?.id || null, signal, spec,
               // …drawing on the CORRECTION allowance, which is the whole point.
               dispatchAs: "correction",
+              attemptPolicy: buildAttemptPolicy,
             });
           } catch (error) {
             if (error?.code !== "correction_limit_reached") throw error;
@@ -725,6 +852,7 @@ export function createOrchestrator({
               journeys: essentialJourneys, initialProblems: evidence,
               checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null,
               signal, spec,
+              attemptPolicy: buildAttemptPolicy,
             });
           } catch (error) {
             if (error?.code !== "repair_limit_reached") throw error;
@@ -786,6 +914,7 @@ export function createOrchestrator({
             step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
             journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id,
             signal, spec,
+            attemptPolicy: buildAttemptPolicy,
           });
           let verdicts = null;
           if (increment.ok) {
@@ -885,8 +1014,9 @@ export function createOrchestrator({
      */
     async runRepairFromCheckpoint({ owner, projectId, sourceBuildId, request, contract,
       initialProblems = [], maxRepairs = 1, userCritical = [], signal = null }) {
+      const sourceBuild = await buildStore.get(sourceBuildId);
       const buildId = await buildStore.create({
-        owner, project_id: projectId, profile: "repair", request, state: "created",
+        owner, project_id: projectId, profile: sourceBuild?.profile || "simple", request, state: "created",
         max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_repair", sourceBuildId });
@@ -904,12 +1034,26 @@ export function createOrchestrator({
         const spec = deriveBuildSpec(contract, { userCritical });
         contract = spec.contract;
         const { tiers, bindings } = spec;
+        const attemptPolicy = generationPolicyFor(sourceBuild?.profile || "simple", {
+          simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
+        });
         const journeysById = new Map((contract.journeys || []).map((journey) => [journey.id, journey]));
         const allJourneys = [...journeysById.values()];
+        // Classify the retained tree before buying another model turn. If a deterministic gate can
+        // name one bounded defect (as in the live fake-delay / missing-runtime candidate), the
+        // first resumed dispatch is already a scoped correction. Browser-red but otherwise valid
+        // candidates still use the ordinary repair path below.
+        const initialGate = await verifyStage(source.tree, gateOptions(contract,
+          "resume-preflight", allJourneys, { owner, projectId, buildId, step: "resume-preflight", attempt: 0, signal }));
+        const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree);
+        const repairProblems = initialGate.ok
+          ? initialProblems
+          : [...(initialGate.layers?.d0d2?.problems || []), ...initialProblems];
         const repair = await buildIncrement({
           step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
-          assets: [], journeys: allJourneys, initialProblems, editRequest: request,
+          assets: [], journeys: allJourneys, initialProblems: repairProblems, editRequest: request,
           checkpointReason: "working:resumed-repair", parentSnapshotId: source.snapshotId, signal, spec,
+          attemptPolicy, initialRepairScope,
         });
         if (!repair.ok) return finish("blocked", { error: repair.reason, problems: repair.problems,
           workingSnapshotId: source.snapshotId });

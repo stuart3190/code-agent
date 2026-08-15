@@ -19,6 +19,7 @@ import {
   buildInteractionContract, scopeInteractionContract, validateInteractionContract,
 } from "./interactionContract.mjs";
 import { buildModuleGenerationContracts } from "./moduleContracts.mjs";
+import { deriveDependencyPlan, scopeDependencyPlan } from "./dependencyPlan.mjs";
 
 export const BUILD_SPEC_VERSION = 1;
 
@@ -31,9 +32,10 @@ export const BUILD_SPEC_VERSION = 1;
  */
 export function deriveBuildSpec(contract, { userCritical = [], journeys = contract?.journeys || [] } = {}) {
   const bindings = bindCapabilities(contract);
-  const modulePlan = deriveModulePlan(contract, journeys);
+  const dependencyPlan = deriveDependencyPlan(contract, journeys);
+  const modulePlan = deriveModulePlan(contract, journeys, { dependencyPlan });
   const interactionContract = buildInteractionContract(contract, { modulePlan, bindings });
-  const enriched = { ...contract, interactionContract };
+  const enriched = { ...contract, interactionContract, dependencyPlan };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
     contract: enriched, modulePlan, interactionContract, bindings, journeys,
@@ -46,6 +48,7 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     operations: contract?.operations || [],
     tiers,
     bindings,
+    dependencyPlan,
     modulePlan,
     interactionContract,
     moduleContracts,
@@ -62,20 +65,38 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
 export function scopeBuildSpec(spec, journeys = []) {
   const scopedJourneys = journeys.length ? journeys : spec.journeys;
   const ids = new Set(scopedJourneys.map((journey) => journey?.id).filter(Boolean));
+  const operations = (spec.contract?.operations || []).filter((operation) => (
+    !operation?.journey || ids.has(operation.journey)
+  ));
+  const entityNames = new Set(operations.map((operation) => operation?.entity).filter(Boolean));
+  const structuredOwnership = (spec.contract?.operations || []).some((operation) => (
+    operation?.journey || operation?.entity
+  ));
+  const entities = structuredOwnership
+    ? (spec.contract?.entities || []).filter((entity) => entityNames.has(entity.name))
+    : (spec.contract?.entities || []);
   const interactionContract = scopeInteractionContract(spec.interactionContract, scopedJourneys);
   const bindings = bindingsForJourneys(spec.contract, spec.bindings, scopedJourneys);
-  const modulePlan = deriveModulePlan(spec.contract, scopedJourneys);
+  const dependencyPlan = scopeDependencyPlan(spec.dependencyPlan, scopedJourneys);
+  const scopedContract = {
+    ...spec.contract, journeys: scopedJourneys, operations, entities, interactionContract, dependencyPlan,
+  };
+  const modulePlan = deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan });
   return {
     ...spec,
+    scopedContract,
     journeys: scopedJourneys,
     scopedJourneyIds: [...ids],
+    entities,
+    operations,
     bindings,
+    dependencyPlan,
     modulePlan,
     interactionContract,
     moduleContracts: buildModuleGenerationContracts({
-      contract: spec.contract, modulePlan, interactionContract, bindings, journeys: scopedJourneys,
+      contract: scopedContract, modulePlan, interactionContract, bindings, journeys: scopedJourneys,
     }),
-    persistencePlan: persistenceOwnershipPlan(spec.contract, scopedJourneys, modulePlan),
+    persistencePlan: persistenceOwnershipPlan(scopedContract, scopedJourneys, modulePlan),
   };
 }
 
@@ -89,6 +110,9 @@ export function buildSpecSummary(spec) {
       capability: binding.name, requiredMethods: binding.requiredMethods || [],
     })),
     modulePlan: (spec?.modulePlan || []).map((module) => ({ path: module.path, role: module.role })),
+    dependencies: (spec?.dependencyPlan?.requirements || []).map((row) => ({
+      capability: row.capability, package: row.package, version: row.version,
+    })),
     interactionFlows: (spec?.interactionContract?.flows || []).length,
     durableJourneys: spec?.persistencePlan?.durableJourneys || [],
   };

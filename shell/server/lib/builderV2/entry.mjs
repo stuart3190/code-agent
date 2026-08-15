@@ -75,6 +75,44 @@ async function buildCeiling(owner, mode, deps, { maxCredits = null } = {}) {
   };
 }
 
+/**
+ * A pre-green repair continues the one customer-approved build; it is not a new 60-credit job.
+ * Public-job uniqueness serialises dispatch for the project, and this cumulative read makes every
+ * later resume inherit only the unused part of the original authorization.
+ */
+async function approvedRepairHeadroom(client, owner, project) {
+  if (!project?.budget_approval_id || project?.bv2_green_snapshot_id) return null;
+  const { data: approval, error: approvalError } = await client.from("bv2_build_budget_approvals")
+    .select("id,status,ceiling_credits,expires_at,dispatch_project_id")
+    .eq("id", project.budget_approval_id).eq("owner", owner).maybeSingle();
+  if (approvalError) throw new Error(`Builder V2 repair authorization read failed: ${approvalError.message}`);
+  const stillAuthorized = approval?.status === "consumed"
+    && String(approval.dispatch_project_id || "") === String(project.id)
+    && new Date(approval.expires_at).getTime() > Date.now();
+  if (!stillAuthorized) {
+    throw Object.assign(new Error(
+      "The original advanced-build approval is no longer valid. A fresh approval is required before repair dispatch.",
+    ), { code: "build_approval_expired" });
+  }
+  const { data: calls, error: callsError } = await client.from("bv2_model_reservations")
+    .select("state,actual_credits,reserved_credits").eq("owner", owner).eq("project_id", project.id);
+  if (callsError) throw new Error(`Builder V2 repair authorization usage read failed: ${callsError.message}`);
+  const consumed = (calls || []).reduce((sum, row) => (
+    sum + (row.actual_credits != null ? Number(row.actual_credits || 0) : 0)
+  ), 0);
+  const held = (calls || []).reduce((sum, row) => (
+    sum + (row.state === "held" ? Number(row.reserved_credits || 0) : 0)
+  ), 0);
+  const ceiling = Number(approval.ceiling_credits || 0);
+  const remaining = Math.max(0, ceiling - consumed - held);
+  if (!(remaining > 0)) {
+    throw Object.assign(new Error("The approved advanced-build credit ceiling has been exhausted."), {
+      code: "budget_exceeded", ceiling, consumed, held,
+    });
+  }
+  return { approvalId: approval.id, ceiling, consumed, held, remaining };
+}
+
 function relay(ctx, job) {
   let lastAgent = null;
   const send = async (name, data) => {
@@ -328,10 +366,19 @@ export async function startExistingAppWorkV2(ctx, {
     mode = "resume_repair";
     v2Input = { sourceBuildId: resumable.buildId, problems: resumable.problems };
   }
+  const repairAuthorization = mode === "resume_repair"
+    ? await approvedRepairHeadroom(deps.client, ctx.owner, project) : null;
+  const preflight = {
+    ...(await buildCeiling(ctx.owner, mode, deps,
+      repairAuthorization ? { maxCredits: repairAuthorization.remaining } : {})),
+    workerAdmission,
+  };
+  if (repairAuthorization) preflight.ceiling = Math.min(preflight.ceiling, repairAuthorization.remaining);
   const result = await dispatch(ctx, {
     project, mode, prompt: String(request), kind: `${kind}_v2`, trigger, taskHint,
     deps: options.deps, v2Input,
-    preflight: { ...(await buildCeiling(ctx.owner, mode, deps)), workerAdmission },
+    budgetApprovalId: repairAuthorization?.approvalId || null,
+    preflight,
   });
   return { handled: true, result: { ...result, note: `Builder V2 ${kind} dispatched to the isolated worker.` } };
 }

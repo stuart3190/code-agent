@@ -50,6 +50,10 @@ export const BLOCKING_CODES = Object.freeze({
 
   // ── platform ──
   runtime_configuration_invalid: "the generated runtime cannot reach its backend",
+  required_runtime_dependency_missing: "the contract requires a runtime that is not present in the isolated compiler",
+  required_runtime_capability_missing: "the generated app claims a required specialist capability without using its approved runtime",
+  required_runtime_capability_incomplete: "the approved runtime is imported but the contracted specialist capability is not implemented",
+  dependency_manifest_invalid: "the dependency manifest cannot be evaluated safely",
 });
 
 /**
@@ -98,6 +102,8 @@ const UNDEMOTABLE = Object.freeze(new Set([
   "protected_path_violation", "compile_failed", "patch_application_failed",
   "tree_integrity_invalid", "build_config_invalid", "source_parse_error",
   "runtime_configuration_invalid",
+  "required_runtime_dependency_missing", "required_runtime_capability_missing",
+  "required_runtime_capability_incomplete", "dependency_manifest_invalid",
 ]));
 
 /**
