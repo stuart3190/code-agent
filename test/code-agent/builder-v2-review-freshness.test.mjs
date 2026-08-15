@@ -66,6 +66,21 @@ test("a static page still cannot pass a mutation step", () => {
   assert.equal(outcome.status, "fail");
 });
 
+test("a structured read-only assertion judges visible state without inventing an action", () => {
+  const visible = expectationOutcome({
+    wanted: ["model", "version", "parts"], found: ["model", "version", "parts"], fresh: [],
+    drove: false, action: "compare the result", readOnlyAssertion: true,
+  });
+  assert.equal(visible.status, "pass");
+  assert.equal(visible.readOnlyAssertion, true);
+
+  const missing = expectationOutcome({
+    wanted: ["model", "version", "parts"], found: ["model"], fresh: [],
+    drove: false, action: "compare the result", readOnlyAssertion: true,
+  });
+  assert.equal(missing.status, "fail");
+});
+
 test("navigation keeps its own exemption, independent of review", () => {
   const outcome = expectationOutcome({ ...base, action: "open the booking page", reviewWithValues: false });
   assert.equal(outcome.status, "pass");
@@ -88,6 +103,9 @@ test("an isolated journey may assert the durable state its setup just establishe
 test("the container verifier uses Chromium's bounded shared-memory path", async () => {
   const source = await readFile(new URL("../../shell/server/lib/appBuild/journeyVerifier.mjs", import.meta.url), "utf8");
   assert.match(source, /chromium\.launch\(\{ args: \["--disable-dev-shm-usage", "--no-sandbox"\] \}\)/);
+  assert.match(source, /opened\.on\("requestfailed"/);
+  const smoke = await readFile(new URL("../../shell/server/lib/appBuild/verificationAgent.mjs", import.meta.url), "utf8");
+  assert.match(smoke, /chromium\.launch\(\{ args: \["--disable-dev-shm-usage", "--no-sandbox"\] \}\)/);
 });
 
 test("an undriveable step is never rescued by the exemption", () => {

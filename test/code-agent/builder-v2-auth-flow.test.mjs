@@ -51,6 +51,7 @@ const CONTRACT = deriveBuildSpec({
     { action: "open the app while signed out", target: "/", expect: "the Roblox Studio AI landing screen is visible with Sign in and Create account controls" },
     { action: "create an account or sign in with the authentication form", target: "account form", expect: "the editor workspace opens and the signed-in user's email is visible in the account menu" },
     { action: "type a supported asset request and submit it", target: "prompt box labelled Describe the Roblox asset you want to create", operates: ["originalPrompt"], primitive: "textbox", expect: "generation progress is shown and then a named generated asset appears in the centre 3D workspace" },
+    { action: "inspect the generated output", reads: ["originalPrompt"], expect: "generation progress complete and named generated asset appears in the centre 3D workspace" },
   ] }], acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
 }).contract;
 
@@ -82,4 +83,6 @@ test("contracted auth entry fills and submits the real visible account form", { 
   assert.equal(steps[1].controlEvidence.authentication.submitted, true);
   assert.equal(steps[1].controlEvidence.authentication.urlChanged, true);
   assert.equal(steps[2].status, "pass", JSON.stringify(steps, null, 2));
+  assert.equal(steps[3].status, "pass", JSON.stringify(steps, null, 2));
+  assert.equal(steps[3].readOnlyAssertion, true);
 });

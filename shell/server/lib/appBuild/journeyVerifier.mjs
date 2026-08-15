@@ -20,7 +20,7 @@ import {
   semanticConcept, semanticKey,
 } from "../builderV2/controlIdentity.mjs";
 import {
-  ADVANCE_ACTION_ID, browserPlan, deriveVerificationManifest,
+  ADVANCE_ACTION_ID, browserPlan, controlIdFor, deriveVerificationManifest,
 } from "../builderV2/verificationManifest.mjs";
 
 const requireCjs = createRequire(import.meta.url);
@@ -187,16 +187,35 @@ export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null)
   // separate selectable group (modelSpec, objectGraph, objectId, parentObjectId). Those are not
   // four user choices: the step declares one selection and then observes several fields on the
   // selected object. Keep the one selection the step explicitly reads when it is unambiguous; if
-  // none of the synthetic controls corresponds to a declared read, leave the step to the normal
-  // target/action driver instead of demanding invented UI.
+  // the stale controls omit that one structured identity, reconstruct only that identity.
   if (selections.length > 1 && (step?.reads || []).length > 0 && !(step?.operates || []).length) {
     const reads = new Set((step?.reads || []).map(semanticKey));
     const declared = selections.filter((flow) => reads.has(semanticKey(
       flow.control.logicalField || flow.control.accessibleName,
     )));
     if (declared.length <= 1) {
-      const keep = declared[0] || null;
-      flows = flows.filter((flow) => flow.kind !== "selection" || flow === keep);
+      let keep = declared[0] || null;
+      // A second historical shape derived the wrong candidate fields altogether. The step still
+      // carries one exact structured read (for example objectId), which is the selected identity,
+      // while its stale flows name assetName/partCount. Reconstruct that ONE opaque control rather
+      // than falling back to prose and clicking an unrelated button group.
+      if (!keep && step.reads.length === 1) {
+        const logicalField = String(step.reads[0]).split(".").pop();
+        const template = selections[0];
+        keep = {
+          ...template,
+          valueWritten: logicalField,
+          control: {
+            ...template.control,
+            purpose: logicalField,
+            logicalField,
+            machineId: controlIdFor(logicalField),
+            accessibleName: semanticAliases(logicalField)[0],
+            accessibleNames: semanticAliases(logicalField),
+          },
+        };
+      }
+      flows = [...flows.filter((flow) => flow.kind !== "selection"), ...(keep ? [keep] : [])];
     }
   }
   const canonical = (flow) => `${flow.kind}:${semanticKey(
@@ -644,8 +663,15 @@ async function activateContractedControl(page, control) {
       return true;
     }
   }
-  const aliases = unique(controlAliases(control).flatMap((alias) => [alias,
-    String(alias).replace(/\b(control|button|link|action)\b/gi, "").replace(/\s+/g, " ").trim()]));
+  const aliases = unique(controlAliases(control).flatMap((alias) => {
+    const plain = String(alias).replace(/\b(control|button|link|action|form)\b/gi, "")
+      .replace(/\s+/g, " ").trim();
+    // Contracts may use the compound verb while accessible labels use its ordinary spaced form.
+    // This is spelling normalization, not a domain alias: lookup/look up and signup/sign up name
+    // the same action without allowing any unrelated control vocabulary.
+    const spaced = plain.replace(/\blookup\b/gi, "look up").replace(/\bsignup\b/gi, "sign up");
+    return [alias, plain, spaced];
+  }));
   for (const alias of aliases) {
     for (const role of DRIVEABLE_ACTION_ROLES) {
       const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
@@ -1388,6 +1414,37 @@ async function runStep(page, step, {
     contractDriven = true;
   }
 
+  // A fill is not a commit. When one contracted step types values AND owns a durable action,
+  // activate that exact action even though `drove` is already true from typing.
+  if (!navigated && !contractDriven) {
+    const contractedAction = interactionFlows.find((flow) => flow.control
+      && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+    if (contractedAction) {
+      let activated = await activateContractedControl(page, contractedAction.control);
+      // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
+      // companion action identity. The only safe fallback is that field's own form submit; never
+      // another form and never a keyword-selected page button.
+      if (!activated && filledContractedInputs.length) {
+        for (const input of filledContractedInputs) {
+          const id = input.control?.machineId;
+          if (!id) continue;
+          const submit = page.locator(`form:has([data-thrallo-control="${id}"]) button[type="submit"]:visible`).first();
+          if (!(await submit.count().catch(() => 0)) || await submit.isDisabled().catch(() => true)) continue;
+          await submit.click({ timeout: 5_000 }).catch(() => {});
+          activated = true;
+          break;
+        }
+      }
+      if (!activated) {
+        return { drove, status: "undriveable",
+          detail: `the contracted ${contractedAction.kind} control was not offered (${contractedAction.control.accessibleName})`,
+          controlEvidence };
+      }
+      drove = true;
+      contractDriven = true;
+    }
+  }
+
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
   if (!navigated && !droveStepper && !contractDriven && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use|duplicate|download|delete|rename|apply/i.test(action)) {
@@ -1436,20 +1493,6 @@ async function runStep(page, step, {
     }
   }
 
-  // A contracted ACTION step whose prose carries no click verb at all. The list above is a list of
-  // WORDS — "update the lead", "save the changes" and "archive the lead" are in nobody's list, and
-  // all three are durable commits whose control the contract has already named. So the contract
-  // activates it by identity, exactly as flow entry does. Additive by construction: it runs only
-  // when nothing else drove the step, so every step the keyword path already drives is untouched.
-  if (!navigated && !drove && !contractDriven) {
-    const contractedAction = interactionFlows.find((flow) => flow.control
-      && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
-    if (contractedAction && await activateContractedControl(page, contractedAction.control)) {
-      drove = true;
-      contractDriven = true;
-    }
-  }
-
   // A contracted REVIEW step writes nothing, so nothing above drives it, and in a step-gated flow
   // its screen is one transition away. Advancing is allowed here for the same bounded reason as
   // above — and it cannot manufacture a pass, because a review is judged on whether it shows the
@@ -1489,6 +1532,11 @@ async function runStep(page, step, {
   const commits = interactionFlows.length
     ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
     : /submit|send|confirm|book|reserve|pay/i.test(action);
+  const readOnlyAssertion = Array.isArray(step.reads) && step.reads.length > 0
+    && !(step.operates || []).length
+    && !interactionFlows.some((flow) => flow.control
+      || (flow.writes || []).length > 0
+      || ["navigation", "recovery", "mutation", "cancellation", "lookup", "action"].includes(flow.kind));
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   for (;;) {
@@ -1502,7 +1550,8 @@ async function runStep(page, step, {
       if (!before.includes(word)) fresh.push(word);
     }
     if (Date.now() >= pollDeadline) break;
-    const early = expectationOutcome({ wanted, found, fresh, drove, action, urlChanged: page.url() !== urlBefore });
+    const early = expectationOutcome({ wanted, found, fresh, drove, action,
+      urlChanged: page.url() !== urlBefore, readOnlyAssertion });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
   }
@@ -1588,6 +1637,7 @@ async function runStep(page, step, {
   const outcome = expectationOutcome({
     wanted, found, fresh, drove, action, urlChanged,
     reviewWithValues: isReviewStep && enteredValues.length > 0,
+    readOnlyAssertion,
     // A whole page arrives at once for a navigation or a reload, so nothing in it can be "new".
     // Typed by the contract where the contract typed the step.
     navigational: interactionFlows.length
@@ -1688,7 +1738,7 @@ async function runStep(page, step, {
  */
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
-  navigational: declaredNavigational = null, establishedState = false,
+  navigational: declaredNavigational = null, establishedState = false, readOnlyAssertion = false,
 }) {
   const ratio = found.length / wanted.length;
   // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
@@ -1703,6 +1753,16 @@ export function expectationOutcome({
   if (reviewWithValues && ratio >= 0.5) {
     return { drove, status: "pass", reviewExempt: true,
       detail: `found: ${found.join(", ")} (review: values verified below)` };
+  }
+  // A structured read-only step (inspect/compare) asserts state produced by an earlier action.
+  // It deliberately drives nothing, so freshness is inapplicable; the expected evidence still
+  // has to meet the same majority bar and missing evidence is a behavioural failure.
+  if (readOnlyAssertion) {
+    return ratio >= 0.5
+      ? { drove, status: "pass", readOnlyAssertion: true,
+        detail: `found: ${found.join(", ")} (read-only assertion)` }
+      : { drove, status: "fail", readOnlyAssertion: true,
+        detail: `expected ${wanted.join(", ")}; found ${found.join(", ") || "none"}` };
   }
   // jump/scroll/navigation joined the navigational class after a live run: a single-page
   // app renders every section statically, so "use the navigation to jump to services" can
@@ -1766,16 +1826,21 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   if (requiresDurableRecord && flows.some((flow) => flow.journeyId === journeyId && flow.kind === "lookup")) {
     return { controls: [], requiresDurableRecord };
   }
+  // An isolated journey that starts from an EXISTING record needs exactly the producing journey
+  // through its durable commit. It must not continue into later read/inspection controls merely
+  // because a historical contract gave those fields the same names as this journey's controls.
+  // The retained Roblox candidate reached this point, created the row successfully, then setup
+  // demanded a fictitious modelSpec chooser that exists only as generated output.
+  if (requiresPrimaryRecord) {
+    const durableMutation = chain.findIndex((flow) => flow.kind === "mutation" && flow.durableLifecycle);
+    return { controls: durableMutation >= 0 ? chain.slice(0, durableMutation + 1) : chain,
+      requiresDurableRecord: true };
+  }
   const firstOwn = mine.map(controlKey).find((key) => chain.some((flow) => controlKey(flow) === key));
   // A secondary surface may name a control that does not exist in the primary flow (for example
   // a history item). It still needs the primary's authenticated durable setup. Returning no
   // prerequisites made every isolated secondary journey start signed out with no saved record.
   if (!firstOwn) {
-    if (requiresPrimaryRecord) {
-      const durableMutation = chain.findIndex((flow) => flow.kind === "mutation" && flow.durableLifecycle);
-      return { controls: durableMutation >= 0 ? chain.slice(0, durableMutation + 1) : chain,
-        requiresDurableRecord: true };
-    }
     return { controls: reconstructIsolated ? entry : [], requiresDurableRecord };
   }
   const stop = chain.findIndex((flow) => controlKey(flow) === firstOwn);
@@ -2096,6 +2161,12 @@ export async function verifyJourneys({
       opened.on("response", (r) => {
         if (r.status() >= 400 && !r.url().includes("favicon")) {
           failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
+        }
+      });
+      opened.on("requestfailed", (request) => {
+        const reason = request.failure()?.errorText || "failed";
+        if (!/net::ERR_ABORTED/.test(reason)) {
+          failedRequests.push(`${reason} ${request.method()} ${request.url().slice(0, 140)}`);
         }
       });
       contexts.push(created);

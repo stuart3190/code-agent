@@ -47,7 +47,11 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
   const deadline = Date.now() + timeoutMs;
   try {
     const { chromium } = requireCjs("playwright");
-    browser = await chromium.launch({ args: ["--no-sandbox"] });
+    // The generic smoke runs immediately before contracted journey verification inside the
+    // browser sandbox. A Three/WebGL preview can exhaust Docker's small shared-memory mount in
+    // this first browser and leave the following browser unable to load ordinary JS modules
+    // (ERR_INSUFFICIENT_RESOURCES). Use Chromium's disk-backed shared-memory path at BOTH seams.
+    browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     const page = await browser.newPage();
     page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });

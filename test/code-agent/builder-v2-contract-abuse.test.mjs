@@ -245,6 +245,32 @@ test("read-only fields from one object selection do not become several invented 
   assert.deepEqual(interactionFlowsFor(contract, "inspect", 0).map((flow) => flow.control.logicalField), ["objectId"]);
 });
 
+test("a stale object-selection contract reconstructs the one structured read identity", async () => {
+  const { interactionFlowsFor } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const contract = { journeys: [{ id: "validate", steps: [{ action: "select a part", reads: ["objectId"] }] }],
+    interactionContract: { flows: ["assetName", "partCount"].map((field) => ({
+      journeyId: "validate", stepIndex: 0, kind: "selection",
+      control: { logicalField: field, accessibleName: field, machineId: `id-${field}` },
+    })) } };
+  const [flow] = interactionFlowsFor(contract, "validate", 0);
+  assert.equal(flow.control.logicalField, "objectId");
+  assert.equal(flow.control.machineId, "ctl_bafe0937");
+});
+
+test("isolated existing-record reconstruction stops at the durable commit", async () => {
+  const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const control = (name) => ({ logicalField: name, accessibleName: name });
+  const flows = [
+    { journeyId: "primary", stepIndex: 0, kind: "input", control: control("prompt") },
+    { journeyId: "primary", stepIndex: 1, kind: "mutation", control: control("Generate"), durableLifecycle: "crud:item" },
+    { journeyId: "primary", stepIndex: 2, kind: "selection", control: control("modelSpec") },
+    { journeyId: "secondary", stepIndex: 0, kind: "selection", control: control("modelSpec") },
+  ];
+  assert.deepEqual(journeyPrerequisites(flows, "secondary", "primary", {
+    requiresPrimaryRecord: true, reconstructIsolated: true,
+  }).controls.map((flow) => flow.control.logicalField), ["prompt", "Generate"]);
+});
+
 test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {
   const verdict = validation.validateContract(withJourneys([], [
     { id: "create-booking", entity: "booking", kind: "create", journey: "book" },
