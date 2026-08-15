@@ -893,6 +893,30 @@ export function durableRecordKey(flow) {
 
 const REFERENCE_TOKEN = /\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,}\b/g;
 
+// Operation-transition copy such as "duplicated object disappears" proves the immediate action,
+// but requiring those verbs after reload would reject correctly persisted state merely because a
+// toast/status message is intentionally transient. Everything else remains load-bearing: this
+// deliberately retains states such as Confirmed/Archived and record facts such as edited values,
+// so a stale or contradictory recovery still fails the adversarial matrix.
+const TRANSIENT_OPERATION_WORDS = new Set([
+  "appears", "decreases", "disappears", "duplicate", "duplicated", "increases", "reapplies",
+  "redo", "restores", "undo",
+]);
+
+export function durableStatusWords(expect, text) {
+  return keywords(expect, 5).filter((word) => !TRANSIENT_OPERATION_WORDS.has(word.toLowerCase())
+    && new RegExp(word, "i").test(String(text || "")));
+}
+
+export function durableCommitIdentity({ enteredValues = [], textBefore = "", textAfter = "" } = {}) {
+  const before = new Set(String(textBefore).match(REFERENCE_TOKEN) || []);
+  return {
+    value: enteredValues.find((value) => value && String(textAfter).includes(value)) || null,
+    reference: (String(textAfter).match(REFERENCE_TOKEN) || [])
+      .find((reference) => !before.has(reference)) || null,
+  };
+}
+
 async function captureDurableEvidence(page, { enteredValues, selections, expect }) {
   const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const candidates = unique([...enteredValues.map((row) => row.value), ...selections]);
@@ -902,7 +926,7 @@ async function captureDurableEvidence(page, { enteredValues, selections, expect 
     // that it survived.
     values: candidates.filter((value) => value && text.includes(value)),
     references: [...new Set(text.match(REFERENCE_TOKEN) || [])].slice(0, 4),
-    statusWords: keywords(expect, 5).filter((word) => new RegExp(word, "i").test(text)),
+    statusWords: durableStatusWords(expect, text),
   };
 }
 
@@ -1967,6 +1991,10 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
  */
 async function establishPrerequisites(page, controls, { marker, journeyFlows }) {
   const performed = [];
+  // Exact values entered while reconstructing the producing journey. They are not satisfied by
+  // an input's DOM value because body.innerText excludes form values; one must be rendered by the
+  // resulting durable record (or the mutation must produce a new reference token).
+  const enteredValues = [];
   for (const flow of controls) {
     const label = flow.control.logicalField || flow.control.accessibleName;
     if (flow.kind === "selection") {
@@ -2003,6 +2031,8 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
       if (!result.complete) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "field not fillable" } };
       }
+      enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
+        .map((field) => field.expectedValue).filter(Boolean));
       performed.push({ control: label, kind: flow.kind, detail: `filled ${label}` });
       continue;
     }
@@ -2042,16 +2072,25 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
     if (flow.kind === "mutation" && flow.durableLifecycle && flow.observable) {
       const deadline = Date.now() + 12_000;
       let visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
-      while (!visible.met && Date.now() < deadline) {
+      let textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      let identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
+      let { value: durableValue, reference: durableReference } = identity;
+      while (!(visible.met && (durableValue || durableReference)) && Date.now() < deadline) {
         await page.waitForTimeout(400);
         visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
+        textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+        identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
+        ({ value: durableValue, reference: durableReference } = identity);
       }
-      if (!visible.met) {
+      if (!(visible.met && (durableValue || durableReference))) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind,
-          reason: "the durable mutation did not reach its contracted observable state" } };
+          reason: !visible.met
+            ? "the durable mutation did not reach its contracted observable state"
+            : "the observable transition appeared, but no entered value or new durable reference was committed" } };
       }
       performed.push({ control: label, kind: "durable_commit",
-        detail: `durable observable reached (${visible.found.join(", ")})` });
+        detail: `durable observable reached (${visible.found.join(", ")}) and `
+          + `${durableValue ? `retained ${durableValue}` : `created ${durableReference}`}` });
     }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
   }

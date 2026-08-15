@@ -21,7 +21,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  durableRecordKey, expectationOutcome, invalidValueFor, recoveryEvidenceVerdict, verifyJourneys,
+  durableCommitIdentity, durableRecordKey, durableStatusWords, expectationOutcome, invalidValueFor,
+  recoveryEvidenceVerdict, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
@@ -291,6 +292,29 @@ test("recovery verdicts: only the true record passes", () => {
   // No evidence is never a pass — it is not a verdict at all.
   assert.equal(recoveryEvidenceVerdict({ captured: false }, PAGE).checked, false);
   assert.equal(recoveryEvidenceVerdict(null, PAGE).checked, false);
+});
+
+test("durable evidence keeps lifecycle status but discards transient operation copy", () => {
+  assert.deepEqual(durableStatusWords(
+    "the booking is confirmed and its reference is shown",
+    "Status Confirmed. Reference BK-4417.",
+  ), ["confirmed", "reference"]);
+  assert.deepEqual(durableStatusWords(
+    "the duplicated object disappears from the hierarchy and the part count decreases",
+    "The duplicated object disappears from the hierarchy.",
+  ), ["object", "hierarchy"], "transient delete verbs must not be required to survive reload");
+});
+
+test("prerequisite mutation waits for a rendered durable identity, not progress copy", () => {
+  const input = { enteredValues: ["Journey 924950"], textBefore: "Generate asset" };
+  assert.deepEqual(durableCommitIdentity({
+    ...input,
+    textAfter: "Generation progress. Generating asset.",
+  }), { value: null, reference: null });
+  assert.deepEqual(durableCommitIdentity({
+    ...input,
+    textAfter: "Journey 924950 Asset. Saved version ASSET-924950.",
+  }), { value: "Journey 924950", reference: "ASSET-924950" });
 });
 
 test("durable evidence is keyed to one lifecycle and cannot cross", () => {
