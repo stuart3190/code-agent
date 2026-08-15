@@ -2131,12 +2131,15 @@ const selectionSnapshot = (page, id) => page.evaluate((controlId) => [...documen
 
 export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
+  browser: sharedBrowser = null,
 }) {
   const results = [];
   const consoleErrors = [];
   const failedRequests = [];
   const marker = String(Date.now()).slice(-6);
-  let browser = null;
+  let browser = sharedBrowser;
+  const ownsBrowser = !sharedBrowser;
+  const contexts = [];
   // The mechanics phase runs inside the try and is reported outside it.
   let mechanics = null;
 
@@ -2145,14 +2148,13 @@ export async function verifyJourneys({
     // Browser verification runs inside Docker. A real WebGL app across isolated contexts can
     // exhaust the container's small /dev/shm mount, yielding ERR_INSUFFICIENT_RESOURCES and then
     // Page crashed. The sandbox's other Chromium seam already uses this disk-backed path.
-    browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
+    if (!browser) browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     // A journey runs in the browser state its SCENARIO calls for. An independent journey gets a
     // fresh context — a legitimate first-time visitor, nothing deleted and nothing fabricated —
     // because inheriting a previous scenario's terminal wizard is not a property of the app under
     // test. Journeys that depend on a durable record stay in the context that created it, so the
     // app's own visitor identity (and therefore RLS) still resolves the record through the normal
     // runtime; no privileged state is ever injected.
-    const contexts = [];
     const openContext = async () => {
       const created = await browser.newContext({ viewport });
       const opened = await created.newPage();
@@ -2342,7 +2344,8 @@ export async function verifyJourneys({
       unavailable: true,
     };
   } finally {
-    await browser?.close().catch(() => {});
+    await Promise.all(contexts.map((context) => context.close().catch(() => {})));
+    if (ownsBrowser) await browser?.close().catch(() => {});
   }
 
   const primary = results.find((j) => j.priority === "primary") || results[0];

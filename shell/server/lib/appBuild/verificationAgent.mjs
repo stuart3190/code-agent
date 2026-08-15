@@ -34,7 +34,7 @@ async function fillField(page, kind, value) {
   return false;
 }
 
-export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 180_000 }) {
+export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 180_000, browser: sharedBrowser = null }) {
   const checks = [];
   const check = makeCheck(checks);
   const consoleErrors = [];
@@ -43,7 +43,9 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
   const password = `Vf-${Math.random().toString(36).slice(2, 10)}!9`;
   const marker = `verified-${Date.now()}`;
 
-  let browser = null;
+  let browser = sharedBrowser;
+  let context = null;
+  const ownsBrowser = !sharedBrowser;
   const deadline = Date.now() + timeoutMs;
   try {
     const { chromium } = requireCjs("playwright");
@@ -51,8 +53,9 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
     // browser sandbox. A Three/WebGL preview can exhaust Docker's small shared-memory mount in
     // this first browser and leave the following browser unable to load ordinary JS modules
     // (ERR_INSUFFICIENT_RESOURCES). Use Chromium's disk-backed shared-memory path at BOTH seams.
-    browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
-    const page = await browser.newPage();
+    if (!browser) browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
+    context = await browser.newContext();
+    const page = await context.newPage();
     page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
     page.on("response", (r) => {
@@ -146,7 +149,8 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
   } catch (error) {
     if (!checks.some((c) => c.id === "load")) check("load", "App loads", "fail", error.message);
   } finally {
-    await browser?.close().catch(() => {});
+    await context?.close().catch(() => {});
+    if (ownsBrowser) await browser?.close().catch(() => {});
   }
   void deadline;
 

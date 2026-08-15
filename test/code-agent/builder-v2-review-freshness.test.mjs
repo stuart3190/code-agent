@@ -106,6 +106,12 @@ test("the container verifier uses Chromium's bounded shared-memory path", async 
   assert.match(source, /opened\.on\("requestfailed"/);
   const smoke = await readFile(new URL("../../shell/server/lib/appBuild/verificationAgent.mjs", import.meta.url), "utf8");
   assert.match(smoke, /chromium\.launch\(\{ args: \["--disable-dev-shm-usage", "--no-sandbox"\] \}\)/);
+  assert.match(smoke, /browser: sharedBrowser = null/);
+  assert.match(smoke, /context = await browser\.newContext\(\)/);
+  const sandbox = await readFile(new URL("../../build-worker/sandbox.mjs", import.meta.url), "utf8");
+  assert.equal((sandbox.match(/async function browserVerify[\s\S]*?chromium\.launch/g) || []).length, 1,
+    "one browser_verify job launches exactly one Chromium process");
+  assert.match(sandbox, /verifyApp\([\s\S]*?browser,[\s\S]*?verifyJourneys\([\s\S]*?browser/);
 });
 
 test("an undriveable step is never rescued by the exemption", () => {

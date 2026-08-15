@@ -44,14 +44,25 @@ async function compileTree(payload) {
 async function browserVerify(payload) {
   const { verifyApp } = await import("../shell/server/lib/appBuild/verificationAgent.mjs");
   const { verifyJourneys } = await import("../shell/server/lib/appBuild/journeyVerifier.mjs");
-  const app = await verifyApp({
-    previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
-    timeoutMs: Number(payload.timeoutMs) || 180_000,
-  });
-  const journeys = payload.contract?.journeys?.length
-    ? await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract, timeoutMs: Number(payload.timeoutMs) || 180_000 })
-    : null;
-  return { ok: app.pass !== false && (!journeys || journeys.pass !== false), app, journeys, exitCode: 0, stdout: "", stderr: "" };
+  const { chromium } = await import("@playwright/test");
+  // One sandbox job owns one Chromium process. Smoke and contracted journeys use independent
+  // contexts, so authentication/data never leak between them, while a WebGL app cannot strand
+  // resources by tearing one browser down and immediately launching another in the same container.
+  const browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage", "--no-sandbox"] });
+  try {
+    const app = await verifyApp({
+      previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
+      timeoutMs: Number(payload.timeoutMs) || 180_000, browser,
+    });
+    const journeys = payload.contract?.journeys?.length
+      ? await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
+        timeoutMs: Number(payload.timeoutMs) || 180_000, browser })
+      : null;
+    return { ok: app.pass !== false && (!journeys || journeys.pass !== false), app, journeys,
+      exitCode: 0, stdout: "", stderr: "" };
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 // What this image IS, answered through the SAME path a real job takes — same image, same
