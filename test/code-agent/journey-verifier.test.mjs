@@ -52,9 +52,17 @@ const BROKEN = WORKING
 let server = null;
 let baseUrl = "";
 let body = WORKING;
+let delayedHistoryMs = 0;
 
 before(async () => {
-  server = http.createServer((_req, res) => {
+  server = http.createServer((req, res) => {
+    if (req.url === "/history-delay" && delayedHistoryMs > 0) {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end('{"ok":true}');
+      }, delayedHistoryMs);
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html" });
     res.end(body);
   });
@@ -201,6 +209,51 @@ test("generic action driving chooses the control whose name best matches the con
   } });
   assert.equal(result.pass, true, JSON.stringify(result.journeys));
   assert.match(result.journeys[0].steps[0].detail || "", /second|distinct|name/i);
+  body = WORKING;
+});
+
+test("isolated durable setup waits for its asynchronously refreshed consumer entry", needsBrowser, async () => {
+  delayedHistoryMs = 1_200;
+  body = `<!doctype html><html><body>
+    <form id="generator"><label>Prompt <input data-thrallo-control="ctl-prompt"></label>
+      <button data-thrallo-action="act-generate" type="submit">Generate</button></form>
+    <p id="saved"></p><div id="history"></div><p id="opened"></p>
+    <script>
+      document.getElementById('generator').onsubmit = async (event) => {
+        event.preventDefault();
+        const value = document.querySelector('[data-thrallo-control="ctl-prompt"]').value;
+        document.getElementById('saved').textContent = 'Named saved asset ' + value;
+        await fetch('/history-delay');
+        document.getElementById('history').innerHTML = '<button data-thrallo-action="act-history">History item</button>';
+        document.querySelector('[data-thrallo-action="act-history"]').onclick = () => {
+          document.getElementById('opened').textContent = 'Asset preview hierarchy properties panel current version validation panel';
+        };
+      };
+    </script>
+  </body></html>`;
+  const primary = { id: "primary", title: "Create an asset", priority: "primary", steps: [] };
+  const secondary = { id: "edit", title: "Edit an existing asset", priority: "secondary", steps: [{
+    action: "open a saved generation", expect: "the asset preview, hierarchy, properties panel, current version, and validation panel are visible",
+  }] };
+  const primaryFlows = [
+    { id: "primary:input", journeyId: "primary", stepIndex: 0, kind: "input",
+      control: { logicalField: "prompt", accessibleName: "Prompt", accessibleNames: ["Prompt"],
+        machineId: "ctl-prompt", roles: ["textbox"], statePath: "primary.draft.prompt" } },
+    { id: "primary:mutation", journeyId: "primary", stepIndex: 0, kind: "mutation",
+      durableLifecycle: "crud:asset", observable: "a named saved asset appears",
+      control: { accessibleName: "Generate", machineId: "act-generate", roles: ["button"] },
+      writes: ["primary.durable.record"] },
+  ];
+  const secondaryFlows = [{ id: "edit:start", journeyId: "edit", stepIndex: 0, kind: "flow_start",
+    observable: secondary.steps[0].expect,
+    control: { accessibleName: "history item", machineId: "act-history", roles: ["button"], flowEntry: true } }];
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [secondary], allJourneys: [primary, secondary],
+    prerequisiteInteractionContract: { flows: [...primaryFlows, ...secondaryFlows] },
+    interactionContract: { flows: secondaryFlows },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  delayedHistoryMs = 0;
   body = WORKING;
 });
 

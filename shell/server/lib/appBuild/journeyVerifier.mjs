@@ -630,7 +630,9 @@ export function groupKey(group) {
 async function semanticControlVisible(page, control) {
   if (!control) return false;
   if (control.machineId) {
-    const machine = page.locator(`[data-thrallo-control="${control.machineId}"]:visible`).first();
+    const machine = page.locator(
+      `[data-thrallo-control="${control.machineId}"]:visible, [data-thrallo-action="${control.machineId}"]:visible`,
+    ).first();
     if (await machine.count().catch(() => 0)) return true;
   }
   const target = semanticKey(control.logicalField || control.accessibleName);
@@ -1952,7 +1954,8 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   const entry = chain.slice(0, Math.max(0, chain.findIndex((flow) => ["selection", "input"].includes(flow.kind))));
   // A journey that works from an existing RECORD (lookup, cancellation) does not re-walk the
   // wizard: its precondition is the durable row the primary journey already created.
-  if (requiresDurableRecord && flows.some((flow) => flow.journeyId === journeyId && flow.kind === "lookup")) {
+  if (requiresDurableRecord && !reconstructIsolated
+    && flows.some((flow) => flow.journeyId === journeyId && flow.kind === "lookup")) {
     return { controls: [], requiresDurableRecord };
   }
   // An isolated journey that starts from an EXISTING record needs exactly the producing journey
@@ -1960,7 +1963,7 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   // because a historical contract gave those fields the same names as this journey's controls.
   // The retained Roblox candidate reached this point, created the row successfully, then setup
   // demanded a fictitious modelSpec chooser that exists only as generated output.
-  if (requiresPrimaryRecord) {
+  if (requiresPrimaryRecord || (reconstructIsolated && requiresDurableRecord)) {
     const durableMutation = chain.findIndex((flow) => flow.kind === "mutation" && flow.durableLifecycle);
     return { controls: durableMutation >= 0 ? chain.slice(0, durableMutation + 1) : chain,
       requiresDurableRecord: true };
@@ -1995,6 +1998,7 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
   // an input's DOM value because body.innerText excludes form values; one must be rendered by the
   // resulting durable record (or the mutation must produce a new reference token).
   const enteredValues = [];
+  let durableCommitted = false;
   for (const flow of controls) {
     const label = flow.control.logicalField || flow.control.accessibleName;
     if (flow.kind === "selection") {
@@ -2088,11 +2092,39 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
             ? "the durable mutation did not reach its contracted observable state"
             : "the observable transition appeared, but no entered value or new durable reference was committed" } };
       }
+      // The durable identity may render before the mutation handler's remaining reads have
+      // populated the consumer surface (for example a newly-created asset title appears before
+      // its history list refresh finishes). Let the browser settle that same mutation before the
+      // journey attempts its first contracted entry; this never initiates another action.
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+      await page.waitForTimeout(200);
+      durableCommitted = true;
       performed.push({ control: label, kind: "durable_commit",
         detail: `durable observable reached (${visible.found.join(", ")}) and `
           + `${durableValue ? `retained ${durableValue}` : `created ${durableReference}`}` });
     }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
+  }
+  // If the consumer journey begins by opening a contracted control, setup is not complete until
+  // that exact opaque control exists. This closes the race where the durable row is committed but
+  // the app's asynchronously refreshed history entry has not mounted yet.
+  const entry = durableCommitted
+    ? (journeyFlows || []).find((flow) => flow.stepIndex === 0 && flow.kind === "flow_start" && flow.control)
+    : null;
+  if (entry) {
+    const deadline = Date.now() + 5_000;
+    while (!(await semanticControlVisible(page, entry.control)) && Date.now() < deadline) {
+      await page.waitForTimeout(200);
+    }
+    if (!(await semanticControlVisible(page, entry.control))) {
+      return { ok: false, performed, failure: {
+        control: entry.control.logicalField || entry.control.accessibleName,
+        kind: "flow_start",
+        reason: "the durable mutation committed, but the contracted journey entry did not become ready",
+      } };
+    }
+    performed.push({ control: entry.control.logicalField || entry.control.accessibleName,
+      kind: "consumer_ready", detail: "contracted consumer entry became visible" });
   }
   return { ok: true, performed };
 }

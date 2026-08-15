@@ -235,6 +235,22 @@ test("an isolated saved-record journey can reconstruct the primary durable state
     "setup includes the durable primary mutation rather than authentication alone");
 });
 
+test("an isolated durable read reconstructs its producer even when the first action omits saved-record prose", async () => {
+  const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const control = (name) => ({ logicalField: name, accessibleName: name });
+  const flows = [
+    { journeyId: "primary", stepIndex: 0, kind: "input", control: control("prompt") },
+    { journeyId: "primary", stepIndex: 1, kind: "mutation", control: control("Generate"),
+      durableLifecycle: "crud:item" },
+    { journeyId: "history", stepIndex: 0, kind: "recovery", control: null,
+      reads: ["history.durable.reference"], durableLifecycle: "crud:item" },
+    { journeyId: "history", stepIndex: 1, kind: "input", control: control("assetName") },
+  ];
+  assert.deepEqual(journeyPrerequisites(flows, "history", "primary", {
+    reconstructIsolated: true,
+  }).controls.map((flow) => flow.control.logicalField), ["prompt", "Generate"]);
+});
+
 test("read-only fields from one object selection do not become several invented choices", async () => {
   const { interactionFlowsFor } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
   const contract = { journeys: [{ id: "inspect", steps: [{ action: "select an object", reads: ["objectId"] }] }],
