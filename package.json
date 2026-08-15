@@ -48,6 +48,7 @@
     "worker:sandbox:build": "docker build -t thrallo-build-sandbox:latest -f build-worker/Dockerfile .",
     "worker:sandbox:proof": "node ops/prove-build-worker-sandbox.mjs",
     "worker:e2e:proof": "node ops/prove-build-worker-e2e.mjs",
+    "worker:release:verify": "node ops/verify-build-worker-release.mjs",
     "publish:ops": "node ops/publish-releases.mjs",
     "publish:db:proof": "node ops/prove-atomic-publishing-postgres.mjs",
     "security:secrets": "node ops/scan-secrets.mjs",

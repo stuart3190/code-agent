@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { workerPreviewConfiguration } from "./runtimeConfig.mjs";
+import { PREVIEW_ISOLATION_PROOF_MAX_AGE_MS } from "./previewIsolationPolicy.mjs";
 
 const MARKER = "thrallo-isolated-preview-preflight";
 
@@ -24,6 +25,7 @@ export async function proveWorkerPreviewIsolation({
   preview,
   fetchImpl = fetch,
   randomUUID = crypto.randomUUID,
+  now = Date.now,
 } = {}) {
   const config = workerPreviewConfiguration(env);
   if (!preview || preview.mode !== "vps") {
@@ -49,7 +51,7 @@ export async function proveWorkerPreviewIsolation({
   let destroyed = null;
   let absentAfterDestroy = false;
   try {
-    created = await preview.start(projectId, SMOKE_TREE);
+    created = await preview.start(projectId, SMOKE_TREE, { signal: AbortSignal.timeout(15_000) });
     if (created?.mode !== "vps" || created?.id !== expectedId || !created?.url) {
       throw isolationError("Provisiond returned an unexpected isolated preview identity or mode.");
     }
@@ -57,7 +59,7 @@ export async function proveWorkerPreviewIsolation({
     if (!["http:", "https:"].includes(publicUrl.protocol) || publicUrl.hostname.split(".")[0] !== expectedId) {
       throw isolationError("Provisiond returned an invalid isolated preview URL.");
     }
-    const observed = await preview.get(projectId);
+    const observed = await preview.get(projectId, { signal: AbortSignal.timeout(15_000) });
     if (observed?.mode !== "vps" || observed?.url !== created.url) {
       throw isolationError("Provisiond did not return the created preview through the worker lookup path.");
     }
@@ -71,8 +73,8 @@ export async function proveWorkerPreviewIsolation({
       ? error : isolationError(`Disposable isolated preview failed: ${error.message}`, error);
   } finally {
     try {
-      destroyed = await preview.stop(projectId);
-      absentAfterDestroy = (await preview.get(projectId)) === null;
+      destroyed = await preview.stop(projectId, { signal: AbortSignal.timeout(15_000) });
+      absentAfterDestroy = (await preview.get(projectId, { signal: AbortSignal.timeout(15_000) })) === null;
     } catch (error) {
       if (!primaryError) primaryError = isolationError(`Disposable isolated preview teardown failed: ${error.message}`, error);
     }
@@ -84,7 +86,7 @@ export async function proveWorkerPreviewIsolation({
 
   return {
     status: "passed",
-    checkedAt: new Date().toISOString(),
+    checkedAt: new Date(now()).toISOString(),
     resolvedMode: config.mode,
     provisiondOrigin: config.provisiondOrigin,
     health: { reachable: true, capacity: Number(health.capacity) },
@@ -94,20 +96,33 @@ export async function proveWorkerPreviewIsolation({
 }
 
 export function requireFreshWorkerPreviewProof(nodes, {
-  now = Date.now(), maxHeartbeatAgeMs = 30_000, maxProofAgeMs = 10 * 60_000,
+  now = Date.now(), maxHeartbeatAgeMs = 30_000, maxProofAgeMs = PREVIEW_ISOLATION_PROOF_MAX_AGE_MS,
 } = {}) {
   const candidates = (nodes || []).filter((node) => Array.isArray(node.job_types)
-    && node.job_types.includes("builder_pipeline")
+    && (node.job_types.includes("builder_pipeline")
+      || node.metadata?.configuredJobTypes?.includes("builder_pipeline"))
     && ["active", "draining"].includes(node.state)
-    && now - Date.parse(node.heartbeat_at) <= maxHeartbeatAgeMs)
-    .sort((left, right) => Date.parse(right.heartbeat_at) - Date.parse(left.heartbeat_at));
-  const node = candidates[0];
+    && Number.isFinite(Date.parse(node.heartbeat_at))
+    && now - Date.parse(node.heartbeat_at) <= maxHeartbeatAgeMs);
+  const passing = candidates.filter((node) => {
+    const proof = node?.metadata?.previewIsolation;
+    return proof?.status === "passed" && proof.resolvedMode === "vps"
+      && Number.isFinite(Date.parse(proof.checkedAt)) && now - Date.parse(proof.checkedAt) <= maxProofAgeMs
+      && proof.health?.reachable === true && proof.preview?.mode === "vps"
+      && proof.preview?.markerMatched === true && proof.teardown?.stopped === true
+      && proof.teardown?.absent === true;
+  }).sort((left, right) => Date.parse(right.heartbeat_at) - Date.parse(left.heartbeat_at));
+  const node = passing[0];
   const proof = node?.metadata?.previewIsolation;
-  if (!node || proof?.status !== "passed" || proof.resolvedMode !== "vps"
-      || !Number.isFinite(Date.parse(proof.checkedAt)) || now - Date.parse(proof.checkedAt) > maxProofAgeMs
-      || proof.health?.reachable !== true || proof.preview?.mode !== "vps"
-      || proof.preview?.markerMatched !== true || proof.teardown?.stopped !== true
-      || proof.teardown?.absent !== true) {
+  if (!node) {
+    const failed = candidates.filter((candidate) => candidate.metadata?.previewIsolation?.status === "failed")
+      .sort((left, right) => Date.parse(right.metadata.previewIsolation.checkedAt || right.heartbeat_at)
+        - Date.parse(left.metadata.previewIsolation.checkedAt || left.heartbeat_at))[0];
+    if (failed) {
+      const failure = failed.metadata.previewIsolation;
+      throw isolationError(`Builder V2 isolated-preview preflight failed on ${failed.worker_id}: ${failure.message}`,
+        Object.assign(new Error(failure.message), { code: failure.code }));
+    }
     throw isolationError("No fresh production Builder V2 worker has a passing isolated-preview preflight.");
   }
   return { workerId: node.worker_id, heartbeatAt: node.heartbeat_at, ...proof };

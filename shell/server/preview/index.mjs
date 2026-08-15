@@ -150,9 +150,10 @@ function createVpsProvision() {
   const TOKEN = process.env.PROVISIOND_TOKEN || "";
   if (!BASE) throw new Error("PREVIEW_MODE=vps requires PROVISIOND_URL (the SSH tunnel to provisiond)");
 
-  async function call(method, pathname, body) {
+  async function call(method, pathname, body, { signal } = {}) {
     const res = await fetch(`${BASE}${pathname}`, {
       method,
+      signal,
       headers: {
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
@@ -170,20 +171,20 @@ function createVpsProvision() {
     return data;
   }
 
-  async function start(id, tree) {
-    const r = await call("POST", "/provision", { projectId: id, tree });
+  async function start(id, tree, options) {
+    const r = await call("POST", "/provision", { projectId: id, tree }, options);
     return { url: r.url, id: r.id, mode: r.mode || "vps" };
   }
-  async function update(id, tree) {
-    const r = await call("POST", "/update", { projectId: id, changedFiles: tree });
+  async function update(id, tree, options) {
+    const r = await call("POST", "/update", { projectId: id, changedFiles: tree }, options);
     return { url: r.url, id: r.id, changed: r.changed, mode: r.mode || "vps" };
   }
-  async function stop(id) {
-    const r = await call("POST", "/stop", { projectId: id });
+  async function stop(id, options) {
+    const r = await call("POST", "/stop", { projectId: id }, options);
     return { stopped: !!r.stopped };
   }
-  async function get(id) {
-    const r = await call("GET", `/get?projectId=${encodeURIComponent(id)}`);
+  async function get(id, options) {
+    const r = await call("GET", `/get?projectId=${encodeURIComponent(id)}`, undefined, options);
     return r && r.url ? { url: r.url, mode: r.mode || "vps" } : null; // {result:null} -> null
   }
   return { start, update, stop, get, mode: "vps" };

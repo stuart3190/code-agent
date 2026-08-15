@@ -258,7 +258,10 @@ test("the durable worker owns build recovery and the legacy shell action worker 
     "retired V1 shell workers and no-op build sweepers must not remain mounted");
 
   const worker = await readCode("../../build-worker/index.mjs");
-  assert.match(worker, /await queue\.lease\(WORKER_ID, JOB_TYPES, LEASE_SECONDS\)/);
+  assert.match(worker, /await queue\.lease\(WORKER_ID, readiness\.jobTypes\(JOB_TYPES\), LEASE_SECONDS\)/,
+    "the durable worker may lease only job types whose current readiness proof permits dispatch");
+  assert.match(worker, /readinessJobTypes\(JOB_TYPES, previewIsolation/,
+    "the same readiness-filtered job types must be advertised atomically in the node heartbeat");
   assert.match(worker, /await queue\.retireStaleNodes\(WORKER_ID, staleBefore\)/);
   assert.match(worker, /await reconcileOrphanSandboxes\(client\)/);
 });

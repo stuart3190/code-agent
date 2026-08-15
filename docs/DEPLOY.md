@@ -63,11 +63,14 @@ curl -fsS https://app.thrallo.com/api/v1/capabilities
 ```
 
 After a code or environment update, build the release web application with the fail-closed auth
-gate, then restart only `thrallo-shell`:
+gate. For a V2-only production release, activate the validated deployment manifest, pin the
+compatible immutable sandbox through `ops/pin-build-sandbox-image.mjs`, then restart both runtime
+consumers of that release identity:
 
 ```sh
 npm run build:web:production
-sudo systemctl restart thrallo-shell
+sudo systemctl restart thrallo-build-worker thrallo-shell
+npm run worker:release:verify
 node --env-file=shell/.env --env-file=shell/web/.env scripts/smoke-production.mjs \
   --origin https://app.thrallo.com
 ```
@@ -82,7 +85,7 @@ Install both locked packages before rebuilding: `npm ci` at the repository root,
 Vite binary until that second install runs. The legacy shell still imports its QA runner at
 startup, so `npm ci --omit=dev` is not currently a valid production install.
 
-The durable C7 build worker has a separate, approval-gated deployment sequence in
-`docs/BUILD-WORKER-DEPLOYMENT.md`. Do not install/start that unit or set
-`THRALLO_BUILD_WORKER_ENABLED=1` as part of an ordinary shell deploy. The queue migration, sandbox
-image, dark worker proof and shell flag are intentionally ordered and independently reversible.
+Initial worker installation and sandbox replacement remain approval-gated in
+`docs/BUILD-WORKER-DEPLOYMENT.md`. Once V2-only is active, an ordinary source release must not
+restart only the shell: shell admission and the worker both consume the newly activated manifest,
+and the zero-model worker release gate must pass before the deployment is called green.

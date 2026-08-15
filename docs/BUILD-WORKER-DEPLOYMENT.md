@@ -1,8 +1,10 @@
 # Build worker deployment procedure
 
-This procedure is intentionally not executed by the remediation branch. It requires explicit
-production approval, a current complete backup, the reviewed migration and an immutable release
-commit. Builder V2 and managed settlement controls are independent and must remain paused.
+The active release's validated `shell/DEPLOYMENT.json` is the only production worker-version
+authority. Shell admission and the worker process both derive the exact revision from that file;
+`THRALLO_BUILD_WORKER_VERSION` is retained only as drift telemetry and cannot override the
+manifest. This prevents a source activation, shell restart and worker restart from silently
+advertising three different releases.
 
 ## Install without enabling traffic
 
@@ -43,6 +45,15 @@ THRALLO_BUILD_POLL_MS=1000
 THRALLO_MANAGED_SETTLEMENT_PAUSED=1
 ```
 
+Do not hand-edit a worker revision into this file. Pinning must read the deployed manifest and
+reject any conflicting `--commit`:
+
+```bash
+sudo node ops/pin-build-sandbox-image.mjs \
+  --manifest shell/DEPLOYMENT.json --image-commit <image-source-sha> \
+  --tag <immutable-built-tag> --pin
+```
+
 Any worker allowed to execute `builder_pipeline` also requires `SUPABASE_URL` and exactly one
 public browser credential (`SUPABASE_PUBLISHABLE_KEY`, preferred, or the legacy
 `SUPABASE_ANON_KEY`). These values come from the same private configuration authority as the shell.
@@ -64,7 +75,13 @@ sudo systemctl status thrallo-build-worker --no-pager
 npm run worker:ops -- metrics
 npm run worker:ops -- list
 journalctl -u thrallo-build-worker -n 100 --no-pager
+npm run worker:release:verify
 ```
+
+Startup first publishes the worker as pipeline-unready, runs the disposable isolation proof, and
+only then advertises `builder_pipeline`. The worker refreshes that proof every four minutes with
+bounded jitter, retries failed refreshes after 30 seconds, and atomically republishes readiness in
+its worker heartbeat. `worker:release:verify` is the required zero-model post-restart gate.
 
 With no shell dispatch flag, the worker should heartbeat with zero customer jobs. Run only the
 approved synthetic, zero-model proof job. Confirm queue/result/events, resource limits, artifact

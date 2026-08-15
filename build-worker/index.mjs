@@ -7,8 +7,11 @@ import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { redactDiagnosticText } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
 import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
+import { resolveWorkerReleaseIdentity } from "../shell/server/lib/builderV2/workerReleaseIdentity.mjs";
 import { createWorkerQueue, serialiseWorkerFailure } from "./queue.mjs";
 import { proveWorkerPreviewIsolation } from "./previewIsolationPreflight.mjs";
+import { resolvePreviewIsolationRefreshPolicy } from "./previewIsolationPolicy.mjs";
+import { createPreviewIsolationReadiness, readinessJobTypes } from "./previewIsolationReadiness.mjs";
 import { reconcileOrphanSandboxes, runSandboxJob } from "./sandboxRunner.mjs";
 import { assertWorkerCredentialAuthority, resolveWorkerJobTypes } from "./runtimeConfig.mjs";
 import { previewProvider } from "../shell/server/preview/index.mjs";
@@ -16,24 +19,18 @@ import { previewProvider } from "../shell/server/preview/index.mjs";
 loadEnv();
 process.env.THRALLO_PROCESS_ROLE = "build-worker";
 
-const VERSION = process.env.THRALLO_BUILD_WORKER_VERSION || "c7/1";
+const RELEASE_IDENTITY = await resolveWorkerReleaseIdentity();
+const VERSION = RELEASE_IDENTITY.version;
+if (RELEASE_IDENTITY.configuredVersionDrift) {
+  console.warn(JSON.stringify({ event: "worker_release_environment_drift",
+    configuredVersion: RELEASE_IDENTITY.configuredVersion, deployedVersion: VERSION,
+    manifestSha256: RELEASE_IDENTITY.manifestSha256 }));
+}
 const WORKER_ID = process.env.THRALLO_BUILD_WORKER_ID || `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 const LEASE_SECONDS = Math.max(15, Math.min(300, Number(process.env.THRALLO_BUILD_LEASE_SECONDS || 45)));
 const POLL_MS = Math.max(250, Math.min(10_000, Number(process.env.THRALLO_BUILD_POLL_MS || 1000)));
 const JOB_TYPES = resolveWorkerJobTypes();
-
-let previewIsolation = { status: "not_required" };
-try {
-  assertWorkerCredentialAuthority(JOB_TYPES);
-  if (JOB_TYPES.includes("builder_pipeline")) {
-    previewIsolation = await proveWorkerPreviewIsolation({ preview: previewProvider() });
-    console.log(JSON.stringify({ event: "worker_preview_isolation_preflight", ...previewIsolation }));
-  }
-} catch (error) {
-  console.error(JSON.stringify({ event: "worker_preview_isolation_preflight", status: "failed",
-    code: error.code || "worker_preflight_failed", message: error.message }));
-  throw error;
-}
+const PREVIEW_POLICY = resolvePreviewIsolationRefreshPolicy();
 
 const client = serviceClient();
 const queue = createWorkerQueue(client);
@@ -44,15 +41,68 @@ let current = null;
 let currentAbort = null;
 let lastReconcile = 0;
 let lastNodeRetirement = 0;
+let previewIsolation = JOB_TYPES.includes("builder_pipeline")
+  ? { status: "pending", checkedAt: null }
+  : { status: "not_required", checkedAt: new Date().toISOString() };
+let nodeHeartbeatChain = Promise.resolve();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const tail = (value, max = 16_384) => redactDiagnosticText(String(value || "")).slice(-max);
+const workerState = () => stopping ? "stopped" : draining ? "draining" : paused ? "paused" : "active";
+
+function publishWorkerNode(nextProof = previewIsolation) {
+  previewIsolation = nextProof;
+  nodeHeartbeatChain = nodeHeartbeatChain.catch((error) => {
+    console.error(`[build-worker] prior node heartbeat: ${error.message}`);
+  }).then(() => queue.nodeHeartbeat(
+    WORKER_ID,
+    VERSION,
+    workerState(),
+    readinessJobTypes(JOB_TYPES, previewIsolation, {
+      maxProofAgeMs: PREVIEW_POLICY.maxProofAgeMs,
+    }),
+    current?.id || null,
+    {
+      pid: process.pid,
+      hostname: os.hostname(),
+      leaseSeconds: LEASE_SECONDS,
+      configuredJobTypes: JOB_TYPES,
+      previewIsolation,
+    },
+  ));
+  return nodeHeartbeatChain;
+}
+
+const readiness = createPreviewIsolationReadiness({
+  enabled: JOB_TYPES.includes("builder_pipeline"),
+  refreshMs: PREVIEW_POLICY.refreshMs,
+  retryMs: PREVIEW_POLICY.retryMs,
+  jitterMs: PREVIEW_POLICY.jitterMs,
+  maxProofAgeMs: PREVIEW_POLICY.maxProofAgeMs,
+  prove: async () => {
+    assertWorkerCredentialAuthority(JOB_TYPES);
+    return proveWorkerPreviewIsolation({ preview: previewProvider() });
+  },
+  publish: publishWorkerNode,
+  onEvent(event) {
+    const safe = { ...event, ...(event.message ? { message: tail(event.message, 1_000) } : {}) };
+    const output = JSON.stringify(safe);
+    if (event.status === "failed" || event.event === "worker_preview_isolation_publish_failed") {
+      console.error(output);
+    } else {
+      console.log(output);
+    }
+  },
+});
 
 async function runJob(job) {
   current = job;
   currentAbort = new AbortController();
   try {
     await queue.start(job, WORKER_ID);
+    await publishWorkerNode().catch((error) => {
+      console.error(`[build-worker] node heartbeat after start ${job.id}: ${error.message}`);
+    });
   } catch (error) {
     // A start acknowledgement failure leaves the durable lease to expire/recover. Never leave
     // the supervisor's process-local `current` latch stuck, which would stop all future leasing.
@@ -93,6 +143,9 @@ async function runJob(job) {
       console.error(`[build-worker] heartbeat ${job.id}: ${error.message}`);
       currentAbort.abort(Object.assign(new Error("lease lost"), { code: "lease_lost" }));
     }
+    await publishWorkerNode().catch((error) => {
+      console.error(`[build-worker] node heartbeat during ${job.id}: ${error.message}`);
+    });
   }, Math.max(5_000, Math.floor(LEASE_SECONDS * 1000 / 3)));
   heartbeat.unref?.();
 
@@ -235,17 +288,19 @@ async function tick() {
   if (!stopping && commanded === "paused") { paused = true; draining = false; }
   else if (!stopping && commanded === "draining") { draining = true; paused = false; }
   else if (!stopping && commanded === "active") { draining = false; paused = false; }
-  const state = stopping ? "stopped" : draining ? "draining" : paused ? "paused" : "active";
-  await queue.nodeHeartbeat(WORKER_ID, VERSION, state, JOB_TYPES, current?.id || null, {
-    pid: process.pid, hostname: os.hostname(), leaseSeconds: LEASE_SECONDS, previewIsolation,
-  });
+  await publishWorkerNode();
   if (stopping || draining || paused || current) return;
-  const job = await queue.lease(WORKER_ID, JOB_TYPES, LEASE_SECONDS);
+  const job = await queue.lease(WORKER_ID, readiness.jobTypes(JOB_TYPES), LEASE_SECONDS);
   if (job) await runJob(job);
 }
 
 async function main() {
-  console.log(`[build-worker] ${WORKER_ID} ${VERSION} types=${JOB_TYPES.join(",")} concurrency=1`);
+  console.log(`[build-worker] ${WORKER_ID} ${VERSION} types=${JOB_TYPES.join(",")} concurrency=1 `
+    + `previewRefreshMs=${PREVIEW_POLICY.refreshMs} previewRetryMs=${PREVIEW_POLICY.retryMs}`);
+  await readiness.start().catch((error) => {
+    console.error(JSON.stringify({ event: "worker_preview_isolation_publish_failed", reason: "startup",
+      code: error.code || "worker_heartbeat_failed", message: tail(error.message, 1_000) }));
+  });
   while (!stopping) {
     try { await tick(); } catch (error) { console.error(`[build-worker] tick: ${error.message}`); }
     await sleep(POLL_MS);
@@ -256,6 +311,7 @@ async function main() {
 function shutdown(signal) {
   if (stopping) return;
   stopping = true; draining = true;
+  readiness.stop();
   console.log(`[build-worker] ${signal}; draining`);
   currentAbort?.abort(Object.assign(new Error("worker shutting down"), { code: "worker_shutdown" }));
   setTimeout(() => process.exit(1), 30_000).unref();

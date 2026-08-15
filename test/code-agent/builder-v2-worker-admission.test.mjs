@@ -59,3 +59,56 @@ test("non-pipeline capability admission still requires heartbeat and release ide
   });
   assert.equal(result.jobType, "qa_browser");
 });
+
+test("a healthy compatible worker remains selectable when a newer heartbeat reports isolation failure", async () => {
+  const failed = {
+    worker_id: "worker-failed", version: "release-1", state: "active", job_types: ["compile"],
+    heartbeat_at: "2026-08-13T11:59:59.000Z",
+    metadata: { configuredJobTypes: ["builder_pipeline", "compile"], previewIsolation: {
+      status: "failed", checkedAt: "2026-08-13T11:59:58.000Z",
+      code: "preview_isolation_required", message: "isolated provisioner failed its marker probe",
+    } },
+  };
+  const healthy = {
+    worker_id: "worker-healthy", version: "release-1", state: "active", job_types: ["builder_pipeline"],
+    heartbeat_at: "2026-08-13T11:59:55.000Z", metadata: { previewIsolation: proof },
+  };
+  const result = await requireFreshWorkerAdmission({
+    client: clientFor([failed, healthy]),
+    env: { THRALLO_BUILD_WORKER_ENABLED: "1", THRALLO_BUILD_WORKER_VERSION: "release-1" }, now,
+  });
+  assert.equal(result.workerId, "worker-healthy");
+});
+
+test("an isolation-failed worker surfaces its recorded reason while remaining unavailable", async () => {
+  const failed = {
+    worker_id: "worker-failed", version: "release-1", state: "active", job_types: ["compile"],
+    heartbeat_at: "2026-08-13T11:59:59.000Z",
+    metadata: { configuredJobTypes: ["builder_pipeline", "compile"], previewIsolation: {
+      status: "failed", checkedAt: "2026-08-13T11:59:58.000Z",
+      code: "preview_isolation_required", message: "isolated provisioner failed its marker probe",
+    } },
+  };
+  await assert.rejects(requireFreshWorkerAdmission({
+    client: clientFor([failed]),
+    env: { THRALLO_BUILD_WORKER_ENABLED: "1", THRALLO_BUILD_WORKER_VERSION: "release-1" }, now,
+  }), (error) => error.code === "preview_isolation_required"
+    && /isolated provisioner failed its marker probe/.test(error.message));
+});
+
+test("a stale environment value cannot override the deployed manifest revision", async () => {
+  const manifestVersion = "manifest-release";
+  const result = await requireFreshWorkerAdmission({
+    client: clientFor([{
+      worker_id: "worker-manifest", version: manifestVersion, state: "active",
+      job_types: ["builder_pipeline"], heartbeat_at: "2026-08-13T11:59:55.000Z",
+      metadata: { previewIsolation: proof },
+    }]),
+    env: { THRALLO_BUILD_WORKER_ENABLED: "1", THRALLO_BUILD_WORKER_VERSION: "stale-private-env",
+      CODE_AGENT_STORE: "supabase" },
+    releaseIdentityResolver: async () => ({ version: manifestVersion, source: "deployment_manifest" }),
+    now,
+  });
+  assert.equal(result.version, manifestVersion);
+  assert.equal(result.releaseIdentitySource, "deployment_manifest");
+});

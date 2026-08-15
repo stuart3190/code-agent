@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { runProcess } from "../build-worker/processTree.mjs";
 import { computeSandboxIdentity } from "../shell/server/lib/builderV2/sandboxProvenance.mjs";
+import { readDeploymentIdentity } from "../shell/server/lib/deploymentIdentity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -27,7 +28,13 @@ const value = (name, fallback = null) => {
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 };
 
-const commit = value("commit") || "unknown";
+const manifestPath = value("manifest") || path.join(root, "shell", "DEPLOYMENT.json");
+const deployment = await readDeploymentIdentity({ file: manifestPath });
+const requestedCommit = value("commit");
+if (requestedCommit && requestedCommit !== deployment.gitCommit) {
+  throw new Error(`--commit ${requestedCommit} differs from deployed manifest ${deployment.gitCommit}`);
+}
+const commit = deployment.gitCommit;
 // The image is built from the build context only (src, shell/server, harness, build-worker), so a
 // later commit that touches nothing in it leaves the image correct. Recording both commits keeps
 // that honest instead of quietly claiming the image is newer than it is.
@@ -70,6 +77,7 @@ const created = await capture("docker", ["image", "inspect", tag, "--format", "{
 
 const record = {
   sourceCommit: commit,
+  deploymentManifestSha256: deployment.manifestSha256,
   sandboxImageSourceCommit: imageCommit,
   sandboxImageTag: tag,
   sandboxImageDigest: digest,
