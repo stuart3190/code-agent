@@ -23,7 +23,9 @@ The tracked service definition is `ops/thrallo-shell.service`; the tracked proxy
 
 Production secrets live only in `/home/ubuntu/code-agent/shell/.env`, owned by `ubuntu` with mode
 `600`. Browser configuration lives in `/home/ubuntu/code-agent/shell/web/.env` and contains only
-the Supabase URL and publishable key. Neither file is shipped through Git.
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The legacy
+`VITE_SUPABASE_ANON_KEY` name remains a fallback during key migration. Neither file is shipped
+through Git, and service-role/secret keys must never be added to the web environment.
 
 Required production overrides:
 
@@ -60,8 +62,20 @@ curl -fsS http://10.83.7.1:8788/api/v1/capabilities
 curl -fsS https://app.thrallo.com/api/v1/capabilities
 ```
 
-After a code or environment update, rebuild the web application and restart only
-`thrallo-shell`. Do not restart Buildr101 services for a Thrallo-only change.
+After a code or environment update, build the release web application with the fail-closed auth
+gate, then restart only `thrallo-shell`:
+
+```sh
+npm run build:web:production
+sudo systemctl restart thrallo-shell
+node --env-file=shell/.env --env-file=shell/web/.env scripts/smoke-production.mjs \
+  --origin https://app.thrallo.com
+```
+
+The production build and post-deploy smoke both fail if the public URL/key are absent, the key is
+privileged, the deployed assets do not contain the expected public configuration, Supabase Auth
+rejects it, or a public environment path exposes credentials. Do not restart Buildr101 services
+for a Thrallo-only change.
 
 Install both locked packages before rebuilding: `npm ci` at the repository root, followed by
 `npm --prefix shell/web ci`. The web application has its own lockfile and a clean checkout has no

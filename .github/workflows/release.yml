@@ -12,6 +12,9 @@ jobs:
   production-like-proof:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      SUPABASE_URL: ${{ vars.THRALLO_PUBLIC_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ vars.THRALLO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -54,7 +57,7 @@ jobs:
       - name: Backup compatibility and release artifacts
         run: |
           node --test test/code-agent/backup-coverage.test.mjs test/code-agent/restore-isolation.test.mjs
-          npm run build:web
+          npm run build:web:production
           mkdir -p .release
           git archive --format=tar HEAD | gzip -n > .release/source.tar.gz
           tar -C shell/web -czf .release/web.tar.gz dist

@@ -69,7 +69,7 @@ export function AuthCard({ mode, onMode }) {
 
       {!backendConfigured && (
         <div className="mb-4 rounded-lg border border-amber/40 bg-amber/10 px-3 py-2 text-xs text-amber-soft">
-          Authentication setup required — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
+          Authentication setup required — set the public Supabase URL and publishable key.
         </div>
       )}
 

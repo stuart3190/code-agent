@@ -11,11 +11,16 @@
 // mounted AND gated, without needing a real session or spending anything. The one status this
 // script exists to catch is 404.
 
+import { verifyPublicWebAuth } from "./lib/public-web-auth-smoke.mjs";
+import { resolvePublicAuthConfig } from "../shell/web/publicAuthConfig.mjs";
+
 const origin = (() => {
   const i = process.argv.indexOf("--origin");
   return (i === -1 ? process.env.THRALLO_SMOKE_ORIGIN || "https://app.thrallo.com" : process.argv[i + 1])
     .replace(/\/$/, "");
 })();
+
+const publicAuth = resolvePublicAuthConfig(process.env, { required: true });
 
 // `expect` is the set of acceptable statuses. 404 is never acceptable for a mounted route.
 const CHECKS = [
@@ -87,6 +92,15 @@ async function check(entry) {
 const results = [];
 for (const entry of CHECKS) results.push(await check(entry));
 
+let authProof;
+try {
+  authProof = await verifyPublicWebAuth({ origin, config: publicAuth });
+  console.log(`PASS  public browser auth (${authProof.keyKind}, ${authProof.assets.length} assets, ${authProof.sourceMapCount} source maps)`);
+} catch (error) {
+  console.error(`FAIL  public browser auth — ${error.message}`);
+  process.exitCode = 1;
+}
+
 const failures = results.filter((r) => !r.ok);
 for (const r of results) {
   const mark = r.ok ? "PASS" : "FAIL";
@@ -103,3 +117,4 @@ if (failures.length) {
   }
   process.exit(1);
 }
+if (!authProof) process.exit(1);

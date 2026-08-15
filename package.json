@@ -53,6 +53,7 @@
     "security:secrets": "node ops/scan-secrets.mjs",
     "release:verify": "node ops/verify-release-artifacts.mjs",
     "build:web": "npm --prefix shell/web run build",
+    "build:web:production": "npm --prefix shell/web run build:production",
     "verify": "npm run build:web && npm run test:code-agent && npm run test:ui"
   },
   "dependencies": {
