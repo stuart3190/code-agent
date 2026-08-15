@@ -9,6 +9,23 @@ const MARKER = "thrallo-isolated-preview-preflight";
 // doing so lets scheduled retries overlap server-side work that the controller can no longer see.
 export const PREVIEW_ISOLATION_START_TIMEOUT_MS = 255_000;
 
+export function resolvePreviewIsolationRunId({ configured = "", nodeIdentity = "" } = {}) {
+  const explicit = String(configured || "").trim().toLowerCase();
+  if (explicit) {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(explicit)) {
+      throw Object.assign(new Error("THRALLO_PREVIEW_ISOLATION_RUN_ID must be a DNS-safe stable identifier."), {
+        code: "preview_isolation_identity_invalid",
+      });
+    }
+    return explicit;
+  }
+  const digest = crypto.createHash("sha256")
+    .update(`thrallo-preview-isolation:${String(nodeIdentity || "worker")}`)
+    .digest("hex").slice(0, 32);
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-`
+    + `${digest.slice(16, 20)}-${digest.slice(20)}`;
+}
+
 function isolationError(message, cause = null) {
   return Object.assign(new Error(message, cause ? { cause } : undefined), {
     code: "preview_isolation_required",

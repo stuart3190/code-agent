@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   PREVIEW_ISOLATION_START_TIMEOUT_MS,
   proveWorkerPreviewIsolation,
+  resolvePreviewIsolationRunId,
   requireFreshWorkerPreviewProof,
 } from "../../build-worker/previewIsolationPreflight.mjs";
 import { assertWorkerCredentialAuthority } from "../../build-worker/runtimeConfig.mjs";
@@ -35,6 +36,20 @@ test("14S worker preview configuration requires the isolated mode, valid URL and
       (error) => error.code === "preview_isolation_required");
   }
   assert.doesNotThrow(() => assertWorkerCredentialAuthority(["builder_pipeline"], AUTHORITY));
+});
+
+test("14S preview identity is stable across restarts and supports an issued identity", () => {
+  const first = resolvePreviewIsolationRunId({ nodeIdentity: "vps-worker-1" });
+  const second = resolvePreviewIsolationRunId({ nodeIdentity: "vps-worker-1" });
+  assert.equal(first, second);
+  assert.match(first, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+  assert.notEqual(first, resolvePreviewIsolationRunId({ nodeIdentity: "vps-worker-2" }));
+  assert.equal(resolvePreviewIsolationRunId({
+    configured: "ec9972d8-ef9d-4105-a2c7-946c19dd6438",
+    nodeIdentity: "ignored",
+  }), "ec9972d8-ef9d-4105-a2c7-946c19dd6438");
+  assert.throws(() => resolvePreviewIsolationRunId({ configured: "unsafe/id" }),
+    (error) => error.code === "preview_isolation_identity_invalid");
 });
 
 test("14S actual-worker smoke verifies health, identity, marker and clean teardown", async () => {
@@ -94,7 +109,8 @@ test("14S worker startup and periodic refresh publish fail-closed readiness with
   assert.match(source, /prove: async \(\) => \{[\s\S]*assertWorkerCredentialAuthority\(JOB_TYPES\)/);
   assert.match(source, /publish: publishWorkerNode/);
   assert.match(source, /configuredJobTypes: JOB_TYPES/);
-  assert.match(source, /const PREVIEW_ISOLATION_RUN_ID = crypto\.randomUUID\(\)/);
+  assert.match(source, /resolvePreviewIsolationRunId\(\{/);
+  assert.match(source, /THRALLO_PREVIEW_ISOLATION_RUN_ID/);
   assert.match(source, /randomUUID: \(\) => PREVIEW_ISOLATION_RUN_ID/,
     "all refreshes in one worker process must reuse one isolated-preview hostname");
   assert.match(controller, /proof\.status === "passed" \? jitterMs : 0/);
