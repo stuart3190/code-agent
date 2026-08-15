@@ -4,8 +4,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { clone, fromScaffold } from "../../src/engine/fileTree.mjs";
+import { GENERATED_DEPENDENCIES } from "../../src/scaffolds/dependencyCatalog.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { buildTree, depsNodeModules, ensureDeps } from "../../harness/workspace.mjs";
 import { deriveBuildSpec, scopeBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
@@ -76,6 +78,14 @@ const CORE_CONTRACT = {
   entities: CONTRACT.entities.slice(0, 2),
   operations: CONTRACT.operations.slice(0, 2),
 };
+
+test("the production preview base contains every generated-app dependency", () => {
+  const previewPackage = JSON.parse(readFileSync(new URL("../../provisiond/base/package.json", import.meta.url), "utf8"));
+  for (const [name, version] of Object.entries(GENERATED_DEPENDENCIES)) {
+    assert.equal(previewPackage.dependencies[name], version,
+      `${name} must be installed in the preview image at the compiler-supported version`);
+  }
+});
 
 const patch = (fields) => ({ file: null, ops: null, newFile: null, content: null,
   deleteFile: null, replaceFile: null, ...fields });
