@@ -892,6 +892,11 @@ function isAuthenticationFlow(entry, step) {
   return /\b(account form|auth(?:entication)?|sign[ -]?in|sign[ -]?up|create account|register)\b/i.test(text);
 }
 
+export function shouldSubmitContractedForm(action = "") {
+  return /\b(generate|rename|apply|save|submit|send|create|change|edit|update)\b|\biterat(?:e|ion|ive|ing)\b/i
+    .test(String(action));
+}
+
 /** Drive a real visible account form; never inject or fabricate a session. */
 async function driveAuthenticationForm(page, marker, { mode = "create", credentials = null } = {}) {
   const deadline = Date.now() + 20_000;
@@ -1154,7 +1159,7 @@ async function runStep(page, step, {
   // ordinary rename/generate/apply interactions without guessing among unrelated page buttons.
   if (filledContractedInputs.length
     && !interactionFlows.some((flow) => ["mutation", "action", "cancellation"].includes(flow.kind))
-    && /\b(generate|rename|apply|save|submit|send|create|iterate)\b/i.test(action)) {
+    && shouldSubmitContractedForm(action)) {
     for (const flow of filledContractedInputs) {
       const id = flow.control?.machineId;
       if (!id) continue;

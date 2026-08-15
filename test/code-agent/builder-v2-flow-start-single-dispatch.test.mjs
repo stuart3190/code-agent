@@ -19,7 +19,10 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { verifyJourneys } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import {
+  shouldSubmitContractedForm,
+  verifyJourneys,
+} from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -174,4 +177,17 @@ test("the generic click path is still available to steps with no contracted acti
     new URL("../../shell/server/lib/appBuild/journeyVerifier.mjs", import.meta.url), "utf8"));
   assert.match(source, /!droveStepper && !contractDriven &&/);
   assert.match(source, /let contractDriven = false;/);
+});
+
+test("contracted edit and iteration fields submit their owning form", () => {
+  for (const action of [
+    "Change the selected object's properties",
+    "Edit the selected object",
+    "Update its material",
+    "Enter an iteration request",
+    "Iterate on the generated asset",
+  ]) {
+    assert.equal(shouldSubmitContractedForm(action), true, action);
+  }
+  assert.equal(shouldSubmitContractedForm("Inspect the selected object"), false);
 });
