@@ -111,6 +111,83 @@ test("console errors and failed requests are collected as evidence", needsBrowse
   body = WORKING;
 });
 
+test("visible evidence is not shadowed by an earlier hidden responsive copy", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <div style="display:none">model hierarchy properties panel</div>
+    <main><h1>Saved asset preview</h1><p>Model hierarchy and properties panel are visible.</p></main>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "saved", title: "Open saved asset", priority: "primary",
+    steps: [{ action: "open the saved asset", target: "/",
+      expect: "the asset preview, model hierarchy, and properties panel are visible" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  body = WORKING;
+});
+
+test("invalid input tests only its owning form and never an unrelated page action", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <form><label>Size <input data-thrallo-control="ctl-size" value="2, 2, 2"></label>
+      <button type="submit">Save properties</button></form>
+    <p id="validation"></p><button id="unrelated" type="button">Continue to unrelated generator</button>
+    <script>
+      const input = document.querySelector('[data-thrallo-control="ctl-size"]');
+      const save = document.querySelector('button[type="submit"]');
+      input.addEventListener('input', () => {
+        const invalid = input.value.split(/[ ,]+/).some((value) => Number(value) <= 0);
+        save.disabled = invalid;
+        document.getElementById('validation').textContent = invalid
+          ? 'Readable validation message: export controls are disabled until corrected' : '';
+      });
+      document.getElementById('unrelated').onclick = () => { document.body.textContent = 'unrelated action advanced'; };
+    </script>
+  </body></html>`;
+  const control = { logicalField: "size", accessibleName: "size", accessibleNames: ["size"],
+    machineId: "ctl-size", roles: ["textbox"], inputTypes: ["text"], validity: "invalid",
+    statePath: "asset.draft.size" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "invalid", title: "Reject invalid size", priority: "primary",
+      steps: [{ action: "enter an invalid size value", target: "size", operates: ["size"],
+        expect: "a readable validation message is shown and export controls are disabled until corrected" }] }],
+    interactionContract: { flows: [{ journeyId: "invalid", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.doesNotMatch(result.journeys[0].steps[0].observation?.text || "", /unrelated action advanced/);
+  body = WORKING;
+});
+
+test("sign out is proved by the public auth entry replacing the private surface", needsBrowser, async () => {
+  body = `<!doctype html><html><body><main id="private">Private editor history
+    <button id="signout">Sign out</button></main><script>
+      document.getElementById('signout').onclick = () => {
+        document.body.innerHTML = '<main>Public landing screen <a href="/auth">Sign in</a></main>';
+      };
+    </script></body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "signout", title: "Sign out", priority: "primary",
+    steps: [{ action: "sign out", target: "account menu",
+      expect: "the landing or sign-in screen is visible and private editor history is no longer visible" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  body = WORKING;
+});
+
+test("a mobile viewport is graded on visible controls and horizontal reflow", needsBrowser, async () => {
+  body = `<!doctype html><html><head><style>
+    .mobile-panels{display:none}@media(max-width:500px){.desktop{display:none}.mobile-panels{display:flex;gap:8px}}
+    body{margin:0;max-width:100%}
+  </style></head><body><div class="desktop">History hierarchy properties desktop sidebars</div>
+    <nav class="mobile-panels"><button>History panel</button><button>Hierarchy panel</button><button>Properties panel</button></nav>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "mobile", title: "Responsive editor", priority: "primary",
+    steps: [{ action: "resize to a mobile-width viewport", target: "browser viewport",
+      expect: "history, hierarchy, and properties are reachable through clearly labelled panel buttons with no horizontal scrollbar" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  body = WORKING;
+});
+
 test("the primary journey is driven first, so a timeout still proves what gates the preview", needsBrowser, async () => {
   body = WORKING;
   const twoJourneys = {

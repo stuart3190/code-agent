@@ -271,6 +271,22 @@ test("isolated existing-record reconstruction stops at the durable commit", asyn
   }).controls.map((flow) => flow.control.logicalField), ["prompt", "Generate"]);
 });
 
+test("same-step durable setup fills contracted inputs before it commits", async () => {
+  const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const control = (name) => ({ logicalField: name, accessibleName: name });
+  const flows = [
+    { journeyId: "primary", stepIndex: 0, kind: "flow_start", control: control("Create account") },
+    // This is the historical/live ordering: derivation emitted mutation before input.
+    { journeyId: "primary", stepIndex: 1, kind: "mutation", control: control("Generate"),
+      durableLifecycle: "crud:item" },
+    { journeyId: "primary", stepIndex: 1, kind: "input", control: control("prompt") },
+    { journeyId: "secondary", stepIndex: 0, kind: "selection", control: control("history item") },
+  ];
+  assert.deepEqual(journeyPrerequisites(flows, "secondary", "primary", {
+    requiresPrimaryRecord: true, reconstructIsolated: true,
+  }).controls.map((flow) => flow.control.logicalField), ["Create account", "prompt", "Generate"]);
+});
+
 test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {
   const verdict = validation.validateContract(withJourneys([], [
     { id: "create-booking", entity: "booking", kind: "create", journey: "book" },

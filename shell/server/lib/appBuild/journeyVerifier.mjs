@@ -638,7 +638,7 @@ async function expectationBecameVisible(page, expect, textBefore) {
   const found = [];
   const fresh = [];
   for (const word of wanted) {
-    if (!(await page.getByText(new RegExp(word, "i")).first().isVisible().catch(() => false))) continue;
+    if (!(await anyVisibleTextMatch(page, word))) continue;
     found.push(word);
     if (!before.includes(word)) fresh.push(word);
   }
@@ -918,6 +918,15 @@ function isAuthenticationFlow(entry, step) {
   return /\b(account form|auth(?:entication)?|sign[ -]?in|sign[ -]?up|create account|register)\b/i.test(text);
 }
 
+async function anyVisibleTextMatch(page, word) {
+  const matches = page.getByText(new RegExp(word, "i"));
+  const count = Math.min(await matches.count().catch(() => 0), 20);
+  for (let index = 0; index < count; index += 1) {
+    if (await matches.nth(index).isVisible().catch(() => false)) return true;
+  }
+  return false;
+}
+
 export function shouldSubmitContractedForm(action = "") {
   return /\b(generate|rename|apply|save|submit|send|create|change|edit|update)\b|\biterat(?:e|ion|ive|ing)\b/i
     .test(String(action));
@@ -1003,7 +1012,17 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
     await signOut.click({ timeout: 5_000 });
     await page.waitForTimeout(700);
     authState.active = null;
-    return { handled: true, drove: true };
+    const publicEntry = await firstVisible([
+      page.getByRole("link", { name: /sign ?in|create account|sign ?up/i }),
+      page.getByRole("button", { name: /sign ?in|create account|sign ?up/i }),
+      page.locator('input[type="email"]'),
+    ], Date.now() + 5_000);
+    const privateEntryStillVisible = await signOut.isVisible().catch(() => false);
+    return publicEntry && !privateEntryStillVisible
+      ? { handled: true, drove: true, status: "pass",
+        detail: "the authenticated surface closed and a public authentication entry is visible" }
+      : { handled: true, drove: true, status: "fail",
+        detail: "sign out did not replace the authenticated surface with a public authentication entry" };
   }
 
   let mode = null;
@@ -1065,14 +1084,31 @@ async function runStep(page, step, {
     if (explicitAuth.status) return explicitAuth;
     drove = explicitAuth.drove;
     controlEvidence = explicitAuth.authentication ? { authentication: explicitAuth.authentication } : null;
+    if (/different account/i.test(action) && explicitAuth.authentication) {
+      const privateEvidence = unique([...(durable.values || []), ...(durable.references || [])]);
+      if (!privateEvidence.length) {
+        return { drove: true, status: "undriveable",
+          detail: "the first account produced no durable evidence to test against the second account" };
+      }
+      const visible = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      const leaked = privateEvidence.filter((value) => visible.includes(value));
+      return leaked.length
+        ? { drove: true, status: "fail",
+          detail: `the different account can see private durable evidence: ${leaked.slice(0, 3).join(", ")}` }
+        : { drove: true, status: "pass",
+          detail: "the different account opened successfully and cannot see the first account's durable record" };
+    }
   }
 
+  let viewportChanged = false;
   if (/resize to (?:a )?tablet/i.test(action)) {
     await page.setViewportSize({ width: 820, height: 900 });
     drove = true;
+    viewportChanged = true;
   } else if (/resize to (?:a )?mobile/i.test(action)) {
     await page.setViewportSize({ width: 390, height: 844 });
     drove = true;
+    viewportChanged = true;
   }
 
   // Navigation, when the step names a route.
@@ -1153,7 +1189,14 @@ async function runStep(page, step, {
       if (result.complete && invalidFlow) {
         const stillHere = async () => semanticControlVisible(page, invalidFlow.control);
         let blocked = null;
-        for (const { locator: control } of await advanceCandidates(page)) {
+        const machineId = invalidFlow.control.machineId;
+        const owningSubmit = machineId
+          ? page.locator(`form:has([data-thrallo-control="${machineId}"]) button[type="submit"]:visible`).first()
+          : null;
+        const candidates = owningSubmit && await owningSubmit.count().catch(() => 0)
+          ? [{ locator: owningSubmit, via: "the invalid field's owning form" }]
+          : (await advanceCandidates(page)).filter((candidate) => candidate.declared);
+        for (const { locator: control } of candidates) {
           if (await control.isDisabled().catch(() => false)) { blocked = "the advance control is disabled"; break; }
           await control.click({ timeout: 5_000 }).catch(() => {});
           await page.waitForTimeout(700);
@@ -1543,7 +1586,7 @@ async function runStep(page, step, {
     found = [];
     fresh = [];
     for (const word of wanted) {
-      const hit = await page.getByText(new RegExp(word, "i")).first().isVisible().catch(() => false);
+      const hit = await anyVisibleTextMatch(page, word);
       if (!hit) continue;
       found.push(word);
       // New since the step ran, which is the only kind of evidence that the step DID something.
@@ -1554,6 +1597,26 @@ async function runStep(page, step, {
       urlChanged: page.url() !== urlBefore, readOnlyAssertion });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
+  }
+
+  if (viewportChanged) {
+    const layout = await page.evaluate(() => ({
+      width: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      bodyScrollWidth: document.body?.scrollWidth || 0,
+    })).catch(() => null);
+    if (!layout) return { drove: true, status: "undriveable", detail: "responsive layout could not be measured" };
+    const overflow = Math.max(layout.scrollWidth, layout.bodyScrollWidth) > layout.width + 2;
+    if (overflow) {
+      return { drove: true, status: "fail",
+        detail: `the ${layout.width}px viewport has horizontal overflow (${Math.max(layout.scrollWidth, layout.bodyScrollWidth)}px)` };
+    }
+    if (found.length / wanted.length >= 0.5) {
+      return { drove: true, status: "pass",
+        detail: `the viewport reflowed to ${layout.width}px without horizontal overflow; visible: ${found.join(", ")}` };
+    }
+    return { drove: true, status: "fail",
+      detail: `the viewport reflowed without overflow, but expected responsive controls were not visible (found ${found.join(", ") || "none"})` };
   }
 
   // A stepper-driven step is judged on the OBSERVABLE transition: the counter's page text
@@ -1754,6 +1817,7 @@ export function expectationOutcome({
     return { drove, status: "pass", reviewExempt: true,
       detail: `found: ${found.join(", ")} (review: values verified below)` };
   }
+
   // A structured read-only step (inspect/compare) asserts state produced by an earlier action.
   // It deliberately drives nothing, so freshness is inapplicable; the expected evidence still
   // has to meet the same majority bar and missing evidence is a behavioural failure.
@@ -1808,7 +1872,13 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
 } = {}) {
   const controlKey = (flow) => semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
   const ordered = (id) => flows.filter((flow) => flow.journeyId === id && flow.control)
-    .sort((a, b) => a.stepIndex - b.stepIndex);
+    .sort((a, b) => {
+      const step = a.stepIndex - b.stepIndex;
+      if (step) return step;
+      const order = { flow_start: 0, navigation: 0, input: 1, selection: 1,
+        flow_advance: 2, mutation: 3, action: 3, cancellation: 3, review: 4, recovery: 4 };
+      return (order[a.kind] ?? 2) - (order[b.kind] ?? 2);
+    });
   const mine = ordered(journeyId);
   const requiresDurableRecord = flows.some((flow) => flow.journeyId === journeyId
     && (flow.reads || []).some((path) => /\.durable\./.test(path)));
@@ -1904,6 +1974,7 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
     // A mutation/action control ("start booking control") — driven by its contracted accessible
     // name only, never by a keyword sweep, so an unrelated button can never stand in for it.
     let clicked = false;
+    const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     // A contract names controls descriptively — "start booking control", "Confirm booking
     // control" — while the button itself is labelled "Start booking". The generic control nouns
     // are stripped as a second attempt, so the description still resolves to the real control
@@ -1932,6 +2003,20 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
           reason: authentication.reason || "authentication did not complete" } };
       }
       performed.push({ control: label, kind: "authentication", detail: `authenticated ${authentication.email}` });
+    }
+    if (flow.kind === "mutation" && flow.durableLifecycle && flow.observable) {
+      const deadline = Date.now() + 12_000;
+      let visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
+      while (!visible.met && Date.now() < deadline) {
+        await page.waitForTimeout(400);
+        visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
+      }
+      if (!visible.met) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: "the durable mutation did not reach its contracted observable state" } };
+      }
+      performed.push({ control: label, kind: "durable_commit",
+        detail: `durable observable reached (${visible.found.join(", ")})` });
     }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
   }
