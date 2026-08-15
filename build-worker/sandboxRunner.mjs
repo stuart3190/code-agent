@@ -10,6 +10,19 @@ export function safeChildEnvironment(base = process.env) {
   return Object.fromEntries(allowed.filter((key) => base[key]).map((key) => [key, base[key]]));
 }
 
+export function sandboxTmpfsMb(jobType, memoryMb = 1024) {
+  const containerMemoryMb = Math.max(256, Number(memoryMb || 1024));
+  // Chromium is launched with --disable-dev-shm-usage, so its shared-memory files live in
+  // /tmp. A fixed 256 MiB tmpfs was enough for a smoke OR a Three/WebGL journey, but not both in
+  // one browser_verify job: the second context failed ordinary module loads with
+  // ERR_INSUFFICIENT_RESOURCES. Browser jobs get a bounded half of their cgroup allowance (up to
+  // 1 GiB); other sandboxes retain the smaller filesystem because they do not host Chromium.
+  if (["browser_verify", "qa_browser"].includes(jobType)) {
+    return Math.max(256, Math.min(1024, Math.floor(containerMemoryMb / 2)));
+  }
+  return 256;
+}
+
 async function removeSandboxContainer(name) {
   return runProcess("docker", ["rm", "-f", name], {
     env: safeChildEnvironment(), wallMs: 10_000, outputBytes: 64 * 1024,
@@ -68,6 +81,8 @@ export async function runSandboxJob(job, {
     const durableJobId = safeId(job.durable_job_id || job.id);
     const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
     const gid = typeof process.getgid === "function" ? process.getgid() : 1000;
+    const memoryMb = Math.max(256, Number(limits.memoryMb || 1024));
+    const tmpfsMb = sandboxTmpfsMb(job.job_type, memoryMb);
     // A hard worker death can leave the daemon-owned container alive. A retry of this exact
     // work unit always removes that orphan before claiming the deterministic container name.
     await removeSandboxContainer(name);
@@ -76,11 +91,11 @@ export async function runSandboxJob(job, {
       "--label", "thrallo.build-worker=1", "--label", `thrallo.durable-job-id=${durableJobId}`,
       "--user", `${uid}:${gid}`,
       "--network", network,
-      "--memory", `${Math.max(256, Number(limits.memoryMb || 1024))}m`,
+      "--memory", `${memoryMb}m`,
       "--cpus", String(Math.max(0.25, Number(limits.cpu || 1))),
       "--pids-limit", String(Math.max(32, Number(limits.pids || 128))),
       "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-      "--tmpfs", `/tmp:rw,noexec,nosuid,size=256m,uid=${uid},gid=${gid}`,
+      "--tmpfs", `/tmp:rw,noexec,nosuid,size=${tmpfsMb}m,uid=${uid},gid=${gid}`,
       "--tmpfs", `/tmp/home:rw,noexec,nosuid,size=16m,uid=${uid},gid=${gid}`,
       "-v", `${jobRoot}:/work:rw`, "-v", `${inputPath}:/input/payload.json:ro`,
       image,

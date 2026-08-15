@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import { buildWorkerEnabled, limitsFor, workIdempotencyKey } from "../../shell/server/lib/buildWorkQueue.mjs";
 import { runProcess } from "../../build-worker/processTree.mjs";
-import { safeChildEnvironment } from "../../build-worker/sandboxRunner.mjs";
+import { safeChildEnvironment, sandboxTmpfsMb } from "../../build-worker/sandboxRunner.mjs";
 import { createWorkerQueue } from "../../build-worker/queue.mjs";
 
 const slowScript = (phase, ms = 1_200) => `console.log(${JSON.stringify(`${phase}:stdout`)}); console.error(${JSON.stringify(`${phase}:stderr`)}); setTimeout(()=>{},${ms});`;
@@ -98,6 +98,13 @@ test("C7 sandbox children receive no platform or provider credentials", () => {
   assert.deepEqual(env, { PATH: "x", SystemRoot: "y" });
 });
 
+test("C7 browser sandboxes reserve bounded temp space for sequential WebGL verification", () => {
+  assert.equal(sandboxTmpfsMb("browser_verify", 2048), 1024);
+  assert.equal(sandboxTmpfsMb("qa_browser", 3072), 1024);
+  assert.equal(sandboxTmpfsMb("browser_verify", 1024), 512);
+  assert.equal(sandboxTmpfsMb("compile", 2048), 256);
+});
+
 test("C7 worker policy caps every requested resource", () => {
   assert.deepEqual(limitsFor("compile", { wallSeconds: 9999, cpu: 99, memoryMb: 99999, pids: 9999, outputBytes: 999999999 }), {
     wallSeconds: 300, cpu: 2, memoryMb: 2048, pids: 256, outputBytes: 4 * 1024 * 1024,
@@ -150,6 +157,7 @@ test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation
   assert.match(unit, /MemoryMax=3G/); assert.match(unit, /CPUQuota=250%/); assert.match(unit, /KillMode=control-group/);
   assert.match(runner, /--memory/); assert.match(runner, /--cpus/); assert.match(runner, /--pids-limit/);
   assert.match(runner, /--read-only/); assert.match(runner, /--cap-drop/); assert.match(runner, /no-new-privileges/);
+  assert.match(runner, /size=\$\{tmpfsMb\}m/);
   assert.match(runner, /thrallo\.durable-job-id/); assert.match(runner, /removeSandboxContainer\(name\)/);
   assert.match(runner, /reconcileOrphanSandboxes/);
   assert.match(runner, /jobRoot.*artifactRoot/);
