@@ -4,6 +4,10 @@ import { workerPreviewConfiguration } from "./runtimeConfig.mjs";
 import { PREVIEW_ISOLATION_PROOF_MAX_AGE_MS } from "./previewIsolationPolicy.mjs";
 
 const MARKER = "thrallo-isolated-preview-preflight";
+// provisiond may legitimately wait up to 240 seconds for a newly-created Vite preview. The
+// worker must not abandon the HTTP request after 15 seconds while provisiond continues working;
+// doing so lets scheduled retries overlap server-side work that the controller can no longer see.
+export const PREVIEW_ISOLATION_START_TIMEOUT_MS = 255_000;
 
 function isolationError(message, cause = null) {
   return Object.assign(new Error(message, cause ? { cause } : undefined), {
@@ -51,7 +55,9 @@ export async function proveWorkerPreviewIsolation({
   let destroyed = null;
   let absentAfterDestroy = false;
   try {
-    created = await preview.start(projectId, SMOKE_TREE, { signal: AbortSignal.timeout(15_000) });
+    created = await preview.start(projectId, SMOKE_TREE, {
+      signal: AbortSignal.timeout(PREVIEW_ISOLATION_START_TIMEOUT_MS),
+    });
     if (created?.mode !== "vps" || created?.id !== expectedId || !created?.url) {
       throw isolationError("Provisiond returned an unexpected isolated preview identity or mode.");
     }

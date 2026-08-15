@@ -130,7 +130,7 @@ test("failed refresh removes builder admission, preserves exact reason, and a re
         metadata: { configuredJobTypes: CONFIGURED_TYPES, previewIsolation: proof },
       };
     },
-    refreshMs: 4 * 60_000, retryMs: 30_000, jitterMs: 0, now: () => now,
+    refreshMs: 4 * 60_000, retryMs: 30_000, jitterMs: 30_000, random: () => 0, now: () => now,
     setTimer: timers.setTimer, clearTimer: timers.clearTimer,
   });
   await readiness.start();
@@ -149,6 +149,26 @@ test("failed refresh removes builder admission, preserves exact reason, and a re
   assert.ok(node.job_types.includes("builder_pipeline"));
   assert.equal(node.current_job_id, currentJobId);
   assert.equal((await requireFreshWorkerAdmission({ client: clientFor(node), env: ENV, now })).workerId, "worker-1");
+  readiness.stop();
+});
+
+test("failed readiness never applies symmetric jitter that collapses retries to one second", async () => {
+  const timers = fakeTimers();
+  const readiness = createPreviewIsolationReadiness({
+    enabled: true,
+    prove: async () => { throw Object.assign(new Error("isolated preview timed out"), {
+      code: "preview_isolation_required",
+    }); },
+    publish: async () => {},
+    refreshMs: 4 * 60_000,
+    retryMs: 30_000,
+    jitterMs: 30_000,
+    random: () => 0,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  await readiness.start();
+  assert.equal(timers.scheduled[0].delayMs, 30_000);
   readiness.stop();
 });
 

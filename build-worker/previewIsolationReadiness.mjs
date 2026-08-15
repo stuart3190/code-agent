@@ -61,10 +61,10 @@ export function createPreviewIsolationReadiness({
   const emit = (event) => {
     try { onEvent(event); } catch {}
   };
-  const schedule = (baseMs) => {
+  const schedule = (baseMs, delayJitterMs = jitterMs) => {
     if (stopped || !enabled) return;
     if (timer) clearTimer(timer);
-    const delayMs = jitteredPreviewIsolationDelay(baseMs, jitterMs, random);
+    const delayMs = jitteredPreviewIsolationDelay(baseMs, delayJitterMs, random);
     timer = setTimer(async () => {
       timer = null;
       try {
@@ -98,7 +98,11 @@ export function createPreviewIsolationReadiness({
       try {
         await publish(proof);
       } finally {
-        schedule(proof.status === "passed" ? refreshMs : retryMs);
+        // Jitter spreads healthy workers across the refresh window. It must not be symmetric on
+        // the short failure retry: with retryMs=jitterMs=30s that previously collapsed to a one-
+        // second retry and amplified a slow provisiond request into a failure storm.
+        schedule(proof.status === "passed" ? refreshMs : retryMs,
+          proof.status === "passed" ? jitterMs : 0);
       }
       return proof;
     })().finally(() => { inFlight = null; });

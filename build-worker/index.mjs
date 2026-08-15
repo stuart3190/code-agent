@@ -27,6 +27,11 @@ if (RELEASE_IDENTITY.configuredVersionDrift) {
     manifestSha256: RELEASE_IDENTITY.manifestSha256 }));
 }
 const WORKER_ID = process.env.THRALLO_BUILD_WORKER_ID || `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
+// Keep one disposable preview identity for this worker process. A fresh hostname on every
+// readiness refresh forces a new on-demand TLS transaction and turns a transient CA/network
+// failure into an unbounded certificate/provisioning storm. Separate worker processes still own
+// separate proofs, while every refresh within one process reuses Caddy's cached certificate.
+const PREVIEW_ISOLATION_RUN_ID = crypto.randomUUID();
 const LEASE_SECONDS = Math.max(15, Math.min(300, Number(process.env.THRALLO_BUILD_LEASE_SECONDS || 45)));
 const POLL_MS = Math.max(250, Math.min(10_000, Number(process.env.THRALLO_BUILD_POLL_MS || 1000)));
 const JOB_TYPES = resolveWorkerJobTypes();
@@ -81,7 +86,10 @@ const readiness = createPreviewIsolationReadiness({
   maxProofAgeMs: PREVIEW_POLICY.maxProofAgeMs,
   prove: async () => {
     assertWorkerCredentialAuthority(JOB_TYPES);
-    return proveWorkerPreviewIsolation({ preview: previewProvider() });
+    return proveWorkerPreviewIsolation({
+      preview: previewProvider(),
+      randomUUID: () => PREVIEW_ISOLATION_RUN_ID,
+    });
   },
   publish: publishWorkerNode,
   onEvent(event) {

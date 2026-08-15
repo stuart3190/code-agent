@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
-import { proveWorkerPreviewIsolation, requireFreshWorkerPreviewProof } from "../../build-worker/previewIsolationPreflight.mjs";
+import {
+  PREVIEW_ISOLATION_START_TIMEOUT_MS,
+  proveWorkerPreviewIsolation,
+  requireFreshWorkerPreviewProof,
+} from "../../build-worker/previewIsolationPreflight.mjs";
 import { assertWorkerCredentialAuthority } from "../../build-worker/runtimeConfig.mjs";
 
 const AUTHORITY = {
@@ -55,6 +59,8 @@ test("14S actual-worker smoke verifies health, identity, marker and clean teardo
   assert.equal(proof.resolvedMode, "vps");
   assert.deepEqual(proof.teardown, { stopped: true, absent: true });
   assert.deepEqual(calls.map((row) => row[0]), ["start", "get", "stop", "get"]);
+  assert.ok(PREVIEW_ISOLATION_START_TIMEOUT_MS > 240_000,
+    "the client must outlive provisiond's documented 240-second readiness window");
   const accepted = requireFreshWorkerPreviewProof([{
     worker_id: "worker-1", state: "active", job_types: ["builder_pipeline"],
     heartbeat_at: new Date().toISOString(), metadata: { previewIsolation: proof },
@@ -88,7 +94,10 @@ test("14S worker startup and periodic refresh publish fail-closed readiness with
   assert.match(source, /prove: async \(\) => \{[\s\S]*assertWorkerCredentialAuthority\(JOB_TYPES\)/);
   assert.match(source, /publish: publishWorkerNode/);
   assert.match(source, /configuredJobTypes: JOB_TYPES/);
-  assert.match(controller, /schedule\(proof\.status === "passed" \? refreshMs : retryMs\)/);
+  assert.match(source, /const PREVIEW_ISOLATION_RUN_ID = crypto\.randomUUID\(\)/);
+  assert.match(source, /randomUUID: \(\) => PREVIEW_ISOLATION_RUN_ID/,
+    "all refreshes in one worker process must reuse one isolated-preview hostname");
+  assert.match(controller, /proof\.status === "passed" \? jitterMs : 0/);
   assert.match(controller, /failedPreviewIsolationProof/);
   assert.doesNotMatch(source, /throw error;[\s\S]*worker_preview_isolation_preflight/,
     "a transient readiness failure must not terminate the worker recovery loop");
