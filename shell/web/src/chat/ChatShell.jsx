@@ -330,6 +330,17 @@ function Workspace({ user }) {
     })();
   }, []);
 
+  const acceptApprovedBuild = useCallback((build) => {
+    if (!build?.jobId) return;
+    setView((current) => applyBuildUpdate({
+      ...current,
+      waiting: false,
+      thinking: false,
+      buildReference: { jobId: build.jobId, projectId: build.projectId || null },
+    }, build));
+    watchBuild(build);
+  }, [watchBuild]);
+
   // Live channel: replay history from seq 0, then keep streaming with `after` resume.
   const openConversation = useCallback((conversation) => {
     streamAbort.current?.abort();
@@ -460,11 +471,19 @@ function Workspace({ user }) {
 
   // Historical roster rows stay useful as a record, but only confirmed work may shimmer or read as
   // current. A missing terminal specialist event therefore settles visually after reconstruction.
-  const displayRoster = view.roster.map((row) => {
+  const durableRoster = view.roster.map((row) => {
     if (row.state !== "working") return row;
     if (row.agent === "Lead Agent") return view.thinking ? row : { ...row, state: "done" };
     return view.activeBuild ? row : { ...row, state: "done" };
   });
+  // Admission can acknowledge a queued build before the worker's first specialist event reaches
+  // the conversation stream. Keep that short, valid state visibly "Building" (and cancellable)
+  // without inventing durable history; the synthetic row disappears as soon as a real working
+  // specialist arrives, and refresh reconstructs it from the durable active-build snapshot.
+  const hasWorkingSpecialist = durableRoster.some((row) => row.state === "working" && row.agent !== "Lead Agent");
+  const displayRoster = view.activeBuild && !hasWorkingSpecialist
+    ? [...durableRoster, { agent: "Builder", status: "Starting the buildâ€¦", state: "working", synthetic: true }]
+    : durableRoster;
   const visibleView = { ...view, roster: displayRoster };
   const rail = railState(visibleView);
   const initial = (user.email || "?")[0].toUpperCase();
@@ -829,7 +848,8 @@ function Workspace({ user }) {
               onDeployments={(deploymentId) =>
                 openDashboard(publish.byProduct(active.productId), "deployments", null, deploymentId)} />
             <Thread view={visibleView} pending={pending} onOpenPreview={() => setMobilePreview(true)}
-              onRetry={send} scrollKey={active.id} scrollMemory={scrollMemory} />
+              onRetry={send} onBuildAccepted={acceptApprovedBuild}
+              scrollKey={active.id} scrollMemory={scrollMemory} />
             <div className="ct-model-dock">
               <ModelSelector compact value={active.model_pref || active.modelPref || "auto"}
                 onChange={changeConversationModel}
@@ -1569,7 +1589,10 @@ const RECOVERY_LABEL = {
   continuing: "Continuing…",
 };
 
-function Thread({ view, pending, onOpenPreview, onRetry = null, scrollKey = null, scrollMemory = null }) {
+function Thread({
+  view, pending, onOpenPreview, onRetry = null, onBuildAccepted = null,
+  scrollKey = null, scrollMemory = null,
+}) {
   const ref = useRef(null);
   const atBottom = useRef(true);   // follow the stream only while the user is at the bottom
   const restored = useRef(false);
@@ -1617,6 +1640,7 @@ function Thread({ view, pending, onOpenPreview, onRetry = null, scrollKey = null
         const showWho = item.kind !== "message" ? false : item.role === "lead" && lastRole !== "lead";
         if (item.kind === "message") lastRole = item.role; else lastRole = null;
         return <ThreadItem key={item.seq} item={item} showWho={showWho} onOpenPreview={onOpenPreview} onRetry={onRetry}
+          onBuildAccepted={onBuildAccepted}
           live={view.thinking || view.roster.some((r) => r.state === "working")} waiting={view.waiting} />;
       })}
       {pending && <div className="ct-msg user"><div className="ct-bubble">{pending}</div></div>}
@@ -1635,7 +1659,9 @@ function Thread({ view, pending, onOpenPreview, onRetry = null, scrollKey = null
   );
 }
 
-function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false, waiting = false }) {
+function ThreadItem({
+  item, showWho, onOpenPreview, onRetry = null, onBuildAccepted = null, live = false, waiting = false,
+}) {
   if (item.kind === "message") {
     if (item.role === "user") {
       return (
@@ -1702,7 +1728,7 @@ function ThreadItem({ item, showWho, onOpenPreview, onRetry = null, live = false
     );
   }
   if (item.kind === "budget_approval") {
-    return <BuildBudgetApprovalCard approval={item.approval} />;
+    return <BuildBudgetApprovalCard approval={item.approval} onBuildAccepted={onBuildAccepted} />;
   }
   if (item.kind === "receipt") {
     return <div className="ct-receipt"><span className="ct-rcheck">✓</span> {item.text}</div>;

@@ -5,7 +5,7 @@ import {
   getBuildBudgetApproval,
 } from "../lib/codeAgentApi.js";
 
-const TERMINAL = new Set(["approved", "declined", "expired", "consumed", "cancelled"]);
+const TERMINAL = new Set(["declined", "expired", "consumed", "cancelled"]);
 
 const credits = (value) => {
   const number = Number(value || 0);
@@ -13,7 +13,7 @@ const credits = (value) => {
 };
 
 const statusCopy = (status) => ({
-  approved: "Approved — the build can start.",
+  approved: "Approved — the build is ready to start.",
   consumed: "Approved — the build has started.",
   declined: "Declined — no build or model work was started.",
   expired: "This approval expired. No build or model work was started.",
@@ -22,10 +22,15 @@ const statusCopy = (status) => ({
 
 function unwrap(result, fallbackStatus = null) {
   const value = result?.approval || result || {};
-  return fallbackStatus && !value.status ? { ...value, status: fallbackStatus } : value;
+  const merged = {
+    ...value,
+    ...(Object.hasOwn(result || {}, "build") ? { build: result.build } : {}),
+    ...(Object.hasOwn(result || {}, "resuming") ? { resuming: !!result.resuming } : {}),
+  };
+  return fallbackStatus && !merged.status ? { ...merged, status: fallbackStatus } : merged;
 }
 
-export default function BuildBudgetApprovalCard({ approval }) {
+export default function BuildBudgetApprovalCard({ approval, onBuildAccepted = null }) {
   const [current, setCurrent] = useState(approval || {});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -33,16 +38,30 @@ export default function BuildBudgetApprovalCard({ approval }) {
   useEffect(() => { setCurrent(approval || {}); }, [approval]);
 
   // The durable resolved event is the replay authority. This read closes the small race where the
-  // browser reconnects after the database decision but before that event reaches this stream.
+  // browser reconnects after the database decision but before that event reaches this stream. A
+  // consumed approval with no attached job is a concurrent dispatch in progress, so poll that
+  // narrow state until its durable build appears or reconciliation reopens the approval.
   useEffect(() => {
-    const id = approval?.approvalId;
-    if (!id || TERMINAL.has(String(approval?.status || "pending").toLowerCase())) return undefined;
+    const id = current?.approvalId;
+    const currentStatus = String(current?.status || "pending").toLowerCase();
+    if (!id || (TERMINAL.has(currentStatus) && !current?.resuming)) return undefined;
     let live = true;
-    getBuildBudgetApproval(id)
-      .then((result) => { if (live) setCurrent((value) => ({ ...value, ...unwrap(result) })); })
-      .catch(() => {});
-    return () => { live = false; };
-  }, [approval?.approvalId, approval?.status]);
+    let timer = null;
+    const refresh = async () => {
+      try {
+        const result = await getBuildBudgetApproval(id);
+        if (!live) return;
+        const next = unwrap(result);
+        setCurrent((value) => ({ ...value, ...next }));
+        if (next.build?.jobId) onBuildAccepted?.(next.build);
+        if (next.resuming) timer = setTimeout(refresh, 1_500);
+      } catch {
+        // The SSE replay remains authoritative; a read interruption is not a decision failure.
+      }
+    };
+    void refresh();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [current?.approvalId, current?.status, current?.resuming, onBuildAccepted]);
 
   const decide = async (decision) => {
     if (!current.approvalId || busy) return;
@@ -54,7 +73,10 @@ export default function BuildBudgetApprovalCard({ approval }) {
       setCurrent((value) => ({
         ...value,
         ...unwrap(result, decision === "approve" ? "approved" : "declined"),
+        resumeError: null,
+        resumeErrorCode: null,
       }));
+      if (result?.build?.jobId) onBuildAccepted?.(result.build);
     } catch (requestError) {
       setError(requestError?.message || "That decision did not go through. Nothing was started.");
     } finally {
@@ -63,7 +85,8 @@ export default function BuildBudgetApprovalCard({ approval }) {
   };
 
   const status = String(current.status || "pending").toLowerCase();
-  const pending = !TERMINAL.has(status);
+  const pending = status === "pending";
+  const retryStart = status === "approved" && !current.resuming && !current.build;
   const available = current.availableCredits || {};
   const expires = current.expiresAt ? new Date(current.expiresAt) : null;
   const expiry = expires && Number.isFinite(expires.getTime())
@@ -86,19 +109,26 @@ export default function BuildBudgetApprovalCard({ approval }) {
           <div><b>{credits(available.included)}</b><span>Included available</span></div>
           <div><b>{credits(available.purchased)}</b><span>Additional available</span></div>
         </div>
-        {expiry && pending && <div className="ct-hint">Approval expires {expiry}.</div>}
-        {statusCopy(status) && <div className="ct-budget-result" role="status">{statusCopy(status)}</div>}
-        {error && <div className="mg-error" role="alert">{error}</div>}
-        {pending && (
+        {expiry && (pending || retryStart) && <div className="ct-hint">Approval expires {expiry}.</div>}
+        {current.resuming
+          ? <div className="ct-budget-result" role="status">Approved — starting the build…</div>
+          : statusCopy(status) && <div className="ct-budget-result" role="status">{statusCopy(status)}</div>}
+        {current.resumeError && <div className="mg-error" role="alert">{current.resumeError}</div>}
+        {error && !current.resumeError && <div className="mg-error" role="alert">{error}</div>}
+        {(pending || retryStart) && (
           <div className="ct-actions ct-budget-actions">
             <button className="ct-btn" disabled={!!busy || !current.approvalId}
               onClick={() => decide("approve")}>
-              {busy === "approve" ? "Approving…" : `Approve up to ${credits(current.ceilingCredits)} credits`}
+              {busy === "approve" ? (retryStart ? "Starting…" : "Approving…")
+                : retryStart ? "Retry starting approved build"
+                  : `Approve up to ${credits(current.ceilingCredits)} credits`}
             </button>
-            <button className="ct-btn-quiet" disabled={!!busy || !current.approvalId}
-              onClick={() => decide("decline")}>
-              {busy === "decline" ? "Declining…" : "Decline"}
-            </button>
+            {pending && (
+              <button className="ct-btn-quiet" disabled={!!busy || !current.approvalId}
+                onClick={() => decide("decline")}>
+                {busy === "decline" ? "Declining…" : "Decline"}
+              </button>
+            )}
           </div>
         )}
       </section>

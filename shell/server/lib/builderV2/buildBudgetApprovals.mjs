@@ -26,6 +26,20 @@ function publicApproval(row, credits = null) {
   };
 }
 
+function publicBuild(row) {
+  if (!row) return null;
+  return {
+    jobId: row.id,
+    projectId: row.project_id,
+    status: row.status,
+    phase: row.phase,
+    error: row.error || null,
+    stopReason: row.stop_reason || null,
+    pipelineVersion: row.pipeline_version,
+    workJobId: row.work_job_id || null,
+  };
+}
+
 export function buildBudgetApprovals({
   client = serviceClient(),
   balanceResolver = (owner) => customerCredits(owner, { client }),
@@ -85,14 +99,18 @@ export function buildBudgetApprovals({
       if (!['approve', 'decline'].includes(action)) throw new Error("invalid build budget approval action");
       const current = await this.get(owner, id);
       if (!current) return null;
-      if (current.status !== "pending") return current;
+      if (current.status !== "pending") return { ...current, decisionChanged: false };
       const row = assert(await client.from("bv2_build_budget_approvals").update({
         status: action === "approve" ? "approved" : "declined",
         approved_by: action === "approve" ? owner : null,
         resolved_at: now().toISOString(),
       }).eq("owner", owner).eq("id", id).eq("status", "pending").select("*").maybeSingle(),
       "resolve build budget approval");
-      return row ? { ...publicApproval(row, await balanceResolver(owner)), requestPayload: row.request_payload } : this.get(owner, id);
+      if (!row) return { ...(await this.get(owner, id)), decisionChanged: false };
+      return {
+        ...publicApproval(row, await balanceResolver(owner)), requestPayload: row.request_payload,
+        decisionChanged: true,
+      };
     },
     async consume(owner, id, { conversationId, input }) {
       const row = assert(await client.from("bv2_build_budget_approvals").update({
@@ -121,10 +139,26 @@ export function buildBudgetApprovals({
         dispatch_job_id: jobId,
       }).eq("owner", owner).eq("id", id).eq("status", "consumed")
         .is("dispatch_job_id", null).select("*").maybeSingle(), "attach build budget approval dispatch");
-      if (!row) throw Object.assign(new Error("Consumed build approval could not be attached to its durable job."), {
+      if (row) return publicApproval(row, await balanceResolver(owner));
+      const current = assert(await client.from("bv2_build_budget_approvals").select("*")
+        .eq("owner", owner).eq("id", id).maybeSingle(), "read attached build budget approval");
+      if (current?.status === "consumed" && String(current.dispatch_project_id) === String(projectId)
+          && String(current.dispatch_job_id) === String(jobId)) {
+        return publicApproval(current, await balanceResolver(owner));
+      }
+      throw Object.assign(new Error("Consumed build approval could not be attached to its durable job."), {
         code: "build_budget_approval_attach_failed",
       });
-      return publicApproval(row, await balanceResolver(owner));
+    },
+    async getDispatch(owner, id) {
+      const approval = await this.get(owner, id);
+      if (!approval) return null;
+      const job = assert(await client.from("build_jobs")
+        .select("id,project_id,status,phase,error,stop_reason,pipeline_version,work_job_id,created_at")
+        .eq("owner", owner).eq("budget_approval_id", id)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      "read approved build dispatch");
+      return { approval, build: publicBuild(job) };
     },
   };
 }

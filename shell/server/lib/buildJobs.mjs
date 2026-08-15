@@ -113,7 +113,10 @@ export async function createJob({
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (winner) return { job: rowToJob(winner), existing: true };
     }
-    throw new Error(`could not create build job: ${error.message}`);
+    throw Object.assign(new Error(`could not create build job: ${error.message}`), {
+      code: "build_job_create_failed",
+      publicMessage: "The approval was saved, but Thrallo could not create its durable build job.",
+    });
   }
 
   jobs.set(job.id, job);

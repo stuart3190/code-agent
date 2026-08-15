@@ -100,6 +100,8 @@ export function applyEvent(view, event) {
       next.buildJob = null;
       next.buildActivity = ACTIVITY_STATE.idle;
       next.activeBuild = null;
+      next.waiting = false;
+      next.thinking = false;
       break;
     case "verification_pending":
     case "verification_failed":
@@ -164,7 +166,13 @@ export function applyEvent(view, event) {
       next.items = next.items.map((item) => {
         if (item.kind !== "budget_approval" || item.approval?.approvalId !== payload.approvalId) return item;
         matched = true;
-        return { ...item, approval: { ...item.approval, ...payload } };
+        return {
+          ...item,
+          approval: {
+            ...item.approval, ...payload,
+            resumeError: null, resumeErrorCode: null, resuming: false,
+          },
+        };
       });
       // A compacted stream may start at the resolution. It remains useful as a durable receipt
       // even when its original approval card is outside the retained event window.
@@ -181,6 +189,36 @@ export function applyEvent(view, event) {
         });
       }
       next.waiting = false;
+      break;
+    }
+    case "budget_approval_resume_failed": {
+      let matched = false;
+      next.items = next.items.map((item) => {
+        if (item.kind !== "budget_approval" || item.approval?.approvalId !== payload.approvalId) return item;
+        matched = true;
+        return {
+          ...item,
+          approval: {
+            ...item.approval,
+            status: payload.status || item.approval.status || "approved",
+            resumeError: payload.message || "The approved build could not start.",
+            resumeErrorCode: payload.code || null,
+            build: payload.build || null,
+            resuming: false,
+          },
+        };
+      });
+      if (!matched) {
+        push({
+          kind: "failure",
+          text: payload.message || "The approved build could not start.",
+          reference: payload.code || null,
+        });
+      }
+      next.waiting = false;
+      next.thinking = false;
+      next.activeBuild = null;
+      next.buildActivity = ACTIVITY_STATE.failed;
       break;
     }
     // Recovery states: subtle, honest, never technical. "failed" is handled by lead_error.

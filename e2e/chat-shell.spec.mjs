@@ -686,3 +686,76 @@ test("Stop build is absent when no build is running, and a completion race is no
   // The team finished: nothing to stop, so the control is gone.
   await expect(page.getByTestId("cancel-build")).toHaveCount(0);
 });
+
+test("advanced approval resumes exactly one build and reconstructs after refresh", async ({ page }) => {
+  await stubApi(page);
+  const approvalId = "00000000-0000-4000-8000-000000000060";
+  const build = {
+    jobId: "job-approved-60",
+    projectId: "project-approved-60",
+    status: "queued",
+    phase: "queued",
+  };
+  const approval = {
+    approvalId,
+    requestSummary: "Build an AI-powered Roblox model generator",
+    complexity: "advanced",
+    ceilingCredits: 60,
+    availableCredits: { included: 40, purchased: 30 },
+    status: "pending",
+  };
+  const events = [
+    [1, "message", { role: "user", text: "Build an AI-powered Roblox model generator" }],
+    [2, "message", { role: "lead", text: "Approve the build prompt that appeared, and I'll continue from there." }],
+    [3, "budget_approval_required", approval],
+  ];
+  let approved = false;
+  let approveCalls = 0;
+
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => route.fulfill({
+    json: { conversations: [{
+      id: "c9",
+      title: "Roblox generator",
+      state: approved ? "building" : "waiting_for_approval",
+      activeBuild: approved ? build : null,
+    }] },
+  }));
+  await page.route("**/api/v1/conversations/c9/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
+  });
+  await page.route(`**/api/v1/build-budget-approvals/${approvalId}`, (route) => route.fulfill({
+    json: { approval: { ...approval, status: approved ? "consumed" : "pending" }, build: approved ? build : null },
+  }));
+  await page.route(`**/api/v1/build-budget-approvals/${approvalId}/approve`, async (route) => {
+    approveCalls += 1;
+    approved = true;
+    events.push(
+      [4, "budget_approval_resolved", { approvalId, status: "consumed", build }],
+      [5, "build_started", build],
+      [6, "message", { role: "lead", text: "Approval accepted. Builder V2 started the build automatically." }],
+    );
+    return route.fulfill({ json: { approval: { ...approval, status: "consumed" }, build } });
+  });
+  await page.route("**/api/builds/job-approved-60/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ ...build, status: "running", phase: "running" })}\n\n`,
+  }));
+
+  await page.goto("/");
+  await openProject(page, /Open Roblox generator/);
+  await page.getByRole("button", { name: "Approve up to 60 credits" }).click();
+
+  await expect(page.getByText(/Approved .* the build has started\./)).toBeVisible();
+  await expect(page.getByText("Approval accepted. Builder V2 started the build automatically.")).toBeVisible();
+  await expect(page.getByTestId("cancel-build").locator("visible=true")).toBeVisible();
+  await expect.poll(() => approveCalls).toBe(1);
+
+  await page.reload();
+  await openProject(page, /Open Roblox generator/);
+  await expect(page.getByText(/Approved .* the build has started\./)).toBeVisible();
+  await expect(page.getByText("Approval accepted. Builder V2 started the build automatically.")).toBeVisible();
+  await expect(page.getByTestId("cancel-build").locator("visible=true")).toBeVisible();
+  await expect.poll(() => approveCalls).toBe(1);
+});

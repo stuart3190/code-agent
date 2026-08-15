@@ -330,11 +330,12 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 14);
   assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 77);
+  assert.equal(result.active, 78);
   assert.deepEqual(result.pending, [
     { version: "20260813095526", name: "v2_customer_accounting_and_approvals" },
     { version: "20260813183000", name: "retire_legacy_bv2_accounting_rpcs" },
     { version: "20260813194500", name: "enforce_v2_only_builder_contract" },
+    { version: "20260815095256", name: "drop_v1_build_job_server_id" },
   ]);
 });
 
@@ -389,7 +390,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes historical ledgers and the current 77-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current 78-migration catalog", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
@@ -403,7 +404,8 @@ test("backup/restore recognizes historical ledgers and the current 77-migration 
   assert.equal(runtimeCatalogEvidence(75).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(76).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(77).tables.length, 91);
-  assert.throws(() => runtimeCatalogEvidence(78), /unsupported production migration count/);
+  assert.equal(runtimeCatalogEvidence(78).tables.length, 91);
+  assert.throws(() => runtimeCatalogEvidence(79), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {

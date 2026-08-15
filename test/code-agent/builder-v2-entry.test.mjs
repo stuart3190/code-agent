@@ -103,6 +103,56 @@ test("a configured advanced ceiling can request a larger explicitly approved bud
   }
 });
 
+test("an approved advanced request consumes once and automatically creates one durable V2 job", async () => {
+  const events = [];
+  const calls = { consume: 0, createJob: 0, attach: 0 };
+  const project = { id: "project-approved", name: "Advanced" };
+  const approvalStore = {
+    async consume(_owner, id, match) {
+      calls.consume += 1;
+      assert.equal(id, "approval-advanced");
+      assert.equal(match.conversationId, "conversation-1");
+      return { approvalId: id, status: "consumed", ceilingCredits: 60 };
+    },
+    async attachDispatch(_owner, id, dispatch) {
+      calls.attach += 1;
+      assert.equal(id, "approval-advanced");
+      assert.deepEqual(dispatch, { projectId: project.id, jobId: "job-approved" });
+    },
+  };
+  const client = {
+    from(table) {
+      assert.equal(table, "projects");
+      return { insert: (input) => {
+        assert.equal(input.budget_approval_id, "approval-advanced");
+        return { select: () => ({ single: async () => ({ data: project, error: null }) }) };
+      } };
+    },
+  };
+  const result = await startAppBuildV2({
+    owner: "owner-1", conversation: { id: "conversation-1", product_id: null },
+    conversations: {}, emit: async (type, payload) => events.push({ type, payload }),
+  }, { description: "Build a collaborative IDE with a Monaco code editor and node graph" }, {
+    approvalId: "approval-advanced",
+    deps: {
+      client, approvalStore,
+      workerEnabled: () => true,
+      requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
+      resolveBuildContext: async () => ({ byok: true }),
+      startDiagSessionSafe: async () => ({ id: "diag-approved", recorderForJob: () => ({ sessionId: "diag-approved" }) }),
+      createJob: async (input) => {
+        calls.createJob += 1;
+        assert.equal(input.budgetApprovalId, "approval-advanced");
+        return { job: { id: "job-approved", projectId: project.id, subscribers: new Set() }, existing: false };
+      },
+    },
+  });
+  assert.equal(result.result.jobId, "job-approved");
+  assert.deepEqual(calls, { consume: 1, createJob: 1, attach: 1 });
+  assert.deepEqual(events.map((event) => event.type), ["build_started", "budget_approval_resolved"]);
+  assert.equal(events[1].payload.status, "consumed");
+});
+
 test("a consumed large-build approval reopens when dispatch fails before any durable job exists", async () => {
   const approval = { approvalId: "approval-1", complexity: "advanced", ceilingCredits: 60, status: "consumed" };
   const reopened = [];
