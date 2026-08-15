@@ -509,6 +509,8 @@ export function createBuilderV2Runtime({
             job_type: "browser_verify", attempts: workJob.attempts || 1,
             payload: { previewUrl: previewResult.url,
               contract: { ...journeyContract, journeys: [journey],
+                allJourneys: journeyContract?.journeys || [],
+                prerequisiteInteractionContract: journeyContract?.interactionContract || null,
                 interactionContract: scopeInteractionContract(journeyContract?.interactionContract, [journey]) },
               timeoutMs: 180_000 },
             resource_limits: runtimeLimits(workJob, "browser_verify"),

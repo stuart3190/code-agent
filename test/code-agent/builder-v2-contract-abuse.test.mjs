@@ -187,10 +187,10 @@ const PRIMARY = { id: "book", title: "A guest books a seat", priority: "primary"
 const withJourneys = (journeys, operations = [{ id: "create-booking", entity: "booking", kind: "create", journey: "book" }]) =>
   ({ ...BASE, operations, journeys: [PRIMARY, ...journeys] });
 
-const prerequisitesFor = async (contract, journeyId) => {
+const prerequisitesFor = async (contract, journeyId, options = undefined) => {
   const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
   const flows = deriveBuildSpec(contract).interactionContract?.flows || [];
-  return journeyPrerequisites(flows, journeyId, "book").controls
+  return journeyPrerequisites(flows, journeyId, "book", options).controls
     .map((flow) => flow.control?.logicalField || flow.control?.accessibleName);
 };
 
@@ -221,6 +221,28 @@ test("a journey that works from an existing record walks no wizard", async () =>
       expect: "the saved booking is displayed" },
     { action: "cancel the booking", target: "cancel booking control", expect: "the status is Cancelled" }] }]);
   assert.deepEqual(await prerequisitesFor(contract, "cancel"), []);
+});
+
+test("an isolated saved-record journey can reconstruct the primary durable state", async () => {
+  const contract = withJourneys([{ id: "history", title: "Saved history", priority: "secondary", steps: [
+    { action: "open an existing saved record", target: "history item", expect: "the saved record is visible" },
+  ] }]);
+  const controls = await prerequisitesFor(contract, "history", {
+    requiresPrimaryRecord: true, reconstructIsolated: true,
+  });
+  assert.ok(controls.includes("guestName"), JSON.stringify(controls));
+  assert.match(controls.at(-1), /confirm booking/i,
+    "setup includes the durable primary mutation rather than authentication alone");
+});
+
+test("read-only fields from one object selection do not become several invented choices", async () => {
+  const { interactionFlowsFor } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const contract = { journeys: [{ id: "inspect", steps: [{ action: "select an object", reads: ["objectId"] }] }],
+    interactionContract: { flows: ["modelSpec", "objectGraph", "objectId", "parentObjectId"].map((field) => ({
+      journeyId: "inspect", stepIndex: 0, kind: "selection",
+      control: { logicalField: field, accessibleName: field, machineId: `id-${field}` },
+    })) } };
+  assert.deepEqual(interactionFlowsFor(contract, "inspect", 0).map((flow) => flow.control.logicalField), ["objectId"]);
 });
 
 test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {

@@ -104,6 +104,8 @@ test("invalid-value generation follows the same concept", () => {
   assert.equal(invalidValueFor("guestEmail", ["text"]), "not-an-email");
   assert.equal(invalidValueFor("partySize", ["text"]), "not-a-number");
   assert.equal(invalidValueFor("guestCount", ["text"]), "not-a-number");
+  assert.equal(invalidValueFor("size", ["text"]), "0, 0, 0",
+    "a vector size has a deterministic invalid value even when represented by one text field");
   // A name has no rule the contract states, so none is invented — and it is certainly not a number.
   assert.equal(invalidValueFor("guestName", ["text"]), null);
   assert.equal(invalidValueFor("customerName", ["text"]), null);

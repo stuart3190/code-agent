@@ -28,6 +28,9 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
   assert.match(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
     "the browser worker receives the machine-readable contract rather than English journeys alone");
   assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
+  assert.match(runtime, /prerequisiteInteractionContract: journeyContract\?\.interactionContract/,
+    "isolated journey verification retains the full contract needed to reconstruct prerequisites");
+  assert.match(runtime, /allJourneys: journeyContract\?\.journeys/);
   assert.match(verification, /backendEvidence: outcome\.backendEvidence \|\| null/);
   assert.match(runtime, /mode === "resume_verify"[\s\S]*runVerifyFromCheckpoint/,
     "checkpoint verification must resume directly from immutable V2 state");

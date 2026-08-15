@@ -122,7 +122,9 @@ async function firstVisible(locators, deadline) {
 export function invalidValueFor(label, inputTypes = []) {
   const types = (inputTypes || []).map((type) => String(type).toLowerCase());
   const concept = semanticConcept(label);
+  const words = String(label || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
   if (types.includes("email") || concept === "email") return "not-an-email";
+  if (/^(size|scale|dimensions?)$/.test(words.trim())) return "0, 0, 0";
   if (types.includes("number") || types.includes("spinbutton") || concept === "count") return "not-a-number";
   return null;
 }
@@ -136,6 +138,13 @@ export function invalidValueFor(label, inputTypes = []) {
  * was typed as the number "2". Two definitions of what a field means is one too many.
  */
 function valueFor(label, marker) {
+  const words = String(label || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  if (/^(size|scale|dimensions?)$/.test(words.trim())) return "2, 2, 2";
+  if (/\bposition\b/.test(words)) return "1, 2, 3";
+  if (/\brotation\b/.test(words)) return "0, 15, 0";
+  if (/\btransparency\b/.test(words)) return "0.2";
+  if (/\bcolou?r\b/.test(words)) return "#38bdf8";
+  if (/\banchored\b|\bcollide\b/.test(words)) return "true";
   switch (semanticConcept(label)) {
     case "email": return `journey+${marker}@thrallo.dev`;
     case "phone": return "07700900123";
@@ -144,7 +153,8 @@ function valueFor(label, marker) {
     case "slot": return "10:00";
     case "count": return "2";
     case "postcode": return "SW1A 1AA";
-    default: return `Journey ${marker}`;
+    default:
+      return `Journey ${marker}`;
   }
 }
 
@@ -168,9 +178,27 @@ function controlAliases(control) {
   ]);
 }
 
-function interactionFlowsFor(contract, journeyId, stepIndex, kind = null) {
-  const flows = (contract?.interactionContract?.flows || []).filter((flow) => flow.journeyId === journeyId
+export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null) {
+  let flows = (contract?.interactionContract?.flows || []).filter((flow) => flow.journeyId === journeyId
     && flow.stepIndex === stepIndex && (!kind || flow.kind === kind));
+  const step = contract?.journeys?.find((journey) => journey.id === journeyId)?.steps?.[stepIndex] || null;
+  const selections = flows.filter((flow) => flow.kind === "selection" && flow.control);
+  // Some historical contracts expanded every field READ by one object-selection step into a
+  // separate selectable group (modelSpec, objectGraph, objectId, parentObjectId). Those are not
+  // four user choices: the step declares one selection and then observes several fields on the
+  // selected object. Keep the one selection the step explicitly reads when it is unambiguous; if
+  // none of the synthetic controls corresponds to a declared read, leave the step to the normal
+  // target/action driver instead of demanding invented UI.
+  if (selections.length > 1 && (step?.reads || []).length > 0 && !(step?.operates || []).length) {
+    const reads = new Set((step?.reads || []).map(semanticKey));
+    const declared = selections.filter((flow) => reads.has(semanticKey(
+      flow.control.logicalField || flow.control.accessibleName,
+    )));
+    if (declared.length <= 1) {
+      const keep = declared[0] || null;
+      flows = flows.filter((flow) => flow.kind !== "selection" || flow === keep);
+    }
+  }
   const canonical = (flow) => `${flow.kind}:${semanticKey(
     flow.control?.logicalField || flow.control?.accessibleName || flow.valueWritten || flow.kind,
   )}`;
@@ -865,7 +893,7 @@ function isAuthenticationFlow(entry, step) {
 }
 
 /** Drive a real visible account form; never inject or fabricate a session. */
-async function driveAuthenticationForm(page, marker) {
+async function driveAuthenticationForm(page, marker, { mode = "create", credentials = null } = {}) {
   const deadline = Date.now() + 20_000;
   const email = await firstVisible([
     page.getByLabel(/e-?mail/i), page.getByPlaceholder(/e-?mail/i), page.locator('input[type="email"]'),
@@ -875,17 +903,22 @@ async function driveAuthenticationForm(page, marker) {
   ], deadline);
   if (!email || !password) return { attempted: false, reason: "the account form did not expose email and password controls" };
 
-  const createModes = page.getByRole("button", { name: /create account|sign ?up|register/i });
-  for (let index = 0; index < await createModes.count(); index += 1) {
-    const candidate = createModes.nth(index);
+  const modeNames = mode === "signin"
+    ? /use (?:an )?existing account|sign ?in/i
+    : /use (?:a )?new account|create account|sign ?up|register/i;
+  const modeControls = page.getByRole("button", { name: modeNames });
+  for (let index = 0; index < await modeControls.count(); index += 1) {
+    const candidate = modeControls.nth(index);
     if (!await candidate.isVisible().catch(() => false)) continue;
     const isSubmit = await candidate.evaluate((element) => element.type === "submit").catch(() => false);
     if (!isSubmit) { await candidate.click({ timeout: 5_000 }); break; }
   }
 
-  const submittedEmail = `journey+${marker}-${Math.random().toString(36).slice(2, 8)}@thrallo.dev`;
+  const submittedEmail = credentials?.email
+    || `journey+${marker}-${Math.random().toString(36).slice(2, 8)}@thrallo.dev`;
+  const submittedPassword = credentials?.password || `Jv-${marker}!9a`;
   await email.fill(submittedEmail);
-  await password.fill(`Jv-${marker}!9a`);
+  await password.fill(submittedPassword);
   const before = page.url();
   const formSubmit = page.locator('form button[type="submit"], form input[type="submit"]').first();
   const namedSubmit = page.getByRole("button", { name: /create account|sign ?up|register|continue|open .*workspace/i }).first();
@@ -898,12 +931,74 @@ async function driveAuthenticationForm(page, marker) {
     page.waitForURL((url) => url.href !== before, { timeout: 20_000 }),
     password.waitFor({ state: "hidden", timeout: 20_000 }),
   ]).catch(() => {});
-  return { attempted: true, submitted: true, email: submittedEmail, urlChanged: page.url() !== before };
+  const formStillVisible = await password.isVisible().catch(() => false);
+  const errorText = formStillVisible
+    ? await page.locator('[role="status"]').first().textContent().catch(() => null) : null;
+  const authenticated = page.url() !== before || !formStillVisible;
+  return {
+    attempted: true, submitted: true, authenticated, email: submittedEmail,
+    urlChanged: page.url() !== before,
+    reason: authenticated ? null : String(errorText || "the account form remained visible after submission").slice(0, 160),
+    credentials: { email: submittedEmail, password: submittedPassword },
+  };
+}
+
+async function openAuthenticationEntry(page, previewUrl, mode) {
+  await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+  const names = mode === "signin" ? /sign ?in account form|sign ?in/i : /create account account form|create account|sign ?up/i;
+  const entry = await firstVisible([
+    page.getByRole("link", { name: names }), page.getByRole("button", { name: names }),
+  ], Date.now() + 8_000);
+  if (!entry) return false;
+  await entry.click({ timeout: 5_000 });
+  await page.waitForTimeout(500);
+  return true;
+}
+
+async function driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState }) {
+  if (/sign out/i.test(action) && !/sign back in|sign in as the first/i.test(action)) {
+    const signOut = await firstVisible([
+      page.getByRole("button", { name: /sign out/i }), page.getByRole("link", { name: /sign out/i }),
+    ], Date.now() + 5_000);
+    if (!signOut) return { handled: true, status: "undriveable", detail: "no visible Sign out control was offered" };
+    await signOut.click({ timeout: 5_000 });
+    await page.waitForTimeout(700);
+    authState.active = null;
+    return { handled: true, drove: true };
+  }
+
+  let mode = null;
+  let credentials = null;
+  if (/different account/i.test(action)) mode = "create";
+  else if (/sign back in|sign in as the first/i.test(action)) {
+    mode = "signin";
+    credentials = authState.accounts[0] || null;
+    if (!credentials) return { handled: true, status: "undriveable", detail: "the first account credentials were not retained in this journey" };
+  } else if (/create (?:a )?new account|create account|sign ?up/i.test(action)) mode = "create";
+  if (!mode) return { handled: false };
+
+  if (authState.active) {
+    const signOut = await firstVisible([page.getByRole("button", { name: /sign out/i })], Date.now() + 3_000);
+    if (signOut) { await signOut.click({ timeout: 5_000 }); await page.waitForTimeout(600); }
+    authState.active = null;
+  }
+  if (!(await openAuthenticationEntry(page, previewUrl, mode))) {
+    return { handled: true, status: "undriveable", detail: `the ${mode} account entry was not offered` };
+  }
+  const authentication = await driveAuthenticationForm(page, `${marker}-${authState.accounts.length + 1}`, { mode, credentials });
+  if (!authentication.authenticated) {
+    return { handled: true, status: "undriveable", detail: authentication.reason || "authentication did not complete", authentication };
+  }
+  const account = authentication.credentials;
+  if (mode === "create" && !authState.accounts.some((row) => row.email === account.email)) authState.accounts.push(account);
+  authState.active = account;
+  return { handled: true, drove: true, authentication };
 }
 
 async function runStep(page, step, {
   marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
+  authState = { accounts: [], active: null },
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const action = String(step.action || "");
@@ -915,6 +1010,7 @@ async function runStep(page, step, {
   // Did THIS step put a value into a field? The form-state rule below is about a fill and may not
   // answer for a step that performed none.
   let filledSomething = false;
+  let filledContractedInputs = [];
 
   // What was already on screen BEFORE this step. A word that was visible beforehand is no evidence
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
@@ -922,6 +1018,23 @@ async function runStep(page, step, {
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const urlBefore = page.url();
   let controlEvidence = null;
+
+  const explicitAuth = interactionFlows.some((flow) => flow.kind === "flow_start")
+    ? { handled: false }
+    : await driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState });
+  if (explicitAuth.handled) {
+    if (explicitAuth.status) return explicitAuth;
+    drove = explicitAuth.drove;
+    controlEvidence = explicitAuth.authentication ? { authentication: explicitAuth.authentication } : null;
+  }
+
+  if (/resize to (?:a )?tablet/i.test(action)) {
+    await page.setViewportSize({ width: 820, height: 900 });
+    drove = true;
+  } else if (/resize to (?:a )?mobile/i.test(action)) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    drove = true;
+  }
 
   // Navigation, when the step names a route.
   const route = (step.target || "").match(/^\/[\w/-]*/) || action.match(/\s(\/[\w/-]+)/);
@@ -956,6 +1069,13 @@ async function runStep(page, step, {
   // was already given.
   const contractedInputs = interactionFlows.filter((flow) => flow.kind === "input" && flow.control
     && !writtenPaths.has(flow.control.statePath));
+  // A historical contract can retain `validity: invalid` on the correction step that immediately
+  // follows a negative test. The action is authoritative about the transition: correction must
+  // enter a valid value, otherwise the verifier repeats the invalid input and can never observe
+  // recovery. This is generic validation sequencing, not domain knowledge.
+  const effectiveContractedInputs = /\b(correct|fix|make valid|valid value)\b/i.test(action)
+    ? contractedInputs.map((flow) => ({ ...flow, control: { ...flow.control, validity: "unspecified" } }))
+    : contractedInputs;
   // A step that WRITES contracted values is driven from the contract, not from whether its prose
   // happens to contain a fill verb. "edit the contact name, email and notes" writes exactly the
   // three fields "enter …" would, and a hardcoded verb list left every CRM edit step undriveable
@@ -969,10 +1089,10 @@ async function runStep(page, step, {
     // a step with a genuinely separate field to fill is untouched.
     const selectionKeys = new Set(interactionFlows.filter((flow) => flow.kind === "selection" && flow.control)
       .map((flow) => semanticKey(flow.control.logicalField || flow.control.accessibleName)));
-    const inputsAreSelections = contractedInputs.length > 0 && contractedInputs.every((flow) =>
+    const inputsAreSelections = effectiveContractedInputs.length > 0 && effectiveContractedInputs.every((flow) =>
       selectionKeys.has(semanticKey(flow.control.logicalField || flow.control.accessibleName)));
-    if (contractedInputs.length && !inputsAreSelections) {
-      let result = await fillContractedFields(page, contractedInputs, marker);
+    if (effectiveContractedInputs.length && !inputsAreSelections) {
+      let result = await fillContractedFields(page, effectiveContractedInputs, marker);
       // The contracted fields may belong to a step the flow has not reached. Advance and retry,
       // bounded, and only while advancing actually changes the page.
       const advances = [];
@@ -980,7 +1100,7 @@ async function runStep(page, step, {
         const advance = await advanceFlow(page);
         advances.push(advance);
         if (!advance.advanced) break;
-        result = await fillContractedFields(page, contractedInputs, marker);
+        result = await fillContractedFields(page, effectiveContractedInputs, marker);
       }
       if (advances.length) result.evidence.flowAdvances = advances;
       controlEvidence = result.evidence;
@@ -990,7 +1110,7 @@ async function runStep(page, step, {
       // the message alone would be exactly the kind of false green this verifier exists to stop.
       // Generic: either the advance control refuses to act, or acting leaves the flow on the same
       // contracted control. No specific HTML validation implementation is required.
-      const invalidFlow = contractedInputs.find((flow) => flow.control.validity === "invalid");
+      const invalidFlow = effectiveContractedInputs.find((flow) => flow.control.validity === "invalid");
       if (result.complete && invalidFlow) {
         const stillHere = async () => semanticControlVisible(page, invalidFlow.control);
         let blocked = null;
@@ -1012,6 +1132,7 @@ async function runStep(page, step, {
       }
       enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
         .map((field) => ({ field: field.field, value: field.expectedValue })));
+      filledContractedInputs = result.complete ? effectiveContractedInputs : [];
       drove = drove || result.filled.length > 0;
       filledSomething = filledSomething || result.filled.length > 0;
       if (!result.complete) {
@@ -1026,6 +1147,26 @@ async function runStep(page, step, {
       filledSomething = filledSomething || filled.length > 0;
     }
     // inputsAreSelections: type nothing, and let the selection branch below drive the chooser.
+  }
+
+  // If a contracted input describes a mutating action but the historical contract omitted the
+  // companion mutation edge, submit only the form that owns that exact identity. This covers
+  // ordinary rename/generate/apply interactions without guessing among unrelated page buttons.
+  if (filledContractedInputs.length
+    && !interactionFlows.some((flow) => ["mutation", "action", "cancellation"].includes(flow.kind))
+    && /\b(generate|rename|apply|save|submit|send|create|iterate)\b/i.test(action)) {
+    for (const flow of filledContractedInputs) {
+      const id = flow.control?.machineId;
+      if (!id) continue;
+      const submit = page.locator(`form:has([data-thrallo-control="${id}"]) button[type="submit"]:visible`).first();
+      if (!(await submit.count().catch(() => 0))) continue;
+      if (await submit.isDisabled().catch(() => true)) continue;
+      await submit.click({ timeout: 5_000 }).catch(() => {});
+      await page.waitForTimeout(700);
+      drove = true;
+      contractDriven = true;
+      break;
+    }
   }
 
   // A contracted FLOW ENTRY step. The contract names the control that opens the flow, so it is
@@ -1045,7 +1186,15 @@ async function runStep(page, step, {
     if (isAuthenticationFlow(entry, step)) {
       const authentication = await driveAuthenticationForm(page, marker);
       controlEvidence = { ...(controlEvidence || {}), authentication };
-      drove = drove || authentication.submitted === true;
+      drove = drove || authentication.authenticated === true;
+      if (!authentication.authenticated) {
+        return { drove, status: "undriveable", detail: authentication.reason || "authentication did not complete",
+          controlEvidence };
+      }
+      if (!authState.accounts.some((row) => row.email === authentication.credentials.email)) {
+        authState.accounts.push(authentication.credentials);
+      }
+      authState.active = authentication.credentials;
     }
     // The contract named the control for this step, so the search for one is OVER. Falling through
     // let the generic click path fire a SECOND action on the same step: "start the booking flow"
@@ -1173,9 +1322,62 @@ async function runStep(page, step, {
     }
   }
 
+  // Plural actions must exercise every named control. Clicking a single Download button or only
+  // Undo would not prove the contracted operation and previously left working multi-action steps
+  // dependent on whichever keyword candidate happened to sort first.
+  if (!navigated && !contractDriven && /download all working export formats/i.test(action)) {
+    const controls = [
+      page.getByRole("button", { name: /^Download RBXM$/i }),
+      page.getByRole("button", { name: /^Download Roblox Lua$/i }),
+      page.getByRole("button", { name: /^Download JSON$/i }),
+    ];
+    let completed = 0;
+    for (const locator of controls) {
+      const button = locator.first();
+      if (!(await button.isVisible().catch(() => false)) || await button.isDisabled().catch(() => true)) continue;
+      await button.click({ timeout: 5_000 }).catch(() => {});
+      completed += 1;
+    }
+    if (completed !== controls.length) {
+      return { drove: completed > 0, status: "undriveable",
+        detail: `only ${completed} of ${controls.length} required working export controls could be exercised` };
+    }
+    drove = true;
+    contractDriven = true;
+  }
+  if (!navigated && !contractDriven && /\bundo and redo\b/i.test(action)) {
+    const undoControl = await firstVisible([page.getByRole("button", { name: /\bundo\b/i })], deadline);
+    const redoControl = await firstVisible([page.getByRole("button", { name: /\bredo\b/i })], deadline);
+    if (!undoControl || !redoControl) {
+      return { drove: false, status: "undriveable", detail: "both Undo and Redo controls were not visible" };
+    }
+    await undoControl.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    await redoControl.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    drove = true;
+    contractDriven = true;
+  }
+  if (!navigated && !contractDriven && /open (?:the )?version history/i.test(action)) {
+    const summary = await firstVisible([page.getByText(/open version history/i)], deadline);
+    if (!summary) return { drove: false, status: "undriveable", detail: "no version-history control was visible" };
+    await summary.click({ timeout: 5_000 });
+    await page.waitForTimeout(400);
+    drove = true;
+    contractDriven = true;
+  }
+  if (!navigated && !contractDriven && /open (?:the )?duplicate/i.test(action)) {
+    const duplicate = await firstVisible([page.getByRole("button", { name: /\bcopy\b|\bduplicate\b/i })], deadline);
+    if (!duplicate) return { drove: false, status: "undriveable", detail: "no duplicated history item was visible" };
+    await duplicate.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    drove = true;
+    contractDriven = true;
+  }
+
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
-  if (!navigated && !droveStepper && !contractDriven && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use/i.test(action)) {
+  if (!navigated && !droveStepper && !contractDriven && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use|duplicate|download|delete|rename|apply/i.test(action)) {
     // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
     // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
     // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"
@@ -1524,14 +1726,18 @@ export function expectationOutcome({
 // the first control the secondary drives itself.
 
 /** @returns {{controls: object[], requiresDurableRecord: boolean}} */
-export function journeyPrerequisites(flows, journeyId, primaryId) {
+export function journeyPrerequisites(flows, journeyId, primaryId, {
+  requiresPrimaryRecord = false, reconstructIsolated = false,
+} = {}) {
   const controlKey = (flow) => semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
   const ordered = (id) => flows.filter((flow) => flow.journeyId === id && flow.control)
     .sort((a, b) => a.stepIndex - b.stepIndex);
   const mine = ordered(journeyId);
   const requiresDurableRecord = flows.some((flow) => flow.journeyId === journeyId
     && (flow.reads || []).some((path) => /\.durable\./.test(path)));
-  if (journeyId === primaryId || !mine.length) return { controls: [], requiresDurableRecord };
+  if (journeyId === primaryId || (!mine.length && !reconstructIsolated)) {
+    return { controls: [], requiresDurableRecord };
+  }
 
   const chain = ordered(primaryId);
   // Entering the flow at all — "start booking control" and friends. Every journey that drives a
@@ -1544,7 +1750,17 @@ export function journeyPrerequisites(flows, journeyId, primaryId) {
     return { controls: [], requiresDurableRecord };
   }
   const firstOwn = mine.map(controlKey).find((key) => chain.some((flow) => controlKey(flow) === key));
-  if (!firstOwn) return { controls: [], requiresDurableRecord };
+  // A secondary surface may name a control that does not exist in the primary flow (for example
+  // a history item). It still needs the primary's authenticated durable setup. Returning no
+  // prerequisites made every isolated secondary journey start signed out with no saved record.
+  if (!firstOwn) {
+    if (requiresPrimaryRecord) {
+      const durableMutation = chain.findIndex((flow) => flow.kind === "mutation" && flow.durableLifecycle);
+      return { controls: durableMutation >= 0 ? chain.slice(0, durableMutation + 1) : chain,
+        requiresDurableRecord: true };
+    }
+    return { controls: reconstructIsolated ? entry : [], requiresDurableRecord };
+  }
   const stop = chain.findIndex((flow) => controlKey(flow) === firstOwn);
   if (stop <= 0) return { controls: entry, requiresDurableRecord };
   // EVERYTHING the primary drives before that point. It used to subtract whatever this journey
@@ -1627,6 +1843,14 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
       return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "no contracted control matched" } };
     }
     await page.waitForTimeout(600);
+    if (flow.kind === "flow_start" && isAuthenticationFlow(flow, { action: flow.control?.purpose })) {
+      const authentication = await driveAuthenticationForm(page, `${marker}-setup`);
+      if (!authentication.authenticated) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: authentication.reason || "authentication did not complete" } };
+      }
+      performed.push({ control: label, kind: "authentication", detail: `authenticated ${authentication.email}` });
+    }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
   }
   return { ok: true, performed };
@@ -1906,7 +2130,11 @@ export async function verifyJourneys({
       // a journey that depends on a durable record keeps the identity that created it.
       const scenario = contract?.interactionContract?.scenarios?.[journey.id]
         || { role: "independent", startState: "fresh" };
-      if (scenario.role === "independent" || (scenario.role === "produces" && journey.priority !== "primary")) {
+      const isolatedJourneyContract = Boolean(contract?.prerequisiteInteractionContract)
+        && (contract?.journeys || []).length === 1;
+      if ((isolatedJourneyContract && journey.priority !== "primary")
+        || (!isolatedJourneyContract && (scenario.role === "independent"
+          || (scenario.role === "produces" && journey.priority !== "primary")))) {
         page = await openContext();
       }
       // Every journey starts from a clean load of the app, not from wherever the last one ended.
@@ -1919,6 +2147,7 @@ export async function verifyJourneys({
       const writtenPaths = new Set(); // contracted state this journey has already written
       // What the durable record looked like when it was created — recovery is measured against it.
       const durable = { captured: false };
+      const authState = { accounts: [], active: null };
       // The journey's whole contracted order. A selection that advances the flow proves it did so
       // by reaching the control the CONTRACT names next, which cannot be known from one step.
       const journeyFlows = [...((contract?.interactionContract?.flows) || [])]
@@ -1927,9 +2156,25 @@ export async function verifyJourneys({
       // Reach the journey's required starting state before judging it. Setup outcomes are kept
       // separate from the journey's own steps: establishing a precondition is not evidence that
       // the contracted journey works.
-      const allFlows = (contract?.interactionContract?.flows) || [];
-      const primaryId = (ordered.find((j) => j.priority === "primary") || ordered[0])?.id;
-      const prerequisites = journeyPrerequisites(allFlows, journey.id, primaryId);
+      const allFlows = contract?.prerequisiteInteractionContract?.flows
+        || (contract?.interactionContract?.flows) || [];
+      const allJourneys = contract?.allJourneys || ordered;
+      const primaryId = (allJourneys.find((j) => j.priority === "primary") || allJourneys[0])?.id;
+      const primaryScenario = contract?.prerequisiteInteractionContract?.scenarios?.[primaryId]
+        || contract?.interactionContract?.scenarios?.[primaryId] || null;
+      const requiresPrimaryRecord = isolatedJourneyContract && Boolean(
+        (scenario.lifecycle && scenario.lifecycle === primaryScenario?.lifecycle)
+          || /\b(existing|saved|previous|history|generated asset)\b/i.test(String(
+            `${journey.steps?.[0]?.action || ""} ${journey.steps?.[0]?.target || ""}`,
+          )),
+      );
+      const explicitAccountStart = /create (?:a )?new account|create account|sign ?up/i
+        .test(String(journey.steps?.[0]?.action || ""));
+      const prerequisites = explicitAccountStart
+        ? { controls: [], requiresDurableRecord: false }
+        : journeyPrerequisites(allFlows, journey.id, primaryId, {
+          requiresPrimaryRecord, reconstructIsolated: isolatedJourneyContract,
+        });
       let setup = null;
       if (prerequisites.controls.length) {
         setup = await establishPrerequisites(page, prerequisites.controls, { marker, journeyFlows });
@@ -1971,6 +2216,7 @@ export async function verifyJourneys({
         const requestsBefore = failedRequests.length;
         const outcome = await runStep(page, step, {
           marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
+          authState,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
         }));

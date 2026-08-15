@@ -21,12 +21,14 @@ export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
   const [prompt, setPrompt] = useState("");
   const [created, setCreated] = useState(false);
+  const [authMode, setAuthMode] = useState("signin");
   const go = (next) => { window.history.pushState({}, "", next); setPath(next); };
   if (path === "/auth") return <main><h1>Authentication</h1>
-    <button type="button">Create account</button>
+    <button type="button" onClick={() => setAuthMode("signin")}>Use existing account</button>
+    <button type="button" onClick={() => setAuthMode("create")}>Use new account</button>
     <form onSubmit={(event) => { event.preventDefault(); go("/app"); }}>
       <label>Email<input type="email" /></label><label>Password<input type="password" /></label>
-      <button type="submit">Open editor workspace</button>
+      <button type="submit">{authMode === "create" ? "Create account" : "Sign in"}</button>
     </form></main>;
   if (path === "/app") return <main><h1>Editor workspace</h1><p>signed-in account menu</p>
     <label>original Prompt<input value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
