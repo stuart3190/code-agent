@@ -7,8 +7,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
-  createModelLanes, estimatePromptTokens, headroomDispatchScope, jobUsageBucket, planCallReservation,
-  renderPatchPrompt, repairFailureOwnedPaths, repairFailureReferences,
+  causalRepairProblems, createModelLanes, estimatePromptTokens, HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
+  headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
+  repairFailureOwnedPaths, repairFailureReferences,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
@@ -218,12 +219,122 @@ test("browser-repair headroom batching targets only evidence owners and fits a u
   assert.ok(plan.estimatedInputTokens > 0, "the dispatch records its deterministic prompt estimate");
 });
 
+test("an irreducible large component resizes to exact causal fragments inside retained headroom", async () => {
+  const filePath = "src/components/A.jsx";
+  const filler = Array.from({ length: 350 }, (_, index) => `  // unrelated retained line ${index}`).join("\n");
+  const source = [
+    'import { useState } from "react";',
+    "export default function Planner() {",
+    '  const [user, setUser] = useState(null);',
+    '  const [project, setProject] = useState(null);',
+    filler,
+    '  function newProject() { setProject({ name: "Workspace Project" }); }',
+    filler,
+    '  if (!user) return <section><button onClick={newProject}>New Project control</button></section>;',
+    '  return <main><h1>{project?.name || "No project selected"}</h1><p>Workspace header room setup</p></main>;',
+    "}",
+  ].join("\n");
+  const fixture = oversizedModuleFixture({ source });
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure", journeyId: "send-message",
+    userAction: "create a new project",
+    expectedOutcome: "project name appears in workspace header and room setup becomes editable",
+    detail: "expected project, name, workspace, header, room; found project, name",
+    responsibleModules: [filePath], stateOwners: [filePath],
+  });
+  const fullFileScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], semanticFiles: [filePath], logicalStep: "repair",
+  });
+  const fragmentScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], semanticFiles: [filePath], logicalStep: "repair", previousScope: fullFileScope,
+  });
+  assert.equal(fragmentScope.fragmented, true);
+  assert.deepEqual(fragmentScope.allowedFiles, [filePath]);
+  assert.equal(fragmentScope.remainingFiles.length, 0);
+  const excerpt = fragmentScope.fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /newProject/);
+  assert.match(excerpt, /if \(!user\)/);
+  assert.ok(excerpt.length < source.length / 3, "unrelated retained source is not resent");
+  assert.deepEqual(headroomSourceFragments(source, [problem]),
+    fragmentScope.fragments.map(({ path: _path, ...fragment }) => fragment));
+
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "repair", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], headroomScope: fragmentScope,
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /replace_exact/);
+  assert.doesNotMatch(prompt, /unrelated retained line 120/);
+  const plan = planCallReservation({
+    systemPrompt: HEADROOM_FRAGMENT_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: prompt }], tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 10_000, callCeilingCredits: 6, repairAllowanceCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: fragmentScope.expectedPatchTokens },
+    budget: { approvedCeilingCredits: 12, consumedCredits: 11.4303,
+      reservedCredits: 0, remainingCredits: 0.5697 },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200);
+  assert.ok(plan.estimatedInputTokens < 4_500, plan.estimatedInputTokens);
+
+  let providerCalls = 0;
+  const logs = [];
+  const reservations = memoryModelReservations();
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async (options) => {
+      providerCalls += 1;
+      assert.match(options.messages[0].content, /RETAINED CANDIDATE MICRO-REPAIR/);
+      return {
+        text: "", toolCalls: [{ id: "micro", name: "emit_patches", arguments: { patches: [{
+          file: filePath, ops: [{ op: "replace_exact", symbol: "if (!user)", content: "if (!user && !project)" }],
+        }] } }],
+        usage: { input: 500, output: 100, total: 600, providerRequestId: "req-micro" },
+      };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 10_000,
+    } }),
+    ceilingCredits: 0.5697, reservations, knowledgeStore: memoryKnowledgeStore(),
+    log: (line) => logs.push(line),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "micro-build", step: "repair", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [problem],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+  });
+  assert.equal(providerCalls, 1, "full-file refusals occur before dispatch; only the micro prompt reaches the provider");
+  assert.equal(reservations.rows().length, 1);
+  assert.equal(patches.dispatchScope.fragmented, true);
+  assert.match(logs.join("\n"), /resize 2/);
+});
+
 test("repair scoping parses the emitted journey evidence and ignores downstream undriveable cascades", () => {
   const problems = [
     'journey send-message Â· step "fill the form" FAILED in a real browser: control missing',
     'journey send-message Â· step "submit" FAILED in a real browser: not reached because step 1 was undriveable',
   ];
   assert.deepEqual(repairFailureReferences(problems), [{ journeyId: "send-message", action: "fill the form" }]);
+});
+
+test("primary browser evidence wins over simultaneous secondary first-step cascades", () => {
+  const primary = JSON.stringify({ code: "interaction_verification_failure", journeyId: "primary-flow",
+    userAction: "create a project", status: "fail", stateOwners: ["src/Primary.jsx"] });
+  const secondary = JSON.stringify({ code: "interaction_verification_failure", journeyId: "secondary-flow",
+    userAction: "open the project manager", status: "undriveable", stateOwners: ["src/Secondary.jsx"] });
+  const contract = { journeys: [
+    { id: "primary-flow", priority: "primary" }, { id: "secondary-flow", priority: "secondary" },
+  ] };
+  assert.deepEqual(causalRepairProblems(contract, [primary, secondary]), [primary]);
+  assert.deepEqual(repairFailureOwnedPaths(contract, [primary, secondary]), ["src/Primary.jsx"]);
 });
 
 test("headroom batching maps verifier actions to their semantic owner before planned-module fallback", () => {

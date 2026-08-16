@@ -202,3 +202,41 @@ test("a second default export is rejected at APPLY time with the fix named — n
   const ok = applyPatches(tree, [{ file: "src/routes/HomePage.jsx", ops: [{ op: "replace_symbol", symbol: "HomePage", content: "export default function HomePage() {\n  return 2;\n}" }] }]);
   assert.equal(ok.rejected.length, 0, JSON.stringify(ok.rejected));
 });
+
+test("replace_exact surgically patches one unique nested excerpt and fails closed", () => {
+  const routePath = "src/routes/Nested.jsx";
+  const source = [
+    "export default function Nested() {",
+    "  const ready = false;",
+    "  function start() { return true; }",
+    "  if (!ready) return <button onClick={start}>Start</button>;",
+    "  return <main>Ready</main>;",
+    "}",
+  ].join("\n");
+  const tree = { [routePath]: source };
+  const expected = "if (!ready) return <button onClick={start}>Start</button>;";
+  const replacement = "if (!ready) return <button onClick={start}>Start now</button>;";
+  const result = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected, content: replacement,
+  }] }]);
+  assert.equal(result.rejected.length, 0, JSON.stringify(result.rejected));
+  assert.equal(result.applied[0].kind, "replace_exact");
+  assert.match(result.applied[0].signature, /replace_exact:[a-f0-9]{16}$/);
+  assert.match(result.tree[routePath], /Start now/);
+  assert.equal(tree[routePath], source, "the retained input tree remains immutable");
+
+  const duplicate = applyPatches({ [routePath]: `${source}\n// ${expected}` }, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected, content: replacement,
+  }] }]);
+  assert.match(duplicate.rejected[0].reason, /not unique/);
+  const missing = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: "not in source", content: replacement,
+  }] }]);
+  assert.match(missing.rejected[0].reason, /not found/);
+  const malformed = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected, content: "if (!ready) return (",
+  }] }]);
+  assert.match(malformed.rejected[0].reason, /does not parse/);
+  assert.ok(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
+    .properties.op.enum.includes("replace_exact"));
+});

@@ -51,7 +51,8 @@ assets. You make changes ONLY by calling emit_patches — symbol-level operation
 against a code index. Rules:
 - newFile creates files; never rewrite an existing file via newFile. Ops modify existing files:
   add_import adds an import line (imports are NOT symbols); replace_symbol swaps a component
-  wholesale (never append a second default component); replaceFile is for index-opaque files.
+  wholesale (never append a second default component); replace_exact safely replaces one unique
+  old source excerpt inside a large symbol; replaceFile is for index-opaque files.
 - Pages live in src/routes/<Name>.jsx and MUST be registered in src/App.jsx's ROUTES map
   (replace_symbol on the existing map or the App component).
 - src/lib/backend/, src/lib/visitorSession.js and src/lib/capabilities/ are protected platform
@@ -73,6 +74,16 @@ against a code index. Rules:
   kilobytes of new JSX: new files for every section/page, real copy, real form state, and
   the App.jsx registration. A batch that re-emits existing content, leaves scaffold stubs
   in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
+
+// When the ordinary bounded file prompt still cannot fit, the orchestrator supplies exact source
+// excerpts and an exact-replacement primitive. This deliberately excludes broad architecture and
+// capability prose: the retained tree supplies exact current bytes, the write boundary is
+// machine-enforced, and deterministic compile/browser verification remains mandatory.
+export const HEADROOM_FRAGMENT_SYSTEM_PROMPT = `You repair one bounded defect in an existing
+React+Vite app. Respond only by calling emit_patches. Modify only the allowed file. Prefer
+replace_exact: put the exact old excerpt in symbol and its complete replacement in content. The
+old excerpt must occur exactly once and the resulting full file must parse. Preserve all unrelated
+behaviour. Never modify protected platform files, fake persistence, or weaken verification.`;
 
 function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
   const paths = Object.keys(tree).sort();
@@ -257,8 +268,21 @@ export function repairFailureReferences(problems = []) {
     }).filter(Boolean);
 }
 
-export function repairFailureOwnedPaths(contract = {}, problems = []) {
+/** Prefer the earliest primary-journey defect over simultaneous secondary cascades. */
+export function causalRepairProblems(contract = {}, problems = []) {
   const actionable = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem));
+  const primary = new Set((contract.journeys || [])
+    .filter((journey) => journey.priority === "primary")
+    .map((journey) => journey.id));
+  const primaryStructured = actionable.filter((problem) => {
+    const structured = structuredFailure(problem);
+    return structured?.journeyId && primary.has(structured.journeyId);
+  });
+  return primaryStructured.length ? primaryStructured : actionable;
+}
+
+export function repairFailureOwnedPaths(contract = {}, problems = []) {
+  const actionable = causalRepairProblems(contract, problems);
   const directOwners = actionable.flatMap((problem) => {
     const structured = structuredFailure(problem);
     if (!structured) return [];
@@ -277,11 +301,56 @@ export function repairFailureOwnedPaths(contract = {}, problems = []) {
     .filter((path) => typeof path === "string" && GENERATED_SOURCE.test(path)))];
 }
 
+function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieval = null }) {
+  const fragments = headroomScope?.fragments || [];
+  const included = fragments.map((fragment) => ({
+    path: fragment.path, form: "exact_fragment", reason: "live verifier named this control/state",
+    startLine: fragment.startLine, endLine: fragment.endLine,
+    tokens: Math.ceil(Buffer.byteLength(fragment.content || "", "utf8") / 4),
+  }));
+  onRetrieval?.({
+    query: { step: "repair", kind: headroomScope.kind, files: headroomScope.allowedFiles },
+    included, omittedCount: 0, tokens: included.reduce((sum, row) => sum + row.tokens, 0),
+  });
+  const failures = [...new Set((problems || []).filter((problem) => !isDownstreamFailureEvidence(problem))
+    .map((problem) => {
+      const structured = structuredFailure(problem);
+      if (!structured) return String(problem);
+      return [
+        `action=${structured.userAction || "unknown"}`,
+        `expected=${structured.expectedStateAfter || structured.expectedOutcome || structured.expected || "contracted visible transition"}`,
+        `observed=${structured.actualObservedState || structured.detail || "the transition did not occur"}`,
+        structured.target ? `target=${structured.target}` : null,
+      ].filter(Boolean).join("; ");
+    }))].slice(0, 4);
+  return [
+    "RETAINED CANDIDATE MICRO-REPAIR",
+    "The full candidate is retained. Fix only the named transition below. Deterministic structure,",
+    "compile, and all contracted browser journeys still gate promotion after this patch.",
+    `Allowed file: ${headroomScope.allowedFiles[0]}`,
+    "Failure evidence:",
+    ...failures.map((failure) => `- ${failure}`),
+    "",
+    "EXACT CURRENT SOURCE EXCERPTS (line numbers are informational):",
+    ...fragments.map((fragment) => [
+      `--- ${fragment.path}:${fragment.startLine}-${fragment.endLine} ---`, fragment.content,
+    ].join("\n")),
+    "",
+    "Use replace_exact for a nested handler/conditional: symbol must be a non-empty exact old",
+    "excerpt copied above, content its complete balanced replacement. It is rejected unless the",
+    "old excerpt occurs exactly once and the entire retained file still parses. Preserve everything",
+    "outside the defect. Do not replace the whole file. Call emit_patches now.",
+  ].join("\n");
+}
+
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
   repairScope = null, moduleCorrectionScope = null, headroomScope = null, advisory = [],
 }) {
+  if (headroomScope?.fragmented) {
+    return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
+  }
   const isEdit = step === "edit";
   const isRepair = step === "repair" || step === "correction";
   const activeScope = headroomScope || repairScope || moduleCorrectionScope;
@@ -525,6 +594,75 @@ export function isHeadroomFitError(error) {
     && /approved (?:build )?headroom|useful response|insufficient approved/i.test(String(error?.message || ""));
 }
 
+const FRAGMENT_STOP_WORDS = new Set([
+  "after", "before", "because", "could", "expected", "failed", "failure", "found", "from",
+  "into", "journey", "not", "required", "should", "status", "step", "that", "their", "then",
+  "this", "visible", "when", "with",
+]);
+
+function sourceWords(value) {
+  return String(value || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()
+    .match(/[a-z][a-z0-9_-]{3,}/g) || [];
+}
+
+/** Exact, bounded excerpts around the controls/state named by live verifier evidence. */
+export function headroomSourceFragments(source, problems = [], { maxFragments = 2, radius = 7 } = {}) {
+  const firstCausal = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem)).slice(0, 1);
+  const evidence = firstCausal.flatMap((problem) => {
+    const structured = structuredFailure(problem);
+    if (!structured) return [String(problem || "")];
+    return [structured.userAction, structured.expectedStateAfter, structured.expectedOutcome,
+      structured.actualObservedState, structured.detail, structured.target,
+      structured.control?.logicalField, ...(structured.control?.accessibleNames || []),
+      ...(structured.expectedControls || []).flatMap((control) => [
+        control.field, ...(control.accessibleNames || []),
+      ])];
+  }).filter(Boolean);
+  const terms = [...new Set(evidence.flatMap(sourceWords)
+    .filter((word) => !FRAGMENT_STOP_WORDS.has(word)))];
+  const phrases = [...new Set(evidence.flatMap((value) => {
+    const words = sourceWords(value).filter((word) => !FRAGMENT_STOP_WORDS.has(word));
+    return [...words.slice(0, -1).map((word, index) => `${word} ${words[index + 1]}`),
+      ...words.slice(0, -2).map((word, index) => `${word} ${words[index + 1]} ${words[index + 2]}`)];
+  }))];
+  if (!terms.length) return [];
+  const lines = String(source || "").split("\n");
+  const scored = lines.map((line, index) => {
+    const normalized = line.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+    const hits = terms.reduce((sum, term) => sum + (normalized.includes(term) ? 1 : 0), 0);
+    const phraseHits = phrases.reduce((sum, phrase) => sum + (normalized.includes(phrase) ? 1 : 0), 0);
+    return { index, hits, score: (hits + (phraseHits * 4)) / (1 + (line.length / 500)) };
+  }).filter((row) => row.hits > 0)
+    .sort((a, b) => b.score - a.score || b.hits - a.hits || a.index - b.index);
+  const centres = [];
+  for (const row of scored) {
+    if (centres.some((index) => Math.abs(index - row.index) <= radius)) continue;
+    centres.push(row.index);
+    if (centres.length >= maxFragments) break;
+  }
+  const ranges = centres.map((centre) => {
+    let start = Math.max(0, centre - radius);
+    // Include the nearest enclosing handler/conditional/state declaration so an excerpt shows
+    // why clicking the named control did not change the rendered branch.
+    for (let index = centre; index >= Math.max(0, centre - (radius * 2)); index -= 1) {
+      if (/^\s*(?:if\s*\(|(?:async\s+)?function\s|const\s+\[)/.test(lines[index])) {
+        start = index;
+        break;
+      }
+    }
+    return { start, end: Math.min(lines.length - 1, centre + radius) };
+  }).sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const range of ranges) {
+    const prior = merged.at(-1);
+    if (prior && range.start <= prior.end + 1) prior.end = Math.max(prior.end, range.end);
+    else merged.push({ ...range });
+  }
+  return merged.map(({ start, end }) => ({
+    startLine: start + 1, endLine: end + 1, content: lines.slice(start, end + 1).join("\n"),
+  }));
+}
+
 /**
  * Turn one oversized, not-yet-dispatched request into a machine-bounded semantic continuation.
  * This never retries a provider-completed call. The first split prefers validator/evidence files,
@@ -567,9 +705,28 @@ export function headroomDispatchScope({
   const source = priorFiles.length ? priorFiles : candidates;
   const files = source.slice(0, width);
   const remainingFiles = [...source.slice(width), ...(previousScope?.remainingFiles || [])];
-  // A one-file scope that already failed cannot be made semantically smaller without hiding the
-  // source needed to patch it. Fail closed instead of retrying an identical prompt forever.
-  if (previousScope && previousScope.allowedFiles?.length === 1 && files.length === 1) return null;
+  // A large top-level component may contain one tiny nested handler/branch. If the full one-file
+  // prompt still cannot fit, expose only exact verifier-relevant excerpts and require a unique
+  // exact-source replacement. This is a real semantic resize, not a retry of identical bytes.
+  if (previousScope && previousScope.allowedFiles?.length === 1 && files.length === 1) {
+    if (previousScope.fragmented) return null;
+    const fragments = headroomSourceFragments(tree?.[files[0]], problems);
+    if (!fragments.length) return null;
+    const fragmentTokens = fragments.reduce((sum, fragment) => (
+      sum + Math.ceil(Buffer.byteLength(fragment.content, "utf8") / 4)
+    ), 0);
+    return {
+      ...previousScope,
+      kind: "headroom_fragment_continuation",
+      fragmented: true,
+      fragments: fragments.map((fragment) => ({ path: files[0], ...fragment })),
+      remainingFiles: previousScope.remainingFiles || [],
+      expectedPatchTokens: Math.min(1_200, Math.max(500, Math.ceil(fragmentTokens * 0.6))),
+      instruction: "The complete file is retained but too large to resend. Repair the exact nested "
+        + "handler/conditional shown in the excerpts with replace_exact. Put an exact, unique old "
+        + "excerpt in symbol and its balanced replacement in content; do not rewrite the whole file.",
+    };
+  }
   const selectedContracts = (moduleContracts?.specifications || [])
     .filter((specification) => files.includes(specification.path));
   const sourceTokens = files.reduce((sum, path) => sum + Math.ceil(String(tree?.[path] || "").length / 4), 0);
@@ -987,12 +1144,14 @@ export function createModelLanes({
       headroomScope: requestedHeadroomScope = null, advisory = [], signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
         ? null : await loadKnowledge(owner, projectId);
-      const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
+      const fullSystemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
+      let systemPrompt = fullSystemPrompt;
       const startedAt = Date.now();
       let headroomScope = requestedHeadroomScope;
       let headroomResizes = 0;
+      const dispatchProblems = step === "repair" ? causalRepairProblems(contract, problems) : problems;
       const semanticRepairFiles = step === "repair" && !repairScope && !moduleCorrectionScope
-        ? repairFailureOwnedPaths(contract, problems) : [];
+        ? repairFailureOwnedPaths(contract, dispatchProblems) : [];
       let prompt = null;
       let selected = null;
       let turn = null;
@@ -1012,8 +1171,9 @@ export function createModelLanes({
       const dispatchWithHeadroom = async () => {
         for (;;) {
           let retrievalTrace = null;
+          systemPrompt = headroomScope?.fragmented ? HEADROOM_FRAGMENT_SYSTEM_PROMPT : fullSystemPrompt;
           prompt = renderPatchPrompt({
-            step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
+            step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
             repairScope, moduleCorrectionScope, headroomScope, advisory,
             onRetrieval: (trace) => { retrievalTrace = trace; },
@@ -1024,7 +1184,7 @@ export function createModelLanes({
           }
           const scopedFiles = headroomScope?.allowedFiles || [];
           selected = await reservedProvider(step, {
-            owner, projectId, buildId, contract, tree, problems, editRequest, signal,
+            owner, projectId, buildId, contract, tree, problems: dispatchProblems, editRequest, signal,
             taskClass: `${String(step).startsWith("increment:") ? "increment" : step}`,
             retrievalTokens: Number(retrievalTrace?.tokens || 0),
             affectedModules: Math.max(1, scopedFiles.length || new Set([
@@ -1042,7 +1202,7 @@ export function createModelLanes({
             if (!isHeadroomFitError(error)) throw error;
             const nextScope = headroomDispatchScope({
               tree, modulePlan, moduleContracts, repairScope, moduleCorrectionScope,
-              problems, rejections, previousScope: headroomScope, logicalStep: step,
+              problems: dispatchProblems, rejections, previousScope: headroomScope, logicalStep: step,
               semanticFiles: semanticRepairFiles,
             });
             if (!nextScope) {

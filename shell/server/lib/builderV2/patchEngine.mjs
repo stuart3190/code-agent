@@ -8,6 +8,7 @@
 
 import { indexFile } from "./indexer.mjs";
 import { modularityCheck } from "../appBuild/modularity.mjs";
+import { createHash } from "node:crypto";
 
 export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/backend\//,
@@ -23,7 +24,8 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
     + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
     + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
     + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
-    + "COMPLETE new content.",
+    + "COMPLETE new content. For a very large symbol, replace_exact uses `symbol` as the exact "
+    + "old source excerpt and `content` as its replacement; the excerpt must occur exactly once.",
   strict: true,
   parameters: {
     type: "object",
@@ -45,7 +47,7 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
                 additionalProperties: false,
                 required: ["op", "symbol", "content"],
                 properties: {
-                  op: { type: "string", enum: ["replace_symbol", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
+                  op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
                   symbol: { type: ["string", "null"] },
                   content: { type: ["string", "null"] },
                 },
@@ -79,6 +81,10 @@ function opSignature(patch, op) {
   if (patch.newFile) return `new:${patch.newFile}`;
   if (patch.deleteFile) return `del:${patch.deleteFile}`;
   if (patch.replaceFile) return `repl:${patch.replaceFile}`;
+  if (op.op === "replace_exact") {
+    const digest = createHash("sha256").update(String(op.symbol || "")).digest("hex").slice(0, 16);
+    return `${patch.file}:${op.op}:${digest}`;
+  }
   return `${patch.file}:${op.op}:${op.symbol || ""}`;
 }
 
@@ -196,6 +202,45 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
         const probe = indexFile(file, candidate);
         if (probe.opaque) { reject(patch, op, "append: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }
+        working[file] = candidate;
+        applied.push({ signature: opSignature(patch, op), file, kind: op.op });
+        continue;
+      }
+
+      // Large generated components often contain small nested handlers or conditional branches
+      // that are not top-level index symbols. Requiring replace_symbol there forces the model to
+      // resend an entire 15-30k component for a two-line correction. `replace_exact` is the safe
+      // bounded alternative: the old excerpt is an optimistic-concurrency precondition, must be
+      // non-empty and unique, and the complete file must still parse after replacement.
+      if (op.op === "replace_exact") {
+        const expected = String(op.symbol || "");
+        if (!expected) {
+          reject(patch, op, "replace_exact: symbol must contain the non-empty exact old source excerpt",
+            REJECTION.INVALID_PATCH_OPERATION);
+          continue;
+        }
+        const first = current.indexOf(expected);
+        const last = current.lastIndexOf(expected);
+        if (first < 0) {
+          reject(patch, op, "replace_exact: the expected old source excerpt was not found",
+            REJECTION.PATCH_NOT_APPLICABLE);
+          continue;
+        }
+        if (first !== last) {
+          reject(patch, op, "replace_exact: the expected old source excerpt is not unique",
+            REJECTION.PATCH_NOT_APPLICABLE);
+          continue;
+        }
+        const candidate = current.slice(0, first) + String(op.content || "")
+          + current.slice(first + expected.length);
+        const dupDefault = duplicateDefault(candidate);
+        if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
+        const probe = indexFile(file, candidate);
+        if (probe.opaque) {
+          reject(patch, op, "replace_exact: resulting file does not parse — include complete balanced syntax",
+            REJECTION.SOURCE_PARSE_FAILED);
+          continue;
+        }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
