@@ -240,7 +240,10 @@ test("14R failed verification resumes the exact non-promotable candidate without
     snapshotStore, buildStore: memoryBuildStore(), maxJourneyRepairs: 0,
     journeysFn: async ({ journeys }) => {
       browserCalls += 1;
-      return { journeys: journeys.map((journey) => ({ ...journey, status: browserCalls === 1 ? "fail" : "pass" })) };
+      // First build verification and zero-model retained-candidate preverification both stay red;
+      // only the journey run after the targeted patch passes. A verifier-only false negative is
+      // covered separately and must not buy a repair call.
+      return { journeys: journeys.map((journey) => ({ ...journey, status: browserCalls <= 2 ? "fail" : "pass" })) };
     },
     baseTree: () => clone(fromScaffold(REACT_VITE)), baseline: REACT_VITE,
   });

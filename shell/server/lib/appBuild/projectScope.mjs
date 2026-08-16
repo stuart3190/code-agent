@@ -13,7 +13,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 
-export const DEFAULT_COLUMNS = "id, name, tree, product_id, updated_at, builder_version, bv2_green_snapshot_id";
+export const DEFAULT_COLUMNS = "id, name, tree, product_id, created_at, updated_at, builder_version, bv2_green_snapshot_id, budget_approval_id";
 
 /**
  * Resolve the project a capability should act on.
@@ -35,14 +35,23 @@ export const DEFAULT_COLUMNS = "id, name, tree, product_id, updated_at, builder_
  */
 export async function resolveConversationProject(ctx, {
   projectId = null, productName = null, columns = DEFAULT_COLUMNS, client = serviceClient(),
-  allowOwnerFallback = true,
+  allowOwnerFallback = true, includeUnverified = false,
 } = {}) {
   const owner = ctx?.owner;
   if (!owner) return { project: null, scope: "no_owner", productId: null };
 
-  const select = () => client.from("projects").select(columns)
-    .eq("owner", owner).or("tree.not.is.null,bv2_green_snapshot_id.not.is.null")
-    .order("updated_at", { ascending: false }).limit(1);
+  const select = () => {
+    const query = client.from("projects").select(columns).eq("owner", owner);
+    // Delivery/edit/publish capabilities may only resolve materialized legacy projects or a
+    // verified V2 snapshot. Repair is deliberately different: a failed first-green V2 build has
+    // neither, but its immutable working/candidate checkpoint is exactly what repair must resume.
+    // Callers must opt in so an unfinished project can never leak into a delivery capability.
+    if (!includeUnverified) query.or("tree.not.is.null,bv2_green_snapshot_id.not.is.null");
+    // A preview restart legitimately touches updated_at on an older green project. For repair,
+    // product lineage is project creation order: a later first-green attempt must remain the
+    // target even when an older preview was re-served afterward.
+    return query.order(includeUnverified ? "created_at" : "updated_at", { ascending: false }).limit(1);
+  };
 
   if (projectId) {
     // Owner-scoped by the base query, so a projectId belonging to someone else resolves to null

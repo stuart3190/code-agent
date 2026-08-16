@@ -91,7 +91,7 @@ export function registerCoreCapabilities() {
       const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
       const { project } = await resolveConversationProject(ctx, {
         productName: input.productName || null,
-        columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
+        columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id",
       });
       if (!project) {
         const error = new Error("There's no existing app to edit — describe what you want built first.");
@@ -120,7 +120,11 @@ export function registerCoreCapabilities() {
       const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
       const { project } = await resolveConversationProject(ctx, {
         productName: input.productName || null,
-        columns: "id,name,tree,product_id,updated_at,builder_version,bv2_green_snapshot_id",
+        columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id",
+        // A failed first-green build has no green pointer yet. Repair must select that newest
+        // product-scoped project so Builder V2 can resume its retained checkpoint instead of
+        // silently falling back to an older green project for the same product.
+        includeUnverified: true,
       });
       if (!project) {
         const error = new Error("There's no existing app to repair — describe what you want built instead.");

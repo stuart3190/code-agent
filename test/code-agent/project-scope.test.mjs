@@ -22,7 +22,7 @@ const PRODUCT_B = "prod-b";
 
 const project = (over = {}) => ({
   id: "p1", name: "App A", tree: { "index.html": "" }, product_id: PRODUCT_A,
-  updated_at: "2026-08-01T10:00:00Z", owner: OWNER, ...over,
+  created_at: "2026-08-01T09:00:00Z", updated_at: "2026-08-01T10:00:00Z", owner: OWNER, ...over,
 });
 
 // Models the filters the real query applies, so a test cannot pass by ignoring one.
@@ -38,7 +38,7 @@ function fakeDb({ projects = [], products = [] } = {}) {
         not(c, _op, v) { f[`not_${c}`] = v; return api; },
         or(value) { f.or = value; return api; },
         ilike(c, v) { f[`ilike_${c}`] = v; return api; },
-        order() { return api; },
+        order(column) { f.order = column; return api; },
         limit(n) { f.limit = n; return api; },
         maybeSingle: async () => {
           seen.push(f);
@@ -48,10 +48,12 @@ function fakeDb({ projects = [], products = [] } = {}) {
         },
         then(resolve) {
           seen.push(f);
-          let rows = projects.filter((p) => p.owner === f.owner && (p.tree || p.bv2_green_snapshot_id));
+          let rows = projects.filter((p) => p.owner === f.owner
+            && (!f.or || p.tree || p.bv2_green_snapshot_id));
           if (f.id) rows = rows.filter((p) => String(p.id) === String(f.id));
           if (f.product_id) rows = rows.filter((p) => String(p.product_id) === String(f.product_id));
-          rows = [...rows].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)).slice(0, f.limit || 50);
+          const order = f.order || "updated_at";
+          rows = [...rows].sort((a, b) => (a[order] < b[order] ? 1 : -1)).slice(0, f.limit || 50);
           return Promise.resolve({ data: rows, error: null }).then(resolve);
         },
       };
@@ -157,6 +159,44 @@ test("projects without either a legacy tree or a green snapshot are never resolv
   assert.equal(resolved, null, "an unbuilt project cannot be published, repaired or exported");
 });
 
+test("repair can resolve the newest failed V2 project instead of an older green sibling", async () => {
+  const client = fakeDb({ projects: [
+    project({ id: "older-green", tree: null, bv2_green_snapshot_id: "green-1",
+      created_at: "2026-08-14T01:00:00Z", updated_at: "2026-08-16T09:00:00Z" }),
+    project({ id: "newer-failed", tree: null, bv2_green_snapshot_id: null,
+      created_at: "2026-08-15T08:00:00Z", updated_at: "2026-08-15T08:00:00Z",
+      budget_approval_id: "approval-60" }),
+  ] });
+
+  const ordinary = await resolveConversationProject(conversation(PRODUCT_A), { client });
+  assert.equal(ordinary.project.id, "older-green",
+    "delivery and edit still require a green/materialized project");
+
+  const repair = await resolveConversationProject(conversation(PRODUCT_A), {
+    client, includeUnverified: true,
+  });
+  assert.equal(repair.project.id, "newer-failed",
+    "repair resumes the newest failed project rather than editing the older green app");
+  assert.equal(repair.project.budget_approval_id, "approval-60",
+    "repair carries the existing authorization into resume admission");
+  assert.equal(repair.scope, "conversation");
+});
+
+test("unverified repair resolution remains strictly owner and product scoped", async () => {
+  const client = fakeDb({ projects: [
+    project({ id: "right-product", tree: null, bv2_green_snapshot_id: null,
+      created_at: "2026-08-15T08:00:00Z", updated_at: "2026-08-15T08:00:00Z" }),
+    project({ id: "wrong-product", product_id: PRODUCT_B, tree: null, bv2_green_snapshot_id: null,
+      created_at: "2026-08-16T08:00:00Z", updated_at: "2026-08-16T08:00:00Z" }),
+    project({ id: "wrong-owner", owner: "someone-else", tree: null, bv2_green_snapshot_id: null,
+      created_at: "2026-08-17T08:00:00Z", updated_at: "2026-08-17T08:00:00Z" }),
+  ] });
+  const { project: resolved } = await resolveConversationProject(conversation(PRODUCT_A), {
+    client, includeUnverified: true,
+  });
+  assert.equal(resolved.id, "right-product");
+});
+
 test("snapshot-only V2 projects remain resolvable after mutable tree projection is retired", async () => {
   const client = fakeDb({ projects: [project({
     id: "v2", tree: null, builder_version: "v2", bv2_green_snapshot_id: "snapshot-1",
@@ -196,6 +236,8 @@ test("publish, V2 edit/repair, preview, QA, export and domains all use the scope
   const core = await readFile(fileURLToPath(new URL("../../shell/server/lib/capabilities/coreCapabilities.mjs", import.meta.url)), "utf8");
   assert.equal((delivery.match(/resolveConversationProject\(ctx/g) || []).length, 3);
   assert.equal((core.match(/resolveConversationProject\(ctx/g) || []).length, 2);
+  assert.equal((core.match(/includeUnverified: true/g) || []).length, 1,
+    "only repair opts into unfinished projects; edit and delivery remain green-only");
   // publish, connectDomain
   assert.equal((publish.match(/resolveConversationProject\(ctx/g) || []).length, 2);
 });

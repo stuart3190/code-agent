@@ -306,6 +306,34 @@ test("14S platform re-verification refreshes protected runtime and makes zero mo
   assert.equal(patchCalls, 0);
 });
 
+test("14S repair retry promotes a retained greenable candidate before any provider call", async () => {
+  const snapshots = createSnapshotStore();
+  await snapshots.createSnapshot("owner", "project", candidateTree(correctedBookingFlow), {
+    buildId: "failed-verifier", reason: "candidate:final-pre-green",
+  });
+  let patchCalls = 0;
+  let journeyCalls = 0;
+  const orchestrator = createOrchestrator({
+    contractFn: async () => { throw new Error("contract must not replay"); },
+    patchesFn: async () => { patchCalls += 1; throw new Error("model must not run"); },
+    assetService: { async resolveIntents() { throw new Error("assets must not replay"); },
+      async assetManifestFor() { return []; } },
+    snapshotStore: snapshots, buildStore: memoryBuildStore(), baseTree: () => fromScaffold(REACT_VITE),
+    baseline: REACT_VITE, compile: async (tree) => ({ ok: true, tree }),
+    journeysFn: async ({ journeys }) => {
+      journeyCalls += 1;
+      return { journeys: journeys.map((journey) => ({ ...journey, status: "pass", steps: [] })) };
+    },
+  });
+  const result = await orchestrator.runRepairFromCheckpoint({ owner: "owner", projectId: "project",
+    sourceBuildId: "failed-verifier", request: "try the retained build again", contract: BOOKING,
+    initialProblems: ["required contracted journeys remain red"] });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(result.providerCalls, 0);
+  assert.equal(patchCalls, 0, "a now-green retained candidate never enters model repair");
+  assert.equal(journeyCalls, 1, "the affected contracted journeys are genuinely reverified");
+});
+
 test("14S deterministically corrected retained candidate compiles without weakening persistence", async () => {
   const modulePlan = deriveModulePlan(BOOKING, BOOKING.journeys);
   const tree = candidateTree(correctedBookingFlow);

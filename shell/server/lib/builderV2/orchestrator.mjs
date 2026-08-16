@@ -1093,8 +1093,38 @@ export function createOrchestrator({
         const initialGate = await verifyStage(source.tree, gateOptions(contract,
           "resume-preflight", allJourneys, { owner, projectId, buildId, step: "resume-preflight", attempt: 0, signal }));
         const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree);
+        let retainedJourneyProblems = [];
+        if (initialGate.ok) {
+          // A retained candidate may have failed only because the platform verifier/runtime was
+          // defective. Re-prove the candidate before buying a repair turn. This keeps retries
+          // checkpoint-first and allows a platform fix to promote the existing bytes at zero
+          // provider cost, while a genuinely red journey still falls through to targeted repair.
+          let retainedCheckpoint = await snapshotStore.createSnapshot(owner, projectId, initialGate.tree, {
+            buildId, parent: source.snapshotId, reason: "candidate:resume-preflight",
+            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+          });
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot: retainedCheckpoint,
+            tree: initialGate.tree, reason: "candidate:resume-preflight", promotable: false });
+          const retainedVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+            journeys: allJourneys, tree: initialGate.tree, snapshotId: retainedCheckpoint.id, signal });
+          const retainedEligibility = completionEligibility({ contract, gates: { ok: true },
+            journeyResults: { journeys: retainedVerdicts.journeys },
+            blockingErrors: retainedVerdicts.blockingErrors });
+          if (retainedEligibility.eligible) {
+            retainedCheckpoint = await snapshotStore.markCandidateValidated(owner, projectId,
+              retainedCheckpoint.id, { reason: "working:resumed-preflight" });
+            await events.checkpoint?.({ owner, projectId, buildId, snapshot: retainedCheckpoint,
+              tree: initialGate.tree, reason: "working:resumed-preflight", promotable: false });
+            await events.snapshot?.({ owner, projectId, buildId, snapshot: retainedCheckpoint,
+              tree: initialGate.tree, reason: "resumed-preflight" });
+            await snapshotStore.promote(owner, projectId, "green", retainedCheckpoint.id);
+            return finish("green", { final_snapshot: retainedCheckpoint.id,
+              snapshotId: retainedCheckpoint.id, parentSnapshotId: source.snapshotId, providerCalls: 0 });
+          }
+          retainedJourneyProblems = retainedEligibility.failures || [];
+        }
         const repairProblems = initialGate.ok
-          ? initialProblems
+          ? [...retainedJourneyProblems, ...initialProblems]
           : [...(initialGate.layers?.d0d2?.problems || []), ...initialProblems];
         const repair = await buildIncrement({
           step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
