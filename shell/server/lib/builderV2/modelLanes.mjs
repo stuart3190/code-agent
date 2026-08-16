@@ -69,7 +69,7 @@ against a code index. Rules:
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
 - Keep components small; one route file per page plus small shared components.
-- BUILD THE WHOLE STEP IN THIS ONE BATCH. A real step is several patches and several
+- BUILD THE WHOLE ASSIGNED DISPATCH SCOPE IN THIS ONE BATCH. A normal core step is several patches and several
   kilobytes of new JSX: new files for every section/page, real copy, real form state, and
   the App.jsx registration. A batch that re-emits existing content, leaves scaffold stubs
   in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
@@ -129,7 +129,7 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
   const interfaces = [...new Set([
     ...(repairScope?.adapterInterfaces || []), ...(repairScope?.capabilityPaths || []),
   ])].filter((path) => !files.includes(path)).sort();
-  const mayCreateMissing = ["module_contract", "runtime_dependency", "imports", "structural_modularity"]
+  const mayCreateMissing = ["module_contract", "runtime_dependency", "imports", "structural_modularity", "headroom_continuation"]
     .includes(repairScope?.kind);
   for (const path of files) {
     if (typeof tree?.[path] !== "string" && !mayCreateMissing) {
@@ -225,10 +225,17 @@ function renderJourneyBrief(journeys) {
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
-  repairScope = null, moduleCorrectionScope = null, advisory = [],
+  repairScope = null, moduleCorrectionScope = null, headroomScope = null, advisory = [],
 }) {
   const isEdit = step === "edit";
   const isRepair = step === "repair" || step === "correction";
+  const activeScope = headroomScope || repairScope || moduleCorrectionScope;
+  const activeScopePaths = [...new Set([
+    ...(activeScope?.allowedFiles || []), ...(activeScope?.files || []),
+  ].filter(Boolean))];
+  const promptModulePlan = activeScopePaths.length
+    ? modulePlan.filter((module) => activeScopePaths.includes(module.path))
+    : modulePlan;
   const browserRepair = step === "repair" && !repairScope && !moduleCorrectionScope;
   const repairFailures = browserRepair ? (problems || []).map((problem) => {
     const match = String(problem).match(/^journey ([^:]+): (.*?): /);
@@ -283,11 +290,13 @@ export function renderPatchPrompt({
   const repairFocusPaths = browserRepair ? [...new Set(repairFlows.flatMap((flow) => [
     ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
   ]).filter((value) => typeof value === "string" && value.startsWith("src/")))] : [];
-  const repairPersistencePlan = browserRepair ? {
+  const compactPersistencePlan = browserRepair || activeScopePaths.length ? {
     durableJourneys: persistencePlan?.durableJourneys || [],
     forbiddenBusinessPersistence: persistencePlan?.forbiddenBusinessPersistence || [],
     owners: persistencePlan?.owners || [],
-    modules: (persistencePlan?.modules || []).filter((module) => repairFocusPaths.includes(module.path))
+    modules: (persistencePlan?.modules || []).filter((module) => (
+      (activeScopePaths.length ? activeScopePaths : repairFocusPaths).includes(module.path)
+    ))
       .map(({ forbiddenPersistence: _forbiddenPersistence, ...module }) => module),
   } : persistencePlan;
   const capabilityPaths = bindCapabilities(contract)
@@ -300,7 +309,9 @@ export function renderPatchPrompt({
   ].join("\n") : "";
   const parts = [
     `STEP: ${step}`,
-    moduleCorrectionScope
+    headroomScope
+      ? "HEADROOM-SCOPED CONTINUATION: the current candidate is retained. Complete ONLY the named modules in this bounded internal dispatch; Thrallo will integrate and verify the remaining work automatically."
+      : moduleCorrectionScope
       ? "CORE CORRECTION: preserve the current candidate and patch ONLY the validator-named modules. Do not replay or redesign conforming modules."
       : step === "core"
       ? `Build the ESSENTIAL scope only: journeys [${tiers.essential.journeys.join(", ")}], entities [${tiers.essential.entities.join(", ")}]. Secondary work is delivered later as increments — do NOT build it now.`
@@ -317,10 +328,10 @@ export function renderPatchPrompt({
     "",
     capabilityRequirementsBrief(scopedContract),
     dependencyPlanBrief(scopedContract.dependencyPlan),
-    modulePlan.length ? [
+    promptModulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
       + " application is never rejected for naming a file differently):",
-      ...modulePlan.map((module) => {
+      ...promptModulePlan.map((module) => {
         const ownership = module.stateOwnership || {};
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
           + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `
@@ -329,19 +340,19 @@ export function renderPatchPrompt({
       "Keep styling, layout, typography and component composition original to this app.",
     ].join("\n") : "REQUIRED MODULE PLAN: none for this scope.",
     "",
-    step === "repair"
-      ? moduleGenerationContractsRepairBrief(moduleCorrectionScope?.moduleContracts || moduleContracts,
-        { focusPaths: repairFocusPaths })
+    activeScope || isRepair
+      ? moduleGenerationContractsRepairBrief(activeScope?.moduleContracts || moduleContracts,
+        { focusPaths: activeScopePaths.length ? activeScopePaths : repairFocusPaths })
       : moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
     "",
-    repairPersistencePlan
-      ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(repairPersistencePlan, null, 2)}`
+    compactPersistencePlan
+      ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(compactPersistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
     "",
     interactionContractBrief(repairInteractionPlan),
     preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),
     "",
-    repairScope ? [
+    repairScope && !headroomScope ? [
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",
       repairScope.instruction,
       `Allowed files: [${repairScope.allowedFiles.join(", ")}]`,
@@ -349,7 +360,7 @@ export function renderPatchPrompt({
         ? [`New supporting modules may be created only under: [${repairScope.allowedPrefixes.join(", ")}]`] : []),
       `Validator findings: ${JSON.stringify(repairScope.findings)}`,
     ].join("\n") : "",
-    moduleCorrectionScope ? [
+    moduleCorrectionScope && !headroomScope ? [
       "MODULE-SCOPED CORE CORRECTION (write boundary is machine-enforced):",
       moduleCorrectionScope.instruction,
       `Allowed files: [${moduleCorrectionScope.allowedFiles.join(", ")}]`,
@@ -357,15 +368,24 @@ export function renderPatchPrompt({
         ? [`New supporting modules may be created only under: [${moduleCorrectionScope.allowedPrefixes.join(", ")}]`] : []),
       `Module conformance findings: ${JSON.stringify(moduleCorrectionScope.findings)}`,
     ].join("\n") : "",
-    repairScope || moduleCorrectionScope ? "" : null,
-    repairScope || moduleCorrectionScope
-      ? "PROJECT KNOWLEDGE: omitted for this deterministic pre-compile repair."
+    headroomScope ? [
+      "INTERNAL HEADROOM-SCOPED WRITE BOUNDARY (machine-enforced):",
+      headroomScope.instruction,
+      `Allowed files: [${headroomScope.allowedFiles.join(", ")}]`,
+      ...(headroomScope.allowedPrefixes?.length
+        ? [`New supporting modules may be created only under: [${headroomScope.allowedPrefixes.join(", ")}]`] : []),
+    ].join("\n") : "",
+    activeScope ? "" : null,
+    activeScope
+      ? headroomScope
+        ? "PROJECT KNOWLEDGE: omitted for this deterministic headroom continuation."
+        : "PROJECT KNOWLEDGE: omitted for this deterministic pre-compile repair."
       : projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
     renderJourneyBrief(scopedJourneys),
     advisoryNotes,
-    repairScope || moduleCorrectionScope
-      ? renderPrecompileRepairContext(tree, { repairScope: repairScope || moduleCorrectionScope, onRetrieval })
+    activeScope
+      ? renderPrecompileRepairContext(tree, { repairScope: activeScope, onRetrieval })
       : isEdit || isRepair
       ? renderScopedContext(tree, {
         step, editRequest, problems, journeys: scopedJourneys,
@@ -410,6 +430,73 @@ export const STEP_ROUTING = Object.freeze({
 
 /** Steps whose write scope is bounded by the validator, so output is sized from that scope. */
 export const SCOPED_STEPS = Object.freeze(new Set(["repair", "correction"]));
+
+const HEADROOM_CODES = new Set(["budget_ceiling", "step_budget_ceiling"]);
+const GENERATED_SOURCE = /^src\/(?!lib\/(?:backend\/|capabilities\/|visitorSession\.js$|assets\.js$|assetData\.js$)).*\.(?:jsx?|tsx?|css)$/;
+const evidencePaths = (values) => [...new Set((values || []).flatMap((value) => (
+  String(value?.reason || value?.message || value || "").match(/src\/[a-zA-Z0-9_./-]+\.(?:jsx?|tsx?|css)/g) || []
+)).filter((path) => GENERATED_SOURCE.test(path)))];
+
+export function isHeadroomFitError(error) {
+  return error?.dispatchState === "before_dispatch" && HEADROOM_CODES.has(error?.code)
+    && /approved (?:build )?headroom|useful response|insufficient approved/i.test(String(error?.message || ""));
+}
+
+/**
+ * Turn one oversized, not-yet-dispatched request into a machine-bounded semantic continuation.
+ * This never retries a provider-completed call. The first split prefers validator/evidence files,
+ * then missing planned modules; a repeated pre-dispatch refusal halves that set until one module
+ * remains. The approved whole-build and per-call ceilings remain unchanged.
+ */
+export function headroomDispatchScope({
+  tree = {}, modulePlan = [], moduleContracts = null, repairScope = null,
+  moduleCorrectionScope = null, problems = [], rejections = [], previousScope = null,
+  logicalStep = null,
+} = {}) {
+  const active = previousScope || repairScope || moduleCorrectionScope;
+  const activeFiles = [...new Set([...(active?.allowedFiles || []), ...(active?.files || [])])]
+    .filter((path) => GENERATED_SOURCE.test(path));
+  const evidence = evidencePaths([...(problems || []), ...(rejections || [])]);
+  const planned = (modulePlan || []).map((module) => module.path).filter((path) => GENERATED_SOURCE.test(path));
+  const missing = planned.filter((path) => typeof tree?.[path] !== "string");
+  const candidates = [...new Set([
+    ...activeFiles,
+    ...evidence.filter((path) => planned.includes(path) || typeof tree?.[path] === "string"),
+    ...missing,
+    ...planned,
+    ...["src/App.jsx", "src/routes/HomePage.jsx"].filter((path) => typeof tree?.[path] === "string"),
+  ])];
+  if (!candidates.length) return null;
+  const priorFiles = previousScope?.allowedFiles || activeFiles;
+  const width = priorFiles.length
+    ? Math.max(1, Math.floor(priorFiles.length / 2))
+    : Math.min(3, Math.max(1, Math.ceil(candidates.length / 2)));
+  const source = priorFiles.length ? priorFiles : candidates;
+  const files = source.slice(0, width);
+  const remainingFiles = [...source.slice(width), ...(previousScope?.remainingFiles || [])];
+  // A one-file scope that already failed cannot be made semantically smaller without hiding the
+  // source needed to patch it. Fail closed instead of retrying an identical prompt forever.
+  if (previousScope && previousScope.allowedFiles?.length === 1 && files.length === 1) return null;
+  const selectedContracts = (moduleContracts?.specifications || [])
+    .filter((specification) => files.includes(specification.path));
+  const sourceTokens = files.reduce((sum, path) => sum + Math.ceil(String(tree?.[path] || "").length / 4), 0);
+  return {
+    kind: "headroom_continuation",
+    logicalStep: previousScope?.logicalStep || logicalStep,
+    batchIndex: Number(previousScope?.batchIndex || 0),
+    files,
+    allowedFiles: files,
+    remainingFiles,
+    batchWidth: width,
+    allowedPrefixes: active?.allowedPrefixes || [],
+    findings: [],
+    moduleContracts: { version: moduleContracts?.version || 1, specifications: selectedContracts },
+    expectedPatchTokens: Math.min(6_000, Math.max(1_000, Math.ceil(sourceTokens * 1.1))),
+    instruction: "This is one bounded continuation of the same approved build. Implement the complete responsibilities "
+      + `owned by [${files.join(", ")}], preserve the retained candidate, and do not touch unrelated modules. `
+      + "Do not ask the customer to send another message; the orchestrator will continue with the remaining modules.",
+  };
+}
 
 export function routeForStep(step, { repairScope = null, moduleCorrectionScope = null } = {}) {
   const kind = String(step || "").startsWith("increment:") ? "increment" : String(step || "");
@@ -608,14 +695,15 @@ export function createModelLanes({
               approvedCeilingCredits: Number(ceilingCredits), consumedCredits: 0,
               reservedCredits: 0, remainingCredits: Number(ceilingCredits),
             };
+          const scopedDispatch = SCOPED_STEPS.has(step) || context.scopedDispatch === true;
           const plan = planCallReservation(options, selected.provider.model, {
             requestedMaxOutputTokens: selectedMaxOutputTokens,
             // A route estimate is not a mandatory hold. Repair usefulness is enforced by its
             // minimum output envelope; the durable whole-build ceiling remains authoritative.
-            minimumCredits: SCOPED_STEPS.has(step) ? 0 : selected.decision?.estimatedCredits || 0,
+            minimumCredits: scopedDispatch ? 0 : selected.decision?.estimatedCredits || 0,
             callCeilingCredits: callCeiling,
             repairAllowanceCredits: selected.decision?.repairAllowanceCredits,
-            repairSizing: SCOPED_STEPS.has(step) ? {
+            repairSizing: scopedDispatch ? {
               retrievedFileCount: Number(context.affectedModules || 1),
               retrievalTokens: Number(context.retrievalTokens || 0),
               problemCount: Array.isArray(context.problems) ? context.problems.length : 1,
@@ -624,7 +712,13 @@ export function createModelLanes({
             fundingPolicy: selected.decision?.fundingPolicy || "request_owner",
             budget,
           });
-          const callKey = modelCallKey({ buildId: context.buildId, step, sequence });
+          // One logical repair/correction may be split into several bounded model calls. The
+          // first useful call consumes its ordinary dispatch slot; later batches retain the same
+          // funding/routing identity but are explicit continuations. Every batch still settles
+          // against the same whole-build ceiling.
+          const reservationStep = Number(context.headroomBatchIndex || 0) > 0
+            ? `${step}:headroom` : step;
+          const callKey = modelCallKey({ buildId: context.buildId, step: reservationStep, sequence });
           const usageResponsibility = ["qualification", "platform_failure"].includes(defaultUsageResponsibility)
             ? defaultUsageResponsibility
             : ["repair", "correction"].includes(step) ? "thrallo_repair" : defaultUsageResponsibility;
@@ -633,7 +727,7 @@ export function createModelLanes({
             ? await accountCreditResolver?.(context.owner) : null;
           const reservationInput = () => ({
             owner: context.owner, projectId: context.projectId, buildId: context.buildId,
-            callKey, step,
+            callKey, step: reservationStep,
             provider: selected.provider.provider || selected.provider.providerId || selected.decision?.provider || selected.provider.model,
             model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
             reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
@@ -642,6 +736,7 @@ export function createModelLanes({
             maxRepairs, maxCorrections,
             metadata: {
               routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
+              logicalStep: step, headroomBatchIndex: Number(context.headroomBatchIndex || 0),
               budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
             },
           });
@@ -794,29 +889,16 @@ export function createModelLanes({
 
     patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
-      advisory = [], signal = null }) => {
-      const projectKnowledge = repairScope || moduleCorrectionScope ? null : await loadKnowledge(owner, projectId);
-      let retrievalTrace = null;
-      const prompt = renderPatchPrompt({
-        step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest, projectKnowledge, modulePlan,
-        moduleContracts, repairScope, moduleCorrectionScope, advisory,
-        onRetrieval: (trace) => { retrievalTrace = trace; },
-      });
-      if (retrievalTrace && recordRetrieval) {
-        await recordRetrieval({ owner, projectId, buildId, step, ...retrievalTrace });
-      }
+      headroomScope: requestedHeadroomScope = null, advisory = [], signal = null }) => {
+      const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
+        ? null : await loadKnowledge(owner, projectId);
       const systemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
       const startedAt = Date.now();
-      const selected = await reservedProvider(step, {
-        owner, projectId, buildId, contract, tree, problems, editRequest, signal,
-        taskClass: `${String(step).startsWith("increment:") ? "increment" : step}`,
-        retrievalTokens: Number(retrievalTrace?.tokens || 0),
-        affectedModules: Math.max(1, new Set([
-          ...(retrievalTrace?.included || []).map((entry) => entry.path).filter(Boolean),
-          ...Object.keys(tree || {}).filter((path) => (problems || []).some((problem) => String(problem).includes(path))),
-        ]).size),
-        expectedPatchTokens: repairScope?.expectedPatchTokens || moduleCorrectionScope?.expectedPatchTokens || null,
-      });
+      let headroomScope = requestedHeadroomScope;
+      let headroomResizes = 0;
+      let prompt = null;
+      let selected = null;
+      let turn = null;
       // ONE retry on transport-shaped failures: a dropped SSE stream ("terminated") killed
       // a live booking attempt 24 minutes in. Model/tool errors never retry — only the wire.
       const callOnce = () => selected.provider.runTurn({
@@ -826,16 +908,71 @@ export function createModelLanes({
         toolChoice: { type: "function", name: EMIT_PATCHES_SCHEMA.name },
         // The first live run produced an 82-token no-op with zero reasoning; a forced tool
         // call still needs thinking room — how much is the per-step routing table's call.
-        reasoningEffort: routeForStep(step, { repairScope, moduleCorrectionScope }).reasoningEffort,
+        reasoningEffort: routeForStep(step, {
+          repairScope, moduleCorrectionScope: headroomScope || moduleCorrectionScope,
+        }).reasoningEffort,
       });
-      let turn;
+      const dispatchWithHeadroom = async () => {
+        for (;;) {
+          let retrievalTrace = null;
+          prompt = renderPatchPrompt({
+            step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
+            projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
+            repairScope, moduleCorrectionScope, headroomScope, advisory,
+            onRetrieval: (trace) => { retrievalTrace = trace; },
+          });
+          if (retrievalTrace && recordRetrieval) {
+            await recordRetrieval({ owner, projectId, buildId,
+              step: headroomScope ? `${step}:headroom:${headroomResizes}` : step, ...retrievalTrace });
+          }
+          const scopedFiles = headroomScope?.allowedFiles || [];
+          selected = await reservedProvider(step, {
+            owner, projectId, buildId, contract, tree, problems, editRequest, signal,
+            taskClass: `${String(step).startsWith("increment:") ? "increment" : step}`,
+            retrievalTokens: Number(retrievalTrace?.tokens || 0),
+            affectedModules: Math.max(1, scopedFiles.length || new Set([
+              ...(retrievalTrace?.included || []).map((entry) => entry.path).filter(Boolean),
+              ...Object.keys(tree || {}).filter((path) => (problems || []).some((problem) => String(problem).includes(path))),
+            ]).size),
+            expectedPatchTokens: headroomScope?.expectedPatchTokens
+              || repairScope?.expectedPatchTokens || moduleCorrectionScope?.expectedPatchTokens || null,
+            scopedDispatch: !!(headroomScope || repairScope || moduleCorrectionScope),
+            headroomBatchIndex: Number(headroomScope?.batchIndex || 0),
+          });
+          try {
+            return await callOnce();
+          } catch (error) {
+            if (!isHeadroomFitError(error)) throw error;
+            const nextScope = headroomDispatchScope({
+              tree, modulePlan, moduleContracts, repairScope, moduleCorrectionScope,
+              problems, rejections, previousScope: headroomScope, logicalStep: step,
+            });
+            if (!nextScope) {
+              // A raw call with no model/module boundary is not safely splittable. Preserve its
+              // canonical planner error; only a scope that was actually narrowed may be reported
+              // as an irreducible smallest continuation.
+              if (!headroomScope && headroomResizes === 0) throw error;
+              throw Object.assign(error, {
+                code: "smallest_scoped_call_exceeds_headroom",
+                publicMessage: "The remaining approved budget cannot fit the smallest safe Builder V2 continuation.",
+                headroomResizes,
+              });
+            }
+            headroomScope = nextScope;
+            headroomResizes += 1;
+            log(`${step}: approved ceiling is intact, but this single prompt exceeds its per-call envelope; `
+              + `continuing internally with ${nextScope.allowedFiles.length} module(s) `
+              + `[${nextScope.allowedFiles.join(", ")}] (resize ${headroomResizes})`);
+          }
+        }
+      };
       try {
-        turn = await callOnce();
+        turn = await dispatchWithHeadroom();
       } catch (error) {
         if (error?.retrySafe !== true) throw error;
         log(`${step}: provider rejected before billable dispatch (${String(error.message).slice(0, 60)}) — one retry`);
         await new Promise((r) => setTimeout(r, 2_000));
-        turn = await callOnce();
+        turn = await dispatchWithHeadroom();
       }
       const call = (turn.toolCalls || []).find((c) => c.name === EMIT_PATCHES_SCHEMA.name);
       // Record BEFORE the guard can throw — the ceiling stopping a build never hides spend.
@@ -848,6 +985,11 @@ export function createModelLanes({
       await accountUsage(turn.usage || {});
       if (!call || !Array.isArray(call.arguments?.patches)) {
         throw new Error(`the model did not call emit_patches at step ${step}: ${String(turn.text).slice(0, 300)}`);
+      }
+      if (headroomScope) {
+        Object.defineProperty(call.arguments.patches, "dispatchScope", {
+          value: headroomScope, enumerable: false, configurable: false,
+        });
       }
       return call.arguments.patches;
     },

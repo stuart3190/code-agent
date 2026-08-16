@@ -196,6 +196,55 @@ test("a protected-path rewrite is refused", async () => {
   assert.equal(h.timeline.includes("browser"), false);
 });
 
+test("an internally split headroom continuation cannot write outside its advertised module scope", async () => {
+  const h = harness({
+    patches: () => {
+      const patches = asPatches(UNPRESCRIBED);
+      Object.defineProperty(patches, "dispatchScope", { value: {
+        kind: "headroom_continuation", files: ["src/components/OnlyThis.jsx"],
+        allowedFiles: ["src/components/OnlyThis.jsx"], allowedPrefixes: [],
+      } });
+      return patches;
+    },
+    maxCoreAttempts: 1,
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+  assert.equal(result.state, "blocked");
+  assert.equal(h.events.checkpoints.length, 0, "out-of-scope patches are refused before candidate persistence");
+  assert.equal(h.timeline.includes("compile"), false);
+  assert.equal(h.timeline.includes("browser"), false);
+});
+
+test("headroom module batches continue automatically and gate only after the retained tree is complete", async () => {
+  let dispatches = 0;
+  const h = harness({
+    patches: (input) => {
+      dispatches += 1;
+      if (dispatches === 1) {
+        const patches = asPatches({ "src/data/store.js": UNPRESCRIBED["src/data/store.js"] });
+        Object.defineProperty(patches, "dispatchScope", { value: {
+          kind: "headroom_continuation", files: ["src/data/store.js"],
+          allowedFiles: ["src/data/store.js"], allowedPrefixes: [], batchWidth: 1,
+          logicalStep: "correction", batchIndex: 0,
+          remainingFiles: ["src/routes/Booking.jsx"], moduleContracts: { version: 1, specifications: [] },
+        } });
+        return patches;
+      }
+      assert.equal(input.step, "correction", "continuations keep the original logical routing and funding step");
+      assert.deepEqual(input.headroomScope.allowedFiles, ["src/routes/Booking.jsx"]);
+      assert.equal(input.headroomScope.batchIndex, 1);
+      return asPatches({ "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"] });
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(dispatches, 2, "the second batch is dispatched inside the same build with no user turn");
+  assert.equal(h.timeline.filter((entry) => entry === "compile").length, 1,
+    "partial headroom batches are checkpointed but not prematurely compiled");
+  assert.equal(h.timeline.filter((entry) => entry === "browser").length, 1);
+  assert.ok(h.events.checkpoints.length >= 2, "each useful batch is durably retained");
+});
+
 test("a tree that does not compile is a real generation attempt, not a correction", async () => {
   const events = { findings: [] };
   const dispatches = [];

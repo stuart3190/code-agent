@@ -6,7 +6,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
-import { createModelLanes, jobUsageBucket, renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import {
+  createModelLanes, estimatePromptTokens, headroomDispatchScope, jobUsageBucket, renderPatchPrompt,
+} from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
@@ -87,6 +89,147 @@ function fakePatchProvider({ usage = { input: 1000, output: 200, cached: 0, reas
     },
   };
 }
+
+function oversizedModuleFixture({ source = null } = {}) {
+  const modulePlan = ["A", "B", "C", "D"].map((name) => ({
+    path: `src/components/${name}.jsx`, role: `${name} feature module`,
+  }));
+  const moduleContracts = {
+    version: 1,
+    specifications: modulePlan.map((module) => ({
+      path: module.path, role: module.role, ownedJourneys: ["send-message"],
+      requiredImports: [], requiredCapabilities: [], forbiddenCapabilityBypasses: [],
+      state: { owns: "presentation" }, semanticInteractions: [], downstream: { consumes: [], produces: [] },
+      persistence: { owner: null }, requiredExports: [], moduleSizeBoundary: 6_000,
+      // Models never see this synthetic field in a scoped continuation. It reproduces the live
+      // failure class: a full correction re-sent tens of thousands of irrelevant contract bytes.
+      diagnosticPadding: "x".repeat(55_000),
+    })),
+  };
+  const tree = {
+    "src/App.jsx": "export default function App(){return <main/>}",
+    "src/routes/HomePage.jsx": "export default function HomePage(){return <main/>}",
+    ...(source == null ? {} : { "src/components/A.jsx": source }),
+  };
+  return { modulePlan, moduleContracts, tree };
+}
+
+test("oversized pre-dispatch core calls compact into one bounded continuation without another user turn", async () => {
+  const fixture = oversizedModuleFixture();
+  let providerCalls = 0;
+  const logs = [];
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return {
+        text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [{
+          newFile: "src/components/A.jsx", content: "export function A(){return <section>A</section>}",
+        }] } }],
+        usage: { input: 1_000, output: 300, total: 1_300, providerRequestId: "req-headroom" },
+      };
+    },
+  };
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(), log: (line) => logs.push(line),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+  });
+  assert.equal(providerCalls, 1, "the oversized envelope is rejected before dispatch; only the compact call reaches the provider");
+  assert.equal(reservations.rows().length, 1, "only the useful compact dispatch acquires a durable reservation");
+  assert.deepEqual(patches.dispatchScope.allowedFiles,
+    ["src/components/A.jsx", "src/components/B.jsx", "src/components/C.jsx"]);
+  assert.match(logs.join("\n"), /continuing internally with 3 module\(s\).*resize 1/);
+});
+
+test("scoped correction prompts use compact module contracts while full generation retains full architecture", () => {
+  const fixture = oversizedModuleFixture({ source: "export function A(){return <section/>}" });
+  const full = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts });
+  const repairScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    repairScope: { files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"] },
+  });
+  const compact = renderPatchPrompt({ step: "correction", originalStep: "core", contract: CONTRACT,
+    tiers: TIERS, tree: fixture.tree, modulePlan: fixture.modulePlan,
+    moduleContracts: fixture.moduleContracts, headroomScope: repairScope });
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: full }] }) > 70_000);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: compact }] }) < 15_000,
+    "bounded corrections no longer resend every unrelated module contract");
+  assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);
+  assert.doesNotMatch(compact, /diagnosticPadding/);
+});
+
+test("a single irreducible source fails closed after bounded zero-dispatch compaction", async () => {
+  const fixture = oversizedModuleFixture({ source: `export function A(){return <pre>${"x".repeat(240_000)}</pre>}` });
+  const scope = { kind: "compile", files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"],
+    allowedPrefixes: [], findings: [], expectedPatchTokens: 1_200, instruction: "Fix A only." };
+  let providerCalls = 0;
+  const provider = { model: "gpt-5.5", provider: "openai", runTurn: async () => { providerCalls += 1; return {}; } };
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await assert.rejects(lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "correction", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: ["src/components/A.jsx"],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts, repairScope: scope,
+  }), (error) => error.code === "smallest_scoped_call_exceeds_headroom" && error.headroomResizes === 1);
+  assert.equal(providerCalls, 0, "neither oversized preflight is allowed onto the provider wire");
+  assert.equal(reservations.rows().length, 0, "no unusable call acquires or consumes a reservation");
+});
+
+test("later headroom batches keep repair funding without consuming another logical repair slot", async () => {
+  const fixture = oversizedModuleFixture({ source: "export function A(){return <section/>}" });
+  const reservations = memoryModelReservations();
+  const first = await reservations.reserve({
+    owner: "owner", projectId: "project", buildId: "build", callKey: "first-repair", step: "repair",
+    provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+    usageResponsibility: "thrallo_repair", reservedCredits: 0.1, ceilingCredits: 30,
+    maxRepairs: 1, maxCorrections: 2,
+  });
+  await reservations.settle("owner", first.id, {
+    actualCredits: 0.1, usage: { input: 100, output: 20 }, providerRequestIds: ["req-first"],
+  });
+  const provider = fakePatchProvider({ patches: [{
+    replaceFile: "src/components/A.jsx", content: "export function A(){return <section>A</section>}",
+  }] });
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, maxRepairs: 1, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "repair", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    headroomScope: {
+      kind: "headroom_continuation", logicalStep: "repair", batchIndex: 1,
+      files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"], allowedPrefixes: [],
+      remainingFiles: [], expectedPatchTokens: 1_000, instruction: "Complete A only.",
+      moduleContracts: { version: 1, specifications: [fixture.moduleContracts.specifications[0]] },
+    },
+  });
+  const continuation = reservations.rows().find((row) => row.callKey.includes("repair:headroom"));
+  assert.ok(continuation, "the later call has a distinct durable continuation identity");
+  assert.equal(continuation.step, "repair:headroom");
+  assert.equal(continuation.usageResponsibility, "thrallo_repair");
+  assert.equal(provider.calls.length, 1);
+});
 
 function fakeDiag() {
   const steps = [];

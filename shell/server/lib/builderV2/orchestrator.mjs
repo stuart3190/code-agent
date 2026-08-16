@@ -195,6 +195,29 @@ function structuralCandidateCorrection(applied) {
 
 // ── the orchestrator ──────────────────────────────────────────────────────────────────────────
 
+function nextHeadroomContinuation(scope, moduleContracts, tree) {
+  const remaining = [...new Set(scope?.remainingFiles || [])];
+  if (!remaining.length) return null;
+  const width = Math.max(1, Number(scope.batchWidth || scope.allowedFiles?.length || 1));
+  const files = remaining.slice(0, width);
+  const selected = (moduleContracts?.specifications || [])
+    .filter((specification) => files.includes(specification.path));
+  const sourceTokens = files.reduce((sum, path) => (
+    sum + Math.ceil(String(tree?.[path] || "").length / 4)
+  ), 0);
+  return {
+    ...scope,
+    batchIndex: Number(scope.batchIndex || 0) + 1,
+    files,
+    allowedFiles: files,
+    remainingFiles: remaining.slice(width),
+    moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
+    expectedPatchTokens: Math.min(6_000, Math.max(1_000, Math.ceil(sourceTokens * 1.1))),
+    instruction: "Continue the same approved build with only this next bounded module batch. "
+      + `Complete [${files.join(", ")}], preserve every retained module, and do not touch unrelated files.`,
+  };
+}
+
 export function createOrchestrator({
   contractFn,                       // MODEL SEAM: async ({owner, projectId, request, profile}) → contract
   patchesFn,                        // MODEL SEAM: async ({step, contract, tiers, tree, assets, rejections, problems, journey}) → patches[]
@@ -318,6 +341,7 @@ export function createOrchestrator({
     let lastSignature = null;
     let repairScope = initialRepairScope;
     let contractCorrectionScope = null;
+    let headroomScope = null;
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
     let advisory = [];
@@ -358,25 +382,34 @@ export function createOrchestrator({
       // Pre-compile corrections dispatch under their own step identity so they draw on the
       // correction allowance, never on the single browser-informed repair slot.
       const dispatchStep = dispatchAs
+        || headroomScope?.logicalStep
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
-        modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope,
+        modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
         advisory, spec: scoped, signal });
-      const activeScope = repairScope || contractCorrectionScope;
+      // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
+      // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
+      // the following full-tree gates still decide whether more work is required.
+      const activeScope = patches.dispatchScope || headroomScope || repairScope || contractCorrectionScope;
+      const internalHeadroomSplit = activeScope?.kind === "headroom_continuation";
       const patchScope = validateModulePatchScope(patches, activeScope);
       if (!patchScope.ok) {
-        // The correction reached outside its boundary. Retrying the same scope would just
-        // reproduce the same batch, so fall back to an unscoped attempt with the boundary
-        // explained — the tree is retained either way.
+        // Validator-owned correction scopes fall back to a full attempt. Internal headroom
+        // continuations keep the same bounded scope so an oversized full prompt cannot reappear.
         rejections = patchScope.findings.map((finding) => ({ signature: finding.code, reason: JSON.stringify(finding) }));
-        repairScope = null;
-        contractCorrectionScope = null;
-        working = originalTree;
+        if (internalHeadroomSplit) {
+          headroomScope = activeScope;
+        } else {
+          repairScope = null;
+          contractCorrectionScope = null;
+          working = originalTree;
+        }
         attempts += 1;
         log(`${step}: scoped correction attempted ${patchScope.findings.length} out-of-scope write(s); `
-          + `retrying unscoped (attempt ${attempts}/${maxGenerationAttempts})`);
+          + `${internalHeadroomSplit ? "retrying the same bounded continuation" : "retrying unscoped"} `
+          + `(attempt ${attempts}/${maxGenerationAttempts})`);
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
@@ -393,6 +426,7 @@ export function createOrchestrator({
         outcomes: patchOutcomes(patches, applied), filesChanged,
       });
       if (applied.rejected.length) {
+        headroomScope = null;
         rejections = applied.rejected;
         const classes = [...new Set(applied.rejected.map((row) => row.code).filter(Boolean))];
         const structuralScope = structuralCandidateCorrection(applied);
@@ -457,20 +491,26 @@ export function createOrchestrator({
         const outsideScope = filesChanged.filter((path) => !(activeScope.allowedFiles || []).includes(path)
           && !(activeScope.allowedPrefixes || []).some((prefix) => path.startsWith(prefix)));
         if (outsideScope.length) {
-          // A correction that reached wider than its boundary is not a reason to abandon a
-          // build: drop back to an unscoped attempt with the boundary explained, rather than
-          // discarding work over a write-scope technicality.
+          // A validator-owned correction that reached wider than its boundary drops back to a
+          // full attempt. A headroom continuation remains bounded so it cannot reintroduce the
+          // oversized prompt that caused the split.
           rejections = [{
             signature: "correction-scope",
             reason: `your correction changed ${outsideScope.join(", ")}, outside its boundary `
               + `[${activeScope.allowedFiles.join(", ")}]. Re-emit the fix for the named files only, `
               + "or address the problem across the step if it genuinely cannot be scoped.",
           }];
-          repairScope = null;
-          contractCorrectionScope = null;
-          working = originalTree;
+          if (internalHeadroomSplit) {
+            headroomScope = activeScope;
+          } else {
+            repairScope = null;
+            contractCorrectionScope = null;
+            working = originalTree;
+          }
           attempts += 1;
-          log(`${step}: correction exceeded its boundary; retrying unscoped (attempt ${attempts}/${maxGenerationAttempts})`);
+          log(`${step}: correction exceeded its boundary; `
+            + `${internalHeadroomSplit ? "retrying the same bounded continuation" : "retrying unscoped"} `
+            + `(attempt ${attempts}/${maxGenerationAttempts})`);
           continue;
         }
       }
@@ -493,7 +533,7 @@ export function createOrchestrator({
               + "and make every journey outcome visible as real UI text"
             : "you returned no patches at all — emit the files this step requires",
         }];
-        working = originalTree;
+        working = internalHeadroomSplit ? working : originalTree;
         noOps += 1;
         attemptLedger.push({ attempt, dispatch: dispatchStep,
           class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
@@ -518,6 +558,19 @@ export function createOrchestrator({
       });
       await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
         tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
+
+      if (internalHeadroomSplit && activeScope.remainingFiles?.length) {
+        working = applied.tree;
+        headroomScope = nextHeadroomContinuation(activeScope, moduleContracts, working);
+        repairScope = null;
+        contractCorrectionScope = null;
+        attemptLedger.push({ attempt, dispatch: dispatchStep, class: "headroom_continuation",
+          substantive: true, retainedFiles: filesChanged });
+        log(`${step}: retained headroom batch ${latestCandidate.id}; continuing automatically with `
+          + `[${headroomScope.allowedFiles.join(", ")}] (${headroomScope.remainingFiles.length} queued file(s) after it)`);
+        continue;
+      }
+      headroomScope = null;
 
       // Shape analysis now RECORDS rather than rejects. Only genuine safety/integrity findings
       // (see validationSeverity) can stop a candidate that is otherwise runnable.

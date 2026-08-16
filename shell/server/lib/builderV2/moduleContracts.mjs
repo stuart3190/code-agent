@@ -137,12 +137,12 @@ export function moduleGenerationContractsBrief(moduleContracts) {
 }
 
 /**
- * Compact the already-enforced module contracts for a browser-informed repair.
+ * Compact the already-enforced module contracts for any bounded repair or correction.
  *
- * Full generation needs the complete machine contract. A targeted repair already has a compiled
- * tree plus exact browser evidence, and the same full contracts are re-run deterministically after
- * its patch. Repeating every flow and capability-owner rule inside every module made one live
- * repair prompt 160 KB and unable to fit even its minimum useful response under the six-credit
+ * Full generation needs the complete machine contract. A targeted dispatch has a retained tree
+ * plus an exact write boundary, and the same full contracts are re-run deterministically after its
+ * patch. Repeating every flow and capability-owner rule inside every module made live repair and
+ * correction prompts too large to fit even their minimum useful response under the six-credit
  * per-call ceiling. This summary preserves the responsibilities needed to patch safely while the
  * validators remain the authoritative, unchanged gate.
  */
