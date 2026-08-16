@@ -214,8 +214,8 @@ async function dispatch(ctx, {
 
 async function resumableBuild(client, owner, projectId) {
   const { data: builds, error: buildError } = await client.from("bv2_builds")
-    .select("id,state,error,created_at").eq("owner", owner).eq("project_id", projectId)
-    .in("state", ["blocked", "failed"]).order("created_at", { ascending: false }).limit(10);
+    .select("id,state,error,started_at").eq("owner", owner).eq("project_id", projectId)
+    .in("state", ["blocked", "failed"]).order("started_at", { ascending: false }).limit(10);
   if (buildError) throw new Error(`Builder V2 resumable build lookup failed: ${buildError.message}`);
   const ids = (builds || []).map((row) => row.id);
   if (!ids.length) return null;

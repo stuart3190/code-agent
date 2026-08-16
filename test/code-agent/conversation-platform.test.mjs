@@ -309,6 +309,10 @@ test("a bare retry resumes the exact preserved V2 build without consulting the L
   assert.equal(turns.filter((turn) => turn.role === "user").length, 2);
   assert.equal(turns.at(-1).content, buildDispatchConfirmation("resume"));
   assert.doesNotMatch(turns.at(-1).content, /Build ID|``/);
+  assert.deepEqual(turns.at(-1).payload, {
+    projectId: "project-1", jobId: "job-2", buildId: "diag-2",
+    pipelineVersion: "v2", dispatch: "resume",
+  });
   const events = await store.listEvents(OWNER, conversation.id, 0);
   assert.equal(events.filter((event) => event.type === "build_started").length, 1);
   assert.equal((await store.getConversation(OWNER, conversation.id)).state, "idle");
@@ -321,8 +325,46 @@ test("retry targeting requires a bare retry and a durable V2 terminal identity",
   assert.deepEqual(preservedBuildRetryTarget([terminal, { role: "user", content: "Continue" }]), {
     projectId: "project", jobId: "job", failure: "failed",
   });
+  assert.deepEqual(preservedBuildRetryTarget([
+    terminal,
+    { role: "lead", content: "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created." },
+    { role: "user", content: "Retry again" },
+  ]), { projectId: "project", jobId: "job", failure: "failed" });
+  assert.equal(preservedBuildRetryTarget([
+    terminal,
+    { role: "lead", content: "I changed something else." },
+    { role: "user", content: "Retry again" },
+  ]), null);
   assert.equal(preservedBuildRetryTarget([terminal, { role: "user", content: "Try again with a darker theme" }]), null);
   assert.equal(preservedBuildRetryTarget([{ role: "user", content: "Try again" }]), null);
+});
+
+test("a pre-dispatch resume failure preserves the exact retry identity", async () => {
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, {});
+  await store.appendTurn(conversation, {
+    role: "lead", content: "failed",
+    payload: { pipelineVersion: "v2", projectId: "project-1", jobId: "job-1" },
+  });
+  await store.appendTurn(conversation, { role: "user", content: "Retry again" });
+  await store.claimConversationThinking(conversation);
+  await processConversation(conversation, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    retryDispatcher: async () => {
+      throw Object.assign(new Error("column bv2_builds.created_at does not exist"), { code: "42703" });
+    },
+  });
+  const turns = await store.listTurns(OWNER, conversation.id);
+  assert.equal(turns.at(-1).content,
+    "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.");
+  assert.deepEqual(turns.at(-1).payload, {
+    projectId: "project-1", jobId: "job-1", pipelineVersion: "v2",
+    retryDispatchFailure: true, errorCode: "42703",
+  });
 });
 
 test("successful build capability output closes with canonical copy instead of a model-written blank ID", async () => {
@@ -365,6 +407,10 @@ test("successful build capability output closes with canonical copy instead of a
   const turns = await store.listTurns(OWNER, conversation.id);
   assert.equal(turns.at(-1).content, buildDispatchConfirmation("build"));
   assert.doesNotMatch(turns.at(-1).content, /Build ID|``|7b93a4b7/);
+  assert.deepEqual(turns.at(-1).payload, {
+    projectId: "project", jobId: "job", buildId: "7b93a4b7-0d95-4320-9e8f-514a0745e124",
+    pipelineVersion: "v2", dispatch: "build",
+  });
 });
 
 test("stale thinking conversations recover so the Lead Agent never visibly dies", async () => {

@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 
 import { startExistingAppWorkV2 } from "../../shell/server/lib/builderV2/entry.mjs";
 
-const query = (rows) => {
+const query = (rows, record = () => {}) => {
   const chain = {
-    select: () => chain, eq: () => chain, in: () => chain, order: () => chain, limit: () => chain,
+    select: (columns) => { record("select", columns); return chain; },
+    eq: () => chain, in: () => chain,
+    order: (column, options) => { record("order", { column, options }); return chain; },
+    limit: () => chain,
     maybeSingle: async () => ({ data: Array.isArray(rows) ? rows[0] || null : rows, error: null }),
     then(resolve, reject) { return Promise.resolve({ data: Array.isArray(rows) ? rows : [rows], error: null }).then(resolve, reject); },
   };
@@ -15,11 +18,13 @@ const query = (rows) => {
 function fixture({ expiresAt = "2099-08-16T09:19:27.332Z" } = {}) {
   const calls = [];
   const tables = [];
+  const queryCalls = [];
   const client = {
     from(table) {
       tables.push(table);
       if (table === "bv2_builds") return query([{ id: "advanced-source", state: "blocked",
-        profile: "advanced", error: "no runnable tree within 3 generation attempts" }]);
+        profile: "advanced", error: "no runnable tree within 3 generation attempts" }],
+      (operation, value) => queryCalls.push({ table, operation, value }));
       if (table === "bv2_snapshots") return query([{ id: "candidate", build_id: "advanced-source",
         reason: "candidate:core:2" }]);
       if (table === "bv2_build_budget_approvals") return query({ id: "approval-60", status: "consumed",
@@ -44,7 +49,7 @@ function fixture({ expiresAt = "2099-08-16T09:19:27.332Z" } = {}) {
       recorderForJob: () => ({ sessionId: "diag" }) }),
     createJob: async (input) => { calls.push(input); return { job, existing: false }; },
   };
-  return { client, deps, calls, tables };
+  return { client, deps, calls, tables, queryCalls };
 }
 
 const ctx = () => ({
@@ -53,7 +58,7 @@ const ctx = () => ({
 });
 
 test("an advanced pre-green repair reuses only the original approval's remaining headroom", async () => {
-  const { deps, calls, tables } = fixture();
+  const { deps, calls, tables, queryCalls } = fixture();
   const result = await startExistingAppWorkV2(ctx(), {
     project: { id: "project", bv2_green_snapshot_id: null, budget_approval_id: "approval-60" },
     request: "repair the retained candidate", kind: "repair",
@@ -68,6 +73,10 @@ test("an advanced pre-green repair reuses only the original approval's remaining
     sourceBuildId: "advanced-source", problems: ["no runnable tree within 3 generation attempts"],
   });
   assert.equal(tables.includes("projects"), false, "the existing project is reused");
+  assert.deepEqual(queryCalls.filter((call) => call.table === "bv2_builds"), [
+    { table: "bv2_builds", operation: "select", value: "id,state,error,started_at" },
+    { table: "bv2_builds", operation: "order", value: { column: "started_at", options: { ascending: false } } },
+  ]);
 });
 
 test("an expired advanced authorization fails before job or provider dispatch", async () => {

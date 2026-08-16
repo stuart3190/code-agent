@@ -131,11 +131,26 @@ const BARE_BUILD_RETRY = /^(?:try|retry|resume|continue)(?:\s+(?:it|again|the bu
 export function preservedBuildRetryTarget(turns = []) {
   const latest = turns.at(-1);
   if (latest?.role !== "user" || !BARE_BUILD_RETRY.test(String(latest.content || "").trim())) return null;
-  const terminal = turns.at(-2);
+  const intervening = [];
+  let terminal = null;
+  for (let index = turns.length - 2; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role === "lead" && turn.payload?.pipelineVersion === "v2"
+      && turn.payload?.projectId && turn.payload?.jobId) {
+      terminal = turn;
+      break;
+    }
+    intervening.push(turn);
+  }
+  const onlySafePredispatchFailures = intervening.every((turn) => turn?.role === "lead" && (
+    turn.payload?.retryDispatchFailure === true
+    || String(turn.content || "") === "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created."
+  ));
   if (terminal?.role !== "lead"
     || terminal.payload?.pipelineVersion !== "v2"
     || !terminal.payload?.projectId
-    || !terminal.payload?.jobId) return null;
+    || !terminal.payload?.jobId
+    || !onlySafePredispatchFailures) return null;
   return {
     jobId: String(terminal.payload.jobId),
     projectId: String(terminal.payload.projectId),
@@ -217,11 +232,25 @@ export async function processConversation(conversation, {
           });
         }
         await emit("agent_done", { agent: "Builder", ok: true });
-        await finishWithMessage(store, conversation, buildDispatchConfirmation("resume"));
+        await finishWithMessage(store, conversation, buildDispatchConfirmation("resume"), {
+          projectId: accepted.result.projectId,
+          jobId: accepted.result.jobId,
+          buildId: accepted.result.buildId,
+          pipelineVersion: "v2",
+          dispatch: "resume",
+        });
       } catch (error) {
+        console.error(`[bv2 retry ${retryTarget.jobId.slice(0, 8)}] ${error.code || "error"}: ${error.message}`);
         await emit("agent_done", { agent: "Builder", ok: false });
         await finishWithMessage(store, conversation,
-          error.publicMessage || "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.");
+          error.publicMessage || "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.",
+          {
+            projectId: retryTarget.projectId,
+            jobId: retryTarget.jobId,
+            pipelineVersion: "v2",
+            retryDispatchFailure: true,
+            errorCode: error.code || "retry_dispatch_failed",
+          });
       }
       return;
     }
@@ -543,7 +572,13 @@ export async function processConversation(conversation, {
           && output?.jobId && output?.buildId && output?.projectId) {
           await emit("agent_done", { agent: "Lead Agent" });
           await finishWithMessage(store, conversation,
-            buildDispatchConfirmation(call.name === "app_build" ? "build" : "resume"));
+            buildDispatchConfirmation(call.name === "app_build" ? "build" : "resume"), {
+              projectId: output.projectId,
+              jobId: output.jobId,
+              buildId: output.buildId,
+              pipelineVersion: "v2",
+              dispatch: call.name === "app_build" ? "build" : "resume",
+            });
           return;
         }
         if (output?.__pause === "waiting_user") {
@@ -783,11 +818,11 @@ function relayRunEvents({ store, runStore, conversation, runId }) {
 
 // Last line of defence: EVERY closing message the user sees is sanitised, including text
 // the model wrote — a technical leak would need two independent failures.
-async function finishWithMessage(store, conversation, text) {
+async function finishWithMessage(store, conversation, text, payload = null) {
   const { sanitizeUserFacingText } = await import("./errorShield.mjs");
   const safe = sanitizeUserFacingText(text, "That's done — tell me what you'd like next.");
-  await store.appendTurn(conversation, { role: "lead", content: safe });
-  await store.appendEvent(conversation, "message", { role: "lead", text: safe });
+  await store.appendTurn(conversation, { role: "lead", content: safe, ...(payload ? { payload } : {}) });
+  await store.appendEvent(conversation, "message", { role: "lead", text: safe, ...(payload || {}) });
   await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() });
 }
 
