@@ -115,17 +115,23 @@ async function approvedRepairHeadroom(client, owner, project) {
 
 async function retainedBuildRepairHeadroom(client, owner, project, resumable) {
   if (project?.budget_approval_id) return approvedRepairHeadroom(client, owner, project);
-  const { data: calls, error: callsError } = await client.from("bv2_model_reservations")
+  const [{ data: calls, error: callsError }, { data: builds, error: buildsError }] = await Promise.all([
+    client.from("bv2_model_reservations")
     .select("state,actual_credits,reserved_credits")
-    .eq("owner", owner).eq("project_id", project.id).eq("build_id", resumable.buildId);
+      .eq("owner", owner).eq("project_id", project.id),
+    client.from("bv2_builds").select("budget_credits")
+      .eq("owner", owner).eq("project_id", project.id),
+  ]);
   if (callsError) throw new Error(`Builder V2 retained-build usage read failed: ${callsError.message}`);
+  if (buildsError) throw new Error(`Builder V2 retained-build authorization read failed: ${buildsError.message}`);
   const consumed = (calls || []).reduce((sum, row) => (
     sum + (row.actual_credits != null ? Number(row.actual_credits || 0) : 0)
   ), 0);
   const held = (calls || []).reduce((sum, row) => (
     sum + (row.state === "held" ? Number(row.reserved_credits || 0) : 0)
   ), 0);
-  const ceiling = Number(resumable.budgetCredits || 0);
+  const ceiling = Math.max(Number(resumable.budgetCredits || 0),
+    ...(builds || []).map((build) => Number(build.budget_credits || 0)));
   const remaining = Math.max(0, ceiling - consumed - held);
   if (!(remaining > 0)) {
     throw Object.assign(new Error("The retained Builder V2 build credit ceiling has been exhausted."), {

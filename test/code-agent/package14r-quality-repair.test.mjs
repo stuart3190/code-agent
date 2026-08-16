@@ -220,6 +220,7 @@ test("14R failed verification resumes the exact non-promotable candidate without
   let repairProblems = [];
   let browserCalls = 0;
   const snapshotStore = createSnapshotStore();
+  const buildStore = memoryBuildStore();
   const orchestrator = createOrchestrator({
     contractFn: async () => { contractCalls += 1; return contract; },
     patchesFn: async ({ step, problems }) => {
@@ -239,7 +240,7 @@ test("14R failed verification resumes the exact non-promotable candidate without
       },
       async assetManifestFor() { return []; },
     },
-    snapshotStore, buildStore: memoryBuildStore(), maxJourneyRepairs: 0,
+    snapshotStore, buildStore, maxJourneyRepairs: 0,
     journeysFn: async ({ journeys }) => {
       browserCalls += 1;
       // First build verification and zero-model retained-candidate preverification both stay red;
@@ -265,7 +266,7 @@ test("14R failed verification resumes the exact non-promotable candidate without
 
   const repaired = await orchestrator.runRepairFromCheckpoint({ owner: "owner", projectId: "project",
     sourceBuildId: failed.buildId, request: "repair failed verification", contract,
-    initialProblems: ["headline did not become visible"] });
+    initialProblems: ["headline did not become visible"], budgetCredits: 0.5697 });
   assert.equal(repaired.state, "green", JSON.stringify(repaired));
   assert.equal(contractCalls, 1, "persisted contract is reused");
   assert.equal(coreCalls, 1, "core generation is never replayed");
@@ -276,6 +277,8 @@ test("14R failed verification resumes the exact non-promotable candidate without
   assert.doesNotMatch(repairProblems.join("\n"), /required journey headline is undriveable/);
   assert.equal((await snapshotStore.pointer("owner", "project", "green")), repaired.snapshotId);
   assert.match((await snapshotStore.getSnapshot(source.snapshotId)).reason, /^candidate:core:/);
+  assert.equal((await buildStore.get(repaired.buildId)).budget_credits, 0.5697,
+    "the resume dispatch's actual remaining allowance is durable on its build row");
 });
 
 test("14R repair dispatch selects the durable checkpoint when a new project has no green snapshot", async () => {

@@ -586,7 +586,8 @@ export function createBuilderV2Runtime({
         : mode === "resume_repair"
           ? await orchestrator.runRepairFromCheckpoint({
             owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract,
-            initialProblems: Array.isArray(input.problems) ? input.problems : [], maxRepairs, signal,
+            initialProblems: Array.isArray(input.problems) ? input.problems : [], maxRepairs,
+            budgetCredits: ceilingCredits, signal,
           })
           : mode === "resume_verify"
             ? await orchestrator.runVerifyFromCheckpoint({

@@ -15,19 +15,26 @@ const query = (rows, record = () => {}) => {
   return chain;
 };
 
-function fixture({ expiresAt = "2099-08-16T09:19:27.332Z", unapproved = false } = {}) {
+function fixture({ expiresAt = "2099-08-16T09:19:27.332Z", unapproved = false, resumeUsage = 0 } = {}) {
   const calls = [];
   const tables = [];
   const queryCalls = [];
   const client = {
     from(table) {
       tables.push(table);
-      if (table === "bv2_builds") return query([{ id: "advanced-source", state: "blocked",
-        profile: "advanced", budget_credits: unapproved ? 12 : 60,
-        error: "no runnable tree within 3 generation attempts" }],
+      if (table === "bv2_builds") return query([
+        ...(resumeUsage ? [{ id: "retained-resume", state: "failed", profile: "advanced",
+          budget_credits: null, error: "retained repair needs verification" }] : []),
+        { id: "advanced-source", state: "blocked",
+          profile: "advanced", budget_credits: unapproved ? 12 : 60,
+          error: "no runnable tree within 3 generation attempts" },
+      ],
       (operation, value) => queryCalls.push({ table, operation, value }));
-      if (table === "bv2_snapshots") return query([{ id: "candidate", build_id: "advanced-source",
-        reason: "candidate:core:2" }]);
+      if (table === "bv2_snapshots") return query([
+        ...(resumeUsage ? [{ id: "repaired-candidate", build_id: "retained-resume",
+          reason: "candidate:repair:1" }] : []),
+        { id: "candidate", build_id: "advanced-source", reason: "candidate:core:2" },
+      ]);
       if (table === "bv2_build_budget_approvals") return query({ id: "approval-60", status: "consumed",
         ceiling_credits: 60, expires_at: expiresAt, dispatch_project_id: "project" });
       if (table === "bv2_model_reservations") return query(unapproved ? [
@@ -36,6 +43,7 @@ function fixture({ expiresAt = "2099-08-16T09:19:27.332Z", unapproved = false } 
         { state: "settled", actual_credits: 3.1649, reserved_credits: 3.2 },
         { state: "settled", actual_credits: 2.4814, reserved_credits: 2.5 },
         { state: "settled", actual_credits: 2.4902, reserved_credits: 2.5 },
+        ...(resumeUsage ? [{ state: "settled", actual_credits: resumeUsage, reserved_credits: 1.9893 }] : []),
       ] : [
         { state: "settled", actual_credits: 1.0508, reserved_credits: 1.0805 },
         { state: "settled", actual_credits: 1.0387, reserved_credits: 1.1089 },
@@ -97,6 +105,19 @@ test("a pre-green build without an approval retains only its source build headro
   assert.equal(calls[0].mode, "resume_repair");
   assert.equal(calls[0].budgetApprovalId, null);
   assert.ok(Math.abs(calls[0].budgetAllowance - 1.9893) < 1e-9, calls[0].budgetAllowance);
+});
+
+test("repeated pre-green resumes share one project-wide ceiling instead of resetting headroom", async () => {
+  const { deps, calls } = fixture({ unapproved: true, resumeUsage: 1.4196 });
+  const result = await startExistingAppWorkV2(ctx(), {
+    project: { id: "project", bv2_green_snapshot_id: null, budget_approval_id: null },
+    request: "reverify the retained repair", kind: "repair",
+  }, { deps });
+  assert.equal(result.handled, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].v2Input.sourceBuildId, "retained-resume",
+    "the newest patched checkpoint is preserved");
+  assert.ok(Math.abs(calls[0].budgetAllowance - 0.5697) < 1e-9, calls[0].budgetAllowance);
 });
 
 test("an expired advanced authorization fails before job or provider dispatch", async () => {

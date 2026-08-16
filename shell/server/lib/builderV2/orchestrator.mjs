@@ -1140,10 +1140,13 @@ export function createOrchestrator({
      * replayed. The checkpoint remains unpromoted unless the repaired journeys become green.
      */
     async runRepairFromCheckpoint({ owner, projectId, sourceBuildId, request, contract,
-      initialProblems = [], maxRepairs = 1, userCritical = [], signal = null }) {
+      initialProblems = [], maxRepairs = 1, userCritical = [], budgetCredits = null, signal = null }) {
       const sourceBuild = await buildStore.get(sourceBuildId);
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: sourceBuild?.profile || "simple", request, state: "created",
+        // Persist the dispatch allowance as well as inheriting historical source metadata. Old
+        // repair rows pre-date ceiling propagation and can legitimately have a null budget.
+        budget_credits: Number(budgetCredits || sourceBuild?.budget_credits || 0) || null,
         max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_repair", sourceBuildId });

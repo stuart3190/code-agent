@@ -261,17 +261,18 @@ export function repairFailureOwnedPaths(contract = {}, problems = []) {
   const actionable = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem));
   const directOwners = actionable.flatMap((problem) => {
     const structured = structuredFailure(problem);
-    return structured ? [
-      ...(structured.responsibleModules || []), ...(structured.stateOwners || []),
-    ] : [];
+    if (!structured) return [];
+    const stateOwners = structured.stateOwners || [];
+    return stateOwners.length ? stateOwners : structured.responsibleModules || [];
   });
   const failures = new Set(repairFailureReferences(actionable)
     .map((failure) => `${failure.journeyId}\n${failure.action}`));
   const mappedOwners = failures.size ? (contract.interactionContract?.flows || [])
     .filter((flow) => failures.has(`${flow.journeyId}\n${flow.action}`))
-    .flatMap((flow) => [
-      ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
-    ]) : [];
+    .flatMap((flow) => {
+      const stateOwners = [flow.stateOwner, flow.control?.stateOwner].filter(Boolean);
+      return stateOwners.length ? stateOwners : flow.responsibleModules || [];
+    }) : [];
   return [...new Set([...directOwners, ...mappedOwners]
     .filter((path) => typeof path === "string" && GENERATED_SOURCE.test(path)))];
 }
@@ -541,11 +542,14 @@ export function headroomDispatchScope({
   const evidence = evidencePaths([...(problems || []), ...(rejections || [])]);
   const planned = (modulePlan || []).map((module) => module.path).filter((path) => GENERATED_SOURCE.test(path));
   const missing = planned.filter((path) => typeof tree?.[path] !== "string");
+  const semantic = semanticFiles.filter((path) => GENERATED_SOURCE.test(path)
+    && (planned.includes(path) || typeof tree?.[path] === "string"));
   const targeted = [...new Set([
     ...activeFiles,
-    ...semanticFiles.filter((path) => GENERATED_SOURCE.test(path)
-      && (planned.includes(path) || typeof tree?.[path] === "string")),
-    ...evidence.filter((path) => planned.includes(path) || typeof tree?.[path] === "string"),
+    ...semantic,
+    // Structured state ownership is the strongest available write address. Broad diagnostic
+    // `responsibleModules` remain a fallback only when no exact semantic owner was derived.
+    ...(semantic.length ? [] : evidence.filter((path) => planned.includes(path) || typeof tree?.[path] === "string")),
   ])];
   // A browser/pre-compile repair already names its owning modules. Queuing every other missing
   // planned module turned a one-file repair into unrelated continuations and exhausted the

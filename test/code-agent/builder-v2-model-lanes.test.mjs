@@ -262,7 +262,12 @@ test("production browser cascades batch the causal structured owner, never unrel
     JSON.stringify({
       code: "interaction_verification_failure", journeyId: "create-adjust-save-reopen-export-plan",
       userAction: "create a new project", status: "undriveable",
-      responsibleModules: [owner], stateOwners: [owner],
+      responsibleModules: [
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanConfirmation.jsx",
+        owner,
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanOutput.jsx",
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanStatus.jsx",
+      ], stateOwners: [owner],
     }),
   ];
   const contract = { interactionContract: { flows: [
@@ -275,7 +280,12 @@ test("production browser cascades batch the causal structured owner, never unrel
   ]);
   assert.deepEqual(repairFailureOwnedPaths(contract, problems), [owner]);
   const scope = headroomDispatchScope({
-    tree: { [owner]: "export function Planner(){}", [unrelated]: "export function Projects(){}" },
+    tree: {
+      [owner]: "export function Planner(){}", [unrelated]: "export function Projects(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanConfirmation.jsx": "export function Confirmation(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanOutput.jsx": "export function Output(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanStatus.jsx": "export function Status(){}",
+    },
     modulePlan: [{ path: unrelated }, { path: owner }], problems,
     semanticFiles: repairFailureOwnedPaths(contract, problems), logicalStep: "repair",
   });
