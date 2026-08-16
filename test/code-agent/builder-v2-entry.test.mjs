@@ -5,6 +5,12 @@ import { readFile } from "node:fs/promises";
 import { createJob, executeBuildPipelineWork } from "../../shell/server/lib/buildJobs.mjs";
 import { startAppBuildV2, startExistingAppWorkV2 } from "../../shell/server/lib/builderV2/entry.mjs";
 
+test("terminal V2 conversation and reconnect events retain durable job and build identities", async () => {
+  const source = await readFile(new URL("../../shell/server/lib/builderV2/entry.mjs", import.meta.url), "utf8");
+  assert.match(source, /payload:\s*\{[\s\S]*?jobId: data\.jobId,[\s\S]*?buildId: job\.diagSessionId,[\s\S]*?pipelineVersion: "v2"/);
+  assert.match(source, /ctx\.emit\("message", \{[\s\S]*?jobId: data\.jobId,[\s\S]*?buildId: job\.diagSessionId,[\s\S]*?pipelineVersion: "v2"/);
+});
+
 test("accepted Builder V2 dispatch is durable-worker-only and returns handled:true", async () => {
   const calls = [];
   const project = { id: "project-1", name: "Test" };

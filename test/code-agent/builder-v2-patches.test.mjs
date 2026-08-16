@@ -237,6 +237,19 @@ test("replace_exact surgically patches one unique nested excerpt and fails close
     op: "replace_exact", symbol: expected, content: "if (!ready) return (",
   }] }]);
   assert.match(malformed.rejected[0].reason, /does not parse/);
+  const unresolved = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected,
+    content: "if (!ready) { setStep('workspace'); return <button onClick={start}>Start</button>; }",
+  }] }]);
+  assert.equal(unresolved.applied.length, 0);
+  assert.equal(unresolved.rejected[0].code, "tree_integrity_failed");
+  assert.match(unresolved.rejected[0].reason, /unresolved call identifier\(s\): setStep/);
+
+  const locallyBound = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected,
+    content: "if (!ready) { const advance = () => true; return <button onClick={advance}>Start</button>; }",
+  }] }]);
+  assert.equal(locallyBound.rejected.length, 0, JSON.stringify(locallyBound.rejected));
   assert.ok(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
     .properties.op.enum.includes("replace_exact"));
 });

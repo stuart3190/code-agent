@@ -9,6 +9,7 @@
 import { indexFile } from "./indexer.mjs";
 import { modularityCheck } from "../appBuild/modularity.mjs";
 import { createHash } from "node:crypto";
+import { parse } from "@babel/parser";
 
 export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/backend\//,
@@ -75,6 +76,70 @@ function duplicateDefault(candidateText) {
   if (count <= 1) return null;
   return `this would leave ${count} default exports — `
     + `use replace_symbol on the existing default component instead of adding another`;
+}
+
+const SAFE_BARE_CALL_GLOBALS = new Set([
+  "alert", "atob", "btoa", "cancelAnimationFrame", "clearInterval", "clearTimeout",
+  "confirm", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+  "escape", "eval", "fetch", "isFinite", "isNaN", "parseFloat", "parseInt", "prompt",
+  "queueMicrotask", "requestAnimationFrame", "setInterval", "setTimeout", "structuredClone",
+  "unescape",
+]);
+
+function addBindingNames(node, names) {
+  if (!node || typeof node !== "object") return;
+  if (node.type === "Identifier") { names.add(node.name); return; }
+  if (node.type === "RestElement" || node.type === "AssignmentPattern") {
+    addBindingNames(node.argument || node.left, names);
+    return;
+  }
+  if (node.type === "ObjectPattern") {
+    for (const property of node.properties || []) addBindingNames(property.value || property.argument, names);
+    return;
+  }
+  if (node.type === "ArrayPattern") for (const element of node.elements || []) addBindingNames(element, names);
+}
+
+// Micro-repairs are intentionally too small for a compile/retry round. Fail closed when one adds
+// a bare call or constructor for which the complete candidate has no declaration or import. This
+// catches runtime-only defects (for example an invented React setter) that Vite transpilation does
+// not report, while leaving member calls and pre-existing generated behavior unchanged.
+function unresolvedIntroducedCalls(before, after, file) {
+  const facts = (source) => {
+    const calls = new Set();
+    const bindings = new Set();
+    const ast = parse(source, {
+      sourceType: "unambiguous",
+      plugins: ["jsx", ...(file.endsWith(".ts") || file.endsWith(".tsx") ? ["typescript"] : [])],
+    });
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const child of node) visit(child); return; }
+      if (node.type === "ImportSpecifier" || node.type === "ImportDefaultSpecifier"
+          || node.type === "ImportNamespaceSpecifier") addBindingNames(node.local, bindings);
+      if (node.type === "VariableDeclarator") addBindingNames(node.id, bindings);
+      if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression"
+          || node.type === "ArrowFunctionExpression" || node.type === "ObjectMethod"
+          || node.type === "ClassMethod" || node.type === "ClassPrivateMethod") {
+        addBindingNames(node.id, bindings);
+        for (const param of node.params || []) addBindingNames(param, bindings);
+      }
+      if (node.type === "ClassDeclaration" || node.type === "ClassExpression") addBindingNames(node.id, bindings);
+      if (node.type === "CatchClause") addBindingNames(node.param, bindings);
+      if ((node.type === "CallExpression" || node.type === "OptionalCallExpression"
+          || node.type === "NewExpression") && node.callee?.type === "Identifier") calls.add(node.callee.name);
+      for (const [key, child] of Object.entries(node)) {
+        if (["loc", "start", "end", "extra", "comments", "errors"].includes(key)) continue;
+        visit(child);
+      }
+    };
+    visit(ast.program);
+    return { calls, bindings };
+  };
+  const prior = facts(before);
+  const next = facts(after);
+  return [...next.calls].filter((name) => !prior.calls.has(name)
+    && !next.bindings.has(name) && !SAFE_BARE_CALL_GLOBALS.has(name));
 }
 
 function opSignature(patch, op) {
@@ -239,6 +304,12 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         if (probe.opaque) {
           reject(patch, op, "replace_exact: resulting file does not parse — include complete balanced syntax",
             REJECTION.SOURCE_PARSE_FAILED);
+          continue;
+        }
+        const unresolved = unresolvedIntroducedCalls(current, candidate, file);
+        if (unresolved.length) {
+          reject(patch, op, `replace_exact: introduced unresolved call identifier(s): ${unresolved.join(", ")}`,
+            REJECTION.TREE_INTEGRITY_FAILED);
           continue;
         }
         working[file] = candidate;

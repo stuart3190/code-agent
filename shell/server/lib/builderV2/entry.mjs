@@ -165,9 +165,15 @@ function relay(ctx, job) {
         : (data.error || "Builder V2 stopped without producing an unverified preview.");
       await ctx.conversations.appendTurn(ctx.conversation, {
         role: "lead", content: text,
-        payload: { projectId: data.projectId, jobId: data.jobId, pipelineVersion: "v2" },
+        payload: {
+          projectId: data.projectId, jobId: data.jobId,
+          buildId: job.diagSessionId, pipelineVersion: "v2",
+        },
       });
-      await ctx.emit("message", { role: "lead", text, projectId: data.projectId });
+      await ctx.emit("message", {
+        role: "lead", text, projectId: data.projectId,
+        jobId: data.jobId, buildId: job.diagSessionId, pipelineVersion: "v2",
+      });
     } catch (error) {
       console.error(`[bv2 relay ${job.id.slice(0, 8)}] ${error.message}`);
     }
