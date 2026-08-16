@@ -252,9 +252,14 @@ export async function proveGeneratedRuntimeBackend({
     }
   }
   if (failure) {
+    // app-auth signup is idempotent for the exact visitor credentials. A gateway/network/auth
+    // service interruption is therefore safe for the durable worker's single bounded retry, and
+    // still occurs before any Builder model reservation or dispatch. Other runtime proof failures
+    // remain terminal because replaying their mutations is not proven safe.
+    const retryable = failure.code === "app_auth_request_failed";
     throw configurationError("runtime_app_auth_preflight_failed",
       `Builder V2 generated app-auth runtime preflight failed at ${stage} (${failure.code || failure.name || "runtime_error"}); no provider call was made.`,
-      { stage, status: Number(failure.status || 0) || null });
+      { stage, status: Number(failure.status || 0) || null, retryable });
   }
   return {
     ok: true,

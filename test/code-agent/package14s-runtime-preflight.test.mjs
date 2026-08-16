@@ -336,11 +336,24 @@ test("14S app-auth failure is machine-readable with the exact failing stage befo
     backendFactory: () => ({
       _client: {},
       auth: { currentUser: async () => null,
-        signUp: async () => { throw Object.assign(new Error("unauthorized"), { status: 401 }); },
+        signUp: async () => { throw Object.assign(new Error("unauthorized"), {
+          code: "app_auth_request_failed", status: 401,
+        }); },
         signIn: async () => null },
       db: { entity: () => ({}) },
     }),
   }), (error) => error.code === "runtime_app_auth_preflight_failed"
     && error.stage === "app_auth_visitor_signup" && error.status === 401
+    && error.retryable === true
+    && error.dispatchState === "before_dispatch");
+});
+
+test("14S non-request runtime failures remain terminal before provider dispatch", async () => {
+  await assert.rejects(proveGeneratedRuntimeBackend({
+    projectId: PROJECT, adminClient: cleanupAdmin(), env: env(),
+    backendFactory: () => { throw new Error("generated backend is malformed"); },
+  }), (error) => error.code === "runtime_app_auth_preflight_failed"
+    && error.stage === "generated_runtime_initialization"
+    && error.retryable === false
     && error.dispatchState === "before_dispatch");
 });
