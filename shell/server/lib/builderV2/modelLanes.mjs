@@ -222,10 +222,32 @@ function renderJourneyBrief(journeys) {
   return lines.join("\n");
 }
 
+function structuredFailure(problem) {
+  if (typeof problem !== "string" || !problem.trim().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(problem);
+    return parsed?.code === "interaction_verification_failure" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isDownstreamFailureEvidence(problem) {
+  const structured = structuredFailure(problem);
+  if (structured) return ["not_reached", "skipped"].includes(String(structured.status || "").toLowerCase());
+  const value = String(problem);
+  if (/\b(?:not[_ ]reached|skipped)\b/i.test(value)) return true;
+  return /(?:required starting state|journey prerequisites).*could not be established/i.test(value);
+}
+
 export function repairFailureReferences(problems = []) {
   return (problems || [])
-    .filter((problem) => !/not reached because .* was undriveable/i.test(String(problem)))
+    .filter((problem) => !isDownstreamFailureEvidence(problem))
     .map((problem) => {
+      const structured = structuredFailure(problem);
+      if (structured?.journeyId && structured?.userAction) {
+        return { journeyId: structured.journeyId, action: structured.userAction };
+      }
       // Accept both the canonical middle dot and its historical UTF-8 mojibake as stored by older
       // workers. The orchestrator emits this exact sentence; repair scoping must parse what it owns.
       const current = String(problem).match(/^journey\s+(.+?)\s+(?:\u00c2?\u00b7)\s+step\s+"([^"]+)"\s+FAILED/i);
@@ -236,14 +258,21 @@ export function repairFailureReferences(problems = []) {
 }
 
 export function repairFailureOwnedPaths(contract = {}, problems = []) {
-  const failures = new Set(repairFailureReferences(problems)
+  const actionable = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem));
+  const directOwners = actionable.flatMap((problem) => {
+    const structured = structuredFailure(problem);
+    return structured ? [
+      ...(structured.responsibleModules || []), ...(structured.stateOwners || []),
+    ] : [];
+  });
+  const failures = new Set(repairFailureReferences(actionable)
     .map((failure) => `${failure.journeyId}\n${failure.action}`));
-  if (!failures.size) return [];
-  return [...new Set((contract.interactionContract?.flows || [])
+  const mappedOwners = failures.size ? (contract.interactionContract?.flows || [])
     .filter((flow) => failures.has(`${flow.journeyId}\n${flow.action}`))
     .flatMap((flow) => [
       ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
-    ])
+    ]) : [];
+  return [...new Set([...directOwners, ...mappedOwners]
     .filter((path) => typeof path === "string" && GENERATED_SOURCE.test(path)))];
 }
 
@@ -327,7 +356,7 @@ export function renderPatchPrompt({
       .map(({ forbiddenPersistence: _forbiddenPersistence, ...module }) => module),
   } : persistencePlan;
   const compactHeadroomProblems = headroomScope ? (() => {
-    const actionable = (problems || []).filter((problem) => !/not reached because .* was undriveable/i.test(String(problem)));
+    const actionable = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem));
     return [...new Set((actionable.length ? actionable : problems || []).map(String))].slice(0, 12);
   })() : problems;
   const compactHeadroomContract = headroomScope ? JSON.stringify({

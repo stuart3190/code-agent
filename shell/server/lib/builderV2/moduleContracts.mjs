@@ -167,36 +167,63 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
     }
   }
   const uniqueRows = (rows) => [...new Map((rows || []).map((row) => [JSON.stringify(row), row])).values()];
+  // Exact interaction ids outrank human labels. A shared module can legitimately have several
+  // unrelated fields all called "name"; treating the label as a global selector re-expanded a
+  // one-control live repair into every journey that happened to use that word.
+  const exactInteractionIds = new Set(allSpecifications.flatMap((specification) => (
+    specification.semanticInteractions || []
+  )).map((interaction) => interaction.interactionId)
+    .filter((id) => id && focusedControls.has(String(id).toLowerCase())));
+  const focusedInteractions = (specification) => (specification.semanticInteractions || [])
+    .filter((control) => !focusedControls.size
+      || (exactInteractionIds.size ? exactInteractionIds.has(control.interactionId) : [
+        control.interactionId,
+        control.logicalField,
+        ...(control.accessibleNames || []),
+      ].filter(Boolean).some((value) => focusedControls.has(String(value).toLowerCase()))));
+  const focusedState = (specification, interactions) => {
+    if (!focusedControls.size) return specification.state || null;
+    const relevant = new Set(interactions.flatMap((interaction) => [
+      ...(interaction.reads || []), ...(interaction.writes || []),
+    ]));
+    const state = specification.state || null;
+    if (!state) return null;
+    return {
+      ...state,
+      ...Object.fromEntries(["mayConsume", "mustProduce"].filter((key) => Array.isArray(state[key]))
+        .map((key) => [key, state[key].filter((value) => relevant.has(value))])),
+    };
+  };
   const compact = {
     version: moduleContracts.version || 1,
-    specifications: specifications.map((specification) => ({
-      path: specification.path,
-      role: specification.role,
-      ownedJourneys: specification.ownedJourneys || [],
-      requiredImports: specification.requiredImports || [],
-      capabilities: (specification.requiredCapabilities || []).map((capability) => ({
-        capability: capability.capability,
-        factory: capability.factory,
-        methods: (capability.methods || []).map((method) => method.method),
-      })),
-      controls: uniqueRows((specification.semanticInteractions || [])
-        .filter((control) => !focusedControls.size || [
-          control.interactionId,
-          control.logicalField,
-          ...(control.accessibleNames || []),
-        ].filter(Boolean).some((value) => focusedControls.has(String(value).toLowerCase())))
-        .map((control) => ({
-        logicalField: control.logicalField,
-        roles: control.roles || [],
-        inputTypes: control.inputTypes || [],
-        accessibleNames: control.accessibleNames || [],
-        stateOwner: control.stateOwner || null,
-      }))),
-      state: specification.state || null,
-      persistenceOwner: specification.persistence?.owner || null,
-      requiredExports: specification.requiredExports || [],
-      moduleSizeBoundary: specification.moduleSizeBoundary,
-    })),
+    specifications: specifications.map((specification) => {
+      const interactions = focusedInteractions(specification);
+      const ownedJourneys = focusedControls.size
+        ? [...new Set(interactions.map((interaction) => interaction.journeyId).filter(Boolean))]
+        : specification.ownedJourneys || [];
+      return {
+        path: specification.path,
+        role: specification.role,
+        ownedJourneys,
+        requiredImports: specification.requiredImports || [],
+        capabilities: (specification.requiredCapabilities || []).map((capability) => ({
+          capability: capability.capability,
+          factory: capability.factory,
+          methods: (capability.methods || []).map((method) => method.method),
+        })),
+        controls: uniqueRows(interactions.map((control) => ({
+          logicalField: control.logicalField,
+          roles: control.roles || [],
+          inputTypes: control.inputTypes || [],
+          accessibleNames: control.accessibleNames || [],
+          stateOwner: control.stateOwner || null,
+        }))),
+        state: focusedState(specification, interactions),
+        persistenceOwner: specification.persistence?.owner || null,
+        requiredExports: specification.requiredExports || [],
+        moduleSizeBoundary: specification.moduleSizeBoundary,
+      };
+    }),
     capabilityOwnership: [...ownership.values()],
   };
   return [

@@ -110,6 +110,30 @@ test("browser-informed repair gets a compact contract summary while full enforce
     "capability ownership is deduplicated instead of repeated in every module");
 });
 
+test("a focused repair summary excludes unrelated journeys and state carried by a shared module", () => {
+  const compact = moduleGenerationContractsRepairBrief({ version: 1, specifications: [{
+    path: "src/components/SharedFlow.jsx", role: "shared flow",
+    ownedJourneys: ["failed-journey", "unrelated-journey"], requiredImports: [],
+    requiredCapabilities: [], forbiddenCapabilityBypasses: [],
+    semanticInteractions: [
+      { interactionId: "failed-journey:1:input:name", journeyId: "failed-journey",
+        logicalField: "name", accessibleNames: ["name"], roles: ["textbox"], inputTypes: ["text"],
+        writes: ["failed-journey.draft.name"], stateOwner: "src/components/SharedFlow.jsx" },
+      { interactionId: "unrelated-journey:1:input:name", journeyId: "unrelated-journey",
+        logicalField: "name", accessibleNames: ["name"], roles: ["textbox"], inputTypes: ["text"],
+        writes: ["unrelated-journey.draft.name"], stateOwner: "src/components/SharedFlow.jsx" },
+    ],
+    state: { owns: "ephemeral UI", mayConsume: ["failed-journey.draft.name", "unrelated-journey.draft.name"],
+      mustProduce: ["failed-journey.draft.name", "unrelated-journey.draft.name"], survivesReload: false },
+    persistence: { owner: null }, requiredExports: [], moduleSizeBoundary: 5_500,
+  }] }, { focusPaths: ["src/components/SharedFlow.jsx"],
+    focusControls: ["failed-journey:1:input:name", "name"] });
+  assert.match(compact, /failed-journey/);
+  assert.doesNotMatch(compact, /unrelated-journey/);
+  assert.match(compact, /failed-journey\.draft\.name/);
+  assert.doesNotMatch(compact, /unrelated-journey\.draft\.name/);
+});
+
 test("browser repair prompt includes every failed journey but only their failed interaction steps", () => {
   const secondary = {
     id: "validate-contact", title: "Validate contact", priority: "secondary", steps: [

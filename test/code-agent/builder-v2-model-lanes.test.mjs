@@ -253,6 +253,36 @@ test("headroom batching maps verifier actions to their semantic owner before pla
   assert.deepEqual(scope.remainingFiles, []);
 });
 
+test("production browser cascades batch the causal structured owner, never unrelated planned journeys", () => {
+  const owner = "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanFlow.jsx";
+  const unrelated = "src/components/project-manager-crud/ProjectManagerCrudFlow.jsx";
+  const problems = [
+    'journey create-adjust-save-reopen-export-plan · step "create a new project" FAILED in a real browser: contracted control(s) could not be driven: name:missing',
+    'journey project-manager-crud · step "open the project manager" FAILED in a real browser: not reached: the journey\'s required starting state could not be established (New Project control: no contracted control matched)',
+    JSON.stringify({
+      code: "interaction_verification_failure", journeyId: "create-adjust-save-reopen-export-plan",
+      userAction: "create a new project", status: "undriveable",
+      responsibleModules: [owner], stateOwners: [owner],
+    }),
+  ];
+  const contract = { interactionContract: { flows: [
+    { journeyId: "project-manager-crud", action: "open the project manager", responsibleModules: [unrelated] },
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project", responsibleModules: [owner] },
+  ] } };
+  assert.deepEqual(repairFailureReferences(problems), [
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project" },
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project" },
+  ]);
+  assert.deepEqual(repairFailureOwnedPaths(contract, problems), [owner]);
+  const scope = headroomDispatchScope({
+    tree: { [owner]: "export function Planner(){}", [unrelated]: "export function Projects(){}" },
+    modulePlan: [{ path: unrelated }, { path: owner }], problems,
+    semanticFiles: repairFailureOwnedPaths(contract, problems), logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, [owner]);
+  assert.deepEqual(scope.remainingFiles, []);
+});
+
 test("a single irreducible source fails closed after bounded zero-dispatch compaction", async () => {
   const fixture = oversizedModuleFixture({ source: `export function A(){return <pre>${"x".repeat(240_000)}</pre>}` });
   const scope = { kind: "compile", files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"],
