@@ -83,7 +83,10 @@ export const HEADROOM_FRAGMENT_SYSTEM_PROMPT = `You repair one bounded defect in
 React+Vite app. Respond only by calling emit_patches. Modify only the allowed file. Prefer
 replace_exact: put the exact old excerpt in symbol and its complete replacement in content. The
 old excerpt must occur exactly once and the resulting full file must parse. Preserve all unrelated
-behaviour. Never modify protected platform files, fake persistence, or weaken verification.`;
+behaviour. Fix the real state transition: changing labels, messages, or static copy merely to echo
+verifier keywords is not a repair. When a rendered branch hides the expected controls after the
+action, change the handler/state/conditional data flow that keeps that branch active. Never modify
+protected platform files, fake persistence, or weaken verification.`;
 
 function renderTreeContext(tree, { extraFullPaths = [] } = {}) {
   const paths = Object.keys(tree).sort();
@@ -327,6 +330,7 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
     "RETAINED CANDIDATE MICRO-REPAIR",
     "The full candidate is retained. Fix only the named transition below. Deterministic structure,",
     "compile, and all contracted browser journeys still gate promotion after this patch.",
+    "Repair actual handler/state/conditional flow. Do not change copy merely to repeat expected words.",
     `Allowed file: ${headroomScope.allowedFiles[0]}`,
     "Failure evidence:",
     ...failures.map((failure) => `- ${failure}`),

@@ -268,6 +268,8 @@ test("an irreducible large component resizes to exact causal fragments inside re
     onRetrieval: (trace) => { retrieval = trace; },
   });
   assert.match(prompt, /replace_exact/);
+  assert.match(HEADROOM_FRAGMENT_SYSTEM_PROMPT, /changing labels, messages, or static copy merely to echo/i);
+  assert.match(prompt, /Repair actual handler\/state\/conditional flow/);
   assert.doesNotMatch(prompt, /unrelated retained line 120/);
   const plan = planCallReservation({
     systemPrompt: HEADROOM_FRAGMENT_SYSTEM_PROMPT,
