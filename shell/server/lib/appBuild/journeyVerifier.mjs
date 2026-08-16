@@ -197,6 +197,39 @@ function valueFor(label, marker) {
   }
 }
 
+/**
+ * Build a browser fixture from the contract and the control's own declared constraints.
+ *
+ * A generic marker is useful only when it is VALID. A live concept-generator contract said
+ * "enter the default ... idea" and rendered that default as its placeholder, while the verifier
+ * ignored both and typed a shorter marker that deliberately left Generate disabled. Prefer the
+ * visible default/example the contract names; otherwise satisfy native length constraints without
+ * inventing domain behaviour. Native validity is checked again after filling below.
+ */
+function fixtureValueFor(flow, facts, marker) {
+  const logicalField = flow.control.logicalField || flow.valueWritten || flow.control.accessibleName;
+  let value = valueFor(logicalField, marker);
+  const instruction = `${flow.action || ""} ${flow.semanticPurpose || ""} ${flow.observable || ""}`;
+  const placeholder = String(facts?.placeholder || "").trim();
+  const type = String(facts?.type || "text").toLowerCase();
+  const textual = facts?.tag === "textarea" || ["text", "search", "url"].includes(type);
+  const placeholderWords = new Set(wordsOf(placeholder));
+  const instructionOverlap = keywords(instruction, 12).filter((word) => placeholderWords.has(word));
+  if (textual && placeholder && (/(?:^|\b)(default|example|sample|preset|template)(?:\b|$)/i.test(instruction)
+      || instructionOverlap.length >= 2)) {
+    value = placeholder;
+  }
+
+  const minLength = Number.isInteger(facts?.minLength) && facts.minLength >= 0 ? facts.minLength : 0;
+  const maxLength = Number.isInteger(facts?.maxLength) && facts.maxLength >= 0 ? facts.maxLength : null;
+  if (minLength && value.length < minLength) {
+    const suffix = ` ${String(logicalField || "input").replace(/([a-z])([A-Z])/g, "$1 $2")} ${marker}`;
+    while (value.length < minLength) value += suffix;
+  }
+  if (maxLength !== null && value.length > maxLength) value = value.slice(0, maxLength);
+  return value;
+}
+
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
@@ -369,7 +402,10 @@ async function fillContractedFields(page, flows, marker) {
       tag: el.tagName.toLowerCase(), type: el.getAttribute("type") || "text", name: el.getAttribute("name"),
       id: el.id || null, placeholder: el.getAttribute("placeholder"), ariaLabel: el.getAttribute("aria-label"),
       labels: el.labels ? [...el.labels].map((label) => (label.innerText || "").trim()).filter(Boolean) : [],
-      disabled: Boolean(el.disabled), readOnly: Boolean(el.readOnly),
+      disabled: Boolean(el.disabled), readOnly: Boolean(el.readOnly), required: Boolean(el.required),
+      minLength: Number.isInteger(el.minLength) && el.minLength >= 0 ? el.minLength : null,
+      maxLength: Number.isInteger(el.maxLength) && el.maxLength >= 0 ? el.maxLength : null,
+      pattern: el.getAttribute("pattern"),
     })).catch(() => null);
     if (disabled || !editable) {
       evidence.fields.push({ ...fieldEvidence, status: "not_editable", facts });
@@ -378,7 +414,7 @@ async function fillContractedFields(page, flows, marker) {
     // A contracted negative-validation step must enter something the application should REJECT.
     // When no rule can be derived from the contract, the field is left alone and the step reports
     // an unsupported intent rather than guessing at a rule the contract never stated.
-    let value = valueFor(logicalField, marker);
+    let value = fixtureValueFor(flow, facts, marker);
     if (flow.control.validity === "invalid") {
       value = invalidValueFor(logicalField, flow.control.inputTypes);
       if (value === null) {
@@ -389,8 +425,14 @@ async function fillContractedFields(page, flows, marker) {
     }
     await field.fill(value, { timeout: 3_000 }).catch(() => {});
     const observedValue = await field.inputValue().catch(() => "");
-    const status = observedValue === value ? "filled" : "value_not_accepted";
-    evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue, facts });
+    const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
+      message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
+    const expectsInvalid = flow.control.validity === "invalid";
+    const status = observedValue !== value
+      ? "value_not_accepted"
+      : (expectsInvalid || validity.valid ? "filled" : "fixture_invalid");
+    evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue, facts,
+      validityMessage: validity.message });
     if (status === "filled") filled.push(logicalField);
   }
   evidence.attemptedLocators = unique(evidence.attemptedLocators);
@@ -704,8 +746,8 @@ async function activateContractedControl(page, control) {
   if (control?.machineId) {
     const byIdentity = page.locator(`[data-thrallo-action="${control.machineId}"]`).first();
     if (await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
-      await byIdentity.click({ timeout: 5_000 }).catch(() => {});
-      return true;
+      if (await byIdentity.isDisabled().catch(() => true)) return false;
+      try { await byIdentity.click({ timeout: 5_000 }); return true; } catch { return false; }
     }
   }
   const aliases = unique(controlAliases(control).flatMap((alias) => {
@@ -722,8 +764,8 @@ async function activateContractedControl(page, control) {
       const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
       if (!(await candidate.count().catch(() => 0))) continue;
       if (!(await candidate.isVisible().catch(() => false))) continue;
-      await candidate.click({ timeout: 5_000 }).catch(() => {});
-      return true;
+      if (await candidate.isDisabled().catch(() => true)) return false;
+      try { await candidate.click({ timeout: 5_000 }); return true; } catch { return false; }
     }
   }
   return false;
@@ -1292,8 +1334,15 @@ async function runStep(page, step, {
       if (!result.complete) {
         const missing = result.evidence.fields.filter((field) => field.status !== "filled")
           .map((field) => `${field.field}:${field.status}`).join(", ");
+        const invalidFixture = result.evidence.fields.find((field) => field.status === "fixture_invalid");
         return { drove, status: "undriveable", detail: `contracted control(s) could not be driven: ${missing}`,
-          controlEvidence };
+          controlEvidence,
+          ...(invalidFixture ? { verifierDefect: {
+            code: "verifier_fixture_invalid",
+            field: invalidFixture.field,
+            detail: invalidFixture.validityMessage || "the verifier fixture violates the control's native constraints",
+          } } : {}),
+        };
       }
     } else if (!inputsAreSelections) {
       const filled = await fillVisibleForm(page, marker);
@@ -2340,6 +2389,7 @@ export async function verifyJourneys({
   const results = [];
   const consoleErrors = [];
   const failedRequests = [];
+  const verifierDefects = [];
   const marker = String(Date.now()).slice(-6);
   let browser = sharedBrowser;
   const ownsBrowser = !sharedBrowser;
@@ -2363,7 +2413,14 @@ export async function verifyJourneys({
       const created = await browser.newContext({ viewport });
       const opened = await created.newPage();
       opened.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
-      opened.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
+      opened.on("console", (m) => {
+        // Chromium emits this generic console line for the same HTTP failure reported with its
+        // exact method, status and URL by the response/requestfailed listeners below. Keeping both
+        // made one recovered app-auth race count as two independent blockers.
+        if (m.type() === "error" && !/^Failed to load resource:/i.test(m.text())) {
+          consoleErrors.push(m.text().slice(0, 200));
+        }
+      });
       opened.on("response", (r) => {
         if (r.status() >= 400 && !r.url().includes("favicon")) {
           failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
@@ -2516,7 +2573,11 @@ export async function verifyJourneys({
           authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
+          verifierDefect: { code: "journey_driver_error", detail: error.message.slice(0, 200) },
         }));
+        if (outcome.verifierDefect) verifierDefects.push({
+          ...outcome.verifierDefect, journeyId: journey.id, stepIndex, action: step.action,
+        });
         if (outcome.selectedText) selections.push(outcome.selectedText);
         if (!["pass", "skipped", "not_reached"].includes(outcome.status)) {
           outcome.observation = {
@@ -2563,6 +2624,7 @@ export async function verifyJourneys({
     // control by its opaque id and says what the browser observed, which is what a targeted
     // correction needs and what a journey failure eight steps later does not supply.
     mechanics,
+    verifierDefects,
     consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
     failedRequests: [...new Set(failedRequests)].slice(0, 10),
   };

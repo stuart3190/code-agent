@@ -285,6 +285,9 @@ export function createOrchestrator({
       }),
     ];
     return { journeys: merged, plan, platformDefects, blockingErrors,
+      unavailable: driven.unavailable === true,
+      verifierError: driven.error || null,
+      verifierDefects: driven.verifierDefects || [],
       // The pre-journey mechanics probe's verdict travels with the journey verdicts, so a repair
       // brief can lead with the control that provably cannot hold a value.
       mechanics: driven.mechanics || null,
@@ -749,6 +752,24 @@ export function createOrchestrator({
         workingSnapshot = core.snapshot;
         let workingReason = "working:core";
 
+        // A verifier that cannot supply a valid fixture or cannot run is a PLATFORM failure, not
+        // evidence that generated source is wrong. Preserve the candidate and stop before a model
+        // repair turn. The live Roblox-concept run spent both repair rounds trying to fix JSX for
+        // a 14-character fixture the verifier itself had put into a 20-character prompt.
+        const blockOnVerifierPlatformFailure = async (verdicts) => {
+          const defects = [...(verdicts.verifierDefects || [])];
+          if (verdicts.unavailable) defects.push({ code: "journey_verifier_unavailable",
+            detail: verdicts.verifierError || "the browser verifier was unavailable" });
+          if (!defects.length) return null;
+          const reason = defects.map((defect) => `${defect.code}: ${defect.detail || "verification platform failure"}`).join("; ");
+          return finish("blocked", {
+            error: `Builder V2 verification platform failure: ${reason}`,
+            failureClassification: "verification_platform_defect",
+            platformDefects: defects,
+            workingSnapshotId: workingSnapshot?.id || null,
+          });
+        };
+
         // 4. verify essential journeys (differential), then the C4 eligibility decision —
         //    with the V2-20 repair tier between them: a verified BROWSER failure earns up
         //    to maxRepairs targeted rounds, each briefed with the exact step
@@ -756,6 +777,8 @@ export function createOrchestrator({
         await setState("verify_core");
         let coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
           journeys: essentialJourneys, tree, snapshotId: null, signal });
+        let verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
+        if (verifierBlock) return verifierBlock;
         let backendRowFailures = backendProbeFn ? await backendProbeFn({
           owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
         }) : [];
@@ -821,6 +844,8 @@ export function createOrchestrator({
           workingReason = `working:mechanics:${mechanicsCorrections}`;
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
             journeys: essentialJourneys, tree, snapshotId: null, signal });
+          verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
+          if (verifierBlock) return verifierBlock;
           backendRowFailures = backendProbeFn ? await backendProbeFn({
             owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
           }) : [];
@@ -859,7 +884,7 @@ export function createOrchestrator({
             ...coreVerdicts.blockingErrors,
             // Shape findings that did not stop the build ride along as CONTEXT for a repair
             // that is now driven by observed browser failure. They explain, they do not accuse.
-            ...advisoryMessages(coreAdvisory),
+            ...advisoryMessages(coreAdvisory.filter((finding) => finding.code !== "interaction_control_undriveable")),
           ];
           if (!evidence.length) break; // nothing actionable to brief — blocked below
           await setState(`repair:${round}`);
@@ -887,6 +912,8 @@ export function createOrchestrator({
           workingReason = `working:repair:${round}`;
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
             journeys: essentialJourneys, tree, snapshotId: null, signal });
+          verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
+          if (verifierBlock) return verifierBlock;
           backendRowFailures = backendProbeFn ? await backendProbeFn({
             owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
           }) : [];

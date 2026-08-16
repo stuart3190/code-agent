@@ -111,23 +111,25 @@ test("14S ten fresh concurrent visitor initializers share one signup and one val
   assert.ok(users.every((value) => value === user));
 });
 
-test("14S persisted visitor recovery is single-flight and failures clear for a later retry", async () => {
+test("14S persisted visitor recovery is idempotent-signup single-flight and never emits a signin 401", async () => {
   const credentials = JSON.stringify({ email: "visitor@visitor.local", password: "secret" });
   const storage = { getItem: () => credentials, setItem: () => {} };
   let attempts = 0;
+  let signinAttempts = 0;
   const recovered = { id: "recovered" };
   const auth = {
     currentUser: async () => null,
-    signUp: async () => { throw new Error("signup must not run"); },
-    signIn: async () => {
+    signUp: async () => {
       attempts += 1;
       await new Promise((resolve) => setImmediate(resolve));
       return recovered;
     },
+    signIn: async () => { signinAttempts += 1; throw Object.assign(new Error("former 401"), { status: 401 }); },
     signOut: async () => {},
   };
   const first = await Promise.all(Array.from({ length: 10 }, () => ensureAppVisitorSession({ auth, appId: PROJECT, storage })));
   assert.equal(attempts, 1);
+  assert.equal(signinAttempts, 0);
   assert.ok(first.every((value) => value === recovered));
 
   let freshAttempts = 0;
@@ -141,6 +143,36 @@ test("14S persisted visitor recovery is single-flight and failures clear for a l
   assert.equal(freshAttempts, 1, "all failed waiters share one initialization attempt");
   assert.equal((await ensureAppVisitorSession({ auth: failingAuth, appId: "failed-app", storage: emptyStorage })).id, "recovered");
   assert.equal(freshAttempts, 2, "a failed flight is cleared for a legitimate retry");
+});
+
+test("14S interrupted first load retries the saved visitor with idempotent signup, never signin", async () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) || null, setItem: (key, value) => values.set(key, value) };
+  const user = { id: "same-visitor" };
+  let signupCalls = 0;
+  let signinCalls = 0;
+  let releaseFirst;
+  const firstPending = new Promise((resolve) => { releaseFirst = resolve; });
+  const firstAuth = {
+    currentUser: async () => null,
+    signUp: async () => { signupCalls += 1; await firstPending; return user; },
+    signIn: async () => { signinCalls += 1; throw Object.assign(new Error("race 401"), { status: 401 }); },
+    signOut: async () => {},
+  };
+  const reloadedAuth = {
+    currentUser: async () => null,
+    signUp: async () => { signupCalls += 1; return user; },
+    signIn: async () => { signinCalls += 1; throw Object.assign(new Error("race 401"), { status: 401 }); },
+    signOut: async () => {},
+  };
+  const first = ensureAppVisitorSession({ auth: firstAuth, appId: PROJECT, storage, randomUUID: () => "same" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const reloaded = ensureAppVisitorSession({ auth: reloadedAuth, appId: PROJECT, storage, randomUUID: () => "unused" });
+  assert.equal((await reloaded).id, user.id);
+  releaseFirst();
+  assert.equal((await first).id, user.id);
+  assert.equal(signupCalls, 2, "each isolated browser instance retries the same idempotent signup");
+  assert.equal(signinCalls, 0, "the interrupted mapping race cannot emit an expected 401");
 });
 
 test("14S session flights are identity scoped and reset invalidates an in-progress initialization", async () => {
@@ -213,7 +245,8 @@ test("14S exact generated app-auth runtime shares initialization across concurre
   assert.equal(rows.length, 10);
   await backend.auth.signOut();
   await ensure();
-  assert.equal(signinCalls, 1, "logout invalidates the initialized session and persisted credentials recover once");
+  assert.equal(signupCalls, 2, "logout invalidates the initialized session and idempotent signup recovers once");
+  assert.equal(signinCalls, 0, "visitor recovery never emits an expected signin failure");
 });
 
 test("14S preflight uses VITE_AUTH_URL app-auth, recovers the visitor, and completes authenticated CRUD", async (t) => {
@@ -285,9 +318,12 @@ test("14S preflight uses VITE_AUTH_URL app-auth, recovers the visitor, and compl
   assert.equal(row, null);
   assert.deepEqual(deletedUsers, ["runtime-user"]);
   const appAuth = requests.filter((request) => request.url === "/functions/v1/app-auth");
-  assert.deepEqual(appAuth.map((request) => request.body.action), ["signup", "signin"]);
+  assert.deepEqual(appAuth.map((request) => request.body.action), ["signup", "signup"]);
   assert.ok(appAuth.every((request) => request.origin
     === "https://p11111111111141118111111111111111.preview.thrallo.com"));
+  assert.ok(appAuth.every((request) => request.apikey === PUBLIC_KEY));
+  assert.ok(appAuth.every((request) => request.authorization === undefined),
+    "opaque publishable keys belong in apikey; Authorization is reserved for a user JWT");
   assert.deepEqual(requests.filter((request) => request.url.startsWith("/rest/v1/entities"))
     .map((request) => request.method), ["POST", "GET", "PATCH", "GET", "DELETE"]);
   assert.ok(requests.every((request) => request.apikey === PUBLIC_KEY));

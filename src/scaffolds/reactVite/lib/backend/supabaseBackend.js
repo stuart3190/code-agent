@@ -45,8 +45,9 @@ export function invalidateAppVisitorSession({ auth, appId } = {}) {
 
 /**
  * Exact anonymous app-session state machine shared by generated browsers and the worker preflight.
- * Fresh credentials go directly to signup: signin-first is a guaranteed 401 which verification
- * correctly treats as a failed runtime request. Persisted credentials still recover by signin.
+ * Fresh and persisted credentials go through idempotent signup. app-auth treats a repeated signup
+ * with the same password as session recovery, which avoids a guaranteed signin 401 when a reload
+ * interrupts the first signup after credentials have already reached localStorage.
  */
 export async function ensureAppVisitorSession({
   auth,
@@ -70,18 +71,14 @@ export async function ensureAppVisitorSession({
   flight.promise = (async () => {
     const key = `visitor-session:${identity}`;
     let saved = null;
-    let fresh = false;
     try { saved = JSON.parse(storage?.getItem?.(key) || "null"); } catch { saved = null; }
     if (!saved?.email || !saved?.password) {
       const id = randomUUID();
       saved = { email: `visitor-${id}@visitor.local`, password: `Visitor-${id}-key` };
-      fresh = true;
       try { storage?.setItem?.(key, JSON.stringify(saved)); } catch { /* a per-load session still works */ }
     }
 
-    const user = fresh
-      ? await auth.signUp(saved)
-      : await auth.signIn(saved).catch(() => auth.signUp(saved));
+    const user = await auth.signUp(saved);
     if (flight.invalidated) {
       await auth.signOut?.().catch(() => {});
       throw Object.assign(new Error("Visitor session initialization was reset before completion."), {
@@ -122,7 +119,10 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   const appAuthPost = async (action, payload = {}) => {
     const res = await fetchImpl(authUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}`, apikey: anonKey },
+      // A publishable API key belongs in `apikey`, not Authorization: Bearer. Authorization is for
+      // an end-user JWT; treating an opaque sb_publishable_ key as a JWT can be rejected before an
+      // Edge Function runs. app-auth is the seam that creates that user session, so none exists yet.
+      headers: { "Content-Type": "application/json", apikey: anonKey },
       body: JSON.stringify({ action, appId, ...payload }),
     });
     const out = await res.json().catch(() => ({}));
