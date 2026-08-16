@@ -142,9 +142,13 @@ export function preservedBuildRetryTarget(turns = []) {
     }
     intervening.push(turn);
   }
-  const onlySafePredispatchFailures = intervening.every((turn) => turn?.role === "lead" && (
-    turn.payload?.retryDispatchFailure === true
-    || String(turn.content || "") === "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created."
+  const onlySafePredispatchFailures = intervening.every((turn) => (
+    turn?.role === "user" && BARE_BUILD_RETRY.test(String(turn.content || "").trim())
+  ) || (
+    turn?.role === "lead" && (
+      turn.payload?.retryDispatchFailure === true
+      || String(turn.content || "") === "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created."
+    )
   ));
   if (terminal?.role !== "lead"
     || terminal.payload?.pipelineVersion !== "v2"

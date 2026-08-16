@@ -330,6 +330,12 @@ test("retry targeting requires a bare retry and a durable V2 terminal identity",
     { role: "lead", content: "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created." },
     { role: "user", content: "Retry again" },
   ]), { projectId: "project", jobId: "job", failure: "failed" });
+  assert.deepEqual(preservedBuildRetryTarget([
+    terminal,
+    { role: "user", content: "Retry again" },
+    { role: "lead", content: "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created." },
+    { role: "user", content: "Retry again" },
+  ]), { projectId: "project", jobId: "job", failure: "failed" });
   assert.equal(preservedBuildRetryTarget([
     terminal,
     { role: "lead", content: "I changed something else." },
