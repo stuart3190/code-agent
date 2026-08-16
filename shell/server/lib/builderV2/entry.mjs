@@ -113,6 +113,28 @@ async function approvedRepairHeadroom(client, owner, project) {
   return { approvalId: approval.id, ceiling, consumed, held, remaining };
 }
 
+async function retainedBuildRepairHeadroom(client, owner, project, resumable) {
+  if (project?.budget_approval_id) return approvedRepairHeadroom(client, owner, project);
+  const { data: calls, error: callsError } = await client.from("bv2_model_reservations")
+    .select("state,actual_credits,reserved_credits")
+    .eq("owner", owner).eq("project_id", project.id).eq("build_id", resumable.buildId);
+  if (callsError) throw new Error(`Builder V2 retained-build usage read failed: ${callsError.message}`);
+  const consumed = (calls || []).reduce((sum, row) => (
+    sum + (row.actual_credits != null ? Number(row.actual_credits || 0) : 0)
+  ), 0);
+  const held = (calls || []).reduce((sum, row) => (
+    sum + (row.state === "held" ? Number(row.reserved_credits || 0) : 0)
+  ), 0);
+  const ceiling = Number(resumable.budgetCredits || 0);
+  const remaining = Math.max(0, ceiling - consumed - held);
+  if (!(remaining > 0)) {
+    throw Object.assign(new Error("The retained Builder V2 build credit ceiling has been exhausted."), {
+      code: "budget_exceeded", ceiling, consumed, held,
+    });
+  }
+  return { approvalId: null, ceiling, consumed, held, remaining };
+}
+
 function relay(ctx, job) {
   let lastAgent = null;
   const send = async (name, data) => {
@@ -214,7 +236,7 @@ async function dispatch(ctx, {
 
 async function resumableBuild(client, owner, projectId) {
   const { data: builds, error: buildError } = await client.from("bv2_builds")
-    .select("id,state,error,started_at").eq("owner", owner).eq("project_id", projectId)
+    .select("id,state,error,started_at,budget_credits").eq("owner", owner).eq("project_id", projectId)
     .in("state", ["blocked", "failed"]).order("started_at", { ascending: false }).limit(10);
   if (buildError) throw new Error(`Builder V2 resumable build lookup failed: ${buildError.message}`);
   const ids = (builds || []).map((row) => row.id);
@@ -228,7 +250,11 @@ async function resumableBuild(client, owner, projectId) {
     .filter((row) => /^(?:working|candidate):/.test(String(row.reason || "")))
     .map((row) => row.build_id));
   const build = (builds || []).find((row) => available.has(row.id));
-  return build ? { buildId: build.id, problems: build.error ? [String(build.error)] : [] } : null;
+  return build ? {
+    buildId: build.id,
+    budgetCredits: Number(build.budget_credits || 0),
+    problems: build.error ? [String(build.error)] : [],
+  } : null;
 }
 
 /** Accept a new application build. An exception remains a V2 failure; callers must not fallback. */
@@ -351,13 +377,14 @@ export async function startExistingAppWorkV2(ctx, {
   const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   let mode = "iterate";
   let v2Input = null;
+  let resumable = null;
   if (kind !== "repair" && !project.bv2_green_snapshot_id) {
     throw Object.assign(new Error("This project has no verified Builder V2 green snapshot."), {
       code: "no_green_snapshot",
     });
   }
   if (kind === "repair" && !project.bv2_green_snapshot_id) {
-    const resumable = await resumableBuild(deps.client, ctx.owner, project.id);
+    resumable = await resumableBuild(deps.client, ctx.owner, project.id);
     if (!resumable) {
       throw Object.assign(new Error("This project has no green snapshot or resumable Builder V2 checkpoint."), {
         code: "no_resumable_checkpoint",
@@ -367,7 +394,7 @@ export async function startExistingAppWorkV2(ctx, {
     v2Input = { sourceBuildId: resumable.buildId, problems: resumable.problems };
   }
   const repairAuthorization = mode === "resume_repair"
-    ? await approvedRepairHeadroom(deps.client, ctx.owner, project) : null;
+    ? await retainedBuildRepairHeadroom(deps.client, ctx.owner, project, resumable) : null;
   const preflight = {
     ...(await buildCeiling(ctx.owner, mode, deps,
       repairAuthorization ? { maxCredits: repairAuthorization.remaining } : {})),

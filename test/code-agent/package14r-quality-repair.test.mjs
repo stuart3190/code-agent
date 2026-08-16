@@ -278,8 +278,11 @@ test("14R repair dispatch selects the durable checkpoint when a new project has 
   };
   const client = {
     from(table) {
-      if (table === "bv2_builds") return query([{ id: "failed-build", state: "blocked", error: "journey failed" }]);
+      if (table === "bv2_builds") return query([{
+        id: "failed-build", state: "blocked", error: "journey failed", budget_credits: 12,
+      }]);
       if (table === "bv2_snapshots") return query([{ id: "working-snapshot", build_id: "failed-build", reason: "working:core" }]);
+      if (table === "bv2_model_reservations") return query([]);
       throw new Error(`unexpected table ${table}`);
     },
   };
