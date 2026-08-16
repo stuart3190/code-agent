@@ -11,8 +11,8 @@ const { MemoryConversationStore } = await import("../../shell/server/lib/convers
 const { MemoryCodeAgentStore, codeAgentStore, resetCodeAgentStoreForTests } =
   await import("../../shell/server/lib/codeAgentStore.mjs");
 const {
-  ensureCoreCapabilities, postUserMessage, processConversation, recoverStaleConversations,
-  resetLeadAgentForTests,
+  buildDispatchConfirmation, ensureCoreCapabilities, postUserMessage, preservedBuildRetryTarget,
+  processConversation, recoverStaleConversations, resetLeadAgentForTests,
 } = await import("../../shell/server/lib/leadAgentService.mjs");
 
 const OWNER = "77777777-7777-4777-8777-777777777777";
@@ -266,6 +266,105 @@ test("postUserMessage creates conversations, streams, and refuses concurrent mes
   assert.equal((await store.getConversation(OWNER, conversation.id)).state, "idle");
   const after = await store.listEvents(OWNER, conversation.id, events.at(-1).sequence - 1);
   assert.equal(after.length, 1, "after-resume returns only newer events");
+});
+
+test("a bare retry resumes the exact preserved V2 build without consulting the Lead model", async () => {
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, {});
+  await store.appendTurn(conversation, { role: "user", content: "Build the planner" });
+  await store.appendTurn(conversation, {
+    role: "lead",
+    content: "Builder V2 call cannot fit a useful response inside approved headroom",
+    payload: { pipelineVersion: "v2", projectId: "project-1", jobId: "job-1" },
+  });
+  await store.appendTurn(conversation, { role: "user", content: "Try again" });
+  await store.claimConversationThinking(conversation);
+  let modelCreated = false;
+  let dispatched = null;
+  await processConversation(conversation, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    credentialResolver: async () => { throw new Error("retry must precede credential/model dispatch"); },
+    modelFactory: async () => { modelCreated = true; throw new Error("model must not run"); },
+    retryDispatcher: async ({ ctx, target }) => {
+      dispatched = target;
+      await ctx.emit("build_started", {
+        jobId: "job-2", projectId: target.projectId, buildId: "diag-2", pipelineVersion: "v2",
+      });
+      return { handled: true, result: {
+        jobId: "job-2", projectId: target.projectId, buildId: "diag-2", pipelineVersion: "v2",
+      } };
+    },
+  });
+  assert.deepEqual(dispatched, {
+    jobId: "job-1",
+    projectId: "project-1",
+    failure: "Builder V2 call cannot fit a useful response inside approved headroom",
+  });
+  assert.equal(modelCreated, false);
+  const turns = await store.listTurns(OWNER, conversation.id);
+  assert.equal(turns.filter((turn) => turn.role === "user").length, 2);
+  assert.equal(turns.at(-1).content, buildDispatchConfirmation("resume"));
+  assert.doesNotMatch(turns.at(-1).content, /Build ID|``/);
+  const events = await store.listEvents(OWNER, conversation.id, 0);
+  assert.equal(events.filter((event) => event.type === "build_started").length, 1);
+  assert.equal((await store.getConversation(OWNER, conversation.id)).state, "idle");
+});
+
+test("retry targeting requires a bare retry and a durable V2 terminal identity", () => {
+  const terminal = { role: "lead", content: "failed", payload: {
+    pipelineVersion: "v2", projectId: "project", jobId: "job",
+  } };
+  assert.deepEqual(preservedBuildRetryTarget([terminal, { role: "user", content: "Continue" }]), {
+    projectId: "project", jobId: "job", failure: "failed",
+  });
+  assert.equal(preservedBuildRetryTarget([terminal, { role: "user", content: "Try again with a darker theme" }]), null);
+  assert.equal(preservedBuildRetryTarget([{ role: "user", content: "Try again" }]), null);
+});
+
+test("successful build capability output closes with canonical copy instead of a model-written blank ID", async () => {
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  // Keep coreRegistered true while replacing the registry with one deterministic test capability.
+  resetCapabilityRegistryForTests();
+  registerCapability({
+    id: "app_build", specialist: "Builder", description: "test build",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    invoke: async (ctx) => {
+      await ctx.emit("build_started", {
+        jobId: "job", projectId: "project", buildId: "7b93a4b7-0d95-4320-9e8f-514a0745e124",
+        pipelineVersion: "v2",
+      });
+      return {
+        jobId: "job", projectId: "project", buildId: "7b93a4b7-0d95-4320-9e8f-514a0745e124",
+        pipelineVersion: "v2",
+      };
+    },
+  });
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, {});
+  await store.appendTurn(conversation, { role: "user", content: "Build it" });
+  await store.claimConversationThinking(conversation);
+  let modelTurns = 0;
+  await processConversation(conversation, {
+    store, runStore: new MemoryCodeAgentStore(),
+    credentialResolver: async () => ({ provider: "managed", routing: {} }),
+    modelFactory: async () => ({
+      turn: async () => {
+        modelTurns += 1;
+        if (modelTurns > 1) throw new Error("a second model turn must not write dispatch copy");
+        return toolCall("app_build", {});
+      },
+    }),
+  });
+  assert.equal(modelTurns, 1);
+  const turns = await store.listTurns(OWNER, conversation.id);
+  assert.equal(turns.at(-1).content, buildDispatchConfirmation("build"));
+  assert.doesNotMatch(turns.at(-1).content, /Build ID|``|7b93a4b7/);
 });
 
 test("stale thinking conversations recover so the Lead Agent never visibly dies", async () => {

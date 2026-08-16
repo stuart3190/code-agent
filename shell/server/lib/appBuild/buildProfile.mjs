@@ -20,6 +20,11 @@ const ADVANCED_SIGNALS = [
   /\bide\b|code editor|monaco|codemirror/i,
   /roblox|luau|unity|unreal|game engine/i,
   /visual editor|drag[- ]and[- ]drop builder|canvas editor|node graph|flow editor/i,
+  // Interactive geometry/layout work has the same coordinated state, rendering and verification
+  // load as a named visual editor even when the brief calls it a planner. The live Downlight
+  // Planner asked for an interactive SVG canvas with drag/edit/zoom/pan but fell through to the
+  // 12-credit simple default because it never used the exact words "canvas editor".
+  /\binteractive\b[\w\s,/()-]{0,48}\b(canvas|svg|diagram|floor ?plan|layout plan)\b|\b(canvas|svg)\b[\w\s,/()-]{0,60}\b(drag|pan|zoom|edit)\b/i,
   /\bcad\b|3d model|three\.?js|webgl|blender/i,
   // "an AI writing assistant" has a word between the two. An earlier version required them
   // adjacent and classified it as simple — the most expensive kind of misclassification.

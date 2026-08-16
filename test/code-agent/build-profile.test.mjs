@@ -33,6 +33,7 @@ test("named product shapes are classified into the expected complexity", () => {
     "a Roblox model generator",
     "a drag-and-drop visual editor",
     "a CAD-style 3D modelling tool",
+    "an interactive top-down SVG lighting plan with zoom, pan, selectable fittings and drag-to-edit positions",
   ]) {
     assert.equal(classifyComplexity({ prompt }).level, COMPLEXITY.advanced, prompt);
   }

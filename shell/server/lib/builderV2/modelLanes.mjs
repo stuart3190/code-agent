@@ -222,6 +222,19 @@ function renderJourneyBrief(journeys) {
   return lines.join("\n");
 }
 
+export function repairFailureReferences(problems = []) {
+  return (problems || [])
+    .filter((problem) => !/not reached because .* was undriveable/i.test(String(problem)))
+    .map((problem) => {
+      // Accept both the canonical middle dot and its historical UTF-8 mojibake as stored by older
+      // workers. The orchestrator emits this exact sentence; repair scoping must parse what it owns.
+      const current = String(problem).match(/^journey\s+(.+?)\s+(?:\u00c2?\u00b7)\s+step\s+"([^"]+)"\s+FAILED/i);
+      if (current) return { journeyId: current[1], action: current[2] };
+      const legacy = String(problem).match(/^journey ([^:]+): (.*?): /);
+      return legacy ? { journeyId: legacy[1], action: legacy[2] } : null;
+    }).filter(Boolean);
+}
+
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
@@ -237,10 +250,7 @@ export function renderPatchPrompt({
     ? modulePlan.filter((module) => activeScopePaths.includes(module.path))
     : modulePlan;
   const browserRepair = step === "repair" && !repairScope && !moduleCorrectionScope;
-  const repairFailures = browserRepair ? (problems || []).map((problem) => {
-    const match = String(problem).match(/^journey ([^:]+): (.*?): /);
-    return match ? { journeyId: match[1], action: match[2] } : null;
-  }).filter(Boolean) : [];
+  const repairFailures = browserRepair ? repairFailureReferences(problems) : [];
   const failedJourneyIds = new Set(repairFailures.map((failure) => failure.journeyId));
   const correctingIncrement = isRepair && String(originalStep || "").startsWith("increment:");
   const scopedJourneys = step === "core" || (isRepair && !correctingIncrement)
@@ -290,6 +300,11 @@ export function renderPatchPrompt({
   const repairFocusPaths = browserRepair ? [...new Set(repairFlows.flatMap((flow) => [
     ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
   ]).filter((value) => typeof value === "string" && value.startsWith("src/")))] : [];
+  const repairControlFocus = headroomScope ? [...new Set(repairFlows.flatMap((flow) => [
+    flow.id,
+    flow.control?.logicalField,
+    ...(flow.control?.accessibleNames || []),
+  ]).filter(Boolean))] : [];
   const compactPersistencePlan = browserRepair || activeScopePaths.length ? {
     durableJourneys: persistencePlan?.durableJourneys || [],
     forbiddenBusinessPersistence: persistencePlan?.forbiddenBusinessPersistence || [],
@@ -299,6 +314,27 @@ export function renderPatchPrompt({
     ))
       .map(({ forbiddenPersistence: _forbiddenPersistence, ...module }) => module),
   } : persistencePlan;
+  const compactHeadroomProblems = headroomScope ? (() => {
+    const actionable = (problems || []).filter((problem) => !/not reached because .* was undriveable/i.test(String(problem)));
+    return [...new Set((actionable.length ? actionable : problems || []).map(String))].slice(0, 12);
+  })() : problems;
+  const compactHeadroomContract = headroomScope ? JSON.stringify({
+    summary: scopedContract.summary || "",
+    journeys: scopedJourneys.map((scopedJourney) => ({
+      id: scopedJourney.id,
+      title: scopedJourney.title,
+      priority: scopedJourney.priority,
+      steps: repairFailures.length
+        ? (scopedJourney.steps || []).filter((contractStep) => repairFailures.some((failure) => (
+          failure.journeyId === scopedJourney.id && failure.action === contractStep.action
+        )))
+        : scopedJourney.steps || [],
+    })),
+    entities: scopedContract.entities || [],
+    operations: scopedOperations,
+    routes: scopedContract.routes || [],
+    dependencyPlan: scopedContract.dependencyPlan || null,
+  }, null, 2) : null;
   const capabilityPaths = bindCapabilities(contract)
     .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
   const advisoryNotes = (advisory || []).length ? [
@@ -324,9 +360,11 @@ export function renderPatchPrompt({
           : `Build EXACTLY this one increment: journey "${journey?.id}" (${journey?.title}). Touch nothing else.`,
     "",
     "IMPLEMENTATION CONTRACT:",
-    contractBrief(scopedContract),
+    compactHeadroomContract || contractBrief(scopedContract),
     "",
-    capabilityRequirementsBrief(scopedContract),
+    headroomScope
+      ? "CAPABILITY REQUIREMENTS: the focused per-module summary below is the dispatch brief; full bindings remain machine-enforced after the patch."
+      : capabilityRequirementsBrief(scopedContract),
     dependencyPlanBrief(scopedContract.dependencyPlan),
     promptModulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
@@ -342,7 +380,10 @@ export function renderPatchPrompt({
     "",
     activeScope || isRepair
       ? moduleGenerationContractsRepairBrief(activeScope?.moduleContracts || moduleContracts,
-        { focusPaths: activeScopePaths.length ? activeScopePaths : repairFocusPaths })
+        {
+          focusPaths: activeScopePaths.length ? activeScopePaths : repairFocusPaths,
+          focusControls: repairControlFocus,
+        })
       : moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
     "",
     compactPersistencePlan
@@ -350,7 +391,7 @@ export function renderPatchPrompt({
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
     "",
     interactionContractBrief(repairInteractionPlan),
-    preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),
+    headroomScope ? "" : preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),
     "",
     repairScope && !headroomScope ? [
       "TARGETED PRE-COMPILE REPAIR (write boundary is machine-enforced):",
@@ -382,8 +423,8 @@ export function renderPatchPrompt({
         : "PROJECT KNOWLEDGE: omitted for this deterministic pre-compile repair."
       : projectKnowledge || "PROJECT KNOWLEDGE: not loaded for this request.",
     "",
-    renderJourneyBrief(scopedJourneys),
-    advisoryNotes,
+    headroomScope ? "" : renderJourneyBrief(scopedJourneys),
+    headroomScope ? "" : advisoryNotes,
     activeScope
       ? renderPrecompileRepairContext(tree, { repairScope: activeScope, onRetrieval })
       : isEdit || isRepair
@@ -398,9 +439,9 @@ export function renderPatchPrompt({
     parts.push("", "YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact; fix and re-emit ALL patches:",
       ...rejections.map((r) => `- ${r.reason}`));
   }
-  if (problems.length) {
+  if (compactHeadroomProblems.length) {
     parts.push("", "VERIFICATION FAILED on your last tree — fix these and re-emit patches:",
-      ...problems.map((p) => `- ${p}`));
+      ...compactHeadroomProblems.map((p) => `- ${p}`));
   }
   parts.push("", "Call emit_patches now with the complete batch for this step.");
   return parts.filter((part) => part !== null).join("\n");
@@ -459,9 +500,14 @@ export function headroomDispatchScope({
   const evidence = evidencePaths([...(problems || []), ...(rejections || [])]);
   const planned = (modulePlan || []).map((module) => module.path).filter((path) => GENERATED_SOURCE.test(path));
   const missing = planned.filter((path) => typeof tree?.[path] !== "string");
-  const candidates = [...new Set([
+  const targeted = [...new Set([
     ...activeFiles,
     ...evidence.filter((path) => planned.includes(path) || typeof tree?.[path] === "string"),
+  ])];
+  // A browser/pre-compile repair already names its owning modules. Queuing every other missing
+  // planned module turned a one-file repair into unrelated continuations and exhausted the
+  // retained build's headroom. Planned modules remain the fallback for unscoped generation.
+  const candidates = targeted.length ? targeted : [...new Set([
     ...missing,
     ...planned,
     ...["src/App.jsx", "src/routes/HomePage.jsx"].filter((path) => typeof tree?.[path] === "string"),
@@ -616,25 +662,26 @@ export function planCallReservation(options, model, {
   const requested = sizing?.plannedOutputTokens
     ?? Math.max(0, Math.floor(Number(requestedMaxOutputTokens || 0)));
   const minimumUsefulOutputTokens = sizing?.minimumUsefulOutputTokens || 1;
+  const estimatedInputTokens = estimatePromptTokens(options);
   let low = 0;
   let high = requested;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
     const estimate = conservativeCallReservation(options, model, {
-      maxOutputTokens: middle, minimumCredits,
+      maxOutputTokens: middle, minimumCredits, inputTokens: estimatedInputTokens,
     });
     if (estimate <= creditLimit + 1e-9) low = middle;
     else high = middle - 1;
   }
   const reservedCredits = conservativeCallReservation(options, model, {
-    maxOutputTokens: low, minimumCredits,
+    maxOutputTokens: low, minimumCredits, inputTokens: estimatedInputTokens,
   });
   if (reservedCredits > creditLimit + 1e-9 || low < minimumUsefulOutputTokens) {
     throw Object.assign(new Error("Builder V2 call cannot fit a useful response inside approved headroom"), {
       code: limitingCode, retryable: false, dispatchState: "before_dispatch",
       remaining, callCeiling: perCall, repairAllowance: Number.isFinite(allowance) ? allowance : null,
       minimumCredits: Number(minimumCredits || 0), minimumUsefulOutputTokens,
-      maximumFittingOutputTokens: low,
+      maximumFittingOutputTokens: low, estimatedInputTokens,
     });
   }
   return {
@@ -647,6 +694,7 @@ export function planCallReservation(options, model, {
     repairAllowanceCredits: Number.isFinite(allowance) ? allowance : null,
     callCeilingCredits: perCall,
     effectiveCallCeilingCredits: creditLimit,
+    estimatedInputTokens,
     outputEnvelope: sizing,
     pricingAssumption: "uncached_input_upper_bound",
     fundingPolicy,
@@ -960,7 +1008,9 @@ export function createModelLanes({
             }
             headroomScope = nextScope;
             headroomResizes += 1;
-            log(`${step}: approved ceiling is intact, but this single prompt exceeds its per-call envelope; `
+            log(`${step}: approved ceiling is intact, but this single prompt exceeds its per-call envelope `
+              + `(estimated input ${Number(error.estimatedInputTokens || 0)} tokens, maximum fitting output `
+              + `${Number(error.maximumFittingOutputTokens || 0)} tokens); `
               + `continuing internally with ${nextScope.allowedFiles.length} module(s) `
               + `[${nextScope.allowedFiles.join(", ")}] (resize ${headroomResizes})`);
           }

@@ -126,6 +126,63 @@ export async function postUserMessage(owner, { conversationId = null, text, work
 
 export const MAX_RECOVERY_ATTEMPTS = 2;
 
+const BARE_BUILD_RETRY = /^(?:try|retry|resume|continue)(?:\s+(?:it|again|the build|building|that))?[.!]*$/i;
+
+export function preservedBuildRetryTarget(turns = []) {
+  const latest = turns.at(-1);
+  if (latest?.role !== "user" || !BARE_BUILD_RETRY.test(String(latest.content || "").trim())) return null;
+  const terminal = turns.at(-2);
+  if (terminal?.role !== "lead"
+    || terminal.payload?.pipelineVersion !== "v2"
+    || !terminal.payload?.projectId
+    || !terminal.payload?.jobId) return null;
+  return {
+    jobId: String(terminal.payload.jobId),
+    projectId: String(terminal.payload.projectId),
+    failure: String(terminal.content || "Builder V2 stopped before verification."),
+  };
+}
+
+export function buildDispatchConfirmation(kind = "build") {
+  return kind === "resume"
+    ? "Builder V2 has resumed the preserved build from its retained checkpoint. The team will re-verify it before the preview appears here."
+    : "Builder V2 has started the build. The team will verify it before the preview appears here.";
+}
+
+async function dispatchPreservedBuildRetry({ ctx, target }) {
+  const [{ serviceClient }, { startExistingAppWorkV2 }] = await Promise.all([
+    import("./supabase.mjs"),
+    import("./builderV2/entry.mjs"),
+  ]);
+  const client = serviceClient();
+  const [{ data: job, error: jobError }, { data: project, error: projectError }] = await Promise.all([
+    client.from("build_jobs").select("id,owner,project_id,status,pipeline_version")
+      .eq("id", target.jobId).eq("owner", ctx.owner).maybeSingle(),
+    client.from("projects")
+      .select("id,owner,name,product_id,tree,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id")
+      .eq("id", target.projectId).eq("owner", ctx.owner).maybeSingle(),
+  ]);
+  if (jobError) throw new Error(`Builder V2 retry job lookup failed: ${jobError.message}`);
+  if (projectError) throw new Error(`Builder V2 retry project lookup failed: ${projectError.message}`);
+  if (!job || job.pipeline_version !== "v2" || job.status !== "failed"
+    || String(job.project_id) !== String(project?.id)) {
+    throw Object.assign(new Error("The preserved Builder V2 build is not in a retryable failed state."), {
+      code: "build_not_retryable",
+    });
+  }
+  return startExistingAppWorkV2(ctx, {
+    project,
+    request: [
+      "Continue this failed Builder V2 build from its retained immutable checkpoint.",
+      `Durable terminal failure: ${target.failure}`,
+      "Repair the named failure and re-verify; do not replay contract or core generation.",
+    ].join("\n\n"),
+    kind: "repair",
+    trigger: "automatic_retry",
+    taskHint: target.failure,
+  });
+}
+
 export async function processConversation(conversation, {
   store = conversationStore(),
   runStore = codeAgentStore(),
@@ -134,12 +191,40 @@ export async function processConversation(conversation, {
   overviewResolver = budgetOverview,
   credentialStoreFactory = null,
   reservationStoreFactory = leadModelReservations,
+  retryDispatcher = dispatchPreservedBuildRetry,
   // Private recovery state — carried across automatic retries, never user-visible.
   recovery = { attempt: 0, fingerprints: [], briefings: [] },
 } = {}) {
   ensureCoreCapabilities();
   const emit = (type, payload) => store.appendEvent(conversation, type, payload);
   try {
+    const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS }) || [];
+    const retryTarget = preservedBuildRetryTarget(turns);
+    if (retryTarget) {
+      const retryCtx = {
+        owner: conversation.owner,
+        conversation,
+        conversations: store,
+        emit,
+        relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
+      };
+      await emit("agent_spawned", { agent: "Builder", status: "Resuming the retained build..." });
+      try {
+        const accepted = await retryDispatcher({ ctx: retryCtx, target: retryTarget });
+        if (!accepted?.handled || !accepted.result?.jobId || !accepted.result?.buildId) {
+          throw Object.assign(new Error("Builder V2 retry did not create a durable dispatch identity."), {
+            code: "retry_dispatch_missing_identity",
+          });
+        }
+        await emit("agent_done", { agent: "Builder", ok: true });
+        await finishWithMessage(store, conversation, buildDispatchConfirmation("resume"));
+      } catch (error) {
+        await emit("agent_done", { agent: "Builder", ok: false });
+        await finishWithMessage(store, conversation,
+          error.publicMessage || "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.");
+      }
+      return;
+    }
     let credential = await credentialResolver(conversation.owner)
       .catch(() => ({ provider: "managed", secret: null, routing: {} }));
 
@@ -453,6 +538,13 @@ export async function processConversation(conversation, {
         }
         if (specialist !== "Lead Agent") {
           await emit("agent_done", { agent: specialist, ok: output?.ok !== false });
+        }
+        if (["app_build", "edit_app", "repair_app"].includes(call.name)
+          && output?.jobId && output?.buildId && output?.projectId) {
+          await emit("agent_done", { agent: "Lead Agent" });
+          await finishWithMessage(store, conversation,
+            buildDispatchConfirmation(call.name === "app_build" ? "build" : "resume"));
+          return;
         }
         if (output?.__pause === "waiting_user") {
           await store.appendTurn(conversation, {

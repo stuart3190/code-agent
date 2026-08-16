@@ -146,8 +146,9 @@ export function moduleGenerationContractsBrief(moduleContracts) {
  * per-call ceiling. This summary preserves the responsibilities needed to patch safely while the
  * validators remain the authoritative, unchanged gate.
  */
-export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPaths = [] } = {}) {
+export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPaths = [], focusControls = [] } = {}) {
   const focused = new Set((focusPaths || []).filter(Boolean));
+  const focusedControls = new Set((focusControls || []).filter(Boolean).map((value) => String(value).toLowerCase()));
   const allSpecifications = moduleContracts?.specifications || [];
   const specifications = focused.size
     ? allSpecifications.filter((specification) => focused.has(specification.path))
@@ -178,7 +179,13 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
         factory: capability.factory,
         methods: (capability.methods || []).map((method) => method.method),
       })),
-      controls: uniqueRows((specification.semanticInteractions || []).map((control) => ({
+      controls: uniqueRows((specification.semanticInteractions || [])
+        .filter((control) => !focusedControls.size || [
+          control.interactionId,
+          control.logicalField,
+          ...(control.accessibleNames || []),
+        ].filter(Boolean).some((value) => focusedControls.has(String(value).toLowerCase())))
+        .map((control) => ({
         logicalField: control.logicalField,
         roles: control.roles || [],
         inputTypes: control.inputTypes || [],

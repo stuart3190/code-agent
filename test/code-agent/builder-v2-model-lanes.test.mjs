@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
-  createModelLanes, estimatePromptTokens, headroomDispatchScope, jobUsageBucket, renderPatchPrompt,
+  createModelLanes, estimatePromptTokens, headroomDispatchScope, jobUsageBucket, planCallReservation,
+  renderPatchPrompt, repairFailureReferences,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
@@ -166,6 +167,63 @@ test("scoped correction prompts use compact module contracts while full generati
     "bounded corrections no longer resend every unrelated module contract");
   assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);
   assert.doesNotMatch(compact, /diagnosticPadding/);
+});
+
+test("browser-repair headroom batching targets only evidence owners and fits a useful one-file continuation", () => {
+  const liveSizedSource = `export default function Planner(){return <main>${"x".repeat(17_000)}</main>}`;
+  const fixture = oversizedModuleFixture({ source: liveSizedSource });
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure",
+    responsibleModules: ["src/components/A.jsx"],
+    actualObservedState: "the contracted control was missing",
+  });
+  const cascade = "journey send-message: later step: not reached because step 1 was undriveable";
+  const scope = headroomDispatchScope({
+    tree: fixture.tree,
+    modulePlan: fixture.modulePlan,
+    moduleContracts: fixture.moduleContracts,
+    problems: [problem, cascade],
+    logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, ["src/components/A.jsx"]);
+  assert.deepEqual(scope.remainingFiles, [], "unrelated missing planned modules are not queued behind a repair");
+
+  let retrieval = null;
+  const prompt = renderPatchPrompt({
+    step: "repair", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem, cascade], headroomScope: scope,
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.doesNotMatch(prompt, /not reached because/, "cascade failures do not consume the smallest continuation");
+  assert.doesNotMatch(prompt, /diagnosticPadding/, "unrelated architecture padding stays out of the continuation");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 10_000,
+    callCeilingCredits: 6,
+    repairAllowanceCredits: 4,
+    repairSizing: {
+      retrievedFileCount: 1,
+      retrievalTokens: retrieval.tokens,
+      problemCount: 2,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 12,
+      consumedCredits: 10.0107,
+      reservedCredits: 0,
+      remainingCredits: 1.9893,
+    },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200, "the live remaining headroom fits a useful bounded response");
+  assert.ok(plan.estimatedInputTokens > 0, "the dispatch records its deterministic prompt estimate");
+});
+
+test("repair scoping parses the emitted journey evidence and ignores downstream undriveable cascades", () => {
+  const problems = [
+    'journey send-message Â· step "fill the form" FAILED in a real browser: control missing',
+    'journey send-message Â· step "submit" FAILED in a real browser: not reached because step 1 was undriveable',
+  ];
+  assert.deepEqual(repairFailureReferences(problems), [{ journeyId: "send-message", action: "fill the form" }]);
 });
 
 test("a single irreducible source fails closed after bounded zero-dispatch compaction", async () => {
