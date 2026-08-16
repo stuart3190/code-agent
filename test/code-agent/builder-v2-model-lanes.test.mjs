@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
   createModelLanes, estimatePromptTokens, headroomDispatchScope, jobUsageBucket, planCallReservation,
-  renderPatchPrompt, repairFailureReferences,
+  renderPatchPrompt, repairFailureOwnedPaths, repairFailureReferences,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
@@ -224,6 +224,33 @@ test("repair scoping parses the emitted journey evidence and ignores downstream 
     'journey send-message Â· step "submit" FAILED in a real browser: not reached because step 1 was undriveable',
   ];
   assert.deepEqual(repairFailureReferences(problems), [{ journeyId: "send-message", action: "fill the form" }]);
+});
+
+test("headroom batching maps verifier actions to their semantic owner before planned-module fallback", () => {
+  const problems = ['journey planner-flow \u00b7 step "create a new project" FAILED in a real browser: name:missing'];
+  const contract = { interactionContract: { flows: [{
+    journeyId: "planner-flow",
+    action: "create a new project",
+    responsibleModules: ["src/components/CreatePlannerFlow.jsx"],
+    stateOwner: "src/components/CreatePlannerFlow.jsx",
+  }] } };
+  const semanticFiles = repairFailureOwnedPaths(contract, problems);
+  assert.deepEqual(semanticFiles, ["src/components/CreatePlannerFlow.jsx"]);
+  const scope = headroomDispatchScope({
+    tree: {
+      "src/components/CreatePlannerFlow.jsx": "export function CreatePlannerFlow(){}",
+      "src/components/Unrelated.jsx": "export function Unrelated(){}",
+    },
+    modulePlan: [
+      { path: "src/components/Unrelated.jsx" },
+      { path: "src/components/CreatePlannerFlow.jsx" },
+    ],
+    problems,
+    semanticFiles,
+    logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, ["src/components/CreatePlannerFlow.jsx"]);
+  assert.deepEqual(scope.remainingFiles, []);
 });
 
 test("a single irreducible source fails closed after bounded zero-dispatch compaction", async () => {

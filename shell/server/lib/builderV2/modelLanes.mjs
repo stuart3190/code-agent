@@ -235,6 +235,18 @@ export function repairFailureReferences(problems = []) {
     }).filter(Boolean);
 }
 
+export function repairFailureOwnedPaths(contract = {}, problems = []) {
+  const failures = new Set(repairFailureReferences(problems)
+    .map((failure) => `${failure.journeyId}\n${failure.action}`));
+  if (!failures.size) return [];
+  return [...new Set((contract.interactionContract?.flows || [])
+    .filter((flow) => failures.has(`${flow.journeyId}\n${flow.action}`))
+    .flatMap((flow) => [
+      ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
+    ])
+    .filter((path) => typeof path === "string" && GENERATED_SOURCE.test(path)))];
+}
+
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
@@ -492,7 +504,7 @@ export function isHeadroomFitError(error) {
 export function headroomDispatchScope({
   tree = {}, modulePlan = [], moduleContracts = null, repairScope = null,
   moduleCorrectionScope = null, problems = [], rejections = [], previousScope = null,
-  logicalStep = null,
+  logicalStep = null, semanticFiles = [],
 } = {}) {
   const active = previousScope || repairScope || moduleCorrectionScope;
   const activeFiles = [...new Set([...(active?.allowedFiles || []), ...(active?.files || [])])]
@@ -502,6 +514,8 @@ export function headroomDispatchScope({
   const missing = planned.filter((path) => typeof tree?.[path] !== "string");
   const targeted = [...new Set([
     ...activeFiles,
+    ...semanticFiles.filter((path) => GENERATED_SOURCE.test(path)
+      && (planned.includes(path) || typeof tree?.[path] === "string")),
     ...evidence.filter((path) => planned.includes(path) || typeof tree?.[path] === "string"),
   ])];
   // A browser/pre-compile repair already names its owning modules. Queuing every other missing
@@ -944,6 +958,8 @@ export function createModelLanes({
       const startedAt = Date.now();
       let headroomScope = requestedHeadroomScope;
       let headroomResizes = 0;
+      const semanticRepairFiles = step === "repair" && !repairScope && !moduleCorrectionScope
+        ? repairFailureOwnedPaths(contract, problems) : [];
       let prompt = null;
       let selected = null;
       let turn = null;
@@ -994,6 +1010,7 @@ export function createModelLanes({
             const nextScope = headroomDispatchScope({
               tree, modulePlan, moduleContracts, repairScope, moduleCorrectionScope,
               problems, rejections, previousScope: headroomScope, logicalStep: step,
+              semanticFiles: semanticRepairFiles,
             });
             if (!nextScope) {
               // A raw call with no model/module boundary is not safely splittable. Preserve its
