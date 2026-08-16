@@ -38,7 +38,7 @@ import { createSnapshotStore } from "./snapshotStore.mjs";
 import {
   loadIndex, persistIndex, supabaseSnapshotStorage,
 } from "./supabaseTwins.mjs";
-import { supabaseVerificationCache } from "./verification.mjs";
+import { supabaseVerificationCache, VERIFICATION_CACHE_VERSION } from "./verification.mjs";
 import { scopeInteractionContract } from "./interactionContract.mjs";
 import {
   compareSandboxIdentity, computeSandboxIdentity, sandboxSkewSummary,
@@ -346,7 +346,7 @@ export function createBuilderV2Runtime({
       // backend-dependent generated apps cannot spend a model token unless the worker can inject
       // and exercise the exact public browser runtime. Service-role values never enter this path.
       await ensureRuntimeReady({ projectId: workJob.project_id, workJob });
-      await ensureSandboxCompatible(workJob);
+      const sandboxCompatibility = await ensureSandboxCompatible(workJob);
       const recovery = await prepareBuilderV2PipelineAttempt(workJob, { client });
       if (recovery.action === "recovered") return recovery.outcome;
       const owner = workJob.owner;
@@ -509,8 +509,9 @@ export function createBuilderV2Runtime({
             job_type: "browser_verify", attempts: workJob.attempts || 1,
             payload: { previewUrl: previewResult.url,
               contract: { ...journeyContract, journeys: [journey],
-                allJourneys: journeyContract?.journeys || [],
-                prerequisiteInteractionContract: journeyContract?.interactionContract || null,
+                allJourneys: journeyContract?.allJourneys || journeyContract?.journeys || [],
+                prerequisiteInteractionContract: journeyContract?.prerequisiteInteractionContract
+                  || journeyContract?.interactionContract || null,
                 interactionContract: scopeInteractionContract(journeyContract?.interactionContract, [journey]) },
               timeoutMs: 180_000 },
             resource_limits: runtimeLimits(workJob, "browser_verify"),
@@ -553,7 +554,15 @@ export function createBuilderV2Runtime({
         ...lanes, assetService, snapshotStore, buildStore: supabaseBuildStore(client),
         verificationCache: supabaseVerificationCache(client),
         verificationContext: {
-          verifierVersion: "journey-v2", backendRuntimeVersion: process.env.THRALLO_RUNTIME_VERSION || "unknown",
+          // Cache PASS evidence against both the exact verifier bytes the sandbox proved it is
+          // running and the deployed orchestration revision that assembled its contract. A
+          // release can no longer change either half of the grader while retaining a static
+          // "journey-v2" identity and silently reuse an older verdict.
+          verifierVersion: [
+            sandboxCompatibility.sandboxVerifier || "in-process",
+            sandboxCompatibility.hostCommit || VERIFICATION_CACHE_VERSION,
+          ].join(":"),
+          backendRuntimeVersion: process.env.THRALLO_RUNTIME_VERSION || "unknown",
           environmentVersion: process.env.THRALLO_ENV_VERSION || "unknown", capabilityVersions: "registry-current",
           indexerVersion: INDEXER_VERSION,
         },

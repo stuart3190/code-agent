@@ -31,6 +31,25 @@ import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
 
+/**
+ * Keep the complete contract needed to reconstruct an isolated journey separate from the
+ * differential subset that must actually be driven. A cache hit may remove the primary journey
+ * from `drivenJourneys`; its account/durable setup is still the only valid starting state for a
+ * secondary journey and must never be scoped away with the cached verdicts.
+ */
+export function verificationExecutionContract(contract, scopedJourneys, drivenJourneys) {
+  return {
+    ...contract,
+    journeys: scopedJourneys,
+    allJourneys: contract?.journeys || scopedJourneys,
+    prerequisiteInteractionContract: contract?.interactionContract || null,
+    interactionContract: scopeInteractionContract(
+      contract?.interactionContract,
+      (drivenJourneys || []).map((row) => row.journey || row),
+    ),
+  };
+}
+
 // ── build persistence (bv2_builds twin pattern) ───────────────────────────────────────────────
 
 export function memoryBuildStore() {
@@ -244,8 +263,9 @@ export function createOrchestrator({
     });
     let driven = { journeys: [] };
     if (plan.drive.length && journeysFn) {
+      const executionContract = verificationExecutionContract(contract, journeys, plan.drive);
       driven = await journeysFn({ owner, projectId, buildId, tree,
-        contract: { ...scoped, interactionContract: scopeInteractionContract(contract.interactionContract, plan.drive.map((d) => d.journey)) },
+        contract: executionContract,
         journeys: plan.drive.map((d) => d.journey), graph, signal });
       abortIfRequested(signal);
       driven = { ...driven, journeys: attributeFailures(driven, graph, scoped) };

@@ -5,6 +5,8 @@ import { readFile } from "node:fs/promises";
 import {
   assertQueuedProviderSelection, journeyRequiresPersistentMutation, prepareBuilderV2PipelineAttempt,
 } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
+import { verificationExecutionContract } from "../../shell/server/lib/builderV2/orchestrator.mjs";
+import { VERIFICATION_CACHE_VERSION } from "../../shell/server/lib/builderV2/verification.mjs";
 import { serialiseWorkerFailure } from "../../build-worker/queue.mjs";
 
 test("V2 runtime distinguishes persistent journeys from read-only navigation", () => {
@@ -28,14 +30,42 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
   assert.match(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
     "the browser worker receives the machine-readable contract rather than English journeys alone");
   assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
-  assert.match(runtime, /prerequisiteInteractionContract: journeyContract\?\.interactionContract/,
-    "isolated journey verification retains the full contract needed to reconstruct prerequisites");
-  assert.match(runtime, /allJourneys: journeyContract\?\.journeys/);
+  assert.match(runtime, /prerequisiteInteractionContract: journeyContract\?\.prerequisiteInteractionContract/,
+    "isolated journey verification preserves the full prerequisite contract across differential cache scoping");
+  assert.match(runtime, /allJourneys: journeyContract\?\.allJourneys/);
+  assert.match(runtime, /sandboxCompatibility\.sandboxVerifier \|\| "in-process"/);
+  assert.match(runtime, /sandboxCompatibility\.hostCommit \|\| VERIFICATION_CACHE_VERSION/,
+    "passing evidence is keyed by the proven sandbox verifier and deployed orchestration revision");
   assert.match(verification, /backendEvidence: outcome\.backendEvidence \|\| null/);
   assert.match(runtime, /mode === "resume_verify"[\s\S]*runVerifyFromCheckpoint/,
     "checkpoint verification must resume directly from immutable V2 state");
   assert.doesNotMatch(runtime, /adoptLegacyTree|projects\.tree/,
     "checkpoint verification must not require legacy project-tree adoption");
+});
+
+test("V2 differential verification retains primary prerequisites when only a red secondary is driven", () => {
+  const primary = { id: "create-asset", priority: "primary", steps: [] };
+  const cached = { id: "responsive-layout", priority: "secondary", steps: [] };
+  const red = { id: "edit-saved-asset", priority: "secondary", steps: [] };
+  const primaryFlow = { id: "create:auth", journeyId: primary.id, kind: "flow_start",
+    control: { accessibleName: "account form" } };
+  const cachedFlow = { id: "responsive:resize", journeyId: cached.id, kind: "action",
+    control: { accessibleName: "mobile viewport" } };
+  const redFlow = { id: "edit:open", journeyId: red.id, kind: "flow_start",
+    control: { accessibleName: "history item" } };
+  const contract = {
+    journeys: [primary, cached, red],
+    interactionContract: { flows: [primaryFlow, cachedFlow, redFlow] },
+  };
+
+  const execution = verificationExecutionContract(contract, contract.journeys, [{ journey: red }]);
+  assert.deepEqual(execution.allJourneys.map((journey) => journey.id),
+    [primary.id, cached.id, red.id]);
+  assert.deepEqual(execution.prerequisiteInteractionContract.flows,
+    [primaryFlow, cachedFlow, redFlow], "the primary setup graph is retained even though its PASS was cached");
+  assert.deepEqual(execution.interactionContract.flows, [redFlow],
+    "the browser still drives only the red differential subset");
+  assert.match(VERIFICATION_CACHE_VERSION, /^journey-verifier\/2026-08-16\./);
 });
 
 test("worker failures retain Error messages after classification", () => {
