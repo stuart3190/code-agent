@@ -50,6 +50,33 @@ export function verificationExecutionContract(contract, scopedJourneys, drivenJo
   };
 }
 
+/** Preserve the browser's causal step evidence when handing a red retained tree to repair. */
+export function browserRepairEvidence({
+  contract, interactionContract = contract?.interactionContract, journeyResults, tree,
+  backendRowFailures = [], advisory = [],
+} = {}) {
+  const verdicts = journeyResults || { journeys: [], blockingErrors: [] };
+  return [
+    ...(verdicts.journeys || []).filter((journey) => journey.status !== "pass").flatMap((journey) => {
+      const failedSteps = (journey.steps || []).filter((step) => step.status !== "pass");
+      const journeyEvidence = failedSteps.length
+        ? failedSteps.map((step) => `journey ${journey.id} · step "${step.action}" FAILED in a real browser: `
+          + `${step.detail || "expected outcome never appeared"}`)
+        : [`journey ${journey.id} FAILED in a real browser (no per-step evidence recorded)`];
+      const attributionEvidence = journey.attributionDefect
+        ? [`platform defect ${journey.attributionDefect.code}: journey ${journey.id} has no owning module; `
+          + `bounded fallback files: ${(journey.fallbackRefs || []).join(", ") || "none available"}`]
+        : [];
+      return [...journeyEvidence, ...attributionEvidence];
+    }),
+    ...interactionFailureDiagnostics({ contract, interactionContract, journeyResults: verdicts, tree })
+      .map((row) => JSON.stringify(row)),
+    ...(backendRowFailures || []).map((failure) => `backend row check failed (${failure.journeyId}): ${failure.detail}`),
+    ...(verdicts.blockingErrors || []),
+    ...(advisory || []),
+  ];
+}
+
 // ── build persistence (bv2_builds twin pattern) ───────────────────────────────────────────────
 
 export function memoryBuildStore() {
@@ -1174,7 +1201,12 @@ export function createOrchestrator({
             return finish("green", { final_snapshot: retainedCheckpoint.id,
               snapshotId: retainedCheckpoint.id, parentSnapshotId: source.snapshotId, providerCalls: 0 });
           }
-          retainedJourneyProblems = retainedEligibility.failures || [];
+          const retainedEvidence = browserRepairEvidence({
+            contract, interactionContract: spec.interactionContract,
+            journeyResults: retainedVerdicts, tree: initialGate.tree,
+          });
+          retainedJourneyProblems = retainedEvidence.length
+            ? retainedEvidence : retainedEligibility.failures || [];
         }
         const repairProblems = initialGate.ok
           ? [...retainedJourneyProblems, ...initialProblems]

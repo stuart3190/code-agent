@@ -217,16 +217,18 @@ test("14R failed verification resumes the exact non-promotable candidate without
   let contractCalls = 0;
   let coreCalls = 0;
   let repairCalls = 0;
+  let repairProblems = [];
   let browserCalls = 0;
   const snapshotStore = createSnapshotStore();
   const orchestrator = createOrchestrator({
     contractFn: async () => { contractCalls += 1; return contract; },
-    patchesFn: async ({ step }) => {
+    patchesFn: async ({ step, problems }) => {
       if (step === "core") {
         coreCalls += 1;
         return [{ newFile: "src/routes/Checkpoint.jsx", content: "export default function Checkpoint(){ return <h1>Checkpoint fixture</h1>; }" }];
       }
       repairCalls += 1;
+      repairProblems = problems;
       return [{ file: "src/routes/Checkpoint.jsx", ops: [{ op: "replace_symbol", symbol: "Checkpoint",
         content: "export default function Checkpoint(){ return <main><h1>Checkpoint fixture</h1><p>Repaired</p></main>; }" }] }];
     },
@@ -243,7 +245,13 @@ test("14R failed verification resumes the exact non-promotable candidate without
       // First build verification and zero-model retained-candidate preverification both stay red;
       // only the journey run after the targeted patch passes. A verifier-only false negative is
       // covered separately and must not buy a repair call.
-      return { journeys: journeys.map((journey) => ({ ...journey, status: browserCalls <= 2 ? "fail" : "pass" })) };
+      return { journeys: journeys.map((journey) => ({
+        ...journey, status: browserCalls <= 2 ? "undriveable" : "pass",
+        steps: journey.steps.map((step) => ({
+          ...step, status: browserCalls <= 2 ? "undriveable" : "pass",
+          detail: browserCalls <= 2 ? "the contracted headline control was missing" : "visible",
+        })),
+      })) };
     },
     baseTree: () => clone(fromScaffold(REACT_VITE)), baseline: REACT_VITE,
   });
@@ -262,6 +270,10 @@ test("14R failed verification resumes the exact non-promotable candidate without
   assert.equal(contractCalls, 1, "persisted contract is reused");
   assert.equal(coreCalls, 1, "core generation is never replayed");
   assert.equal(repairCalls, 1);
+  assert.ok(repairProblems.some((problem) => problem.includes(
+    'journey headline · step "open home" FAILED in a real browser: the contracted headline control was missing')),
+  "resume passes the retained browser's exact causal step instead of an eligibility summary");
+  assert.doesNotMatch(repairProblems.join("\n"), /required journey headline is undriveable/);
   assert.equal((await snapshotStore.pointer("owner", "project", "green")), repaired.snapshotId);
   assert.match((await snapshotStore.getSnapshot(source.snapshotId)).reason, /^candidate:core:/);
 });
