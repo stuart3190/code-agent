@@ -45,9 +45,34 @@ const CASES = {
     minLength: 20,
     networkFailure: true,
   },
+  declaredFieldTypes: { typed: true },
 };
 
-function contractFor(action) {
+function typedContract() {
+  return deriveBuildSpec({
+    summary: "Create an auto-layout project", projectType: "web app", version: 1,
+    auth: { required: false }, routes: [{ path: "/", name: "Project editor" }],
+    entities: [{ name: "project", fields: [
+      { name: "projectName", type: "string", required: true },
+      { name: "lengthM", type: "number", required: true },
+      { name: "targetLux", type: "integer", required: true },
+      { name: "targetLuxOverride", type: "boolean", required: false },
+    ] }],
+    operations: [],
+    journeys: [{ id: "create-auto-layout-project", title: "Create an auto-layout project",
+      priority: "primary", steps: [
+        { action: "open the project editor", target: "/", expect: "the project editor is visible" },
+        { action: "enter project and room details", target: "project form",
+          operates: ["projectName", "lengthM", "targetLux", "targetLuxOverride"], primitive: "textbox",
+          expect: "updated project name, room length, target lux and override state are visible" },
+      ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  }).contract;
+}
+
+function contractFor(shape) {
+  if (shape.typed) return typedContract();
+  const { action } = shape;
   const contract = deriveBuildSpec({
     summary: "Generate a concept", projectType: "web app", version: 1, auth: { required: false },
     routes: [{ path: "/", name: "Dashboard" }],
@@ -80,7 +105,31 @@ function contractFor(action) {
   return contract;
 }
 
-function appFor({ placeholder, minLength, forceDisabled = false, networkFailure = false }) {
+function appFor({ placeholder, minLength, forceDisabled = false, networkFailure = false, typed = false }) {
+  if (typed) return {
+    "src/App.jsx": `import { useState } from "react";
+export default function App() {
+  const [projectName, setProjectName] = useState("");
+  const [lengthM, setLengthM] = useState(5.4);
+  const [targetLux, setTargetLux] = useState(300);
+  const [targetLuxOverride, setTargetLuxOverride] = useState(false);
+  return <main><h1>Project editor</h1><form aria-label="project form">
+    <label htmlFor="projectName">project Name</label>
+    <input id="projectName" name="projectName" aria-label="project Name" required
+      value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+    <label htmlFor="lengthM">length M</label>
+    <input id="lengthM" name="lengthM" aria-label="length M" type="number" min="1" max="20" step="0.1"
+      value={lengthM} onChange={(event) => setLengthM(Number(event.target.value))} />
+    <label htmlFor="targetLux">target Lux</label>
+    <input id="targetLux" name="targetLux" aria-label="target Lux" type="number" min="50" max="1000" step="50"
+      value={targetLux} onChange={(event) => setTargetLux(Number(event.target.value))} />
+    <label htmlFor="targetLuxOverride">target Lux Override</label>
+    <input id="targetLuxOverride" name="targetLuxOverride" aria-label="target Lux Override" type="checkbox"
+      checked={targetLuxOverride} onChange={(event) => setTargetLuxOverride(event.target.checked)} />
+  </form><p>Updated project name {projectName}; room length {lengthM}; target lux {targetLux};
+    override state {String(targetLuxOverride)} are visible</p></main>;
+}`,
+  };
   return {
     "src/App.jsx": `import { useEffect, useState } from "react";
 export default function App() {
@@ -139,7 +188,7 @@ before(async () => {
     servers.set(name, server);
     results.set(name, await verifyJourneys({
       previewUrl: `http://127.0.0.1:${server.address().port}`,
-      contract: contractFor(shape.action), timeoutMs: 120_000,
+      contract: contractFor(shape), timeoutMs: 120_000,
     }));
   }
 }, { timeout: 900_000 });
@@ -154,6 +203,25 @@ for (const [name, shape] of Object.entries(CASES)) {
       assert.equal(builds.get(name).ok, true, builds.get(name)?.stderr);
       const journey = results.get(name).journeys[0];
       const transcript = journey.steps.map((step) => `${step.status}: ${step.action} — ${step.detail}`).join("\n");
+      if (shape.typed) {
+        assert.equal(journey.status, "pass", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
+        const fields = new Map(journey.steps[1].controlEvidence.fields.map((field) => [field.field, field]));
+        assert.equal(fields.get("projectName").status, "filled", JSON.stringify(fields.get("projectName")));
+        for (const fieldName of ["lengthM", "targetLux"]) {
+          const field = fields.get(fieldName);
+          assert.equal(field.status, "filled", JSON.stringify(field));
+          assert.equal(field.facts.type, "number", JSON.stringify(field));
+          assert.equal(Number.isFinite(Number(field.expectedValue)), true, JSON.stringify(field));
+          assert.equal(field.observedValue, field.expectedValue, JSON.stringify(field));
+        }
+        const toggle = fields.get("targetLuxOverride");
+        assert.equal(toggle.status, "filled", JSON.stringify(toggle));
+        assert.equal(toggle.facts.type, "checkbox", JSON.stringify(toggle));
+        assert.equal(toggle.previousValue, "false", JSON.stringify(toggle));
+        assert.equal(toggle.expectedValue, "true", JSON.stringify(toggle));
+        assert.equal(toggle.observedValue, "true", JSON.stringify(toggle));
+        return;
+      }
       if (shape.forceDisabled) {
         assert.equal(journey.status, "undriveable", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
         assert.equal(journey.steps[2].status, "undriveable", transcript);

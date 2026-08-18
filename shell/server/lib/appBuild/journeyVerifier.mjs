@@ -206,8 +206,30 @@ function valueFor(label, marker) {
  * visible default/example the contract names; otherwise satisfy native length constraints without
  * inventing domain behaviour. Native validity is checked again after filling below.
  */
-function fixtureValueFor(flow, facts, marker) {
+function numericFixtureFor(facts, currentValue) {
+  const current = Number(currentValue);
+  const minimum = facts?.min === null || facts?.min === undefined || facts?.min === ""
+    ? Number.NEGATIVE_INFINITY : Number(facts.min);
+  const maximum = facts?.max === null || facts?.max === undefined || facts?.max === ""
+    ? Number.POSITIVE_INFINITY : Number(facts.max);
+  const declaredStep = facts?.step === "any" || facts?.step === null || facts?.step === undefined
+    || facts?.step === "" ? 1 : Number(facts.step);
+  const step = Number.isFinite(declaredStep) && declaredStep > 0 ? declaredStep : 1;
+  const base = Number.isFinite(current) ? current : (Number.isFinite(minimum) ? minimum : 1);
+  let candidate = base + step <= maximum ? base + step : base - step;
+  if (candidate < minimum || candidate > maximum || !Number.isFinite(candidate)) candidate = base;
+  // Avoid binary floating-point tails such as 0.6000000000000001 becoming an invalid browser
+  // fixture. Adding one valid declared step to an already-valid value keeps the same step lattice.
+  return String(Number(candidate.toFixed(10)));
+}
+
+function fixtureValueFor(flow, facts, marker, currentValue = "") {
   const logicalField = flow.control.logicalField || flow.valueWritten || flow.control.accessibleName;
+  const declaredType = String(flow.control.valueType || "").toLowerCase();
+  const browserType = String(facts?.type || "text").toLowerCase();
+  if (["number", "integer"].includes(declaredType) || browserType === "number") {
+    return numericFixtureFor(facts, currentValue);
+  }
   let value = valueFor(logicalField, marker);
   const instruction = `${flow.action || ""} ${flow.semanticPurpose || ""} ${flow.observable || ""}`;
   const placeholder = String(facts?.placeholder || "").trim();
@@ -406,6 +428,7 @@ async function fillContractedFields(page, flows, marker) {
       minLength: Number.isInteger(el.minLength) && el.minLength >= 0 ? el.minLength : null,
       maxLength: Number.isInteger(el.maxLength) && el.maxLength >= 0 ? el.maxLength : null,
       pattern: el.getAttribute("pattern"),
+      min: el.getAttribute("min"), max: el.getAttribute("max"), step: el.getAttribute("step"),
     })).catch(() => null);
     if (disabled || !editable) {
       evidence.fields.push({ ...fieldEvidence, status: "not_editable", facts });
@@ -414,7 +437,28 @@ async function fillContractedFields(page, flows, marker) {
     // A contracted negative-validation step must enter something the application should REJECT.
     // When no rule can be derived from the contract, the field is left alone and the step reports
     // an unsupported intent rather than guessing at a rule the contract never stated.
-    let value = fixtureValueFor(flow, facts, marker);
+    const currentValue = await field.inputValue().catch(() => "");
+    const booleanControl = flow.control.valueType === "boolean" || facts?.type === "checkbox";
+    if (booleanControl && flow.control.validity !== "invalid") {
+      const before = await field.isChecked().catch(() => false);
+      const expected = facts?.required ? true : !before;
+      let changed = false;
+      if (facts?.required && before) {
+        await field.uncheck({ timeout: 3_000 }).then(() => { changed = true; }).catch(() => {});
+      }
+      await (expected ? field.check({ timeout: 3_000 }) : field.uncheck({ timeout: 3_000 }))
+        .then(() => { changed ||= before !== expected; }).catch(() => {});
+      const observed = await field.isChecked().catch(() => before);
+      const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
+        message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
+      const status = observed === expected && changed && validity.valid ? "filled" : "value_not_accepted";
+      evidence.fields.push({ ...fieldEvidence, status, expectedValue: String(expected),
+        observedValue: String(observed), previousValue: String(before), facts,
+        validityMessage: validity.message });
+      if (status === "filled") filled.push(logicalField);
+      continue;
+    }
+    let value = fixtureValueFor(flow, facts, marker, currentValue);
     if (flow.control.validity === "invalid") {
       value = invalidValueFor(logicalField, flow.control.inputTypes);
       if (value === null) {
@@ -428,10 +472,12 @@ async function fillContractedFields(page, flows, marker) {
     const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
       message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
     const expectsInvalid = flow.control.validity === "invalid";
-    const status = observedValue !== value
+    const changed = observedValue !== currentValue;
+    const status = observedValue !== value || (!expectsInvalid && !changed)
       ? "value_not_accepted"
       : (expectsInvalid || validity.valid ? "filled" : "fixture_invalid");
-    evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue, facts,
+    evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue,
+      previousValue: currentValue, facts,
       validityMessage: validity.message });
     if (status === "filled") filled.push(logicalField);
   }

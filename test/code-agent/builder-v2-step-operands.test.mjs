@@ -93,6 +93,40 @@ test("what a step READS never becomes a browser action", () => {
     "a read-only dependency became a control");
 });
 
+test("declared field types drive the generated control contract", () => {
+  const contract = {
+    summary: "generic typed editor", projectType: "web app", version: 1,
+    auth: { required: false }, routes: [{ path: "/", name: "Editor" }],
+    entities: [{ name: "project", fields: [
+      { name: "projectName", type: "string", required: true },
+      { name: "lengthM", type: "number", required: true },
+      { name: "targetLux", type: "integer", required: true },
+      { name: "targetLuxOverride", type: "boolean", required: false },
+    ] }],
+    operations: [],
+    journeys: [{ id: "create-project", title: "Create a project", priority: "primary", steps: [
+      { action: "open the editor", target: "/", expect: "the editor is visible" },
+      { action: "enter project and room details", target: "project form",
+        operates: ["projectName", "lengthM", "targetLux", "targetLuxOverride"], primitive: "textbox",
+        expect: "the entered project and room details are visible" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const controls = new Map(flowsFor(contract, 1)
+    .map((flow) => [flow.control.logicalField, flow.control]));
+
+  assert.deepEqual(controls.get("projectName").inputTypes, ["text"]);
+  assert.equal(controls.get("projectName").valueType, "string");
+  assert.deepEqual(controls.get("lengthM").inputTypes, ["number"]);
+  assert.ok(controls.get("lengthM").roles.includes("spinbutton"));
+  assert.equal(controls.get("lengthM").valueType, "number");
+  assert.deepEqual(controls.get("targetLux").inputTypes, ["number"]);
+  assert.equal(controls.get("targetLux").valueType, "integer");
+  assert.deepEqual(controls.get("targetLuxOverride").inputTypes, ["checkbox"]);
+  assert.deepEqual(controls.get("targetLuxOverride").roles, ["checkbox"]);
+  assert.equal(controls.get("targetLuxOverride").valueType, "boolean");
+});
+
 // ── the same distinction, with the nouns changed ───────────────────────────────────────────────
 
 const GENERIC = [

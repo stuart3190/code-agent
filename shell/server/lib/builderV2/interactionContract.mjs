@@ -250,15 +250,22 @@ function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null
  * registry and without the model being told an id. Accessible names remain, but as a FALLBACK for
  * controls that carry no machine identity — never as the primary way to recognise meaning.
  */
-function controlRequirement(kind, field, step) {
+function controlRequirement(kind, field, step, declaredField = null) {
   const name = field || String(step?.target || step?.action || "control");
   if (kind === "input") {
     const aliases = fieldAliases(name);
-    const inputTypes = /email/i.test(name) ? ["email"] : /phone|telephone/i.test(name)
-      ? ["tel", "text"] : /party|quantity|number/i.test(name) ? ["number", "text"] : ["text"];
+    const valueType = String(declaredField?.type || "").toLowerCase() || null;
+    const inputTypes = ["number", "integer"].includes(valueType) ? ["number"]
+      : valueType === "boolean" ? ["checkbox"]
+        : /email/i.test(name) ? ["email"] : /phone|telephone/i.test(name)
+          ? ["tel", "text"] : /party|quantity|number/i.test(name) ? ["number", "text"] : ["text"];
+    // Keep the broad text/spinbutton discovery set so source lint can locate a correctly named
+    // but wrongly typed native control and report `invalid_control_type`. `inputTypes` is the
+    // authoritative type requirement; checkboxes need their distinct native role.
+    const roles = valueType === "boolean" ? ["checkbox"] : ["textbox", "spinbutton", "combobox"];
     return { purpose: name, logicalField: field || name, machineId: controlIdFor(field || name),
-      roles: ["textbox", "spinbutton", "combobox"],
-      inputTypes, accessibleName: aliases[0], accessibleNames: aliases, editable: true };
+      roles, inputTypes, valueType, required: declaredField?.required === true,
+      accessibleName: aliases[0], accessibleNames: aliases, editable: true };
   }
   if (kind === "selection") return { purpose: name, roles: ["button", "radio", "option", "combobox"],
     logicalField: field || name, machineId: controlIdFor(field || name),
@@ -295,9 +302,12 @@ export function buildInteractionContract(contract, {
   // The only things a browser control can HOLD: the fields the contract's entities declare.
   // Operations, entity names and routes are all legal contract references and none of them is a
   // field, which is exactly the distinction that was missing.
-  const operableFields = new Set((contract?.entities || [])
-    .flatMap((entity) => (entity?.fields || []).map((field) => normalized(field?.name)))
-    .filter(Boolean));
+  const declaredFields = new Map();
+  for (const field of (contract?.entities || []).flatMap((entity) => entity?.fields || [])) {
+    const key = normalized(field?.name);
+    if (key && !declaredFields.has(key)) declaredFields.set(key, field);
+  }
+  const operableFields = new Set(declaredFields.keys());
   const flows = [];
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
@@ -392,7 +402,8 @@ export function buildInteractionContract(contract, {
           }
           const owners = ownerModules(modulePlan, kind, { durableOwner, draftOwner });
           const stateOwner = owners[0] || `journey:${journey.id}`;
-          const control = controlRequirement(kind, field, step);
+          const control = controlRequirement(kind, field, step,
+            field ? declaredFields.get(normalized(field)) || null : null);
           if (control) Object.assign(control, {
             stateOwner,
             statePath: writes[0] || null,
