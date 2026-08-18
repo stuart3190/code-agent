@@ -487,13 +487,20 @@ test("WP9 — patchesFn: forced strict call, patches returned, rejection feedbac
   assert.equal(diag.steps[0].usage.input, 1000, "spend recorded on the canonical step");
 
   await lanes.patchesFn({
-    step: "core", contract: CONTRACT, tiers: TIERS, tree: {},
+    step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: { "src/App.jsx": "export default function App() { return null; }" },
     rejections: [{ reason: 'symbol "Nope" not found in src/App.jsx' }],
     problems: ["expectations: confirmation not rendered"],
+    regenerateFiles: ["src/App.jsx"],
   });
   const prompt = provider.calls[1].messages[0].content;
   assert.match(prompt, /symbol "Nope" not found/, "machine-readable rejection reaches the model");
   assert.match(prompt, /confirmation not rendered/, "gate problems reach the model");
+  assert.match(prompt, /Emit ONLY rejected or unfinished work/);
+  assert.doesNotMatch(prompt, /re-emit ALL patches/);
+  assert.match(prompt, /MANDATORY WHOLE-FILE ESCALATION/);
+  assert.match(prompt, /src\/App\.jsx/);
+  assert.match(prompt, /exactly one replaceFile operation/);
 });
 
 test("WP9 — ONE shared ceiling across all calls: the guard stops the job and spend is still recorded", async () => {

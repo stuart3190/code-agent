@@ -153,6 +153,61 @@ function opSignature(patch, op) {
   return `${patch.file}:${op.op}:${op.symbol || ""}`;
 }
 
+function importBindingKey(specifier) {
+  if (specifier.type === "ImportDefaultSpecifier") return `default:${specifier.local.name}`;
+  if (specifier.type === "ImportNamespaceSpecifier") return `namespace:${specifier.local.name}`;
+  const imported = specifier.imported?.name || specifier.imported?.value;
+  return `named:${imported}:${specifier.local.name}`;
+}
+
+function parseImportDeclarations(source) {
+  return parse(source, { sourceType: "module", plugins: ["jsx", "typescript"] }).program.body
+    .filter((node) => node.type === "ImportDeclaration");
+}
+
+/**
+ * Return only the import bindings not already present in the retained file. Increment retries
+ * operate on a candidate containing every clean sibling from the previous batch. Re-inserting
+ * `import { useState } from "react"` into a file which already imports useState is therefore an
+ * idempotent success, not malformed source. If one binding is new, emit a separate valid import
+ * for just that binding rather than duplicating the already-retained names.
+ */
+function missingImportStatements(current, statement) {
+  try {
+    const requested = parseImportDeclarations(statement);
+    if (requested.length !== 1) return [statement];
+    const declaration = requested[0];
+    const source = declaration.source.value;
+    const existing = new Set(parseImportDeclarations(current)
+      .filter((row) => row.source.value === source)
+      .flatMap((row) => row.specifiers.map(importBindingKey)));
+    if (!declaration.specifiers.length) {
+      return parseImportDeclarations(current).some((row) => row.source.value === source)
+        ? [] : [statement];
+    }
+    const missing = declaration.specifiers.filter((specifier) => !existing.has(importBindingKey(specifier)));
+    if (!missing.length) return [];
+    const quotedSource = JSON.stringify(source);
+    const additions = [];
+    for (const specifier of missing.filter((row) => row.type === "ImportDefaultSpecifier")) {
+      additions.push(`import ${specifier.local.name} from ${quotedSource};`);
+    }
+    for (const specifier of missing.filter((row) => row.type === "ImportNamespaceSpecifier")) {
+      additions.push(`import * as ${specifier.local.name} from ${quotedSource};`);
+    }
+    const named = missing.filter((row) => row.type === "ImportSpecifier");
+    if (named.length) {
+      additions.push(`import { ${named.map((specifier) => {
+        const imported = specifier.imported?.name || specifier.imported?.value;
+        return imported === specifier.local.name ? imported : `${imported} as ${specifier.local.name}`;
+      }).join(", ")} } from ${quotedSource};`);
+    }
+    return additions;
+  } catch {
+    return [statement];
+  }
+}
+
 /**
  * Why a patch was refused. Stable codes — the readable reason may be reworded at any time, these
  * may not, because attempt accounting and repair targeting both branch on them.
@@ -249,10 +304,15 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       if (op.op === "add_import") {
         const statement = String(op.content || "").trim();
         if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement", REJECTION.INVALID_PATCH_OPERATION); continue; }
+        const additions = missingImportStatements(current, statement);
+        if (!additions.length) {
+          applied.push({ signature: opSignature(patch, op), file, kind: "add_import_existing" });
+          continue;
+        }
         const lines = current.split("\n");
         let lastImport = -1;
         for (let i = 0; i < lines.length; i += 1) if (/^\s*import\b/.test(lines[i])) lastImport = i;
-        lines.splice(lastImport + 1, 0, statement);
+        lines.splice(lastImport + 1, 0, ...additions);
         const candidate = lines.join("\n");
         const probe = indexFile(file, candidate);
         if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }

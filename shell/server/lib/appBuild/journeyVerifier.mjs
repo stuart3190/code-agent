@@ -2445,6 +2445,32 @@ const selectionSnapshot = (page, id) => page.evaluate((controlId) => [...documen
   .map((el) => `${el.getAttribute("aria-pressed") || ""}:${el.getAttribute("aria-selected") || ""}`
     + `:${el.getAttribute("data-selected") || ""}:${el.className || ""}`), id).catch(() => []);
 
+// Generated applications may resolve their public session before mounting the contracted
+// workspace. A fixed post-navigation sleep sampled a legitimate visible `role=status` loading
+// surface in production and then falsely concluded that the workspace control did not exist.
+// Wait only while the app explicitly advertises active asynchronous readiness; ordinary status
+// copy such as "Saved" never delays verification, and a stuck loader still proceeds to the normal
+// strict journey failure after this bounded wait.
+async function waitForActiveSurface(page, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const active = await page.evaluate(() => {
+      const visible = (element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden"
+          && Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      return [...document.querySelectorAll('[aria-busy="true"], [role="status"]')]
+        .filter(visible)
+        .some((element) => element.getAttribute("aria-busy") === "true"
+          || /^(loading|initializing|checking|preparing)\b/i.test((element.textContent || "").trim()));
+    }).catch(() => false);
+    if (!active || Date.now() >= deadline) return !active;
+    await page.waitForTimeout(200);
+  }
+}
+
 export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
   browser: sharedBrowser = null,
@@ -2513,6 +2539,7 @@ export async function verifyJourneys({
         consoleErrors, failedRequests,
       };
     }
+    await waitForActiveSurface(page);
 
     const deadline = Date.now() + timeoutMs;
 
@@ -2527,7 +2554,7 @@ export async function verifyJourneys({
     if (mechanics?.failures?.length) {
       // Reload so the probe's own interactions are not part of the state the journeys inherit.
       await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await page.waitForTimeout(400);
+      await waitForActiveSurface(page);
     }
 
     // Durable evidence for the WHOLE run: what each contracted journey created, so a later
@@ -2556,7 +2583,8 @@ export async function verifyJourneys({
       }
       // Every journey starts from a clean load of the app, not from wherever the last one ended.
       await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await page.waitForTimeout(700);
+      await waitForActiveSurface(page);
+      await page.waitForTimeout(200);
 
       const steps = [];
       const selections = []; // what this journey actually chose — confirmations must reflect it

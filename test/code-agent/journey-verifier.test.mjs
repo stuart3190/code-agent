@@ -133,6 +133,33 @@ test("visible evidence is not shadowed by an earlier hidden responsive copy", ne
   body = WORKING;
 });
 
+test("an explicitly loading generated surface settles before contracted controls are driven", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main id="app"><p role="status">Loading: checking whether a signed-in user can open the workspace.</p></main>
+    <script>
+      setTimeout(() => {
+        document.getElementById('app').innerHTML = [
+          '<label>Exclusion zones <input data-thrallo-control="ctl-exclusion-zones"></label>',
+          '<p>Labelled no-light zone and fitting-inside warning are visible.</p>',
+        ].join('');
+      }, 1400);
+    </script>
+  </body></html>`;
+  const control = { logicalField: "exclusionZones", accessibleName: "exclusion zones",
+    accessibleNames: ["exclusion zones"], machineId: "ctl-exclusion-zones",
+    roles: ["textbox"], inputTypes: ["text"], statePath: "plan.exclusionZones" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "zones", title: "Zones groups and heatmap", priority: "primary",
+      steps: [{ action: "draw a rectangular exclusion zone on the plan", target: "exclusion zones",
+        operates: ["exclusionZones"],
+        expect: "a labelled no-light zone and a fitting-inside warning are visible" }] }],
+    interactionContract: { flows: [{ journeyId: "zones", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[0].status, "pass");
+  body = WORKING;
+});
+
 test("invalid input tests only its owning form and never an unrelated page action", needsBrowser, async () => {
   body = `<!doctype html><html><body>
     <form><label>Size <input data-thrallo-control="ctl-size" value="2, 2, 2"></label>

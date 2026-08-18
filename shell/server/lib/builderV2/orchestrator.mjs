@@ -12,7 +12,7 @@
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches, patchOutcomes } from "./patchEngine.mjs";
+import { applyPatches, escalationPlan, patchOutcomes } from "./patchEngine.mjs";
 import { completionEligibility, previewEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, scopeBuildSpec } from "./buildSpec.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
@@ -364,6 +364,7 @@ export function createOrchestrator({
     const originalTree = tree;
     let working = tree;
     let rejections = [];
+    const rejectionHistory = [];
     let problems = initialProblems;
     let lastSignature = null;
     let repairScope = initialRepairScope;
@@ -411,11 +412,12 @@ export function createOrchestrator({
       const dispatchStep = dispatchAs
         || headroomScope?.logicalStep
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
+      const regenerateFiles = escalationPlan(rejectionHistory).regenerateFiles;
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
-        advisory, spec: scoped, signal });
+        regenerateFiles, advisory, spec: scoped, signal });
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
       // the following full-tree gates still decide whether more work is required.
@@ -454,6 +456,7 @@ export function createOrchestrator({
       });
       if (applied.rejected.length) {
         headroomScope = null;
+        rejectionHistory.push(...applied.rejected);
         rejections = applied.rejected;
         const classes = [...new Set(applied.rejected.map((row) => row.code).filter(Boolean))];
         const structuralScope = structuralCandidateCorrection(applied);

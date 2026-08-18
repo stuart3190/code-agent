@@ -57,10 +57,15 @@ export default function Booking() {
 function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) {
   const events = { checkpoints: [], findings: [] };
   const timeline = [];
+  const patchInputs = [];
   const snapshotStore = createSnapshotStore();
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,
-    patchesFn: async (input) => { timeline.push(`patch:${input.step}`); return patches(input); },
+    patchesFn: async (input) => {
+      timeline.push(`patch:${input.step}`);
+      patchInputs.push(input);
+      return patches(input);
+    },
     assetService: {
       async resolveIntents() { return { resolved: [], providerCalls: 0 }; },
       async assetManifestFor() { return []; },
@@ -80,7 +85,7 @@ function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) 
       candidateFindings: async (event) => { events.findings.push(event); },
     },
   });
-  return { orchestrator, snapshotStore, events, timeline };
+  return { orchestrator, snapshotStore, events, timeline, patchInputs };
 }
 
 const asPatches = (tree) => Object.entries(tree).map(([path, content]) => ({ newFile: path, content }));
@@ -194,6 +199,24 @@ test("a protected-path rewrite is refused", async () => {
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
   assert.equal(result.state, "blocked");
   assert.equal(h.timeline.includes("browser"), false);
+});
+
+test("repeated rejected operations escalate the exact retained file to whole-file regeneration", async () => {
+  const h = harness({
+    maxCoreAttempts: 3,
+    patches: () => [{
+      file: "src/App.jsx", newFile: null, replaceFile: null, content: null, deleteFile: null,
+      ops: [{ op: "replace_symbol", symbol: "MissingLiveSymbol", content: "function MissingLiveSymbol() {}" }],
+    }],
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(h.patchInputs.length, 3);
+  assert.deepEqual(h.patchInputs[0].regenerateFiles, []);
+  assert.deepEqual(h.patchInputs[1].regenerateFiles, []);
+  assert.deepEqual(h.patchInputs[2].regenerateFiles, ["src/App.jsx"],
+    "the third bounded attempt receives the existing escalationPlan output");
 });
 
 test("an internally split headroom continuation cannot write outside its advertised module scope", async () => {

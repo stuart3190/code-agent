@@ -191,6 +191,37 @@ test("add_import inserts after the last import; naming an import as a symbol tea
   assert.match(miss.rejected[0].reason, /use \{op: "add_import"/);
 });
 
+test("add_import is idempotent against retained sibling work and adds only missing bindings", () => {
+  const tree = {
+    "src/App.jsx": [
+      'import { useEffect, useMemo, useState } from "react";',
+      'import Existing from "./Existing.jsx";',
+      "export default function App() { return null; }",
+    ].join("\n"),
+  };
+
+  const retained = applyPatches(tree, [{
+    file: "src/App.jsx", ops: [{ op: "add_import", symbol: null,
+      content: 'import { useEffect, useState } from "react";' }],
+  }]);
+  assert.equal(retained.rejected.length, 0, JSON.stringify(retained.rejected));
+  assert.equal(retained.applied[0].kind, "add_import_existing");
+  assert.equal((retained.tree["src/App.jsx"].match(/useEffect/g) || []).length, 1);
+
+  const partial = applyPatches(retained.tree, [{
+    file: "src/App.jsx", ops: [{ op: "add_import", symbol: null,
+      content: 'import { useCallback, useEffect, useState } from "react";' }],
+  }, {
+    file: "src/App.jsx", ops: [{ op: "add_import", symbol: null,
+      content: 'import Existing from "./Existing.jsx";' }],
+  }]);
+  assert.equal(partial.rejected.length, 0, JSON.stringify(partial.rejected));
+  assert.match(partial.tree["src/App.jsx"], /import \{ useCallback \} from "react";/);
+  assert.equal((partial.tree["src/App.jsx"].match(/useEffect/g) || []).length, 1);
+  assert.equal((partial.tree["src/App.jsx"].match(/Existing from/g) || []).length, 1);
+  assert.equal(indexFile("src/App.jsx", partial.tree["src/App.jsx"]).opaque, false);
+});
+
 test("a second default export is rejected at APPLY time with the fix named — never a compile round", () => {
   const tree = { "src/routes/HomePage.jsx": "export default function HomePage() {\n  return null;\n}\n" };
   const dup = applyPatches(tree, [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", symbol: null, content: "export default function BetterHome() {\n  return 1;\n}" }] }]);

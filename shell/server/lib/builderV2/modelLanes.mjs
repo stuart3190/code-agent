@@ -350,7 +350,7 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
-  repairScope = null, moduleCorrectionScope = null, headroomScope = null, advisory = [],
+  repairScope = null, moduleCorrectionScope = null, headroomScope = null, regenerateFiles = [], advisory = [],
 }) {
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
@@ -548,11 +548,17 @@ export function renderPatchPrompt({
         capabilityPaths,
         onRetrieval,
       })
-      : renderTreeContext(tree),
+      : renderTreeContext(tree, { extraFullPaths: regenerateFiles }),
   ];
   if (rejections.length) {
-    parts.push("", "YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact; fix and re-emit ALL patches:",
+    parts.push("", "PART OF YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact.",
+      "The retained tree already contains every sibling that applied cleanly. Emit ONLY rejected or unfinished work; do not recreate existing files or re-emit changes already visible in CURRENT SOURCE:",
       ...rejections.map((r) => `- ${r.reason}`));
+  }
+  if (regenerateFiles.length) {
+    parts.push("", "MANDATORY WHOLE-FILE ESCALATION — repeated symbol operations could not land:",
+      ...regenerateFiles.map((file) => `- ${file}`),
+      "For each listed file, emit exactly one replaceFile operation containing the COMPLETE current file plus the required fix. Do not use newFile or symbol operations for these files. Preserve all clean retained sibling work.");
   }
   if (compactHeadroomProblems.length) {
     parts.push("", "VERIFICATION FAILED on your last tree — fix these and re-emit patches:",
@@ -1145,7 +1151,7 @@ export function createModelLanes({
 
     patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
-      headroomScope: requestedHeadroomScope = null, advisory = [], signal = null }) => {
+      headroomScope: requestedHeadroomScope = null, regenerateFiles = [], advisory = [], signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
         ? null : await loadKnowledge(owner, projectId);
       const fullSystemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
@@ -1179,7 +1185,7 @@ export function createModelLanes({
           prompt = renderPatchPrompt({
             step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
-            repairScope, moduleCorrectionScope, headroomScope, advisory,
+            repairScope, moduleCorrectionScope, headroomScope, regenerateFiles, advisory,
             onRetrieval: (trace) => { retrievalTrace = trace; },
           });
           if (retrievalTrace && recordRetrieval) {
