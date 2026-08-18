@@ -5,15 +5,15 @@
 // while the application was working. Showing the running selection as it is made is good UX, so
 // by the time review runs its vocabulary is already on screen and nothing can be NEW.
 //
-// The exemption is deliberately narrow and trades freshness for a STRONGER check: it arms only
-// when there are exact contracted values to verify, and the caller then fails the step unless
-// the review contains every one of them. Everywhere else the freshness rule is untouched.
+// The exact-value exemption is deliberately narrow and trades freshness for a STRONGER check:
+// it arms only when that review declares exact values. A calculated-output review is instead a
+// structured read-only assertion of its own expectation; all mutating steps keep freshness.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { expectationOutcome } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { expectationOutcome, reviewValuesForStep } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 
 const base = { wanted: ["review", "selected", "date"], found: ["review", "selected", "date"], fresh: [], drove: true, action: "review the booking" };
 
@@ -64,6 +64,54 @@ test("a static page still cannot pass a mutation step", () => {
     drove: true, action: "submit the booking", reviewWithValues: false,
   });
   assert.equal(outcome.status, "fail");
+});
+
+test("LIVE REGRESSION — a calculated-results review does not demand every earlier setup value", () => {
+  const enteredValues = [
+    { field: "name", value: "Journey 178269" },
+    { field: "unitSystem", value: "Journey 178269" },
+    { field: "shape", value: "Journey 178269" },
+    { field: "length", value: "6.8" },
+    { field: "width", value: "5.2" },
+    { field: "ceilingHeight", value: "3.55" },
+    { field: "workingPlaneHeight", value: "1.75" },
+    { field: "roomUseType", value: "Journey 178269" },
+  ];
+  const step = {
+    action: "review live calculation results",
+    expect: "area, total lumen requirement, estimated fitting count, installed lumens, estimated average illuminance, watts, row spacing, column spacing, and wall offsets are visible",
+  };
+
+  assert.deepEqual(reviewValuesForStep(step, enteredValues), [],
+    "the contract asks to inspect calculated outputs, not echo unrelated setup fields");
+  const outcome = expectationOutcome({
+    wanted: ["area", "total", "lumen", "estimated", "fitting"],
+    found: ["area", "total", "lumen", "estimated", "fitting"],
+    fresh: [], drove: false, action: step.action,
+    reviewWithValues: false, readOnlyAssertion: true,
+  });
+  assert.equal(outcome.status, "pass", JSON.stringify(outcome));
+  assert.equal(outcome.readOnlyAssertion, true);
+});
+
+test("an explicit review read verifies only the fields that step declares", () => {
+  const values = [
+    { field: "name", value: "Lighting plan" },
+    { field: "length", value: "6.8" },
+    { field: "targetLux", value: "350" },
+  ];
+  assert.deepEqual(reviewValuesForStep({
+    action: "review the selected target",
+    reads: ["project.targetLux"],
+  }, values), [{ field: "targetLux", value: "350" }]);
+});
+
+test("legacy exact-review contracts retain all exact entered-value verification", () => {
+  const values = [{ field: "name", value: "Ada" }, { field: "email", value: "ada@example.test" }];
+  assert.deepEqual(reviewValuesForStep({
+    action: "review the exact name and email",
+    expect: "the exact values are displayed",
+  }, values), values);
 });
 
 test("a structured read-only assertion judges visible state without inventing an action", () => {

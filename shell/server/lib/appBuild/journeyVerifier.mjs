@@ -1008,6 +1008,19 @@ export function durableStatusWords(expect, text) {
     && new RegExp(word, "i").test(String(text || "")));
 }
 
+/**
+ * Exact input values are a review requirement only when this STEP says it reads those fields.
+ * A results/analytics review can legitimately render calculated outputs without repeating every
+ * setup input verbatim. Legacy contracts that explicitly promise an "exact" review keep the old
+ * all-values rule; ordinary review prose is judged on its own observable expectation.
+ */
+export function reviewValuesForStep(step, enteredValues = []) {
+  const values = Array.isArray(enteredValues) ? enteredValues : [];
+  const reads = new Set((step?.reads || []).map((read) => semanticKey(String(read).split(".").pop())));
+  if (reads.size) return values.filter((row) => reads.has(semanticKey(row?.field)));
+  return /\bexact(?:ly)?\b/i.test(`${step?.action || ""} ${step?.expect || ""}`) ? values : [];
+}
+
 export function durableCommitIdentity({ enteredValues = [], textBefore = "", textAfter = "" } = {}) {
   const before = new Set(String(textBefore).match(REFERENCE_TOKEN) || []);
   return {
@@ -1744,11 +1757,16 @@ async function runStep(page, step, {
   const commits = interactionFlows.length
     ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
     : /submit|send|confirm|book|reserve|pay/i.test(action);
-  const readOnlyAssertion = Array.isArray(step.reads) && step.reads.length > 0
-    && !(step.operates || []).length
+  const isReviewStep = interactionFlows.some((flow) => flow.kind === "review");
+  const reviewValues = isReviewStep ? reviewValuesForStep(step, enteredValues) : [];
+  const hasNoStepWrites = !(step.operates || []).length
     && !interactionFlows.some((flow) => flow.control
       || (flow.writes || []).length > 0
       || ["navigation", "recovery", "mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+  const readOnlyAssertion = hasNoStepWrites && (
+    (Array.isArray(step.reads) && step.reads.length > 0)
+      || (isReviewStep && reviewValues.length === 0)
+  );
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   for (;;) {
@@ -1862,13 +1880,12 @@ async function runStep(page, step, {
   // failed live because the words it expected existed on the HOME page too — but the whole page
   // was new, which is exactly the navigational exemption.
   const urlChanged = page.url() !== urlBefore;
-  // The review exemption is armed ONLY when there are exact contracted values to check, so the
-  // stronger verification below always runs in its place. A review with nothing to verify keeps
-  // the ordinary freshness rule.
-  const isReviewStep = interactionFlows.some((flow) => flow.kind === "review");
+  // The exact-value review exemption is armed ONLY when this step declares values to check, so
+  // the stronger verification below always runs in its place. A calculated-results review with
+  // no exact input reads is the structured read-only assertion computed above.
   const outcome = expectationOutcome({
     wanted, found, fresh, drove, action, urlChanged,
-    reviewWithValues: isReviewStep && enteredValues.length > 0,
+    reviewWithValues: isReviewStep && reviewValues.length > 0,
     readOnlyAssertion,
     // A whole page arrives at once for a navigation or a reload, so nothing in it can be "new".
     // Typed by the contract where the contract typed the step.
@@ -1881,13 +1898,13 @@ async function runStep(page, step, {
     establishedState: allowEstablishedState,
   });
 
-  if (outcome.status === "pass" && isReviewStep && enteredValues.length) {
+  if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
     const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    const missingValues = enteredValues.filter(({ value }) => !reviewText.includes(value));
+    const missingValues = reviewValues.filter(({ value }) => !reviewText.includes(value));
     if (missingValues.length) return { ...outcome, status: "fail",
       detail: `review omitted exact contracted values: ${missingValues.map((row) => row.field).join(", ")}`,
-      controlEvidence: { enteredValues, missingValues } };
-    outcome.detail += ` · review contains ${enteredValues.length} exact entered value(s)`;
+      controlEvidence: { enteredValues: reviewValues, missingValues } };
+    outcome.detail += ` · review contains ${reviewValues.length} exact entered value(s)`;
   }
 
   // A step that CONSUMES earlier values must show them — the numbers in a chosen date or slot
