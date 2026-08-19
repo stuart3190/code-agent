@@ -495,6 +495,12 @@ export function validateModuleConformance(tree, {
     advisory,
     problems: blocking.map((finding) => JSON.stringify(finding)),
     advisoryProblems: advisory.map((finding) => JSON.stringify(finding)),
+    // The binding lint's answer, RETURNED. It was computed on every build and dropped on the
+    // floor — the whole AST walk ran and reached nobody. It stays out of `findings` on purpose:
+    // wired as a gate it rejected 7/7 of the known-working corpus, and three of the four
+    // indirection classes are beyond a static walker. The browser's probe now answers the same
+    // question behaviourally, for actions as well as fields; this is context, never a verdict.
+    controlBindings,
     correction: {
       kind: narrow ? "module_scoped" : "whole_core",
       modules: offendingModules,

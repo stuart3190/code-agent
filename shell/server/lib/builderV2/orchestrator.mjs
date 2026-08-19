@@ -27,6 +27,10 @@ import {
 import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
 } from "./verification.mjs";
+import {
+  verificationDefects, actionableDefects, platformDefectsOf,
+  defectEvidence, defectWriteBoundary, defectProgress,
+} from "./verificationDefects.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -50,28 +54,37 @@ export function verificationExecutionContract(contract, scopedJourneys, drivenJo
   };
 }
 
+/**
+ * Type the browser's causal step evidence for a red tree.
+ *
+ * ONE derivation, shared by the in-build repair tier and the resumed repair of a retained
+ * checkpoint, so a resumed repair cannot be briefed more weakly than the round that preceded it.
+ */
+export function browserRepairDefects({
+  contract, interactionContract = contract?.interactionContract, journeyResults, tree,
+  backendRowFailures = [], manifest = null,
+} = {}) {
+  return verificationDefects({
+    contract, interactionContract, tree, backendRowFailures,
+    journeyResults: journeyResults || { journeys: [], blockingErrors: [] },
+    manifest: manifest || deriveVerificationManifest({ ...(contract || {}), interactionContract }),
+  });
+}
+
 /** Preserve the browser's causal step evidence when handing a red retained tree to repair. */
 export function browserRepairEvidence({
   contract, interactionContract = contract?.interactionContract, journeyResults, tree,
-  backendRowFailures = [], advisory = [],
+  backendRowFailures = [], advisory = [], manifest = null, defects = null,
 } = {}) {
   const verdicts = journeyResults || { journeys: [], blockingErrors: [] };
+  const typed = defects || browserRepairDefects({
+    contract, interactionContract, journeyResults: verdicts, tree, backendRowFailures, manifest,
+  });
   return [
-    ...(verdicts.journeys || []).filter((journey) => journey.status !== "pass").flatMap((journey) => {
-      const failedSteps = (journey.steps || []).filter((step) => step.status !== "pass");
-      const journeyEvidence = failedSteps.length
-        ? failedSteps.map((step) => `journey ${journey.id} · step "${step.action}" FAILED in a real browser: `
-          + `${step.detail || "expected outcome never appeared"}`)
-        : [`journey ${journey.id} FAILED in a real browser (no per-step evidence recorded)`];
-      const attributionEvidence = journey.attributionDefect
-        ? [`platform defect ${journey.attributionDefect.code}: journey ${journey.id} has no owning module; `
-          + `bounded fallback files: ${(journey.fallbackRefs || []).join(", ") || "none available"}`]
-        : [];
-      return [...journeyEvidence, ...attributionEvidence];
-    }),
-    ...interactionFailureDiagnostics({ contract, interactionContract, journeyResults: verdicts, tree })
-      .map((row) => JSON.stringify(row)),
-    ...(backendRowFailures || []).map((failure) => `backend row check failed (${failure.journeyId}): ${failure.detail}`),
+    // Typed defects carry the sentence the repair scoping parses AND the enriched structured row:
+    // class, owner, control identity, owning modules, the page's own text when it failed, the
+    // console errors raised during that step and the probe's addressing evidence.
+    ...defectEvidence(typed),
     ...(verdicts.blockingErrors || []),
     ...(advisory || []),
   ];
@@ -357,11 +370,18 @@ export function createOrchestrator({
     // observed journey failure, a correction is a named structural fix. A mechanics failure is the
     // second kind — the browser proved one control cannot hold a value, which is a defect with an
     // address — so it must not spend the one browser-informed repair slot.
-    dispatchAs = null }) {
+    dispatchAs = null,
+    // The verifier's own attribution, as a machine-enforced write boundary. Unlike a repairScope
+    // this does NOT turn the dispatch into a pre-compile correction: the browser-informed prompt,
+    // its journey brief and its retrieval-sliced context are unchanged. It only says where the
+    // fix may be written, and it is dropped after one out-of-scope attempt exactly as a
+    // validator-owned scope is, so a mis-attributed boundary can never trap a build.
+    repairBoundary: initialRepairBoundary = null }) {
     // A CORRECTION continues from the retained candidate; an ATTEMPT redoes the work from the
     // increment's starting tree. Keeping the distinction explicit stops a fresh generation from
     // colliding with files the discarded candidate already created.
     const originalTree = tree;
+    let repairBoundary = initialRepairBoundary;
     let working = tree;
     let rejections = [];
     const rejectionHistory = [];
@@ -417,11 +437,12 @@ export function createOrchestrator({
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
-        regenerateFiles, advisory, spec: scoped, signal });
+        repairBoundary, regenerateFiles, advisory, spec: scoped, signal });
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
       // the following full-tree gates still decide whether more work is required.
-      const activeScope = patches.dispatchScope || headroomScope || repairScope || contractCorrectionScope;
+      const activeScope = patches.dispatchScope || headroomScope || repairScope || contractCorrectionScope
+        || repairBoundary;
       const internalHeadroomSplit = activeScope?.kind === "headroom_continuation";
       const patchScope = validateModulePatchScope(patches, activeScope);
       if (!patchScope.ok) {
@@ -433,6 +454,7 @@ export function createOrchestrator({
         } else {
           repairScope = null;
           contractCorrectionScope = null;
+          repairBoundary = null;
           working = originalTree;
         }
         attempts += 1;
@@ -535,6 +557,7 @@ export function createOrchestrator({
           } else {
             repairScope = null;
             contractCorrectionScope = null;
+            repairBoundary = null;
             working = originalTree;
           }
           attempts += 1;
@@ -867,9 +890,18 @@ export function createOrchestrator({
         }) : [];
         let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
           backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
+        // ONE typed view of what the browser proved, recomputed after every verification. Class,
+        // owner, control identity and owning modules come from here; nothing below re-reads prose.
+        const verificationManifest = deriveVerificationManifest(spec || deriveBuildSpec(contract));
+        const defectsFor = (verdicts, rows) => browserRepairDefects({
+          contract, interactionContract, journeyResults: verdicts, tree,
+          backendRowFailures: rows, manifest: verificationManifest,
+        });
+        let coreDefects = defectsFor(coreVerdicts, backendRowFailures);
         let repairsAttempted = 0;
         let repairExhausted = false;
         let repairLimit = null;
+        let repairProgressStop = null;
 
         // MECHANICS CORRECTIONS, BEFORE THE REPAIR TIER.
         //
@@ -935,44 +967,36 @@ export function createOrchestrator({
           eligibility = previewEligibility({ tiers, gates: { ok: true },
             journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures,
             blockingErrors: coreVerdicts.blockingErrors });
+          coreDefects = defectsFor(coreVerdicts, backendRowFailures);
         }
         for (let round = 1; !eligibility.eligible && round <= maxRepairs; round += 1) {
-          const structuredInteractionEvidence = interactionFailureDiagnostics({
-            contract, interactionContract, journeyResults: coreVerdicts, tree,
-          }).map((row) => JSON.stringify(row));
+          // THE BRIEF IS THE TYPED DEFECT SET, not a description of it. Each actionable defect
+          // contributes the sentence the repair scoping parses and one structured row carrying
+          // its class, owner, control identity, owning modules, the page's own text when it
+          // failed, the console errors raised during that step, and the probe's addressing
+          // evidence. Platform-owned defects ride along as context and never ask for a patch.
           const evidence = [
-            ...coreVerdicts.journeys.filter((j) => j.status !== "pass").flatMap((j) => {
-              const failedSteps = (j.steps || []).filter((s) => s.status !== "pass");
-              const journeyEvidence = failedSteps.length
-                ? failedSteps.map((s) => `journey ${j.id} · step "${s.action}" FAILED in a real browser: ${s.detail || "expected outcome never appeared"}`)
-                : [`journey ${j.id} FAILED in a real browser (no per-step evidence recorded)`];
-              const attributionEvidence = j.attributionDefect
-                ? [`platform defect ${j.attributionDefect.code}: journey ${j.id} has no owning module; bounded fallback files: ${(j.fallbackRefs || []).join(", ") || "none available"}`]
-                : [];
-              return [...journeyEvidence, ...attributionEvidence];
+            ...browserRepairEvidence({
+              contract, interactionContract, journeyResults: coreVerdicts, tree,
+              backendRowFailures, defects: coreDefects,
+              // Shape findings that did not stop the build ride along as CONTEXT for a repair
+              // that is now driven by observed browser failure. They explain, they do not accuse.
+              advisory: advisoryMessages(coreAdvisory.filter((finding) => finding.code !== "interaction_control_undriveable")),
             }),
-            ...structuredInteractionEvidence,
-            // MECHANICS EVIDENCE FIRST. A journey failure says "step 5 was undriveable"; the probe
-            // says which control, by its own id, what mechanic was expected and what the browser
-            // actually observed. Run #7 spent both its rounds on the second kind of message and
-            // fixed nothing. Named as a MECHANIC, never as a field: the model is being told a
-            // control cannot hold a value, not what the value would have meant.
-            ...(coreVerdicts.mechanics?.failures || []).map((row) => `control ${row.id} (${row.primitive}) `
-              + `failed its mechanics probe: expected ${JSON.stringify(row.expected)}, observed `
-              + `${JSON.stringify(row.observed)} — ${row.detail}. The control is present and located by `
-              + "its declared identity, so bind it so a typed value lands in state and renders back, "
-              + "for example: value={state.field} with onChange writing state through the setter, or "
-              + "the capability field binding, or an uncontrolled input with defaultValue."),
-            ...backendRowFailures.map((f) => `backend row check failed (${f.journeyId}): ${f.detail}`),
-            ...coreVerdicts.blockingErrors,
-            // Shape findings that did not stop the build ride along as CONTEXT for a repair
-            // that is now driven by observed browser failure. They explain, they do not accuse.
-            ...advisoryMessages(coreAdvisory.filter((finding) => finding.code !== "interaction_control_undriveable")),
           ];
+          if (!actionableDefects(coreDefects).length) break; // nothing an app patch can answer
           if (!evidence.length) break; // nothing actionable to brief — blocked below
+          // THE WRITE BOUNDARY THE VERIFIER ALREADY KNOWS. Attribution named the modules that own
+          // every failure being briefed; the browser-informed repair is held to them by the same
+          // machine enforcement a pre-compile correction gets. No attribution means no boundary —
+          // a repair is never confined to a guess.
+          const repairBoundary = defectWriteBoundary(coreDefects);
           await setState(`repair:${round}`);
-          log(`repair ${round}/${maxRepairs}: ${evidence.length} verified failure(s)`);
+          log(`repair ${round}/${maxRepairs}: ${actionableDefects(coreDefects).length} typed defect(s) `
+            + `[${[...new Set(actionableDefects(coreDefects).map((defect) => defect.defectClass))].join(", ")}]`
+            + (repairBoundary ? ` scoped to [${repairBoundary.allowedFiles.join(", ")}]` : " unscoped (no attribution)"));
           repairsAttempted += 1;
+          const defectsBefore = coreDefects;
           let repair;
           try {
             repair = await buildIncrement({
@@ -981,6 +1005,7 @@ export function createOrchestrator({
               checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null,
               signal, spec,
               attemptPolicy: buildAttemptPolicy,
+              repairBoundary,
             });
           } catch (error) {
             if (error?.code !== "repair_limit_reached") throw error;
@@ -1002,12 +1027,30 @@ export function createOrchestrator({
           }) : [];
           eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
             backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
+          coreDefects = defectsFor(coreVerdicts, backendRowFailures);
+          // DID THE ROUND MOVE ANYTHING? Fingerprinting already stops an identical brief; this
+          // catches the case that cost run #7 both of its rounds — a repair that edits files,
+          // rewords the failure and leaves the defect exactly where it was. A round earns its
+          // successor only by RESOLVING a defect. The retained checkpoint is kept either way.
+          const progress = defectProgress(defectsBefore, coreDefects);
+          if (!eligibility.eligible && !progress.moved) {
+            repairProgressStop = { round, ...progress };
+            log(`repair ${round}/${maxRepairs} ${progress.reason}: `
+              + `${progress.persisted.length} defect(s) survived, ${progress.introduced.length} new; `
+              + "stopping rather than spending an identical round");
+            break;
+          }
         }
         if (!eligibility.eligible) return finish("blocked", {
           error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
           failureClassification: "contracted_journeys_red",
           repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
           repairLimit,
+          repairProgressStop,
+          // The typed defect set, so a resumed repair and a human post-mortem both start from
+          // what the browser proved rather than from one summary sentence.
+          defects: coreDefects,
+          defectClasses: [...new Set(coreDefects.map((defect) => defect.defectClass))],
           // Reported beside the repair tier and counted apart from it, because they are two
           // allowances answering two different kinds of evidence.
           mechanicsCorrections, mechanicsLimit,
@@ -1180,6 +1223,7 @@ export function createOrchestrator({
           "resume-preflight", allJourneys, { owner, projectId, buildId, step: "resume-preflight", attempt: 0, signal }));
         const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree);
         let retainedJourneyProblems = [];
+        let retainedDefects = [];
         if (initialGate.ok) {
           // A retained candidate may have failed only because the platform verifier/runtime was
           // defective. Re-prove the candidate before buying a repair turn. This keeps retries
@@ -1207,12 +1251,32 @@ export function createOrchestrator({
             return finish("green", { final_snapshot: retainedCheckpoint.id,
               snapshotId: retainedCheckpoint.id, parentSnapshotId: source.snapshotId, providerCalls: 0 });
           }
-          const retainedEvidence = browserRepairEvidence({
+          // THE RESUMED REPAIR IS BRIEFED FROM THE SAME TYPED DEFECTS AS THE ROUND THAT PRECEDED
+          // IT. A blocked build persists one summary sentence and nothing else, so re-deriving
+          // the defect set here — from a verification that just ran against the retained tree —
+          // is what stops a resume from being briefed more weakly than the build it resumes.
+          retainedDefects = browserRepairDefects({
             contract, interactionContract: spec.interactionContract,
             journeyResults: retainedVerdicts, tree: initialGate.tree,
           });
+          const retainedEvidence = browserRepairEvidence({
+            contract, interactionContract: spec.interactionContract,
+            journeyResults: retainedVerdicts, tree: initialGate.tree, defects: retainedDefects,
+          });
           retainedJourneyProblems = retainedEvidence.length
             ? retainedEvidence : retainedEligibility.failures || [];
+        }
+        // A platform-owned defect is not something an application patch can answer, and it must
+        // not spend the retained build's remaining allowance proving that again.
+        const retainedPlatformDefects = platformDefectsOf(retainedDefects);
+        if (retainedPlatformDefects.length && !actionableDefects(retainedDefects).length) {
+          return finish("blocked", {
+            error: `Builder V2 verification platform failure: ${retainedPlatformDefects
+              .map((defect) => `${defect.code}: ${defect.evidence?.observed || "verification platform failure"}`).join("; ")}`,
+            failureClassification: "verification_platform_defect",
+            platformDefects: retainedPlatformDefects, defects: retainedDefects,
+            workingSnapshotId: source.snapshotId,
+          });
         }
         const repairProblems = initialGate.ok
           ? [...retainedJourneyProblems, ...initialProblems]
@@ -1220,6 +1284,9 @@ export function createOrchestrator({
         const repair = await buildIncrement({
           step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree: source.tree,
           assets: [], journeys: allJourneys, initialProblems: repairProblems, editRequest: request,
+          // The verifier's attribution bounds the resumed write exactly as it bounds an in-build
+          // repair round; no attribution means no boundary.
+          repairBoundary: defectWriteBoundary(retainedDefects),
           checkpointReason: "working:resumed-repair", parentSnapshotId: source.snapshotId, signal, spec,
           attemptPolicy, initialRepairScope,
         });
@@ -1230,8 +1297,20 @@ export function createOrchestrator({
           journeys: allJourneys, tree: repair.tree, snapshotId: checkpoint.id, signal });
         const eligibility = completionEligibility({ contract, gates: { ok: true },
           journeyResults: { journeys: verdicts.journeys }, blockingErrors: verdicts.blockingErrors });
-        if (!eligibility.eligible) return finish("blocked", { error: eligibility.failures.join("; "),
-          workingSnapshotId: checkpoint.id });
+        if (!eligibility.eligible) {
+          // What the resumed round actually achieved, measured on defects rather than on wording.
+          const afterDefects = browserRepairDefects({
+            contract, interactionContract: spec.interactionContract,
+            journeyResults: verdicts, tree: repair.tree,
+          });
+          const progress = defectProgress(retainedDefects, afterDefects);
+          log(`resumed repair ${progress.reason}: ${progress.resolved.length} resolved, `
+            + `${progress.persisted.length} survived, ${progress.introduced.length} new`);
+          return finish("blocked", { error: eligibility.failures.join("; "),
+            failureClassification: "contracted_journeys_red",
+            defects: afterDefects, repairProgress: progress,
+            workingSnapshotId: checkpoint.id });
+        }
         checkpoint = await snapshotStore.markCandidateValidated(owner, projectId, checkpoint.id,
           { reason: "working:resumed-repair" });
         await events.checkpoint?.({ owner, projectId, buildId, snapshot: checkpoint,

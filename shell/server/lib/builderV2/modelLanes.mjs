@@ -350,7 +350,8 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
-  repairScope = null, moduleCorrectionScope = null, headroomScope = null, regenerateFiles = [], advisory = [],
+  repairScope = null, moduleCorrectionScope = null, headroomScope = null, repairBoundary = null,
+  regenerateFiles = [], advisory = [],
 }) {
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
@@ -523,6 +524,13 @@ export function renderPatchPrompt({
       ...(moduleCorrectionScope.allowedPrefixes?.length
         ? [`New supporting modules may be created only under: [${moduleCorrectionScope.allowedPrefixes.join(", ")}]`] : []),
       `Module conformance findings: ${JSON.stringify(moduleCorrectionScope.findings)}`,
+    ].join("\n") : "",
+    repairBoundary && !headroomScope && !repairScope && !moduleCorrectionScope ? [
+      "BROWSER-VERIFIED REPAIR WRITE BOUNDARY (machine-enforced):",
+      repairBoundary.instruction,
+      `Allowed files: [${repairBoundary.allowedFiles.join(", ")}]`,
+      ...(repairBoundary.allowedPrefixes?.length
+        ? [`New supporting modules may be created only under: [${repairBoundary.allowedPrefixes.join(", ")}]`] : []),
     ].join("\n") : "",
     headroomScope ? [
       "INTERNAL HEADROOM-SCOPED WRITE BOUNDARY (machine-enforced):",
@@ -1151,7 +1159,8 @@ export function createModelLanes({
 
     patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
-      headroomScope: requestedHeadroomScope = null, regenerateFiles = [], advisory = [], signal = null }) => {
+      headroomScope: requestedHeadroomScope = null, repairBoundary = null,
+      regenerateFiles = [], advisory = [], signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
         ? null : await loadKnowledge(owner, projectId);
       const fullSystemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
@@ -1185,7 +1194,7 @@ export function createModelLanes({
           prompt = renderPatchPrompt({
             step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
-            repairScope, moduleCorrectionScope, headroomScope, regenerateFiles, advisory,
+            repairScope, moduleCorrectionScope, headroomScope, repairBoundary, regenerateFiles, advisory,
             onRetrieval: (trace) => { retrievalTrace = trace; },
           });
           if (retrievalTrace && recordRetrieval) {
@@ -1213,7 +1222,7 @@ export function createModelLanes({
             const nextScope = headroomDispatchScope({
               tree, modulePlan, moduleContracts, repairScope, moduleCorrectionScope,
               problems: dispatchProblems, rejections, previousScope: headroomScope, logicalStep: step,
-              semanticFiles: semanticRepairFiles,
+              semanticFiles: repairBoundary?.allowedFiles?.length ? repairBoundary.allowedFiles : semanticRepairFiles,
             });
             if (!nextScope) {
               // A raw call with no model/module boundary is not safely splittable. Preserve its

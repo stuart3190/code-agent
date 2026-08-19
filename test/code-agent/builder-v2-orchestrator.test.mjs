@@ -493,7 +493,11 @@ test("WP11/V2-20 — the repair tier: a verified browser failure earns a targete
   assert.match(finalTree["src/routes/BookPage.jsx"], /repaired/, "the repaired tree is what shipped");
 });
 
-test("WP11/V2-20 — repairs are BOUNDED: persistent failure blocks after maxJourneyRepairs rounds", async () => {
+test("WP11/V2-20 — repairs are BOUNDED, and a round that resolves nothing does not buy another", async () => {
+  // The bound used to be the ONLY stop: two futile rounds, both charged, then blocked. The loop
+  // now measures each round against the typed defect set it was briefed with, so a repair that
+  // edits a file and leaves the defect exactly where it was ends the tier immediately. The
+  // maxJourneyRepairs ceiling still stands above it and is never exceeded.
   let repairCalls = 0;
   const h = harness({
     failJourneys: ["book-a-visit"],
@@ -506,7 +510,9 @@ test("WP11/V2-20 — repairs are BOUNDED: persistent failure blocks after maxJou
   });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
   assert.equal(result.state, "blocked");
-  assert.equal(repairCalls, 2, "exactly maxJourneyRepairs rounds, never more");
+  assert.equal(repairCalls, 1, "an unmoved defect ends the tier instead of buying an identical round");
+  assert.ok(repairCalls <= 2, "the maxJourneyRepairs ceiling is never exceeded");
+  assert.equal(result.repairProgressStop?.reason, "unchanged");
   assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
 });
 

@@ -2294,10 +2294,16 @@ async function locateForProbe(page, control) {
     return seen;
   };
 
+  // An ACTION carries its identity on a different attribute and is reached by a different set of
+  // roles. Same ladder, same three outcomes — identity, contracted name, nothing — so a button is
+  // addressed exactly the way the driver will address it later.
+  const isAction = control.addressAs === "action";
   // A SELECTION SHARES ITS IDENTITY BY DESIGN. The scaffold stamps the same id on the group and on
   // every option, so counting raw matches would call every correctly-bound chooser ambiguous — the
   // group is the addressable element, the options are its contents.
-  const byIdentity = control.primitive === "selection"
+  const byIdentity = isAction
+    ? page.locator(`[data-thrallo-action="${control.id}"]`)
+    : control.primitive === "selection"
     ? page.locator(`[data-thrallo-control="${control.id}"]:not([data-thrallo-option])`)
     : page.locator(`[data-thrallo-control="${control.id}"]`);
   const identityCount = await visible(byIdentity);
@@ -2309,7 +2315,8 @@ async function locateForProbe(page, control) {
 
   for (const name of control.fallbackNames || []) {
     const pattern = new RegExp(`^\\s*${escapeRegex(String(name))}\\s*$`, "i");
-    const roles = control.primitive === "textbox"
+    const roles = isAction ? DRIVEABLE_ACTION_ROLES
+      : control.primitive === "textbox"
       ? ["textbox", "spinbutton", "combobox"] : ["group", "radiogroup", "listbox", "combobox"];
     // A UNION, not a sum. One input is found by its label AND by its role+name, and counting each
     // strategy separately called that single element two candidates — reporting ambiguity for a
@@ -2434,6 +2441,61 @@ export async function probeControlMechanics(page, controls = []) {
   return { probed, failures, skipped, outcomes };
 }
 
+/**
+ * THE ACTION PROBE — is the contracted button addressable at all?
+ *
+ * Fields and choosers got the cheap question first; the buttons never did. Every contracted
+ * action already has a machine identity in the manifest, and the failure that mattered — a
+ * hand-wired control carrying no identity, reachable only through the name the contract happened
+ * to supply — is answerable before any journey runs.
+ *
+ * IT NEVER ACTIVATES ANYTHING. Pressing a contracted commit button on the entry screen would
+ * create a durable record the customer never asked for, so this probe locates and reports and
+ * stops there. What it can prove without touching the app is addressing, and addressing is
+ * exactly what was missing: an action reached only by name is invisible to every identity-driven
+ * path, and an action whose identity matches several visible elements cannot be driven safely.
+ *
+ * Nothing here is a FAILURE. A button legitimately absent on entry lives behind a flow step; a
+ * forward control is legitimately disabled until its form is filled. These are OUTCOMES, attached
+ * as evidence to whatever the journeys later prove — unknown is not broken.
+ *
+ * @param {object} page     an open page on the app's entry route
+ * @param {Array}  actions  browserPlan actions: { id, primitive, fallbackNames }
+ * @returns {{ probed: number, failures: Array, skipped: Array, outcomes: Array }}
+ */
+export async function probeActionMechanics(page, actions = []) {
+  const outcomes = [];
+  const skipped = [];
+  let probed = 0;
+
+  for (const action of actions) {
+    const located = await locateForProbe(page, { ...action, addressAs: "action" });
+    if (located.ambiguous) {
+      skipped.push({ id: action.id, primitive: action.primitive, reason: "ambiguous_identity",
+        candidates: located.candidates, addressedBy: located.addressedBy });
+      outcomes.push({ id: action.id, outcome: "ambiguous_identity", detail: located.detail });
+      continue;
+    }
+    if (!located.locator) {
+      skipped.push({ id: action.id, primitive: action.primitive, reason: "not_mounted_on_entry" });
+      outcomes.push({ id: action.id, outcome: "not_mounted_on_entry", detail: null });
+      continue;
+    }
+    probed += 1;
+    const disabled = await located.locator.isDisabled().catch(() => false);
+    if (located.addressedBy === "fallback_name") {
+      outcomes.push({ id: action.id, outcome: "identity_absent", addressedBy: located.addressedBy,
+        detail: "the contracted action was reached only by a contract-supplied name; the element "
+          + "carries no machine identity, so every identity-addressed path is blind to it" });
+      continue;
+    }
+    outcomes.push({ id: action.id, outcome: disabled ? "disabled_on_entry" : "addressable",
+      addressedBy: located.addressedBy,
+      detail: disabled ? "the contracted action is present and disabled on entry" : null });
+  }
+  return { probed, failures: [], skipped, outcomes };
+}
+
 // Values chosen by INPUT TYPE, which is a browser fact. Nothing here describes a business meaning.
 const PROBE_VALUE = Object.freeze({
   text: "Probe", email: "probe@example.com", tel: "07700900123", number: "2",
@@ -2548,9 +2610,21 @@ export async function verifyJourneys({
     // whose fields cannot hold a value says so in seconds, with the control's own id, instead of
     // eight steps into a journey. Costs one fill per visible control and changes no verdict on its
     // own: the journeys below still run, and still decide.
-    const probePlan = browserPlan(deriveVerificationManifest(contract)).controls
-      .filter((row) => ["textbox", "selection"].includes(row.primitive));
+    const plan = browserPlan(deriveVerificationManifest(contract));
+    const probePlan = plan.controls.filter((row) => ["textbox", "selection"].includes(row.primitive));
     mechanics = probePlan.length ? await probeControlMechanics(page, probePlan) : null;
+    // The contracted BUTTONS get the same addressing question, without being pressed. Their
+    // outcomes join the control outcomes so a repair brief can say "this action carries no
+    // machine identity" instead of "the outcome never appeared" eight steps later.
+    if (plan.actions?.length) {
+      const actionMechanics = await probeActionMechanics(page, plan.actions);
+      mechanics = {
+        probed: (mechanics?.probed || 0) + actionMechanics.probed,
+        failures: [...(mechanics?.failures || []), ...actionMechanics.failures],
+        skipped: [...(mechanics?.skipped || []), ...actionMechanics.skipped],
+        outcomes: [...(mechanics?.outcomes || []), ...actionMechanics.outcomes],
+      };
+    }
     if (mechanics?.failures?.length) {
       // Reload so the probe's own interactions are not part of the state the journeys inherit.
       await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
