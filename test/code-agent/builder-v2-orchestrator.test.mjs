@@ -162,6 +162,7 @@ function strictBuildStore() {
 function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
+  const checkpoints = [];
   const journeyDrives = [];
   const plan = patchPlan || {
     core: () => CORE_PATCH,
@@ -189,8 +190,9 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
     }),
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
+    events: { checkpoint: async (event) => { checkpoints.push(event); } },
   });
-  return { orchestrator, buildStore, snapshotStore, assetService, patchCalls, journeyDrives };
+  return { orchestrator, buildStore, snapshotStore, assetService, patchCalls, journeyDrives, checkpoints };
 }
 
 // ── the proofs ────────────────────────────────────────────────────────────────────────────────
@@ -230,7 +232,7 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
 });
 
 test("14S — a red required secondary blocks completion while retaining resumable work", async () => {
-  const { orchestrator, snapshotStore } = harness({ failJourneys: ["newsletter-signup"] });
+  const { orchestrator, snapshotStore, checkpoints: events } = harness({ failJourneys: ["newsletter-signup"] });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
 
   assert.equal(result.state, "blocked");
@@ -242,7 +244,17 @@ test("14S — a red required secondary blocks completion while retaining resumab
   const working = await orchestrator.resumeWorkingContext("o", "proj-1", result.buildId);
   assert.ok(working.tree["src/routes/BookPage.jsx"]);
   assert.ok(working.tree["src/routes/AboutSection.jsx"]);
-  assert.ok(working.tree["src/routes/NewsletterPanel.jsx"], "red work remains available for targeted repair");
+  // The red journey's work is RETAINED as its own non-promotable checkpoint, but it is no longer
+  // carried into the verified line: `browse-info` is built on the last VERIFIED candidate, not on
+  // a tree the browser has just called red. One failed increment poisoning every later one is how
+  // a production build ended with six red journeys and 39 of 60 credits unspent.
+  const redCheckpoints = events.filter((event) => /newsletter-signup/.test(event.reason || ""));
+  assert.ok(redCheckpoints.length, "the red increment is retained as a checkpoint for targeted repair");
+  assert.ok(redCheckpoints.every((event) => event.promotable === false));
+  assert.ok(redCheckpoints.some((event) => event.tree["src/routes/NewsletterPanel.jsx"]),
+    "the retained checkpoint still holds the red work itself");
+  assert.ok(!working.tree["src/routes/NewsletterPanel.jsx"],
+    "…and the verified line does not inherit it");
 });
 
 test("WP8/C4 — a failing ESSENTIAL journey blocks: no snapshot, no green pointer, state blocked", async () => {
@@ -493,7 +505,7 @@ test("WP11/V2-20 — the repair tier: a verified browser failure earns a targete
   assert.match(finalTree["src/routes/BookPage.jsx"], /repaired/, "the repaired tree is what shipped");
 });
 
-test("WP11/V2-20 — repairs are BOUNDED, and a round that resolves nothing does not buy another", async () => {
+test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats an identical round", async () => {
   // The bound used to be the ONLY stop: two futile rounds, both charged, then blocked. The loop
   // now measures each round against the typed defect set it was briefed with, so a repair that
   // edits a file and leaves the defect exactly where it was ends the tier immediately. The
@@ -510,9 +522,13 @@ test("WP11/V2-20 — repairs are BOUNDED, and a round that resolves nothing does
   });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
   assert.equal(result.state, "blocked");
-  assert.equal(repairCalls, 1, "an unmoved defect ends the tier instead of buying an identical round");
-  assert.ok(repairCalls <= 2, "the maxJourneyRepairs ceiling is never exceeded");
+  // An unmoved round no longer ENDS the tier — it escalates to a different strategy, so the
+  // approved allowance is spent on genuinely different attempts rather than surrendered.
+  assert.equal(repairCalls, 2, "both approved rounds are used, on different strategies");
+  assert.equal(result.repairRounds, 2);
   assert.equal(result.repairProgressStop?.reason, "unchanged");
+  assert.ok(["scoped", "unscoped"].includes(result.repairProgressStop?.strategy));
+  assert.equal(result.stopReason, "repair_allowance_exhausted");
   assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
 });
 

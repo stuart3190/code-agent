@@ -54,6 +54,11 @@ const numberEnv = (name, fallback) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
+// Observed cost of one browser-informed repair dispatch on production builds (1.97-2.31 credits
+// across the 2026-08-19 run). Used only to size the repair-round backstop from the approved
+// budget; the credit ceiling itself remains the authority and fails closed.
+const REPAIR_ROUND_CREDIT_ESTIMATE = 2.5;
+
 function laneProviderId(context) {
   return context.policy?.primaryProvider === "managed" ? "managed" : context.policy?.primaryProvider;
 }
@@ -352,8 +357,6 @@ export function createBuilderV2Runtime({
       const owner = workJob.owner;
       const projectId = workJob.project_id;
       const input = workJob.payload.input || {};
-      const maxRepairs = Math.max(0, Math.min(10, Number.isInteger(input.maxRepairs)
-        ? input.maxRepairs : 2));
       const mode = workJob.payload.mode || "build";
       const request = String(input.prompt || workJob.payload.request || "");
       const emit = (kind, value) => onEvent?.(kind, typeof value === "string" ? value : JSON.stringify(value));
@@ -371,6 +374,16 @@ export function createBuilderV2Runtime({
         ?? workJob.payload.byokCostLimit
         ?? numberEnv("THRALLO_BV2_DEFAULT_BUILD_CEILING", 60));
       if (!(ceilingCredits > 0)) throw Object.assign(new Error("Builder V2 has no positive build budget"), { code: "budget_ceiling" });
+      // THE REPAIR ALLOWANCE IS SIZED BY THE APPROVED BUDGET, NOT BY A CONSTANT.
+      //
+      // It was 2 for every build regardless of what the customer approved. A 60-credit build
+      // therefore stopped after two repair rounds with 39 credits unspent and six journeys red.
+      // The credit ceiling is the real limit and it already fails closed; this count is only a
+      // backstop against a pathological loop, so it scales with the money actually approved.
+      // An explicit caller value still wins.
+      const maxRepairs = Number.isInteger(input.maxRepairs)
+        ? Math.max(0, Math.min(24, input.maxRepairs))
+        : Math.max(2, Math.min(24, Math.floor(ceilingCredits / REPAIR_ROUND_CREDIT_ESTIMATE)));
       const candidates = candidateSet(context);
       const history = await historyResolver(client, owner, projectId);
       const complexity = classifyComplexity({ prompt: request }).level;

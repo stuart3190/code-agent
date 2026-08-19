@@ -376,7 +376,11 @@ export function createOrchestrator({
     // its journey brief and its retrieval-sliced context are unchanged. It only says where the
     // fix may be written, and it is dropped after one out-of-scope attempt exactly as a
     // validator-owned scope is, so a mis-attributed boundary can never trap a build.
-    repairBoundary: initialRepairBoundary = null }) {
+    repairBoundary: initialRepairBoundary = null,
+    // Modules the caller wants rewritten outright. The escalation ladder inside this function
+    // still adds its own; this is the tier above it asking for a clean re-emit of the files the
+    // verifier attributed the failure to, after a narrower attempt failed to move the defect.
+    regenerateFiles: forcedRegenerateFiles = [] }) {
     // A CORRECTION continues from the retained candidate; an ATTEMPT redoes the work from the
     // increment's starting tree. Keeping the distinction explicit stops a fresh generation from
     // colliding with files the discarded candidate already created.
@@ -432,7 +436,10 @@ export function createOrchestrator({
       const dispatchStep = dispatchAs
         || headroomScope?.logicalStep
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
-      const regenerateFiles = escalationPlan(rejectionHistory).regenerateFiles;
+      const regenerateFiles = [...new Set([
+        ...forcedRegenerateFiles,
+        ...escalationPlan(rejectionHistory).regenerateFiles,
+      ])];
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
@@ -902,6 +909,126 @@ export function createOrchestrator({
         let repairExhausted = false;
         let repairLimit = null;
         let repairProgressStop = null;
+        let budgetExhausted = false;
+
+        // ── THE REPAIR TIER, FOR EVERY CONTRACTED JOURNEY ───────────────────────────────────────
+        //
+        // This used to exist only for the essential core. A SECONDARY journey got one increment
+        // dispatch and, if the browser found it red, the loop recorded it as pending and moved on
+        // — no repair round, ever. A production build on 2026-08-19 ended with six red journeys
+        // and 39 of its 60 approved credits UNSPENT, because six increments each failed once and
+        // nothing was allowed to try again. Same tier, same evidence, same enforcement, for both.
+        //
+        // A ROUND EARNS ITS SUCCESSOR BY RESOLVING A DEFECT — but a round that resolves nothing no
+        // longer ends the tier. It ESCALATES: the attributed write boundary may itself have been
+        // wrong, so the next round widens, and the one after regenerates the owning modules
+        // outright. The loop only stops when every strategy is spent, the approved credit ceiling
+        // is reached, or there is nothing an application patch could answer. Spending the approved
+        // budget on genuinely DIFFERENT attempts is the point; spending it on identical ones is
+        // what this guards against.
+        const REPAIR_STRATEGIES = ["scoped", "unscoped", "regenerate"];
+        async function repairUntilGreen({
+          label, journeys: repairJourneys, tree: startTree, snapshot, verdicts, defects,
+          eligibility: startEligibility, backendRowFailures: startRows = [], advisory = [], evaluate,
+        }) {
+          let currentTree = startTree;
+          let currentSnapshot = snapshot;
+          let currentVerdicts = verdicts;
+          let currentDefects = defects;
+          let currentEligibility = startEligibility;
+          let rows = startRows;
+          let rounds = 0;
+          let strategy = 0;
+          let exhausted = false;
+          let limit = null;
+          let progressStop = null;
+          let budgetOut = false;
+          const done = () => ({
+            tree: currentTree, snapshot: currentSnapshot, verdicts: currentVerdicts,
+            defects: currentDefects, eligibility: currentEligibility, backendRowFailures: rows,
+            rounds, exhausted, repairLimit: limit, progressStop, budgetExhausted: budgetOut,
+            verifierBlock: null,
+          });
+
+          while (!currentEligibility.eligible && rounds < maxRepairs && strategy < REPAIR_STRATEGIES.length) {
+            const actionable = actionableDefects(currentDefects);
+            if (!actionable.length) break; // nothing an application patch can answer
+            const evidence = browserRepairEvidence({
+              contract, interactionContract, journeyResults: currentVerdicts, tree: currentTree,
+              backendRowFailures: rows, defects: currentDefects,
+              // Shape findings that did not stop the build ride along as CONTEXT for a repair
+              // that is now driven by observed browser failure. They explain, they do not accuse.
+              advisory: advisoryMessages((advisory || [])
+                .filter((finding) => finding.code !== "interaction_control_undriveable")),
+            });
+            if (!evidence.length) break;
+            const mode = REPAIR_STRATEGIES[strategy];
+            // The verifier's own attribution bounds the write — until a round proves the boundary
+            // was not where the defect lived, at which point the next attempt is deliberately wider.
+            const boundary = mode === "scoped" ? defectWriteBoundary(currentDefects) : null;
+            const regenerate = mode === "regenerate"
+              ? [...new Set(actionable.flatMap((defect) => defect.modules))].slice(0, 6) : [];
+            rounds += 1;
+            await setState(`${label}:${rounds}`);
+            log(`${label} ${rounds}/${maxRepairs} [${mode}]: ${actionable.length} typed defect(s) `
+              + `[${[...new Set(actionable.map((defect) => defect.defectClass))].join(", ")}]`
+              + (boundary ? ` scoped to [${boundary.allowedFiles.join(", ")}]` : "")
+              + (regenerate.length ? ` regenerating [${regenerate.join(", ")}]` : ""));
+            const defectsBefore = currentDefects;
+            let repair;
+            try {
+              repair = await buildIncrement({
+                step: "repair", owner, projectId, buildId, contract, tiers, bindings,
+                tree: currentTree, assets: resolved, journeys: repairJourneys,
+                initialProblems: evidence, checkpointReason: `working:${label}:${rounds}`,
+                parentSnapshotId: currentSnapshot?.id || null, signal, spec,
+                attemptPolicy: buildAttemptPolicy, repairBoundary: boundary,
+                regenerateFiles: regenerate,
+              });
+            } catch (error) {
+              if (error?.code === "repair_limit_reached") {
+                exhausted = true;
+                limit = { code: error.code, repairsDispatched: error.repairsDispatched, maxRepairs: error.maxRepairs };
+                break;
+              }
+              // THE APPROVED CEILING IS A STOP, NOT A CRASH. A build that has genuinely spent what
+              // the customer approved keeps its last verified checkpoint and reports honestly.
+              if (["budget_ceiling", "account_budget"].includes(error?.code)) {
+                budgetOut = true;
+                log(`${label}: approved credit ceiling reached after ${rounds} round(s); stopping with the retained checkpoint`);
+                break;
+              }
+              throw error;
+            }
+            if (!repair.ok) break;
+            currentTree = repair.tree;
+            currentSnapshot = repair.snapshot;
+            currentVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+              journeys: repairJourneys, tree: currentTree, snapshotId: null, signal });
+            const block = await blockOnVerifierPlatformFailure(currentVerdicts);
+            if (block) return { ...done(), verifierBlock: block };
+            rows = backendProbeFn ? await backendProbeFn({
+              owner, projectId, contract, tiers, journeyResults: currentVerdicts.journeys,
+            }) : [];
+            currentEligibility = evaluate(currentVerdicts, rows);
+            currentDefects = defectsFor(currentVerdicts, rows);
+            const progress = defectProgress(defectsBefore, currentDefects);
+            if (currentEligibility.eligible) break;
+            if (progress.moved) {
+              // It is working. Keep the strategy that is working.
+              strategy = 0;
+              continue;
+            }
+            progressStop = { round: rounds, strategy: mode, ...progress };
+            strategy += 1;
+            log(`${label} ${rounds} ${progress.reason} under [${mode}]: `
+              + `${progress.persisted.length} defect(s) survived, ${progress.introduced.length} new`
+              + (strategy < REPAIR_STRATEGIES.length
+                ? ` — escalating to [${REPAIR_STRATEGIES[strategy]}]`
+                : " — every repair strategy is spent"));
+          }
+          return done();
+        }
 
         // MECHANICS CORRECTIONS, BEFORE THE REPAIR TIER.
         //
@@ -969,84 +1096,41 @@ export function createOrchestrator({
             blockingErrors: coreVerdicts.blockingErrors });
           coreDefects = defectsFor(coreVerdicts, backendRowFailures);
         }
-        for (let round = 1; !eligibility.eligible && round <= maxRepairs; round += 1) {
-          // THE BRIEF IS THE TYPED DEFECT SET, not a description of it. Each actionable defect
-          // contributes the sentence the repair scoping parses and one structured row carrying
-          // its class, owner, control identity, owning modules, the page's own text when it
-          // failed, the console errors raised during that step, and the probe's addressing
-          // evidence. Platform-owned defects ride along as context and never ask for a patch.
-          const evidence = [
-            ...browserRepairEvidence({
-              contract, interactionContract, journeyResults: coreVerdicts, tree,
-              backendRowFailures, defects: coreDefects,
-              // Shape findings that did not stop the build ride along as CONTEXT for a repair
-              // that is now driven by observed browser failure. They explain, they do not accuse.
-              advisory: advisoryMessages(coreAdvisory.filter((finding) => finding.code !== "interaction_control_undriveable")),
-            }),
-          ];
-          if (!actionableDefects(coreDefects).length) break; // nothing an app patch can answer
-          if (!evidence.length) break; // nothing actionable to brief — blocked below
-          // THE WRITE BOUNDARY THE VERIFIER ALREADY KNOWS. Attribution named the modules that own
-          // every failure being briefed; the browser-informed repair is held to them by the same
-          // machine enforcement a pre-compile correction gets. No attribution means no boundary —
-          // a repair is never confined to a guess.
-          const repairBoundary = defectWriteBoundary(coreDefects);
-          await setState(`repair:${round}`);
-          log(`repair ${round}/${maxRepairs}: ${actionableDefects(coreDefects).length} typed defect(s) `
-            + `[${[...new Set(actionableDefects(coreDefects).map((defect) => defect.defectClass))].join(", ")}]`
-            + (repairBoundary ? ` scoped to [${repairBoundary.allowedFiles.join(", ")}]` : " unscoped (no attribution)"));
-          repairsAttempted += 1;
-          const defectsBefore = coreDefects;
-          let repair;
-          try {
-            repair = await buildIncrement({
-              step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-              journeys: essentialJourneys, initialProblems: evidence,
-              checkpointReason: `working:repair:${round}`, parentSnapshotId: workingSnapshot?.id || null,
-              signal, spec,
-              attemptPolicy: buildAttemptPolicy,
-              repairBoundary,
-            });
-          } catch (error) {
-            if (error?.code !== "repair_limit_reached") throw error;
-            repairExhausted = true;
-            repairLimit = { code: error.code, repairsDispatched: error.repairsDispatched,
-              maxRepairs: error.maxRepairs };
-            break;
-          }
-          if (!repair.ok) break;
-          tree = repair.tree;
-          workingSnapshot = repair.snapshot;
-          workingReason = `working:repair:${round}`;
-          coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
-            journeys: essentialJourneys, tree, snapshotId: null, signal });
-          verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
-          if (verifierBlock) return verifierBlock;
-          backendRowFailures = backendProbeFn ? await backendProbeFn({
-            owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
-          }) : [];
-          eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
-            backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
-          coreDefects = defectsFor(coreVerdicts, backendRowFailures);
-          // DID THE ROUND MOVE ANYTHING? Fingerprinting already stops an identical brief; this
-          // catches the case that cost run #7 both of its rounds — a repair that edits files,
-          // rewords the failure and leaves the defect exactly where it was. A round earns its
-          // successor only by RESOLVING a defect. The retained checkpoint is kept either way.
-          const progress = defectProgress(defectsBefore, coreDefects);
-          if (!eligibility.eligible && !progress.moved) {
-            repairProgressStop = { round, ...progress };
-            log(`repair ${round}/${maxRepairs} ${progress.reason}: `
-              + `${progress.persisted.length} defect(s) survived, ${progress.introduced.length} new; `
-              + "stopping rather than spending an identical round");
-            break;
-          }
-        }
+        const coreRepair = await repairUntilGreen({
+          label: "repair", journeys: essentialJourneys, tree, snapshot: workingSnapshot,
+          verdicts: coreVerdicts, defects: coreDefects, eligibility,
+          backendRowFailures, advisory: coreAdvisory,
+          evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
+            journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
+            blockingErrors: nextVerdicts.blockingErrors }),
+        });
+        if (coreRepair.verifierBlock) return coreRepair.verifierBlock;
+        tree = coreRepair.tree;
+        if (coreRepair.snapshot) workingSnapshot = coreRepair.snapshot;
+        if (coreRepair.rounds) workingReason = `working:repair:${coreRepair.rounds}`;
+        coreVerdicts = coreRepair.verdicts;
+        coreDefects = coreRepair.defects;
+        eligibility = coreRepair.eligibility;
+        backendRowFailures = coreRepair.backendRowFailures;
+        repairsAttempted += coreRepair.rounds;
+        repairExhausted = repairExhausted || coreRepair.exhausted;
+        repairLimit = coreRepair.repairLimit || repairLimit;
+        repairProgressStop = coreRepair.progressStop || repairProgressStop;
+        budgetExhausted = budgetExhausted || coreRepair.budgetExhausted;
         if (!eligibility.eligible) return finish("blocked", {
           error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
           failureClassification: "contracted_journeys_red",
           repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
           repairLimit,
           repairProgressStop,
+          repairRounds: repairsAttempted,
+          // WHY the tier stopped, in the customer's terms: the approved credits ran out, or every
+          // repair strategy was spent while credits remained. Those are different problems and a
+          // build that stops for the second reason with budget left is a platform defect.
+          budgetExhausted,
+          stopReason: budgetExhausted ? "approved_credits_exhausted"
+            : repairExhausted || repairsAttempted >= maxRepairs ? "repair_allowance_exhausted"
+            : repairProgressStop ? "repair_strategies_exhausted" : "no_actionable_defect",
           // The typed defect set, so a resumed repair and a human post-mortem both start from
           // what the browser proved rather than from one summary sentence.
           defects: coreDefects,
@@ -1094,25 +1178,53 @@ export function createOrchestrator({
             verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
               journeys: [journey], tree: increment.tree, snapshotId: candidate.id, signal });
           }
-          const incrementEligibility = increment.ok ? completionEligibility({
+          const evaluateIncrement = (nextVerdicts) => completionEligibility({
             contract: { ...contract, journeys: [journey] }, gates: { ok: true },
-            journeyResults: { journeys: verdicts.journeys }, blockingErrors: verdicts.blockingErrors,
-          }) : { eligible: false };
+            journeyResults: { journeys: nextVerdicts.journeys }, blockingErrors: nextVerdicts.blockingErrors,
+          });
+          let incrementEligibility = increment.ok ? evaluateIncrement(verdicts) : { eligible: false };
+          let incrementTree = increment.ok ? increment.tree : null;
+          let incrementSnapshot = increment.ok ? increment.snapshot : null;
+          // A RED SECONDARY JOURNEY NOW EARNS THE SAME REPAIR TIER THE CORE GETS. Until this, one
+          // failed dispatch was the end of it: the journey was filed as pending and the build went
+          // on to the next one, which is how a 60-credit build finished with six red journeys and
+          // 39 credits unspent.
+          if (increment.ok && !incrementEligibility.eligible) {
+            const incrementRepair = await repairUntilGreen({
+              label: `${step}:repair`, journeys: [journey], tree: increment.tree,
+              snapshot: increment.snapshot, verdicts,
+              defects: defectsFor(verdicts, []), eligibility: incrementEligibility,
+              advisory: increment.advisory || [], evaluate: evaluateIncrement,
+            });
+            if (incrementRepair.verifierBlock) return incrementRepair.verifierBlock;
+            incrementTree = incrementRepair.tree;
+            incrementSnapshot = incrementRepair.snapshot;
+            incrementEligibility = incrementRepair.eligibility;
+            verdicts = incrementRepair.verdicts;
+            repairsAttempted += incrementRepair.rounds;
+            repairExhausted = repairExhausted || incrementRepair.exhausted;
+            repairLimit = incrementRepair.repairLimit || repairLimit;
+            budgetExhausted = budgetExhausted || incrementRepair.budgetExhausted;
+          }
           const passed = increment.ok && incrementEligibility.eligible;
           if (!passed) {
             pendingIncrements.push({ journeyId: journey.id, title: journey.title, reason: increment.ok ? "journey verification failed" : increment.reason });
             if (increment.ok) {
-              workingSnapshot = increment.snapshot;
-              candidate = workingSnapshot;
-              await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot,
-                tree: increment.tree, reason: workingSnapshot.reason, promotable: false });
+              // The attempt is RETAINED and stays resumable, so its work is available to a later
+              // targeted repair. What it does NOT do is become `candidate` — the base for the next
+              // journey. Building increment N+1 on a tree the browser has just called red is how
+              // one failure turned into six; the last VERIFIED candidate stays the base.
+              workingSnapshot = incrementSnapshot;
+              await events.checkpoint?.({ owner, projectId, buildId, snapshot: incrementSnapshot,
+                tree: incrementTree, reason: incrementSnapshot.reason, promotable: false });
             }
-            log(`${step}: required journey remains red; retained only as a candidate checkpoint`);
+            log(`${step}: required journey remains red after its repair tier; `
+              + "retained as a candidate and NOT used as the base for the next increment");
             continue;
           }
-          const snapshot = await snapshotStore.markCandidateValidated(owner, projectId, increment.snapshot.id,
+          const snapshot = await snapshotStore.markCandidateValidated(owner, projectId, incrementSnapshot.id,
             { reason: `working:${step}` });
-          await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: increment.tree,
+          await events.checkpoint?.({ owner, projectId, buildId, snapshot, tree: incrementTree,
             reason: `working:${step}`, promotable: false });
           candidate = snapshot;
           workingSnapshot = snapshot;
@@ -1129,7 +1241,17 @@ export function createOrchestrator({
 
         if (pendingIncrements.length) return finish("blocked", {
           error: `required contracted journeys remain red: ${pendingIncrements.map((row) => row.journeyId).join(", ")}`,
+          failureClassification: "contracted_journeys_red",
           coreSnapshotId: coreSnapshot.id, shipped, pendingIncrements,
+          // Each of these journeys has now been through the same repair tier the core gets, so the
+          // report has to say what that tier did and why it stopped. A build that ends here with
+          // budget remaining and strategies unspent is a platform defect, not a customer outcome.
+          repairRounds: repairsAttempted,
+          repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
+          repairLimit, budgetExhausted,
+          stopReason: budgetExhausted ? "approved_credits_exhausted"
+            : repairExhausted || repairsAttempted >= maxRepairs ? "repair_allowance_exhausted"
+            : "repair_strategies_exhausted",
           workingSnapshotId: workingSnapshot?.id || candidate.id, providerCalls,
         });
 

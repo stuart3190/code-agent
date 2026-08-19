@@ -52,7 +52,7 @@ const UNRELATED = "src/routes/Marketing.jsx";
  * the interaction contract answers "which flow is this step" by index, so a fixture that
  * collapses the journey would be asking about the wrong control.
  */
-function verdicts({ failAt = 0, step: over = {}, mechanics = null, verifierDefects = [],
+function verdicts({ failAt = 0, step: over = {}, mechanics = null, verifierDefects = [], journeyId = "booking",
   owners = [JOURNEY_OWNER] } = {}) {
   const steps = CONTRACT.journeys[0].steps.map((step, index) => (
     index < failAt ? { action: step.action, expect: step.expect, status: "pass", drove: true }
@@ -62,7 +62,8 @@ function verdicts({ failAt = 0, step: over = {}, mechanics = null, verifierDefec
   const failing = steps[failAt];
   return {
     journeys: [{
-      id: "booking", title: "Complete a booking", priority: "primary",
+      id: journeyId, title: "Complete a booking",
+      priority: journeyId === "booking" ? "primary" : "secondary",
       status: failing.status === "fail" ? "fail" : "undriveable",
       steps, owners, attributionStatus: "attributed",
     }],
@@ -343,16 +344,22 @@ export default function Booking() {
 
 const asPatches = (tree) => Object.entries(tree).map(([path, content]) => ({ newFile: path, content }));
 
-function harness({ browser, repairPatches = null } = {}) {
+function harness({ browser, repairPatches = null, contract = CONTRACT } = {}) {
   const timeline = [];
   const patchInputs = [];
   let browserCalls = 0;
   const orchestrator = createOrchestrator({
-    contractFn: async () => CONTRACT,
+    contractFn: async () => contract,
     patchesFn: async (input) => {
       timeline.push(`patch:${input.step}`);
       patchInputs.push(input);
       if (input.step === "repair" && repairPatches) return repairPatches(input, patchInputs);
+      // An increment adds to a tree the core already wrote, so re-emitting the same files would be
+      // refused as inapplicable. It appends instead, which is what a real increment does.
+      if (String(input.step).startsWith("increment:")) {
+        return [{ replaceFile: "src/routes/Booking.jsx",
+          content: `${APP["src/routes/Booking.jsx"]}\n// ${input.step}` }];
+      }
       return asPatches(APP);
     },
     assetService: {
@@ -364,7 +371,7 @@ function harness({ browser, repairPatches = null } = {}) {
     baseTree: () => fromScaffold(REACT_VITE),
     baseline: REACT_VITE,
     compile: async () => ({ ok: true }),
-    journeysFn: async () => { timeline.push("browser"); return browser(browserCalls += 1); },
+    journeysFn: async ({ journeys }) => { timeline.push("browser"); return browser(browserCalls += 1, journeys); },
     events: {},
     log: () => {},
   });
@@ -411,19 +418,58 @@ test("a browser-red journey reaches the repair with its typed defects and its wr
   assert.equal(result.state, "green", JSON.stringify(result).slice(0, 400));
 });
 
-test("a repair that resolves nothing does not buy a second identical round", async () => {
+test("a repair that resolves nothing escalates its strategy instead of repeating itself", async () => {
   const h = harness({ browser: () => failing(), repairPatches: repairInsideBoundary("no-op-for-the-defect") });
-  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 2 });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 3 });
 
+  // `patchInputs` counts every dispatch including buildIncrement's own internal retries, so the
+  // round count is read from the result and the STRATEGIES from what each dispatch carried.
+  assert.equal(result.repairRounds, 3, "every approved round is used, on a different strategy each time");
   const repairs = h.patchInputs.filter((input) => input.step === "repair");
-  assert.equal(repairs.length, 1, `the loop spent ${repairs.length} rounds on an unmoved defect`);
+  // Round 1 is bounded by attribution; round 2 drops the boundary in case attribution was wrong;
+  // round 3 forces a clean re-emit of the owning modules. No two rounds are the same attempt.
+  assert.ok(repairs.some((input) => input.repairBoundary), "one round is scoped to the attributed modules");
+  assert.ok(repairs.some((input) => !input.repairBoundary && !input.regenerateFiles?.length),
+    "one round widens past the boundary");
+  assert.ok(repairs.some((input) => input.regenerateFiles?.length),
+    "one round regenerates the owning modules");
   assert.equal(result.state, "blocked");
   assert.equal(result.failureClassification, "contracted_journeys_red");
   assert.equal(result.repairProgressStop.reason, "unchanged");
+  assert.equal(result.repairRounds, 3);
   assert.ok(result.defects.length, "the blocked result carries the typed defect set");
   assert.ok(result.defectClasses.includes(DEFECT_CLASS.DURABILITY)
     || result.defectClasses.includes(DEFECT_CLASS.BEHAVIOUR));
   assert.ok(result.workingSnapshotId, "the retained checkpoint survives the stop");
+});
+
+test("a red SECONDARY journey earns the same repair tier the core gets", async () => {
+  // The production defect: a secondary got one dispatch and, if red, was filed as pending with no
+  // repair at all. Six of them failed that way on a 60-credit build that spent 21.
+  const secondaryContract = {
+    ...CONTRACT,
+    journeys: [
+      CONTRACT.journeys[0],
+      { id: "review-booking", title: "Review a saved booking", priority: "secondary", steps: [
+        { action: "open the saved booking", target: "booking", expect: "the saved booking is shown" },
+      ] },
+    ],
+  };
+  const h = harness({
+    contract: secondaryContract,
+    // The primary passes; the secondary stays red no matter what.
+    browser: (call, journeys) => (journeys.some((j) => j.id === "review-booking")
+      ? verdicts({ failAt: 0, step: { status: "fail", drove: true, detail: "the saved booking never appeared" } ,
+        journeyId: "review-booking" })
+      : passing()),
+    repairPatches: repairInsideBoundary("secondary-repair"),
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 3 });
+
+  const repairs = h.patchInputs.filter((input) => input.step === "repair");
+  assert.ok(repairs.length >= 1, `a red secondary must reach the repair tier: ${h.timeline.join(" → ")}`);
+  assert.equal(result.state, "blocked");
+  assert.ok(result.repairRounds >= 1, "the rounds are counted and reported");
 });
 
 test("a verification platform failure never spends the application's repair allowance", async () => {
