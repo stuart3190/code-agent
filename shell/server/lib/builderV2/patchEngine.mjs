@@ -7,7 +7,7 @@
 // never a guessed anchor.
 
 import { indexFile } from "./indexer.mjs";
-import { modularityCheck } from "../appBuild/modularity.mjs";
+import { FILE_MAX_TOKENS, modularityCheck } from "../appBuild/modularity.mjs";
 import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
 
@@ -415,7 +415,48 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
   if (changedFiles.length) {
     const scope = Object.fromEntries(changedFiles.map((f) => [f, working[f]]));
     const modular = modularityCheck(scope, { contract });
-    if (!modular.ok) {
+    // JUDGE THE DELTA, NOT THE INHERITED STATE.
+    //
+    // This rule exists to stop a batch re-monolithing a modular tree, and it did that job by
+    // rejecting the WHOLE batch whenever a changed file broke a structural invariant. Applied to a
+    // file that was ALREADY over the limit it became a trap with no exit: every repair to the
+    // oversized flow component was discarded — however correct — because the file it was fixing was
+    // too big, and nothing ever asked the model to shrink it. One production build spent 23 repair
+    // dispatches and produced 2 browser verdicts that way; the file could not be fixed, could not
+    // be shrunk, and could never go green.
+    //
+    // A patch does not inherit the blame for a violation it did not create. A pre-existing problem
+    // on a file this batch did not make larger is carried forward as a structural finding for the
+    // repair brief instead of a rejection. Creating a new violation, or worsening an existing one,
+    // is rejected exactly as before.
+    const previousScope = Object.fromEntries(changedFiles.filter((f) => f in tree).map((f) => [f, tree[f]]));
+    const baseline = modularityCheck(previousScope, { contract });
+    const sizeBefore = new Map(baseline.metrics.map((row) => [row.path, row.tokens]));
+    const sizeAfter = new Map(modular.metrics.map((row) => [row.path, row.tokens]));
+    const pathOf = (problem) => (String(problem).match(/^(src\/[^\s]+)/) || [])[1] || null;
+    const inheritedPaths = new Set(baseline.problems.map(pathOf).filter(Boolean));
+    const inherited = [];
+    // A real fix to an oversized module usually has to ADD a few lines — wiring an onChange, adding
+    // a handler. Demanding that it never grow by a single token would leave the deadlock exactly
+    // where it was, so an already-violating file may grow by a small margin while the split it has
+    // been asked for is still outstanding. Material growth is still making the monolith worse.
+    const INHERITED_GROWTH_TOLERANCE = Math.round(FILE_MAX_TOKENS * 0.1);
+    const introduced = modular.problems.filter((problem) => {
+      const path = pathOf(problem);
+      if (!path || !inheritedPaths.has(path)) return true;               // brand-new violation
+      const growth = (sizeAfter.get(path) || 0) - (sizeBefore.get(path) || 0);
+      if (growth > INHERITED_GROWTH_TOLERANCE) return true;              // materially worse
+      inherited.push(problem);
+      return false;
+    });
+    if (introduced.length === 0 && inherited.length) {
+      // Nothing new was broken. Let the work land and hand the pre-existing shape problem to the
+      // caller, which briefs it as something to fix rather than silently discarding the fix.
+      return { tree: working, provisionalTree: null, structuralProblems: [], inheritedStructuralProblems: inherited,
+        applied, rejected, modularityFailed: false };
+    }
+    if (introduced.length) {
+      modular.problems = introduced;
       // The batch violated a structural invariant: the WHOLE batch is rejected — a tree that
       // half-applied its way into a monolith would be worse than a clean refusal.
       const structuralDetail = modular.problems.join("; ");

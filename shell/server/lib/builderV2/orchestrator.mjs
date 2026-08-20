@@ -400,6 +400,11 @@ export function createOrchestrator({
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
     let advisory = [];
+    // Files already asked to split, so the instruction is issued once, not every round.
+    // Held apart from `advisory`, which is REASSIGNED by the conformance and gate steps below
+    // and would silently drop them — the first version of this did exactly that.
+    const splitRequests = new Set();
+    const splitFindings = [];
     // ONE derived specification, narrowed to this increment's journeys. Every view below —
     // module plan, interaction contract, per-module contracts, persistence ownership — is a
     // projection of the same object rather than an independent re-reading of the contract.
@@ -447,7 +452,8 @@ export function createOrchestrator({
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
-        repairBoundary, regenerateFiles, advisory, spec: scoped, signal });
+        repairBoundary, regenerateFiles, advisory: [...splitFindings, ...advisory],
+        spec: scoped, signal });
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
       // the following full-tree gates still decide whether more work is required.
@@ -474,6 +480,27 @@ export function createOrchestrator({
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
+      // A STRUCTURAL PROBLEM THE BATCH INHERITED IS AN INSTRUCTION, NOT A REJECTION.
+      //
+      // The patch was allowed to land because it did not make the file worse. But nobody has yet
+      // asked for the file to be made SMALLER, and until somebody does, every future repair to it
+      // stays as fragile as the ones that produced two browser verdicts from twenty-three
+      // dispatches. So the next brief carries the split as work to do, naming the file.
+      for (const problem of applied.inheritedStructuralProblems || []) {
+        const path = (String(problem).match(/^(src\/[^\s]+)/) || [])[1] || null;
+        if (splitRequests.has(path)) continue;
+        splitRequests.add(path);
+        splitFindings.push({
+          code: "oversized_module_must_be_split",
+          module: path,
+          severity: "advisory",
+          rationale: "every repair to this file is exact-text surgery on a module too large to patch reliably",
+          message: `${problem}. Split it NOW, before fixing anything else in it: move each step or `
+            + "concern into its own module under the same directory, re-export what the flow needs, and "
+            + "keep the behaviour identical. A smaller module is the difference between a repair that "
+            + "lands and one that does not.",
+        });
+      }
       const evidenceTree = applied.modularityFailed && applied.provisionalTree
         ? applied.provisionalTree : applied.tree;
       const filesChanged = [...new Set([
