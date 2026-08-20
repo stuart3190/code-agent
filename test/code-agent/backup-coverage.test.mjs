@@ -330,12 +330,16 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 14);
   assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 78);
+  assert.equal(result.active, 79);
+  // NOTE: this overlay model reports these as pending, but production has all five APPLIED —
+  // confirmed against supabase_migrations.schema_migrations on 2026-08-20. The drift is in the
+  // validator's overlay, not in the database, and it predates the last of these entries.
   assert.deepEqual(result.pending, [
     { version: "20260813095526", name: "v2_customer_accounting_and_approvals" },
     { version: "20260813183000", name: "retire_legacy_bv2_accounting_rpcs" },
     { version: "20260813194500", name: "enforce_v2_only_builder_contract" },
     { version: "20260815095256", name: "drop_v1_build_job_server_id" },
+    { version: "20260820092621", name: "bv2_widen_repair_dispatch_limit" },
   ]);
 });
 

@@ -13,13 +13,18 @@ const stable = (value) => JSON.stringify(canonical(value));
 
 // THE DATABASE OWNS THIS NUMBER.
 //
-// `bv2_builds.max_repair_dispatches` carries `check (max_repair_dispatches between 0 and 10)`
-// from 20260809155622_bv2_repair_dispatch_limit.sql, and `reserve_bv2_model_call_v2` enforces the
-// slot count from that column. A caller that computes a larger allowance does not get more
-// repairs — it gets a check-constraint violation at BUILD CREATE, which is exactly how a
-// budget-derived allowance of 24 stopped every build before it started on 2026-08-20.
-// `builder-v2-repair-allowance.test.mjs` pins this constant to the migration.
-export const MAX_REPAIR_DISPATCHES = 10;
+// `bv2_builds.max_repair_dispatches` carries a CHECK constraint and `reserve_bv2_model_call_v2`
+// enforces the per-build slot count from that column. A caller that computes a larger allowance
+// does not get more repairs — it gets a check-constraint violation at BUILD CREATE, which is
+// exactly how a budget-derived allowance of 24 stopped every build before it started.
+//
+// The bound was 10, set when only the essential core had a repair tier and the allowance was the
+// constant 2. Every contracted journey now earns that tier, and a 60-credit build proved ten
+// insufficient: the core spent all of them going green and five secondary journeys could not be
+// repaired even once. 20260820090000_bv2_widen_repair_dispatch_limit.sql widened it to 40, above
+// the largest allowance the derivation produces, and the approved credit ceiling remains the real
+// limit. `builder-v2-repair-allowance.test.mjs` pins this constant to that migration.
+export const MAX_REPAIR_DISPATCHES = 40;
 
 export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) {
   const identity = `${buildId}:${step}:${sequence}:${purpose}`;

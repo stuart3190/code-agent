@@ -54,13 +54,19 @@ test("every budget the platform can approve derives an allowance the database wi
     // A small budget must still buy the two rounds every build has always had.
     assert.ok(allowance >= 2, `ceiling ${ceiling} derived ${allowance}, fewer than the baseline two rounds`);
   }
-  // …and the budget that broke production now lands exactly on the ceiling the database allows.
-  assert.equal(derive(60), MAX_REPAIR_DISPATCHES);
+  // The CAP IS HEADROOM, NOT THE GOVERNOR. A 60-credit build derives 24 rounds and the database
+  // permits 40, so the approved budget decides how much repair happens and the constraint simply
+  // stops being in the way. When the two were equal, ten dispatches had to cover the core AND
+  // every secondary journey, and the secondaries got none.
+  assert.equal(derive(60), 24);
+  assert.ok(derive(60) < MAX_REPAIR_DISPATCHES, "the budget binds before the constraint does");
 });
 
 test("an explicit caller allowance is clamped, never passed through raw", () => {
   const clamp = (value) => Math.max(0, Math.min(MAX_REPAIR_DISPATCHES, value));
-  assert.equal(clamp(24), MAX_REPAIR_DISPATCHES, "an over-large explicit value is clamped, not rejected");
+  assert.equal(clamp(MAX_REPAIR_DISPATCHES + 1), MAX_REPAIR_DISPATCHES,
+    "an over-large explicit value is clamped to what the database accepts, not rejected");
   assert.equal(clamp(-5), 0);
   assert.equal(clamp(3), 3);
+  assert.equal(clamp(24), 24, "a value the database accepts passes through untouched");
 });
