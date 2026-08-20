@@ -30,7 +30,7 @@ import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
 import { createModelLanes } from "./modelLanes.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
-import { supabaseModelReservations } from "./modelReservations.mjs";
+import { MAX_REPAIR_DISPATCHES, supabaseModelReservations } from "./modelReservations.mjs";
 import { createOrchestrator, supabaseBuildStore } from "./orchestrator.mjs";
 import { recordFacts } from "./knowledge.mjs";
 import { routeV2Step } from "./router.mjs";
@@ -382,8 +382,9 @@ export function createBuilderV2Runtime({
       // backstop against a pathological loop, so it scales with the money actually approved.
       // An explicit caller value still wins.
       const maxRepairs = Number.isInteger(input.maxRepairs)
-        ? Math.max(0, Math.min(24, input.maxRepairs))
-        : Math.max(2, Math.min(24, Math.floor(ceilingCredits / REPAIR_ROUND_CREDIT_ESTIMATE)));
+        ? Math.max(0, Math.min(MAX_REPAIR_DISPATCHES, input.maxRepairs))
+        : Math.max(2, Math.min(MAX_REPAIR_DISPATCHES,
+          Math.floor(ceilingCredits / REPAIR_ROUND_CREDIT_ESTIMATE)));
       const candidates = candidateSet(context);
       const history = await historyResolver(client, owner, projectId);
       const complexity = classifyComplexity({ prompt: request }).level;

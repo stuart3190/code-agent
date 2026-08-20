@@ -11,6 +11,16 @@ const canonical = (value) => {
 };
 const stable = (value) => JSON.stringify(canonical(value));
 
+// THE DATABASE OWNS THIS NUMBER.
+//
+// `bv2_builds.max_repair_dispatches` carries `check (max_repair_dispatches between 0 and 10)`
+// from 20260809155622_bv2_repair_dispatch_limit.sql, and `reserve_bv2_model_call_v2` enforces the
+// slot count from that column. A caller that computes a larger allowance does not get more
+// repairs — it gets a check-constraint violation at BUILD CREATE, which is exactly how a
+// budget-derived allowance of 24 stopped every build before it started on 2026-08-20.
+// `builder-v2-repair-allowance.test.mjs` pins this constant to the migration.
+export const MAX_REPAIR_DISPATCHES = 10;
+
 export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) {
   const identity = `${buildId}:${step}:${sequence}:${purpose}`;
   return `${step}:${sequence}:${crypto.createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
