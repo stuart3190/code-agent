@@ -258,6 +258,9 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
   };
 }
 
+/** The file a patch writes, whichever operation shape it used. */
+const patchTargetPath = (patch) => patch?.file || patch?.newFile || patch?.replaceFile || patch?.deleteFile || null;
+
 export function createOrchestrator({
   contractFn,                       // MODEL SEAM: async ({owner, projectId, request, profile}) → contract
   patchesFn,                        // MODEL SEAM: async ({step, contract, tiers, tree, assets, rejections, problems, journey}) → patches[]
@@ -582,17 +585,35 @@ export function createOrchestrator({
         // A PROTOCOL round, not a generation attempt. It cost provider tokens and credits — both
         // still counted — but it produced no code, so charging it against the substantive attempts
         // punishes the build for a round in which nothing was written.
+        //
+        // NAME WHAT CHANGED NOTHING. A generic "your batch was byte-identical" leaves the model
+        // free to send the same operation again, and on 2026-08-20 it sent the identical
+        // `replace_symbol ROUTES` three times running and burned the build's protocol allowance.
+        // The exact operations go back, so the next round can see what not to repeat.
+        const noOpTargets = [...new Set(patches.map(patchTargetPath).filter(Boolean))];
+        const noOpOperations = patches.flatMap((patch) => {
+          const file = patchTargetPath(patch);
+          if (Array.isArray(patch.ops) && patch.ops.length) {
+            return patch.ops.map((op) => `${file}: ${op.op}${op.symbol ? ` ${op.symbol}` : ""}`);
+          }
+          return [`${file}: ${patch.newFile ? "newFile" : patch.replaceFile ? "replaceFile" : "write"}`];
+        }).slice(0, 8);
         rejections = [{
           code: patches.length ? "patch_noop" : "empty_patch_envelope",
           signature: "no-op",
-          file: null,
+          file: noOpTargets[0] || null,
           operation: null,
           reason: patches.length
-            ? "your batch left every file byte-identical — re-emitting current content is not implementation. "
-              + "CREATE the required sections/pages as newFile entries (src/routes/…), register them in src/App.jsx, "
-              + "and make every journey outcome visible as real UI text"
+            ? `these operations left the file byte-identical because it ALREADY contains exactly that content: `
+              + `${noOpOperations.join("; ")}. Do not send them again. Re-emitting current content is not `
+              + "implementation: CREATE the required sections/pages as newFile entries (src/routes/…), register "
+              + "them in src/App.jsx, and make every journey outcome visible as real UI text"
             : "you returned no patches at all — emit the files this step requires",
         }];
+        // …and feed the ESCALATION LADDER. A file the model keeps rewriting to its own current
+        // content does not need another symbol operation on it; the second identical no-op
+        // promotes that file to a whole-file re-emit, exactly as a repeated rejection does.
+        for (const file of noOpTargets) rejectionHistory.push({ signature: `${file}:noop` });
         working = internalHeadroomSplit ? working : originalTree;
         noOps += 1;
         attemptLedger.push({ attempt, dispatch: dispatchStep,

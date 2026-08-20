@@ -344,7 +344,7 @@ export default function Booking() {
 
 const asPatches = (tree) => Object.entries(tree).map(([path, content]) => ({ newFile: path, content }));
 
-function harness({ browser, repairPatches = null, contract = CONTRACT } = {}) {
+function harness({ browser, repairPatches = null, contract = CONTRACT, allPatches = null } = {}) {
   const timeline = [];
   const patchInputs = [];
   let browserCalls = 0;
@@ -353,6 +353,7 @@ function harness({ browser, repairPatches = null, contract = CONTRACT } = {}) {
     patchesFn: async (input) => {
       timeline.push(`patch:${input.step}`);
       patchInputs.push(input);
+      if (allPatches) return allPatches(input, patchInputs);
       if (input.step === "repair" && repairPatches) return repairPatches(input, patchInputs);
       // An increment adds to a tree the core already wrote, so re-emitting the same files would be
       // refused as inapplicable. It appends instead, which is what a real increment does.
@@ -505,4 +506,42 @@ test("a repair that writes outside the boundary is refused and re-briefed", asyn
   const rejection = JSON.stringify(repairs[1].rejections || []);
   assert.match(rejection, /module_correction_scope_exceeded|correction-scope/,
     `the retry states the boundary it broke: ${rejection}`);
+});
+
+// ── the repeated no-op loop ───────────────────────────────────────────────────────────────────
+
+test("a repeated no-op names the operation and escalates the file to a whole-file re-emit", async () => {
+  // Production, 2026-08-20: the model sent the identical `replace_symbol ROUTES` three rounds
+  // running. Each was byte-identical to the file it claimed to change, so the build died on
+  // "no substantive generation: 3 consecutive protocol round(s) changed nothing" having written
+  // nothing at all. The feedback said only that the batch was byte-identical — it never named the
+  // operation, and no-ops never reached the escalation ladder, so repeating one cost nothing.
+  const scaffold = fromScaffold(REACT_VITE);
+  const current = scaffold["src/routes/HomePage.jsx"];
+  assert.ok(current, "the scaffold ships a HomePage to re-emit");
+  const seen = [];
+  const h = harness({
+    browser: () => passing(),
+    // Re-emit the file's OWN current content: the batch applies cleanly and changes nothing.
+    allPatches: (input) => {
+      seen.push(input);
+      return [{ replaceFile: "src/routes/HomePage.jsx", content: current }];
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.error, /no substantive generation/);
+
+  // The rejection fed back names the exact operation, so the next round can see what to avoid.
+  const withRejections = seen.filter((input) => (input.rejections || []).length);
+  assert.ok(withRejections.length, "the no-op was fed back at all");
+  const reason = String(withRejections.at(-1).rejections[0].reason);
+  assert.ok(reason.includes("src/routes/HomePage.jsx"), `the file is named: ${reason}`);
+  assert.match(reason, /ALREADY contains exactly that content/);
+  assert.match(reason, /Do not send them again/);
+
+  // …and by the second identical no-op the file is queued for a whole-file re-emit.
+  const regenerating = seen.filter((input) => (input.regenerateFiles || []).includes("src/routes/HomePage.jsx"));
+  assert.ok(regenerating.length, "a repeatedly no-op'd file escalates to whole-file regeneration");
 });
