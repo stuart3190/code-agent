@@ -467,6 +467,22 @@ async function fillContractedFields(page, flows, marker) {
         continue;
       }
     }
+    // TYPING WHAT IS ALREADY THERE PROVES NOTHING — AND MUST NOT BE READ AS A DEAD CONTROL.
+    //
+    // The verdict below requires the value to CHANGE, which is the right protection: a control
+    // that ignores input while coincidentally displaying the expected text would otherwise pass.
+    // But an EDIT journey re-opens a saved record, so its fields arrive pre-populated, and the
+    // fixture value derived from the run marker can equal what the field already holds. The fill
+    // is then a no-op, `changed` is false, and a working control is reported `value_not_accepted`
+    // — with expectedValue, observedValue and previousValue all three identical in the evidence.
+    //
+    // So when the field already holds the target, ask a DIFFERENT question: type a distinct but
+    // still type-valid value and require THAT to land. The change requirement is untouched; only
+    // the false negative goes.
+    if (flow.control.validity !== "invalid" && value === currentValue && currentValue !== "") {
+      const variant = fixtureValueFor(flow, facts, `${marker}1`, currentValue);
+      if (variant !== currentValue) value = variant;
+    }
     await field.fill(value, { timeout: 3_000 }).catch(() => {});
     const observedValue = await field.inputValue().catch(() => "");
     const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
