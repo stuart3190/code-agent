@@ -1153,6 +1153,30 @@ export function createOrchestrator({
             blockingErrors: nextVerdicts.blockingErrors }),
         });
         if (coreRepair.verifierBlock) return coreRepair.verifierBlock;
+        // THE RESERVATION IS SOFT, BECAUSE A RED CORE ENDS THE BUILD.
+        //
+        // Holding 60% of the allowance back for the secondary journeys only makes sense if those
+        // journeys ever run, and they only run once the core is green. On 2026-08-20 the core used
+        // its four-round share, stayed red, and the build blocked with 41 of 60 approved credits
+        // unspent and the reserved rounds never touched. If the core is still red after its share,
+        // it takes the rest of the pool: nothing downstream can use it anyway.
+        if (!coreRepair.eligibility.eligible
+            && ["repair_share_exhausted", "repair_strategies_exhausted"].includes(coreRepair.stopReason)
+            && coreRepair.rounds < maxRepairs) {
+          log(`core remains red after its reserved share (${coreRepair.rounds}/${coreRepairRounds}); `
+            + `continuing into the remaining allowance — a red core means no increment can use it`);
+          const overflow = await repairUntilGreen({
+            label: "repair", journeys: essentialJourneys, tree: coreRepair.tree,
+            snapshot: coreRepair.snapshot, verdicts: coreRepair.verdicts, defects: coreRepair.defects,
+            eligibility: coreRepair.eligibility, backendRowFailures: coreRepair.backendRowFailures,
+            advisory: coreAdvisory, maxRounds: maxRepairs - coreRepair.rounds,
+            evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
+              journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
+              blockingErrors: nextVerdicts.blockingErrors }),
+          });
+          if (overflow.verifierBlock) return overflow.verifierBlock;
+          Object.assign(coreRepair, overflow, { rounds: coreRepair.rounds + overflow.rounds });
+        }
         tree = coreRepair.tree;
         if (coreRepair.snapshot) workingSnapshot = coreRepair.snapshot;
         if (coreRepair.rounds) workingReason = `working:repair:${coreRepair.rounds}`;
