@@ -626,3 +626,27 @@ test("a repair round that throws ends the tier and keeps everything already veri
   assert.match(result.repairRoundError.message, /pre-compile repair source is missing/);
   assert.ok(result.workingSnapshotId, "the retained checkpoint is still usable");
 });
+
+test("a failed generation escalates instead of ending the tier with budget in hand", async () => {
+  // Production, 2026-08-20: a 100-credit build with FORTY rounds stopped after two, having spent
+  // 14.56 — while the repair was visibly working. It had fixed unitSystem and roomShape, carried
+  // the journey from 1/6 steps to 2/6, and had one control left. A round whose generation could
+  // not produce a runnable tree hit a bare `break` and ended everything.
+  let repairDispatches = 0;
+  const h = harness({
+    browser: () => failing(),
+    repairPatches: () => {
+      repairDispatches += 1;
+      // Never produces a usable tree: every round is a failed generation.
+      return [{ replaceFile: "src/routes/Booking.jsx", content: "this is not valid javascript {{{" }];
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 6 });
+
+  assert.equal(result.state, "blocked");
+  // More than one round was attempted: a failed generation escalates rather than terminating.
+  assert.ok(result.repairRounds > 1,
+    `a failed generation must not end the tier on round one (rounds: ${result.repairRounds})`);
+  assert.ok(repairDispatches > 1, "the model was asked again with a different strategy");
+  assert.ok(result.workingSnapshotId, "the retained checkpoint survives");
+});

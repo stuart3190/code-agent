@@ -29,7 +29,7 @@ import {
 } from "./verification.mjs";
 import {
   verificationDefects, actionableDefects, platformDefectsOf,
-  defectEvidence, defectWriteBoundary, defectProgress,
+  defectEvidence, defectWriteBoundary, defectProgress, defectSignature,
 } from "./verificationDefects.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -1000,7 +1000,11 @@ export function createOrchestrator({
             stopReason: stopReasonNow(), verifierBlock: null,
           });
 
-          while (!currentEligibility.eligible && rounds < maxRounds && strategy < REPAIR_STRATEGIES.length) {
+          // A stable fingerprint of the whole defect set, used to tell a tier that is grinding
+          // through genuinely different attempts from one that has stopped learning anything.
+          const signatureOf = (rows) => actionableDefects(rows).map(defectSignature).sort().join("|");
+          let cycleBaseline = signatureOf(currentDefects);
+          while (!currentEligibility.eligible && rounds < maxRounds) {
             const actionable = actionableDefects(currentDefects);
             if (!actionable.length) break; // nothing an application patch can answer
             const evidence = browserRepairEvidence({
@@ -1061,7 +1065,25 @@ export function createOrchestrator({
                 + "keeping the retained checkpoint");
               break;
             }
-            if (!repair.ok) break;
+            // ONE FAILED GENERATION IS NOT THE END OF THE TIER.
+            //
+            // This was a bare `break`, and it is why a 100-credit build with forty rounds stopped
+            // after two of them having spent 14.56 — while the repair was visibly working: it had
+            // fixed `unitSystem` and `roomShape`, carried the journey from 1/6 steps to 2/6, and
+            // had one control left to go. A round whose generation could not produce a runnable
+            // tree tells us that ATTEMPT failed, not that the defect is unfixable.
+            //
+            // So it escalates like any other unproductive round — the next strategy is a different
+            // attempt — and the tier ends only when the strategies are spent, the rounds are gone,
+            // or the credits are. The retained checkpoint is untouched either way.
+            if (!repair.ok) {
+              strategy += 1;
+              log(`${label} round ${rounds} produced no runnable tree (${repair.reason || "generation failed"})`
+                + (strategy < REPAIR_STRATEGIES.length
+                  ? ` — escalating to [${REPAIR_STRATEGIES[strategy]}]`
+                  : " — every repair strategy is spent"));
+              continue;
+            }
             currentTree = repair.tree;
             currentSnapshot = repair.snapshot;
             currentVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
@@ -1086,7 +1108,23 @@ export function createOrchestrator({
               + `${progress.persisted.length} defect(s) survived, ${progress.introduced.length} new`
               + (strategy < REPAIR_STRATEGIES.length
                 ? ` — escalating to [${REPAIR_STRATEGIES[strategy]}]`
-                : " — every repair strategy is spent"));
+                : " — every strategy tried this cycle"));
+            if (strategy >= REPAIR_STRATEGIES.length) {
+              // EVERY STRATEGY TRIED. That ends the tier only if the cycle taught us nothing: a
+              // second pass over a DIFFERENT tree is a different attempt, and stopping with
+              // rounds and credits in hand is what left a 100-credit build blocked at 14.56 with
+              // one control left to fix. If the defect set has moved at all since this cycle
+              // began, the ladder resets and keeps going.
+              const signature = signatureOf(currentDefects);
+              if (signature === cycleBaseline) {
+                log(`${label}: a full strategy cycle left the defect set identical — stopping`);
+                break;
+              }
+              cycleBaseline = signature;
+              strategy = 0;
+              log(`${label}: the defect set moved during the cycle — restarting the ladder `
+                + `(${rounds}/${maxRounds} rounds used)`);
+            }
           }
           return done();
         }
