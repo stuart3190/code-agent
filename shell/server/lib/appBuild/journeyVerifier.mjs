@@ -1232,6 +1232,19 @@ async function runStep(page, step, {
   authState = { accounts: [], active: null }, allowEstablishedState = false,
 }) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
+  // NEVER JUDGE A SCREEN THAT IS STILL LOADING.
+  //
+  // This waited for the active surface after NAVIGATION only, so a surface that resolves its own
+  // state asynchronously — an auth form that checks the session before rendering its fields — was
+  // driven mid-load. Across one 24-round production build the same first step failed three times
+  // with "Authentication screen state: loading", "Authentication screen state: error" and "the
+  // account form did not expose email and password controls", while other rounds drove it fine.
+  // A third of the build's repair allowance was spent chasing a race, and because the defect
+  // signature changed each time the progress check read it as movement and kept going.
+  //
+  // Bounded and conditional: it only waits while a loading indicator is actually visible, and it
+  // gets a fraction of the step's own budget so a permanently-stuck spinner cannot eat the step.
+  await waitForActiveSurface(page, 5_000);
   const action = String(step.action || "");
   const expect = String(step.expect || "");
   let drove = false;
