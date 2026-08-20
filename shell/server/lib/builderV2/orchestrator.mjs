@@ -930,6 +930,7 @@ export function createOrchestrator({
         let repairExhausted = false;
         let repairLimit = null;
         let repairProgressStop = null;
+        let repairStopReason = null;
         let budgetExhausted = false;
 
         // ── THE REPAIR TIER, FOR EVERY CONTRACTED JOURNEY ───────────────────────────────────────
@@ -948,9 +949,22 @@ export function createOrchestrator({
         // budget on genuinely DIFFERENT attempts is the point; spending it on identical ones is
         // what this guards against.
         const REPAIR_STRATEGIES = ["scoped", "unscoped", "regenerate"];
+        // THE ALLOWANCE IS ONE POOL AND THE CORE MUST NOT DRINK IT DRY.
+        //
+        // The database counts repair DISPATCHES per build, not rounds, and a single round can
+        // spend several. On 2026-08-20 the core tier consumed all ten — 17.1 credits — went green,
+        // and then all six secondary journeys failed on one dispatch each with nothing left to
+        // repair them. The core gates everything so it keeps the larger share, but every
+        // contracted journey is guaranteed part of what remains.
+        const secondaryCount = secondaryJourneys.length;
+        const coreRepairRounds = secondaryCount
+          ? Math.max(1, Math.ceil(maxRepairs * 0.4)) : maxRepairs;
+        const shareForRemaining = (journeysLeft) => Math.max(1,
+          Math.floor((maxRepairs - repairsAttempted) / Math.max(1, journeysLeft)));
         async function repairUntilGreen({
           label, journeys: repairJourneys, tree: startTree, snapshot, verdicts, defects,
           eligibility: startEligibility, backendRowFailures: startRows = [], advisory = [], evaluate,
+          maxRounds = maxRepairs,
         }) {
           let currentTree = startTree;
           let currentSnapshot = snapshot;
@@ -964,14 +978,26 @@ export function createOrchestrator({
           let limit = null;
           let progressStop = null;
           let budgetOut = false;
+          // WHY THE TIER STOPPED, decided where it actually stopped rather than re-derived from
+          // counters afterwards. "used its reserved share" and "ran out of ideas" are different
+          // outcomes and only one of them is a platform problem.
+          const stopReasonNow = () => {
+            if (currentEligibility.eligible) return null;
+            if (budgetOut) return "approved_credits_exhausted";
+            if (exhausted) return "repair_allowance_exhausted";
+            if (!actionableDefects(currentDefects).length) return "no_actionable_defect";
+            if (strategy >= REPAIR_STRATEGIES.length) return "repair_strategies_exhausted";
+            if (rounds >= maxRounds) return "repair_share_exhausted";
+            return "repair_stopped_early";
+          };
           const done = () => ({
             tree: currentTree, snapshot: currentSnapshot, verdicts: currentVerdicts,
             defects: currentDefects, eligibility: currentEligibility, backendRowFailures: rows,
             rounds, exhausted, repairLimit: limit, progressStop, budgetExhausted: budgetOut,
-            verifierBlock: null,
+            stopReason: stopReasonNow(), verifierBlock: null,
           });
 
-          while (!currentEligibility.eligible && rounds < maxRepairs && strategy < REPAIR_STRATEGIES.length) {
+          while (!currentEligibility.eligible && rounds < maxRounds && strategy < REPAIR_STRATEGIES.length) {
             const actionable = actionableDefects(currentDefects);
             if (!actionable.length) break; // nothing an application patch can answer
             const evidence = browserRepairEvidence({
@@ -991,7 +1017,7 @@ export function createOrchestrator({
               ? [...new Set(actionable.flatMap((defect) => defect.modules))].slice(0, 6) : [];
             rounds += 1;
             await setState(`${label}:${rounds}`);
-            log(`${label} ${rounds}/${maxRepairs} [${mode}]: ${actionable.length} typed defect(s) `
+            log(`${label} ${rounds}/${maxRounds} [${mode}]: ${actionable.length} typed defect(s) `
               + `[${[...new Set(actionable.map((defect) => defect.defectClass))].join(", ")}]`
               + (boundary ? ` scoped to [${boundary.allowedFiles.join(", ")}]` : "")
               + (regenerate.length ? ` regenerating [${regenerate.join(", ")}]` : ""));
@@ -1121,6 +1147,7 @@ export function createOrchestrator({
           label: "repair", journeys: essentialJourneys, tree, snapshot: workingSnapshot,
           verdicts: coreVerdicts, defects: coreDefects, eligibility,
           backendRowFailures, advisory: coreAdvisory,
+          maxRounds: coreRepairRounds,
           evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
             journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
             blockingErrors: nextVerdicts.blockingErrors }),
@@ -1137,6 +1164,7 @@ export function createOrchestrator({
         repairExhausted = repairExhausted || coreRepair.exhausted;
         repairLimit = coreRepair.repairLimit || repairLimit;
         repairProgressStop = coreRepair.progressStop || repairProgressStop;
+        repairStopReason = coreRepair.stopReason || repairStopReason;
         budgetExhausted = budgetExhausted || coreRepair.budgetExhausted;
         if (!eligibility.eligible) return finish("blocked", {
           error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
@@ -1149,9 +1177,7 @@ export function createOrchestrator({
           // repair strategy was spent while credits remained. Those are different problems and a
           // build that stops for the second reason with budget left is a platform defect.
           budgetExhausted,
-          stopReason: budgetExhausted ? "approved_credits_exhausted"
-            : repairExhausted || repairsAttempted >= maxRepairs ? "repair_allowance_exhausted"
-            : repairProgressStop ? "repair_strategies_exhausted" : "no_actionable_defect",
+          stopReason: repairStopReason || (budgetExhausted ? "approved_credits_exhausted" : "no_actionable_defect"),
           // The typed defect set, so a resumed repair and a human post-mortem both start from
           // what the browser proved rather than from one summary sentence.
           defects: coreDefects,
@@ -1216,6 +1242,8 @@ export function createOrchestrator({
               snapshot: increment.snapshot, verdicts,
               defects: defectsFor(verdicts, []), eligibility: incrementEligibility,
               advisory: increment.advisory || [], evaluate: evaluateIncrement,
+              // Its share of what the core left, divided across the journeys still to come.
+              maxRounds: shareForRemaining(secondaryJourneys.length - shipped.length - pendingIncrements.length),
             });
             if (incrementRepair.verifierBlock) return incrementRepair.verifierBlock;
             incrementTree = incrementRepair.tree;
@@ -1226,6 +1254,7 @@ export function createOrchestrator({
             repairExhausted = repairExhausted || incrementRepair.exhausted;
             repairLimit = incrementRepair.repairLimit || repairLimit;
             budgetExhausted = budgetExhausted || incrementRepair.budgetExhausted;
+            repairStopReason = incrementRepair.stopReason || repairStopReason;
           }
           const passed = increment.ok && incrementEligibility.eligible;
           if (!passed) {
@@ -1270,9 +1299,7 @@ export function createOrchestrator({
           repairRounds: repairsAttempted,
           repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
           repairLimit, budgetExhausted,
-          stopReason: budgetExhausted ? "approved_credits_exhausted"
-            : repairExhausted || repairsAttempted >= maxRepairs ? "repair_allowance_exhausted"
-            : "repair_strategies_exhausted",
+          stopReason: repairStopReason || (budgetExhausted ? "approved_credits_exhausted" : "repair_strategies_exhausted"),
           workingSnapshotId: workingSnapshot?.id || candidate.id, providerCalls,
         });
 

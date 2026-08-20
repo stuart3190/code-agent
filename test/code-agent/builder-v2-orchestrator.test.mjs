@@ -524,11 +524,16 @@ test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats 
   assert.equal(result.state, "blocked");
   // An unmoved round no longer ENDS the tier — it escalates to a different strategy, so the
   // approved allowance is spent on genuinely different attempts rather than surrendered.
-  assert.equal(repairCalls, 2, "both approved rounds are used, on different strategies");
-  assert.equal(result.repairRounds, 2);
+  //
+  // The core no longer takes the WHOLE pool either. This contract has two secondary journeys, so
+  // the core keeps its reserved share (ceil(2 * 0.4) = 1) and the rest stays available for them —
+  // the correction for a build that spent all ten rounds on the core and left six journeys with
+  // nothing.
+  assert.equal(repairCalls, 1, "the core takes its reserved share, not the whole allowance");
+  assert.equal(result.repairRounds, 1);
   assert.equal(result.repairProgressStop?.reason, "unchanged");
   assert.ok(["scoped", "unscoped"].includes(result.repairProgressStop?.strategy));
-  assert.equal(result.stopReason, "repair_allowance_exhausted");
+  assert.equal(result.stopReason, "repair_share_exhausted", "it stopped on its reserved share, not on running out of ideas");
   assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
 });
 

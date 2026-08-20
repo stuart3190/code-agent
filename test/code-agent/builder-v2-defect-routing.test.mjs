@@ -23,7 +23,7 @@ import {
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { deriveVerificationManifest, controlIdFor, actionIdFor }
   from "../../shell/server/lib/builderV2/verificationManifest.mjs";
-import { repairFailureOwnedPaths } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import { causalRepairProblems, repairFailureOwnedPaths } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { validateModulePatchScope } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -544,4 +544,56 @@ test("a repeated no-op names the operation and escalates the file to a whole-fil
   // …and by the second identical no-op the file is queued for a whole-file re-emit.
   const regenerating = seen.filter((input) => (input.regenerateFiles || []).includes("src/routes/HomePage.jsx"));
   assert.ok(regenerating.length, "a repeatedly no-op'd file escalates to whole-file regeneration");
+});
+
+// ── unmet prerequisites ───────────────────────────────────────────────────────────────────────
+
+test("a journey blocked on a missing contracted control is REPAIRABLE, not context", () => {
+  // Production, 2026-08-20: six contracted journeys came back not_reached, every one of them for
+  // the same reason — "the journey's required starting state could not be established (new project
+  // control: no contracted control matched)". Filed as tier NONE they were unactionable, so the
+  // repair tier broke out before its first round: six journeys, one missing control, zero attempts.
+  const defects = verificationDefects({
+    contract: SPEC.contract, interactionContract: SPEC.interactionContract, manifest: MANIFEST,
+    journeyResults: { journeys: [{
+      id: "exports-and-print", title: "Export a plan", priority: "secondary", status: "not_reached",
+      owners: [JOURNEY_OWNER], steps: [],
+      setup: { ok: false, code: "journey_prerequisites_unmet",
+        failure: { control: "new project control", reason: "no contracted control matched" } },
+    }], blockingErrors: [] },
+  });
+
+  const prerequisite = defects.find((defect) => defect.prerequisite);
+  assert.ok(prerequisite, "the unmet prerequisite produces a defect at all");
+  assert.equal(prerequisite.code, "journey_prerequisite_control_missing");
+  assert.equal(prerequisite.defectClass, DEFECT_CLASS.INTERACTION);
+  assert.equal(prerequisite.tier, REPAIR_TIER.REPAIR, "it must reach the repair tier");
+  // Whether the control is absent or merely unaddressable is genuinely unsettled — but unknown
+  // ownership is not a reason to leave it unrepaired.
+  assert.equal(prerequisite.owner, DEFECT_OWNER.UNKNOWN);
+  assert.equal(prerequisite.uncertain, true);
+  assert.equal(prerequisite.control.logicalField, "new project control");
+  assert.ok(actionableDefects(defects).some((d) => d.prerequisite),
+    "and it must survive into the actionable set the repair tier reads");
+});
+
+test("the prerequisite brief names the control and survives the downstream-evidence filter", () => {
+  const defects = verificationDefects({
+    contract: SPEC.contract, interactionContract: SPEC.interactionContract, manifest: MANIFEST,
+    journeyResults: { journeys: [{
+      id: "exports-and-print", title: "Export a plan", priority: "secondary", status: "not_reached",
+      owners: [JOURNEY_OWNER], steps: [],
+      setup: { ok: false, code: "journey_prerequisites_unmet",
+        failure: { control: "new project control", reason: "no contracted control matched" } },
+    }], blockingErrors: [] },
+  });
+  const lines = defectEvidence(defects);
+  const brief = lines.find((line) => line.includes("new project control"));
+  assert.ok(brief, `the control is named in the brief: ${JSON.stringify(lines)}`);
+  // `isDownstreamFailureEvidence` drops anything saying the required starting state could not be
+  // established. Phrasing the brief that way would delete it before the model ever saw it.
+  assert.ok(!/required starting state|journey prerequisites/i.test(brief),
+    `the brief must not trip the downstream filter: ${brief}`);
+  assert.deepEqual(causalRepairProblems(SPEC.contract, lines).length > 0, true,
+    "the brief survives causal filtering");
 });

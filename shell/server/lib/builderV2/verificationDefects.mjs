@@ -183,17 +183,38 @@ export function verificationDefects({
     });
   }
 
-  // ── contract ────────────────────────────────────────────────────────────────────────────────
-  // A journey whose required starting state could not be established never tested the app. It is
-  // context for the run, never an actionable app defect, and it must not be briefed as one.
+  // ── unmet prerequisites ─────────────────────────────────────────────────────────────────────
+  //
+  // A journey whose required starting state could not be established never tested the app — and
+  // for a while this file called that "context, never an actionable app defect". That was wrong,
+  // and it cost a whole production build: six contracted journeys came back `not_reached`, every
+  // one of them for the same reason —
+  //
+  //     the journey's required starting state could not be established
+  //     (new project control: no contracted control matched)
+  //
+  // — and because the defect was filed as tier NONE, `actionableDefects` was empty and the repair
+  // tier broke out before its first round. Six journeys, one missing control, zero attempts to
+  // build it.
+  //
+  // A prerequisite that names a CONTROL the browser could not find is the same claim as any other
+  // undriveable contracted control: something the contract requires is not there, or is there and
+  // unaddressable. Which of those it is remains UNKNOWN — that part was right — but unknown
+  // ownership is not a reason to leave it unrepaired.
   for (const journey of verdicts.journeys || []) {
     if (journey.setup?.ok !== false) continue;
+    const named = journey.setup.failure?.control || null;
     defects.push({
-      code: journey.setup.code || "journey_prerequisites_unmet",
-      defectClass: DEFECT_CLASS.CONTRACT, owner: DEFECT_OWNER.UNKNOWN, tier: REPAIR_TIER.NONE,
-      uncertain: true, downstream: true,
+      code: named ? "journey_prerequisite_control_missing" : (journey.setup.code || "journey_prerequisites_unmet"),
+      // Named control → an interaction defect a patch can answer. Unnamed → genuinely nothing to
+      // aim at, so it stays context.
+      defectClass: named ? DEFECT_CLASS.INTERACTION : DEFECT_CLASS.CONTRACT,
+      owner: DEFECT_OWNER.UNKNOWN,
+      tier: named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE,
+      uncertain: true, downstream: !named,
+      prerequisite: true,
       journeyId: journey.id, stepIndex: null, action: null,
-      control: journey.setup.failure?.control ? { id: null, logicalField: journey.setup.failure.control } : null,
+      control: named ? { id: null, logicalField: named } : null,
       modules: unique((journey.owners || []).filter(generatedSource)),
       evidence: { observed: journey.setup.failure?.reason || "the journey's starting state could not be established" },
     });
@@ -333,6 +354,15 @@ export function defectEvidence(defects = []) {
     if (defect.journeyId && defect.action) {
       lines.push(`journey ${defect.journeyId} · step "${defect.action}" FAILED in a real browser: `
         + `${defect.evidence?.observed || "expected outcome never appeared"}`);
+    } else if (defect.prerequisite) {
+      // Deliberately NOT phrased as "the required starting state could not be established": that
+      // sentence is matched by the downstream-evidence filter and would be dropped from the brief
+      // before the model ever saw it. This is a missing control, and it is named as one.
+      lines.push(`journey ${defect.journeyId} could not START in a real browser: the contracted `
+        + `"${defect.control?.logicalField}" control was not found on the app's entry surface `
+        + `(${defect.evidence?.observed}). Every step of this journey is therefore unreachable. `
+        + "Build that control where a first-time visitor can reach it, bind it so the verifier can "
+        + "address it by its declared identity, and make the state it creates visible.");
     } else if (defect.control) {
       lines.push(`control ${defect.control.logicalField || defect.control.id} `
         + `(${defect.control.id || "no machine identity"}) failed its mechanics probe: `
