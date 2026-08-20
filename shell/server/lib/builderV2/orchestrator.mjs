@@ -931,6 +931,7 @@ export function createOrchestrator({
         let repairLimit = null;
         let repairProgressStop = null;
         let repairStopReason = null;
+        let repairRoundError = null;
         let budgetExhausted = false;
 
         // ── THE REPAIR TIER, FOR EVERY CONTRACTED JOURNEY ───────────────────────────────────────
@@ -978,6 +979,7 @@ export function createOrchestrator({
           let limit = null;
           let progressStop = null;
           let budgetOut = false;
+          let roundError = null;
           // WHY THE TIER STOPPED, decided where it actually stopped rather than re-derived from
           // counters afterwards. "used its reserved share" and "ran out of ideas" are different
           // outcomes and only one of them is a platform problem.
@@ -985,6 +987,7 @@ export function createOrchestrator({
             if (currentEligibility.eligible) return null;
             if (budgetOut) return "approved_credits_exhausted";
             if (exhausted) return "repair_allowance_exhausted";
+            if (roundError) return "repair_round_error";
             if (!actionableDefects(currentDefects).length) return "no_actionable_defect";
             if (strategy >= REPAIR_STRATEGIES.length) return "repair_strategies_exhausted";
             if (rounds >= maxRounds) return "repair_share_exhausted";
@@ -993,7 +996,7 @@ export function createOrchestrator({
           const done = () => ({
             tree: currentTree, snapshot: currentSnapshot, verdicts: currentVerdicts,
             defects: currentDefects, eligibility: currentEligibility, backendRowFailures: rows,
-            rounds, exhausted, repairLimit: limit, progressStop, budgetExhausted: budgetOut,
+            rounds, exhausted, repairLimit: limit, progressStop, budgetExhausted: budgetOut, roundError,
             stopReason: stopReasonNow(), verifierBlock: null,
           });
 
@@ -1045,7 +1048,18 @@ export function createOrchestrator({
                 log(`${label}: approved credit ceiling reached after ${rounds} round(s); stopping with the retained checkpoint`);
                 break;
               }
-              throw error;
+              if (["cancelled", "AbortError"].includes(error?.code) || error?.name === "AbortError") throw error;
+              // A REPAIR ROUND IS NOT ALLOWED TO DESTROY THE BUILD IT WAS TRYING TO HELP.
+              //
+              // A scope naming a planned-but-unwritten module threw out of here and took a paid
+              // build to `failed` with 30 of 60 credits spent and a verified core checkpoint on
+              // disk that nobody could use. The tier is best-effort by nature: it ends, the reason
+              // is recorded and reported, and everything already proved green survives.
+              roundError = { round: rounds, message: String(error?.message || error).slice(0, 300),
+                code: error?.code || null };
+              log(`${label} round ${rounds} failed: ${roundError.message} — ending the tier and `
+                + "keeping the retained checkpoint");
+              break;
             }
             if (!repair.ok) break;
             currentTree = repair.tree;
@@ -1189,6 +1203,7 @@ export function createOrchestrator({
         repairLimit = coreRepair.repairLimit || repairLimit;
         repairProgressStop = coreRepair.progressStop || repairProgressStop;
         repairStopReason = coreRepair.stopReason || repairStopReason;
+        repairRoundError = coreRepair.roundError || repairRoundError;
         budgetExhausted = budgetExhausted || coreRepair.budgetExhausted;
         if (!eligibility.eligible) return finish("blocked", {
           error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
@@ -1197,6 +1212,7 @@ export function createOrchestrator({
           repairLimit,
           repairProgressStop,
           repairRounds: repairsAttempted,
+          repairRoundError,
           // WHY the tier stopped, in the customer's terms: the approved credits ran out, or every
           // repair strategy was spent while credits remained. Those are different problems and a
           // build that stops for the second reason with budget left is a platform defect.
@@ -1279,6 +1295,7 @@ export function createOrchestrator({
             repairLimit = incrementRepair.repairLimit || repairLimit;
             budgetExhausted = budgetExhausted || incrementRepair.budgetExhausted;
             repairStopReason = incrementRepair.stopReason || repairStopReason;
+            repairRoundError = incrementRepair.roundError || repairRoundError;
           }
           const passed = increment.ok && incrementEligibility.eligible;
           if (!passed) {
@@ -1321,6 +1338,7 @@ export function createOrchestrator({
           // report has to say what that tier did and why it stopped. A build that ends here with
           // budget remaining and strategies unspent is a platform defect, not a customer outcome.
           repairRounds: repairsAttempted,
+          repairRoundError,
           repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
           repairLimit, budgetExhausted,
           stopReason: repairStopReason || (budgetExhausted ? "approved_credits_exhausted" : "repair_strategies_exhausted"),

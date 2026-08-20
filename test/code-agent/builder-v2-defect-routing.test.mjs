@@ -23,7 +23,7 @@ import {
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { deriveVerificationManifest, controlIdFor, actionIdFor }
   from "../../shell/server/lib/builderV2/verificationManifest.mjs";
-import { causalRepairProblems, repairFailureOwnedPaths } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import { causalRepairProblems, renderPrecompileRepairContext, repairFailureOwnedPaths } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { validateModulePatchScope } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -596,4 +596,33 @@ test("the prerequisite brief names the control and survives the downstream-evide
     `the brief must not trip the downstream filter: ${brief}`);
   assert.deepEqual(causalRepairProblems(SPEC.contract, lines).length > 0, true,
     "the brief survives causal filtering");
+});
+
+// ── a repair round must not be able to destroy the build ──────────────────────────────────────
+
+test("a scope naming a planned-but-unwritten module offers a stub instead of throwing", () => {
+  // This threw on src/components/create-auto-layout/ControlColumn.jsx and took a paid build to
+  // `failed` with 30 of 60 credits spent — a module that was planned, never written, and quite
+  // possibly the thing the repair was being asked to create.
+  const tree = { "src/App.jsx": "export default function App() { return null; }" };
+  const rendered = renderPrecompileRepairContext(tree, {
+    repairScope: { kind: "compile", files: ["src/components/Missing.jsx"], instruction: "fix it" },
+  });
+  assert.match(rendered, /REQUIRED PLANNED MODULE IS MISSING/);
+  assert.ok(rendered.includes("src/components/Missing.jsx"), "the missing module is still named");
+});
+
+test("a repair round that throws ends the tier and keeps everything already verified", async () => {
+  const h = harness({
+    browser: () => failing(),
+    repairPatches: () => { throw new Error("pre-compile repair source is missing: src/x.jsx"); },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 3 });
+
+  // BLOCKED, not FAILED: the verified checkpoint survives and the reason is reported.
+  assert.equal(result.state, "blocked");
+  assert.equal(result.stopReason, "repair_round_error");
+  assert.ok(result.repairRoundError, "the error is reported rather than swallowed");
+  assert.match(result.repairRoundError.message, /pre-compile repair source is missing/);
+  assert.ok(result.workingSnapshotId, "the retained checkpoint is still usable");
 });

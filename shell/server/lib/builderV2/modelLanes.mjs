@@ -143,17 +143,25 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
   const interfaces = [...new Set([
     ...(repairScope?.adapterInterfaces || []), ...(repairScope?.capabilityPaths || []),
   ])].filter((path) => !files.includes(path)).sort();
+  // A SCOPE MAY NAME A MODULE THAT WAS PLANNED AND NEVER WRITTEN, and that is not a reason to kill
+  // a build. This threw on `src/components/create-auto-layout/ControlColumn.jsx` after 30 of 60
+  // credits: the module was in the plan, the model had never created it, and creating it was quite
+  // possibly the repair being asked for. A missing file here costs one wasted instruction; throwing
+  // costs the whole run and everything already verified in it.
+  //
+  // So the file is offered as a stub the model is told to create, for every scope kind. The list
+  // below now only decides whether that substitution is EXPECTED or worth reporting as a surprise.
   const mayCreateMissing = ["module_contract", "runtime_dependency", "imports", "structural_modularity", "headroom_continuation"]
     .includes(repairScope?.kind);
-  for (const path of files) {
-    if (typeof tree?.[path] !== "string" && !mayCreateMissing) {
-      throw new Error(`pre-compile repair source is missing: ${path}`);
+  const missing = files.filter((path) => typeof tree?.[path] !== "string");
+  if (missing.length) {
+    if (!mayCreateMissing) {
+      console.warn(`[builder-v2] ${repairScope?.kind || "repair"} scope names ${missing.length} module(s) `
+        + `that do not exist yet; offering them as create-me stubs: ${missing.join(", ")}`);
     }
-  }
-  if (mayCreateMissing && files.some((path) => typeof tree?.[path] !== "string")) {
     tree = { ...tree };
-    for (const path of files) {
-      if (typeof tree[path] !== "string") tree[path] = "// REQUIRED PLANNED MODULE IS MISSING; create it with newFile";
+    for (const path of missing) {
+      tree[path] = "// REQUIRED PLANNED MODULE IS MISSING; create it with newFile";
     }
   }
   const graph = memoryGraph("ctx", "ctx", indexTree(tree));
