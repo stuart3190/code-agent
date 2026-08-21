@@ -840,6 +840,26 @@ export function createOrchestrator({
           await events.checkpoint?.({ owner, projectId, buildId, snapshot: qualifiedCandidate,
             tree: gate.tree, reason: `candidate:${step}:${attempt}:corrected`, promotable: false });
         }
+        if (retainedPartial && step === "repair") {
+          // A browser-informed repair is not complete merely because its accepted siblings still
+          // compile. The rejected operations were selected to fix observed customer evidence; an
+          // early browser rerun spends the one repair slot before those causal edits receive their
+          // separate deterministic correction allowance. Core generation may accept a runnable
+          // subset, but a partial repair must finish the refused work before paid re-verification.
+          if (!scheduleCorrectionRetry()) {
+            return failure("the repair remained partially rejected after the correction allowance", {
+              problems: retainedPatchRejections.map((row) => row.reason),
+            });
+          }
+          latestCandidate = qualifiedCandidate;
+          working = await snapshotStore.materialize(owner, qualifiedCandidate.id);
+          rejections = [...retainedPatchRejections];
+          attemptLedger.push({ attempt, dispatch: dispatchStep, class: "partial_repair_correction",
+            substantive: true, rejected: retainedPatchRejections.length, retainedFiles: filesChanged });
+          log(`${step}: retained ${filesChanged.length} clean file(s), but ${retainedPatchRejections.length} `
+            + "browser-repair operation(s) were rejected; finishing them through correction allowance before re-verification");
+          continue;
+        }
         return { ok: true, tree: gate.tree, snapshot: qualifiedCandidate,
           candidateSnapshotId: latestCandidate.id, checkpointReason, repairUsed: !!repairScope,
           moduleCorrectionUsed, advisory, advisoryFindings: advisory, attempts, corrections };

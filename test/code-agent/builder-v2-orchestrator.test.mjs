@@ -368,6 +368,51 @@ test("a parser-rejected repair retries through correction allowance, not a secon
     "the correction receives the exact rejected patch evidence");
 });
 
+test("a partially applied browser repair finishes rejected causal edits before re-verification", async () => {
+  const cancellationCopy = "<p>A cancellation control is now offered after confirmed recovery.</p>";
+  const h = harness({
+    maxJourneyRepairs: 1,
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => [{
+        file: "src/routes/HomePage.jsx",
+        ops: [{ op: "append", content: "\n// harmless repair sibling\n" }],
+      }, {
+        file: "src/routes/BookPage.jsx",
+        ops: [{ op: "replace_exact", symbol: "<h1>Book a farm visit</h1>",
+          content: "<h1>Book a farm visit</h1><p>" }],
+      }],
+      correction: () => [{
+        file: "src/routes/BookPage.jsx",
+        ops: [{ op: "replace_exact", symbol: "<h1>Book a farm visit</h1>",
+          content: `<h1>Book a farm visit</h1>${cancellationCopy}` }],
+      }],
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys, tree }) => ({
+      journeys: journeys.map((journey) => ({
+        id: journey.id, title: journey.title, priority: journey.priority,
+        status: journey.id === "book-a-visit"
+          && !String(tree["src/routes/BookPage.jsx"] || "").includes(cancellationCopy) ? "fail" : "pass",
+        steps: journey.id === "book-a-visit" ? [{ action: "cancel the confirmed booking",
+          expect: "a cancellation control is offered", status: String(tree["src/routes/BookPage.jsx"] || "")
+            .includes(cancellationCopy) ? "pass" : "undriveable" }] : [],
+      })),
+    }),
+  });
+
+  const result = await h.orchestrator.runBuild({
+    owner: "o", projectId: "proj-partial-repair-correction", request: "booking site", maxRepairs: 1,
+  });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(h.patchCalls.filter((call) => call.step === "repair").length, 1,
+    "the browser evidence buys exactly one repair dispatch");
+  assert.equal(h.patchCalls.filter((call) => call.step === "correction").length, 1,
+    "rejected causal work finishes through deterministic correction before another browser run");
+  assert.equal(h.patchCalls.find((call) => call.step === "correction")?.rejections, 1);
+});
+
 test("WP8/C4 — a failing ESSENTIAL journey blocks: no snapshot, no green pointer, state blocked", async () => {
   const { orchestrator, snapshotStore } = harness({ failJourneys: ["book-a-visit"] });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
