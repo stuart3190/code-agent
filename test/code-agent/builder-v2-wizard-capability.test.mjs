@@ -13,12 +13,17 @@ test("wizard navigation, validation, progress and confirmation are deterministic
       : stepId === "details" && !values.email ? { email: "Email is required" } : {},
     onConfirm: async (values) => { confirmed.push(values); return { reference: "BK-TEST" }; },
   });
+  assert.deepEqual(
+    (({ stepId, step, currentStep, current }) => ({ stepId, step, currentStep, current }))(machine.getState()),
+    { stepId: "service", step: "service", currentStep: "service", current: "service" },
+  );
   assert.equal(machine.getState().progress, 1 / 3);
   assert.equal((await machine.next()).ok, false);
   assert.equal(machine.getState().status, WIZARD_STATUS.INVALID);
   await machine.select("service", "consultation");
   assert.equal((await machine.next()).ok, true);
   assert.equal(machine.getState().stepId, "details");
+  assert.equal(machine.getState().step, "details", "generated step fallbacks must follow navigation");
   await machine.setValue("email", "user@example.test");
   await machine.next();
   const result = await machine.confirm();

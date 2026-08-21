@@ -68,7 +68,12 @@ export function makeWizardMachine({
   let hydrationFlight = null;
 
   const snapshot = () => ({
-    ...clone(state), stepCount: ids.length,
+    ...clone(state),
+    // `stepId` is canonical. The aliases keep generated applications written against the
+    // common step/currentStep/current names reactive instead of silently pinning their UI to
+    // a fallback landing screen while the machine itself advances correctly.
+    step: state.stepId, currentStep: state.stepId, current: state.stepId,
+    stepCount: ids.length,
     isFirst: state.stepIndex === 0, isLast: state.stepIndex === ids.length - 1,
     progress: (state.stepIndex + 1) / ids.length,
     hydrated: hydration.hydrated, hydrating: hydration.hydrating, hydrationError: hydration.error,
