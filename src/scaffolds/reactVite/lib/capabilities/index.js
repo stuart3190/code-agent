@@ -25,4 +25,5 @@ export const CAPABILITY_VERSIONS = Object.freeze({
   booking: "1.0.0",
   wizard: "1.0.0",
   forms: "1.0.0",
+  "interaction-primitives": "1.0.0",
 });

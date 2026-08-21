@@ -106,6 +106,7 @@ const mutationOf = (kind) => {
 export function deriveVerificationManifest(spec) {
   const flows = spec?.interactionContract?.flows || [];
   const scenarios = spec?.interactionContract?.scenarios || {};
+  const capabilityGraph = spec?.capabilityGraph || spec?.contract?.capabilityGraph || null;
   const controls = [];
   const actions = [];
   const mapping = {};
@@ -185,7 +186,32 @@ export function deriveVerificationManifest(spec) {
     });
   }
 
-  return { version: 1, controls, actions, outcomes, mapping };
+  // Known behavior is verified from the same graph generation consumed. These assertions state
+  // the authoritative operation, owned state, durable mutation, and observation contract; the
+  // browser still proves that the composed capability is correctly integrated into the UI.
+  const capabilityAssertions = (capabilityGraph?.journeys || []).flatMap((journey) => (
+    journey.requiredNodeIds || []
+  ).map((nodeId) => {
+    const node = (capabilityGraph.nodes || []).find((candidate) => candidate.id === nodeId);
+    if (!node) return null;
+    return {
+      journeyId: journey.journeyId,
+      nodeId,
+      type: node.type,
+      operations: node.requiredOperations?.length ? node.requiredOperations : node.verificationSemantics?.actions || [],
+      stateChange: node.verificationSemantics?.stateChange || null,
+      durableMutation: node.verificationSemantics?.durableMutation === true,
+      observe: node.verificationSemantics?.observe || [],
+      interactions: (node.interactions || []).filter((id) => String(id).startsWith(`${journey.journeyId}:`)),
+      testContract: node.testContract || [],
+    };
+  }).filter(Boolean));
+
+  return {
+    version: 2,
+    capabilityGraphVersion: capabilityGraph?.version || null,
+    controls, actions, outcomes, capabilityAssertions, mapping,
+  };
 }
 
 /**
@@ -211,5 +237,11 @@ export function browserPlan(manifest) {
   };
   const controls = (manifest?.controls || []).map(strip);
   const actions = (manifest?.actions || []).map(strip);
-  return { version: manifest?.version || 1, controls, actions };
+  const assertions = (manifest?.capabilityAssertions || []).map((assertion) => ({
+    journey: journeyKey(assertion.journeyId),
+    node: controlIdFor(assertion.nodeId, assertion.type === "custom_behavior" ? "cst" : "cap"),
+    durableMutation: assertion.durableMutation,
+    interactions: assertion.interactions,
+  }));
+  return { version: manifest?.version || 1, controls, actions, assertions };
 }

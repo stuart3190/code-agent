@@ -24,6 +24,8 @@ import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } fro
 import {
   moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
 } from "./moduleContracts.mjs";
+import { capabilityCompositionBrief } from "./capabilityComposer.mjs";
+import { scopeCapabilityGraph } from "./capabilityGraph.mjs";
 import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
@@ -360,6 +362,7 @@ export function renderPatchPrompt({
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
   repairScope = null, moduleCorrectionScope = null, headroomScope = null, repairBoundary = null,
   regenerateFiles = [], advisory = [],
+  capabilityGraph = contract?.capabilityGraph || null, compositionPlan = null,
 }) {
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
@@ -389,12 +392,15 @@ export function renderPatchPrompt({
     ...scopedOperations.map((operation) => operation.entity).filter(Boolean),
     ...(step === "core" ? tiers.essential.entities : []),
   ]);
+  const scopedCapabilityGraph = capabilityGraph
+    ? scopeCapabilityGraph(capabilityGraph, scopedJourneys) : null;
   const scopedContract = {
     ...contract,
     journeys: scopedJourneys,
     operations: scopedOperations,
     entities: (contract.entities || []).filter((entity) => scopedEntityNames.has(entity.name)),
     dependencyPlan: scopeDependencyPlan(contract.dependencyPlan, scopedJourneys),
+    capabilityGraph: scopedCapabilityGraph,
   };
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
   const scopedInteractions = scopeInteractionContract(contract.interactionContract, scopedJourneys);
@@ -489,12 +495,20 @@ export function renderPatchPrompt({
     headroomScope
       ? "CAPABILITY REQUIREMENTS: the focused per-module summary below is the dispatch brief; full bindings remain machine-enforced after the patch."
       : capabilityRequirementsBrief(scopedContract),
+    scopedCapabilityGraph ? [
+      "CAPABILITY GRAPH (authoritative behavior/state/data-flow ownership for this scope):",
+      JSON.stringify(scopedCapabilityGraph, null, 2),
+    ].join("\n") : "CAPABILITY GRAPH: none.",
+    scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
     dependencyPlanBrief(scopedContract.dependencyPlan),
     promptModulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
       + " application is never rejected for naming a file differently):",
       ...promptModulePlan.map((module) => {
         const ownership = module.stateOwnership || {};
+        if (module.providedBy === "capability_composer") {
+          return `- ${module.path}: PROVIDED AND PROTECTED ${module.role}; import its exported interface; never patch, wrap, or reimplement it.`;
+        }
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
           + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `
           + `approvedPersistence=${ownership.approvedPersistence || "none"}; durableStateOwner=${ownership.durableStateOwner || "self/none"}`;
@@ -1168,7 +1182,7 @@ export function createModelLanes({
     patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
       headroomScope: requestedHeadroomScope = null, repairBoundary = null,
-      regenerateFiles = [], advisory = [], signal = null }) => {
+      regenerateFiles = [], advisory = [], spec = null, signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
         ? null : await loadKnowledge(owner, projectId);
       const fullSystemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
@@ -1203,6 +1217,8 @@ export function createModelLanes({
             step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
             repairScope, moduleCorrectionScope, headroomScope, repairBoundary, regenerateFiles, advisory,
+            capabilityGraph: spec?.capabilityGraph || contract?.capabilityGraph || null,
+            compositionPlan: spec?.compositionPlan || null,
             onRetrieval: (trace) => { retrievalTrace = trace; },
           });
           if (retrievalTrace && recordRetrieval) {

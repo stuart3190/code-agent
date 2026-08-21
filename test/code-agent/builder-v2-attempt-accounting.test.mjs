@@ -255,3 +255,53 @@ test("a retained partial candidate is gated immediately instead of returning sta
   assert.equal(dispatches, 1, "a sound retained tree does not spend another model attempt on a rejected sibling");
   assert.ok(result.snapshotId, "the gated partial tree becomes an immutable green checkpoint");
 });
+
+test("a rejected scoped correction keeps the retained candidate it was correcting", async () => {
+  const contract = {
+    summary: "A public information page", projectType: "informational", version: 1,
+    auth: { required: false }, entities: [], operations: [], deferred: [], imageIntents: [], integrations: [],
+    routes: [{ path: "/", name: "Home" }], acceptance: [], states: [],
+    journeys: [{ id: "view-information", title: "A visitor views the information", priority: "primary",
+      stage: "primary_journey", steps: [{ action: "open the application", target: "/",
+        expect: "the public information is visible" }] }],
+  };
+  const seen = [];
+  const orchestrator = createOrchestrator({
+    contractFn: async () => contract,
+    patchesFn: async (ctx) => {
+      seen.push({ step: ctx.step, hasFeature: Boolean(ctx.tree["src/components/Feature.jsx"]),
+        hasData: Boolean(ctx.tree["src/data/feature.js"]) });
+      if (seen.length === 1) return [{
+        newFile: "src/components/Feature.jsx",
+        content: 'import { message } from "../data/feature.js";\nexport default function Feature() { return <h1>{message}</h1>; }\n',
+      }, {
+        file: "src/routes/HomePage.jsx",
+        ops: [{ op: "replace_symbol", symbol: "HomePage", content: 'import Feature from "../components/Feature.jsx";\nexport default function HomePage() { return <main><Feature /></main>; }' }],
+      }, {
+        newFile: "src/data/feature.js",
+        content: "export const message = {\n",
+      }];
+      if (seen.length === 2) return [{
+        replaceFile: "src/components/Feature.jsx",
+        content: "export default function Feature() { return <h1>\n",
+      }];
+      assert.equal(ctx.step, "correction");
+      assert.equal(ctx.tree["src/components/Feature.jsx"]?.includes("../data/feature.js"), true,
+        "the second correction still sees the clean file retained before the rejected correction");
+      return [{ replaceFile: "src/components/Feature.jsx",
+        content: 'export default function Feature() { return <h1>the public information is visible</h1>; }\n' }];
+    },
+    assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
+    snapshotStore: createSnapshotStore(), buildStore: memoryBuildStore(),
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({ id: journey.id, status: "pass" })) }),
+    baseTree: () => clone(fromScaffold(REACT_VITE)), baseline: REACT_VITE,
+    compile: async (tree) => tree["src/components/Feature.jsx"]?.includes("the public information is visible")
+      ? { ok: true }
+      : { ok: false, stderr: 'src/components/Feature.jsx: Could not resolve "../data/feature.js"' },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "retained-correction", request: "information" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.deepEqual(seen.map((row) => row.step), ["core", "correction", "correction"]);
+  assert.equal(seen[1].hasFeature, true);
+  assert.equal(seen[2].hasFeature, true);
+});

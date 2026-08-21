@@ -34,6 +34,7 @@ import {
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
+import { composeCapabilityFoundation } from "./capabilityComposer.mjs";
 
 /**
  * Keep the complete contract needed to reconstruct an isolated journey separate from the
@@ -319,6 +320,10 @@ export function createOrchestrator({
     return refreshed;
   };
 
+  const refreshDeterministicFoundation = (tree, spec) => composeCapabilityFoundation(
+    refreshPlatformRuntime(tree), spec.capabilityGraph,
+  ).tree;
+
   async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal }) {
     abortIfRequested(signal);
     const graph = memoryGraph(owner, projectId, indexTree(tree));
@@ -458,6 +463,7 @@ export function createOrchestrator({
         || headroomScope?.logicalStep
         || (scopeRejectionCorrection ? "correction" : null)
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
+      const correctionDispatch = dispatchStep === "correction";
       retryAsCorrection = false;
       const regenerateFiles = [...new Set([
         ...forcedRegenerateFiles,
@@ -489,7 +495,10 @@ export function createOrchestrator({
           repairScope = null;
           contractCorrectionScope = null;
           repairBoundary = null;
-          working = originalTree;
+          // A rejected correction changes nothing. Keep the immutable candidate it was correcting;
+          // resetting to the increment base discards clean sibling files and makes the next model
+          // round repair paths that no longer exist.
+          working = correctionDispatch && latestCandidate ? working : originalTree;
           // The browser-informed dispatch has already spent its one repair slot. A deterministic
           // scope rejection is re-briefed through the separate correction lane, so the model gets
           // the exact rejection without consuming another journey's repair share.
@@ -598,11 +607,11 @@ export function createOrchestrator({
             class: `${classes[0] || "patch_not_applicable"}_partial_candidate`, substantive: true,
             rejected: applied.rejected.length, retainedFiles: filesChanged });
         } else {
-          working = originalTree;
+          working = correctionDispatch && latestCandidate ? working : originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
-          if (step === "repair") {
+          if (step === "repair" || correctionDispatch) {
             if (!scheduleCorrectionRetry()) {
-              return failure("the repair patch remained invalid after the correction allowance", {
+              return failure(`${step === "repair" ? "the repair" : "the candidate correction"} patch remained invalid after the correction allowance`, {
                 problems: applied.rejected.map((row) => row.reason),
               });
             }
@@ -633,11 +642,11 @@ export function createOrchestrator({
             repairScope = null;
             contractCorrectionScope = null;
             repairBoundary = null;
-            working = originalTree;
+            working = correctionDispatch && latestCandidate ? working : originalTree;
           }
-          if (step === "repair") {
+          if (step === "repair" || correctionDispatch) {
             if (!scheduleCorrectionRetry()) {
-              return failure("the repair kept exceeding its write boundary after the correction allowance", {
+              return failure(`${step === "repair" ? "the repair" : "the candidate correction"} kept exceeding its write boundary after the correction allowance`, {
                 problems: rejections.map((row) => row.reason),
               });
             }
@@ -687,10 +696,10 @@ export function createOrchestrator({
         // content does not need another symbol operation on it; the second identical no-op
         // promotes that file to a whole-file re-emit, exactly as a repeated rejection does.
         for (const file of noOpTargets) rejectionHistory.push({ signature: `${file}:noop` });
-        working = internalHeadroomSplit ? working : originalTree;
+        working = internalHeadroomSplit || (correctionDispatch && latestCandidate) ? working : originalTree;
         noOps += 1;
-        if (step === "repair" && !scheduleCorrectionRetry()) {
-          return failure("the repair produced no applicable change after the correction allowance", {
+        if ((step === "repair" || correctionDispatch) && !scheduleCorrectionRetry()) {
+          return failure(`${step === "repair" ? "the repair" : "the candidate correction"} produced no applicable change after the correction allowance`, {
             code: "no_substantive_repair",
           });
         }
@@ -735,6 +744,7 @@ export function createOrchestrator({
       // (see validationSeverity) can stop a candidate that is otherwise runnable.
       const conformance = validateModuleConformance(applied.tree, {
         contract, modulePlan, moduleContracts, interactionContract: scopedInteractionContract, bindings: scopedBindings,
+        capabilityGraph: scoped.capabilityGraph,
       });
       const persistence = lintDurablePersistence(applied.tree, { contract, journeys, modulePlan });
       const persistenceVerdict = partitionFindings(persistence.findings || []);
@@ -889,7 +899,8 @@ export function createOrchestrator({
         attemptLedger.push({ attempt, dispatch: dispatchStep, class: `${gateScope.kind}_candidate_correction`,
           substantive: true, problems: gateProblems.length, retainedFiles: gateScope.files });
         log(`${step}: retained candidate ${latestCandidate.id}; bounded ${gateScope.kind} failure will correct only `
-          + `[${gateScope.files.join(", ")}] (${corrections}/${maxCandidateCorrections} corrections)`);
+          + `[${gateScope.files.join(", ")}] (${corrections}/${maxCandidateCorrections} corrections): `
+          + gateProblems.slice(0, 3).join("; "));
         continue;
       }
       // No honest bounded repair scope exists. This is a real full-generation failure.
@@ -1008,7 +1019,7 @@ export function createOrchestrator({
 
         // 3. CORE: the essential set only.
         await setState("core");
-        let tree = baseTree();
+        let tree = composeCapabilityFoundation(baseTree(), spec.capabilityGraph).tree;
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         const core = await buildIncrement({
           step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
@@ -1600,8 +1611,8 @@ export function createOrchestrator({
         abortIfRequested(signal);
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
-        source.tree = refreshPlatformRuntime(source.tree);
         const spec = deriveBuildSpec(contract, { userCritical });
+        source.tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
         const { tiers, bindings } = spec;
         const attemptPolicy = generationPolicyFor(sourceBuild?.profile || "simple", {
@@ -1747,13 +1758,14 @@ export function createOrchestrator({
         abortIfRequested(signal);
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
-        const tree = refreshPlatformRuntime(source.tree);
         const spec = deriveBuildSpec(contract, { userCritical });
+        const tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
         const journeys = contract.journeys || [];
         const conformance = validateModuleConformance(tree, {
           contract, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
           interactionContract: spec.interactionContract, bindings: spec.bindings,
+          capabilityGraph: spec.capabilityGraph,
         });
         const persistence = partitionFindings(lintDurablePersistence(tree, {
           contract, journeys, modulePlan: spec.modulePlan,
@@ -1829,7 +1841,7 @@ export function createOrchestrator({
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption
         // gains new reliable behaviours without asking a model to recreate protected code.
-        ctx.tree = refreshPlatformRuntime(ctx.tree);
+        ctx.tree = refreshDeterministicFoundation(ctx.tree, spec);
         const { tiers, bindings } = spec;
         const journeys = contract.journeys || [];
 

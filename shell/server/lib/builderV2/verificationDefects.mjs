@@ -30,6 +30,7 @@
 
 import { interactionFailureDiagnostics } from "./interactionContract.mjs";
 import { PROTECTED_PATHS } from "./patchEngine.mjs";
+import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityComposer.mjs";
 
 export const DEFECT_CLASS = Object.freeze({
   INTERACTION: "interaction",   // the browser could not operate a contracted control
@@ -110,9 +111,20 @@ function controlIdentity(manifest, flows, mechanicsId = null) {
  * owning modules and the flow's declared state owners — never a path scraped out of prose.
  */
 function modulesFor(diagnostic, journey) {
-  return unique([
+  const attributed = [
     ...(diagnostic?.stateOwners || []),
     ...(diagnostic?.responsibleModules || []),
+  ];
+  // A composed capability owns the state, but its implementation is deliberately not a repair
+  // address. Route integration/configuration corrections to the one bounded model-owned seam and
+  // retain the journey UI owner alongside it. This keeps the verifier's attribution useful
+  // without ever inviting a model to patch proven capability internals.
+  const capabilityConfiguration = attributed.some((path) => (
+    typeof path === "string" && path.startsWith(`${COMPOSED_ROOT}/`)
+  )) ? [CAPABILITY_CONFIGURATION_PATH] : [];
+  return unique([
+    ...attributed,
+    ...capabilityConfiguration,
     ...(journey?.owners || []),
   ].filter(generatedSource));
 }
@@ -392,7 +404,11 @@ export function defectEvidence(defects = []) {
       expectedStateAfter: defect.evidence?.expected || null,
       actualObservedState: defect.evidence?.observed || null,
       // Structured attribution. `repairFailureOwnedPaths` reads these two names.
-      stateOwners: defect.diagnostic?.stateOwners || defect.modules,
+      // Repair-addressable state owners. The raw diagnostic may name a protected composed
+      // capability; modulesFor has already translated that platform owner to its bounded
+      // configuration seam while retaining the journey UI owner.
+      stateOwners: defect.modules,
+      capabilityStateOwners: defect.diagnostic?.stateOwners || [],
       responsibleModules: defect.modules,
       expectedControls: defect.diagnostic?.expectedControls || [],
       renderedControlFacts: defect.diagnostic?.renderedControlFacts || [],

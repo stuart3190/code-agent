@@ -44,7 +44,9 @@ const CONTRACT = {
 const SPEC = deriveBuildSpec(CONTRACT);
 const MANIFEST = deriveVerificationManifest(SPEC);
 const JOURNEY_OWNER = "src/routes/Booking.jsx";
-const STATE_OWNER = "src/data/wizard.js";
+// The deterministic wizard owns the state now. Repairs are addressed to its bounded model-owned
+// configuration seam, never to the protected capability implementation.
+const STATE_OWNER = "src/extensions/capabilityConfiguration.js";
 const UNRELATED = "src/routes/Marketing.jsx";
 
 /**

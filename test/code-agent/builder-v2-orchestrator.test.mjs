@@ -470,6 +470,7 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
 });
 
 test("WP8 — stop rule: the same defect surviving a repair round blocks instead of burning attempts", async () => {
+  const unsafeBookings = (attempt) => `// round ${attempt}\nimport { db } from "../lib/backend/index.js";\nimport { makeBookingSystem, ensureVisitorSession } from "../lib/capabilities/index.js";\nconst booking = makeBookingSystem({ entity: "booking" });\nexport const create = async (draft) => { await ensureVisitorSession(); return db.entity("booking").create(draft); };\nexport const viaCapability = (draft) => booking.createBooking(draft);\n`;
   const { orchestrator } = harness({
     contract: {
       summary: "deterministic stop-rule fixture", entities: [{ name: "booking" }], operations: [],
@@ -486,13 +487,17 @@ test("WP8 — stop rule: the same defect surviving a repair round blocks instead
       core: ({ attempt }) => [
         {
           newFile: "src/data/bookings.js",
-          content: `// round ${attempt}\nimport { db } from "../lib/backend/index.js";\nimport { makeBookingSystem, ensureVisitorSession } from "../lib/capabilities/index.js";\nconst booking = makeBookingSystem({ entity: "booking" });\nexport const create = async (draft) => { await ensureVisitorSession(); return db.entity("booking").create(draft); };\nexport const viaCapability = (draft) => booking.createBooking(draft);\n`,
+          content: unsafeBookings(attempt),
         },
         {
           newFile: "src/routes/BookPage.jsx",
           content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\nimport { create } from \"../data/bookings.js\";\n\nexport default function BookPage() {\n  return <main><h1>zzqx-final-outcome</h1><button onClick={() => create({ date: \"2026-08-10\" })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
         },
       ],
+      correction: ({ attempt }) => [{
+        replaceFile: "src/data/bookings.js",
+        content: unsafeBookings(attempt),
+      }],
     },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
@@ -604,7 +609,10 @@ export default function BookPage() {
       correction: ({ problems, moduleCorrectionScope: scope }) => {
         taught.push(...(problems || []));
         assert.deepEqual(scope.allowedFiles, ["src/routes/BookPage.jsx"]);
-        return [{ replaceFile: "src/routes/BookPage.jsx", content: BAD_CONTACT_PATCH[0].content.replace("contactForm.submit(", "contactForm.submitContact(") }];
+        return [{ replaceFile: "src/routes/BookPage.jsx", content: BAD_CONTACT_PATCH[0].content
+          .replace("import React from \"react\";", "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";")
+          .replace("contactForm.submit(", "contactForm.submitContact(")
+          .replace("</main>", "<footer><a href=\"https://www.pexels.com\">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>") }];
       },
       "increment:newsletter-signup": () => NEWSLETTER_PATCH,
       "increment:browse-info": () => BROWSE_PATCH,

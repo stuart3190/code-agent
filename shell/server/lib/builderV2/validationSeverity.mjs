@@ -48,6 +48,7 @@ export const BLOCKING_CODES = Object.freeze({
   capability_method_unknown: "a method is called that the capability demonstrably does not export",
   unknown_capability_factory: "an unrecognised capability factory is bound",
   required_factory_missing: "a contract-required capability is absent from the whole tree",
+  capability_composition_invalid: "the canonical graph is missing a protected capability module or a declared custom extension interface",
 
   // ── platform ──
   runtime_configuration_invalid: "the generated runtime cannot reach its backend",
@@ -104,6 +105,7 @@ const UNDEMOTABLE = Object.freeze(new Set([
   "tree_integrity_invalid", "build_config_invalid", "source_parse_error",
   "scaffold_placeholder_unreplaced",
   "runtime_configuration_invalid",
+  "capability_composition_invalid",
   "required_runtime_dependency_missing", "required_runtime_capability_missing",
   "required_runtime_capability_incomplete", "dependency_manifest_invalid",
 ]));

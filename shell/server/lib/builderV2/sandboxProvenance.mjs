@@ -38,6 +38,11 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   // image disagreed about it, every contracted control would be addressed by an id the generated
   // app never wrote, and the skew guard would have called that pair compatible.
   "src/scaffolds/reactVite/lib/capabilities/react.js",
+  "src/scaffolds/reactVite/lib/capabilities/crud.js",
+  "src/scaffolds/reactVite/lib/capabilities/session.js",
+  "src/scaffolds/reactVite/lib/capabilities/roles.js",
+  "src/scaffolds/reactVite/lib/capabilities/booking.js",
+  "src/scaffolds/reactVite/lib/capabilities/forms.js",
   // Wizard mutations decide whether controlled values remain observable while durable persistence
   // is in flight. A stale image/scaffold pairing can therefore turn a driveable field into a red
   // journey even when the verifier itself is current.
@@ -47,6 +52,10 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   // the forward control produces apps the new verifier correctly calls undriveable.
   "src/scaffolds/reactVite/lib/capabilities/index.js",
   "shell/server/lib/builderV2/capabilityRegistry.mjs",
+  "shell/server/lib/builderV2/capabilityGraph.mjs",
+  "shell/server/lib/builderV2/capabilityComposer.mjs",
+  "shell/server/lib/builderV2/buildSpec.mjs",
+  "shell/server/lib/builderV2/moduleContracts.mjs",
   // WHICH controls a step drives is as verdict-deciding as how they are driven. A paid run failed
   // because the derivation contracted a control the step only referenced; fixing it moved no hash
   // in this list, so an image carrying the old derivation would have been reported compatible with

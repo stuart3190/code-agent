@@ -12,6 +12,7 @@ import { partitionFindings } from "./validationSeverity.mjs";
 import { lintControlBindings } from "./bindingLint.mjs";
 import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
+import { capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
 const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
@@ -56,6 +57,7 @@ function ownershipRules(bindings) {
  */
 export function buildModuleGenerationContracts({
   contract = null, modulePlan = [], interactionContract = null, bindings = [], journeys = contract?.journeys || [],
+  capabilityGraph = contract?.capabilityGraph || null,
 } = {}) {
   const journeyIds = new Set((journeys || []).map((journey) => journey.id));
   const flows = (interactionContract?.flows || []).filter((flow) => journeyIds.has(flow.journeyId));
@@ -94,6 +96,8 @@ export function buildModuleGenerationContracts({
     return {
       path: planned.path,
       role: planned.role || "planned module",
+      providedBy: planned.providedBy || null,
+      protected: planned.protected === true,
       ownedJourneys: unique(assignedFlows.map((flow) => flow.journeyId)),
       requiredImports: unique(planned.requiredImports || []),
       requiredCapabilities,
@@ -280,8 +284,11 @@ function reportModule(reportByPath, path) {
  */
 export function validateModuleConformance(tree, {
   contract = null, modulePlan = [], moduleContracts = null, interactionContract = null, bindings = [],
+  capabilityGraph = contract?.capabilityGraph || null,
 } = {}) {
-  const contracts = moduleContracts || buildModuleGenerationContracts({ contract, modulePlan, interactionContract, bindings });
+  const contracts = moduleContracts || buildModuleGenerationContracts({
+    contract, modulePlan, interactionContract, bindings, capabilityGraph,
+  });
   const reports = new Map((contracts.specifications || []).map((spec) => [spec.path, {
     path: spec.path,
     requiredFacts: [
@@ -347,6 +354,15 @@ export function validateModuleConformance(tree, {
     // per method. Where a capability is instantiated is architecture preference — recorded as
     // placement advice, never a defect.
     for (const required of spec.requiredCapabilities) {
+      if (spec.providedBy === "capability_composer") {
+        report.satisfiedFacts.push(`factory:${required.factory}`);
+        for (const method of required.methods || []) {
+          report.satisfiedFacts.push(`bound:${required.factory}.${method.method}`);
+          if (method.invoked) report.satisfiedFacts.push(`invoked:${required.factory}.${method.method}`);
+          if (method.exported) report.satisfiedFacts.push(`exported:${required.factory}.${method.method}`);
+        }
+        continue;
+      }
       const facts = provenance.get(required.factory);
       const instances = (facts?.instances || []).filter((row) => row.module === spec.path);
       if (!instances.length) {
@@ -417,7 +433,11 @@ export function validateModuleConformance(tree, {
 
   // Preserve the registry's canonical factory-configuration checks. Per-module facts add
   // placement and reachability; they do not replace entity/persistence option validation.
-  const requiredVerdict = lintRequiredCapabilityBindings(tree, bindings);
+  const composed = new Set((capabilityGraph?.nodes || [])
+    .filter((node) => node.type === "deterministic_capability" && node.protected)
+    .map((node) => node.capabilityId));
+  const generatedBindings = (bindings || []).filter((binding) => !composed.has(binding.name));
+  const requiredVerdict = lintRequiredCapabilityBindings(tree, generatedBindings);
   for (const issue of requiredVerdict.issues || []) {
     const plannedModule = (contracts.specifications || []).find((spec) => spec.requiredCapabilities
       .some((required) => required.factory === issue.factory))?.path || null;
@@ -432,6 +452,24 @@ export function validateModuleConformance(tree, {
   // (The former sessionless_mutation dedupe is gone with the finding itself — session
   // establishment is a runtime invariant, not a generated-source obligation.)
   for (const issue of lintCapabilitySafety(tree, bindings).findings || []) add(issue);
+
+  // The composition contract is structural authority, not source inference: protected modules
+  // must exist and every explicitly custom node must expose its declared bounded interface.
+  if (capabilityGraph && typeof tree?.["src/lib/capabilities/composed/manifest.js"] === "string") {
+    const composition = validateCapabilityComposition(tree, capabilityGraph,
+      capabilityCompositionPlan(capabilityGraph));
+    for (const problem of composition.problems) {
+      const module = String(problem).match(/(?:missing:\s*|^)(src\/[^\s:]+)/)?.[1] || null;
+      add({
+        code: "capability_composition_invalid", module,
+        journeys: (capabilityGraph.journeys || [])
+          .filter((journey) => !module || (capabilityGraph.nodes || []).some((node) => (
+            node.extension?.module === module && node.journeys?.includes(journey.journeyId)
+          ))).map((journey) => journey.journeyId),
+        message: problem,
+      });
+    }
+  }
 
   // Is every contracted control ADDRESSABLE? Asked after emit and before the app is served, so a
   // hand-wired control is named here rather than discovered part-way through a paid journey.

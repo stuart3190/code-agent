@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   assertQueuedProviderSelection, journeyRequiresPersistentMutation, prepareBuilderV2PipelineAttempt,
+  verificationVisitorScopeForJourney,
 } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
 import { verificationExecutionContract } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { VERIFICATION_CACHE_VERSION } from "../../shell/server/lib/builderV2/verification.mjs";
@@ -16,6 +17,38 @@ test("V2 runtime distinguishes persistent journeys from read-only navigation", (
   assert.equal(journeyRequiresPersistentMutation({
     title: "Browse services", steps: [{ action: "Open pricing", expect: "Pricing is visible" }],
   }), false);
+});
+
+test("verification visitor identity follows independent and producer-consumer scenarios", () => {
+  const contract = { prerequisiteInteractionContract: {
+    scenarios: {
+      reserve: { role: "produces", lifecycle: "booking:booking", scenario: "booking:booking" },
+      recover: { role: "consumes", lifecycle: "booking:booking", scenario: "booking:booking" },
+      capacity: { role: "independent", scenario: "independent:capacity", startState: "fresh" },
+      contact: { role: "independent", scenario: "independent:contact", startState: "fresh" },
+    },
+    flows: [],
+  } };
+  const scope = (id, round = "round-1") => verificationVisitorScopeForJourney(round, { id }, contract);
+  assert.equal(scope("reserve"), scope("recover"),
+    "a consumer recovers the visitor that produced its durable record");
+  assert.notEqual(scope("capacity"), scope("reserve"),
+    "an independent journey cannot inherit a producer's terminal state");
+  assert.notEqual(scope("capacity"), scope("contact"),
+    "independent journeys cannot contaminate one another");
+  assert.notEqual(scope("reserve", "round-1"), scope("reserve", "round-2"),
+    "a later candidate cannot inherit a prior verification round");
+});
+
+test("historical contracts group only journeys with the same durable lifecycle", () => {
+  const contract = { prerequisiteInteractionContract: { flows: [
+    { journeyId: "create", durableLifecycle: "crud:lead" },
+    { journeyId: "update", durableLifecycle: "crud:lead" },
+    { journeyId: "browse" },
+  ] } };
+  const scope = (id) => verificationVisitorScopeForJourney("round", { id }, contract);
+  assert.equal(scope("create"), scope("update"));
+  assert.notEqual(scope("browse"), scope("create"));
 });
 
 test("V2 runtime requires app-scoped row evidence and persists it with cached verdicts", async () => {

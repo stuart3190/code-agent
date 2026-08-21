@@ -29,6 +29,7 @@
     "prove:billing": "node harness/proveBilling.mjs",
     "test:code-agent": "node ops/ensure-scaffold-deps.mjs && node --test test/code-agent/*.test.mjs",
     "test:bv2:qualification": "node ops/run-bv2-qualification.mjs",
+    "test:bv2:composition": "node ops/prove-bv2-capability-composition.mjs",
     "test:ui": "playwright test e2e/public-shell.spec.mjs e2e/chat-shell.spec.mjs e2e/theme-check.spec.mjs e2e/provider-settings.spec.mjs",
     "audit:remediation-baseline": "node ops/capture-remediation-baseline.mjs",
     "supabase:version": "supabase --version",

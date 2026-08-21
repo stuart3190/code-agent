@@ -7,7 +7,7 @@
 // functions and state enums only, no JSX, no styles — visual identity belongs to the design
 // system, which is how two sites sharing every capability still look nothing alike.
 
-export const CAPABILITIES = Object.freeze({
+const LEGACY_CAPABILITIES = Object.freeze({
   crud: {
     name: "crud",
     version: "1.0.0",
@@ -64,6 +64,98 @@ export const CAPABILITIES = Object.freeze({
     uiContract: ["idle", "invalid", "success", "duplicate"], upgradePolicy: "replace-on-iterate",
   },
 });
+
+const metadata = Object.freeze({
+  crud: {
+    supportedOperations: ["list", "get", "create", "update", "remove", "count", "subscribe"],
+    requiredInputs: { factory: ["entityType"], operations: { get: ["id"], create: ["values"], update: ["id", "partialValues"], remove: ["id"] } },
+    outputs: { records: "flat entity records", mutations: "persisted entity record or void" },
+    stateOwnership: { owns: "entity records", scope: "application and authenticated or visitor owner" },
+    persistenceSemantics: { durable: true, owner: "generated backend entity API", mergeUpdates: true, browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["create", "read", "update", "delete"], stateChange: "entity record mutation", durableMutation: true, observe: ["returned record", "reload or reopen read"] },
+    testContract: ["create", "read", "update", "delete"],
+  },
+  session: {
+    supportedOperations: ["ensure", "recover", "current", "signOut"],
+    requiredInputs: { factory: [], operations: {} }, outputs: { session: "authenticated user or app-scoped visitor", current: "user or null" },
+    stateOwnership: { owns: "authentication and session identity", scope: "browser and generated backend" },
+    persistenceSemantics: { durable: true, owner: "generated auth runtime", browserStorage: "runtime-owned only" },
+    dependencies: [], compatibleUiInteractionPrimitives: [],
+    verificationSemantics: { actions: ["establish", "recover", "signOut"], stateChange: "session identity", durableMutation: false, observe: ["authorized operation succeeds", "current user"] },
+    testContract: ["current", "ensure", "recover", "signOut"],
+  },
+  roles: {
+    supportedOperations: ["isOwner", "requireOwner"],
+    requiredInputs: { factory: [], operations: { isOwner: ["record", "user"], requireOwner: ["record", "user"] } },
+    outputs: { authorization: "boolean or authorized record" }, stateOwnership: { owns: "no state", scope: "record ownership decision" },
+    persistenceSemantics: { durable: false, owner: "RLS enforcement with a matching UI helper", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["action"],
+    verificationSemantics: { actions: ["authorize", "reject"], stateChange: "none", durableMutation: false, observe: ["allowed action", "permission error"] },
+    testContract: ["owner allowed", "non-owner rejected"],
+  },
+  booking: {
+    supportedOperations: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
+    requiredInputs: { factory: ["entity", "slots"], operations: { createBooking: ["date", "slotId", "name", "email"], getBooking: ["reference"], cancelBooking: ["reference"] } },
+    outputs: { booking: "booking with stable reference and status", capacity: "remaining quantity or unknown", result: "ok, invalid, or over_capacity" },
+    stateOwnership: { owns: "booking records, capacity admission, reference and cancellation status", scope: "configured booking entity" },
+    persistenceSemantics: { durable: true, owner: "booking capability through generated backend", conflictPolicy: "deterministic admission rank", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["create", "lookup", "list", "cancel", "check_capacity"], stateChange: "booking status, reference, and capacity", durableMutation: true, observe: ["reference", "capacity refusal", "cancelled status", "reload lookup"] },
+    testContract: ["invalid refused", "create and lookup", "capacity race", "cancel and recover"],
+  },
+  wizard: {
+    supportedOperations: ["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset", "save", "load", "clear"],
+    requiredInputs: { factory: ["id", "steps"], operations: { setValue: ["field", "value"], goTo: ["stepId"], restore: ["optionalState"] } },
+    outputs: { state: "immutable workflow snapshot", confirmation: "terminal confirmation payload", persistence: "saved or restored workflow state" },
+    stateOwnership: { owns: "workflow draft, step, validation, and terminal state", scope: "stable flow id" },
+    persistenceSemantics: { durable: true, owner: "wizard persistence through generated backend", orderedWrites: true, browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "flow_advance", "action", "status"],
+    verificationSemantics: { actions: ["transition", "review", "confirm", "cancel", "restore", "reset"], stateChange: "workflow snapshot and terminal status", durableMutation: true, observe: ["step and progress", "review values", "terminal state", "reload restore"] },
+    testContract: ["transition", "review", "terminal state", "restore", "reset"],
+  },
+  contact: {
+    supportedOperations: ["submitContact"], requiredInputs: { factory: ["entity"], operations: { submitContact: ["name", "email", "message"] } },
+    outputs: { result: "sent or invalid", message: "persisted contact record" }, stateOwnership: { owns: "contact validation and record", scope: "configured contact entity" },
+    persistenceSemantics: { durable: true, owner: "contact capability through generated backend", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["validate", "submit"], stateChange: "contact result and record", durableMutation: true, observe: ["field problems", "sent state", "persisted record"] },
+    testContract: ["invalid refused", "valid persisted", "sent observed"],
+  },
+  newsletter: {
+    supportedOperations: ["subscribe"], requiredInputs: { factory: ["entity"], operations: { subscribe: ["email"] } },
+    outputs: { result: "success, invalid, or duplicate", signup: "persisted signup record" }, stateOwnership: { owns: "newsletter validation, duplicate policy, and record", scope: "configured signup entity" },
+    persistenceSemantics: { durable: true, owner: "newsletter capability through generated backend", duplicatePolicy: "normalized email", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["validate", "subscribe", "reject_duplicate"], stateChange: "signup result and record", durableMutation: true, observe: ["invalid", "success", "duplicate"] },
+    testContract: ["invalid refused", "valid persisted", "duplicate refused"],
+  },
+  "interaction-primitives": {
+    supportedOperations: ["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"],
+    requiredInputs: { factory: [], operations: { field: ["name", "value", "onChange"], selection: ["name", "value", "onSelect"], action: ["name", "onActivate"] } },
+    outputs: { bindings: "accessible props with stable machine identity", state: "reactive capability snapshot or action state" },
+    stateOwnership: { owns: "ephemeral React action status only", scope: "rendered component" },
+    persistenceSemantics: { durable: false, owner: "none", browserStorage: false },
+    dependencies: [], compatibleUiInteractionPrimitives: ["field", "selection", "action", "flow_advance", "status"],
+    verificationSemantics: { actions: ["fill", "select", "activate", "advance", "observe"], stateChange: "control value, selection, or action result", durableMutation: false, observe: ["opaque control identity", "accessible name", "selected, value, or status transition"] },
+    testContract: ["field accepts value", "selection becomes observable", "action changes state", "status announced"],
+  },
+});
+
+const interactionPrimitives = Object.freeze({
+  name: "interaction-primitives", version: "1.0.0", package: "src/lib/capabilities/react.js",
+  interface: ["useCapabilityState", "useCapabilityAction", "useSemanticField", "useSemanticSelection", "useSemanticAction", "useFlowAdvance", "useStatusRegion"],
+  entities: [], uiContract: [], upgradePolicy: "replace-on-iterate",
+});
+
+/** The one machine-readable inventory of reusable behavior that actually ships. */
+export const CAPABILITIES = Object.freeze(Object.fromEntries(
+  Object.entries({ ...LEGACY_CAPABILITIES, "interaction-primitives": interactionPrimitives })
+    .map(([id, entry]) => [id, Object.freeze({
+      id, ...entry, ...metadata[id],
+      implementation: Object.freeze({ mode: "deterministic", proven: true, protected: true }),
+    })]),
+));
 
 /** Validate a contract's capability bindings against the registry. */
 export function validateBindings(bindings = []) {

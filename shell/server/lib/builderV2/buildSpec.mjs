@@ -20,8 +20,12 @@ import {
 } from "./interactionContract.mjs";
 import { buildModuleGenerationContracts } from "./moduleContracts.mjs";
 import { deriveDependencyPlan, scopeDependencyPlan } from "./dependencyPlan.mjs";
+import {
+  capabilityModulePlan, deriveCapabilityGraph, scopeCapabilityGraph, validateCapabilityGraph,
+} from "./capabilityGraph.mjs";
+import { capabilityCompositionPlan } from "./capabilityComposer.mjs";
 
-export const BUILD_SPEC_VERSION = 1;
+export const BUILD_SPEC_VERSION = 2;
 
 /**
  * Derive the complete build specification from a raw contract.
@@ -33,13 +37,23 @@ export const BUILD_SPEC_VERSION = 1;
 export function deriveBuildSpec(contract, { userCritical = [], journeys = contract?.journeys || [] } = {}) {
   const bindings = bindCapabilities(contract);
   const dependencyPlan = deriveDependencyPlan(contract, journeys);
-  const modulePlan = deriveModulePlan(contract, journeys, { dependencyPlan });
+  // The existing planner supplies route/screen responsibility. Capability adapters are then
+  // replaced with composer-owned protected modules, and unsupported flows become bounded custom
+  // modules. A second interaction pass stamps those final owners onto the SAME flow contract.
+  const legacyModulePlan = deriveModulePlan(contract, journeys, { dependencyPlan });
+  const initialInteraction = buildInteractionContract(contract, { modulePlan: legacyModulePlan, bindings });
+  const initialGraph = deriveCapabilityGraph(contract, { bindings, interactionContract: initialInteraction });
+  const modulePlan = capabilityModulePlan(initialGraph, legacyModulePlan);
   const interactionContract = buildInteractionContract(contract, { modulePlan, bindings });
-  const enriched = { ...contract, interactionContract, dependencyPlan };
+  const capabilityGraph = deriveCapabilityGraph(contract, { bindings, interactionContract });
+  const compositionPlan = capabilityCompositionPlan(capabilityGraph);
+  const enriched = { ...contract, interactionContract, dependencyPlan, capabilityGraph };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
-    contract: enriched, modulePlan, interactionContract, bindings, journeys,
+    contract: enriched, modulePlan, interactionContract, bindings, journeys, capabilityGraph,
   });
+  const interactionVerdict = validateInteractionContract(interactionContract);
+  const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
   return {
     version: BUILD_SPEC_VERSION,
     contract: enriched,
@@ -51,10 +65,17 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     dependencyPlan,
     modulePlan,
     interactionContract,
+    capabilityGraph,
+    compositionPlan,
     moduleContracts,
     persistencePlan: persistenceOwnershipPlan(enriched, journeys, modulePlan),
     imageIntents: imageIntents(contract),
-    verdict: validateInteractionContract(interactionContract),
+    verdict: {
+      ok: interactionVerdict.ok && graphVerdict.ok,
+      problems: [...interactionVerdict.problems, ...graphVerdict.problems],
+      interaction: interactionVerdict,
+      capabilityGraph: graphVerdict,
+    },
   };
 }
 
@@ -78,10 +99,13 @@ export function scopeBuildSpec(spec, journeys = []) {
   const interactionContract = scopeInteractionContract(spec.interactionContract, scopedJourneys);
   const bindings = bindingsForJourneys(spec.contract, spec.bindings, scopedJourneys);
   const dependencyPlan = scopeDependencyPlan(spec.dependencyPlan, scopedJourneys);
+  const capabilityGraph = scopeCapabilityGraph(spec.capabilityGraph, scopedJourneys);
   const scopedContract = {
     ...spec.contract, journeys: scopedJourneys, operations, entities, interactionContract, dependencyPlan,
+    capabilityGraph,
   };
-  const modulePlan = deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan });
+  const modulePlan = capabilityModulePlan(capabilityGraph,
+    deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan }));
   return {
     ...spec,
     scopedContract,
@@ -93,8 +117,11 @@ export function scopeBuildSpec(spec, journeys = []) {
     dependencyPlan,
     modulePlan,
     interactionContract,
+    capabilityGraph,
+    compositionPlan: capabilityCompositionPlan(capabilityGraph),
     moduleContracts: buildModuleGenerationContracts({
       contract: scopedContract, modulePlan, interactionContract, bindings, journeys: scopedJourneys,
+      capabilityGraph,
     }),
     persistencePlan: persistenceOwnershipPlan(scopedContract, scopedJourneys, modulePlan),
   };
@@ -114,6 +141,11 @@ export function buildSpecSummary(spec) {
       capability: row.capability, package: row.package, version: row.version,
     })),
     interactionFlows: (spec?.interactionContract?.flows || []).length,
+    capabilityNodes: (spec?.capabilityGraph?.nodes || []).map((node) => ({
+      id: node.id, type: node.type, version: node.version,
+    })),
+    customBehavior: spec?.capabilityGraph?.customBehavior || [],
+    composedModules: spec?.compositionPlan?.protectedFiles || [],
     durableJourneys: spec?.persistencePlan?.durableJourneys || [],
   };
 }

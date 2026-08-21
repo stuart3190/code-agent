@@ -173,6 +173,34 @@ export function journeyRequiresPersistentMutation(journey) {
   return /\b(create|submit|send|book|reserve|save|register|sign[ -]?up|cancel|delete|update)\b/i.test(text);
 }
 
+/**
+ * One verification round may contain independent journeys and several producer/consumer
+ * lifecycles. Anonymous visitor identity follows that scenario graph: independent journeys get
+ * isolated visitors, while a lifecycle's consumers recover the exact visitor that produced its
+ * durable record. Keying the whole round to one visitor made an independent capacity check inherit
+ * a cancelled booking, then made a later recovery check inherit that unrelated capacity context.
+ */
+export function verificationVisitorScopeForJourney(roundScope, journey, contract = {}) {
+  const fullInteraction = contract.prerequisiteInteractionContract || contract.interactionContract || {};
+  const scenario = fullInteraction.scenarios?.[journey?.id]
+    || contract.interactionContract?.scenarios?.[journey?.id]
+    || null;
+  if (scenario?.role === "independent") {
+    return `${roundScope}:independent:${journey.id}`;
+  }
+  if (["produces", "consumes"].includes(scenario?.role)) {
+    const lifecycle = scenario.lifecycle || scenario.scenario;
+    if (lifecycle) return `${roundScope}:lifecycle:${lifecycle}`;
+  }
+  // Historical contracts may predate explicit scenarios. A declared durable lifecycle is still
+  // enough to associate its producer and consumers without sharing unrelated visitor state.
+  const lifecycle = (fullInteraction.flows || [])
+    .find((flow) => flow.journeyId === journey?.id && flow.durableLifecycle)?.durableLifecycle;
+  return lifecycle
+    ? `${roundScope}:lifecycle:${lifecycle}`
+    : `${roundScope}:independent:${journey?.id || "unknown"}`;
+}
+
 async function backendFingerprint(client, projectId) {
   const appUsers = await client.from("app_users").select("id,auth_user_id,created_at")
     .eq("app_id", String(projectId)).order("id");
@@ -520,9 +548,9 @@ export function createBuilderV2Runtime({
         let unavailable = false;
         let verifierError = null;
         let mechanics = null;
-        // Related journeys in this verification round share one visitor so producer/consumer
-        // scenarios see the same durable record. A later repair round gets a new visitor and
-        // cannot inherit a half-completed wizard or terminal state from the prior candidate.
+        // Identity is stable within each producer/consumer lifecycle and isolated for each
+        // independent scenario. A later repair round gets a new root scope and cannot inherit a
+        // half-completed wizard or terminal state from the prior candidate.
         const verificationVisitorScope = uuid();
         for (const journey of journeys) {
           // Use a server-only authority to seal stable verifier credentials. Only the derived,
@@ -531,7 +559,9 @@ export function createBuilderV2Runtime({
           const verificationIdentity = createVerificationIdentity({
             appId: projectId,
             scope: journey.id,
-            visitorScope: verificationVisitorScope,
+            visitorScope: verificationVisitorScopeForJourney(
+              verificationVisitorScope, journey, journeyContract,
+            ),
             secret: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE,
           });
           const before = journeyRequiresPersistentMutation(journey)

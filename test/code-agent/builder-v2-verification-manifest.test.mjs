@@ -28,7 +28,7 @@ const CRM = deriveVerificationManifest(deriveBuildSpec(CRM_CONTRACT));
 // ── the manifest ───────────────────────────────────────────────────────────────────────────────
 
 test("the manifest is derived from the build spec and speaks only in primitives", () => {
-  assert.equal(CRM.version, 1);
+  assert.equal(CRM.version, 2);
   assert.ok(CRM.controls.length > 0, "controls derived");
   assert.ok(CRM.actions.length > 0, "actions derived");
   const primitives = new Set([...CRM.controls, ...CRM.actions].map((row) => row.primitive));
