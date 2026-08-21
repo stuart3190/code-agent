@@ -29,6 +29,10 @@ export default function BookingPanel() {
   }}>Submit booking</button>
     {done ? <p>Booking confirmed</p> : null}</main>;
 }`,
+}, {
+  replaceFile: "src/routes/HomePage.jsx",
+  content: `import BookingPanel from "./BookingPanel.jsx";
+export default function HomePage() { return <BookingPanel />; }`,
 }];
 
 function harness(browserResult) {

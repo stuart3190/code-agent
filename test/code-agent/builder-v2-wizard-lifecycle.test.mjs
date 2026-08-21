@@ -181,6 +181,39 @@ test("an in-progress wizard restores mid-flow with its step and values", async (
   assert.equal((await reloaded.next()).ok, true, "a restored in-progress wizard keeps moving");
 });
 
+test("restore(nextState) atomically adopts and durably saves a compatible generated snapshot", async () => {
+  const { deps } = memoryDeps();
+  const wizard = makeMachine(deps);
+  const emitted = [];
+  const unsubscribe = wizard.subscribe((state) => emitted.push(state));
+
+  const restored = await wizard.restore({
+    stepId: "slot",
+    values: { flowStarted: true, date: "2026-06-14" },
+  });
+  unsubscribe();
+
+  assert.equal(restored.stepId, "slot");
+  assert.equal(restored.stepIndex, 1, "stepId remains the authority when generated code omits stepIndex");
+  assert.equal(restored.status, WIZARD_STATUS.ACTIVE);
+  assert.equal(restored.values.flowStarted, true);
+  assert.equal(emitted.at(-1).stepId, "slot", "React subscribers observe the adopted state");
+
+  const reloaded = makeMachine(deps);
+  await reloaded.restore();
+  assert.equal(reloaded.getState().stepId, "slot");
+  assert.equal(reloaded.getState().values.date, "2026-06-14", "the adopted snapshot survives reload");
+});
+
+test("restore(nextState) rejects an unknown step without corrupting current state", async () => {
+  const { deps } = memoryDeps();
+  const wizard = makeMachine(deps);
+  await assert.rejects(() => wizard.restore({ stepId: "missing", values: { flowStarted: true } }),
+    /must identify a known step/);
+  assert.equal(wizard.getState().stepId, "date");
+  assert.deepEqual(wizard.getState().values, {});
+});
+
 // ── persistence hygiene ───────────────────────────────────────────────────────────────────────
 
 test("every durable wizard operation establishes a session and keeps one row per key", async () => {

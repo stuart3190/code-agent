@@ -76,6 +76,9 @@ const tokensOf = (text) => Math.ceil(String(text || "").length / 4);
 export function lintCapabilitySafety(tree, bindings = []) {
   const findings = [];
   const facts = aggregateCapabilityFacts(tree, bindings);
+  const appSource = String(tree?.["src/App.jsx"] || "");
+  const homePageIsMounted = /\bimport\s+HomePage\s+from\b/.test(appSource)
+    && (/["']\/["']\s*:\s*HomePage\b/.test(appSource) || /<HomePage\b/.test(appSource));
 
   // A call to a method the capability does not export is a guaranteed runtime TypeError.
   // (Live run 3 lost its build to contactForm.submit vs submitContact.) Provable statically,
@@ -103,6 +106,20 @@ export function lintCapabilitySafety(tree, bindings = []) {
   for (const [path, source] of Object.entries(tree || {})) {
     if (!GENERATED_FILE.test(path) || PLATFORM_PATH.test(path)) continue;
     const code = String(source);
+
+    // HomePage is the scaffold's mounted fallback route. Leaving its exact build marker in
+    // place produces a valid bundle whose public root is an empty <main>, even when complete
+    // feature components exist elsewhere in the tree. Compilation cannot distinguish that
+    // from a working application, while the marker proves the scaffold was never composed.
+    if (path === "src/routes/HomePage.jsx" && homePageIsMounted
+      && /\{\/\*\s*build here\s*\*\/\}/i.test(code)) {
+      findings.push({
+        code: "scaffold_placeholder_unreplaced",
+        module: path,
+        message: `${path}: the mounted scaffold placeholder is still present; replace it with `
+          + "reachable application UI or mount the generated feature flow",
+      });
+    }
 
     // The monolith cap is a maintenance/cost preference, not a correctness property: an
     // oversized module makes every later edit pay its whole body as context. Advisory.

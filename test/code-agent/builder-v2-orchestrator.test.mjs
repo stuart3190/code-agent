@@ -89,6 +89,18 @@ export default function AboutSection() {
 `,
 }];
 
+// This suite injects its browser verdicts and tests orchestration, not route composition. Start
+// from a visibly mounted fixture root so the candidate does not carry the real scaffold's empty
+// placeholder into unrelated correction/repair accounting assertions.
+const FIXTURE_HOME = `export default function HomePage() {
+  return <main><h1>Orchestrator fixture application</h1></main>;
+}`;
+const fixtureScaffold = () => {
+  const tree = clone(fromScaffold(REACT_VITE));
+  tree["src/routes/HomePage.jsx"] = FIXTURE_HOME;
+  return tree;
+};
+
 const RECORDED_PHOTOS = [
   { id: 201, width: 2000, height: 1300, alt: "strawberry farm rows in summer light",
     photographer: "T", photographer_url: "https://www.pexels.com/@t", url: "https://www.pexels.com/photo/farm-201/", src: { original: "https://images.pexels.com/201/o.jpg", large2x: "https://images.pexels.com/201/l.jpg", medium: "https://images.pexels.com/201/m.jpg" } },
@@ -189,7 +201,7 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
       journeyDrives.push(journeys.map((j) => j.id));
       return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: failSet.has(j.id) ? "fail" : "pass" })) };
     }),
-    baseTree: () => clone(fromScaffold(REACT_VITE)),
+    baseTree: fixtureScaffold,
     baseline: REACT_VITE,
     maxJourneyRepairs,
     maxNoOpRetries,
@@ -489,7 +501,7 @@ test("WP9 regression — the REAL bv2_builds column set survives green AND block
 
 test("WP9 regression — a byte-identical no-op batch is rejected deterministically, never gated", async () => {
   const { indexFile } = await import("../../shell/server/lib/builderV2/indexer.mjs");
-  const scaffoldHome = clone(fromScaffold(REACT_VITE))["src/routes/HomePage.jsx"];
+  const scaffoldHome = fixtureScaffold()["src/routes/HomePage.jsx"];
   const symbol = indexFile("src/routes/HomePage.jsx", scaffoldHome).symbols.find((s) => s.name === "HomePage");
   const identical = scaffoldHome.slice(symbol.start, symbol.end);
 
@@ -500,7 +512,7 @@ test("WP9 regression — a byte-identical no-op batch is rejected deterministica
       core: ({ rejections }) => {
         round += 1;
         if (round === 1) {
-          // Exactly what the first live model did: "replace" the stub with its own content.
+          // Exactly what the first live model did: "replace" the current symbol with itself.
           return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "replace_symbol", symbol: "HomePage", content: identical }] }];
         }
         fedBack = rejections;

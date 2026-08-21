@@ -35,6 +35,7 @@ export const BLOCKING_CODES = Object.freeze({
   compile_failed: "the candidate does not compile",
   source_parse_error: "generated source is not parseable, so no gate downstream can be trusted",
   persistence_ast_parse_error: "generated source is not parseable, so no gate downstream can be trusted",
+  scaffold_placeholder_unreplaced: "the mounted default route is still the empty scaffold placeholder",
 
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",
@@ -101,6 +102,7 @@ const UNDEMOTABLE = Object.freeze(new Set([
   "forbidden_persistence", "capability_owner_bypassed",
   "protected_path_violation", "compile_failed", "patch_application_failed",
   "tree_integrity_invalid", "build_config_invalid", "source_parse_error",
+  "scaffold_placeholder_unreplaced",
   "runtime_configuration_invalid",
   "required_runtime_dependency_missing", "required_runtime_capability_missing",
   "required_runtime_capability_incomplete", "dependency_manifest_invalid",

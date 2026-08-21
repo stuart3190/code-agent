@@ -53,6 +53,10 @@ export default function BookPage() {
   );
 }
 `,
+}, {
+  replaceFile: "src/routes/HomePage.jsx",
+  content: `import BookPage from "./BookPage.jsx";
+export default function HomePage() { return <BookPage />; }`,
 }];
 const NEWSLETTER_PATCH = [{
   newFile: "src/routes/NewsletterPanel.jsx",

@@ -154,6 +154,30 @@ test("module size is ADVISORY: an oversized file is reported but never fails a r
   assert.equal(ok.ok, true, JSON.stringify(ok.problems));
 });
 
+test("the exact mounted scaffold placeholder blocks before compile and names its correction module", () => {
+  const result = lintCapabilitySafety({
+    "src/App.jsx": `import HomePage from "./routes/HomePage";
+const ROUTES = { "/": HomePage };
+export default function App() { const Page = ROUTES[location.pathname] || HomePage; return <Page />; }`,
+    "src/routes/HomePage.jsx": `// One route, one file.
+export default function HomePage() {
+  return <main>{/* build here */}</main>;
+}`,
+    "src/components/CompleteFeature.jsx": "export default function CompleteFeature() { return <p>Complete</p>; }",
+  });
+  assert.deepEqual(codes(result), ["scaffold_placeholder_unreplaced"]);
+  assert.equal(result.findings[0].module, "src/routes/HomePage.jsx");
+  assert.match(result.problems[0], /reachable application UI/);
+  assert.equal(severityOf("scaffold_placeholder_unreplaced"), SEVERITY.BLOCKING);
+
+  const unused = lintCapabilitySafety({
+    "src/App.jsx": "export default function App() { return <main>Custom root</main>; }",
+    "src/routes/HomePage.jsx": "export default function HomePage() { return <main>{/* build here */}</main>; }",
+  });
+  assert.equal(codes(unused).includes("scaffold_placeholder_unreplaced"), false,
+    "an unused scaffold file is not proof that the mounted application is blank");
+});
+
 test("V2 capability lint accepts the two Package 14R booking-page sizes", () => {
   for (const target of [4_261, 4_364]) {
     const base = "export default function HomePage() { return <main>Booking</main>; }\n/*";

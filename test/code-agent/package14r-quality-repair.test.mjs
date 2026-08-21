@@ -226,7 +226,11 @@ test("14R failed verification resumes the exact non-promotable candidate without
     patchesFn: async ({ step, problems }) => {
       if (step === "core") {
         coreCalls += 1;
-        return [{ newFile: "src/routes/Checkpoint.jsx", content: "export default function Checkpoint(){ return <h1>Checkpoint fixture</h1>; }" }];
+        return [
+          { newFile: "src/routes/Checkpoint.jsx", content: "export default function Checkpoint(){ return <h1>Checkpoint fixture</h1>; }" },
+          { replaceFile: "src/routes/HomePage.jsx", content: `import Checkpoint from "./Checkpoint.jsx";
+export default function HomePage(){ return <Checkpoint />; }` },
+        ];
       }
       repairCalls += 1;
       repairProblems = problems;

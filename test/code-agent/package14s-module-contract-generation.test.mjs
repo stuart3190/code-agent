@@ -74,6 +74,11 @@ const verdict = (tree) => validateModuleConformance(tree, {
   contract: BOOKING, modulePlan: PLAN, moduleContracts: CONTRACTS, interactionContract: INTERACTIONS, bindings: BINDINGS,
 });
 
+const moduleFixtureScaffold = () => ({
+  ...fromScaffold(REACT_VITE),
+  "src/routes/HomePage.jsx": "export default function HomePage(){ return <main>Module contract fixture</main>; }",
+});
+
 test("per-module generation specifications carry capability, identity, ownership, flow and size facts", () => {
   const flow = CONTRACTS.specifications.find((row) => row.path.endsWith("BookFlow.jsx"));
   const booking = CONTRACTS.specifications.find((row) => row.path.endsWith("booking.js"));
@@ -332,7 +337,7 @@ test("orchestrator corrects one offending module without replaying the whole cor
       return [{ replaceFile: "src/data/booking.js", content: CORRECT["src/data/booking.js"] }];
     },
     assetService: { async resolveIntents() { return { resolved: [] }; }, async assetManifestFor() { return []; } },
-    baseTree: () => fromScaffold(REACT_VITE),
+    baseTree: moduleFixtureScaffold,
     compile: async (tree) => ({ ok: true, tree }),
     journeysFn: async () => ({ journeys: [{ id: "book", status: "pass", steps: [] }] }),
     maxCoreAttempts: 2,

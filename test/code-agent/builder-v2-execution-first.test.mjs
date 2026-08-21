@@ -52,6 +52,10 @@ export default function Booking() {
     <button onClick={() => bookings.getBooking("BK-1")}>Look up booking</button>
   </main>;
 }`,
+  // The app is deliberately unprescribed, but it must still be reachable from the scaffold's
+  // mounted root. A complete component left beside the placeholder is not a usable candidate.
+  "src/routes/HomePage.jsx": `import Booking from "./Booking.jsx";
+export default function HomePage() { return <Booking />; }`,
 };
 
 function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) {
@@ -88,7 +92,9 @@ function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) 
   return { orchestrator, snapshotStore, events, timeline, patchInputs };
 }
 
-const asPatches = (tree) => Object.entries(tree).map(([path, content]) => ({ newFile: path, content }));
+const asPatches = (tree) => Object.entries(tree).map(([path, content]) => (
+  Object.hasOwn(REACT_VITE, path) ? { replaceFile: path, content } : { newFile: path, content }
+));
 
 test("the severity model has exactly one authority per finding code", () => {
   assert.equal(assertSeverityTablesDisjoint(), true);
@@ -167,6 +173,7 @@ const RUNTIME_HANDLED = {
 import { db } from "../lib/backend/index.js";
 export const saveNote = (row) => db.entity("note").create(row);`,
   "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
+  "src/routes/HomePage.jsx": UNPRESCRIBED["src/routes/HomePage.jsx"],
 };
 
 test("genuine safety blockers still stop a build before it ever runs", async () => {
@@ -247,16 +254,20 @@ test("headroom module batches continue automatically and gate only after the ret
         const patches = asPatches({ "src/data/store.js": UNPRESCRIBED["src/data/store.js"] });
         Object.defineProperty(patches, "dispatchScope", { value: {
           kind: "headroom_continuation", files: ["src/data/store.js"],
-          allowedFiles: ["src/data/store.js"], allowedPrefixes: [], batchWidth: 1,
+          allowedFiles: ["src/data/store.js"], allowedPrefixes: [], batchWidth: 2,
           logicalStep: "correction", batchIndex: 0,
-          remainingFiles: ["src/routes/Booking.jsx"], moduleContracts: { version: 1, specifications: [] },
+          remainingFiles: ["src/routes/Booking.jsx", "src/routes/HomePage.jsx"],
+          moduleContracts: { version: 1, specifications: [] },
         } });
         return patches;
       }
       assert.equal(input.step, "correction", "continuations keep the original logical routing and funding step");
-      assert.deepEqual(input.headroomScope.allowedFiles, ["src/routes/Booking.jsx"]);
+      assert.deepEqual(input.headroomScope.allowedFiles, ["src/routes/Booking.jsx", "src/routes/HomePage.jsx"]);
       assert.equal(input.headroomScope.batchIndex, 1);
-      return asPatches({ "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"] });
+      return asPatches({
+        "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
+        "src/routes/HomePage.jsx": UNPRESCRIBED["src/routes/HomePage.jsx"],
+      });
     },
   });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });

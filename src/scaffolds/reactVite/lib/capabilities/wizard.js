@@ -66,6 +66,7 @@ export function makeWizardMachine({
   // renders step 1 of a booking the visitor already completed.
   let hydration = { hydrated: !durable?.load, hydrating: false, error: null };
   let hydrationFlight = null;
+  let restoreGeneration = 0;
 
   const snapshot = () => ({
     ...clone(state),
@@ -110,20 +111,43 @@ export function makeWizardMachine({
     return next;
   };
 
-  async function restoreState() {
-    if (!durable?.load) return snapshot();
-    const saved = await durable.load();
-    if (!saved || !ids.includes(saved.stepId) || !Number.isInteger(saved.stepIndex)) return snapshot();
+  function adoptState(saved) {
+    if (!saved || typeof saved !== "object") return null;
+    const stepId = ids.includes(saved.stepId)
+      ? saved.stepId
+      : (Number.isInteger(saved.stepIndex) ? ids[saved.stepIndex] : null);
+    if (!stepId) return null;
     const restoredStatus = Object.values(WIZARD_STATUS).includes(saved.status)
       ? saved.status : WIZARD_STATUS.ACTIVE;
     state = {
-      ...state, stepIndex: ids.indexOf(saved.stepId), stepId: saved.stepId,
+      ...state, stepIndex: ids.indexOf(stepId), stepId,
       values: clone(saved.values || {}), status: restoredStatus,
       errors: clone(saved.errors || {}), confirmation: clone(saved.confirmation || null),
       cancelledAt: saved.cancelledAt || null,
       revision: Math.max(state.revision, Number(saved.revision || 0)),
     };
     return emit();
+  }
+
+  async function restoreState(nextState) {
+    // Generated adapters commonly use restore(snapshot) to atomically start or recover a flow.
+    // Preserve restore() as the durable reload API while accepting that compatible state shape.
+    // Emit before the write yields so event handlers update controlled React UI immediately.
+    if (nextState !== undefined) {
+      const adopted = adoptState(nextState);
+      if (!adopted) throw new Error("wizard restore state must identify a known step");
+      restoreGeneration += 1;
+      hydration = { hydrated: true, hydrating: false, error: null };
+      const next = snapshot();
+      await save();
+      return next;
+    }
+    if (!durable?.load) return snapshot();
+    const generation = restoreGeneration;
+    const saved = await durable.load();
+    // An explicit restore(snapshot) that happened while storage was loading is newer authority.
+    if (generation !== restoreGeneration) return snapshot();
+    return adoptState(saved) || snapshot();
   }
 
   async function hydrateOnce() {
@@ -172,7 +196,7 @@ export function makeWizardMachine({
     },
     /** Restore once, ever. Safe to call from anywhere; returns the same promise while in flight. */
     async hydrate() { return hydrateOnce(); },
-    async restore() { return restoreState(); },
+    async restore(nextState) { return restoreState(nextState); },
     setValue,
     select: setValue,
     validateCurrent() { active(); const ok = validateCurrent(); emit(); return { ok, errors: clone(state.errors) }; },

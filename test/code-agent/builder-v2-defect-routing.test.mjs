@@ -340,9 +340,13 @@ export default function Booking() {
   </main>;
 }`,
   "src/routes/Marketing.jsx": "export default function Marketing() { return <aside>Marketing</aside>; }",
+  "src/routes/HomePage.jsx": `import Booking from "./Booking.jsx";
+export default function HomePage() { return <Booking />; }`,
 };
 
-const asPatches = (tree) => Object.entries(tree).map(([path, content]) => ({ newFile: path, content }));
+const asPatches = (tree) => Object.entries(tree).map(([path, content]) => (
+  Object.hasOwn(REACT_VITE, path) ? { replaceFile: path, content } : { newFile: path, content }
+));
 
 function harness({ browser, repairPatches = null, contract = CONTRACT, allPatches = null } = {}) {
   const timeline = [];
