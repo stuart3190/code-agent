@@ -217,3 +217,41 @@ test("work that applied cleanly survives a sibling's rejection", async () => {
   assert.ok(seen[1].includes("src/routes/SlotList.jsx"), JSON.stringify(seen[1]));
   assert.equal(seen[1].includes("src/data/wizard.js"), false, "the malformed module is still absent");
 });
+
+test("a retained partial candidate is gated immediately instead of returning stale problems", async () => {
+  const contract = {
+    summary: "A simple public information page", projectType: "informational", version: 1,
+    auth: { required: false }, entities: [], operations: [], deferred: [], imageIntents: [], integrations: [],
+    routes: [{ path: "/", name: "Home" }], acceptance: [], states: [],
+    journeys: [{ id: "view-information", title: "A visitor views the information", priority: "primary",
+      stage: "primary_journey", steps: [{ action: "open the application", target: "/",
+        expect: "the public information is visible" }] }],
+  };
+  let dispatches = 0;
+  const orchestrator = createOrchestrator({
+    contractFn: async () => contract,
+    patchesFn: async () => {
+      dispatches += 1;
+      return [{
+        file: "src/routes/HomePage.jsx",
+        ops: [{ op: "replace_symbol", symbol: "HomePage", content: `export default function HomePage() {
+  return <main><h1>The public information is visible</h1></main>;
+}` }],
+      }, {
+        newFile: "src/data/unrelated.js",
+        content: "export function malformed() {\n  return {\n",
+      }];
+    },
+    assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
+    snapshotStore: createSnapshotStore(),
+    buildStore: memoryBuildStore(),
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({ id: journey.id, status: "pass" })) }),
+    baseTree: () => clone(fromScaffold(REACT_VITE)),
+    baseline: REACT_VITE,
+    maxCoreAttempts: 1,
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "partial-green", request: "information" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(dispatches, 1, "a sound retained tree does not spend another model attempt on a rejected sibling");
+  assert.ok(result.snapshotId, "the gated partial tree becomes an immutable green checkpoint");
+});

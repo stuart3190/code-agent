@@ -505,6 +505,8 @@ export function createOrchestrator({
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
+      let retainedPartial = false;
+      const retainedPatchRejections = [...(applied.rejected || [])];
       // A STRUCTURAL PROBLEM THE BATCH INHERITED IS AN INSTRUCTION, NOT A REJECTION.
       //
       // The patch was allowed to land because it did not make the file worse. But nobody has yet
@@ -582,32 +584,35 @@ export function createOrchestrator({
         // downstream. An incomplete tree simply fails to compile, which is the correct answer.
         const retained = filesChanged.length > 0 && !applied.modularityFailed;
         if (retained) {
-          working = applied.tree;
-          latestCandidate = await snapshotStore.createSnapshot(owner, projectId, working, {
-            buildId, parent: latestCandidate?.id || parentSnapshotId,
-            reason: `candidate:${step}:${attempt}:partial`,
-            assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
-          });
-          await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
-            tree: working, reason: `candidate:${step}:${attempt}:partial`, promotable: false });
+          retainedPartial = true;
           log(`${step}: ${applied.rejected.length} patch(es) rejected (${classes.join(", ")}); `
-            + `retaining ${filesChanged.length} file(s) that applied cleanly`);
+            + `retaining and validating ${filesChanged.length} file(s) that applied cleanly`);
+          // A rejected sibling does not prove the retained tree is still red. In a live build the
+          // required contact factory landed cleanly on attempt two, but an unrelated malformed
+          // wizard patch skipped every gate; attempts three and four repeated that mistake and the
+          // build finally returned the stale attempt-one "factory missing" problem. Let the normal
+          // full-tree conformance/compile path below judge what actually landed. It will either
+          // promote a genuinely runnable candidate or derive a fresh, scoped correction from the
+          // current tree; rejected source itself remains excluded by applyPatches.
+          attemptLedger.push({ attempt, dispatch: dispatchStep,
+            class: `${classes[0] || "patch_not_applicable"}_partial_candidate`, substantive: true,
+            rejected: applied.rejected.length, retainedFiles: filesChanged });
         } else {
           working = originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
-        }
-        if (step === "repair") {
-          if (!scheduleCorrectionRetry()) {
-            return failure("the repair patch remained invalid after the correction allowance", {
-              problems: applied.rejected.map((row) => row.reason),
-            });
+          if (step === "repair") {
+            if (!scheduleCorrectionRetry()) {
+              return failure("the repair patch remained invalid after the correction allowance", {
+                problems: applied.rejected.map((row) => row.reason),
+              });
+            }
+          } else {
+            attempts += 1;
           }
-        } else {
-          attempts += 1;
+          attemptLedger.push({ attempt, dispatch: dispatchStep, class: classes[0] || "patch_not_applicable",
+            substantive: true, rejected: applied.rejected.length, retainedFiles: [] });
+          continue;
         }
-        attemptLedger.push({ attempt, dispatch: dispatchStep, class: classes[0] || "patch_not_applicable",
-          substantive: true, rejected: applied.rejected.length, retainedFiles: retained ? filesChanged : [] });
-        continue;
       }
       if (activeScope) {
         const outsideScope = filesChanged.filter((path) => !(activeScope.allowedFiles || []).includes(path)
@@ -754,7 +759,10 @@ export function createOrchestrator({
         }
         lastSignature = signature;
         problems = blockingProblems;
-        rejections = [];
+        // A partial candidate has two independent facts: what failed to apply and what the
+        // resulting full tree still lacks. Keep both. Dropping the first fact makes the next
+        // dispatch repeat malformed surgery; dropping the second returns stale problems.
+        rejections = retainedPartial ? [...retainedPatchRejections] : [];
 
         // A persistence violation names its own write boundary; other blocking findings are
         // scoped by the modules they actually name. Either way the candidate is RETAINED and
@@ -774,8 +782,14 @@ export function createOrchestrator({
           // generation attempt rather than a correction, and the step starts over.
           repairScope = null;
           contractCorrectionScope = null;
-          rejections = blockingProblems.map((reason) => ({ signature: "blocking-defect", reason }));
-          working = originalTree;
+          rejections.push(...blockingProblems.map((reason) => ({ signature: "blocking-defect", reason })));
+          // Clean siblings from a partially accepted batch remain valuable even when the current
+          // blocker has no honest narrow scope. Retry the unfinished work over that immutable
+          // checkpoint; only a wholly applied but unusable generation restarts from the increment
+          // base to avoid colliding with an abandoned design.
+          working = retainedPartial
+            ? await snapshotStore.materialize(owner, latestCandidate.id)
+            : originalTree;
           if (step === "repair") {
             if (!scheduleCorrectionRetry()) {
               return failure("the repair's blocking findings remained after the correction allowance", {
@@ -837,7 +851,7 @@ export function createOrchestrator({
       }
       lastSignature = signature;
       problems = gateProblems;
-      rejections = [];
+      rejections = retainedPartial ? [...retainedPatchRejections] : [];
       const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree);
       if (gateScope && corrections < maxCandidateCorrections) {
         if (!treesEqual(applied.tree, gate.tree)) {
@@ -859,7 +873,9 @@ export function createOrchestrator({
         continue;
       }
       // No honest bounded repair scope exists. This is a real full-generation failure.
-      working = originalTree;
+      working = retainedPartial
+        ? await snapshotStore.materialize(owner, latestCandidate.id)
+        : originalTree;
       if (step === "repair") {
         if (!scheduleCorrectionRetry()) {
           return failure("the repair gate remained red after the correction allowance", {
