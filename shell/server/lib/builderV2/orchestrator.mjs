@@ -437,6 +437,16 @@ export function createOrchestrator({
       candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope,
       moduleCorrectionUsed, attempts, corrections, noOps, attemptLedger, ...extra,
     });
+    // A browser-informed repair is one paid repair dispatch. Everything learned after that
+    // dispatch is deterministic feedback about its patch (scope, syntax, integrity or gates), so
+    // the follow-up belongs to the separate correction allowance. Re-booking it as `repair`
+    // trips maxRepairs before the model can correct even a single malformed replace_exact.
+    const scheduleCorrectionRetry = () => {
+      if (corrections >= maxCandidateCorrections) return false;
+      retryAsCorrection = true;
+      corrections += 1;
+      return true;
+    };
 
     while (!exhausted()) {
       abortIfRequested(signal);
@@ -483,8 +493,11 @@ export function createOrchestrator({
           // The browser-informed dispatch has already spent its one repair slot. A deterministic
           // scope rejection is re-briefed through the separate correction lane, so the model gets
           // the exact rejection without consuming another journey's repair share.
-          retryAsCorrection = true;
-          corrections += 1;
+          if (!scheduleCorrectionRetry()) {
+            return failure("the patch scope rejection remained after the correction allowance", {
+              problems: rejections.map((row) => row.reason),
+            });
+          }
         }
         log(`${step}: scoped correction attempted ${patchScope.findings.length} out-of-scope write(s); `
           + `${internalHeadroomSplit ? "retrying the same bounded continuation" : "retrying unscoped"} `
@@ -583,7 +596,15 @@ export function createOrchestrator({
           working = originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
         }
-        attempts += 1;
+        if (step === "repair") {
+          if (!scheduleCorrectionRetry()) {
+            return failure("the repair patch remained invalid after the correction allowance", {
+              problems: applied.rejected.map((row) => row.reason),
+            });
+          }
+        } else {
+          attempts += 1;
+        }
         attemptLedger.push({ attempt, dispatch: dispatchStep, class: classes[0] || "patch_not_applicable",
           substantive: true, rejected: applied.rejected.length, retainedFiles: retained ? filesChanged : [] });
         continue;
@@ -609,7 +630,15 @@ export function createOrchestrator({
             repairBoundary = null;
             working = originalTree;
           }
-          attempts += 1;
+          if (step === "repair") {
+            if (!scheduleCorrectionRetry()) {
+              return failure("the repair kept exceeding its write boundary after the correction allowance", {
+                problems: rejections.map((row) => row.reason),
+              });
+            }
+          } else {
+            attempts += 1;
+          }
           log(`${step}: correction exceeded its boundary; `
             + `${internalHeadroomSplit ? "retrying the same bounded continuation" : "retrying unscoped"} `
             + `(attempt ${attempts}/${maxGenerationAttempts})`);
@@ -655,6 +684,11 @@ export function createOrchestrator({
         for (const file of noOpTargets) rejectionHistory.push({ signature: `${file}:noop` });
         working = internalHeadroomSplit ? working : originalTree;
         noOps += 1;
+        if (step === "repair" && !scheduleCorrectionRetry()) {
+          return failure("the repair produced no applicable change after the correction allowance", {
+            code: "no_substantive_repair",
+          });
+        }
         attemptLedger.push({ attempt, dispatch: dispatchStep,
           class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
         log(`${step}: no-op batch rejected deterministically `
@@ -742,7 +776,15 @@ export function createOrchestrator({
           contractCorrectionScope = null;
           rejections = blockingProblems.map((reason) => ({ signature: "blocking-defect", reason }));
           working = originalTree;
-          attempts += 1;
+          if (step === "repair") {
+            if (!scheduleCorrectionRetry()) {
+              return failure("the repair's blocking findings remained after the correction allowance", {
+                problems: blockingProblems,
+              });
+            }
+          } else {
+            attempts += 1;
+          }
           log(`${step}: ${blocking.length} widespread or unmapped blocking defect(s) require a whole-core `
             + `retry (attempt ${attempts}/${maxGenerationAttempts})`);
           continue;
@@ -761,7 +803,11 @@ export function createOrchestrator({
       const assetCompliance = lintAssetAttribution(applied.tree, assets);
       if (!assetCompliance.ok) {
         rejections = assetCompliance.problems.map((reason) => ({ signature: "asset-attribution", reason }));
-        corrections += 1;
+        if (!scheduleCorrectionRetry()) {
+          return failure("asset-attribution defects remained after the correction allowance", {
+            problems: assetCompliance.problems,
+          });
+        }
         log(`${step}: ${assetCompliance.problems.length} asset-attribution defect(s) rejected deterministically`);
         continue;
       }
@@ -814,7 +860,15 @@ export function createOrchestrator({
       }
       // No honest bounded repair scope exists. This is a real full-generation failure.
       working = originalTree;
-      attempts += 1;
+      if (step === "repair") {
+        if (!scheduleCorrectionRetry()) {
+          return failure("the repair gate remained red after the correction allowance", {
+            problems: gateProblems,
+          });
+        }
+      } else {
+        attempts += 1;
+      }
       attemptLedger.push({ attempt, dispatch: dispatchStep,
         class: gate.layers.d0d2.failure?.kind || "gate_failed", substantive: true,
         problems: gateProblems.length });
