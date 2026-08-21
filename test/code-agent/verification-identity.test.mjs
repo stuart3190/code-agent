@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   appAuthRateLimitDefect,
@@ -44,7 +45,7 @@ test("the verifier restores visitor credentials but never injects a privileged s
   const calls = [];
   const context = { addInitScript: async (fn, arg) => calls.push({ fn: String(fn), arg }) };
   const identity = createVerificationIdentity({ appId: "project-a", scope: "journey-a", secret: "test-authority" });
-  assert.equal(await seedVerificationVisitorStorage(context, identity), true);
+  assert.equal(await seedVerificationVisitorStorage(context, identity, "visitor"), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].arg.storageKey, "visitor-session:project-a");
   assert.match(calls[0].arg.storedCredentials.email, /^verify-visitor-/);
@@ -56,6 +57,29 @@ test("the verifier restores visitor credentials but never injects a privileged s
   assert.equal(await seedVerificationVisitorStorage(mechanicsContext, identity, "mechanics"), true);
   assert.notEqual(mechanicsCalls[0].arg.storedCredentials.email, calls[0].arg.storedCredentials.email,
     "mechanics must not mutate the journey visitor's durable app state");
+
+  const smokeCalls = [];
+  const smokeContext = { addInitScript: async (fn, arg) => smokeCalls.push({ fn: String(fn), arg }) };
+  assert.equal(await seedVerificationVisitorStorage(smokeContext, identity, "smoke"), true);
+  assert.notEqual(smokeCalls[0].arg.storedCredentials.email, calls[0].arg.storedCredentials.email,
+    "generic smoke must not pre-drive the journey visitor's durable app state");
+  assert.notEqual(smokeCalls[0].arg.storedCredentials.email, mechanicsCalls[0].arg.storedCredentials.email,
+    "smoke and mechanics are independent disposable visitors");
+  await assert.rejects(seedVerificationVisitorStorage(context, identity),
+    (error) => error.code === "verification_visitor_purpose_required",
+    "a new verifier call site cannot silently fall back to the customer-journey visitor");
+});
+
+test("generic smoke explicitly uses its isolated durable visitor", async () => {
+  const source = await readFile(new URL(
+    "../../shell/server/lib/appBuild/verificationAgent.mjs", import.meta.url,
+  ), "utf8");
+  assert.match(source,
+    /seedVerificationVisitorStorage\(context, verificationIdentity, "smoke"\)/,
+    "the pre-journey smoke driver must never persist its Start click as the journey visitor");
+  assert.doesNotMatch(source,
+    /seedVerificationVisitorStorage\(context, verificationIdentity\)\s*;/,
+    "the purpose-less call was the production visitor-state leak");
 });
 
 test("an app id alone cannot derive production verifier credentials", () => {

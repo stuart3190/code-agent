@@ -57,8 +57,13 @@ export function verificationCredentials(identity, purpose, { kind = "account" } 
  * real RLS-scoped session; only the browser-persisted credentials are restored. Repeated browser
  * rounds therefore recover one test visitor instead of creating a new auth user every time.
  */
-export async function seedVerificationVisitorStorage(context, identity, purpose = "visitor") {
+export async function seedVerificationVisitorStorage(context, identity, purpose) {
   if (!hasVerificationIdentity(identity)) return false;
+  if (!purpose) {
+    throw Object.assign(new Error("verification visitor purpose is required"), {
+      code: "verification_visitor_purpose_required",
+    });
+  }
   const credentials = verificationCredentials(identity, purpose, { kind: "visitor" });
   const key = `visitor-session:${identity.appId}`;
   await context.addInitScript(({ storageKey, storedCredentials }) => {

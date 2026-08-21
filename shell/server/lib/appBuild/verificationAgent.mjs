@@ -65,7 +65,10 @@ export async function verifyApp({
     // (ERR_INSUFFICIENT_RESOURCES). Use Chromium's disk-backed shared-memory path at BOTH seams.
     if (!browser) browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     context = await browser.newContext();
-    await seedVerificationVisitorStorage(context, verificationIdentity);
+    // Smoke deliberately clicks generic Start/Get started controls. It must never share the
+    // journey visitor: a durable wizard would restore the smoke click in the real customer drive,
+    // hiding the contracted entry control before that journey had a chance to activate it.
+    await seedVerificationVisitorStorage(context, verificationIdentity, "smoke");
     const page = await context.newPage();
     page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
