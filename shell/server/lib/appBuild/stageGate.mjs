@@ -12,6 +12,7 @@
 import { preflightImports, preflightSummary } from "./importPreflight.mjs";
 import { honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
+import { transformWizardEntryState, wizardEntryTransformSummary } from "./wizardEntryTransform.mjs";
 import { expectationKeywords } from "./journeyVerifier.mjs";
 import { modularityCheck, modularitySummary } from "./modularity.mjs";
 import { validateDependencyPlan } from "../builderV2/dependencyPlan.mjs";
@@ -118,6 +119,7 @@ export async function runStageGate(tree, {
   // 1. imports — milliseconds, and the fault class that cost a whole build in production.
   let working = tree;
   let corrections = [];
+  let deterministicRepair = null;
   try {
     const preflight = await preflightImports(tree, { nodeModules });
     corrections = preflight.corrections;
@@ -152,6 +154,22 @@ export async function runStageGate(tree, {
     }
   }
 
+  // A generated component can correctly bind a contracted Start control and still make it
+  // unreachable by comparing the live wizard state with a step the machine never declares. That
+  // is a cross-file compiler invariant, not a browser judgement. Align it locally when (and only
+  // when) the concrete machine, control, guard and static first step all resolve unambiguously.
+  if (contract?.interactionContract?.flows?.some((flow) => flow.kind === "flow_start")) {
+    const aligned = transformWizardEntryState(working, { contract });
+    if (aligned.changes.length) {
+      working = aligned.tree;
+      deterministicRepair = {
+        applied: aligned.changes,
+        summary: `wizard entry aligned with no model call: ${wizardEntryTransformSummary(aligned)}`,
+      };
+      log(`stage-gate: deterministic transform — ${deterministicRepair.summary}`);
+    }
+  }
+
   // 2b. modularity — static and instant. The monolith shape (one App.jsx owning every journey)
   // is what made the 46.10-credit run's later stages so expensive; catching it at the stage that
   // produces it costs a cheap in-stage repair instead of the whole build's economics. The
@@ -171,7 +189,6 @@ export async function runStageGate(tree, {
   // verification, when the budget left no room to fix it. The scan costs milliseconds; the safe
   // deterministic transforms cost nothing; and a defect the transform cannot fix feeds the CHEAP
   // in-stage repair (scoped context, two attempts) instead of a whole-build repair round.
-  let deterministicRepair = null;
   if (contract) {
     let scan = honestyScan(working, { contract, stageScoped: true });
     if (scan.findings.length) {
@@ -181,7 +198,11 @@ export async function runStageGate(tree, {
         if (rescanned.findings.length < scan.findings.length) {
           // Adopt the transform. The single compiler pass below validates the transformed tree.
           working = { ...fixed.tree };
-          deterministicRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
+          const persistenceRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
+          deterministicRepair = deterministicRepair
+            ? { applied: [...deterministicRepair.applied, ...persistenceRepair.applied],
+              summary: `${deterministicRepair.summary}; ${persistenceRepair.summary}` }
+            : persistenceRepair;
           scan = rescanned;
           log(`stage-gate: deterministic transform — ${deterministicRepair.summary}`);
         }
@@ -237,7 +258,7 @@ export async function runStageGate(tree, {
     const built = await compile(working);
     if (!record("compile", !!built.ok, built.ok ? "passed" : "failed")) {
       return {
-        ok: false, checks, tree: working, corrections,
+        ok: false, checks, tree: working, corrections, deterministicRepair,
         problems: ["the project does not compile"],
         stderr: built.stderr || "",
         failure: { kind: "compile", findings: [], stderr: built.stderr || "" },
