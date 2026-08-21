@@ -68,10 +68,11 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
    */
   async function createBooking(values = {}) {
     // The capability originally required the compact { date, email, name } vocabulary while the
-    // contracts it serves commonly expose explicit entity fields such as dateId/guestEmail/
-    // guestName. Accept both at this platform boundary. The canonical fields remain present in
-    // storage, so existing consumers and capacity checks keep their exact semantics.
-    const date = values.date ?? values.dateId;
+    // contracts it serves commonly expose explicit entity fields such as dateId/bookingDate/
+    // guestEmail/guestName. Accept those contract-shaped names at this platform boundary. The
+    // canonical fields remain present in storage, so existing consumers and capacity checks keep
+    // their exact semantics.
+    const date = values.date ?? values.dateId ?? values.bookingDate;
     const email = values.email ?? values.guestEmail;
     const name = values.name ?? values.guestName;
     const status = values.status === "Confirmed" ? "Confirmed" : BOOKING_STATUS.ACTIVE;

@@ -130,6 +130,32 @@ test("WP5 - declared booking field aliases and direct-record consumers remain co
   assert.equal(await system.remaining("2026-08-13", "morning"), 4, "cancellation releases capacity");
 });
 
+test("WP5 - bookingDate adapters persist a real record that survives lookup and cancellation", async () => {
+  const { makeBookingSystem, CREATE_RESULT } = await CAP("booking.js");
+  const system = makeBookingSystem({ slots: SLOTS, deps: memoryBackend() });
+  const normalize = (record) => ({
+    ...record,
+    reference: record.reference || record.id || record.bookingReference,
+    status: String(record.status || "confirmed").toLowerCase(),
+  });
+
+  const created = normalize(await system.createBooking({
+    bookingDate: "2026-08-14", slotId: "morning", partySize: 2,
+    guestName: "Katherine Johnson", guestEmail: "Katherine@Example.com", guestPhone: "555-0114",
+    status: "confirmed",
+  }));
+  assert.equal(created.result, CREATE_RESULT.OK, "the common generated adapter does not confirm an invalid envelope");
+  assert.match(created.reference, /^BK-[A-Z0-9]{6}$/);
+  assert.equal(created.date, "2026-08-14", "bookingDate is stored under the canonical durable date");
+
+  const recovered = await system.getBooking(created.reference);
+  assert.equal(recovered.reference, created.reference, "the same visitor recovers the durable reference after reload");
+  assert.equal(recovered.bookingDate, "2026-08-14", "the generated adapter field remains available to its UI");
+  const cancelled = normalize(await system.cancelBooking(created.reference));
+  assert.equal(cancelled.reference, created.reference);
+  assert.equal(cancelled.status, "cancelled", "the recovered record completes its lifecycle transition");
+});
+
 test("WP5 — newsletter returns the exact states the UI contract demands", async () => {
   const { makeNewsletter, NEWSLETTER_RESULT } = await CAP("forms.js");
   const newsletter = makeNewsletter({ deps: memoryBackend() });
