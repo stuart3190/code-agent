@@ -46,6 +46,12 @@ test("a scoped name is a distinct identity", () => {
   assert.notEqual(controlIdFor("notes"), controlIdFor("intake.notes"));
 });
 
+test("presentation whitespace does not change identity while scope punctuation still does", () => {
+  assert.equal(controlIdFor("slotId"), controlIdFor("slot Id"));
+  assert.equal(controlIdFor("partySize"), controlIdFor("party Size"));
+  assert.notEqual(controlIdFor("shipping.address"), controlIdFor("shippingaddress"));
+});
+
 test("the same bare name IS the same identity — which is why duplicates must be reported", () => {
   // Not a bug in the hash: two screens showing the same contracted field SHOULD address the same
   // control. It only becomes ambiguous when both are visible at once, which the browser layer

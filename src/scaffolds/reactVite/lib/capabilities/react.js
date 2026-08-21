@@ -92,12 +92,14 @@ const titled = (value) => {
  * recognise "Guest name" from prose would have to be taught every application's vocabulary, and
  * once drove a party-size number input because a field was called guestName.
  *
- * FNV-1a over the control's name, matching verificationManifest.controlIdFor on the platform side,
- * so both compute the same id from the same name with nothing to keep in sync. Accessibility is
- * still required on its own merits: this attribute is for machines, a label is for people.
+ * FNV-1a over the control's whitespace-normalised name, matching
+ * verificationManifest.controlIdFor on the platform side, so both compute the same id from a
+ * logical camelCase name or its humanised spaced spelling with nothing to keep in sync.
+ * Accessibility is still required on its own merits: this attribute is for machines, a label is
+ * for people.
  */
 const machineId = (name, prefix) => {
-  const text = String(name || "").trim().toLowerCase();
+  const text = String(name || "").trim().toLowerCase().replace(/\s+/g, "");
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);

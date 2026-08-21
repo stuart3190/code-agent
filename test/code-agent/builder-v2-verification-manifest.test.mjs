@@ -120,10 +120,14 @@ test("the scaffold computes the SAME identity the platform does", async () => {
     `data:text/javascript,${encodeURIComponent(source.replace(/import[^;]+;/g, "").replace(/useCallback\(([^,]+),[^)]*\)/g, "$1"))}`
   ).catch(() => null);
   if (runtime?.controlId) {
-    for (const name of ["guestName", "partySize", "contactEmail", "deliverySpeed", "notes"]) {
+    for (const name of ["guestName", "partySize", "contactEmail", "deliverySpeed", "notes", "slot Id"]) {
       assert.equal(runtime.controlId(name), controlIdFor(name), `${name} must agree on both sides`);
       assert.equal(runtime.actionId(name), actionIdFor(name), `${name} action id must agree`);
     }
+    assert.equal(runtime.controlId("slot Id"), controlIdFor("slotId"),
+      "a humanised helper name must retain the logical field's machine identity");
+    assert.equal(runtime.controlId("party Size"), controlIdFor("partySize"),
+      "camelCase and presentation spacing must address the same contracted selection");
   }
 });
 

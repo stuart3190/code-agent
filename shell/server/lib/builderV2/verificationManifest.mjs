@@ -21,13 +21,15 @@
 /**
  * A stable, opaque identity for one contracted control.
  *
- * FNV-1a over the field's name. Deterministic and dependency-free ON PURPOSE: the generated app
- * computes the same identity at runtime from the same name (see the scaffold's capabilities/react
- * helpers), so the two agree without the model being told an id, without a registry to keep in
- * sync, and without the browser layer ever seeing the name.
+ * FNV-1a over the field's name after removing presentation whitespace. Deterministic and
+ * dependency-free ON PURPOSE: the generated app computes the same identity at runtime from the
+ * same name (see the scaffold's capabilities/react helpers), so the two agree without the model
+ * being told an id, without a registry to keep in sync, and without the browser layer ever seeing
+ * the name. Ignoring whitespace keeps a humanised helper name such as `slot Id` identical to the
+ * contract's logical `slotId`; dots and other scope punctuation remain significant.
  */
 export function controlIdFor(name, prefix = "ctl") {
-  const text = String(name || "").trim().toLowerCase();
+  const text = String(name || "").trim().toLowerCase().replace(/\s+/g, "");
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
