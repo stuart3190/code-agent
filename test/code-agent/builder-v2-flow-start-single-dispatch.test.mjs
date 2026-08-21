@@ -39,14 +39,26 @@ const needsBrowser = { skip: playwrightAvailable ? false : "requires playwright"
  * @param {string} shape.decoy     a control whose name collides with the action's vocabulary
  * @param {string} shape.heading   copy proving the flow actually opened
  */
-const appFor = ({ entry, decoy, heading }) => ({
+const appFor = ({ entry, decoy, heading, persistentProbe = false }) => ({
   "src/App.jsx": `import { useState } from "react";
 import { useSemanticSelection } from "./lib/capabilities/react.js";
 
 export default function App() {
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(${persistentProbe
+    ? `() => localStorage.getItem("mechanics-selected") === "yes"`
+    : "false"});
   const [tier, setTier] = useState(null);
-  const choice = useSemanticSelection({ name: "tierId", value: tier, onSelect: setTier });
+  const choice = useSemanticSelection({ name: "tierId", value: tier, onSelect: (next) => {
+    setTier(next);
+    ${persistentProbe ? `localStorage.setItem("mechanics-selected", "yes"); setStarted(true);` : ""}
+  } });
+  const tierChoices = <div {...choice.groupProps}>
+    {["Bronze", "Silver"].map((t) => (
+      <button key={t} {...choice.optionProps(t, "tier Id " + t)}>
+        <span style={{ display: "block" }}>Tier Id {t}</span>
+      </button>
+    ))}
+  </div>;
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/elsewhere")) {
     return <main><h1>Somewhere else entirely</h1><p>This page is not the flow.</p></main>;
   }
@@ -55,16 +67,11 @@ export default function App() {
     <p>The Northwind headline and summary are shown.</p>
     <div><button type="button" onClick={() => setStarted(true)}>${entry}</button></div>
     <div><a href="/elsewhere">${decoy}</a></div>
+    ${persistentProbe ? "{tierChoices}" : ""}
   </main>;
   return <main>
     <p>${heading}</p>
-    <div {...choice.groupProps}>
-      {["Bronze", "Silver"].map((t) => (
-        <button key={t} {...choice.optionProps(t, "tier Id " + t)}>
-          <span style={{ display: "block" }}>Tier Id {t}</span>
-        </button>
-      ))}
-    </div>
+    {tierChoices}
     <div><a href="/elsewhere">${decoy}</a></div>
   </main>;
 }`,
@@ -96,6 +103,17 @@ const CASES = {
       heading: "The checkout wizard shows the available tiers and the current step indicator." }),
     contract: contractFor({ id: "begin-checkout", action: "begin checkout",
       target: "begin checkout control",
+      expect: "the available tiers and the current wizard step indicator are shown" }),
+  },
+  probeIsolation: {
+    // The mechanics phase sees and clicks the tier chooser on entry. That click deliberately
+    // persists a state in which the Start control disappears. Reusing the probe context (or only
+    // reloading it) makes the real flow_start undriveable; a disposable probe context stays green.
+    app: appFor({ entry: "Start configuration", decoy: "View configuration history",
+      heading: "The configuration wizard shows the available tiers and the current step indicator.",
+      persistentProbe: true }),
+    contract: contractFor({ id: "start-configuration", action: "start configuration",
+      target: "start configuration control",
       expect: "the available tiers and the current wizard step indicator are shown" }),
   },
 };

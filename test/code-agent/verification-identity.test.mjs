@@ -24,6 +24,22 @@ test("verification credentials are stable per project and purpose without crossi
     }), "smoke"));
 });
 
+test("anonymous visitor state is fresh per verification round while account credentials stay stable", () => {
+  const first = createVerificationIdentity({
+    appId: "project-a", scope: "journey-a", visitorScope: "round-1", secret: "test-authority",
+  });
+  const second = createVerificationIdentity({
+    appId: "project-a", scope: "journey-a", visitorScope: "round-2", secret: "test-authority",
+  });
+  assert.notDeepEqual(verificationCredentials(first, "visitor", { kind: "visitor" }),
+    verificationCredentials(second, "visitor", { kind: "visitor" }));
+  assert.notDeepEqual(verificationCredentials(first, "mechanics", { kind: "visitor" }),
+    verificationCredentials(second, "mechanics", { kind: "visitor" }));
+  assert.deepEqual(verificationCredentials(first, "journey:journey-a"),
+    verificationCredentials(second, "journey:journey-a"),
+    "repair rounds reuse the explicit test account instead of consuming another signup");
+});
+
 test("the verifier restores visitor credentials but never injects a privileged session", async () => {
   const calls = [];
   const context = { addInitScript: async (fn, arg) => calls.push({ fn: String(fn), arg }) };
@@ -34,6 +50,12 @@ test("the verifier restores visitor credentials but never injects a privileged s
   assert.match(calls[0].arg.storedCredentials.email, /^verify-visitor-/);
   assert.doesNotMatch(calls[0].fn, /access[_-]?token|refresh[_-]?token|sessionStorage/i,
     "only ordinary persisted credentials are restored; the app must obtain its own real session");
+
+  const mechanicsCalls = [];
+  const mechanicsContext = { addInitScript: async (fn, arg) => mechanicsCalls.push({ fn: String(fn), arg }) };
+  assert.equal(await seedVerificationVisitorStorage(mechanicsContext, identity, "mechanics"), true);
+  assert.notEqual(mechanicsCalls[0].arg.storedCredentials.email, calls[0].arg.storedCredentials.email,
+    "mechanics must not mutate the journey visitor's durable app state");
 });
 
 test("an app id alone cannot derive production verifier credentials", () => {

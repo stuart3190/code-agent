@@ -2727,9 +2727,9 @@ export async function verifyJourneys({
     // test. Journeys that depend on a durable record stay in the context that created it, so the
     // app's own visitor identity (and therefore RLS) still resolves the record through the normal
     // runtime; no privileged state is ever injected.
-    const openContext = async () => {
+    const openContext = async ({ visitorPurpose = "visitor" } = {}) => {
       const created = await browser.newContext({ viewport });
-      await seedVerificationVisitorStorage(created, verificationIdentity);
+      await seedVerificationVisitorStorage(created, verificationIdentity, visitorPurpose);
       const opened = await created.newPage();
       opened.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
       opened.on("console", (m) => {
@@ -2756,7 +2756,10 @@ export async function verifyJourneys({
       contexts.push(created);
       return opened;
     };
-    let page = await openContext();
+    // Mechanics deliberately writes to controls. It therefore gets a disposable visitor and
+    // browser context: reloading the same page is insufficient when a wizard/selection persists
+    // through the generated backend, and would make the real journey inherit probe state.
+    let page = await openContext({ visitorPurpose: "mechanics" });
 
     // Is the preview actually there? Without this, an unreachable URL leaves a blank page, every
     // expectation goes unmet, and the run reports confident journey failures for an app it never
@@ -2795,11 +2798,11 @@ export async function verifyJourneys({
         outcomes: [...(mechanics?.outcomes || []), ...actionMechanics.outcomes],
       };
     }
-    if (mechanics?.failures?.length) {
-      // Reload so the probe's own interactions are not part of the state the journeys inherit.
-      await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await waitForActiveSurface(page);
-    }
+    // Always discard the mechanics context, even when every probe passed. A successful selection
+    // probe still changed state; a durable wizard can restore that state after a reload and hide
+    // the flow-entry control the first customer journey is required to drive.
+    await page.context().close().catch(() => {});
+    page = await openContext();
 
     // Durable evidence for the WHOLE run: what each contracted journey created, so a later
     // journey that depends on that record can prove it survived.

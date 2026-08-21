@@ -5,7 +5,7 @@ const stableToken = (...parts) => crypto.createHash("sha256")
   .digest("hex")
   .slice(0, 24);
 
-export function createVerificationIdentity({ appId, scope, secret }) {
+export function createVerificationIdentity({ appId, scope, visitorScope = null, secret }) {
   if (!appId || !scope || !secret) {
     throw Object.assign(new Error("browser verification identity authority is unavailable"), {
       code: "verification_identity_authority_missing",
@@ -19,7 +19,11 @@ export function createVerificationIdentity({ appId, scope, secret }) {
     appId: String(appId),
     scope: String(scope),
     tokens: {
-      visitor: seal("visitor"),
+      // A verification round shares one visitor across its related journeys, but a later repair
+      // round must not restore the half-completed wizard left by the prior candidate. Explicit
+      // account credentials remain journey-stable below; only anonymous app data is round-scoped.
+      visitor: seal(visitorScope ? `visitor:${visitorScope}` : "visitor"),
+      mechanics: seal(visitorScope ? `mechanics:${visitorScope}` : `mechanics:${scope}`),
       smoke: seal("smoke"),
       journey: seal(`journey:${scope}`),
     },
@@ -34,6 +38,7 @@ export function hasVerificationIdentity(identity) {
 export function verificationToken(identity, purpose) {
   if (!hasVerificationIdentity(identity)) return null;
   if (purpose === "visitor") return stableToken(identity.tokens.visitor, purpose);
+  if (purpose === "mechanics") return stableToken(identity.tokens.mechanics || identity.tokens.journey, purpose);
   if (purpose === "smoke") return stableToken(identity.tokens.smoke, purpose);
   return stableToken(identity.tokens.journey, purpose);
 }
@@ -52,9 +57,9 @@ export function verificationCredentials(identity, purpose, { kind = "account" } 
  * real RLS-scoped session; only the browser-persisted credentials are restored. Repeated browser
  * rounds therefore recover one test visitor instead of creating a new auth user every time.
  */
-export async function seedVerificationVisitorStorage(context, identity) {
+export async function seedVerificationVisitorStorage(context, identity, purpose = "visitor") {
   if (!hasVerificationIdentity(identity)) return false;
-  const credentials = verificationCredentials(identity, "visitor", { kind: "visitor" });
+  const credentials = verificationCredentials(identity, purpose, { kind: "visitor" });
   const key = `visitor-session:${identity.appId}`;
   await context.addInitScript(({ storageKey, storedCredentials }) => {
     try {

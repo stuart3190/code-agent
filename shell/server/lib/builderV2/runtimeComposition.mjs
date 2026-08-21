@@ -520,6 +520,10 @@ export function createBuilderV2Runtime({
         let unavailable = false;
         let verifierError = null;
         let mechanics = null;
+        // Related journeys in this verification round share one visitor so producer/consumer
+        // scenarios see the same durable record. A later repair round gets a new visitor and
+        // cannot inherit a half-completed wizard or terminal state from the prior candidate.
+        const verificationVisitorScope = uuid();
         for (const journey of journeys) {
           // Use a server-only authority to seal stable verifier credentials. Only the derived,
           // purpose-scoped tokens enter the ephemeral sandbox payload; the service credential
@@ -527,6 +531,7 @@ export function createBuilderV2Runtime({
           const verificationIdentity = createVerificationIdentity({
             appId: projectId,
             scope: journey.id,
+            visitorScope: verificationVisitorScope,
             secret: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE,
           });
           const before = journeyRequiresPersistentMutation(journey)
