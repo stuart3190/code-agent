@@ -857,6 +857,27 @@ async function expectationBecameVisible(page, expect, textBefore) {
 }
 
 /**
+ * A selection can unmount synchronously while the state it selected is resolved asynchronously.
+ * Wait at that real asynchronous boundary for BOTH pieces of contracted evidence: the next
+ * semantic control and this step's observable outcome. A single sample made correct customer
+ * apps depend on render/network timing; the bounded wait still fails unrelated or wrong states.
+ */
+async function waitForAutoAdvanceEvidence(page, nextControl, expect, textBefore, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let nextControlVisible = false;
+  let expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
+  if (!nextControl) return { nextControlVisible, expectationEvidence };
+  for (;;) {
+    nextControlVisible = await semanticControlVisible(page, nextControl);
+    if (nextControlVisible && expectationEvidence.met) break;
+    if (Date.now() >= deadline) break;
+    await page.waitForTimeout(200);
+    expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
+  }
+  return { nextControlVisible, expectationEvidence };
+}
+
+/**
  * Activate a control the contract names, by its own declared identity.
  *
  * Contracts describe controls ("start checkout control", "Confirm order control") while the button
@@ -1010,12 +1031,12 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   let autoAdvance = null;
   if (!after.length) {
     const nextControl = nextContractedControl(journeyFlows, flow);
-    const outcome = await expectationBecameVisible(page, step.expect, textBefore);
+    const observed = await waitForAutoAdvanceEvidence(page, nextControl, step.expect, textBefore);
     autoAdvance = {
       nextControl: nextControl ? (nextControl.logicalField || nextControl.accessibleName) : null,
-      nextControlVisible: await semanticControlVisible(page, nextControl),
-      expectationMet: outcome.met,
-      expectationEvidence: outcome,
+      nextControlVisible: observed.nextControlVisible,
+      expectationMet: observed.expectationEvidence.met,
+      expectationEvidence: observed.expectationEvidence,
     };
   }
 
@@ -1028,7 +1049,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     selectedText: verdict.selectedText || null,
     groupId: group.groupId,
     controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
-      selectedGroupContext: group.contextText, selectedOptions: after },
+      selectedGroupContext: group.contextText, selectedOptions: after, autoAdvance },
   };
 }
 

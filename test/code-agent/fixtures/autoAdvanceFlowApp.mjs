@@ -56,17 +56,20 @@ export const SLOTS = {
 `;
 
 /**
- * @param {"auto-advance"|"unrelated-content"|"wrong-next-state"|"rerender-only"} variant
+ * @param {"auto-advance"|"delayed-outcome"|"unrelated-content"|"wrong-next-state"|"rerender-only"} variant
  */
-const bookingFlow = (variant) => `import { useCapabilityState, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
+const bookingFlow = (variant) => `import { useState } from "react";
+import { useCapabilityState, useSemanticSelection, useSemanticField } from "../lib/capabilities/react.js";
 import { wizard } from "../data/flow.js";
 import { DATES, SLOTS } from "../data/catalogue.js";
 
 export function Flow() {
+  const [outcomeReady, setOutcomeReady] = useState(${variant === "delayed-outcome" ? "false" : "true"});
   const state = useCapabilityState(wizard);
   const values = state.values || {};
   const date = useSemanticSelection({ name: "dateId", value: values.dateId,
-    onSelect: async (v) => { await wizard.select("dateId", v); ${variant === "rerender-only" ? "" : "await wizard.next();"} } });
+    onSelect: async (v) => { await wizard.select("dateId", v); ${variant === "rerender-only" ? "" : "await wizard.next();"}
+      ${variant === "delayed-outcome" ? "setTimeout(() => setOutcomeReady(true), 1400);" : ""} } });
   const slot = useSemanticSelection({ name: "slotId", value: values.slotId,
     onSelect: (v) => wizard.select("slotId", v) });
   const partySize = useSemanticSelection({ name: "partySize", value: values.partySize,
@@ -119,7 +122,7 @@ ${variant === "unrelated-content" ? `
     </div> : null}
 ` : `
     {state.stepId === "slot" ? <>
-      <p>Available slots for {chosenDate ? chosenDate.label : ""} are displayed with remaining seat counts.</p>
+      {outcomeReady ? <p>Available slots for {chosenDate ? chosenDate.label : ""} are displayed with remaining seat counts.</p> : null}
       <div {...slot.groupProps}>
         {(SLOTS[values.dateId] || []).map((s) => (
           <button key={s.value} {...slot.optionProps(s.value, "slot Id " + s.label)}>
@@ -268,6 +271,9 @@ export default function App() { return <Flow />; }
 const SHAPES = {
   // The live shape, and the three adversarial variants of it.
   "booking-auto-advance": { flow: bookingFlow("auto-advance"), catalogue: BOOKING_DATA,
+    steps: ["date", "slot", "party", "contact", "review"],
+    values: { started: false, dateId: null, slotId: null, partySize: null, guestName: "", guestEmail: "", guestPhone: "", dietaryNote: "" } },
+  "booking-delayed-outcome": { flow: bookingFlow("delayed-outcome"), catalogue: BOOKING_DATA,
     steps: ["date", "slot", "party", "contact", "review"],
     values: { started: false, dateId: null, slotId: null, partySize: null, guestName: "", guestEmail: "", guestPhone: "", dietaryNote: "" } },
   "booking-unrelated-content": { flow: bookingFlow("unrelated-content"), catalogue: BOOKING_DATA,

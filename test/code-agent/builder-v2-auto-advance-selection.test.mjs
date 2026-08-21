@@ -91,6 +91,7 @@ const CRM = genericContract("configure-deal", "A rep configures a deal", [
 
 const CONTRACTS = {
   "booking-auto-advance": bookingContract(),
+  "booking-delayed-outcome": bookingContract(),
   "booking-unrelated-content": bookingContract(),
   "booking-wrong-next-state": bookingContract(),
   "booking-rerender-only": bookingContract(),
@@ -184,6 +185,17 @@ test("BOOKING date → slots: the live shape now passes, driving the date group"
     assert.equal(steps[3].status, "pass", transcript);
     assert.match(steps[3].detail, /6:30 PM|8:30 PM/, transcript);
   });
+
+test("BOOKING async outcome: waits for contracted copy after the next control renders", {
+  ...needsBrowser, timeout: 300_000,
+}, async () => {
+  const result = await drive("booking-delayed-outcome");
+  const steps = result.journeys[0].steps;
+  const transcript = steps.map(line).join("\n");
+  console.log(`\n[booking-delayed-outcome]\n${transcript}\n`);
+  assert.equal(steps[2].status, "pass", `async contracted evidence must be observed\n${transcript}`);
+  assert.match(steps[2].detail, /advanced the flow/, transcript);
+});
 
 test("ADVERSARIAL — unrelated content appears instead of the contracted next state",
   { ...needsBrowser, timeout: 300_000 }, async () => {
