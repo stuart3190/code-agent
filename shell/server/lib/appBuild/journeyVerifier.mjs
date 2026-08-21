@@ -257,6 +257,46 @@ function fixtureValueFor(flow, facts, marker, currentValue = "") {
   return value;
 }
 
+function replaceLastDigit(value, direction = 1) {
+  const match = String(value || "").match(/\d(?!.*\d)/);
+  if (!match) return null;
+  const next = (Number(match[0]) + direction + 10) % 10;
+  return `${value.slice(0, match.index)}${next}${value.slice(match.index + 1)}`;
+}
+
+/**
+ * Candidate values for proving that a pre-populated control can make a real, valid transition.
+ *
+ * Marker-derived fixtures cover names, email addresses, passwords and normal text. Some semantic
+ * fixtures are intentionally stable, though (phone/date/time/postcode and 3D properties), so an
+ * edit journey would otherwise restore the original value and make its following Save a no-op.
+ * These small alternatives remain inside the same declared browser type; native validity below
+ * is the final authority, so a pattern/min/max-constrained field cannot accept a guessed value.
+ */
+function distinctFixtureCandidates(flow, facts, marker, currentValue) {
+  const logicalField = flow.control.logicalField || flow.valueWritten || flow.control.accessibleName;
+  const browserType = String(facts?.type || "text").toLowerCase();
+  const concept = semanticConcept(logicalField);
+  const candidates = [1, 2, 3].map((suffix) => fixtureValueFor(
+    flow, facts, `${marker}${suffix}`, currentValue,
+  ));
+  const addDigitAlternates = () => {
+    candidates.push(replaceLastDigit(currentValue, 1), replaceLastDigit(currentValue, -1));
+  };
+  if (concept === "phone" || concept === "postcode" || concept === "count"
+      || ["tel", "date", "time", "datetime-local", "month", "week", "color"].includes(browserType)) {
+    addDigitAlternates();
+  }
+  const words = String(logicalField || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  if (/^(size|scale|dimensions?)$/.test(words.trim()) || /\b(position|rotation|transparency|colou?r)\b/.test(words)) {
+    addDigitAlternates();
+  }
+  if (/\banchored\b|\bcollide\b/.test(words)) {
+    candidates.push(String(currentValue).toLowerCase() === "true" ? "false" : "true");
+  }
+  return unique(candidates).filter((candidate) => candidate !== currentValue);
+}
+
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
@@ -481,24 +521,41 @@ async function fillContractedFields(page, flows, marker) {
     // is then a no-op, `changed` is false, and a working control is reported `value_not_accepted`
     // — with expectedValue, observedValue and previousValue all three identical in the evidence.
     //
-    // So when the field already holds the target, ask a DIFFERENT question: type a distinct but
-    // still type-valid value and require THAT to land. The change requirement is untouched; only
-    // the false negative goes.
+    // So when the field already holds the target, ask a DIFFERENT question. Prefer a distinct,
+    // natively valid final fixture so an edit journey makes a real mutation before its Save step.
+    // If the field's constraints admit no alternate, clear and restore it as a final driveability
+    // probe. A dead controlled input that ignores both writes still fails the unchanged verdict.
+    let probeValue = null;
+    let probeChanged = false;
     if (flow.control.validity !== "invalid" && value === currentValue && currentValue !== "") {
-      const variant = fixtureValueFor(flow, facts, `${marker}1`, currentValue);
-      if (variant !== currentValue) value = variant;
+      for (const candidate of distinctFixtureCandidates(flow, facts, marker, currentValue)) {
+        await field.fill(candidate, { timeout: 3_000 }).catch(() => {});
+        const observedCandidate = await field.inputValue().catch(() => currentValue);
+        const candidateValidity = await field.evaluate((el) => el.checkValidity()).catch(() => false);
+        if (observedCandidate === candidate && candidateValidity) {
+          value = candidate;
+          probeValue = observedCandidate;
+          probeChanged = true;
+          break;
+        }
+      }
+      if (!probeChanged) {
+        await field.fill("", { timeout: 3_000 }).catch(() => {});
+        probeValue = await field.inputValue().catch(() => currentValue);
+        probeChanged = probeValue !== currentValue;
+      }
     }
     await field.fill(value, { timeout: 3_000 }).catch(() => {});
     const observedValue = await field.inputValue().catch(() => "");
     const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
       message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
     const expectsInvalid = flow.control.validity === "invalid";
-    const changed = observedValue !== currentValue;
+    const changed = probeChanged || observedValue !== currentValue;
     const status = observedValue !== value || (!expectsInvalid && !changed)
       ? "value_not_accepted"
       : (expectsInvalid || validity.valid ? "filled" : "fixture_invalid");
     evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue,
-      previousValue: currentValue, facts,
+      previousValue: currentValue, ...(probeValue === null ? {} : { probeValue }), facts,
       validityMessage: validity.message });
     if (status === "filled") filled.push(logicalField);
   }

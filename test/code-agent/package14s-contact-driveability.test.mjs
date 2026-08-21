@@ -66,7 +66,7 @@ export default function App() {
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState("");
   const [partySize, setPartySize] = useState("");
-  const [contact, setContact] = useState({ name: "", email: "", phone: "" });
+  const [contact, setContact] = useState({ name: "", email: "", phone: "07700900123" });
   const [review, setReview] = useState(false);
   const ready = date && slot && partySize;
   useEffect(() => {
@@ -135,6 +135,10 @@ test("the same compiled candidate is driveable with exact contracted control ide
     ["name", "filled"], ["email", "filled"], ["phone", "filled"],
   ]);
   assert.ok(contact.controlEvidence.fields.every((field) => field.expectedValue === field.observedValue));
+  const phone = contact.controlEvidence.fields.find((field) => field.field === "phone");
+  assert.equal(phone.previousValue, "07700900123", JSON.stringify(phone));
+  assert.notEqual(phone.expectedValue, phone.previousValue, JSON.stringify(phone));
+  assert.equal(phone.probeValue, phone.expectedValue, JSON.stringify(phone));
   assert.match(result.journeys[0].steps[3].detail, /review contains 3 exact entered value/);
 });
 
