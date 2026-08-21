@@ -11,6 +11,12 @@ export const WIZARD_STATUS = Object.freeze({
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+const freezeSnapshot = (value) => {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezeSnapshot(child);
+  return Object.freeze(value);
+};
+
 const flatten = (row) => (row ? { id: row.id, ...(row.data || {}) } : null);
 
 /** Durable app-scoped persistence. No browser storage and no visual opinions. */
@@ -68,8 +74,9 @@ export function makeWizardMachine({
   let hydrationFlight = null;
   let stateGeneration = 0;
   let persistenceQueue = Promise.resolve();
+  let snapshotCache = null;
 
-  const snapshot = () => ({
+  const buildSnapshot = () => ({
     ...clone(state),
     // `stepId` is canonical. The aliases keep generated applications written against the
     // common step/currentStep/current names reactive instead of silently pinning their UI to
@@ -80,7 +87,12 @@ export function makeWizardMachine({
     progress: (state.stepIndex + 1) / ids.length,
     hydrated: hydration.hydrated, hydrating: hydration.hydrating, hydrationError: hydration.error,
   });
+  // React's external-store contract requires repeated reads to return the same immutable object
+  // until the store emits. Returning a fresh clone from every getState() causes raw documented
+  // useSyncExternalStore consumers to render forever with "getSnapshot should be cached".
+  const snapshot = () => snapshotCache || (snapshotCache = freezeSnapshot(buildSnapshot()));
   const emit = () => {
+    snapshotCache = null;
     const next = snapshot();
     for (const listener of listeners) listener(next);
     return next;
@@ -92,7 +104,9 @@ export function makeWizardMachine({
   };
   const save = () => {
     if (!durable?.save) return Promise.resolve();
-    const value = snapshot();
+    // Persistence captures the current internal state even when the public snapshot intentionally
+    // remains stable until the matching emit (move/cancel/reset persist before notifying).
+    const value = buildSnapshot();
     // Generated handlers often issue select/reset/next without awaiting each call. Preserve their
     // synchronous UI updates, but serialize durable mutations in invocation order so an older slow
     // request cannot land after a newer save or clear and resurrect stale values on reload.
@@ -128,7 +142,7 @@ export function makeWizardMachine({
     return next;
   };
 
-  function adoptState(saved) {
+  function adoptState(saved, { notify = true } = {}) {
     if (!saved || typeof saved !== "object") return null;
     const stepId = ids.includes(saved.stepId)
       ? saved.stepId
@@ -143,7 +157,8 @@ export function makeWizardMachine({
       cancelledAt: saved.cancelledAt || null,
       revision: Math.max(state.revision, Number(saved.revision || 0)),
     };
-    return emit();
+    snapshotCache = null;
+    return notify ? emit() : snapshot();
   }
 
   async function restoreState(nextState) {
@@ -151,11 +166,11 @@ export function makeWizardMachine({
     // Preserve restore() as the durable reload API while accepting that compatible state shape.
     // Emit before the write yields so event handlers update controlled React UI immediately.
     if (nextState !== undefined) {
-      const adopted = adoptState(nextState);
+      const adopted = adoptState(nextState, { notify: false });
       if (!adopted) throw new Error("wizard restore state must identify a known step");
       stateGeneration += 1;
       hydration = { hydrated: true, hydrating: false, error: null };
-      const next = snapshot();
+      const next = emit();
       await save();
       return next;
     }

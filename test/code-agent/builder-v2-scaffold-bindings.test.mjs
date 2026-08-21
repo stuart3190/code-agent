@@ -35,11 +35,13 @@ export const flow = makeWizardMachine({
   steps: ["details", "slot"],
   persistence: null,
 });`,
-  "src/App.jsx": `import { useCapabilityState, useSemanticField, useSemanticSelection, useStatusRegion } from "./lib/capabilities";
+  "src/App.jsx": `import { useSyncExternalStore } from "react";
+import { useCapabilityState, useSemanticField, useSemanticSelection, useStatusRegion } from "./lib/capabilities";
 import { flow } from "./data/flow.js";
 
 export default function App() {
   const state = useCapabilityState(flow, (snapshot) => snapshot.values);
+  const rawState = useSyncExternalStore(flow.subscribe, flow.getState, flow.getState);
   const email = useSemanticField({ name: "customerEmail", value: state.customerEmail || "", type: "email",
     onChange: (value) => flow.setValue("customerEmail", value) });
   const slot = useSemanticSelection({ name: "slot", value: state.slot || null,
@@ -58,6 +60,7 @@ export default function App() {
       {state.slot ? \`Chosen slot \${state.slot}\` : "No slot chosen"}
     </p>
     <p id="echo">{state.customerEmail || "no email"}</p>
+    <p id="raw-echo">{rawState.values.customerEmail || "no raw email"}</p>
   </main>;
 }`,
 };
@@ -112,9 +115,10 @@ test("semantic props produce controls a verifier can find and drive", { ...needs
     assert.equal(await email.count(), 1, "the field has one accessible name");
     await email.fill("visitor@example.com");
     await assert.doesNotReject(page.waitForFunction(
-      () => document.getElementById("echo")?.textContent === "visitor@example.com",
+      () => document.getElementById("echo")?.textContent === "visitor@example.com"
+        && document.getElementById("raw-echo")?.textContent === "visitor@example.com",
       null, { timeout: 5_000 },
-    ), "typing propagates to the capability store");
+    ), "typing propagates through both the platform hook and raw external-store contract");
 
     // Selected state by construction: observable before AND after, which is what a browser
     // verifier asserts and what hand-rolled selection wiring repeatedly failed to expose.

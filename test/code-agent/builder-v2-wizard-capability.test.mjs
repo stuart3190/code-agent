@@ -74,6 +74,25 @@ test("wizard controlled values emit before durable persistence settles", async (
   await pending;
 });
 
+test("wizard snapshots obey React's external-store identity contract", async () => {
+  const machine = makeWizardMachine({ steps: ["details", "review"], persistence: null });
+  const initial = machine.getState();
+  assert.strictEqual(machine.getState(), initial,
+    "repeated getState reads must be identity-stable until the store emits");
+  assert.equal(Object.isFrozen(initial), true);
+  assert.equal(Object.isFrozen(initial.values), true, "cached nested state is immutable too");
+
+  const emissions = [];
+  machine.subscribe((value) => emissions.push(value));
+  assert.strictEqual(emissions.at(-1), initial, "subscription and getState share one snapshot object");
+
+  await machine.select("email", "user@example.test");
+  const changed = machine.getState();
+  assert.notStrictEqual(changed, initial, "a real state emission advances snapshot identity");
+  assert.strictEqual(machine.getState(), changed, "the new identity remains stable after the emission");
+  assert.strictEqual(emissions.at(-1), changed);
+});
+
 test("mount restore shares hydration and cannot overwrite a live selection", async () => {
   let releaseLoad;
   let loadStarted;
