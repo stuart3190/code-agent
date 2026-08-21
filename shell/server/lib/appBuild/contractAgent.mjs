@@ -54,12 +54,25 @@ Shape:
   "routes": [{ "path": "/", "name": "Home", "purpose": "...", "auth": false }],
   "entities": [{
     "name": "booking",
-    "fields": [{ "name": "slotId", "type": "string", "required": true }],
+    "fields": [
+      { "name": "slotId", "type": "string", "required": true },
+      { "name": "guestName", "type": "string", "required": true },
+      { "name": "guestEmail", "type": "string", "required": true },
+      { "name": "reference", "type": "string", "required": true },
+      { "name": "status", "type": "string", "required": true }
+    ],
     "owned": true,                        // true when rows belong to the signed-in user
     "relationships": ["a booking references one slot"]
   }],
   "auth": { "required": true, "model": "email + password via the backend SDK", "rules": ["a signed-out visitor cannot see another customer's booking"] },
-  "operations": [{ "id": "create-booking", "entity": "booking", "kind": "create", "description": "persist a booking via db.entity('booking').create", "journey": "book-a-slot" }],
+  "operations": [{
+    "id": "create-booking", "entity": "booking", "kind": "create",
+    "description": "persist a booking via db.entity('booking').create", "journey": "book-a-slot",
+    "responsibilities": [{
+      "type": "persistence", "capability": "crud", "capabilityMethod": "create",
+      "reads": ["slotId", "guestName", "guestEmail"], "writes": ["reference", "status"]
+    }]
+  }],
   "integrations": [{ "name": "none", "purpose": "", "required": false }],
   "states": [{ "surface": "booking page", "loading": "skeleton while slots load", "empty": "no slots left this week", "validation": "email must look like an email", "error": "saving failed, try again", "success": "confirmation with reference" }],
   "acceptance": [{ "id": "a1", "statement": "a submitted booking is readable after a page reload", "journey": "book-a-slot", "kind": "persistence" }],
@@ -80,6 +93,15 @@ Rules:
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.
 - If the request implies stored data, declare the entities and the operations that write them.
+- Every operation declares \`responsibilities\`. Persistence and functional transformation are
+  separate responsibilities even when they happen behind one button. CRUD may create/read/update/
+  delete values supplied by its caller; it never calculates, generates, optimises, allocates or
+  otherwise produces domain values. A transformation responsibility uses
+  \`{ "type": "functional", "behavior": "...", "reads": [declared input fields],
+  "writes": [declared output fields] }\`. Add a separate persistence responsibility when those
+  outputs are saved. Only name \`capability\` and \`capabilityMethod\` when that exact registered method
+  implements the functional behavior; otherwise leave them absent so Builder V2 creates a bounded
+  custom_behavior extension.
 - Anything you are NOT building goes in "deferred" with a reason. Deferring is honest; a control
   that pretends to work is not.
 - Public marketing content (business name, service list, opening hours) is in-code constants, NOT
@@ -142,6 +164,16 @@ function normalise(contract, { prompt }) {
     fields: Array.isArray(entity.fields) ? entity.fields : [],
     relationships: Array.isArray(entity.relationships) ? entity.relationships : [],
     owned: entity.owned !== false,
+  }));
+  c.operations = c.operations.map((operation) => ({
+    ...operation,
+    ...(Array.isArray(operation?.responsibilities) ? {
+      responsibilities: operation.responsibilities.map((responsibility) => ({
+        ...responsibility,
+        reads: Array.isArray(responsibility?.reads) ? responsibility.reads.map(String).filter(Boolean) : [],
+        writes: Array.isArray(responsibility?.writes) ? responsibility.writes.map(String).filter(Boolean) : [],
+      })),
+    } : {}),
   }));
   return c;
 }

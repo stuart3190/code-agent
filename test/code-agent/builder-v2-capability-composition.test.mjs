@@ -69,8 +69,10 @@ test("the authoritative registry is total only for capabilities that actually sh
     for (const key of [
       "id", "supportedOperations", "requiredInputs", "outputs", "stateOwnership",
       "persistenceSemantics", "dependencies", "compatibleUiInteractionPrimitives",
-      "verificationSemantics", "version", "implementation", "testContract",
+      "verificationSemantics", "responsibilitySemantics", "version", "implementation", "testContract",
     ]) assert.ok(Object.hasOwn(capability, key), `${capability.name}.${key}`);
+    assert.ok(Array.isArray(capability.responsibilitySemantics.persistence));
+    assert.ok(Array.isArray(capability.responsibilitySemantics.functional));
     assert.equal(capability.implementation.mode, "deterministic");
     assert.equal(capability.implementation.proven, true);
     assert.ok(capability.testContract.length, `${capability.name} needs a reusable test contract`);

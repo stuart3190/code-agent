@@ -26,7 +26,8 @@ export const STAGES = ["foundation", "data", "primary_journey", "supporting", "p
 //   routes:     [{ path, name, purpose, auth }],
 //   entities:   [{ name, fields: [{ name, type, required }], owned, relationships: [] }],
 //   auth:       { required, model, rules: [] },
-//   operations: [{ id, entity, kind, description, journey }],
+//   operations: [{ id, entity, kind, description, journey,
+//                  responsibilities: [{ type, behavior, capability, capabilityMethod, reads, writes }] }],
 //   integrations: [{ name, purpose, required }],
 //   states:     [{ surface, loading, empty, validation, error, success }],
 //   acceptance: [{ id, statement, journey, kind }],
@@ -230,6 +231,38 @@ export function validateContract(contract) {
     if (operation?.entity && !declaredEntities.has(normaliseReference(operation.entity))) {
       problems.push(`operation "${where}" writes entity "${operation.entity}", which this contract `
         + "does not declare — there would be no record to prove it against");
+    }
+    if (operation?.responsibilities !== undefined && !Array.isArray(operation.responsibilities)) {
+      problems.push(`operation "${where}" responsibilities is not a list`);
+      continue;
+    }
+    for (const [responsibilityIndex, responsibility] of (operation?.responsibilities || []).entries()) {
+      const label = `operation "${where}" responsibility ${responsibilityIndex + 1}`;
+      if (!["persistence", "functional"].includes(responsibility?.type)) {
+        problems.push(`${label} has unknown type "${responsibility?.type || ""}"`);
+      }
+      for (const key of ["reads", "writes"]) {
+        if (!Array.isArray(responsibility?.[key])) {
+          problems.push(`${label} ${key} is not a list`);
+          continue;
+        }
+        for (const reference of responsibility[key]) {
+          const references = key === "writes" ? fieldNames(c) : contractReferences(c);
+          if (!references.has(normaliseReference(reference))) {
+            problems.push(`${label} ${key} "${reference}" is not a declared ${key === "writes" ? "entity field" : "entity field or operation"}`);
+          }
+        }
+      }
+      if (responsibility?.type === "functional") {
+        if (!String(responsibility.behavior || operation.description || "").trim()) {
+          problems.push(`${label} does not name the functional behavior`);
+        }
+        if (!responsibility.reads?.length) problems.push(`${label} has no declared functional inputs`);
+        if (!responsibility.writes?.length) problems.push(`${label} has no declared functional outputs`);
+      }
+      if (responsibility?.capability && !responsibility?.capabilityMethod) {
+        problems.push(`${label} names capability "${responsibility.capability}" without a capabilityMethod`);
+      }
     }
   }
 

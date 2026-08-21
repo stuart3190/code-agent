@@ -148,11 +148,39 @@ const interactionPrimitives = Object.freeze({
   entities: [], uiContract: [], upgradePolicy: "replace-on-iterate",
 });
 
+// A method name is not enough to establish semantic ownership. In particular, CRUD's `update`
+// persists values supplied by its caller; it does not calculate, generate or otherwise produce
+// those values. Capability-graph derivation consults this declaration before it lets a registered
+// capability satisfy a functional responsibility.
+const RESPONSIBILITY_SEMANTICS = Object.freeze({
+  crud: Object.freeze({
+    persistence: Object.freeze(["list", "get", "create", "update", "remove", "count", "subscribe"]),
+    functional: Object.freeze([]),
+  }),
+  session: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["ensure", "recover", "current", "signOut"]) }),
+  roles: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["isOwner", "requireOwner"]) }),
+  booking: Object.freeze({
+    persistence: Object.freeze(["createBooking", "getBooking", "listBookings", "cancelBooking"]),
+    functional: Object.freeze(["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"]),
+  }),
+  wizard: Object.freeze({
+    persistence: Object.freeze(["hydrate", "restore", "save", "load", "clear"]),
+    functional: Object.freeze(["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset", "save", "load", "clear"]),
+  }),
+  contact: Object.freeze({ persistence: Object.freeze(["submitContact"]), functional: Object.freeze(["submitContact"]) }),
+  newsletter: Object.freeze({ persistence: Object.freeze(["subscribe"]), functional: Object.freeze(["subscribe"]) }),
+  "interaction-primitives": Object.freeze({
+    persistence: Object.freeze([]),
+    functional: Object.freeze(["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"]),
+  }),
+});
+
 /** The one machine-readable inventory of reusable behavior that actually ships. */
 export const CAPABILITIES = Object.freeze(Object.fromEntries(
   Object.entries({ ...LEGACY_CAPABILITIES, "interaction-primitives": interactionPrimitives })
     .map(([id, entry]) => [id, Object.freeze({
       id, ...entry, ...metadata[id],
+      responsibilitySemantics: RESPONSIBILITY_SEMANTICS[id],
       implementation: Object.freeze({ mode: "deterministic", proven: true, protected: true }),
     })]),
 ));
