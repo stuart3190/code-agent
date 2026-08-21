@@ -21,7 +21,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  durableCommitIdentity, durableRecordKey, durableStatusWords, expectationOutcome, invalidValueFor,
+  durableCommitIdentity, durableRecordKey, durableStatusWords, durableTransitionFlow,
+  expectationOutcome, invalidValueFor,
   recoveryEvidenceVerdict, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
@@ -303,6 +304,20 @@ test("durable evidence keeps lifecycle status but discards transient operation c
     "the duplicated object disappears from the hierarchy and the part count decreases",
     "The duplicated object disappears from the hierarchy.",
   ), ["object", "hierarchy"], "transient delete verbs must not be required to survive reload");
+  assert.deepEqual(durableStatusWords(
+    "the booking screen changes to an explicit Cancelled state",
+    "The booking screen changes to an explicit Cancelled state.",
+  ), ["booking", "screen", "explicit", "cancelled"],
+  "a lifecycle transition keeps its resulting status but not the one-time change verb");
+});
+
+test("a cancellation-only interaction refreshes the durable recovery baseline", () => {
+  const cancellation = { kind: "cancellation", durableLifecycle: "reservation" };
+  assert.strictEqual(durableTransitionFlow([cancellation]), cancellation,
+    "Cancel is a durable transition even when the step is not also classified as mutation");
+  const mutation = { kind: "mutation", durableLifecycle: "reservation" };
+  assert.strictEqual(durableTransitionFlow([mutation, cancellation]), mutation,
+    "the primary mutation remains the baseline when one step carries both classifications");
 });
 
 test("prerequisite mutation waits for a rendered durable identity, not progress copy", () => {

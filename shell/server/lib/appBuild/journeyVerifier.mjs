@@ -1077,13 +1077,22 @@ const REFERENCE_TOKEN = /\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,}\b/g;
 // deliberately retains states such as Confirmed/Archived and record facts such as edited values,
 // so a stale or contradictory recovery still fails the adversarial matrix.
 const TRANSIENT_OPERATION_WORDS = new Set([
-  "appears", "decreases", "disappears", "duplicate", "duplicated", "increases", "reapplies",
-  "redo", "restores", "undo",
+  "appears", "change", "changed", "changes", "decreases", "disappears", "duplicate", "duplicated",
+  "increases", "reapplies", "redo", "restores", "undo",
 ]);
 
 export function durableStatusWords(expect, text) {
   return keywords(expect, 5).filter((word) => !TRANSIENT_OPERATION_WORDS.has(word.toLowerCase())
     && new RegExp(word, "i").test(String(text || "")));
+}
+
+/**
+ * The contracted transition whose rendered record becomes the baseline for a later recovery.
+ * Cancellation is a durable mutation in its own right: a reload after cancellation must be
+ * compared with the Cancelled record, never with stale evidence captured when it was Confirmed.
+ */
+export function durableTransitionFlow(flows = []) {
+  return (flows || []).find((flow) => ["mutation", "cancellation"].includes(flow?.kind)) || null;
 }
 
 /**
@@ -1887,7 +1896,7 @@ async function runStep(page, step, {
   let fresh = [];
   // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
   // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
-  const mutationFlow = interactionFlows.find((flow) => flow.kind === "mutation");
+  const mutationFlow = durableTransitionFlow(interactionFlows);
   const commits = interactionFlows.length
     ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
     : /submit|send|confirm|book|reserve|pay/i.test(action);
