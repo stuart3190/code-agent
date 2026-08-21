@@ -18,6 +18,7 @@ import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 import { resolveBuildContext } from "../appBuild/buildContext.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
+import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
 import { proveGeneratedRuntimeBackend, withRuntimeEnv } from "../runtimeEnv.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -515,7 +516,19 @@ export function createBuilderV2Runtime({
         const results = [];
         const consoleErrors = [];
         const failedRequests = [];
+        const verifierDefects = [];
+        let unavailable = false;
+        let verifierError = null;
+        let mechanics = null;
         for (const journey of journeys) {
+          // Use a server-only authority to seal stable verifier credentials. Only the derived,
+          // purpose-scoped tokens enter the ephemeral sandbox payload; the service credential
+          // itself never leaves the durable worker process.
+          const verificationIdentity = createVerificationIdentity({
+            appId: projectId,
+            scope: journey.id,
+            secret: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE,
+          });
           const before = journeyRequiresPersistentMutation(journey)
             ? await backendFingerprint(client, projectId) : null;
           const outcome = await isolated({
@@ -527,6 +540,9 @@ export function createBuilderV2Runtime({
                 prerequisiteInteractionContract: journeyContract?.prerequisiteInteractionContract
                   || journeyContract?.interactionContract || null,
                 interactionContract: scopeInteractionContract(journeyContract?.interactionContract, [journey]) },
+              // Stable only within this project/journey. The sandbox restores deterministic test
+              // credentials, then the app still obtains a real app-auth/RLS session normally.
+              verificationIdentity,
               timeoutMs: 180_000 },
             resource_limits: runtimeLimits(workJob, "browser_verify"),
           }, {
@@ -536,6 +552,18 @@ export function createBuilderV2Runtime({
           if (!outcome.journeys) throw new Error(`browser verification produced no journey evidence (${outcome.classification || outcome.stderr || "unknown"})`);
           consoleErrors.push(...(outcome.journeys.consoleErrors || []));
           failedRequests.push(...(outcome.journeys.failedRequests || []));
+          verifierDefects.push(...(outcome.journeys.verifierDefects || []));
+          unavailable = unavailable || outcome.journeys.unavailable === true;
+          verifierError ||= outcome.journeys.error || null;
+          if (outcome.journeys.mechanics) {
+            const current = outcome.journeys.mechanics;
+            mechanics = {
+              probed: (mechanics?.probed || 0) + (current.probed || 0),
+              failures: [...(mechanics?.failures || []), ...(current.failures || [])],
+              skipped: [...(mechanics?.skipped || []), ...(current.skipped || [])],
+              outcomes: [...(mechanics?.outcomes || []), ...(current.outcomes || [])],
+            };
+          }
           const after = before ? await backendFingerprint(client, projectId) : null;
           for (const verdict of outcome.journeys.journeys || []) {
             results.push({
@@ -547,11 +575,19 @@ export function createBuilderV2Runtime({
               } : { required: false },
             });
           }
+          // A platform-owned verifier failure cannot be repaired by changing generated source.
+          // Stop opening more browsers and let the orchestrator retain the candidate immediately.
+          if (unavailable || verifierDefects.length) break;
         }
         const journeyResult = {
-          pass: results.every((row) => row.status === "pass") && !consoleErrors.length && !failedRequests.length,
+          pass: !unavailable && !verifierDefects.length
+            && results.every((row) => row.status === "pass") && !consoleErrors.length && !failedRequests.length,
           journeys: results,
           consoleErrors: [...new Set(consoleErrors)], failedRequests: [...new Set(failedRequests)],
+          verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
+          unavailable,
+          error: verifierError,
+          mechanics,
         };
         diag.step?.({ agent: "Verifier", kind: "browser", label: "Builder V2 journeys",
           status: journeyResult.pass ? "ok" : "failed", output: JSON.stringify(journeyResult, null, 2) });

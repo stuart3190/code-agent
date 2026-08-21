@@ -159,7 +159,7 @@ function strictBuildStore() {
   };
 }
 
-function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null } = {}) {
+function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2 } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const checkpoints = [];
@@ -175,7 +175,8 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
   const orchestrator = createOrchestrator({
     contractFn: async () => contract,
     patchesFn: async (ctx) => {
-      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, rejections: ctx.rejections.length, problems: ctx.problems });
+      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
+        rejections: ctx.rejections.length, problems: ctx.problems });
       // A pre-compile `correction` is a scoped re-emission of its originating step.
       const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
       return plan[stage](ctx);
@@ -190,6 +191,8 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
     }),
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
+    maxJourneyRepairs,
+    maxNoOpRetries,
     events: { checkpoint: async (event) => { checkpoints.push(event); } },
   });
   return { orchestrator, buildStore, snapshotStore, assetService, patchCalls, journeyDrives, checkpoints };
@@ -255,6 +258,56 @@ test("14S — a red required secondary blocks completion while retaining resumab
     "the retained checkpoint still holds the red work itself");
   assert.ok(!working.tree["src/routes/NewsletterPanel.jsx"],
     "…and the verified line does not inherit it");
+});
+
+test("a secondary candidate must re-prove every completed journey whose owners it changed", async () => {
+  const drives = [];
+  const h = harness({
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// futile repair\n" }] }],
+      "increment:newsletter-signup": () => [
+        ...NEWSLETTER_PATCH,
+        { file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: "\n// regress-primary\n" }] },
+      ],
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys, tree }) => {
+      drives.push(journeys.map((journey) => journey.id));
+      return { journeys: journeys.map((journey) => ({
+        id: journey.id, title: journey.title, priority: journey.priority,
+        status: journey.id === "book-a-visit" && /regress-primary/.test(tree["src/routes/BookPage.jsx"] || "")
+          ? "fail" : "pass",
+      })) };
+    },
+  });
+
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-regression", request: "booking site" });
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.ok(drives.some((ids) => ids.includes("book-a-visit") && ids.includes("newsletter-signup")),
+    `the changed primary owner was not re-driven with the secondary: ${JSON.stringify(drives)}`);
+  assert.ok(!result.shipped.includes("newsletter-signup"), "a candidate that regressed the core must not ship");
+  assert.ok(result.shipped.includes("browse-info"), "later work still starts from the retained green core");
+});
+
+test("one browser repair round consumes at most one repair dispatch", async () => {
+  const h = harness({
+    failJourneys: ["book-a-visit"],
+    maxJourneyRepairs: 2,
+    maxNoOpRetries: 5,
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => [],
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-repair-unit", request: "booking site" });
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  const repairDispatches = h.patchCalls.filter((call) => call.step === "repair");
+  assert.equal(repairDispatches.length, 2,
+    "protocol retries inside one browser round must not consume another journey's durable repair share");
+  assert.equal(result.repairRounds, 2);
 });
 
 test("WP8/C4 — a failing ESSENTIAL journey blocks: no snapshot, no green pointer, state blocked", async () => {
@@ -625,7 +678,7 @@ test("MECHANICS — a probe-proven dead control is charged to the correction all
   // The build still blocks — nothing in this harness repairs the control — but WHERE the round was
   // charged is the claim.
   assert.equal(result.state, "blocked", JSON.stringify(result).slice(0, 160));
-  const mechanicsRounds = patchCalls.filter((row) => row.originalStep === "repair" && row.step === "correction");
+  const mechanicsRounds = patchCalls.filter((row) => row.dispatchReason === "mechanics_correction");
   assert.equal(mechanicsRounds.length, 1,
     `dispatch identities: ${JSON.stringify(patchCalls.map((row) => `${row.originalStep || row.step}→${row.step}`))}`);
   assert.equal(result.mechanicsCorrections, 1);

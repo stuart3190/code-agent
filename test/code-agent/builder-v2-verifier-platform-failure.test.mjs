@@ -59,6 +59,12 @@ for (const [name, browserResult, expectedCode] of [
       detail: "the verifier fixture violates the control's native constraints" }],
     journeys: [{ id: "book", title: "Book", priority: "primary", status: "undriveable", steps: [] }],
   }, "verifier_fixture_invalid"],
+  ["platform app-auth rate limit", {
+    verifierDefects: [{ code: "journey_verifier_auth_rate_limited",
+      detail: "the platform app-auth verifier identity was rate limited" }],
+    failedRequests: ["429 POST https://example.supabase.co/functions/v1/app-auth"],
+    journeys: [{ id: "book", title: "Book", priority: "primary", status: "undriveable", steps: [] }],
+  }, "journey_verifier_auth_rate_limited"],
 ]) {
   test(`${name} preserves the candidate and spends zero repair turns`, async () => {
     const h = harness(browserResult);

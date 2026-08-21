@@ -36,6 +36,8 @@ test("the identity covers the verifier and the files that decide a verdict with 
     "the verifier's shared semantic vocabulary decides verdicts too");
   assert.ok(SANDBOX_IDENTITY_FILES.includes("build-worker/sandbox.mjs"),
     "the entrypoint that chooses which verifier to call");
+  assert.ok(SANDBOX_IDENTITY_FILES.includes("shell/server/lib/appBuild/verificationIdentity.mjs"),
+    "the verifier identity and app-auth platform-failure rules decide browser verdicts");
   assert.ok(SANDBOX_IDENTITY_FILES.includes("src/scaffolds/reactVite/lib/capabilities/wizard.js"),
     "the primitive that makes contracted controlled values observable");
   assert.ok(SANDBOX_IDENTITY_FILES.includes("src/scaffolds/dependencyCatalog.mjs"),

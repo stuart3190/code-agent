@@ -53,11 +53,30 @@ async function browserVerify(payload) {
     const app = await verifyApp({
       previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
       timeoutMs: Number(payload.timeoutMs) || 180_000, browser,
+      verificationIdentity: payload.verificationIdentity || null,
     });
-    const journeys = payload.contract?.journeys?.length
-      ? await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
-        timeoutMs: Number(payload.timeoutMs) || 180_000, browser })
-      : null;
+    let journeys = null;
+    if (app.verifierDefects?.length) {
+      // The generic smoke has already proved the verification platform is unavailable. Opening a
+      // second context can only add pressure to the same cap; return the typed platform failure so
+      // the orchestrator retains the candidate without spending a repair.
+      journeys = {
+        pass: null, journeys: [], verifierDefects: app.verifierDefects,
+        consoleErrors: app.consoleErrors || [], failedRequests: app.failedRequests || [],
+      };
+    } else if (payload.contract?.journeys?.length) {
+      journeys = await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
+        timeoutMs: Number(payload.timeoutMs) || 180_000, browser,
+        verificationIdentity: payload.verificationIdentity || null });
+    }
+    if (journeys && app.verifierDefects?.length) {
+      journeys = {
+        ...journeys,
+        verifierDefects: [...new Map([
+          ...(journeys.verifierDefects || []), ...app.verifierDefects,
+        ].map((row) => [row.code, row])).values()],
+      };
+    }
     return { ok: app.pass !== false && (!journeys || journeys.pass !== false), app, journeys,
       exitCode: 0, stdout: "", stderr: "" };
   } finally {

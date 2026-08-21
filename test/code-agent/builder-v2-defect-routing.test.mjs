@@ -354,7 +354,9 @@ function harness({ browser, repairPatches = null, contract = CONTRACT, allPatche
       timeline.push(`patch:${input.step}`);
       patchInputs.push(input);
       if (allPatches) return allPatches(input, patchInputs);
-      if (input.step === "repair" && repairPatches) return repairPatches(input, patchInputs);
+      if ((input.step === "repair" || input.originalStep === "repair") && repairPatches) {
+        return repairPatches(input, patchInputs);
+      }
       // An increment adds to a tree the core already wrote, so re-emitting the same files would be
       // refused as inapplicable. It appends instead, which is what a real increment does.
       if (String(input.step).startsWith("increment:")) {
@@ -491,7 +493,7 @@ test("a repair that writes outside the boundary is refused and re-briefed", asyn
   const h = harness({
     browser: (call) => (call === 1 ? failing() : passing()),
     repairPatches: (input, all) => {
-      const priorRepairs = all.filter((row) => row.step === "repair").length;
+      const priorRepairs = all.filter((row) => row.step === "repair" || row.originalStep === "repair").length;
       // The first attempt reaches outside the attributed modules; the retry stays inside.
       return priorRepairs === 1
         ? [{ replaceFile: "src/routes/Marketing.jsx",
@@ -501,8 +503,11 @@ test("a repair that writes outside the boundary is refused and re-briefed", asyn
   });
   await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking", maxRepairs: 2 });
 
-  const repairs = h.patchInputs.filter((input) => input.step === "repair");
+  const repairs = h.patchInputs.filter((input) => input.step === "repair" || input.originalStep === "repair");
   assert.ok(repairs.length >= 2, "the out-of-scope write was refused and the model was asked again");
+  assert.equal(repairs[0].step, "repair");
+  assert.equal(repairs[1].step, "correction",
+    "the deterministic re-brief uses correction allowance instead of stealing a second repair slot");
   const rejection = JSON.stringify(repairs[1].rejections || []);
   assert.match(rejection, /module_correction_scope_exceeded|correction-scope/,
     `the retry states the boundary it broke: ${rejection}`);

@@ -13,7 +13,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { expectationOutcome, reviewValuesForStep } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import {
+  expectationOutcome, mutationCommitEvidence, reviewValuesForStep,
+} from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 
 const base = { wanted: ["review", "selected", "date"], found: ["review", "selected", "date"], fresh: [], drove: true, action: "review the booking" };
 
@@ -64,6 +66,51 @@ test("a static page still cannot pass a mutation step", () => {
     drove: true, action: "submit the booking", reviewWithValues: false,
   });
   assert.equal(outcome.status, "fail");
+});
+
+test("a durable update may replace word freshness with exact changed values and record identity", () => {
+  const flow = {
+    reads: ["lead.draft.contactName", "lead.draft.contactEmail"],
+    writes: ["lead.durable.record", "lead.durable.reference"],
+  };
+  const enteredValues = [
+    { field: "contactName", value: "Journey 7139271" },
+    { field: "contactEmail", value: "journey-7139271@example.test" },
+  ];
+  const evidence = mutationCommitEvidence({
+    flow,
+    enteredValues,
+    textBefore: "Saved lead details. Reference LEAD-REF-4417.",
+    textAfter: "Saved lead details. Journey 7139271. journey-7139271@example.test. Reference LEAD-REF-4417.",
+  });
+  assert.equal(evidence.ok, true, JSON.stringify(evidence));
+  const outcome = expectationOutcome({
+    wanted: ["saved", "lead", "details"], found: ["saved", "lead", "details"], fresh: [],
+    drove: true, action: "update the lead", mutationWithValues: evidence.ok,
+  });
+  assert.equal(outcome.status, "pass");
+  assert.equal(outcome.mutationEvidence, true);
+});
+
+test("mutation evidence never accepts static copy, partial values, or a changed record", () => {
+  const flow = {
+    reads: ["lead.draft.contactName", "lead.draft.contactEmail"],
+    writes: ["lead.durable.record", "lead.durable.reference"],
+  };
+  const enteredValues = [
+    { field: "contactName", value: "Journey 7139271" },
+    { field: "contactEmail", value: "journey-7139271@example.test" },
+  ];
+  const before = "Journey 7139271. journey-7139271@example.test. Reference LEAD-REF-4417.";
+  assert.equal(mutationCommitEvidence({ flow, enteredValues, textBefore: before, textAfter: before }).ok, false);
+  assert.equal(mutationCommitEvidence({
+    flow, enteredValues, textBefore: "Reference LEAD-REF-4417.",
+    textAfter: "Journey 7139271. Reference LEAD-REF-4417.",
+  }).ok, false);
+  assert.equal(mutationCommitEvidence({
+    flow, enteredValues, textBefore: "Reference LEAD-REF-4417.",
+    textAfter: "Journey 7139271. journey-7139271@example.test. Reference LEAD-REF-9999.",
+  }).ok, false);
 });
 
 test("LIVE REGRESSION — a calculated-results review does not demand every earlier setup value", () => {

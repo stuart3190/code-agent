@@ -24,6 +24,10 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   "build-worker/sandbox.mjs",
   "shell/server/lib/appBuild/journeyVerifier.mjs",
   "shell/server/lib/appBuild/verificationAgent.mjs",
+  // Stable, server-sealed verifier accounts and platform app-auth failure classification are
+  // verdict-deciding. A stale image that still creates a new account per round will hit the auth
+  // cap and turn otherwise-correct application journeys red.
+  "shell/server/lib/appBuild/verificationIdentity.mjs",
   "shell/server/lib/builderV2/controlIdentity.mjs",
   "src/scaffolds/reactVite.mjs",
   // reactVite.mjs imports this catalogue to build package.json. A stale sandbox catalogue means

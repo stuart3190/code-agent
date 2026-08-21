@@ -14,6 +14,11 @@
 // driver can identify before browser verification begins.
 
 import { createRequire } from "node:module";
+import {
+  appAuthRateLimitDefect,
+  seedVerificationVisitorStorage,
+  verificationToken,
+} from "./verificationIdentity.mjs";
 
 import {
   ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases,
@@ -1046,6 +1051,48 @@ export function durableCommitIdentity({ enteredValues = [], textBefore = "", tex
   };
 }
 
+/**
+ * Did a durable mutation render the exact values it declared as inputs, against the same record?
+ *
+ * Update screens commonly show the expectation's nouns before Save ("saved lead details",
+ * "edited contact"), so word freshness alone rejects a real update. Exact values are stronger
+ * evidence: every value read by this mutation must be rendered after the action, at least one of
+ * them must not have been page text before it, and a durable-reference write must preserve or
+ * create a reference. This proves the immediate transition only; the following recovery step
+ * still has to prove that the values survived reload.
+ */
+export function mutationCommitEvidence({ flow, enteredValues = [], textBefore = "", textAfter = "" } = {}) {
+  const reads = new Set((flow?.reads || []).map((read) => semanticKey(String(read).split(".").pop())));
+  const values = unique((enteredValues || [])
+    .filter((row) => row?.value && reads.has(semanticKey(row.field)))
+    .map((row) => row.value));
+  if (!values.length) return { checked: false, ok: false, values: [], visibleValues: [], freshValues: [] };
+
+  const beforeText = String(textBefore || "");
+  const afterText = String(textAfter || "");
+  const visibleValues = values.filter((value) => afterText.includes(value));
+  const freshValues = visibleValues.filter((value) => !beforeText.includes(value));
+  const beforeReferences = new Set(beforeText.match(REFERENCE_TOKEN) || []);
+  const afterReferences = new Set(afterText.match(REFERENCE_TOKEN) || []);
+  const stableReferences = [...beforeReferences].filter((reference) => afterReferences.has(reference));
+  const newReferences = [...afterReferences].filter((reference) => !beforeReferences.has(reference));
+  const requiresReference = (flow?.writes || []).some((write) => /\.durable\.reference$/.test(String(write)));
+  const referenceOk = !requiresReference || (beforeReferences.size > 0
+    ? stableReferences.length > 0
+    : newReferences.length > 0);
+
+  return {
+    checked: true,
+    ok: visibleValues.length === values.length && freshValues.length > 0 && referenceOk,
+    values,
+    visibleValues,
+    freshValues,
+    stableReferences,
+    newReferences,
+    requiresReference,
+  };
+}
+
 async function captureDurableEvidence(page, { enteredValues, selections, expect }) {
   const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const candidates = unique([...enteredValues.map((row) => row.value), ...selections]);
@@ -1144,7 +1191,7 @@ async function driveAuthenticationForm(page, marker, { mode = "create", credenti
   }
 
   const submittedEmail = credentials?.email
-    || `journey+${marker}-${Math.random().toString(36).slice(2, 8)}@thrallo.dev`;
+    || `journey+${marker}@thrallo.dev`;
   const submittedPassword = credentials?.password || `Jv-${marker}!9a`;
   await email.fill(submittedEmail);
   await password.fill(submittedPassword);
@@ -1243,7 +1290,7 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
 }
 
 async function runStep(page, step, {
-  marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
+  marker, authMarker = marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
   authState = { accounts: [], active: null }, allowEstablishedState = false,
 }) {
@@ -1281,7 +1328,7 @@ async function runStep(page, step, {
 
   const explicitAuth = interactionFlows.some((flow) => flow.kind === "flow_start")
     ? { handled: false }
-    : await driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState });
+    : await driveExplicitAuthenticationAction(page, action, { marker: authMarker, previewUrl, authState });
   if (explicitAuth.handled) {
     if (explicitAuth.status) return explicitAuth;
     drove = explicitAuth.drove;
@@ -1475,7 +1522,7 @@ async function runStep(page, step, {
     }
     await page.waitForTimeout(700);
     if (isAuthenticationFlow(entry, step)) {
-      const authentication = await driveAuthenticationForm(page, marker);
+      const authentication = await driveAuthenticationForm(page, authMarker);
       controlEvidence = { ...(controlEvidence || {}), authentication };
       drove = drove || authentication.authenticated === true;
       if (!authentication.authenticated) {
@@ -1783,6 +1830,7 @@ async function runStep(page, step, {
   let fresh = [];
   // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
   // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
+  const mutationFlow = interactionFlows.find((flow) => flow.kind === "mutation");
   const commits = interactionFlows.length
     ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
     : /submit|send|confirm|book|reserve|pay/i.test(action);
@@ -1798,6 +1846,7 @@ async function runStep(page, step, {
   );
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
+  let mutationEvidence = { checked: false, ok: false };
   for (;;) {
     found = [];
     fresh = [];
@@ -1808,9 +1857,16 @@ async function runStep(page, step, {
       // New since the step ran, which is the only kind of evidence that the step DID something.
       if (!before.includes(word)) fresh.push(word);
     }
+    if (mutationFlow && found.length / wanted.length >= 0.5 && fresh.length === 0) {
+      const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      mutationEvidence = mutationCommitEvidence({
+        flow: mutationFlow, enteredValues, textBefore, textAfter,
+      });
+    }
     if (Date.now() >= pollDeadline) break;
     const early = expectationOutcome({ wanted, found, fresh, drove, action,
-      urlChanged: page.url() !== urlBefore, readOnlyAssertion });
+      urlChanged: page.url() !== urlBefore, readOnlyAssertion,
+      mutationWithValues: mutationEvidence.ok });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
   }
@@ -1915,6 +1971,7 @@ async function runStep(page, step, {
   const outcome = expectationOutcome({
     wanted, found, fresh, drove, action, urlChanged,
     reviewWithValues: isReviewStep && reviewValues.length > 0,
+    mutationWithValues: mutationEvidence.ok,
     readOnlyAssertion,
     // A whole page arrives at once for a navigation or a reload, so nothing in it can be "new".
     // Typed by the contract where the contract typed the step.
@@ -1934,6 +1991,14 @@ async function runStep(page, step, {
       detail: `review omitted exact contracted values: ${missingValues.map((row) => row.field).join(", ")}`,
       controlEvidence: { enteredValues: reviewValues, missingValues } };
     outcome.detail += ` · review contains ${reviewValues.length} exact entered value(s)`;
+  }
+  if (outcome.status === "pass" && mutationEvidence.ok) {
+    outcome.detail += ` · mutation rendered ${mutationEvidence.visibleValues.length} exact value(s)`;
+    if (mutationEvidence.stableReferences?.length) {
+      outcome.detail += ` against ${mutationEvidence.stableReferences[0]}`;
+    } else if (mutationEvidence.newReferences?.length) {
+      outcome.detail += ` with ${mutationEvidence.newReferences[0]}`;
+    }
   }
 
   // A step that CONSUMES earlier values must show them — the numbers in a chosen date or slot
@@ -1992,7 +2057,6 @@ async function runStep(page, step, {
         controlEvidence: { ...(controlEvidence || {}), durable: evidence } };
     }
   }
-  const mutationFlow = interactionFlows.find((flow) => flow.kind === "mutation");
   if (outcome.status === "pass" && mutationFlow) {
     Object.assign(durable, await captureDurableEvidence(page, { enteredValues, selections, expect }));
     // Run-scoped and canonically keyed, so a later contracted journey can prove this same record
@@ -2016,7 +2080,8 @@ async function runStep(page, step, {
  */
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
-  navigational: declaredNavigational = null, establishedState = false, readOnlyAssertion = false,
+  mutationWithValues = false, navigational: declaredNavigational = null, establishedState = false,
+  readOnlyAssertion = false,
 }) {
   const ratio = found.length / wanted.length;
   // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
@@ -2031,6 +2096,15 @@ export function expectationOutcome({
   if (reviewWithValues && ratio >= 0.5) {
     return { drove, status: "pass", reviewExempt: true,
       detail: `found: ${found.join(", ")} (review: values verified below)` };
+  }
+
+  // A durable mutation may legitimately render the expectation's nouns before Save. The caller
+  // only arms this exemption after the mutation renders every exact declared input, at least one
+  // newly as page text, against a preserved or newly-created durable reference. Recovery remains
+  // a separate required step and is what rejects a UI-only update.
+  if (mutationWithValues && ratio >= 0.5) {
+    return { drove, status: "pass", mutationEvidence: true,
+      detail: `found: ${found.join(", ")} (mutation: exact values verified)` };
   }
 
   // A structured read-only step (inspect/compare) asserts state produced by an earlier action.
@@ -2146,7 +2220,7 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
  * themselves use. Nothing is guessed: a prerequisite that cannot be established is reported as a
  * machine-readable setup failure, and the journey is NOT_REACHED rather than failed.
  */
-async function establishPrerequisites(page, controls, { marker, journeyFlows }) {
+async function establishPrerequisites(page, controls, { marker, authMarker = marker, journeyFlows }) {
   const performed = [];
   // Exact values entered while reconstructing the producing journey. They are not satisfied by
   // an input's DOM value because body.innerText excludes form values; one must be rendered by the
@@ -2220,7 +2294,7 @@ async function establishPrerequisites(page, controls, { marker, journeyFlows }) 
     }
     await page.waitForTimeout(600);
     if (flow.kind === "flow_start" && isAuthenticationFlow(flow, { action: flow.control?.purpose })) {
-      const authentication = await driveAuthenticationForm(page, `${marker}-setup`);
+      const authentication = await driveAuthenticationForm(page, `${authMarker}-setup`);
       if (!authentication.authenticated) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind,
           reason: authentication.reason || "authentication did not complete" } };
@@ -2565,12 +2639,19 @@ async function waitForActiveSurface(page, timeoutMs = 15_000) {
 export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
   browser: sharedBrowser = null,
+  verificationIdentity = null,
 }) {
   const results = [];
   const consoleErrors = [];
   const failedRequests = [];
   const verifierDefects = [];
   const marker = String(Date.now()).slice(-6);
+  // Form data stays fresh on every drive so persistence probes observe a real change. Account
+  // credentials do not: a repair round for the same project/journey recovers the same test user
+  // instead of consuming another app-auth signup slot.
+  const authMarker = verificationToken(verificationIdentity,
+    `journey:${verificationIdentity?.scope || "default"}`)
+    || `${marker}-${Math.random().toString(36).slice(2, 10)}`;
   let browser = sharedBrowser;
   const ownsBrowser = !sharedBrowser;
   const contexts = [];
@@ -2591,6 +2672,7 @@ export async function verifyJourneys({
     // runtime; no privileged state is ever injected.
     const openContext = async () => {
       const created = await browser.newContext({ viewport });
+      await seedVerificationVisitorStorage(created, verificationIdentity);
       const opened = await created.newPage();
       opened.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
       opened.on("console", (m) => {
@@ -2605,6 +2687,8 @@ export async function verifyJourneys({
         if (r.status() >= 400 && !r.url().includes("favicon")) {
           failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
         }
+        const defect = appAuthRateLimitDefect(r);
+        if (defect) verifierDefects.push(defect);
       });
       opened.on("requestfailed", (request) => {
         const reason = request.failure()?.errorText || "failed";
@@ -2725,7 +2809,7 @@ export async function verifyJourneys({
         });
       let setup = null;
       if (prerequisites.controls.length) {
-        setup = await establishPrerequisites(page, prerequisites.controls, { marker, journeyFlows });
+        setup = await establishPrerequisites(page, prerequisites.controls, { marker, authMarker, journeyFlows });
         if (!setup.ok) {
           results.push({
             id: journey.id, title: journey.title, priority: journey.priority,
@@ -2763,7 +2847,7 @@ export async function verifyJourneys({
         const consoleBefore = consoleErrors.length;
         const requestsBefore = failedRequests.length;
         const outcome = await runStep(page, step, {
-          marker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
+          marker, authMarker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
           authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
@@ -2818,7 +2902,7 @@ export async function verifyJourneys({
     // control by its opaque id and says what the browser observed, which is what a targeted
     // correction needs and what a journey failure eight steps later does not supply.
     mechanics,
-    verifierDefects,
+    verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
     consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
     failedRequests: [...new Set(failedRequests)].slice(0, 10),
   };

@@ -368,6 +368,7 @@ export function createOrchestrator({
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
     editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
     parentSnapshotId = null, signal = null, spec = null, attemptPolicy = null, initialRepairScope = null,
+    protocolRetryLimit = maxNoOpRetries,
     // Which ALLOWANCE this increment draws on, when the caller already knows. The reservation
     // layer counts `repair` and `correction` separately on purpose: a repair is a round briefed by
     // observed journey failure, a correction is a named structural fix. A mechanics failure is the
@@ -397,6 +398,7 @@ export function createOrchestrator({
     let repairScope = initialRepairScope;
     let contractCorrectionScope = null;
     let headroomScope = null;
+    let retryAsCorrection = false;
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
     let advisory = [];
@@ -429,7 +431,7 @@ export function createOrchestrator({
     const maxCandidateCorrections = policy.maxCandidateCorrections;
     const maxDispatches = maxGenerationAttempts + maxCandidateCorrections;
     const exhausted = () => attempts >= maxGenerationAttempts || spend() >= maxDispatches
-      || noOps > maxNoOpRetries;
+      || noOps > protocolRetryLimit;
     const failure = (reason, extra = {}) => ({
       ok: false, reason, problems, advisory, advisoryFindings: advisory,
       candidateSnapshotId: latestCandidate?.id || null, repairUsed: !!repairScope,
@@ -441,9 +443,12 @@ export function createOrchestrator({
       const attempt = spend() + 1;
       // Pre-compile corrections dispatch under their own step identity so they draw on the
       // correction allowance, never on the single browser-informed repair slot.
+      const scopeRejectionCorrection = retryAsCorrection;
       const dispatchStep = dispatchAs
         || headroomScope?.logicalStep
+        || (scopeRejectionCorrection ? "correction" : null)
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
+      retryAsCorrection = false;
       const regenerateFiles = [...new Set([
         ...forcedRegenerateFiles,
         ...escalationPlan(rejectionHistory).regenerateFiles,
@@ -453,6 +458,8 @@ export function createOrchestrator({
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
         repairBoundary, regenerateFiles, advisory: [...splitFindings, ...advisory],
+        dispatchReason: dispatchAs === "correction" ? "mechanics_correction"
+          : scopeRejectionCorrection ? "scope_rejection_correction" : null,
         spec: scoped, signal });
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
@@ -467,13 +474,18 @@ export function createOrchestrator({
         rejections = patchScope.findings.map((finding) => ({ signature: finding.code, reason: JSON.stringify(finding) }));
         if (internalHeadroomSplit) {
           headroomScope = activeScope;
+          attempts += 1;
         } else {
           repairScope = null;
           contractCorrectionScope = null;
           repairBoundary = null;
           working = originalTree;
+          // The browser-informed dispatch has already spent its one repair slot. A deterministic
+          // scope rejection is re-briefed through the separate correction lane, so the model gets
+          // the exact rejection without consuming another journey's repair share.
+          retryAsCorrection = true;
+          corrections += 1;
         }
-        attempts += 1;
         log(`${step}: scoped correction attempted ${patchScope.findings.length} out-of-scope write(s); `
           + `${internalHeadroomSplit ? "retrying the same bounded continuation" : "retrying unscoped"} `
           + `(attempt ${attempts}/${maxGenerationAttempts})`);
@@ -646,7 +658,7 @@ export function createOrchestrator({
         attemptLedger.push({ attempt, dispatch: dispatchStep,
           class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
         log(`${step}: no-op batch rejected deterministically `
-          + `(protocol round ${noOps}/${maxNoOpRetries}, generation attempts still ${attempts}/${maxGenerationAttempts})`);
+          + `(protocol round ${noOps}/${protocolRetryLimit}, generation attempts still ${attempts}/${maxGenerationAttempts})`);
         continue;
       }
 
@@ -810,7 +822,7 @@ export function createOrchestrator({
     }
     // Say WHICH ceiling ended the step. "No runnable tree in 3 attempts" read identically whether
     // the model wrote three broken applications or none at all.
-    if (noOps > maxNoOpRetries) {
+    if (noOps > protocolRetryLimit) {
       return failure(`no substantive generation: ${noOps} consecutive protocol round(s) changed nothing `
         + `(generation attempts used: ${attempts}/${maxGenerationAttempts})`, { code: "no_substantive_generation" });
     }
@@ -870,6 +882,15 @@ export function createOrchestrator({
         const buildAttemptPolicy = generationPolicyFor(refinedProfile, {
           simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
         });
+        // One browser-informed repair round owns exactly one durable repair dispatch. Deterministic
+        // candidate corrections still use their separate correction allowance, but parse, no-op or
+        // full-generation retries become the next outer round. This keeps fair-share accounting in
+        // the same unit the database enforces and prevents one journey consuming another's slots.
+        const repairAttemptPolicy = {
+          profile: buildAttemptPolicy.profile,
+          maxGenerationAttempts: 1,
+          maxCandidateCorrections: buildAttemptPolicy.maxCandidateCorrections,
+        };
         log(`generation policy: ${buildAttemptPolicy.profile} â€” ${buildAttemptPolicy.maxGenerationAttempts} `
           + `full attempts, ${buildAttemptPolicy.maxCandidateCorrections} retained-candidate corrections; `
           + "the approved build credit ceiling remains authoritative");
@@ -1063,7 +1084,7 @@ export function createOrchestrator({
                 tree: currentTree, assets: resolved, journeys: repairJourneys,
                 initialProblems: evidence, checkpointReason: `working:${label}:${rounds}`,
                 parentSnapshotId: currentSnapshot?.id || null, signal, spec,
-                attemptPolicy: buildAttemptPolicy, repairBoundary: boundary,
+                attemptPolicy: repairAttemptPolicy, protocolRetryLimit: 0, repairBoundary: boundary,
                 regenerateFiles: regenerate,
               });
             } catch (error) {
@@ -1317,6 +1338,12 @@ export function createOrchestrator({
         const pendingIncrements = [...eligibility.pendingIncrements];
         for (const journey of secondaryJourneys) {
           const step = `increment:${journey.id}`;
+          // A secondary is only shippable if it preserves every journey already proved green.
+          // Differential verification will reuse unchanged owners and re-drive any earlier journey
+          // whose modules this candidate touched, so the check is complete without being wasteful.
+          const regressionJourneys = (contract.journeys || [])
+            .filter((candidateJourney) => completedJourneys.has(candidateJourney.id)
+              || candidateJourney.id === journey.id);
           await setState(step);
           const startTree = await snapshotStore.materialize(owner, candidate.id);
           const increment = await buildIncrement({
@@ -1328,10 +1355,10 @@ export function createOrchestrator({
           let verdicts = null;
           if (increment.ok) {
             verdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
-              journeys: [journey], tree: increment.tree, snapshotId: candidate.id, signal });
+              journeys: regressionJourneys, tree: increment.tree, snapshotId: increment.snapshot.id, signal });
           }
           const evaluateIncrement = (nextVerdicts) => completionEligibility({
-            contract: { ...contract, journeys: [journey] }, gates: { ok: true },
+            contract: { ...contract, journeys: regressionJourneys }, gates: { ok: true },
             journeyResults: { journeys: nextVerdicts.journeys }, blockingErrors: nextVerdicts.blockingErrors,
           });
           let incrementEligibility = increment.ok ? evaluateIncrement(verdicts) : { eligible: false };
@@ -1343,7 +1370,7 @@ export function createOrchestrator({
           // 39 credits unspent.
           if (increment.ok && !incrementEligibility.eligible) {
             const incrementRepair = await repairUntilGreen({
-              label: `${step}:repair`, journeys: [journey], tree: increment.tree,
+              label: `${step}:repair`, journeys: regressionJourneys, tree: increment.tree,
               snapshot: increment.snapshot, verdicts,
               defects: defectsFor(verdicts, []), eligibility: incrementEligibility,
               advisory: increment.advisory || [], evaluate: evaluateIncrement,

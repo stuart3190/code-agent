@@ -5,6 +5,11 @@
 // the gate is structural: the completion message is only produced after sign-off.
 
 import { createRequire } from "node:module";
+import {
+  appAuthRateLimitDefect,
+  seedVerificationVisitorStorage,
+  verificationCredentials,
+} from "./verificationIdentity.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -34,14 +39,19 @@ async function fillField(page, kind, value) {
   return false;
 }
 
-export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 180_000, browser: sharedBrowser = null }) {
+export async function verifyApp({
+  previewUrl, usesBackend = true, timeoutMs = 180_000, browser: sharedBrowser = null,
+  verificationIdentity = null,
+}) {
   const checks = [];
   const check = makeCheck(checks);
   const consoleErrors = [];
   const failedRequests = [];
-  const email = `verify+${Date.now()}@thrallo.dev`;
-  const password = `Vf-${Math.random().toString(36).slice(2, 10)}!9`;
+  const stableCredentials = verificationCredentials(verificationIdentity, "smoke");
+  const email = stableCredentials?.email || `verify+${Date.now()}@thrallo.dev`;
+  const password = stableCredentials?.password || `Vf-${Math.random().toString(36).slice(2, 10)}!9`;
   const marker = `verified-${Date.now()}`;
+  const verifierDefects = [];
 
   let browser = sharedBrowser;
   let context = null;
@@ -55,12 +65,15 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
     // (ERR_INSUFFICIENT_RESOURCES). Use Chromium's disk-backed shared-memory path at BOTH seams.
     if (!browser) browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     context = await browser.newContext();
+    await seedVerificationVisitorStorage(context, verificationIdentity);
     const page = await context.newPage();
     page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
     page.on("response", (r) => {
       const s = r.status();
       if (s >= 400 && !r.url().includes("favicon")) failedRequests.push(`${s} ${r.request().method()} ${r.url().slice(0, 140)}`);
+      const defect = appAuthRateLimitDefect(r);
+      if (defect) verifierDefects.push(defect);
     });
     page.on("requestfailed", (r) => {
       const reason = r.failure()?.errorText || "failed";
@@ -158,6 +171,9 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
   return {
     pass: failed.length === 0 && checks.some((c) => c.status === "pass"),
     checks,
+    verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
+    consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
+    failedRequests: [...new Set(failedRequests)].slice(0, 10),
     failures: failed.map((c) => `${c.label}: ${c.detail || "failed"}`),
     summary: checks
       .filter((c) => c.status !== "skip")

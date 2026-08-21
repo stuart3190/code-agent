@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { verifyJourneys } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { createVerificationIdentity, verificationToken } from "../../shell/server/lib/appBuild/verificationIdentity.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -56,6 +57,11 @@ const CONTRACT = deriveBuildSpec({
 }).contract;
 
 let server; let result; let built;
+const verificationIdentity = createVerificationIdentity({
+  appId: "11111111-1111-4111-8111-111111111111",
+  scope: "auth-generate",
+  secret: "browser-test-authority",
+});
 before(async () => {
   if (!playwrightAvailable) return;
   await ensureDeps(() => {});
@@ -71,7 +77,8 @@ before(async () => {
     } catch { response.writeHead(200, { "content-type": "text/html" }); response.end(await readFile(path.join(root, "index.html"))); }
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  result = await verifyJourneys({ previewUrl: `http://127.0.0.1:${server.address().port}`, contract: CONTRACT, timeoutMs: 120_000 });
+  result = await verifyJourneys({ previewUrl: `http://127.0.0.1:${server.address().port}`,
+    contract: CONTRACT, timeoutMs: 120_000, verificationIdentity });
 }, { timeout: 600_000 });
 
 after(async () => { if (server) await new Promise((resolve) => server.close(resolve)); });
@@ -82,6 +89,9 @@ test("contracted auth entry fills and submits the real visible account form", { 
   assert.equal(steps[1].status, "pass", JSON.stringify(steps, null, 2));
   assert.equal(steps[1].controlEvidence.authentication.submitted, true);
   assert.equal(steps[1].controlEvidence.authentication.urlChanged, true);
+  assert.equal(steps[1].controlEvidence.authentication.email,
+    `journey+${verificationToken(verificationIdentity, "journey:auth-generate")}@thrallo.dev`,
+    "the real browser uses the stable sealed journey account rather than creating one per round");
   assert.equal(steps[2].status, "pass", JSON.stringify(steps, null, 2));
   assert.equal(steps[3].status, "pass", JSON.stringify(steps, null, 2));
   assert.equal(steps[3].readOnlyAssertion, true);

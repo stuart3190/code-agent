@@ -33,6 +33,11 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
   assert.match(runtime, /prerequisiteInteractionContract: journeyContract\?\.prerequisiteInteractionContract/,
     "isolated journey verification preserves the full prerequisite contract across differential cache scoping");
   assert.match(runtime, /allJourneys: journeyContract\?\.allJourneys/);
+  assert.match(runtime, /createVerificationIdentity\(\{/,
+    "every repeat verification recovers a server-sealed project/journey test identity");
+  assert.match(runtime, /secret: process\.env\.SUPABASE_SERVICE_ROLE_KEY \|\| process\.env\.SUPABASE_SERVICE_ROLE/);
+  assert.match(runtime, /verifierDefects\.push/,
+    "sandbox verifier defects must reach the orchestrator instead of being dropped at composition");
   assert.match(runtime, /sandboxCompatibility\.sandboxVerifier \|\| "in-process"/);
   assert.match(runtime, /sandboxCompatibility\.hostCommit \|\| VERIFICATION_CACHE_VERSION/,
     "passing evidence is keyed by the proven sandbox verifier and deployed orchestration revision");
@@ -65,7 +70,7 @@ test("V2 differential verification retains primary prerequisites when only a red
     [primaryFlow, cachedFlow, redFlow], "the primary setup graph is retained even though its PASS was cached");
   assert.deepEqual(execution.interactionContract.flows, [redFlow],
     "the browser still drives only the red differential subset");
-  assert.match(VERIFICATION_CACHE_VERSION, /^journey-verifier\/2026-08-16\./);
+  assert.match(VERIFICATION_CACHE_VERSION, /^journey-verifier\/2026-08-20\./);
 });
 
 test("worker failures retain Error messages after classification", () => {
