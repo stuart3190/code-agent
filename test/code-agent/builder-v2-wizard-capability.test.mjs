@@ -74,6 +74,69 @@ test("wizard controlled values emit before durable persistence settles", async (
   await pending;
 });
 
+test("mount restore shares hydration and cannot overwrite a live selection", async () => {
+  let releaseLoad;
+  let loadStarted;
+  let loadCalls = 0;
+  const started = new Promise((resolve) => { loadStarted = resolve; });
+  const persistence = {
+    async load() {
+      loadCalls += 1;
+      loadStarted();
+      await new Promise((resolve) => { releaseLoad = resolve; });
+      return { stepId: "date", values: { slotId: "" }, status: WIZARD_STATUS.ACTIVE, revision: 0 };
+    },
+    async save() {},
+  };
+  const machine = makeWizardMachine({ steps: ["date", "slot"], persistence });
+  machine.subscribe(() => {}); // useCapabilityState starts hydration
+  await started;
+  const mountRestore = machine.restore(); // generated useEffect(() => restore(), [])
+  assert.equal(loadCalls, 1, "subscribe and generated restore share one durable read");
+
+  await machine.select("slotId", "evening");
+  releaseLoad();
+  await mountRestore;
+  assert.equal(machine.getState().values.slotId, "evening",
+    "a stale mount load cannot revert the option the visitor selected while hydration was pending");
+});
+
+test("unawaited generated wizard calls persist in invocation order", async () => {
+  let durable = null;
+  const persistence = {
+    async save(value) {
+      if (value.revision === 1) await new Promise((resolve) => setTimeout(resolve, 30));
+      durable = value;
+    },
+  };
+  const machine = makeWizardMachine({ steps: ["date", "slot"], persistence });
+  const first = machine.select("dateId", "friday");
+  const second = machine.select("slotId", "late");
+  const third = machine.next();
+  await Promise.all([first, second, third]);
+  assert.equal(durable.revision, machine.getState().revision);
+  assert.equal(durable.values.dateId, "friday");
+  assert.equal(durable.values.slotId, "late");
+  assert.equal(durable.stepId, "slot");
+});
+
+test("reset is ordered after unawaited durable writes", async () => {
+  let durable = null;
+  const persistence = {
+    async save(value) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      durable = value;
+    },
+    async clear() { durable = null; },
+  };
+  const machine = makeWizardMachine({ steps: ["date", "slot"], persistence });
+  const selection = machine.select("dateId", "friday");
+  const reset = machine.reset();
+  await Promise.all([selection, reset]);
+  assert.equal(durable, null, "a slow older save cannot resurrect state after reset clears it");
+  assert.equal(machine.getState().values.dateId, undefined);
+});
+
 test("booking-only contracts bind booking without imposing a wizard", () => {
   const booking = bindCapabilities({
     entities: [{ name: "booking" }], journeys: [{ id: "book", title: "Book a visit",

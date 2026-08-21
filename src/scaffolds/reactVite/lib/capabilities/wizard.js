@@ -66,7 +66,8 @@ export function makeWizardMachine({
   // renders step 1 of a booking the visitor already completed.
   let hydration = { hydrated: !durable?.load, hydrating: false, error: null };
   let hydrationFlight = null;
-  let restoreGeneration = 0;
+  let stateGeneration = 0;
+  let persistenceQueue = Promise.resolve();
 
   const snapshot = () => ({
     ...clone(state),
@@ -84,7 +85,20 @@ export function makeWizardMachine({
     for (const listener of listeners) listener(next);
     return next;
   };
-  const save = async () => { if (durable?.save) await durable.save(snapshot()); };
+  const persist = (operation) => {
+    const queued = persistenceQueue.then(operation);
+    persistenceQueue = queued.catch(() => {});
+    return queued;
+  };
+  const save = () => {
+    if (!durable?.save) return Promise.resolve();
+    const value = snapshot();
+    // Generated handlers often issue select/reset/next without awaiting each call. Preserve their
+    // synchronous UI updates, but serialize durable mutations in invocation order so an older slow
+    // request cannot land after a newer save or clear and resurrect stale values on reload.
+    return persist(() => durable.save(value));
+  };
+  const clear = () => durable?.clear ? persist(() => durable.clear()) : Promise.resolve();
   const active = () => {
     if ([WIZARD_STATUS.CANCELLED, WIZARD_STATUS.CONFIRMED].includes(state.status)) {
       throw new Error(`wizard is ${state.status}`);
@@ -93,15 +107,18 @@ export function makeWizardMachine({
   const validateCurrent = () => {
     const errors = validate({ stepId: state.stepId, stepIndex: state.stepIndex, values: clone(state.values) }) || {};
     state = { ...state, errors: clone(errors), status: Object.keys(errors).length ? WIZARD_STATUS.INVALID : WIZARD_STATUS.ACTIVE };
+    stateGeneration += 1;
     return Object.keys(errors).length === 0;
   };
   const move = async (index) => {
     state = { ...state, stepIndex: index, stepId: ids[index], errors: {}, status: WIZARD_STATUS.ACTIVE, revision: state.revision + 1 };
+    stateGeneration += 1;
     await save(); return emit();
   };
   const setValue = async (key, value) => {
     active(); state = { ...state, values: { ...state.values, [key]: value }, errors: {}, status: WIZARD_STATUS.ACTIVE,
       revision: state.revision + 1 };
+    stateGeneration += 1;
     // Controlled React inputs must observe the new value before durable persistence yields to the
     // network. Waiting for save() first lets React re-render the old controlled value in response
     // to the input event, so the browser sees the character it just typed immediately disappear.
@@ -136,17 +153,18 @@ export function makeWizardMachine({
     if (nextState !== undefined) {
       const adopted = adoptState(nextState);
       if (!adopted) throw new Error("wizard restore state must identify a known step");
-      restoreGeneration += 1;
+      stateGeneration += 1;
       hydration = { hydrated: true, hydrating: false, error: null };
       const next = snapshot();
       await save();
       return next;
     }
     if (!durable?.load) return snapshot();
-    const generation = restoreGeneration;
+    const generation = stateGeneration;
     const saved = await durable.load();
-    // An explicit restore(snapshot) that happened while storage was loading is newer authority.
-    if (generation !== restoreGeneration) return snapshot();
+    // Any real interaction that happened while storage was loading is newer authority. A stale
+    // load must never erase a click, field edit, transition, confirmation, cancellation or reset.
+    if (generation !== stateGeneration) return snapshot();
     return adoptState(saved) || snapshot();
   }
 
@@ -196,7 +214,9 @@ export function makeWizardMachine({
     },
     /** Restore once, ever. Safe to call from anywhere; returns the same promise while in flight. */
     async hydrate() { return hydrateOnce(); },
-    async restore(nextState) { return restoreState(nextState); },
+    async restore(nextState) {
+      return nextState === undefined ? hydrateOnce() : restoreState(nextState);
+    },
     setValue,
     select: setValue,
     validateCurrent() { active(); const ok = validateCurrent(); emit(); return { ok, errors: clone(state.errors) }; },
@@ -223,14 +243,17 @@ export function makeWizardMachine({
       if (state.stepIndex !== ids.length - 1) return { ok: false, reason: "not_last_step", state: snapshot() };
       if (!validateCurrent()) { emit(); return { ok: false, state: snapshot() }; }
       state = { ...state, status: WIZARD_STATUS.CONFIRMING, revision: state.revision + 1 };
+      stateGeneration += 1;
       emit();
       try {
         const confirmation = onConfirm ? await onConfirm(clone(state.values)) : { ok: true };
         state = { ...state, status: WIZARD_STATUS.CONFIRMED, confirmation: clone(confirmation), errors: {} };
+        stateGeneration += 1;
         await save();
         return { ok: true, confirmation: clone(confirmation), state: emit() };
       } catch (error) {
         state = { ...state, status: WIZARD_STATUS.INVALID, errors: { submit: error.message || "Confirmation failed" } };
+        stateGeneration += 1;
         await save(); emit(); throw error;
       }
     },
@@ -238,12 +261,14 @@ export function makeWizardMachine({
       if (state.status === WIZARD_STATUS.CANCELLED) return snapshot();
       if (state.status === WIZARD_STATUS.CONFIRMED) throw new Error("a confirmed wizard cannot be cancelled");
       state = { ...state, status: WIZARD_STATUS.CANCELLED, cancelledAt: new Date().toISOString(), revision: state.revision + 1 };
+      stateGeneration += 1;
       await save(); return emit();
     },
     async reset() {
       state = { status: WIZARD_STATUS.ACTIVE, stepIndex: 0, stepId: ids[0], values: clone(initialValues),
         errors: {}, confirmation: null, cancelledAt: null, revision: state.revision + 1 };
-      await durable?.clear?.(); return emit();
+      stateGeneration += 1;
+      await clear(); return emit();
     },
   };
 }
