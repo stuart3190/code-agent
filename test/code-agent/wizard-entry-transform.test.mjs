@@ -10,6 +10,35 @@ const contractFor = (name = "Start booking control") => ({
   interactionContract: { flows: [{ kind: "flow_start", control: { accessibleName: name } }] },
 });
 
+const causalContractFor = ({ journeyId = "book", start = "Start booking control", field = "date" } = {}) => ({
+  interactionContract: { flows: [
+    { journeyId, stepIndex: 0, kind: "navigation", control: null, writes: [] },
+    { journeyId, stepIndex: 1, kind: "flow_start", control: { accessibleName: start },
+      writes: [`${journeyId}.flowStarted`] },
+    { journeyId, stepIndex: 2, kind: "selection",
+      control: { logicalField: field, accessibleName: field }, writes: [`${journeyId}.draft.${field}`] },
+  ] },
+});
+
+const causalTreeFor = ({ start = "Start booking control", field = "date", guarded = false } = {}) => ({
+  "src/components/Flow.jsx": `import { useCapabilityState, useSemanticAction, useSemanticSelection } from "../lib/capabilities";
+export function Flow() {
+  const wizardState = useCapabilityState({ getState() {}, subscribe() {} });
+  const values = wizardState.values || {};
+  const stepId = wizardState.stepId || wizardState.currentStep || "intro";
+  const start = useSemanticAction({ name: "${start}", label: "Begin", onActivate() {
+    restoreWizard({ stepId: "details", values: { ...values, flowStarted: true } });
+  } });
+  const firstSelection = useSemanticSelection({ name: "${field}", value: values.${field} || "", onSelect() {} });
+  const showStart = stepId === "intro";
+  return <main>
+    ${guarded ? `{showStart && <button aria-label="${start}" {...start.buttonProps}>Begin</button>}`
+    : `<button aria-label="${start}" {...start.buttonProps}>Begin</button>`}
+    {stepId !== "intro" && <section><div {...firstSelection.groupProps}>First outcome</div></section>}
+  </main>;
+}`,
+});
+
 const treeFor = ({ first = "intro", impossible = "home", name = "Start booking control" } = {}) => ({
   "src/data/wizard.js": `import { makeWizardMachine } from "../lib/capabilities";
 export const STEPS = [{ id: "${first}", label: "Start" }, { id: "details", label: "Details" }];
@@ -61,6 +90,51 @@ test("an unrelated conditional cannot be rewritten merely because the file has a
   assert.equal(result.changes.length, 0);
 });
 
+test("an unguarded contracted flow entry is causally latched to its first semantic outcome", () => {
+  const tree = causalTreeFor();
+  const result = transformWizardEntryState(tree, { contract: causalContractFor() });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["wizard_flow_entry_latched"]);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{!values\.flowStarted && \(<button aria-label="Start booking control"/);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{values\.flowStarted && \(stepId !== "intro"\) && <section>/);
+});
+
+test("causal latching is domain-independent and augments an existing entry guard", () => {
+  const tree = causalTreeFor({ start: "Begin checkout control", field: "shippingMethod", guarded: true });
+  const result = transformWizardEntryState(tree, { contract: causalContractFor({
+    journeyId: "checkout", start: "Begin checkout control", field: "shippingMethod",
+  }) });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["wizard_flow_entry_latched"]);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{!values\.flowStarted && \(showStart\) && <button aria-label="Begin checkout control"/);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /values\.flowStarted && \(stepId !== "intro"\)/);
+  const repeated = transformWizardEntryState(result.tree, { contract: causalContractFor({
+    journeyId: "checkout", start: "Begin checkout control", field: "shippingMethod",
+  }) });
+  assert.equal(repeated.changes.length, 0, "the causal transform is idempotent");
+  assert.strictEqual(repeated.tree, result.tree);
+});
+
+test("causal latching declines ambiguous components with multiple capability states", () => {
+  const tree = causalTreeFor();
+  tree["src/components/Flow.jsx"] = tree["src/components/Flow.jsx"].replace(
+    "const values = wizardState.values || {};",
+    "const values = wizardState.values || {};\n  const otherState = useCapabilityState(otherMachine);",
+  );
+  const result = transformWizardEntryState(tree, { contract: causalContractFor() });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("causal latching declines a contract without a statically matched first outcome", () => {
+  const tree = causalTreeFor();
+  const result = transformWizardEntryState(tree, { contract: causalContractFor({ field: "unknownField" }) });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
 test("the stage gate adopts the zero-model wizard correction before compilation", async () => {
   const generated = treeFor();
   const tree = {
@@ -79,5 +153,27 @@ test("the stage gate adopts the zero-model wizard correction before compilation"
   assert.equal(result.ok, true);
   assert.equal(result.deterministicRepair?.applied?.[0]?.code, "wizard_entry_state_aligned");
   assert.match(compiled["src/components/Flow.jsx"], /stepId === "intro"/);
+  assert.equal(result.tree, compiled);
+});
+
+test("the stage gate adopts causal flow-entry latching before compilation", async () => {
+  const generated = causalTreeFor();
+  const tree = {
+    ...generated,
+    "src/lib/capabilities/index.js": "export const useCapabilityState = () => ({}); export const useSemanticAction = () => ({}); export const useSemanticSelection = () => ({});",
+    "package.json": JSON.stringify({ type: "module", scripts: { build: "vite build" } }),
+    "index.html": '<div id="root"></div>',
+    "vite.config.js": "export default {}",
+    "src/main.jsx": "export default null",
+  };
+  let compiled = null;
+  const result = await runStageGate(tree, {
+    contract: causalContractFor(),
+    compile: async (candidate) => { compiled = candidate; return { ok: true }; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.deterministicRepair?.applied?.[0]?.code, "wizard_flow_entry_latched");
+  assert.match(compiled["src/components/Flow.jsx"], /!values\.flowStarted/);
+  assert.match(compiled["src/components/Flow.jsx"], /values\.flowStarted && \(stepId !== "intro"\)/);
   assert.equal(result.tree, compiled);
 });

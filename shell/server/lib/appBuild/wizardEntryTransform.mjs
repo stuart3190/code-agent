@@ -1,11 +1,9 @@
-// Deterministic alignment for a generated flow-entry control whose visibility predicate names a
-// wizard state that the same generated state machine can never produce.
+// Deterministic alignment and causal latching for generated flow-entry controls.
 //
-// This is intentionally proof-driven. It does not guess from words such as "home" or "intro": it
-// resolves the concrete makeWizardMachine used by useCapabilityState(), reads its static steps,
-// finds the contracted flow-start control in JSX, and changes only the impossible equality that
-// guards that control. Dynamic, cross-wizard or otherwise ambiguous shapes are left untouched for
-// ordinary browser verification and targeted repair.
+// This is intentionally proof-driven. It does not guess from domain words: it resolves concrete
+// state and semantic-control relationships in the generated AST, then uses the interaction
+// contract to prove the entry action and its first outcome. Dynamic, cross-component or otherwise
+// ambiguous shapes are left untouched for ordinary browser verification and targeted repair.
 
 import path from "node:path";
 import { parse } from "@babel/parser";
@@ -142,6 +140,111 @@ function flowStartBindings(module, wantedNames) {
   return bindings;
 }
 
+function semanticBindings(module, wantedNames) {
+  const bindings = new Set();
+  walk(module.ast, (node) => {
+    if (node.type !== "VariableDeclarator" || node.id?.type !== "Identifier") return;
+    const call = node.init;
+    if (!["CallExpression", "OptionalCallExpression"].includes(call?.type)
+      || call.callee?.type !== "Identifier"
+      || !["useSemanticSelection", "useSemanticField", "useFlowAdvance", "useSemanticAction"]
+        .includes(call.callee.name)) return;
+    const options = call.arguments?.[0];
+    const names = [literalString(objectProperty(options, "name")), literalString(objectProperty(options, "label"))]
+      .map(normalizeControlName).filter(Boolean);
+    if (names.some((name) => wantedNames.has(name))) bindings.add(node.id.name);
+  });
+  return bindings;
+}
+
+function jsxElementMatchesBinding(node, bindings, allowedProps) {
+  if (node?.type !== "JSXElement") return false;
+  return (node.openingElement?.attributes || []).some((attribute) => attribute.type === "JSXSpreadAttribute"
+    && ["MemberExpression", "OptionalMemberExpression"].includes(attribute.argument?.type)
+    && attribute.argument.object?.type === "Identifier"
+    && bindings.has(attribute.argument.object.name)
+    && allowedProps.has(propertyName(attribute.argument.property)));
+}
+
+function jsxElementMatchesFlowStart(node, bindings, wantedNames) {
+  if (node?.type !== "JSXElement") return false;
+  return (node.openingElement?.attributes || []).some((attribute) => {
+    if (attribute.type === "JSXSpreadAttribute"
+      && ["MemberExpression", "OptionalMemberExpression"].includes(attribute.argument?.type)
+      && attribute.argument.object?.type === "Identifier"
+      && bindings.has(attribute.argument.object.name)
+      && ["buttonProps", "linkProps", "actionProps"].includes(propertyName(attribute.argument.property))) {
+      return true;
+    }
+    if (attribute.type !== "JSXAttribute" || attribute.name?.name !== "aria-label") return false;
+    const value = attribute.value?.type === "StringLiteral" ? attribute.value.value
+      : literalString(attribute.value?.expression);
+    return wantedNames.has(normalizeControlName(value));
+  });
+}
+
+function nearestFunction(node, parents) {
+  let current = node;
+  while (current) {
+    if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]
+      .includes(current.type)) return current;
+    current = parents.get(current);
+  }
+  return null;
+}
+
+function expressionMentionsMember(expression, objectName, memberName) {
+  let found = false;
+  walk(expression, (node) => {
+    if (found || !["MemberExpression", "OptionalMemberExpression"].includes(node.type)) return;
+    if (node.object?.type === "Identifier" && node.object.name === objectName
+      && propertyName(node.property) === memberName) found = true;
+  });
+  return found;
+}
+
+function expressionMentionsProperty(expression, memberName) {
+  let found = false;
+  walk(expression, (node) => {
+    if (["MemberExpression", "OptionalMemberExpression"].includes(node.type)
+      && propertyName(node.property) === memberName) found = true;
+  });
+  return found;
+}
+
+function expressionReferencesAlias(expression, aliases) {
+  let found = false;
+  walk(expression, (node, parent) => {
+    if (node.type !== "Identifier" || !aliases.has(node.name)) return;
+    if (["MemberExpression", "OptionalMemberExpression"].includes(parent?.type)
+      && parent.property === node && !parent.computed) return;
+    found = true;
+  });
+  return found;
+}
+
+function contractEntrySpecs(contract) {
+  const flows = contract?.interactionContract?.flows || [];
+  const specs = [];
+  for (let index = 0; index < flows.length; index += 1) {
+    const start = flows[index];
+    if (start?.kind !== "flow_start"
+      || !(start.writes || []).some((write) => String(write).split(".").at(-1) === "flowStarted")) continue;
+    const startNames = new Set([start.control?.accessibleName, ...(start.control?.accessibleNames || [])]
+      .map(normalizeControlName).filter(Boolean));
+    if (!startNames.size) continue;
+    const outcome = flows.slice(index + 1).find((flow) => flow?.journeyId === start.journeyId
+      && flow.control
+      && [flow.control.logicalField, flow.control.accessibleName, ...(flow.control.accessibleNames || [])]
+        .some((name) => normalizeControlName(name)));
+    if (!outcome) continue;
+    const outcomeNames = new Set([outcome.control.logicalField, outcome.control.accessibleName,
+      ...(outcome.control.accessibleNames || [])].map(normalizeControlName).filter(Boolean));
+    if (outcomeNames.size) specs.push({ startNames, outcomeNames });
+  }
+  return specs;
+}
+
 function jsxContainsFlowStart(node, bindings, wantedNames) {
   let found = false;
   walk(node, (child) => {
@@ -225,6 +328,156 @@ function replacementLiteral(source, node, value) {
   return JSON.stringify(value);
 }
 
+function flowEntryLatchEdits(module, specs) {
+  const edits = [];
+  const declarationNodes = new Map();
+  walk(module.ast, (node) => {
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+      declarationNodes.set(node.id.name, node);
+    }
+  });
+
+  for (const spec of specs) {
+    const startBindings = flowStartBindings(module, spec.startNames);
+    const outcomeBindings = semanticBindings(module, spec.outcomeNames);
+    if (!startBindings.size || !outcomeBindings.size) continue;
+
+    const startElements = [];
+    const outcomeElements = [];
+    walk(module.ast, (node) => {
+      if (node.type !== "JSXElement") return;
+      if (jsxElementMatchesFlowStart(node, startBindings, spec.startNames)) startElements.push(node);
+      if (jsxElementMatchesBinding(node, outcomeBindings,
+        new Set(["groupProps", "inputProps", "selectProps", "fieldProps", "controlProps"]))) {
+        outcomeElements.push(node);
+      }
+    });
+    if (startElements.length !== 1 || outcomeElements.length !== 1) continue;
+
+    const component = nearestFunction(startElements[0], module.parents);
+    if (!component || nearestFunction(outcomeElements[0], module.parents) !== component) continue;
+    if ([...startBindings, ...outcomeBindings].some((binding) => {
+      const declaration = declarationNodes.get(binding);
+      return !declaration || nearestFunction(declaration, module.parents) !== component;
+    })) continue;
+
+    const stateVariables = new Set();
+    for (const [name, declaration] of declarationNodes) {
+      if (nearestFunction(declaration, module.parents) !== component) continue;
+      const call = declaration.init;
+      if (["CallExpression", "OptionalCallExpression"].includes(call?.type)
+        && call.callee?.type === "Identifier" && call.callee.name === "useCapabilityState") {
+        stateVariables.add(name);
+      }
+    }
+    if (stateVariables.size !== 1) continue;
+    const stateName = [...stateVariables][0];
+
+    const valueAliases = [];
+    for (const [name, declaration] of declarationNodes) {
+      if (nearestFunction(declaration, module.parents) === component
+        && expressionMentionsMember(declaration.init, stateName, "values")) valueAliases.push(name);
+    }
+    if (valueAliases.length !== 1) continue;
+    const valuesName = valueAliases[0];
+
+    const stepAliases = new Set();
+    let aliasesChanged = true;
+    while (aliasesChanged) {
+      aliasesChanged = false;
+      for (const [name, declaration] of declarationNodes) {
+        if (stepAliases.has(name) || nearestFunction(declaration, module.parents) !== component) continue;
+        const direct = ["stepId", "step", "currentStep", "current"]
+          .some((member) => expressionMentionsMember(declaration.init, stateName, member));
+        if (direct || expressionReferencesAlias(declaration.init, stepAliases)) {
+          stepAliases.add(name);
+          aliasesChanged = true;
+        }
+      }
+    }
+    if (!stepAliases.size) continue;
+
+    let startGuard = null;
+    let cursor = startElements[0];
+    while ((cursor = module.parents.get(cursor))) {
+      if (cursor === component) break;
+      if (cursor.type === "LogicalExpression" && cursor.operator === "&&"
+        && cursor.right && cursor.right.start <= startElements[0].start
+        && cursor.right.end >= startElements[0].end) {
+        startGuard = cursor.left;
+        break;
+      }
+      if (cursor.type === "ConditionalExpression" && cursor.consequent
+        && cursor.consequent.start <= startElements[0].start
+        && cursor.consequent.end >= startElements[0].end) {
+        startGuard = cursor.test;
+        break;
+      }
+    }
+
+    let outcomeGuard = null;
+    cursor = outcomeElements[0];
+    while ((cursor = module.parents.get(cursor))) {
+      if (cursor === component) break;
+      if (cursor.type === "LogicalExpression" && cursor.operator === "&&"
+        && cursor.right && cursor.right.start <= outcomeElements[0].start
+        && cursor.right.end >= outcomeElements[0].end
+        && expressionReferencesAlias(cursor.left, stepAliases)) {
+        outcomeGuard = cursor.left;
+        break;
+      }
+      if (cursor.type === "ConditionalExpression" && cursor.consequent
+        && cursor.consequent.start <= outcomeElements[0].start
+        && cursor.consequent.end >= outcomeElements[0].end
+        && expressionReferencesAlias(cursor.test, stepAliases)) {
+        outcomeGuard = cursor.test;
+        break;
+      }
+    }
+    if (!outcomeGuard) continue;
+
+    const pending = [];
+    if (!startGuard || !expressionMentionsProperty(startGuard, "flowStarted")) {
+      if (startGuard) {
+        const original = module.source.slice(startGuard.start, startGuard.end);
+        pending.push({ start: startGuard.start, end: startGuard.end,
+          replacement: `!${valuesName}.flowStarted && (${original})` });
+      } else {
+        const parent = module.parents.get(startElements[0]);
+        if (!["JSXElement", "JSXFragment"].includes(parent?.type)) continue;
+        const original = module.source.slice(startElements[0].start, startElements[0].end);
+        pending.push({ start: startElements[0].start, end: startElements[0].end,
+          replacement: `{!${valuesName}.flowStarted && (${original})}` });
+      }
+    }
+    if (!expressionMentionsProperty(outcomeGuard, "flowStarted")) {
+      const original = module.source.slice(outcomeGuard.start, outcomeGuard.end);
+      pending.push({ start: outcomeGuard.start, end: outcomeGuard.end,
+        replacement: `${valuesName}.flowStarted && (${original})` });
+    }
+    if (!pending.length) continue;
+    if (pending.some((candidate, index) => pending.some((other, otherIndex) => index !== otherIndex
+      && candidate.start < other.end && other.start < candidate.end))) continue;
+    const startControl = [...spec.startNames].sort()[0];
+    const change = {
+      code: "wizard_flow_entry_latched",
+      file: module.file,
+      startControl,
+      message: `${module.file}: causally latched ${JSON.stringify(startControl)} to its first semantic outcome`,
+    };
+    for (const pendingEdit of pending) {
+      edits.push({ ...pendingEdit, change });
+    }
+  }
+
+  const unique = [];
+  for (const edit of edits) {
+    if (!unique.some((row) => row.start === edit.start && row.end === edit.end
+      && row.replacement === edit.replacement)) unique.push(edit);
+  }
+  return unique;
+}
+
 /**
  * Return a byte-stable corrected tree plus auditable changes. `changes=[]` means the proof was
  * incomplete or there was no defect; no source is changed in either case.
@@ -235,6 +488,7 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
     .flatMap((flow) => [flow.control?.accessibleName, ...(flow.control?.accessibleNames || [])])
     .map(normalizeControlName).filter(Boolean));
   if (!wantedNames.size) return { tree, changes: [] };
+  const entrySpecs = contractEntrySpecs(contract);
 
   const files = new Set(Object.keys(tree || {}));
   const modules = new Map();
@@ -242,10 +496,12 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
     if (!GENERATED_FILE.test(file) || PLATFORM_PATH.test(file)) continue;
     try {
       const ast = parseModule(file, raw);
+      const parents = new Map();
       const declarations = new Map();
       const exportedLocals = new Map();
       const imports = new Map();
       walk(ast, (node, parent) => {
+        if (parent) parents.set(node, parent);
         if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && node.init) {
           declarations.set(node.id.name, node.init);
           if (parent?.type === "VariableDeclaration" && parent.__exported) exportedLocals.set(node.id.name, node.id.name);
@@ -266,7 +522,7 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
       });
       // ExportNamedDeclaration is visited before its child declaration, so the marker above is
       // available when the declarator is reached. Direct exported functions are irrelevant here.
-      modules.set(file, { file, source: String(raw), ast, declarations, exportedLocals, imports,
+      modules.set(file, { file, source: String(raw), ast, parents, declarations, exportedLocals, imports,
         localWizards: new Map() });
     } catch {
       // Syntax failures are handled by the existing stage gate. Never transform an unparsed file.
@@ -324,9 +580,18 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
       if (!edits.some((edit) => edit.start === match.literal.start && edit.end === match.literal.end)) {
         edits.push({ start: match.literal.start, end: match.literal.end,
           replacement: replacementLiteral(module.source, match.literal, match.wizard.firstStep),
-          from: match.impossible, to: match.wizard.firstStep, wizardFile: match.wizard.file });
+          change: { code: "wizard_entry_state_aligned", file: module.file, wizardFile: match.wizard.file,
+            from: match.impossible, to: match.wizard.firstStep,
+            message: `${module.file}: aligned contracted flow-start guard ${JSON.stringify(match.impossible)} to `
+              + `the wizard's declared entry step ${JSON.stringify(match.wizard.firstStep)}` } });
         editsByFile.set(module.file, edits);
       }
+    }
+    const latchEdits = flowEntryLatchEdits(module, entrySpecs);
+    if (latchEdits.length) {
+      const edits = editsByFile.get(module.file) || [];
+      edits.push(...latchEdits);
+      editsByFile.set(module.file, edits);
     }
   }
 
@@ -337,10 +602,9 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
     let source = String(next[file]);
     for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
       source = source.slice(0, edit.start) + edit.replacement + source.slice(edit.end);
-      changes.push({ code: "wizard_entry_state_aligned", file, wizardFile: edit.wizardFile,
-        from: edit.from, to: edit.to,
-        message: `${file}: aligned contracted flow-start guard ${JSON.stringify(edit.from)} to `
-          + `the wizard's declared entry step ${JSON.stringify(edit.to)}` });
+      if (!changes.some((change) => change.code === edit.change.code && change.file === edit.change.file
+        && change.startControl === edit.change.startControl && change.from === edit.change.from
+        && change.to === edit.change.to)) changes.push(edit.change);
     }
     try { parseModule(file, source); } catch { return { tree, changes: [] }; }
     next[file] = source;
@@ -349,5 +613,7 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
 }
 
 export function wizardEntryTransformSummary({ changes = [] } = {}) {
-  return changes.map((change) => `${change.file} ${change.from} -> ${change.to}`).join("; ");
+  return changes.map((change) => change.code === "wizard_entry_state_aligned"
+    ? `${change.file} ${change.from} -> ${change.to}`
+    : `${change.file} flow entry latched`).join("; ");
 }
