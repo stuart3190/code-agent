@@ -1,12 +1,12 @@
 // Package 14S: exactly one AUTO-routed live booking build and, only if a durable working
 // checkpoint exists, at most one targeted resume-repair. Aggregate connected-allowance spend
-// is hard-capped at the explicitly approved 15 internal credits. Evidence is private and incremental.
+// is hard-capped at the production medium-customer profile. Evidence is private and incremental.
 
 import crypto from "node:crypto";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { classifyComplexity } from "../shell/server/lib/appBuild/buildProfile.mjs";
+import { classifyComplexity, COMPLEXITY, profileFor } from "../shell/server/lib/appBuild/buildProfile.mjs";
 import { createDiagSession } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
 import { createJob } from "../shell/server/lib/buildJobs.mjs";
 import { awaitBuildWork } from "../shell/server/lib/buildWorkQueue.mjs";
@@ -23,7 +23,7 @@ import { requireFreshWorkerPreviewProof } from "../build-worker/previewIsolation
 loadEnv();
 process.env.THRALLO_BUILD_WORKER_ENABLED = "1"; // operator only; customer shell routing stays dark
 
-const TOTAL_CEILING = 15;
+const TOTAL_CEILING = profileFor(COMPLEXITY.medium).maxCredits;
 const STAGE = String(process.argv[2] || "preflight").toLowerCase();
 const evidenceDir = path.resolve(process.env.PACKAGE14S_EVIDENCE_DIR
   || "/home/ubuntu/thrallo-deploy-evidence/package14s-live-20260809");

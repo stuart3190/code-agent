@@ -17,6 +17,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../../ops/run-package14s-live-booking.mjs", import.meta.url), "utf8");
+
+test("Package 14S uses the real medium-customer ceiling instead of a smaller qualification-only cap", () => {
+  assert.match(source, /profileFor\(COMPLEXITY\.medium\)\.maxCredits/);
+  assert.doesNotMatch(source, /const TOTAL_CEILING = 15/);
+});
 const cleanup = source.slice(source.indexOf("async function cleanup(state)"),
   source.indexOf("await mkdir(evidenceDir"));
 const retain = source.slice(source.indexOf("async function retainGeneratedSource"),
