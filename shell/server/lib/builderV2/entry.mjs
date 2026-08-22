@@ -18,6 +18,7 @@ import { killSwitchActive } from "./cutoverPolicy.mjs";
 import { requireFreshWorkerAdmission } from "./workerAdmission.mjs";
 import { classifyComplexity, profileFor } from "../appBuild/buildProfile.mjs";
 import { buildBudgetApprovals } from "./buildBudgetApprovals.mjs";
+import { latestBuildProfile, resolveBuildProfile } from "../../../shared/buildProfile.mjs";
 
 export async function v2BuildEligible(_owner, options = {}) {
   if (killSwitchActive(options.env || process.env)) {
@@ -279,6 +280,10 @@ export async function startAppBuildV2(ctx, input, options = {}) {
     });
   }
   const deps = productionDeps(options.deps);
+  const storedTurns = ctx.buildProfile || typeof ctx.conversations?.listTurns !== "function" ? []
+    : await ctx.conversations.listTurns(ctx.owner, ctx.conversation.id, { limit: 30 }).catch(() => []);
+  const buildProfile = ctx.buildProfile || latestBuildProfile(storedTurns)
+    || resolveBuildProfile({ prompt: String(input.description || "") });
   const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   const complexity = classifyComplexity({ prompt: String(input.description) });
   const profile = profileFor(complexity.level);
@@ -332,6 +337,7 @@ export async function startAppBuildV2(ctx, input, options = {}) {
     const result = await dispatch(ctx, {
       project, mode: "build", prompt: String(input.description), kind: "app_build_v2",
       deps: options.deps, preflight,
+      v2Input: { buildProfile },
       budgetApprovalId: consumedApproval?.approvalId || null,
     });
     if (consumedApproval) {

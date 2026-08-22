@@ -24,6 +24,8 @@ import {
   ACTIVITY_STATE, activityFromJob, activityLabel, isActiveActivity, normalizeProjectSummary, projectActivity,
 } from "./activityState.js";
 import BuildBudgetApprovalCard from "./BuildBudgetApprovalCard.jsx";
+import BuildProfileControls from "./BuildProfileControls.jsx";
+import { resolveBuildProfile } from "../../../shared/buildProfile.mjs";
 import { renderMarkdown } from "./markdown.js";
 import ManageView, { MANAGE_VIEW_IDS } from "../manage/ManageView.jsx";
 import PlanBanner from "../billing/PlanBanner.jsx";
@@ -415,14 +417,14 @@ function Workspace({ user }) {
 
   // Returns false on failure so the composer can restore the draft instead of losing it.
   const sendingRef = useRef(false);
-  const send = useCallback(async (text) => {
+  const send = useCallback(async (text, buildProfile = null) => {
     const trimmed = text.trim();
     if (!trimmed || sendingRef.current) return true;
     const context = wsContextOn && wsContext ? wsContext : null;
     sendingRef.current = true;
     try {
       if (!active) {
-        const r = await startConversation(trimmed, context, modelPref);
+        const r = await startConversation(trimmed, context, modelPref, buildProfile);
         setConversations((list) => [r.conversation, ...list]);
         openConversation(r.conversation);
       } else {
@@ -1173,7 +1175,7 @@ function Begin({ user, conversations, loaded = true, onSend, composerSeed = null
       <div className="ct-hello" style={fresh ? undefined : { marginTop: 40 }}>{fresh ? "Let's build something." : `Welcome back${name ? `, ${name}` : ""}.`}</div>
       <div className="ct-question">What are we building today?</div>
       <Composer autoFocus={FINE_POINTER} onSend={onSend} seed={composerSeed}
-        placeholder="Describe anything — an app, a change, an idea…" />
+        placeholder="Describe anything — an app, a change, an idea…" buildProfileEnabled />
       {onModelChange && (
         <div className="ct-model-begin">
           <ModelSelector value={modelPref} onChange={onModelChange} onOpenSettings={onOpenSettings} />
@@ -1972,9 +1974,20 @@ function contextChipLabel(context) {
   return bits.filter(Boolean).join(" · ");
 }
 
-function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null, seed = "" }) {
+function Composer({ onSend, autoFocus = false, placeholder = "Message your team…", waiting = false, thinking = false, context = null, onDismissContext = null, seed = "", buildProfileEnabled = false }) {
   const [text, setText] = useState("");
+  const [requestedBuildType, setRequestedBuildType] = useState("auto");
+  const [applicationSubtype, setApplicationSubtype] = useState("auto");
+  const [adjustedSignals, setAdjustedSignals] = useState(null);
   const ref = useRef(null);
+  const buildProfile = useMemo(() => buildProfileEnabled ? resolveBuildProfile({
+    prompt: text,
+    input: {
+      requestedBuildType,
+      applicationSubtype,
+      ...(adjustedSignals ? { requirementSignals: adjustedSignals, inferenceSource: "adjusted" } : {}),
+    },
+  }) : null, [applicationSubtype, adjustedSignals, buildProfileEnabled, requestedBuildType, text]);
   // A seed is a DRAFT, never a send. "Edit & rebuild" and the starter gallery both put words in
   // the box for the customer to change; sending on their behalf would take that away — and the
   // whole point of an expert prompt is that it is a good first draft, not a finished answer.
@@ -2001,7 +2014,15 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
     if (!draft.trim()) return;
     setText("");
     if (ref.current) ref.current.style.height = "auto";
-    const ok = await onSend(draft);
+    const submittedProfile = buildProfileEnabled ? resolveBuildProfile({
+      prompt: draft,
+      input: {
+        requestedBuildType,
+        applicationSubtype,
+        ...(adjustedSignals ? { requirementSignals: adjustedSignals, inferenceSource: "adjusted" } : {}),
+      },
+    }) : null;
+    const ok = await onSend(draft, submittedProfile);
     if (ok === false) {
       setText((current) => current || draft);
       ref.current?.focus();
@@ -2009,7 +2030,25 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team�
   };
   const hint = waiting ? "The team is waiting on your answer above…" : thinking ? "The team is working — you can still talk…" : placeholder;
   return (
-    <div className="ct-composer" style={context ? { flexWrap: "wrap" } : undefined}>
+    <div className={`ct-composer ${buildProfileEnabled ? "ct-build-composer" : ""}`} style={context ? { flexWrap: "wrap" } : undefined}>
+      {buildProfileEnabled && (
+        <BuildProfileControls
+          profile={buildProfile}
+          requestedBuildType={requestedBuildType}
+          onBuildTypeChange={(value) => {
+            setRequestedBuildType(value);
+            if (value !== "application") setApplicationSubtype("auto");
+            setAdjustedSignals(null);
+          }}
+          applicationSubtype={applicationSubtype}
+          onApplicationSubtypeChange={setApplicationSubtype}
+          onToggleRequirement={(signal) => setAdjustedSignals((current) => {
+            const next = new Set(current || buildProfile?.requirementSignals || []);
+            if (next.has(signal)) next.delete(signal); else next.add(signal);
+            return [...next];
+          })}
+        />
+      )}
       {context && (
         <div className="ct-context-chip" title="Shared with your next message — the team sees exactly this">
           <span className="ct-context-glyph">⌁</span>

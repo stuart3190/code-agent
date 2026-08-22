@@ -933,7 +933,7 @@ export function createOrchestrator({
   }
 
   return {
-    async runBuild({ owner, projectId, request, profile = "simple", budgetCredits = null,
+    async runBuild({ owner, projectId, request, profile = "simple", buildProfile = null, budgetCredits = null,
       maxRepairs = maxJourneyRepairs, userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile, request, state: "created",
@@ -967,7 +967,7 @@ export function createOrchestrator({
         abortIfRequested(signal);
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
         await setState("contracting");
-        const rawContract = await contractFn({ owner, projectId, buildId, request, profile, signal });
+        const rawContract = await contractFn({ owner, projectId, buildId, request, profile, buildProfile, signal });
         // ONE derivation for the whole build: tiers, bindings, module plan, interaction
         // contract, per-module contracts, persistence ownership and image intents all come
         // from here and are passed down, so no subsystem re-reads the contract prose alone.

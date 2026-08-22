@@ -25,6 +25,7 @@ import {
   capabilityModulePlan, deriveCapabilityGraph, scopeCapabilityGraph, validateCapabilityGraph,
 } from "./capabilityGraph.mjs";
 import { capabilityCompositionPlan } from "./capabilityComposer.mjs";
+import { resolveBuildProfile, validateBuildProfileContract } from "../../../shared/buildProfile.mjs";
 
 export const BUILD_SPEC_VERSION = 2;
 
@@ -36,44 +37,50 @@ export const BUILD_SPEC_VERSION = 2;
  * out of band reproduces the drift this replaces.
  */
 export function deriveBuildSpec(contract, { userCritical = [], journeys = contract?.journeys || [] } = {}) {
-  const bindings = bindCapabilities(contract);
-  const dependencyPlan = deriveDependencyPlan(contract, journeys);
+  const buildProfile = resolveBuildProfile({
+    prompt: contract?.summary || "", input: contract?.buildProfile || null, legacy: !contract?.buildProfile,
+  });
+  const plannedContract = { ...contract, buildProfile };
+  const bindings = bindCapabilities(plannedContract);
+  const dependencyPlan = deriveDependencyPlan(plannedContract, journeys);
   // The existing planner supplies route/screen responsibility. Capability adapters are then
   // replaced with composer-owned protected modules, and unsupported flows become bounded custom
   // modules. A second interaction pass stamps those final owners onto the SAME flow contract.
-  const legacyModulePlan = deriveModulePlan(contract, journeys, { dependencyPlan });
-  const initialInteraction = buildInteractionContract(contract, { modulePlan: legacyModulePlan, bindings });
-  const initialGraph = deriveCapabilityGraph(contract, { bindings, interactionContract: initialInteraction });
+  const legacyModulePlan = deriveModulePlan(plannedContract, journeys, { dependencyPlan });
+  const initialInteraction = buildInteractionContract(plannedContract, { modulePlan: legacyModulePlan, bindings });
+  const initialGraph = deriveCapabilityGraph(plannedContract, { bindings, interactionContract: initialInteraction });
   const modulePlan = capabilityModulePlan(initialGraph, legacyModulePlan);
-  const baseInteraction = buildInteractionContract(contract, { modulePlan, bindings });
-  const graphBeforeInteractionBinding = deriveCapabilityGraph(contract, {
+  const baseInteraction = buildInteractionContract(plannedContract, { modulePlan, bindings });
+  const graphBeforeInteractionBinding = deriveCapabilityGraph(plannedContract, {
     bindings, interactionContract: baseInteraction,
   });
   const graphBoundInteraction = composeCapabilityGraphInteractions(
-    baseInteraction, graphBeforeInteractionBinding, contract,
+    baseInteraction, graphBeforeInteractionBinding, plannedContract,
   );
   // Re-derive once from the graph-bound interactions so every responsibility points at the
   // authoritative interaction it owns, including operations that had no prose-derived flow.
-  const capabilityGraph = deriveCapabilityGraph(contract, {
+  const capabilityGraph = deriveCapabilityGraph(plannedContract, {
     bindings, interactionContract: graphBoundInteraction,
   });
   const interactionContract = composeCapabilityGraphInteractions(
-    graphBoundInteraction, capabilityGraph, contract,
+    graphBoundInteraction, capabilityGraph, plannedContract,
   );
   const compositionPlan = capabilityCompositionPlan(capabilityGraph);
-  const enriched = { ...contract, interactionContract, dependencyPlan, capabilityGraph };
+  const enriched = { ...plannedContract, interactionContract, dependencyPlan, capabilityGraph };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
     contract: enriched, modulePlan, interactionContract, bindings, journeys, capabilityGraph,
   });
   const interactionVerdict = validateInteractionContract(interactionContract, { capabilityGraph });
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
+  const profileVerdict = validateBuildProfileContract(enriched, buildProfile);
   return {
     version: BUILD_SPEC_VERSION,
     contract: enriched,
     journeys,
-    entities: contract?.entities || [],
-    operations: contract?.operations || [],
+    buildProfile,
+    entities: plannedContract?.entities || [],
+    operations: plannedContract?.operations || [],
     tiers,
     bindings,
     dependencyPlan,
@@ -83,12 +90,13 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     compositionPlan,
     moduleContracts,
     persistencePlan: persistenceOwnershipPlan(enriched, journeys, modulePlan),
-    imageIntents: imageIntents(contract),
+    imageIntents: imageIntents(plannedContract),
     verdict: {
-      ok: interactionVerdict.ok && graphVerdict.ok,
-      problems: [...interactionVerdict.problems, ...graphVerdict.problems],
+      ok: interactionVerdict.ok && graphVerdict.ok && profileVerdict.ok,
+      problems: [...interactionVerdict.problems, ...graphVerdict.problems, ...profileVerdict.problems],
       interaction: interactionVerdict,
       capabilityGraph: graphVerdict,
+      buildProfile: profileVerdict,
     },
   };
 }
@@ -145,6 +153,7 @@ export function scopeBuildSpec(spec, journeys = []) {
 export function buildSpecSummary(spec) {
   return {
     version: spec?.version || BUILD_SPEC_VERSION,
+    buildProfile: spec?.buildProfile || spec?.contract?.buildProfile || null,
     journeys: (spec?.journeys || []).map((journey) => journey.id),
     essential: spec?.tiers?.essential?.journeys || [],
     bindings: (spec?.bindings || []).map((binding) => ({

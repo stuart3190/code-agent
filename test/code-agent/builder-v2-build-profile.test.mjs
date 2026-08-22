@@ -1,0 +1,340 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+process.env.CODE_AGENT_STORE = "memory";
+
+const {
+  resolveBuildProfile, validateBuildProfileInput,
+} = await import("../../shell/shared/buildProfile.mjs");
+const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
+const { generateContract, normaliseContract } = await import("../../shell/server/lib/appBuild/contractAgent.mjs");
+const { MemoryConversationStore } = await import("../../shell/server/lib/conversationStore.mjs");
+const { MemoryCodeAgentStore } = await import("../../shell/server/lib/codeAgentStore.mjs");
+const { assembleInput, postUserMessage } = await import("../../shell/server/lib/leadAgentService.mjs");
+const { handleConversations } = await import("../../shell/server/routes/conversations.mjs");
+
+const OWNER = "88888888-8888-4888-8888-888888888888";
+
+function contract({
+  summary = "A structured product",
+  buildProfile,
+  entities = [],
+  operations = [],
+  steps = [
+    { action: "open the product", target: "/", expect: "the product is visible" },
+    { action: "review the result", target: "main content", expect: "the result is visible" },
+  ],
+  auth = { required: false, model: null, rules: [] },
+  integrations = [],
+} = {}) {
+  return {
+    summary,
+    projectType: "other",
+    buildProfile,
+    journeys: [{
+      id: "primary-flow", title: "Primary flow", priority: "primary", stage: "primary_journey",
+      steps, acceptance: ["the requested outcome is visible"],
+    }],
+    routes: [{ path: "/", name: "Home", purpose: summary, auth: false }],
+    entities,
+    operations,
+    auth,
+    integrations,
+    states: [], acceptance: [], deferred: [],
+  };
+}
+
+function field(name, type = "string") {
+  return { name, type, required: true };
+}
+
+test("contract normalization embeds the same authoritative profile before graph derivation", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build an application with saved customer data.",
+    input: { requestedBuildType: "application", requirementSignals: ["saved_data"] },
+  });
+  const normalized = normaliseContract(contract({
+    entities: [{ name: "record", fields: [field("name")] }],
+    operations: [{
+      id: "save-record", entity: "record", kind: "create", journey: "primary-flow",
+      responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "create", reads: ["name"], writes: ["id"] }],
+    }],
+    steps: [
+      { action: "enter a record", target: "record form", operates: ["name"], expect: "the value is visible" },
+      { action: "save the record", target: "save", operates: ["save-record"], expect: "the saved record is visible" },
+    ],
+  }), { prompt: "Build an application with saved customer data.", buildProfile: profile });
+  assert.deepEqual(normalized.buildProfile, profile);
+  const spec = deriveBuildSpec(normalized);
+  assert.deepEqual(spec.contract.buildProfile, spec.capabilityGraph.buildProfile);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+});
+
+test("contract generation receives authoritative product guidance before its zero-model fixture dispatch", async () => {
+  let ask = "";
+  const profile = resolveBuildProfile({
+    prompt: "Create a company website with a contact form.",
+    input: { requestedBuildType: "website" },
+  });
+  const fixtureContract = contract({ summary: "A company website with a contact form" });
+  const outcome = await generateContract({
+    prompt: "Create a company website with a contact form.",
+    buildProfile: profile,
+    provider: {
+      model: "zero-model-fixture",
+      async runTurn(input) {
+        ask = input.messages?.[0]?.content || "";
+        return {
+          text: JSON.stringify(fixtureContract), toolCalls: [],
+          usage: { input: 0, output: 0, total: 0 },
+        };
+      },
+    },
+  });
+  assert.ok(outcome.contract);
+  assert.equal(outcome.contract.buildProfile.resolvedBuildType, "website");
+  assert.match(ask, /AUTHORITATIVE BUILDER V2 PRODUCT PROFILE/);
+  assert.match(ask, /Website means content and presentation are likely dominant/);
+});
+
+test("Auto resolves a simple marketing-site prompt as website without forcing application behavior", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Create a marketing website with Home, About, Services and Contact pages.",
+  });
+  assert.equal(profile.requestedBuildType, "auto");
+  assert.equal(profile.resolvedBuildType, "website");
+  const spec = deriveBuildSpec(contract({ summary: "A marketing website", buildProfile: profile }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(spec.buildProfile.resolvedBuildType, "website");
+  assert.equal(spec.capabilityGraph.operationResponsibilities.length, 0);
+});
+
+test("explicit Website remains website-oriented while requested forms and integrations remain represented", () => {
+  const profile = resolveBuildProfile({
+    prompt: "A website with a contact form connected to our email integration.",
+    input: { requestedBuildType: "website" },
+  });
+  const source = contract({
+    summary: "A content-led company website with a contact form",
+    buildProfile: profile,
+    entities: [{ name: "message", fields: [field("name"), field("email"), field("body")] }],
+    operations: [{
+      id: "submit-message", entity: "message", kind: "create", journey: "primary-flow",
+      responsibilities: [{
+        type: "persistence", capability: "crud", capabilityMethod: "create",
+        reads: ["name", "email", "body"], writes: ["id"],
+      }],
+    }],
+    steps: [
+      { action: "open the contact page", target: "/contact", expect: "the contact form is visible" },
+      { action: "enter and submit a message", target: "contact form", operates: ["name", "email", "body"], expect: "a success message is visible" },
+    ],
+    integrations: [{ name: "email", purpose: "deliver the submitted message", required: true }],
+  });
+  const spec = deriveBuildSpec(source);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(spec.buildProfile.resolvedBuildType, "website");
+  assert.ok(spec.capabilityGraph.nodes.some((node) => node.capabilityId === "crud"));
+  assert.equal(spec.contract.integrations[0].name, "email");
+});
+
+test("explicit Application makes structured behavior and state flow a planning invariant", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build an application that tracks an adjustable counter.",
+    input: { requestedBuildType: "application" },
+  });
+  const source = contract({
+    summary: "An interactive counter application",
+    buildProfile: profile,
+    entities: [{ name: "counter", fields: [field("value", "number")] }],
+    operations: [{
+      id: "change-counter", entity: "counter", kind: "update", journey: "primary-flow",
+      responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "update", reads: ["value"], writes: ["value"] }],
+    }],
+    steps: [
+      { action: "open the counter", target: "/", reads: ["value"], expect: "the current value is visible" },
+      { action: "change the value", target: "counter control", operates: ["value"], expect: "the changed value is visible" },
+    ],
+  });
+  const spec = deriveBuildSpec(source);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(spec.capabilityGraph.operationResponsibilities.length > 0);
+  assert.ok(spec.capabilityGraph.journeys[0].dataFlows.some((flow) => flow.reads.length || flow.writes.length));
+
+  const incomplete = deriveBuildSpec(contract({ buildProfile: profile }));
+  assert.equal(incomplete.verdict.ok, false);
+  assert.ok(incomplete.verdict.problems.includes(
+    "build_profile_contract_incomplete signal=application missing=behavior_or_stateful_journey",
+  ));
+});
+
+test("Application plus SaaS carries account and durable ownership context without inventing payments", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build a SaaS application for teams to keep shared records.",
+    input: { requestedBuildType: "application", applicationSubtype: "saas" },
+  });
+  assert.equal(profile.applicationSubtype, "saas");
+  assert.ok(profile.requirementSignals.includes("user_accounts"));
+  assert.ok(profile.requirementSignals.includes("saved_data"));
+  assert.ok(!profile.requirementSignals.includes("payments"));
+  const spec = deriveBuildSpec(contract({
+    buildProfile: profile,
+    entities: [{ name: "record", owned: true, fields: [field("workspaceId"), field("name")] }],
+    operations: [{
+      id: "save-record", entity: "record", kind: "create", journey: "primary-flow",
+      responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "create", reads: ["workspaceId", "name"], writes: ["id"] }],
+    }],
+    steps: [
+      { action: "sign in and open a workspace", target: "workspace", reads: ["workspaceId"], expect: "the workspace is visible" },
+      { action: "create a record", target: "record form", operates: ["name"], expect: "the saved record is visible" },
+    ],
+    auth: { required: true, model: "email and password", rules: ["records belong to a workspace"] },
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(!spec.contract.operations.some((operation) => operation.kind === "payment"));
+});
+
+test("Application plus custom calculations preserves novel transformation as custom_behavior", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build an application that calculates derived totals and saves them.",
+    input: { requestedBuildType: "application", requirementSignals: ["custom_logic"] },
+  });
+  const spec = deriveBuildSpec(contract({
+    buildProfile: profile,
+    entities: [{ name: "estimate", fields: [field("amounts"), field("total", "number")] }],
+    operations: [{
+      id: "calculate-total", entity: "estimate", kind: "update", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "derive total from amounts", reads: ["amounts"], writes: ["total"],
+      }],
+    }],
+    steps: [
+      { action: "enter amounts", target: "amount fields", operates: ["amounts"], expect: "the amounts are visible" },
+      { action: "calculate the total", target: "calculate", operates: ["calculate-total"], expect: "the total is visible" },
+    ],
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const functional = spec.capabilityGraph.operationResponsibilities[0].responsibilities
+    .find((responsibility) => responsibility.type === "custom_functional");
+  assert.ok(functional?.customBehavior);
+  assert.equal(functional.capabilityMethod, null);
+  assert.equal(functional.persistenceHandoff.capabilityId, "crud");
+});
+
+test("Saved data requires and carries durable persistence ownership", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build an application where records are saved in a database.",
+    input: { requestedBuildType: "application", requirementSignals: ["saved_data"] },
+  });
+  const spec = deriveBuildSpec(contract({
+    buildProfile: profile,
+    entities: [{ name: "record", fields: [field("name")] }],
+    operations: [{
+      id: "save-record", entity: "record", kind: "create", journey: "primary-flow",
+      responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "create", reads: ["name"], writes: ["id"] }],
+    }],
+    steps: [
+      { action: "enter a record", target: "record form", operates: ["name"], expect: "the value is visible" },
+      { action: "save the record", target: "save", operates: ["save-record"], expect: "the saved record is visible" },
+    ],
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(spec.capabilityGraph.operationResponsibilities[0].responsibilities
+    .some((responsibility) => responsibility.type === "persistence" && responsibility.owner === "capability:crud"));
+});
+
+test("Interactive workspace requires a represented interaction and state contract", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build an application with an interactive workspace.",
+    input: { requestedBuildType: "application", requirementSignals: ["interactive_workspace"] },
+  });
+  const spec = deriveBuildSpec(contract({
+    buildProfile: profile,
+    entities: [{ name: "item", fields: [field("position")] }],
+    operations: [{
+      id: "move-item", entity: "item", kind: "update", journey: "primary-flow",
+      responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "update", reads: ["position"], writes: ["position"] }],
+    }],
+    steps: [
+      { action: "select an item", target: "workspace item", reads: ["position"], expect: "the item is selected" },
+      { action: "move the item", target: "workspace", operates: ["position"], expect: "the item is visible in its new position" },
+    ],
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(spec.interactionContract.flows.some((flow) => flow.reads.length || flow.writes.length));
+  assert.equal(spec.capabilityGraph.buildProfile.requirementSignals.includes("interactive_workspace"), true);
+});
+
+test("an existing contract without build-profile fields remains compatible through legacy Auto", () => {
+  const source = contract({ buildProfile: undefined });
+  delete source.buildProfile;
+  const spec = deriveBuildSpec(source);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(spec.buildProfile.requestedBuildType, "auto");
+  assert.equal(spec.buildProfile.inferenceSource, "legacy_auto");
+});
+
+test("invalid browser-supplied build type is rejected before a conversation is created", async () => {
+  assert.throws(() => validateBuildProfileInput({ requestedBuildType: "capability:crud" }),
+    (error) => error.code === "invalid_build_profile" && error.field === "requestedBuildType");
+  const store = new MemoryConversationStore();
+  await assert.rejects(postUserMessage(OWNER, {
+    text: "Build something",
+    buildProfile: { requestedBuildType: "application", capabilities: ["crud"] },
+  }, { store }), (error) => error.code === "invalid_build_profile" && error.status === 400);
+  assert.equal((await store.listConversations(OWNER)).length, 0);
+  await assert.rejects(handleConversations({}, {}, {
+    owner: { id: OWNER }, method: "POST",
+    body: { text: "Build something", buildProfile: { requestedBuildType: "unknown" } },
+  }), (error) => error.code === "invalid_build_profile" && error.status === 400);
+});
+
+test("the API intake persists one canonical DTO and supplies it to the Lead Agent context", async () => {
+  const store = new MemoryConversationStore();
+  let dispatches = 0;
+  const { conversation, processing } = await postUserMessage(OWNER, {
+    text: "Build an application that saves projects and exports them.",
+    buildProfile: {
+      requestedBuildType: "application",
+      applicationSubtype: "general_application",
+      requirementSignals: ["saved_data", "export"],
+      inferenceSource: "adjusted",
+    },
+  }, {
+    store,
+    processOptions: {
+      runStore: new MemoryCodeAgentStore(),
+      credentialResolver: async () => ({ provider: "codex", routing: {} }),
+      modelFactory: async () => ({
+        id: "fixture", model: "fixture",
+        async turn() {
+          dispatches += 1;
+          return {
+            text: "The request is understood.",
+            output: [{ type: "message", content: [{ type: "output_text", text: "The request is understood." }] }],
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          };
+        },
+      }),
+      reservationStoreFactory: () => ({
+        reserve: async () => ({ id: "fixture-reservation", acquired: true, billingLane: "connected_allowance" }),
+        settle: async () => {}, release: async () => {}, markAmbiguous: async () => {},
+      }),
+    },
+  });
+  await processing;
+  const turns = await store.listTurns(OWNER, conversation.id, { limit: 10 });
+  const stored = turns.find((turn) => turn.role === "user")?.payload?.build_profile;
+  assert.deepEqual(stored, {
+    version: 1,
+    requestedBuildType: "application",
+    resolvedBuildType: "application",
+    applicationSubtype: "general_application",
+    requirementSignals: ["saved_data", "export"],
+    inferenceSource: "adjusted",
+    confidence: 1,
+  });
+  const input = await assembleInput(store, conversation);
+  assert.match(input.find((item) => item.role === "user")?.content || "", /AUTHORITATIVE BUILDER V2 PRODUCT PROFILE/);
+  assert.equal(dispatches, 1, "only the injected zero-model fixture ran");
+});

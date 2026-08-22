@@ -13,6 +13,9 @@ import { runAgent } from "../../../../src/engine/runAgent.mjs";
 import {
   CONTRACT_VERSION, STAGES, validateContract, contractSummary,
 } from "../../../shared/implementationContract.mjs";
+import {
+  buildProfileBrief, resolveBuildProfile, validateBuildProfileContract,
+} from "../../../shared/buildProfile.mjs";
 
 // Exported so a test can hold the brief and the code that enforces it to the same statement:
 // the operand type confusion of 2026-08-12 was a disagreement between them.
@@ -123,7 +126,7 @@ function extractJson(text) {
 }
 
 // Fill in what the shape needs but a model may omit, so downstream code never guards every field.
-function normalise(contract, { prompt }) {
+export function normaliseContract(contract, { prompt, buildProfile = null, legacy = false }) {
   const c = { ...contract };
   c.version = CONTRACT_VERSION;
   c.summary = String(c.summary || "").trim() || String(prompt || "").slice(0, 160);
@@ -175,6 +178,7 @@ function normalise(contract, { prompt }) {
       })),
     } : {}),
   }));
+  c.buildProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy });
   return c;
 }
 
@@ -184,7 +188,11 @@ function normalise(contract, { prompt }) {
  * Returns `{ contract, attempts, problems, warnings, usage }`; `contract` is null when the model
  * could not produce a usable one twice, and the caller carries on without it.
  */
-export async function generateContract({ provider, prompt, knowledge = "", log = () => {}, onUsage = null }) {
+export async function generateContract({
+  provider, prompt, buildProfile = null, knowledge = "", log = () => {}, onUsage = null,
+}) {
+  const productProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
+  const profileGuidance = buildProfileBrief(productProfile);
   let lastProblems = [];
   let usageTotal = null;
   // The best contract seen, even if it did not fully validate. Discarding a contract because one
@@ -195,8 +203,8 @@ export async function generateContract({ provider, prompt, knowledge = "", log =
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const ask = attempt === 1
-      ? `${knowledge ? `${knowledge}\n\n` : ""}REQUEST:\n${prompt}`
-      : `${knowledge ? `${knowledge}\n\n` : ""}REQUEST:\n${prompt}\n\nYour previous contract was rejected:\n${lastProblems.map((p) => `- ${p}`).join("\n")}\n\nReturn a corrected contract. Every step and acceptance entry must name something a browser test could observe.`;
+      ? `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`
+      : `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}\n\nYour previous contract was rejected:\n${lastProblems.map((p) => `- ${p}`).join("\n")}\n\nReturn a corrected contract. Every step and acceptance entry must name something a browser test could observe.`;
 
     const { telemetry, finalText } = await runAgent({
       provider, systemPrompt: SYSTEM_PROMPT, tools: [], toolImpls: {},
@@ -210,8 +218,14 @@ export async function generateContract({ provider, prompt, knowledge = "", log =
       log(`contract: attempt ${attempt} did not return JSON`);
       continue;
     }
-    const contract = normalise(parsed, { prompt });
-    const verdict = validateContract(contract);
+    const contract = normaliseContract(parsed, { prompt, buildProfile: productProfile });
+    const baseVerdict = validateContract(contract);
+    const profileVerdict = validateBuildProfileContract(contract, productProfile);
+    const verdict = {
+      ok: baseVerdict.ok && profileVerdict.ok,
+      problems: [...baseVerdict.problems, ...profileVerdict.problems],
+      warnings: baseVerdict.warnings,
+    };
     if (verdict.ok) {
       log(`contract: ${contractSummary(contract)}${verdict.warnings.length ? ` (${verdict.warnings.length} warning(s))` : ""}`);
       return { contract, attempts: attempt, problems: [], warnings: verdict.warnings, usage: usageTotal };

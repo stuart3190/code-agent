@@ -225,6 +225,7 @@ export async function handleConversations(req, res, { owner, method, body, url =
     const { conversation } = await postUserMessage(owner.id, {
       text: body?.text, workspaceContext: body?.workspaceContext || null,
       modelPref: body?.modelPref || null,
+      buildProfile: body?.buildProfile ?? null,
     });
     sendJson(res, 201, { conversation: publicConversation(conversation) });
   });

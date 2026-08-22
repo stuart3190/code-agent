@@ -107,6 +107,22 @@
 .ct-send { width: 38px; height: 38px; border-radius: 14px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur-1); }
 .ct-send:hover { background: var(--accent-strong); }
 .ct-send:disabled { opacity: 0.45; cursor: default; }
+.ct-composer.ct-build-composer { width: min(760px, 94%); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; padding: 10px; }
+.ct-build-profile { grid-column: 1 / -1; min-width: 0; display: grid; gap: 8px; padding: 2px 4px 6px; border-bottom: 1px solid var(--line); }
+.ct-build-profile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.ct-build-profile-label, .ct-app-subtype > span { color: var(--ink-2); font-size: 12px; font-weight: 700; }
+.ct-build-type { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); }
+.ct-build-type button { min-height: 34px; padding: 6px 13px; border-radius: 999px; color: var(--ink-2); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.ct-build-type button.on { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-1); }
+.ct-application-context { min-width: 0; display: grid; gap: 7px; }
+.ct-app-subtype { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ct-app-subtype select { max-width: min(260px, 66%); min-height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); padding: 5px 30px 5px 10px; font: inherit; font-size: 12.5px; }
+.ct-requirement-chips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.ct-requirement-chips button { min-height: 32px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-size: 11.5px; line-height: 1.2; text-align: left; }
+.ct-requirement-chips button.on { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: var(--accent-soft); color: var(--accent); }
+.ct-build-interpretation { display: flex; align-items: baseline; gap: 5px; min-width: 0; color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
+.ct-build-interpretation span { flex-shrink: 0; }
+.ct-build-interpretation strong { min-width: 0; color: var(--ink-2); font-weight: 650; overflow-wrap: anywhere; }
 
 /* ── workspace home + live state (UX polish pass) ── */
 button.ct-wordmark { cursor: pointer; border-radius: 12px; padding: 6px 10px; margin-left: -10px; transition: background var(--dur-1); }
@@ -186,6 +202,7 @@ button.ct-wordmark:hover { background: var(--surface-2); }
 .ct-hello { font-family: var(--font-display); font-size: 17px; color: var(--ink-3); font-weight: 500; animation: ct-rise var(--dur-3) var(--ease-out) 80ms both; }
 .ct-question { font-family: var(--font-display); font-size: clamp(28px, 4vw, 40px); font-weight: 600; letter-spacing: -0.01em; margin: 10px 0 34px; animation: ct-rise var(--dur-3) var(--ease-out) 180ms both; text-align: center; }
 .ct-begin .ct-composer { position: static; transform: none; width: min(640px, 90%); animation: ct-rise var(--dur-3) var(--ease-out) 280ms both; }
+.ct-begin .ct-build-composer { width: min(760px, 94%); }
 .ct-begin-chips { display: flex; gap: 9px; margin-top: 22px; flex-wrap: wrap; justify-content: center; animation: ct-rise var(--dur-3) var(--ease-out) 380ms both; padding: 0 16px; }
 
 /* ── settings sheet + scrim ── */
@@ -1450,6 +1467,7 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
   position: static; left: auto !important; bottom: auto;
   width: min(680px, calc(100% - 48px)); transform: none;
 }
+.ct-home-layout > .ct-build-composer { width: min(760px, calc(100% - 48px)); }
 .ct-home-layout > .ct-composer textarea { min-width: 0; }
 .ct-home-layout > .ct-firstrun { padding-inline: 20px; }
 .ct-continue-project {
@@ -1662,7 +1680,7 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
 }
 
 @media (max-width: 560px) {
-  .ct-dash .ct-home-layout { padding: 42px 0 5vh; }
+  .ct-dash .ct-home-layout { padding: 42px 0 5vh; overflow-y: auto; justify-content: flex-start; }
   .ct-projects-toggle { top: 10px; left: 12px; min-height: 40px; }
   .ct-home-layout > .ct-hello,
   .ct-home-layout > .ct-question,
@@ -1670,6 +1688,15 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
   .ct-home-layout > .ct-model-begin { transform: translateY(-18px); }
   .ct-home-layout > .ct-question { max-width: calc(100% - 32px); font-size: clamp(24px, 7.2vw, 31px); }
   .ct-home-layout > .ct-composer { width: calc(100% - 28px); }
+  .ct-composer.ct-build-composer { padding: 8px; gap: 8px; }
+  .ct-build-profile-head { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .ct-build-type { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ct-build-type button { min-width: 0; min-height: 44px; padding-inline: 6px; }
+  .ct-app-subtype select { min-height: 44px; }
+  .ct-requirement-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ct-requirement-chips button { min-width: 0; min-height: 44px; border-radius: 12px; padding: 7px 9px; }
+  .ct-build-interpretation { display: block; }
+  .ct-build-interpretation span { display: block; margin-bottom: 2px; }
   .ct-continue-project { display: none; }
   .ct-project-sidebar { width: min(360px, 88vw); border-radius: 0 16px 16px 0; }
   .ct-sidebar-close { width: 44px; height: 44px; }

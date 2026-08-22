@@ -5,6 +5,7 @@
 // proven registry capability or is explicitly assigned to one bounded custom_behavior module.
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { validateBuildProfileGraph } from "../../../shared/buildProfile.mjs";
 
 export const CAPABILITY_GRAPH_VERSION = 2;
 
@@ -510,6 +511,7 @@ export function deriveCapabilityGraph(contract, { bindings = [], interactionCont
 
   return {
     version: CAPABILITY_GRAPH_VERSION,
+    buildProfile: contract?.buildProfile || null,
     registryVersions: Object.fromEntries(Object.entries(CAPABILITIES).map(([id, entry]) => [id, entry.version])),
     nodes,
     edges,
@@ -596,6 +598,8 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
       }
     }
   }
+  const profileVerdict = validateBuildProfileGraph(graph, contract?.buildProfile || graph?.buildProfile);
+  problems.push(...profileVerdict.problems);
   return { ok: problems.length === 0, problems };
 }
 

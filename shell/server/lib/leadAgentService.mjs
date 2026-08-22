@@ -22,6 +22,9 @@ import {
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { classifyProviderFailure, replayUnsafe } from "./providerOutcome.mjs";
 import { createBudgetLedger } from "./appBuild/budgetLedger.mjs";
+import {
+  buildProfileBrief, latestBuildProfile, resolveBuildProfile,
+} from "../../shared/buildProfile.mjs";
 
 const MAX_TURNS = 12;
 const HISTORY_TURNS = 30;
@@ -78,7 +81,9 @@ function describeWorkspaceContext(context) {
   return parts.join("\n");
 }
 
-export async function postUserMessage(owner, { conversationId = null, text, workspaceContext = null, modelPref = null }, {
+export async function postUserMessage(owner, {
+  conversationId = null, text, workspaceContext = null, modelPref = null, buildProfile = null,
+}, {
   store = conversationStore(),
   processOptions = {},
 } = {}) {
@@ -87,6 +92,14 @@ export async function postUserMessage(owner, { conversationId = null, text, work
   if (!trimmed) throw inputError("Message text is required");
   if (trimmed.length > 20_000) throw inputError("Message is too long");
   const context = sanitizeWorkspaceContext(workspaceContext);
+  let productProfile = null;
+  if (!conversationId || buildProfile != null) {
+    try {
+      productProfile = resolveBuildProfile({ prompt: trimmed, input: buildProfile });
+    } catch (error) {
+      throw inputError(error.message, 400, error.code || "invalid_build_profile");
+    }
+  }
 
   let conversation = conversationId ? await store.getConversation(owner, conversationId) : null;
   if (conversationId && !conversation) throw inputError("Conversation not found", 404, "conversation_not_found");
@@ -106,13 +119,18 @@ export async function postUserMessage(owner, { conversationId = null, text, work
     throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
   }
 
+  const turnPayload = {
+    ...(context ? { workspace_context: context } : {}),
+    ...(productProfile ? { build_profile: productProfile } : {}),
+  };
   await store.appendTurn(conversation, {
     role: "user", content: trimmed,
-    ...(context ? { payload: { workspace_context: context } } : {}),
+    ...(Object.keys(turnPayload).length ? { payload: turnPayload } : {}),
   });
   await store.appendEvent(conversation, "message", {
     role: "user", text: trimmed,
     ...(context ? { workspaceContext: { file: context.file || null, hasSelection: !!context.selection, diagnostics: context.diagnostics?.length || 0 } } : {}),
+    ...(productProfile ? { buildProfile: productProfile } : {}),
   });
   const claimed = await store.claimConversationThinking(conversation);
   if (!claimed) throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
@@ -218,12 +236,14 @@ export async function processConversation(conversation, {
   const emit = (type, payload) => store.appendEvent(conversation, type, payload);
   try {
     const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS }) || [];
+    const productProfile = latestBuildProfile(turns);
     const retryTarget = preservedBuildRetryTarget(turns);
     if (retryTarget) {
       const retryCtx = {
         owner: conversation.owner,
         conversation,
         conversations: store,
+        buildProfile: productProfile,
         emit,
         relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
       };
@@ -319,6 +339,7 @@ export async function processConversation(conversation, {
       owner: conversation.owner,
       conversation,
       conversations: store,
+      buildProfile: productProfile,
       emit,
       relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
     };
@@ -762,8 +783,11 @@ export async function assembleInput(store, conversation) {
     // Workspace context rides the model turn only — the visible thread stays the user's
     // own words, marked with a transparent context chip by the shell.
     const context = turn.payload?.workspace_context;
-    const suffix = context
+    const contextSuffix = context
       ? `\n\n[Shared automatically from the user's editor — visible to them as a context chip]\n${describeWorkspaceContext(context)}`
+      : "";
+    const profileSuffix = turn.payload?.build_profile
+      ? `\n\n${buildProfileBrief(turn.payload.build_profile)}`
       : "";
     const content = String(turn.content);
     const capped = content.length > TURN_CHAR_CAP
@@ -771,7 +795,7 @@ export async function assembleInput(store, conversation) {
       : content;
     input.push({
       role: turn.role === "user" ? "user" : "assistant",
-      content: `${capped}${suffix}`,
+      content: `${capped}${contextSuffix}${profileSuffix}`,
     });
   }
   return input;

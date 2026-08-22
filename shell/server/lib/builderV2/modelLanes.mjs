@@ -1145,7 +1145,7 @@ export function createModelLanes({
   return {
     bucket,
 
-    contractFn: async ({ owner, projectId, buildId, request, signal = null }) => {
+    contractFn: async ({ owner, projectId, buildId, request, buildProfile = null, signal = null }) => {
       const startedAt = Date.now();
       const before = bucket.summary();
       const projectKnowledge = await loadKnowledge(owner, projectId);
@@ -1158,7 +1158,9 @@ export function createModelLanes({
       });
       let outcome;
       try {
-        outcome = await generateContract({ provider: selected.provider, prompt: contractRequest, log, onUsage: accountUsage });
+        outcome = await generateContract({
+          provider: selected.provider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
+        });
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
         // `usage` reports only its last attempt). Recorded even when the guard throws —

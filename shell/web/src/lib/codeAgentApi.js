@@ -188,8 +188,8 @@ export const listConversations = ({ tab = null, q = "", offset = 0, limit = 0, s
   const suffix = query.toString();
   return request(`/api/v1/conversations${suffix ? `?${suffix}` : ""}`);
 };
-export const startConversation = (text, workspaceContext = null, modelPref = null) => request("/api/v1/conversations", {
-  method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref }),
+export const startConversation = (text, workspaceContext = null, modelPref = null, buildProfile = null) => request("/api/v1/conversations", {
+  method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref, buildProfile }),
 });
 export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
 export const deleteConversation = (conversationId, { permanent = false } = {}) =>

@@ -46,6 +46,10 @@ test("accepted Builder V2 dispatch is durable-worker-only and returns handled:tr
   assert.equal(projectInput.builder_version, "v2", "a queued project is V2-owned before its first green snapshot");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].pipelineVersion, "v2");
+  assert.deepEqual(calls[0].v2Input.buildProfile, {
+    version: 1, requestedBuildType: "auto", resolvedBuildType: "application",
+    applicationSubtype: "auto", requirementSignals: [], inferenceSource: "auto", confidence: 0.75,
+  });
   assert.deepEqual(calls[0].providerSelection, { provider: "unknown", billingLane: "byok_api", manualModel: null });
 });
 

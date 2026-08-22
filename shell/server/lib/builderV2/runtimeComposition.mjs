@@ -667,6 +667,7 @@ export function createBuilderV2Runtime({
       if (contract) tierContract(contract); // reject malformed durable contracts before spend
       const result = mode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
+          buildProfile: input.buildProfile || null,
           budgetCredits: ceilingCredits, maxRepairs, signal })
         : mode === "resume_repair"
           ? await orchestrator.runRepairFromCheckpoint({
