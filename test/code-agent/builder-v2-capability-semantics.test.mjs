@@ -166,6 +166,7 @@ test("novel transformations cannot disappear behind update or create kinds", () 
   });
   const invalidSpec = deriveBuildSpec(invalid);
   assert.equal(invalidSpec.verdict.ok, false);
-  assert.ok(invalidSpec.verdict.problems.some((problem) => /no semantic reads\/inputs/.test(problem)));
-  assert.ok(invalidSpec.verdict.problems.some((problem) => /no semantic writes\/outputs/.test(problem)));
+  assert.ok(invalidSpec.verdict.problems.includes(
+    "capability_graph_semantics_incomplete operation=unowned-transform responsibility=unowned-transform:functional-1 missing=reads,writes",
+  ));
 });

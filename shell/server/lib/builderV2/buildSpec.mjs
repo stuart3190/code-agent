@@ -16,7 +16,8 @@ import {
   tierContract,
 } from "./contractTiering.mjs";
 import {
-  buildInteractionContract, scopeInteractionContract, validateInteractionContract,
+  buildInteractionContract, composeCapabilityGraphInteractions, scopeInteractionContract,
+  validateInteractionContract,
 } from "./interactionContract.mjs";
 import { buildModuleGenerationContracts } from "./moduleContracts.mjs";
 import { deriveDependencyPlan, scopeDependencyPlan } from "./dependencyPlan.mjs";
@@ -44,15 +45,28 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
   const initialInteraction = buildInteractionContract(contract, { modulePlan: legacyModulePlan, bindings });
   const initialGraph = deriveCapabilityGraph(contract, { bindings, interactionContract: initialInteraction });
   const modulePlan = capabilityModulePlan(initialGraph, legacyModulePlan);
-  const interactionContract = buildInteractionContract(contract, { modulePlan, bindings });
-  const capabilityGraph = deriveCapabilityGraph(contract, { bindings, interactionContract });
+  const baseInteraction = buildInteractionContract(contract, { modulePlan, bindings });
+  const graphBeforeInteractionBinding = deriveCapabilityGraph(contract, {
+    bindings, interactionContract: baseInteraction,
+  });
+  const graphBoundInteraction = composeCapabilityGraphInteractions(
+    baseInteraction, graphBeforeInteractionBinding, contract,
+  );
+  // Re-derive once from the graph-bound interactions so every responsibility points at the
+  // authoritative interaction it owns, including operations that had no prose-derived flow.
+  const capabilityGraph = deriveCapabilityGraph(contract, {
+    bindings, interactionContract: graphBoundInteraction,
+  });
+  const interactionContract = composeCapabilityGraphInteractions(
+    graphBoundInteraction, capabilityGraph, contract,
+  );
   const compositionPlan = capabilityCompositionPlan(capabilityGraph);
   const enriched = { ...contract, interactionContract, dependencyPlan, capabilityGraph };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
     contract: enriched, modulePlan, interactionContract, bindings, journeys, capabilityGraph,
   });
-  const interactionVerdict = validateInteractionContract(interactionContract);
+  const interactionVerdict = validateInteractionContract(interactionContract, { capabilityGraph });
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
   return {
     version: BUILD_SPEC_VERSION,

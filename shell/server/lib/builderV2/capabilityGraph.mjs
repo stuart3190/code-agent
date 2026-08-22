@@ -31,6 +31,18 @@ const capabilitySupports = (capabilityId, method, responsibility) => {
   return Boolean(method) && supported.includes(method);
 };
 
+function persistenceCapabilityMethod(operation, responsibility, declaredReads, capabilityId) {
+  const requested = responsibility?.capabilityMethod || responsibility?.method || responsibility?.operation || null;
+  if (capabilitySupports(capabilityId, requested, "persistence")) return requested;
+  if (capabilityId !== "crud") return requested;
+
+  const alias = operationKind({ kind: requested || operationKind(operation) });
+  const canonical = alias === "read"
+    ? (declaredReads.length ? "get" : "list")
+    : PERSISTENCE_METHOD[alias] || null;
+  return capabilitySupports(capabilityId, canonical, "persistence") ? canonical : requested;
+}
+
 function fieldCatalog(contract, entityName = null) {
   const fields = new Map();
   for (const entity of contract?.entities || []) {
@@ -97,6 +109,17 @@ function downstreamInteractions(journey, flows, stepIndex, outputFields, fields)
   }));
 }
 
+function capabilityInputPaths(journey, capabilityId, method) {
+  const inputs = CAPABILITIES[capabilityId]?.requiredInputs?.operations?.[method] || [];
+  return unique(inputs.map((input) => `${journey.id}.input.${input}`));
+}
+
+function operationInteractionIds(operation, flows, stepIndex) {
+  const exact = flows.filter((flow) => flow.operationId === operation.id).map((flow) => flow.id);
+  if (exact.length || stepIndex < 0) return exact;
+  return flows.filter((flow) => flow.stepIndex === stepIndex).map((flow) => flow.id);
+}
+
 function persistenceResponsibility(operation, journey) {
   const method = PERSISTENCE_METHOD[operationKind(operation)] || null;
   if (!method) return null;
@@ -108,7 +131,8 @@ function persistenceResponsibility(operation, journey) {
     semanticOperation: method,
     behavior: operation.description || `${method} ${operation.entity || "record"}`,
     entity: operation.entity || null, capabilityId: "crud", capabilityMethod: method,
-    reads: [], writes: [result], declaredReads: [], declaredWrites: [],
+    reads: capabilityInputPaths(journey, "crud", method), writes: [result],
+    declaredReads: [], declaredWrites: [],
     owner: "capability:crud", customBehavior: null, requiresTransformation: false,
     interactionIds: [], downstreamDependencies: [], persistenceHandoff: null,
   };
@@ -118,7 +142,7 @@ function explicitResponsibilities(operation, journey, flows, contract) {
   if (!Array.isArray(operation?.responsibilities) || !operation.responsibilities.length) return [];
   const fields = fieldCatalog(contract, operation.entity);
   const stepIndex = operationStep(operation, journey);
-  const interactionIds = flows.filter((flow) => flow.stepIndex === stepIndex).map((flow) => flow.id);
+  const interactionIds = operationInteractionIds(operation, flows, stepIndex);
   return operation.responsibilities.map((responsibility, index) => {
     const declaredReads = declaredFields(responsibility?.reads || responsibility?.inputs, fields);
     const declaredWrites = declaredFields(responsibility?.writes || responsibility?.outputs, fields);
@@ -130,7 +154,8 @@ function explicitResponsibilities(operation, journey, flows, contract) {
     const persistence = responsibility?.type === "persistence";
     const automaticPersistence = persistence ? persistenceResponsibility(operation, journey) : null;
     const capabilityId = persistence ? (requestedCapability || "crud") : requestedCapability;
-    const capabilityMethod = persistence ? (requestedMethod || PERSISTENCE_METHOD[operationKind(operation)] || null)
+    const capabilityMethod = persistence
+      ? persistenceCapabilityMethod(operation, responsibility, declaredReads, capabilityId)
       : (capabilitySupports(capabilityId, requestedMethod, "functional") ? requestedMethod : null);
     const type = persistence ? "persistence" : capabilityMethod ? "capability_functional" : "custom_functional";
     return {
@@ -142,8 +167,9 @@ function explicitResponsibilities(operation, journey, flows, contract) {
       capabilityId: type === "custom_functional" ? null : capabilityId,
       capabilityMethod,
       requestedCapability: type === "custom_functional" ? requestedCapability : null,
-      requestedCapabilityMethod: type === "custom_functional" ? requestedMethod : null,
-      reads: persistence ? unique([...reads, ...(automaticPersistence?.reads || [])]) : reads,
+      requestedCapabilityMethod: requestedMethod && requestedMethod !== capabilityMethod ? requestedMethod : null,
+      reads: persistence ? unique([...reads, ...(automaticPersistence?.reads || []),
+        ...capabilityInputPaths(journey, capabilityId, capabilityMethod)]) : reads,
       writes: persistence ? unique(automaticPersistence?.writes || writes) : writes,
       declaredReads, declaredWrites,
       owner: type === "custom_functional" ? null : `capability:${capabilityId}`,
@@ -188,6 +214,7 @@ function legacyFunctionalResponsibility(operation, journey, flows, contract) {
 }
 
 function deriveOperationResponsibilities(operation, journey, flows, contract) {
+  const stepIndex = operationStep(operation, journey);
   const explicit = explicitResponsibilities(operation, journey, flows, contract);
   const automaticPersistence = persistenceResponsibility(operation, journey);
   const responsibilities = explicit.length
@@ -195,16 +222,25 @@ function deriveOperationResponsibilities(operation, journey, flows, contract) {
       ? [automaticPersistence] : []), ...explicit]
     : [automaticPersistence, legacyFunctionalResponsibility(operation, journey, flows, contract)].filter(Boolean);
   const persistence = responsibilities.find((responsibility) => responsibility.type === "persistence");
+  const functional = responsibilities.filter((responsibility) => responsibility.requiresTransformation);
+  const linkedInteractionIds = operationInteractionIds(operation, flows, stepIndex);
+  if (persistence) {
+    persistence.interactionIds = functional.length ? []
+      : unique([...(persistence.interactionIds || []), ...linkedInteractionIds]);
+  }
   for (const responsibility of responsibilities) {
     if (!responsibility.requiresTransformation || !persistence) continue;
     persistence.reads = unique([...persistence.reads, ...responsibility.writes]);
     responsibility.persistenceHandoff = {
       responsibilityId: persistence.id, capabilityId: persistence.capabilityId,
       capabilityMethod: persistence.capabilityMethod, entity: persistence.entity,
-      reads: [...responsibility.writes], writes: [...persistence.writes],
+      reads: [...persistence.reads], writes: [...persistence.writes],
     };
   }
-  return { operationId: operation.id, journeyId: journey.id, entity: operation.entity || null, responsibilities };
+  return {
+    operationId: operation.id, journeyId: journey.id, entity: operation.entity || null,
+    stepIndex, responsibilities,
+  };
 }
 const factoryCapability = new Map(Object.entries(CAPABILITIES).flatMap(([id, capability]) =>
   (capability.interface || []).filter((name) => /^make[A-Z]/.test(name)).map((name) => [name, id])));
@@ -526,8 +562,14 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
       } else if (responsibility.type === "custom_functional") {
         const owner = nodes.get(responsibility.customBehavior);
         if (!owner || owner.type !== "custom_behavior") problems.push(`${prefix} has no bounded custom_behavior owner`);
-        if (!(responsibility.reads || []).length) problems.push(`${prefix} declares no semantic reads/inputs`);
-        if (!(responsibility.writes || []).length) problems.push(`${prefix} declares no semantic writes/outputs`);
+        const missingSemanticFields = [
+          ...(!(responsibility.reads || []).length ? ["reads"] : []),
+          ...(!(responsibility.writes || []).length ? ["writes"] : []),
+        ];
+        if (missingSemanticFields.length) {
+          problems.push(`capability_graph_semantics_incomplete operation=${operation.id} `
+            + `responsibility=${responsibility.id} missing=${missingSemanticFields.join(",")}`);
+        }
         if (!Array.isArray(responsibility.downstreamDependencies)) {
           problems.push(`${prefix} has no declared downstream dependency contract`);
         }

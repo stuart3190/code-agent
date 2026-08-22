@@ -17,6 +17,8 @@ import {
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 
+export const INTERACTION_CONTRACT_VERSION = 2;
+
 // A method name that changes a durable record. Domain-neutral vocabulary: it reads the
 // registry's real interfaces rather than naming any application's capability.
 const DURABLE_MUTATION = /^(?:cancel|remove|delete|update|archive|void|close)/i;
@@ -542,20 +544,199 @@ export function buildInteractionContract(contract, {
           basis: touchesDurable ? basis : "data-flow" };
   }
 
-  const plan = { version: 1, flows, scenarios };
+  const plan = { version: INTERACTION_CONTRACT_VERSION, flows, scenarios };
   const verdict = validateInteractionContract(plan);
   return { ...plan, valid: verdict.ok, problems: verdict.problems };
 }
 
+const interactionKindFor = (responsibilities) => {
+  if (responsibilities.some((responsibility) => responsibility.requiresTransformation)) return "action";
+  const method = responsibilities.find((responsibility) => responsibility.type === "persistence")?.capabilityMethod;
+  return ["get", "list", "count"].includes(method) ? "lookup" : "mutation";
+};
+
+const moduleForNode = (node) => node?.type === "custom_behavior"
+  ? node.extension?.module || null
+  : node?.compositionModule || null;
+
+/**
+ * Bind the authoritative graph semantics back into the interaction contract.
+ *
+ * The base interaction pass discovers controls and journey order. The graph then decides who
+ * owns each operation and which state it transforms. This pass joins those two deterministic
+ * views; it never re-reads application prose to invent functional semantics.
+ */
+export function composeCapabilityGraphInteractions(plan, graph, contract) {
+  const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
+  const journeys = new Map((contract?.journeys || []).map((journey, index) => [journey.id, { ...journey, index }]));
+  const flows = (plan?.flows || []).map((flow, index) => ({
+    ...flow,
+    reads: [...(flow.reads || [])], writes: [...(flow.writes || [])],
+    dependsOn: [...(flow.dependsOn || [])], responsibleModules: [...(flow.responsibleModules || [])],
+    control: flow.control ? { ...flow.control, downstream: [...(flow.control.downstream || [])] } : null,
+    _sourceOrder: index,
+  }));
+  const byId = new Map(flows.map((flow) => [flow.id, flow]));
+  const coverage = [];
+  const operationsAtStep = new Map();
+  for (const operation of graph?.operationResponsibilities || []) {
+    const key = `${operation.journeyId}:${operation.stepIndex}`;
+    operationsAtStep.set(key, (operationsAtStep.get(key) || 0) + 1);
+  }
+
+  for (const operation of graph?.operationResponsibilities || []) {
+    const responsibilities = operation.responsibilities || [];
+    const functional = responsibilities.find((responsibility) => responsibility.requiresTransformation) || null;
+    const persistence = responsibilities.find((responsibility) => responsibility.type === "persistence") || null;
+    const semantic = functional || persistence;
+    if (!semantic) continue;
+
+    const exactTargets = flows.filter((flow) => flow.operationId === operation.operationId
+      && flow.journeyId === operation.journeyId);
+    let targets = exactTargets;
+    if (!targets.length && operationsAtStep.get(`${operation.journeyId}:${operation.stepIndex}`) === 1) {
+      const candidates = unique(responsibilities.flatMap((responsibility) => responsibility.interactionIds || []))
+        .map((id) => byId.get(id)).filter(Boolean)
+        .filter((flow) => !flow.operationId && ["action", "lookup", "mutation", "navigation"].includes(flow.kind));
+      targets = candidates.length ? [candidates[0]] : [];
+    }
+
+    const journey = journeys.get(operation.journeyId) || null;
+    const step = operation.stepIndex >= 0 ? journey?.steps?.[operation.stepIndex] || null : null;
+    const semanticNode = nodes.get(semantic.owner);
+    const semanticModule = moduleForNode(semanticNode) || `journey:${operation.journeyId}`;
+    const persistenceNode = persistence ? nodes.get(persistence.owner) : null;
+    const persistenceModule = moduleForNode(persistenceNode);
+    const kind = interactionKindFor(responsibilities);
+
+    if (!targets.length) {
+      const id = `${operation.journeyId}:operation:${normalized(operation.operationId)}`;
+      const control = step ? controlRequirement(kind, null, step) : null;
+      const created = {
+        id, journeyId: operation.journeyId, stepIndex: operation.stepIndex, kind,
+        semanticPurpose: semantic.behavior || operation.operationId,
+        action: step?.action || semantic.behavior || operation.operationId,
+        valueWritten: null, reads: [], writes: [], dependsOn: [],
+        nextStateRequirement: step?.expect || semantic.behavior || operation.operationId,
+        observable: step?.expect || semantic.behavior || operation.operationId,
+        stateOwner: semanticModule, responsibleModules: unique([semanticModule, persistenceModule]),
+        control, capability: null, _sourceOrder: flows.length,
+      };
+      flows.push(created);
+      byId.set(created.id, created);
+      targets = [created];
+    }
+
+    const semanticReads = unique((functional ? functional.reads : responsibilities.flatMap((row) => row.reads || [])) || []);
+    const semanticWrites = unique((functional ? functional.writes : responsibilities.flatMap((row) => row.writes || [])) || []);
+    const downstreamConsumers = unique(responsibilities.flatMap((row) => row.downstreamDependencies || []));
+    const handoff = functional?.persistenceHandoff || null;
+    const requiredExports = semanticNode?.extension?.requiredExports || [];
+    const observation = step?.expect || semanticNode?.verificationSemantics?.observe
+      || semanticNode?.verificationSemantics?.actions || semantic.behavior || operation.operationId;
+
+    for (const flow of targets) {
+      const reads = unique([...(flow.reads || []), ...semanticReads]);
+      const writes = unique([...(flow.writes || []), ...semanticWrites]);
+      const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
+      Object.assign(flow, {
+        operationId: operation.operationId,
+        responsibilityIds: responsibilities.map((responsibility) => responsibility.id),
+        semanticResponsibilityTypes: responsibilities.map((responsibility) => responsibility.type),
+        actionIdentity: {
+          operationId: operation.operationId, interactionId: flow.id,
+          controlId: flow.control?.machineId || null,
+        },
+        stateOwner: semanticModule,
+        responsibleModules,
+        reads,
+        writes,
+        dependsOn: reads,
+        nextStateRequirement: flow.nextStateRequirement || step?.expect || semantic.behavior,
+        downstreamConsumers,
+        capabilityId: semantic.capabilityId || null,
+        capabilityMethod: semantic.capabilityMethod || null,
+        customBehavior: functional?.customBehavior || null,
+        customBehaviorModule: semanticNode?.type === "custom_behavior" ? semanticNode.extension?.module || null : null,
+        customBehaviorExports: semanticNode?.type === "custom_behavior" ? [...requiredExports] : [],
+        persistenceHandoff: handoff,
+        expectedStateTransition: {
+          produces: semanticWrites,
+          persists: handoff?.writes || (persistence ? persistence.writes || [] : []),
+          requirement: flow.nextStateRequirement || step?.expect || semantic.behavior,
+        },
+        verificationObservation: observation,
+        observable: flow.observable || step?.expect || semantic.behavior,
+        capability: semanticNode?.type === "deterministic_capability"
+          ? factoryFor(semantic.capabilityId) : null,
+      });
+      if (flow.control) Object.assign(flow.control, {
+        stateOwner: semanticModule,
+        statePath: semanticWrites[0] || flow.control.statePath || null,
+        downstream: unique([...(flow.control.downstream || []), ...downstreamConsumers]),
+      });
+    }
+
+    coverage.push({
+      operationId: operation.operationId, journeyId: operation.journeyId,
+      responsibilityIds: responsibilities.map((responsibility) => responsibility.id),
+      interactionIds: targets.map((flow) => flow.id),
+    });
+  }
+
+  // A semantic producer is authoritative for its declared consumers. Stamp those reads onto the
+  // consumer flows so ordering validation and generation receive the same data-flow edge.
+  for (const operation of graph?.operationResponsibilities || []) {
+    for (const responsibility of operation.responsibilities || []) {
+      if (!responsibility.requiresTransformation) continue;
+      for (const downstreamId of responsibility.downstreamDependencies || []) {
+        const downstream = byId.get(downstreamId);
+        if (!downstream) continue;
+        downstream.reads = unique([...(downstream.reads || []), ...(responsibility.writes || [])]);
+        downstream.dependsOn = [...downstream.reads];
+      }
+    }
+  }
+
+  flows.sort((left, right) => {
+    const journey = (journeys.get(left.journeyId)?.index ?? Number.MAX_SAFE_INTEGER)
+      - (journeys.get(right.journeyId)?.index ?? Number.MAX_SAFE_INTEGER);
+    if (journey) return journey;
+    if (left.stepIndex !== right.stepIndex) return left.stepIndex - right.stepIndex;
+    return left._sourceOrder - right._sourceOrder;
+  });
+  for (const flow of flows) delete flow._sourceOrder;
+
+  const composed = {
+    ...plan, version: INTERACTION_CONTRACT_VERSION, flows,
+    operationCoverage: coverage,
+    capabilityGraphVersion: graph?.version || null,
+  };
+  const verdict = validateInteractionContract(composed, { capabilityGraph: graph });
+  return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };
+}
+
 /** Reject a broken ownership/data-flow graph before implementation generation. */
-export function validateInteractionContract(plan) {
+export function validateInteractionContract(plan, { capabilityGraph = null } = {}) {
   const problems = [];
+  const issues = [];
+  const semanticIssue = (flow, missing) => {
+    const issue = {
+      code: "interaction_contract_semantics_incomplete",
+      operationId: flow.operationId || null,
+      interactionId: flow.id || null,
+      missingFields: missing,
+    };
+    issues.push(issue);
+    problems.push(`${issue.code} operation=${issue.operationId || "unknown"} `
+      + `interaction=${issue.interactionId || "unknown"} missing=${missing.join(",")}`);
+  };
   const produced = new Set();
   for (const flow of plan?.flows || []) {
     if (!flow.id || !flow.journeyId) problems.push("interaction flow is missing identity");
     if ((flow.writes || []).length && !flow.stateOwner) problems.push(`${flow.id} writes state without an owner`);
     const missing = (flow.reads || []).filter((path) => !produced.has(path)
-      && !/\.(?:durable\.(?:record|reference)|input)$/.test(path));
+      && !/\.(?:durable\.(?:record|reference)|input(?:\.|$))/.test(path));
     if (missing.length) problems.push(`${flow.id} reads state before it is produced: ${missing.join(", ")}`);
     if (flow.kind === "review" && !(flow.reads || []).length) problems.push(`${flow.id} review has no source values`);
     if (flow.kind === "mutation" && !(flow.reads || []).length) problems.push(`${flow.id} mutation consumes no contracted input state`);
@@ -567,9 +748,56 @@ export function validateInteractionContract(plan) {
     if (flow.control && (!flow.control.accessibleName || !(flow.control.roles || []).length)) {
       problems.push(`${flow.id} interactive control has no driveable semantic contract`);
     }
+    if (flow.operationId) {
+      const missingFields = [
+        ...(!flow.actionIdentity?.operationId || !flow.actionIdentity?.interactionId ? ["actionIdentity"] : []),
+        ...(!flow.stateOwner ? ["stateOwner"] : []),
+        ...(!flow.expectedStateTransition ? ["expectedStateTransition"] : []),
+        ...(!Array.isArray(flow.downstreamConsumers) ? ["downstreamConsumers"] : []),
+        ...(!flow.verificationObservation ? ["verificationObservation"] : []),
+        ...(!(flow.responsibilityIds || []).length ? ["responsibilityIds"] : []),
+      ];
+      const types = new Set(flow.semanticResponsibilityTypes || []);
+      if (types.has("custom_functional")) missingFields.push(
+        ...(!(flow.reads || []).length ? ["reads"] : []),
+        ...(!(flow.writes || []).length ? ["writes"] : []),
+        ...(!flow.customBehavior ? ["customBehavior"] : []),
+        ...(!flow.customBehaviorModule ? ["customBehaviorModule"] : []),
+        ...(!(flow.customBehaviorExports || []).length ? ["customBehaviorExports"] : []),
+        ...(!flow.persistenceHandoff && types.has("persistence") ? ["persistenceHandoff"] : []),
+      );
+      if (types.has("capability_functional")) missingFields.push(
+        ...(!flow.capabilityId ? ["capabilityId"] : []),
+        ...(!flow.capabilityMethod ? ["capabilityMethod"] : []),
+        ...(!(flow.reads || []).length ? ["reads"] : []),
+        ...(!(flow.writes || []).length ? ["writes"] : []),
+      );
+      if (types.size === 1 && types.has("persistence")) missingFields.push(
+        ...(!flow.capabilityId ? ["capabilityId"] : []),
+        ...(!flow.capabilityMethod ? ["capabilityMethod"] : []),
+        ...(!(flow.writes || []).length ? ["writes"] : []),
+      );
+      if (missingFields.length) semanticIssue(flow, unique(missingFields));
+    }
     for (const path of flow.writes || []) produced.add(path);
   }
-  return { ok: problems.length === 0, problems };
+  if (capabilityGraph) {
+    const flows = plan?.flows || [];
+    for (const operation of capabilityGraph.operationResponsibilities || []) {
+      const represented = flows.filter((flow) => flow.operationId === operation.operationId
+        && flow.journeyId === operation.journeyId);
+      const required = new Set((operation.responsibilities || []).map((responsibility) => responsibility.id));
+      const covered = new Set(represented.flatMap((flow) => flow.responsibilityIds || []));
+      const missingResponsibilities = [...required].filter((id) => !covered.has(id));
+      if (!represented.length || missingResponsibilities.length) {
+        semanticIssue({ operationId: operation.operationId, id: null }, [
+          ...(!represented.length ? ["interaction"] : []),
+          ...missingResponsibilities.map((id) => `responsibility:${id}`),
+        ]);
+      }
+    }
+  }
+  return { ok: problems.length === 0, problems, issues };
 }
 
 export function interactionContractBrief(plan) {
@@ -619,7 +847,16 @@ export function assemblyNeeds(plan, bindings = []) {
 
 export function scopeInteractionContract(plan, journeys = []) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
-  return { version: plan?.version || 1, flows: (plan?.flows || []).filter((flow) => ids.has(flow.journeyId)) };
+  return {
+    version: plan?.version || INTERACTION_CONTRACT_VERSION,
+    flows: (plan?.flows || []).filter((flow) => ids.has(flow.journeyId)),
+    operationCoverage: (plan?.operationCoverage || []).filter((operation) => (
+      ids.has(operation.journeyId) && (plan?.flows || []).some((flow) => (
+        flow.operationId === operation.operationId && flow.journeyId === operation.journeyId
+      ))
+    )),
+    capabilityGraphVersion: plan?.capabilityGraphVersion || null,
+  };
 }
 
 function walk(node, visit) {

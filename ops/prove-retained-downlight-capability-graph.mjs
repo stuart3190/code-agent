@@ -37,6 +37,29 @@ assert.equal(functional.persistenceHandoff.capabilityId, "crud");
 assert.equal(functional.persistenceHandoff.capabilityMethod, "update");
 assert.deepEqual(functional.declaredWrites.sort(), ["calculationResults", "fittings", "layoutExplanation"]);
 
+const interaction = spec.interactionContract.flows
+  .find((candidate) => candidate.operationId === "auto-layout-project");
+assert.ok(interaction, "auto-layout must reach generation planning as an interaction");
+assert.equal(interaction.actionIdentity.operationId, "auto-layout-project");
+assert.equal(interaction.stateOwner, "src/extensions/custom/create-auto-layout-project.js");
+assert.deepEqual(interaction.reads.slice().sort(), functional.reads.slice().sort());
+assert.deepEqual(interaction.writes.slice().sort(), functional.writes.slice().sort());
+assert.deepEqual(interaction.expectedStateTransition.produces.slice().sort(), functional.writes.slice().sort());
+assert.deepEqual(interaction.downstreamConsumers, functional.downstreamDependencies);
+assert.equal(interaction.customBehavior, functional.customBehavior);
+assert.equal(interaction.customBehaviorModule, "src/extensions/custom/create-auto-layout-project.js");
+assert.ok(interaction.customBehaviorExports.length);
+assert.equal(interaction.persistenceHandoff.capabilityId, "crud");
+assert.equal(interaction.persistenceHandoff.capabilityMethod, "update");
+assert.ok(interaction.verificationObservation);
+
+const extensionGenerationContract = spec.moduleContracts.specifications
+  .find((candidate) => candidate.path === interaction.customBehaviorModule);
+assert.ok(extensionGenerationContract, "the bounded custom module must reach generation planning");
+assert.deepEqual(extensionGenerationContract.requiredExports, interaction.customBehaviorExports);
+for (const input of interaction.reads) assert.ok(extensionGenerationContract.state.mayConsume.includes(input));
+for (const output of interaction.writes) assert.ok(extensionGenerationContract.state.mustProduce.includes(output));
+
 const extension = spec.compositionPlan.extensionPoints
   .find((candidate) => candidate.id === functional.customBehavior);
 assert.ok(extension?.module);
@@ -82,5 +105,15 @@ process.stdout.write(`${JSON.stringify({
     persistenceHandoff: responsibility.persistenceHandoff,
   })),
   extension: { id: extension.id, module: extension.module, requiredExports: extension.requiredExports },
+  interaction: {
+    id: interaction.id,
+    complete: true,
+    stateOwner: interaction.stateOwner,
+    reads: interaction.reads,
+    writes: interaction.writes,
+    downstreamConsumers: interaction.downstreamConsumers,
+    persistenceHandoff: interaction.persistenceHandoff,
+    verificationObservation: interaction.verificationObservation,
+  },
   persistenceOperations: ["create-project", "update-project", "load-project"],
 }, null, 2)}\n`);
