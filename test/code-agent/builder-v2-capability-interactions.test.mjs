@@ -132,6 +132,51 @@ test("custom data transformation plus persistence produces a complete custom int
   assert.equal(flow.persistenceHandoff.capabilityMethod, "create");
 });
 
+test("cross-entity transformation preserves source reads and output-entity writes", () => {
+  const source = makeContract({
+    entity: "artifact", fields: ["format", "content", "generatedAt"],
+    operations: [{
+      id: "render-artifact", entity: "artifact", kind: "transform", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "render a source record into an artifact",
+        reads: ["sourceName", "sourceRows"], writes: ["format", "content", "generatedAt"],
+      }],
+    }],
+    steps: [
+      { action: "open the source record", target: "source", reads: ["sourceName", "sourceRows"], expect: "the source is visible" },
+      { action: "run render artifact", target: "render", operates: ["render-artifact"], expect: "the artifact is available" },
+    ],
+  });
+  source.entities.unshift({
+    name: "sourceRecord",
+    fields: ["sourceName", "sourceRows"].map((name) => ({ name, type: "string", required: true })),
+    owned: true,
+  });
+
+  const spec = deriveBuildSpec(source);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const responsibility = spec.capabilityGraph.operationResponsibilities
+    .find((candidate) => candidate.operationId === "render-artifact").responsibilities[0];
+  assert.deepEqual(responsibility.declaredReads, ["sourceName", "sourceRows"]);
+  assert.deepEqual(responsibility.declaredWrites, ["format", "content", "generatedAt"]);
+  assert.equal(responsibility.type, "custom_functional");
+
+  const flow = interactionFor(spec, "render-artifact");
+  assertCommonSemantics(flow, "render-artifact");
+  assert.deepEqual(flow.semanticResponsibilityTypes, ["custom_functional"]);
+  assert.deepEqual(flow.reads, [
+    "primary-flow.input.sourceName",
+    "primary-flow.input.sourceRows",
+  ]);
+  assert.deepEqual(flow.writes, [
+    "primary-flow.custom.format",
+    "primary-flow.custom.content",
+    "primary-flow.custom.generatedAt",
+  ]);
+  assert.ok(flow.customBehaviorModule);
+  assert.equal(flow.persistenceHandoff, null);
+});
+
 test("registered functional capability produces a capability-backed interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "booking", fields: ["date", "slotId", "name", "email", "reference", "status"],

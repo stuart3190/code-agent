@@ -141,12 +141,18 @@ function persistenceResponsibility(operation, journey) {
 
 function explicitResponsibilities(operation, journey, flows, contract) {
   if (!Array.isArray(operation?.responsibilities) || !operation.responsibilities.length) return [];
-  const fields = fieldCatalog(contract, operation.entity);
+  // Functional transformations may consume one entity and produce another. The operation's
+  // entity is the output/state owner, so it remains authoritative for declared writes; reads are
+  // dependencies and may legitimately come from any entity in the same structured contract.
+  // Scoping both sides to the output entity discarded valid cross-entity inputs before the graph
+  // could bind them into the interaction contract (for example, source record -> export artifact).
+  const fields = fieldCatalog(contract);
+  const outputFields = fieldCatalog(contract, operation.entity);
   const stepIndex = operationStep(operation, journey);
   const interactionIds = operationInteractionIds(operation, flows, stepIndex);
   return operation.responsibilities.map((responsibility, index) => {
     const declaredReads = declaredFields(responsibility?.reads || responsibility?.inputs, fields);
-    const declaredWrites = declaredFields(responsibility?.writes || responsibility?.outputs, fields);
+    const declaredWrites = declaredFields(responsibility?.writes || responsibility?.outputs, outputFields);
     const reads = declaredReads.map((field) => statePathForInput(journey, field, flows, Math.max(stepIndex, 0)));
     const writes = declaredWrites.map((field) => statePathForOutput(journey, field));
     const downstreamDependencies = downstreamInteractions(journey, flows, stepIndex, declaredWrites, fields);
