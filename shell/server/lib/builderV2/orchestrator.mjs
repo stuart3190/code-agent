@@ -972,12 +972,51 @@ export function createOrchestrator({
         // ONE derivation for the whole build: tiers, bindings, module plan, interaction
         // contract, per-module contracts, persistence ownership and image intents all come
         // from here and are passed down, so no subsystem re-reads the contract prose alone.
-        const spec = deriveBuildSpec(rawContract, { userCritical });
-        if (!spec.verdict.ok) return finish("blocked", {
-          error: "interaction contract is structurally incomplete before generation",
-          problems: spec.verdict.problems,
-          failureClassification: "interaction_contract_invalid",
-        });
+        let spec = deriveBuildSpec(rawContract, { userCritical });
+        const failingGates = (verdict) => ["interaction", "capabilityGraph", "buildProfile"]
+          .filter((gate) => verdict?.[gate] && !verdict[gate].ok);
+        let contractRepairUsed = false;
+        if (!spec.verdict.ok) {
+          // ONE targeted contract repair before the build dies. The contract lane deliberately
+          // returns a degraded contract rather than nothing, and this gate then rejected it on
+          // checks the lane had already failed — two paid contract calls, zero generation, and a
+          // sentence that named nothing. The model is now shown exactly what the derived spec
+          // could not satisfy, and gets one attempt to close it.
+          log(`contract gate rejected the contract (${failingGates(spec.verdict).join(", ")}): `
+            + `${(spec.verdict.problems || []).join(" | ")}`);
+          try {
+            const repairedContract = await contractFn({
+              owner, projectId, buildId, request, profile, buildProfile, signal,
+              priorContract: rawContract, problems: spec.verdict.problems || [],
+            });
+            // Whatever the repair produced is now the build's contract: when it still fails, its
+            // problems — not the superseded first attempt's — are what the build died on.
+            spec = deriveBuildSpec(repairedContract, { userCritical });
+            contractRepairUsed = true;
+            log(`contract repair ${spec.verdict.ok ? "produced a derivable contract" : "did not close the gate"}`);
+          } catch (error) {
+            abortIfRequested(signal);
+            log(`contract repair unavailable (${error.message}); reporting the original gate result`);
+          }
+        }
+        if (!spec.verdict.ok) {
+          // Say WHAT is incomplete. The bare sentence was unactionable: it read identically for a
+          // missing state owner, an uncovered capability responsibility and an unmet intake
+          // obligation, and the problems never reached a log or the build row.
+          const problems = spec.verdict.problems || [];
+          const failing = failingGates(spec.verdict);
+          log(`contract blocked before generation (${failing.join(", ") || "unknown gate"}): `
+            + problems.join(" | "));
+          return finish("blocked", {
+            error: `interaction contract is structurally incomplete before generation`
+              + `${problems.length ? `: ${problems.slice(0, 3).join("; ")}` : ""}`
+              + `${problems.length > 3 ? ` (+${problems.length - 3} more)` : ""}`,
+            problems,
+            failingGates: failing,
+            contractRepairUsed,
+            failureClassification: "interaction_contract_invalid",
+          });
+        }
         const { contract, tiers, bindings, interactionContract } = spec;
         const intents = spec.imageIntents;
         const refinedProfile = await classifyContract?.({ request, contract, profile }) || profile;

@@ -171,7 +171,7 @@ function strictBuildStore() {
   };
 }
 
-function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2 } = {}) {
+function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2 } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const checkpoints = [];
@@ -185,7 +185,7 @@ function harness({ contract = CONTRACT, failJourneys = [], patchPlan = null, ass
   };
   const failSet = new Set(failJourneys);
   const orchestrator = createOrchestrator({
-    contractFn: async () => contract,
+    contractFn: contractFn || (async () => contract),
     patchesFn: async (ctx) => {
       patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
         rejections: ctx.rejections.length, problems: ctx.problems });
@@ -852,4 +852,65 @@ test("MECHANICS — the allowance is bounded and hands over to the repair tier",
   // …and the repair tier still got its turn afterwards, which is the point of separating them.
   assert.ok(patchCalls.some((row) => row.originalStep === "repair" && row.step === "repair"),
     `no repair round followed: ${JSON.stringify(patchCalls.map((row) => `${row.originalStep}→${row.step}`))}`);
+});
+
+// ── the contract gate ─────────────────────────────────────────────────────────────────────────
+//
+// A contract the derived build spec cannot satisfy used to end the build on the spot: the
+// contract lane deliberately returns its best degraded attempt, this gate re-ran checks that
+// attempt had already failed, and the customer got one sentence naming nothing. One targeted
+// repair round now runs first, and whatever still fails is named.
+
+const ACCOUNTS_PROFILE = Object.freeze({
+  version: 1, requestedBuildType: "application", resolvedBuildType: "application",
+  applicationSubtype: "auto", requirementSignals: ["user_accounts"],
+  inferenceSource: "explicit", confidence: 1,
+});
+const AUTH_MISSING = "build_profile_contract_incomplete signal=user_accounts missing=required_auth_semantics";
+const ungatedContract = { ...CONTRACT, buildProfile: ACCOUNTS_PROFILE };
+const gatedContract = {
+  ...CONTRACT, buildProfile: ACCOUNTS_PROFILE,
+  auth: { required: true, model: "email and password", rules: ["a visitor sees only their own booking"] },
+};
+
+test("CONTRACT GATE — a rejected contract earns one repair briefed with the exact problems", async () => {
+  const asks = [];
+  const { orchestrator, buildStore } = harness({
+    contractFn: async ({ priorContract = null, problems = [] }) => {
+      asks.push({ repaired: Boolean(priorContract), problems });
+      return problems.length ? gatedContract : ungatedContract;
+    },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "gate-1", request: "booking site" });
+
+  assert.equal(result.state, "green", JSON.stringify(result.error || result));
+  assert.equal(asks.length, 2, "the gate failure did not earn a contract repair");
+  assert.equal(asks[0].repaired, false);
+  assert.equal(asks[1].repaired, true, "the repair was not shown the contract it must correct");
+  assert.deepEqual(asks[1].problems, [AUTH_MISSING], "the repair was briefed with something other than the gate's own problems");
+  const build = await buildStore.get(result.buildId);
+  assert.equal(build.state, "green");
+});
+
+test("CONTRACT GATE — a repair that does not close the gate blocks with the problems named", async () => {
+  let calls = 0;
+  const { orchestrator } = harness({
+    contractFn: async () => { calls += 1; return ungatedContract; },
+  });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "gate-2", request: "booking site" });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(calls, 2, "exactly one repair round is spent on a contract the gate rejects");
+  assert.equal(result.contractRepairUsed, true);
+  assert.deepEqual(result.problems, [AUTH_MISSING]);
+  assert.deepEqual(result.failingGates, ["buildProfile"]);
+  assert.ok(result.error.includes(AUTH_MISSING), `the customer-visible failure named nothing: ${result.error}`);
+});
+
+test("CONTRACT GATE — a contract the gate accepts is never re-asked", async () => {
+  let calls = 0;
+  const { orchestrator } = harness({ contractFn: async () => { calls += 1; return gatedContract; } });
+  const result = await orchestrator.runBuild({ owner: "o", projectId: "gate-3", request: "booking site" });
+  assert.equal(result.state, "green", JSON.stringify(result.error || result));
+  assert.equal(calls, 1, "a derivable contract paid for a second contract dispatch");
 });

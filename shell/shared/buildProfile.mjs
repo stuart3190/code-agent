@@ -177,6 +177,36 @@ export function inferBuildType(prompt = "", signals = inferRequirementSignals(pr
 }
 
 /**
+ * Adopt a profile that was ALREADY resolved server-side, verbatim.
+ *
+ * A resolved profile is a planning fact the contract was generated and validated against, so a
+ * later stage reads it rather than inferring a second one. Re-resolving from the model's own
+ * summary produced obligations the contract agent never saw: a request with no signal words whose
+ * summary happened to say "staff log in" acquired `user_accounts` at the build gate and blocked
+ * the build before generation, with nothing the model could have done to satisfy it.
+ *
+ * Returns null when the value is not a complete server-resolved DTO, so the caller falls back to
+ * inference rather than trusting a malformed profile.
+ */
+export function adoptBuildProfile(profile) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+  try { validateBuildProfileInput(profile); } catch { return null; }
+  if (!BUILD_TYPES.includes(profile.resolvedBuildType)) return null;
+  if (!INFERENCE_SOURCES.includes(profile.inferenceSource)) return null;
+  const confidence = Number(profile.confidence);
+  return Object.freeze({
+    version: BUILD_PROFILE_VERSION,
+    requestedBuildType: profile.requestedBuildType || "auto",
+    resolvedBuildType: profile.resolvedBuildType,
+    applicationSubtype: profile.resolvedBuildType === "application"
+      ? (profile.applicationSubtype || "auto") : "auto",
+    requirementSignals: unique(profile.requirementSignals || []),
+    inferenceSource: profile.inferenceSource,
+    confidence: Number((Number.isFinite(confidence) ? confidence : 1).toFixed(2)),
+  });
+}
+
+/**
  * Resolve browser choices and generic prompt inference into the one persisted DTO. Server callers
  * must call this even when the browser already did: resolved type, confidence, and inferred
  * requirements are server-owned planning facts.

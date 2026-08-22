@@ -1288,14 +1288,16 @@ export function createModelLanes({
   return {
     bucket,
 
-    contractFn: async ({ owner, projectId, buildId, request, buildProfile = null, signal = null }) => {
+    contractFn: async ({ owner, projectId, buildId, request, buildProfile = null, signal = null,
+      priorContract = null, problems = [] }) => {
       const startedAt = Date.now();
       const before = bucket.summary();
+      const repair = Boolean(priorContract && problems.length);
       const projectKnowledge = await loadKnowledge(owner, projectId);
       const contractRequest = `${projectKnowledge}\n\nUSER REQUEST:\n${request}`;
       const selected = await reservedProvider("contract", {
         owner, projectId, buildId, request, signal,
-        taskClass: "contract",
+        taskClass: "contract", problems,
         retrievalTokens: Math.ceil(Buffer.byteLength(projectKnowledge, "utf8") / 4),
         affectedModules: 1,
       });
@@ -1303,6 +1305,7 @@ export function createModelLanes({
       try {
         outcome = await generateContract({
           provider: selected.provider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
+          priorContract: repair ? priorContract : null, priorProblems: repair ? problems : [],
         });
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
@@ -1314,7 +1317,8 @@ export function createModelLanes({
         delta.providerRequestIds = (after.providerRequestIds || [])
           .filter((id) => !(before.providerRequestIds || []).includes(id));
         await record("contract", {
-          label: outcome?.degraded ? "implementation contract (degraded)" : "implementation contract",
+          label: `implementation contract${repair ? " (gate repair)" : ""}`
+            + `${outcome?.degraded ? " (degraded)" : ""}`,
           prompt: contractRequest, output: outcome ? JSON.stringify(outcome.contract) : null,
           usage: delta, durationMs: Date.now() - startedAt, providerUsed: selected.provider,
           decision: selected.decision,

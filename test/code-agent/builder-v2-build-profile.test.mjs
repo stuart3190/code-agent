@@ -303,6 +303,66 @@ test("Interactive workspace requires a represented interaction and state contrac
   assert.equal(spec.capabilityGraph.buildProfile.requirementSignals.includes("interactive_workspace"), true);
 });
 
+test("the build gate holds the contract to the profile it was generated against, not to its own summary", () => {
+  // The contract agent validated against the profile resolved from the REQUEST. Re-inferring at
+  // the gate from the model's summary invented obligations no attempt could have satisfied: this
+  // request names no signal at all, and the summary's own wording added user_accounts, which
+  // demands auth.required — blocking the build before a single generation dispatch.
+  const prompt = "Build me something for my dog grooming business";
+  const profile = resolveBuildProfile({ prompt });
+  assert.deepEqual(profile.requirementSignals, []);
+
+  const normalized = normaliseContract(contract({
+    summary: "A grooming app where staff log in to manage and save appointments",
+    entities: [{ name: "appointment", fields: [field("slotId"), field("guestName")] }],
+    operations: [{
+      id: "save-appointment", entity: "appointment", kind: "create", journey: "primary-flow",
+      responsibilities: [{
+        type: "persistence", capability: "crud", capabilityMethod: "create",
+        reads: ["slotId", "guestName"], writes: ["id"],
+      }],
+    }],
+    steps: [
+      { action: "choose a slot", target: "slot picker", operates: ["slotId"], expect: "the slot is selected" },
+      { action: "enter the guest name and save", target: "details form", operates: ["guestName"], expect: "the saved appointment is visible" },
+    ],
+  }), { prompt, buildProfile: profile });
+
+  const spec = deriveBuildSpec(normalized);
+  assert.deepEqual(spec.buildProfile.requirementSignals, []);
+  assert.equal(spec.buildProfile.inferenceSource, profile.inferenceSource);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+});
+
+test("an adopted profile keeps every obligation the request actually carried", () => {
+  const prompt = "Build an application where users log in and their records are saved.";
+  const profile = resolveBuildProfile({ prompt });
+  assert.ok(profile.requirementSignals.includes("user_accounts"));
+
+  const spec = deriveBuildSpec(normaliseContract(contract({
+    summary: "A records application",
+    entities: [{ name: "record", fields: [field("name")] }],
+    operations: [{
+      id: "save-record", entity: "record", kind: "create", journey: "primary-flow",
+      responsibilities: [{
+        type: "persistence", capability: "crud", capabilityMethod: "create",
+        reads: ["name"], writes: ["id"],
+      }],
+    }],
+    steps: [
+      { action: "enter a record", target: "record form", operates: ["name"], expect: "the value is visible" },
+      { action: "save the record", target: "save", operates: ["save-record"], expect: "the saved record is visible" },
+    ],
+    auth: { required: false, model: null, rules: [] },
+  }), { prompt, buildProfile: profile }));
+
+  assert.ok(spec.buildProfile.requirementSignals.includes("user_accounts"));
+  assert.equal(spec.verdict.ok, false);
+  assert.ok(spec.verdict.problems.includes(
+    "build_profile_contract_incomplete signal=user_accounts missing=required_auth_semantics",
+  ));
+});
+
 test("an existing contract without build-profile fields remains compatible through legacy Auto", () => {
   const source = contract({ buildProfile: undefined });
   delete source.buildProfile;

@@ -25,7 +25,9 @@ import {
   capabilityModulePlan, deriveCapabilityGraph, scopeCapabilityGraph, validateCapabilityGraph,
 } from "./capabilityGraph.mjs";
 import { capabilityCompositionPlan } from "./capabilityComposer.mjs";
-import { resolveBuildProfile, validateBuildProfileContract } from "../../../shared/buildProfile.mjs";
+import {
+  adoptBuildProfile, resolveBuildProfile, validateBuildProfileContract,
+} from "../../../shared/buildProfile.mjs";
 
 export const BUILD_SPEC_VERSION = 2;
 
@@ -37,9 +39,12 @@ export const BUILD_SPEC_VERSION = 2;
  * out of band reproduces the drift this replaces.
  */
 export function deriveBuildSpec(contract, { userCritical = [], journeys = contract?.journeys || [] } = {}) {
-  const buildProfile = resolveBuildProfile({
-    prompt: contract?.summary || "", input: contract?.buildProfile || null, legacy: !contract?.buildProfile,
-  });
+  // The profile the contract was GENERATED and validated against is authoritative here. Inferring
+  // a second one from the model's own summary let this gate demand obligations the contract agent
+  // never saw, and no attempt it could make would have satisfied them. Only a contract that
+  // carries no profile at all is inferred for, and that one stays legacy (obligation-free).
+  const buildProfile = adoptBuildProfile(contract?.buildProfile)
+    || resolveBuildProfile({ prompt: contract?.summary || "", input: null, legacy: true });
   const plannedContract = { ...contract, buildProfile };
   const bindings = bindCapabilities(plannedContract);
   const dependencyPlan = deriveDependencyPlan(plannedContract, journeys);

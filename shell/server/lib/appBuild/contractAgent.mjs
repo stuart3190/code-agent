@@ -196,13 +196,21 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
  *
  * Returns `{ contract, attempts, problems, warnings, usage }`; `contract` is null when the model
  * could not produce a usable one twice, and the caller carries on without it.
+ *
+ * `priorContract`/`priorProblems` turn the call into a REPAIR: the build gate derived a spec from
+ * an accepted contract and could not, and the model is shown the contract it wrote together with
+ * the exact obligations that failed. Without them, a contract the gate rejects is unrecoverable —
+ * the build blocks before generation with no attempt the model was ever asked to make.
  */
 export async function generateContract({
   provider, prompt, buildProfile = null, knowledge = "", log = () => {}, onUsage = null,
+  priorContract = null, priorProblems = [],
 }) {
   const productProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
   const profileGuidance = buildProfileBrief(productProfile);
-  let lastProblems = [];
+  const baseAsk = `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`;
+  let lastProblems = (priorProblems || []).map(String).filter(Boolean);
+  let lastContract = lastProblems.length ? priorContract : null;
   let usageTotal = null;
   // The best contract seen, even if it did not fully validate. Discarding a contract because one
   // acceptance line reads weakly throws away the journeys, the entities and the deferred list —
@@ -211,9 +219,9 @@ export async function generateContract({
   let best = null;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const ask = attempt === 1
-      ? `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`
-      : `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}\n\nYour previous contract was rejected:\n${lastProblems.map((p) => `- ${p}`).join("\n")}\n\nReturn a corrected contract. Every step and acceptance entry must name something a browser test could observe.`;
+    const ask = lastProblems.length
+      ? `${baseAsk}\n\n${lastContract ? `Your previous contract:\n${JSON.stringify(lastContract)}\n\n` : ""}Your previous contract was rejected:\n${lastProblems.map((p) => `- ${p}`).join("\n")}\n\nReturn a corrected contract. Every step and acceptance entry must name something a browser test could observe.`
+      : baseAsk;
 
     const { telemetry, finalText } = await runAgent({
       provider, systemPrompt: SYSTEM_PROMPT, tools: [], toolImpls: {},
@@ -224,6 +232,7 @@ export async function generateContract({
     const parsed = extractJson(finalText);
     if (!parsed) {
       lastProblems = ["the reply was not a JSON object"];
+      lastContract = null;
       log(`contract: attempt ${attempt} did not return JSON`);
       continue;
     }
@@ -240,6 +249,7 @@ export async function generateContract({
       return { contract, attempts: attempt, problems: [], warnings: verdict.warnings, usage: usageTotal };
     }
     lastProblems = verdict.problems;
+    lastContract = contract;
     // Keep the one with fewer problems; a second attempt is not automatically better.
     if (!best || verdict.problems.length < best.problems.length) best = { contract, problems: verdict.problems };
     log(`contract: attempt ${attempt} rejected — ${verdict.problems.slice(0, 3).join("; ")}`);
