@@ -268,8 +268,12 @@ async function runJob(job) {
         }).eq("id", job.payload?.runId).eq("owner", job.owner);
       } catch {}
     }
+    const structuredFailure = serialiseWorkerFailure(error, classification);
+    await queue.event(job, WORKER_ID, "structured_failure", structuredFailure).catch((failure) => {
+      console.error(`[build-worker] structured failure evidence ${job.id}: ${failure.message}`);
+    });
     const failedWork = await queue.fail(job, WORKER_ID,
-      serialiseWorkerFailure(error, classification)).catch((failure) => {
+      structuredFailure).catch((failure) => {
       console.error(`[build-worker] fail persistence ${job.id}: ${failure.message}`);
       return null;
     });
@@ -284,6 +288,8 @@ async function runJob(job) {
       if (publicJob?.bv2_build_id) {
         await client.from("bv2_builds").update({
           state: classification === "cancelled" ? "cancelled" : "failed",
+          customer_state: structuredFailure.customerActionRequired ? "action_required" : "failed",
+          failure: structuredFailure,
           error: `worker:${classification}`, finished_at: new Date().toISOString(),
         }).eq("id", publicJob.bv2_build_id).eq("owner", job.owner)
           .not("state", "in", "(green,failed,cancelled,blocked)")

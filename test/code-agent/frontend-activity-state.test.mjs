@@ -70,6 +70,20 @@ test("only a genuine non-terminal job displays ordinary customer activity", asyn
   assert.doesNotMatch(project.activity.status, /repair|verification failure|regenerating/i);
 });
 
+test("durable action-required state survives refresh without exposing internal phases", () => {
+  const job = { jobId: "j-action", status: "failed", phase: "failed",
+    state: "action_required", progressLabel: "Action required", actionRequired: true };
+  assert.deepEqual(activityFromJob(job), {
+    state: ACTIVITY_STATE.actionRequired, label: "Action required",
+  });
+  const normalized = normalizeProjectSummary({
+    id: "c-action", activeBuild: job, activity: { agent: "Builder", status: "contract gate failed" },
+  });
+  assert.equal(normalized.activityState, ACTIVITY_STATE.actionRequired);
+  assert.equal(normalized.activity, null);
+  assert.equal(normalized.buildJob, job);
+});
+
 test("a completed job transitions back to ready", async () => {
   const source = {
     id: "c-transition", activity: { agent: "Builder", status: "Writing the code…", projectId: "p-transition" },

@@ -277,7 +277,8 @@ test("headroom module batches continue automatically and gate only after the ret
   assert.equal(dispatches, 2, "the second batch is dispatched inside the same build with no user turn");
   assert.equal(h.timeline.filter((entry) => entry === "compile").length, 1,
     "partial headroom batches are checkpointed but not prematurely compiled");
-  assert.equal(h.timeline.filter((entry) => entry === "browser").length, 1);
+  assert.equal(h.timeline.filter((entry) => entry === "browser").length, 2,
+    "differential verification is followed by the mandatory uncached full-journey pass");
   assert.ok(h.events.checkpoints.length >= 2, "each useful batch is durably retained");
 });
 

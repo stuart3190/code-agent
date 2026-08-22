@@ -18,7 +18,8 @@ import {
 } from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
-import { modelCallKey } from "./modelReservations.mjs";
+import { fundingPoolFor, modelCallKey } from "./modelReservations.mjs";
+import { FUNDING_POOL } from "./buildEnvelope.mjs";
 import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
 import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
 import {
@@ -765,7 +766,9 @@ export const STEP_ROUTING = Object.freeze({
 /** Steps whose write scope is bounded by the validator, so output is sized from that scope. */
 export const SCOPED_STEPS = Object.freeze(new Set(["repair", "correction"]));
 
-const HEADROOM_CODES = new Set(["budget_ceiling", "step_budget_ceiling"]);
+const HEADROOM_CODES = new Set([
+  "step_budget_ceiling", "customer_envelope_exhausted", "recovery_envelope_exhausted",
+]);
 const GENERATED_SOURCE = /^src\/(?!lib\/(?:backend\/|capabilities\/|visitorSession\.js$|assets\.js$|assetData\.js$)).*\.(?:jsx?|tsx?|css)$/;
 const evidencePaths = (values) => [...new Set((values || []).flatMap((value) => (
   String(value?.reason || value?.message || value || "").match(/src\/[a-zA-Z0-9_./-]+\.(?:jsx?|tsx?|css)/g) || []
@@ -1088,6 +1091,176 @@ export function planCallReservation(options, model, {
   };
 }
 
+const providerRequestIds = (usage, extras = []) => [...new Set([
+  ...(Array.isArray(usage?.providerRequestIds) ? usage.providerRequestIds : []),
+  usage?.providerRequestId, ...extras,
+].filter(Boolean).map(String))].sort();
+
+/**
+ * The sole network-dispatch authority for Builder V2. Contract planning, contract repair,
+ * generation, corrections, browser-informed repair and continuations all enter here with an
+ * explicit provider, payer, responsibility, funding pool and durable logical identity.
+ */
+export async function runReservedDispatch({
+  reservations, owner, projectId, buildId, step, logicalStep = step, sequence,
+  logicalDispatchId: suppliedLogicalDispatchId = null,
+  continuationIndex = 0, provider, decision = null, options,
+  ceilingCredits, fundingPool = null, usageResponsibility = "customer_request",
+  accountBalanceResolver = null, maxRepairs = 2, maxCorrections = 2,
+  scopedDispatch = false, affectedModules = 1, retrievalTokens = 0, problems = [],
+  expectedPatchTokens = null, maxOutputTokens = 16_000, beforeDispatch = null,
+  signal = null, causalFiles = [], checkpointId = null, completionReserveCredits = 0,
+} = {}) {
+  if (!reservations?.reserve || !reservations?.settle || !provider?.runTurn || !provider?.model) {
+    throw new Error("runReservedDispatch needs reservation and executable provider authorities");
+  }
+  const resolvedPool = fundingPool || fundingPoolFor({ usageResponsibility });
+  await beforeDispatch?.({ owner, projectId, buildId, step: logicalStep, fundingPool: resolvedPool });
+  const budget = reservations.budget
+    ? await reservations.budget(owner, buildId, Number(ceilingCredits), resolvedPool)
+    : {
+      approvedCeilingCredits: Number(ceilingCredits), consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: Number(ceilingCredits),
+    };
+  const protectedCredits = Math.max(0, Number(completionReserveCredits || 0));
+  const planningBudget = { ...budget,
+    remainingCredits: Math.max(0, Number(budget.remainingCredits || 0) - protectedCredits) };
+  const selectedMaxOutputTokens = Number(decision?.maxOutputTokens || maxOutputTokens);
+  const callCeiling = Number(decision?.callCeilingCredits || ceilingCredits);
+  let plan;
+  try {
+    plan = planCallReservation(options, provider.model, {
+      requestedMaxOutputTokens: selectedMaxOutputTokens,
+      minimumCredits: scopedDispatch ? 0 : decision?.estimatedCredits || 0,
+      callCeilingCredits: callCeiling,
+      repairAllowanceCredits: decision?.repairAllowanceCredits,
+      repairSizing: scopedDispatch ? {
+        retrievedFileCount: Number(affectedModules || 1),
+        retrievalTokens: Number(retrievalTokens || 0),
+        problemCount: Array.isArray(problems) ? problems.length : 1,
+        expectedPatchTokens: Number(expectedPatchTokens || 0) || null,
+      } : null,
+      fundingPolicy: decision?.fundingPolicy || (resolvedPool === FUNDING_POOL.RECOVERY
+        ? "thrallo_recovery" : "request_owner"),
+      budget: planningBudget,
+    });
+  } catch (error) {
+    error.fundingPool = resolvedPool;
+    if (error.code === "budget_ceiling") {
+      error.code = protectedCredits > 0 ? "customer_completion_reserve"
+        : resolvedPool === FUNDING_POOL.RECOVERY
+          ? "recovery_envelope_exhausted" : "customer_envelope_exhausted";
+      error.completionReserveCredits = protectedCredits;
+    }
+    throw error;
+  }
+  const reservationStep = Number(continuationIndex || 0) > 0 ? `${step}:headroom` : step;
+  const logicalDispatchId = suppliedLogicalDispatchId
+    || `${buildId}:${logicalStep}:${Number(sequence)}:logical`;
+  const callKey = modelCallKey({
+    buildId, step: reservationStep, sequence,
+    purpose: `dispatch:${logicalDispatchId}:${Number(continuationIndex || 0)}`,
+  });
+  let accountBalance = (decision?.billingLane || "managed") === "managed"
+    && usageResponsibility === "customer_request"
+    ? await accountBalanceResolver?.(owner) : null;
+  const reservationInput = () => ({
+    owner, projectId, buildId, callKey, step: reservationStep,
+    provider: provider.provider || provider.providerId || decision?.provider || provider.model,
+    model: provider.model, billingLane: decision?.billingLane || "managed",
+    reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
+    accountBalance, usageResponsibility, fundingPool: resolvedPool,
+    maxRepairs, maxCorrections,
+    logicalDispatchId, continuationIndex: Number(continuationIndex || 0),
+    metadata: {
+      routing: decision || null, taskClass: decision?.taskClass || "generated_app", sequence,
+      logicalStep, logicalDispatchId, continuationIndex: Number(continuationIndex || 0),
+      budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
+      causalFiles: [...new Set(causalFiles || [])], checkpointId,
+      completionReserveCredits: protectedCredits,
+    },
+  });
+  let hold;
+  try {
+    hold = await reservations.reserve(reservationInput());
+  } catch (error) {
+    const customerManaged = (decision?.billingLane || "managed") === "managed"
+      && usageResponsibility === "customer_request";
+    if (error.code !== "allowance_snapshot_stale" || !customerManaged) {
+      if (error.code === "budget_ceiling") {
+        error.code = resolvedPool === FUNDING_POOL.RECOVERY
+          ? "recovery_envelope_exhausted" : "customer_envelope_exhausted";
+        error.fundingPool = resolvedPool;
+      }
+      throw error;
+    }
+    accountBalance = await accountBalanceResolver?.(owner);
+    hold = await reservations.reserve(reservationInput());
+  }
+  assertModelDispatchAcquired(hold);
+  let turn;
+  try {
+    turn = await provider.runTurn.call(provider, {
+      ...options, signal: signal || options.signal, maxOutputTokens: plan.maxOutputTokens,
+      maxProviderRetries: 0, allowParameterRetry: false,
+    });
+  } catch (error) {
+    const usage = error?.usage || {};
+    const failure = classifyProviderFailure(error);
+    const actualCredits = creditsForUsage({ usage, model: provider.model });
+    try {
+      if (failure.hasUsage) {
+        await reservations.settle(owner, hold.id, {
+          actualCredits, usage, providerRequestIds: providerRequestIds(usage, [error?.providerRequestId]),
+        });
+      } else if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
+        await reservations.release(owner, hold.id);
+      } else {
+        await reservations.markAmbiguous(owner, hold.id, {
+          reason: error?.message || "provider dispatch ambiguous",
+          providerRequestIds: providerRequestIds(usage, [error?.providerRequestId]),
+        });
+      }
+    } catch (settlementError) {
+      const ids = providerRequestIds(usage, [error?.providerRequestId]);
+      const accountingError = Object.assign(new AggregateError(
+        [error, settlementError],
+        `Provider call failed and its usage could not be settled: ${settlementError.message}`,
+      ), { code: "billing_settlement_failed", providerError: error });
+      try {
+        await reservations.markAmbiguous(owner, hold.id, {
+          reason: accountingError.message, providerRequestIds: ids,
+        });
+      } catch (reconciliationError) { accountingError.reconciliationError = reconciliationError; }
+      throw replayUnsafe(accountingError, { reservationId: hold.id, providerRequestId: ids[0] || null });
+    }
+    if (failure.state === "before_dispatch" || failure.state === "provider_rejected") throw error;
+    throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+  }
+  const actualCredits = creditsForUsage({ usage: turn.usage || {}, model: provider.model });
+  const ids = providerRequestIds(turn.usage);
+  try {
+    await reservations.settle(owner, hold.id, {
+      actualCredits, usage: turn.usage || {}, providerRequestIds: ids,
+    });
+  } catch (error) {
+    try {
+      await reservations.markAmbiguous(owner, hold.id, {
+        reason: `provider completed but settlement failed: ${error?.message || "unknown error"}`,
+        providerRequestIds: ids,
+      });
+    } catch (reconciliationError) { error.reconciliationError = reconciliationError; }
+    throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: ids[0] || null });
+  }
+  if (!turn || typeof turn !== "object") turn = { text: String(turn || "") };
+  if (!Object.isExtensible(turn)) turn = { ...turn };
+  Object.defineProperty(turn, "reservation", {
+    value: { id: hold.id, logicalDispatchId, continuationIndex, fundingPool: resolvedPool, plan },
+    enumerable: false,
+  });
+  return turn;
+}
+
 export function createModelLanes({
   provider, providerForStep = null, ceilingCredits, diag = null, log = () => {},
   bucket = jobUsageBucket(), knowledgeStore = null, reservations = null,
@@ -1097,6 +1270,8 @@ export function createModelLanes({
   maxRepairs = 2,
   maxCorrections = 2,
   defaultUsageResponsibility = "customer_request",
+  poolCeilingResolver = null,
+  beforeDispatch = null,
 }) {
   if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
@@ -1107,10 +1282,6 @@ export function createModelLanes({
     if (!selectedProvider?.runTurn || !selectedProvider.model) throw new Error(`no executable provider for Builder V2 step ${step}`);
     return { provider: selectedProvider, decision: selected?.decision || null };
   };
-  const requestIds = (usage, extras = []) => [...new Set([
-    ...(Array.isArray(usage?.providerRequestIds) ? usage.providerRequestIds : []),
-    usage?.providerRequestId, ...extras,
-  ].filter(Boolean).map(String))].sort();
   const reservedProvider = async (step, context) => {
     const selected = await choose(step, context);
     if (!reservations) return selected;
@@ -1122,142 +1293,34 @@ export function createModelLanes({
           // Each network dispatch gets its own durable identity. A transport retry is a real
           // second provider attempt and must never reuse/overwrite the first attempt's usage.
           const sequence = ++callSequence;
-          const selectedMaxOutputTokens = Number(selected.decision?.maxOutputTokens || maxOutputTokens);
-          const callCeiling = Number(selected.decision?.callCeilingCredits || ceilingCredits);
-          const budget = reservations.budget
-            ? await reservations.budget(context.owner, context.buildId, Number(ceilingCredits))
-            : {
-              approvedCeilingCredits: Number(ceilingCredits), consumedCredits: 0,
-              reservedCredits: 0, remainingCredits: Number(ceilingCredits),
-            };
           const scopedDispatch = SCOPED_STEPS.has(step) || context.scopedDispatch === true;
-          const plan = planCallReservation(options, selected.provider.model, {
-            requestedMaxOutputTokens: selectedMaxOutputTokens,
-            // A route estimate is not a mandatory hold. Repair usefulness is enforced by its
-            // minimum output envelope; the durable whole-build ceiling remains authoritative.
-            minimumCredits: scopedDispatch ? 0 : selected.decision?.estimatedCredits || 0,
-            callCeilingCredits: callCeiling,
-            repairAllowanceCredits: selected.decision?.repairAllowanceCredits,
-            repairSizing: scopedDispatch ? {
-              retrievedFileCount: Number(context.affectedModules || 1),
-              retrievalTokens: Number(context.retrievalTokens || 0),
-              problemCount: Array.isArray(context.problems) ? context.problems.length : 1,
-              expectedPatchTokens: Number(context.expectedPatchTokens || 0) || null,
-            } : null,
-            fundingPolicy: selected.decision?.fundingPolicy || "request_owner",
-            budget,
-          });
-          // One logical repair/correction may be split into several bounded model calls. The
-          // first useful call consumes its ordinary dispatch slot; later batches retain the same
-          // funding/routing identity but are explicit continuations. Every batch still settles
-          // against the same whole-build ceiling.
-          const reservationStep = Number(context.headroomBatchIndex || 0) > 0
-            ? `${step}:headroom` : step;
-          const callKey = modelCallKey({ buildId: context.buildId, step: reservationStep, sequence });
-          const usageResponsibility = ["qualification", "platform_failure"].includes(defaultUsageResponsibility)
-            ? defaultUsageResponsibility
-            : ["repair", "correction"].includes(step) ? "thrallo_repair" : defaultUsageResponsibility;
-          let accountBalance = (selected.decision?.billingLane || billingLane) === "managed"
-            && usageResponsibility === "customer_request"
-            ? await accountCreditResolver?.(context.owner) : null;
-          const reservationInput = () => ({
+          const usageResponsibility = context.recoveryDispatch === true
+            || ["repair", "correction"].includes(step)
+            ? "thrallo_repair" : defaultUsageResponsibility;
+          const fundingPool = fundingPoolFor({ usageResponsibility });
+          const poolAuthority = await poolCeilingResolver?.({
             owner: context.owner, projectId: context.projectId, buildId: context.buildId,
-            callKey, step: reservationStep,
-            provider: selected.provider.provider || selected.provider.providerId || selected.decision?.provider || selected.provider.model,
-            model: selected.provider.model, billingLane: selected.decision?.billingLane || billingLane,
-            reservedCredits: plan.reservedCredits, ceilingCredits: Number(ceilingCredits),
-            accountBalance,
-            usageResponsibility,
-            maxRepairs, maxCorrections,
-            metadata: {
-              routing: selected.decision || null, taskClass: selected.decision?.taskClass || "generated_app", sequence,
-              logicalStep: step, headroomBatchIndex: Number(context.headroomBatchIndex || 0),
-              budgetPlan: plan, fundingPolicy: plan.fundingPolicy,
-            },
+            step, fundingPool, context,
           });
-          let hold;
-          try {
-            hold = await reservations.reserve(reservationInput());
-          } catch (error) {
-            const customerManaged = (selected.decision?.billingLane || billingLane) === "managed"
-              && usageResponsibility === "customer_request";
-            if (error.code !== "allowance_snapshot_stale" || !customerManaged) throw error;
-            accountBalance = await accountCreditResolver?.(context.owner);
-            hold = await reservations.reserve(reservationInput());
-          }
-          assertModelDispatchAcquired(hold);
-          let turn;
-          try {
-            turn = await selected.provider.runTurn.call(selected.provider, {
-              ...options, signal: context.signal || options.signal, maxOutputTokens: plan.maxOutputTokens,
-              // V2 owns retries outside transports so every network dispatch receives its own
-              // reservation and telemetry identity. Provider-internal retries would be invisible.
-              maxProviderRetries: 0,
-              allowParameterRetry: false,
-            });
-          } catch (error) {
-            const usage = error?.usage || {};
-            const failure = classifyProviderFailure(error);
-            const actualCredits = creditsForUsage({ usage, model: selected.provider.model });
-            try {
-              if (failure.hasUsage) {
-                await reservations.settle(context.owner, hold.id, {
-                  actualCredits, usage, providerRequestIds: requestIds(usage, [error?.providerRequestId]),
-                });
-              } else if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
-                await reservations.release(context.owner, hold.id);
-              } else {
-                await reservations.markAmbiguous(context.owner, hold.id, {
-                  reason: error?.message || "provider dispatch ambiguous",
-                  providerRequestIds: requestIds(usage, [error?.providerRequestId]),
-                });
-              }
-            } catch (settlementError) {
-              const providerRequestIds = requestIds(usage, [error?.providerRequestId]);
-              const accountingError = Object.assign(new AggregateError(
-                [error, settlementError],
-                `Provider call failed and its usage could not be settled: ${settlementError.message}`,
-              ), { code: "billing_settlement_failed", providerError: error });
-              try {
-                await reservations.markAmbiguous(context.owner, hold.id, {
-                  reason: accountingError.message,
-                  providerRequestIds,
-                });
-              } catch (reconciliationError) {
-                accountingError.reconciliationError = reconciliationError;
-              }
-              throw replayUnsafe(accountingError, {
-                reservationId: hold.id,
-                providerRequestId: providerRequestIds[0] || null,
-              });
-            }
-            if (failure.state === "before_dispatch" || failure.state === "provider_rejected") throw error;
-            throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
-          }
-          // Settlement is part of successful dispatch. If its acknowledgement fails, stop here;
-          // do not reinterpret that database failure as a provider failure or invoke settlement a
-          // second time with empty telemetry. The reservation remains the reconciliation authority.
-          const actualCredits = creditsForUsage({ usage: turn.usage || {}, model: selected.provider.model });
-          const providerRequestIds = requestIds(turn.usage);
-          try {
-            await reservations.settle(context.owner, hold.id, {
-              actualCredits, usage: turn.usage || {}, providerRequestIds,
-            });
-          } catch (error) {
-            try {
-              await reservations.markAmbiguous(context.owner, hold.id, {
-                reason: `provider completed but settlement failed: ${error?.message || "unknown error"}`,
-                providerRequestIds,
-              });
-            } catch (reconciliationError) {
-              error.reconciliationError = reconciliationError;
-            }
-            throw replayUnsafe(error, {
-              reservationId: hold.id,
-              providerRequestId: providerRequestIds[0] || null,
-            });
-          }
-          return turn;
+          const poolCeiling = Number(poolAuthority?.ceilingCredits ?? poolAuthority ?? ceilingCredits);
+          const completionReserveCredits = Number(poolAuthority?.completionReserveCredits || 0);
+          return runReservedDispatch({
+            reservations, owner: context.owner, projectId: context.projectId,
+            buildId: context.buildId, step, logicalStep: context.logicalStep || step, sequence,
+            logicalDispatchId: context.logicalDispatchId || `${context.buildId}:${context.logicalStep || step}:`
+              + `${context.attempt || context.correction || context.round || sequence}`,
+            continuationIndex: Number(context.headroomBatchIndex || 0), provider: selected.provider,
+            decision: { ...(selected.decision || {}),
+              billingLane: selected.decision?.billingLane || billingLane },
+            options, ceilingCredits: poolCeiling, fundingPool, usageResponsibility,
+            accountBalanceResolver: accountCreditResolver, maxRepairs, maxCorrections,
+            scopedDispatch, affectedModules: context.affectedModules,
+            retrievalTokens: context.retrievalTokens, problems: context.problems,
+            expectedPatchTokens: context.expectedPatchTokens, maxOutputTokens,
+            beforeDispatch, signal: context.signal || options.signal,
+            causalFiles: context.causalFiles || [], checkpointId: context.checkpointId || null,
+            completionReserveCredits,
+          });
         },
       },
     };
@@ -1294,17 +1357,41 @@ export function createModelLanes({
       const before = bucket.summary();
       const repair = Boolean(priorContract && problems.length);
       const projectKnowledge = await loadKnowledge(owner, projectId);
-      const contractRequest = `${projectKnowledge}\n\nUSER REQUEST:\n${request}`;
-      const selected = await reservedProvider("contract", {
+      // Project memory is supporting context; the customer's request is irreducible. Keep a
+      // bounded, line-complete knowledge prefix so reservation sizing sheds memory before it ever
+      // asks the customer to narrow unchanged scope.
+      const boundedKnowledge = projectKnowledge.length > 8_000
+        ? `${projectKnowledge.slice(0, 8_000).replace(/[^\n]*$/, "")}\n[older project knowledge omitted for sizing]`
+        : projectKnowledge;
+      const contractRequest = `${boundedKnowledge}\n\nUSER REQUEST:\n${request}`;
+      const selectionContext = {
         owner, projectId, buildId, request, signal,
         taskClass: "contract", problems,
-        retrievalTokens: Math.ceil(Buffer.byteLength(projectKnowledge, "utf8") / 4),
+        retrievalTokens: Math.ceil(Buffer.byteLength(boundedKnowledge, "utf8") / 4),
         affectedModules: 1,
-      });
+        recoveryDispatch: repair,
+      };
+      let selected = await reservedProvider("contract", selectionContext);
+      let contractAttempt = 0;
+      const dispatchProvider = {
+        ...selected.provider,
+        runTurn: async (options) => {
+          contractAttempt += 1;
+          // Retry/correction work is Thrallo-funded even when the first planned contract call was
+          // customer-funded. A gate-repair invocation is recovery-funded from its first call.
+          if (!repair && contractAttempt > 1) {
+            selected = await reservedProvider("contract", {
+              ...selectionContext, recoveryDispatch: true,
+              logicalDispatchId: `${buildId}:contract_protocol_correction:${contractAttempt - 1}`,
+            });
+          }
+          return selected.provider.runTurn(options);
+        },
+      };
       let outcome;
       try {
         outcome = await generateContract({
-          provider: selected.provider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
+          provider: dispatchProvider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
           priorContract: repair ? priorContract : null, priorProblems: repair ? problems : [],
         });
       } finally {
@@ -1328,7 +1415,7 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, originalStep, contract, tiers, tree, journey, rejections, problems, editRequest,
+    patchesFn: async ({ owner, projectId, buildId, step, originalStep, attempt = 1, contract, tiers, tree, journey, rejections, problems, editRequest,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
       headroomScope: requestedHeadroomScope = null, repairBoundary = null,
       regenerateFiles = [], advisory = [], spec = null, signal = null }) => {
@@ -1339,6 +1426,8 @@ export function createModelLanes({
       const startedAt = Date.now();
       let headroomScope = requestedHeadroomScope;
       let headroomResizes = 0;
+      const logicalDispatchId = requestedHeadroomScope?.logicalDispatchId
+        || `${buildId}:${originalStep || step}:${attempt}`;
       const dispatchProblems = step === "repair" ? causalRepairProblems(contract, problems) : problems;
       const semanticRepairFiles = step === "repair" && !repairScope && !moduleCorrectionScope
         ? repairFailureOwnedPaths(contract, dispatchProblems) : [];
@@ -1386,7 +1475,14 @@ export function createModelLanes({
             expectedPatchTokens: headroomScope?.expectedPatchTokens
               || repairScope?.expectedPatchTokens || moduleCorrectionScope?.expectedPatchTokens || null,
             scopedDispatch: !!(headroomScope || repairScope || moduleCorrectionScope),
-            headroomBatchIndex: Number(headroomScope?.batchIndex || 0),
+            recoveryDispatch: ["repair", "correction"].includes(step)
+              || (attempt > 1 && !requestedHeadroomScope),
+            headroomBatchIndex: Number(headroomScope?.batchIndex || 0) + headroomResizes,
+            logicalDispatchId,
+            causalFiles: [...new Set([
+              ...(repairBoundary?.allowedFiles || []), ...(semanticRepairFiles || []),
+              ...(headroomScope?.allowedFiles || []),
+            ])],
           });
           try {
             return await callOnce();
@@ -1409,8 +1505,13 @@ export function createModelLanes({
               });
             }
             headroomScope = nextScope;
+            headroomScope.logicalDispatchId = logicalDispatchId;
             headroomResizes += 1;
-            log(`${step}: approved ceiling is intact, but this single prompt exceeds its per-call envelope `
+            const poolLimited = ["customer_envelope_exhausted", "recovery_envelope_exhausted"]
+              .includes(error.code);
+            log(`${step}: ${poolLimited
+              ? `the remaining ${error.fundingPool || "build"} pool cannot fit this full semantic request`
+              : "the approved whole-build ceiling is intact, but this prompt exceeds its per-call envelope"} `
               + `(estimated input ${Number(error.estimatedInputTokens || 0)} tokens, maximum fitting output `
               + `${Number(error.maximumFittingOutputTokens || 0)} tokens); `
               + `continuing internally with ${nextScope.allowedFiles.length} module(s) `

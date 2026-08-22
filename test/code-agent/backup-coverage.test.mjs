@@ -23,6 +23,8 @@ import {
   PRODUCTION_PUBLIC_TABLES_69,
   PRODUCTION_PUBLIC_TABLES_70,
   PRODUCTION_PUBLIC_TABLES_75,
+  PRODUCTION_PUBLIC_TABLES_98,
+  PRODUCTION_PUBLIC_FK_PAIRS_99,
   backupTablesToVerify,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
@@ -330,7 +332,7 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 14);
   assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 79);
+  assert.equal(result.active, 80);
   // NOTE: this overlay model reports these as pending, but production has all five APPLIED —
   // confirmed against supabase_migrations.schema_migrations on 2026-08-20. The drift is in the
   // validator's overlay, not in the database, and it predates the last of these entries.
@@ -340,6 +342,7 @@ test("migration history validation reports the effective applied ledger, not the
     { version: "20260813194500", name: "enforce_v2_only_builder_contract" },
     { version: "20260815095256", name: "drop_v1_build_job_server_id" },
     { version: "20260820092621", name: "bv2_widen_repair_dispatch_limit" },
+    { version: "20260822160000", name: "bv2_contract_envelopes_recovery_settlement" },
   ]);
 });
 
@@ -384,17 +387,17 @@ test("generated runtime project ids are omitted from backup and restore writes",
 });
 
 test("the current runtime catalog and backup manifest are exactly aligned", () => {
-  assert.equal(PRODUCTION_PUBLIC_TABLES_75.length, 91);
-  assert.ok(PRODUCTION_PUBLIC_TABLES_75.includes("ca_direct_model_reservations"));
-  assert.ok(PRODUCTION_PUBLIC_TABLES_75.includes("ca_model_call_identities"));
-  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_75, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_98.length, 98);
+  assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("ca_direct_model_reservations"));
+  assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("bv2_build_settlements"));
+  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_98, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
     missingFromBackup: [], missingFromCatalog: [],
   });
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_75, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes historical ledgers and the current 78-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current 80-migration catalog", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
@@ -409,12 +412,15 @@ test("backup/restore recognizes historical ledgers and the current 78-migration 
   assert.equal(runtimeCatalogEvidence(76).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(77).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(78).tables.length, 91);
-  assert.throws(() => runtimeCatalogEvidence(79), /unsupported production migration count/);
+  assert.equal(runtimeCatalogEvidence(79).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(80).tables.length, 98);
+  assert.throws(() => runtimeCatalogEvidence(81), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_70.length, 84);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_75.length, 91);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_99.length, 99);
   assert.deepEqual(validateRestoreOrder(RESTORE_ORDER), { missingTables: [], violations: [] });
   const broken = RESTORE_ORDER.filter((table) => table !== "bv2_model_reservations");
   assert.deepEqual(validateRestoreOrder(broken).missingTables, ["bv2_model_reservations"]);

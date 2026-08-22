@@ -19,23 +19,51 @@ function db(client = null) { return (client || serviceClient()).from("build_jobs
 
 function publicResult(job) {
   if (!job.result) return null;
-  const { finalText, buildOk, previewUrl, snapshotId, pipelineVersion, qualityWarnings } = job.result;
-  return { finalText, buildOk, previewUrl, snapshotId, pipelineVersion, qualityWarnings };
+  const { finalText, buildOk, previewUrl, snapshotId, pipelineVersion, qualityWarnings,
+    customerStatus, creditsProtected } = job.result;
+  return { finalText, buildOk, previewUrl, snapshotId, pipelineVersion, qualityWarnings,
+    customerStatus, creditsProtected };
 }
 
 export function isTerminal(job) { return TERMINAL.has(job.status); }
 
+function safeTerminalError(job, customer) {
+  if (!TERMINAL.has(job.status) || job.status === "complete") return null;
+  if (/cancel/i.test(String(job.stopReason || ""))) return "Cancelled by user.";
+  if (customer?.messageKey === "build_provider_action_required") {
+    return "Your selected provider needs attention before this build can continue.";
+  }
+  if (customer?.actionRequired === true) {
+    return "The validated scope needs your approval or clarification before generation can continue.";
+  }
+  return "Thrallo could not produce a verified preview. Your credits remain protected.";
+}
+
 export function publicJob(job) {
+  const customer = job.result?.customerStatus || null;
+  const state = customer?.state || (job.status === "complete" ? "ready"
+    : TERMINAL.has(job.status) ? "failed" : /verify|compile|check/i.test(job.phase || "")
+      ? "checking" : /finish|preview|promot/i.test(job.phase || "") ? "finishing" : "building");
   return {
     jobId: job.id,
     projectId: job.projectId,
     mode: job.mode,
     pipelineVersion: "v2",
     status: job.status,
-    phase: job.phase,
-    error: job.error || null,
-    stopReason: job.stopReason || null,
+    phase: state,
+    error: safeTerminalError(job, customer),
+    stopReason: /cancel/i.test(String(job.stopReason || "")) ? "cancelled"
+      : customer?.actionRequired === true ? "action_required"
+        : TERMINAL.has(job.status) && job.status !== "complete" ? "failed" : null,
     result: TERMINAL.has(job.status) ? publicResult(job) : null,
+    state,
+    progressLabel: customer?.progressLabel || (job.status === "complete" ? "Ready"
+      : TERMINAL.has(job.status) ? "Needs attention" : "Building"),
+    retrying: customer?.retrying === true,
+    actionRequired: customer?.actionRequired === true,
+    creditsProtected: customer?.creditsProtected !== false,
+    previewUrl: customer?.previewUrl || job.result?.previewUrl || null,
+    messageKey: customer?.messageKey || null,
   };
 }
 
@@ -278,5 +306,17 @@ export async function executeBuildPipelineWork(workJob, { signal = null, onEvent
     updated_at: new Date().toISOString(),
   }).eq("id", workJob.build_id).eq("owner", workJob.owner);
   if (error) throw new Error(`Builder V2 public job persistence: ${error.message}`);
+  if (outcome.status !== "complete") {
+    throw Object.assign(new Error(publicOutcome?.finalText || "Builder V2 ended without a green preview."), {
+      code: outcome.failure?.code || outcome.stopReason || "builder_v2_not_green",
+      classification: outcome.failure?.classification || "generated_app",
+      retryable: outcome.failure?.retryable === true,
+      providerCallMade: outcome.failure?.providerCallMade ?? null,
+      reservationState: outcome.failure?.reservationState || null,
+      checkpointId: outcome.failure?.checkpointId || outcome.bv2?.workingSnapshotId || null,
+      customerActionRequired: outcome.failure?.customerActionRequired === true,
+      customerMessageKey: outcome.failure?.customerMessageKey || null,
+    });
+  }
   return outcome;
 }

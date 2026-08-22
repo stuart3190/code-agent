@@ -435,11 +435,13 @@ test("a repair that resolves nothing escalates its strategy instead of repeating
   // round count is read from the result and the STRATEGIES from what each dispatch carried.
   assert.equal(result.repairRounds, 3, "every approved round is used, on a different strategy each time");
   const repairs = h.patchInputs.filter((input) => input.step === "repair");
-  // Round 1 is bounded by attribution; round 2 drops the boundary in case attribution was wrong;
-  // round 3 forces a clean re-emit of the owning modules. No two rounds are the same attempt.
-  assert.ok(repairs.some((input) => input.repairBoundary), "one round is scoped to the attributed modules");
-  assert.ok(repairs.some((input) => !input.repairBoundary && !input.regenerateFiles?.length),
-    "one round widens past the boundary");
+  // Round 1 is bounded by attribution; round 2 widens to evidence-supported direct callers and
+  // dependencies; round 3 forces a clean re-emit of the owning modules. No two rounds are the
+  // same attempt, and even the widened strategy retains an explicit write boundary.
+  assert.ok(repairs.some((input) => input.repairBoundary?.kind === "browser_repair_boundary"),
+    "one round is scoped to the attributed modules");
+  assert.ok(repairs.some((input) => input.repairBoundary?.kind === "browser_repair_dependency_boundary"
+    && !input.regenerateFiles?.length), "one round widens to direct causal dependencies");
   assert.ok(repairs.some((input) => input.regenerateFiles?.length),
     "one round regenerates the owning modules");
   assert.equal(result.state, "blocked");

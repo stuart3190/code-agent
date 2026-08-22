@@ -131,6 +131,13 @@ export const CA_TABLES = [
   "bv2_project_pointers",
   "bv2_contracts",
   "bv2_builds",
+  "bv2_build_envelopes",
+  "bv2_build_progress",
+  "bv2_recovery_approvals",
+  "bv2_duration_extensions",
+  "bv2_verification_defects",
+  "bv2_repair_strategies",
+  "bv2_build_settlements",
   // Durable pre-dispatch reservations are canonical billing evidence. Losing them could either
   // reopen spent budget after restore or make an already-settled provider call untraceable.
   "bv2_model_reservations",

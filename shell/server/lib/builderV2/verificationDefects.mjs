@@ -28,6 +28,8 @@
 // Pure and deterministic: no network, no model, no clock. The browser decides what happened;
 // this decides only how to describe it.
 
+import crypto from "node:crypto";
+
 import { interactionFailureDiagnostics } from "./interactionContract.mjs";
 import { PROTECTED_PATHS } from "./patchEngine.mjs";
 import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityComposer.mjs";
@@ -52,6 +54,9 @@ export const REPAIR_TIER = Object.freeze({
   REPAIR: "repair",             // a browser-informed model round
   NONE: "none",                 // nothing an application patch can fix
 });
+export const VERIFICATION_DEFECT_VERSION = 1;
+const fingerprint = (value) => crypto.createHash("sha256")
+  .update(JSON.stringify(value ?? null)).digest("hex");
 
 // Flow kinds whose subject is a durable record rather than a screen transition.
 const DURABLE_KINDS = new Set(["mutation", "cancellation", "recovery", "lookup"]);
@@ -191,6 +196,7 @@ export function verificationDefects({
       journeyId: journey.id, stepIndex: null, action: null, control: null,
       // The bounded fallback is the one thing a repair CAN use when attribution missed.
       modules: unique((journey.fallbackRefs || []).filter(generatedSource)),
+      failureRefs: unique(journey.fallbackRefs || []),
       evidence: { observed: journey.attributionDefect.message || "failed journey attributed to no owning module" },
     });
   }
@@ -228,6 +234,7 @@ export function verificationDefects({
       journeyId: journey.id, stepIndex: null, action: null,
       control: named ? { id: null, logicalField: named } : null,
       modules: unique((journey.owners || []).filter(generatedSource)),
+      failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
       evidence: { observed: journey.setup.failure?.reason || "the journey's starting state could not be established" },
     });
   }
@@ -267,6 +274,9 @@ export function verificationDefects({
       journeyId: diagnostic.journeyId, stepIndex: diagnostic.stepIndex,
       action: diagnostic.userAction, control,
       modules: modulesFor(diagnostic, journey),
+      failureRefs: unique([
+        ...(diagnostic.failureRefs || []), ...(journey?.owners || []), ...(journey?.fallbackRefs || []),
+      ]),
       evidence: {
         expected: diagnostic.expectedStateAfter || null,
         observed: diagnostic.actualObservedState || null,
@@ -281,6 +291,9 @@ export function verificationDefects({
         mechanics: proven
           ? { expected: proven.expected, observed: proven.observed, detail: proven.detail }
           : null,
+        entityBefore: journey?.backendEvidence?.before || null,
+        entityAfter: journey?.backendEvidence?.after || null,
+        entityDiff: journey?.backendEvidence?.diff || null,
       },
       diagnostic,
     });
@@ -300,6 +313,7 @@ export function verificationDefects({
       tier: REPAIR_TIER.REPAIR,
       journeyId: journey.id, stepIndex: null, action: null, control: null,
       modules: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])].filter(generatedSource)),
+      failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
       evidence: {
         observed: `the contracted journey did not pass (status ${journey.status || "unknown"}) `
           + "and no per-step evidence was recorded",
@@ -321,6 +335,7 @@ export function verificationDefects({
       control: { id: failure.id, logicalField: mapped?.logicalField || flows[0]?.control?.logicalField || null },
       modules: unique(flows.flatMap((flow) => [flow.stateOwner, ...(flow.responsibleModules || [])])
         .filter(generatedSource)),
+      failureRefs: unique(flows.flatMap((flow) => [flow.stateOwner, ...(flow.responsibleModules || [])])),
       evidence: {
         expected: failure.expected, observed: failure.observed,
         mechanics: { expected: failure.expected, observed: failure.observed, detail: failure.detail },
@@ -337,6 +352,7 @@ export function verificationDefects({
       defectClass: DEFECT_CLASS.DURABILITY, owner: DEFECT_OWNER.APP, tier: REPAIR_TIER.REPAIR,
       journeyId: failure.journeyId || null, stepIndex: null, action: null, control: null,
       modules: unique((journey?.owners || []).filter(generatedSource)),
+      failureRefs: unique(journey?.owners || []),
       evidence: { observed: failure.detail || "the contracted durable row was not written" },
     });
   }
@@ -419,6 +435,7 @@ export function defectEvidence(defects = []) {
       pageTextWhenItFailed: defect.evidence?.pageText || null,
       consoleErrorsDuringStep: defect.evidence?.consoleErrors || [],
       failedRequestsDuringStep: defect.evidence?.failedRequests || [],
+      failureRefs: defect.failureRefs || defect.modules || [],
     }));
   }
   // Platform and prerequisite defects ride along as CONTEXT with their ownership stated. They
@@ -466,6 +483,54 @@ export const defectSignature = (defect) => [
   defect.defectClass, defect.code, defect.journeyId || "-",
   defect.stepIndex ?? "-", defect.control?.id || defect.control?.logicalField || "-",
 ].join("|");
+
+/** Versioned durable defect evidence with sensitive entity values represented only by hashes. */
+export function verificationDefectRecord(defect, {
+  sourceTreeHash, candidateSnapshotId = null, dependencyOwners = [],
+} = {}) {
+  if (!sourceTreeHash) throw new Error("verification defect persistence requires a source tree hash");
+  const signature = defectSignature(defect);
+  const identityStatus = defect.code === "journey_verifier_unavailable"
+    ? "verifier_unavailable"
+    : defect.evidence?.addressing?.reason === "ambiguous_identity" ? "ambiguous_identity"
+      : defect.evidence?.addressing?.reason === "identity_absent" || !defect.control?.id
+        ? "identity_absent" : "identified";
+  return {
+    defectId: fingerprint({ version: VERIFICATION_DEFECT_VERSION, signature }).slice(0, 32),
+    version: VERIFICATION_DEFECT_VERSION,
+    classification: defect.defectClass,
+    journeyId: defect.journeyId || null,
+    stepId: defect.stepIndex == null ? null : String(defect.stepIndex),
+    capabilityOperationId: defect.diagnostic?.capabilityOperationId || null,
+    controlIdentity: defect.control || null,
+    actionIdentity: defect.action ? {
+      journeyId: defect.journeyId || null, stepId: defect.stepIndex ?? null, action: defect.action,
+    } : null,
+    expectedState: defect.evidence?.expected ?? null,
+    observedState: defect.evidence?.observed ?? null,
+    drove: defect.evidence?.drove ?? null,
+    identityStatus,
+    pageState: defect.evidence?.pageText ? String(defect.evidence.pageText).slice(0, 2_000) : null,
+    consoleFingerprint: fingerprint(defect.evidence?.consoleErrors || []),
+    requestFingerprint: fingerprint(defect.evidence?.failedRequests || []),
+    entityBefore: defect.evidence?.entityBefore || null,
+    entityAfter: defect.evidence?.entityAfter || null,
+    entityDiff: defect.evidence?.entityDiff || null,
+    failureRefs: unique(defect.failureRefs || defect.modules || []),
+    owningModules: unique(defect.modules || []),
+    dependencyOwners: unique(dependencyOwners),
+    sourceTreeHash,
+    candidateSnapshotId,
+    repairTier: defect.tier,
+    owner: defect.owner,
+    defectCode: defect.code,
+    signature,
+  };
+}
+
+export function verificationDefectRecords(defects, options = {}) {
+  return (defects || []).map((defect) => verificationDefectRecord(defect, options));
+}
 
 /**
  * Did the repair move anything?

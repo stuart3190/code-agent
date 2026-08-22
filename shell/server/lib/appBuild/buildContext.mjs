@@ -25,6 +25,24 @@ function managedModelForIntent(intent) {
     : approvedConfiguredModel("OPENAI_QUALITY_MODEL", "gpt-5.6-sol", { provider: "openai", tier: "quality" });
 }
 
+/**
+ * Internal recovery is a Thrallo service responsibility. It deliberately ignores the owner's
+ * active credential and can therefore never spend BYOK quota or a connected allowance. Callers
+ * must still label every reservation `thrallo_repair`; this context only fixes provider/payer
+ * selection, while the reservation authority fixes accounting.
+ */
+export function resolveManagedRecoveryContext() {
+  return {
+    byok: false,
+    providerLabel: "openai-managed",
+    strongModel: managedModelForIntent("generate"),
+    routing: null,
+    byokSafety: null,
+    policy: resolveProviderPolicy({ provider: "managed", selectedBy: "thrallo_recovery_policy" }),
+    buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
+  };
+}
+
 // `preferProvider` is set only by an automatic provider fallback: the build continues on a
 // different connected provider without the owner changing their active connection. Falls
 // back to the active credential whenever that provider is not usable.
@@ -159,13 +177,6 @@ export async function resolveBuildContext(ownerId, {
     });
   }
 
-  return {
-    byok: false,
-    providerLabel: "openai-managed",
-    strongModel: managedModelForIntent("generate"),
-    routing: credential.routing || null,
-    byokSafety: credential.byokSafety || null,
-    policy: resolveProviderPolicy({ provider: "managed" }),
-    buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
-  };
+  return { ...resolveManagedRecoveryContext(), routing: credential.routing || null,
+    byokSafety: credential.byokSafety || null };
 }

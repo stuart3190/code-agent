@@ -8,6 +8,14 @@ export function serialiseWorkerFailure(error, classification) {
     classification,
     message,
     retryable: error?.retryable === true || ["worker_crash", "spawn_error"].includes(classification),
+    code: error?.code || classification,
+    action: error?.action || (error?.retryable ? "retry_from_checkpoint" : "stop"),
+    providerCallMade: error?.providerCallMade ?? null,
+    reservationState: error?.reservationState || null,
+    checkpointId: error?.checkpointId || null,
+    customerActionRequired: error?.customerActionRequired === true,
+    customerMessageKey: error?.customerMessageKey || null,
+    internalDetail: message,
   };
 }
 

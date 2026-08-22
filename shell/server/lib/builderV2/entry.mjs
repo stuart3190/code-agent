@@ -96,7 +96,8 @@ async function approvedRepairHeadroom(client, owner, project) {
     ), { code: "build_approval_expired" });
   }
   const { data: calls, error: callsError } = await client.from("bv2_model_reservations")
-    .select("state,actual_credits,reserved_credits").eq("owner", owner).eq("project_id", project.id);
+    .select("state,actual_credits,reserved_credits,funding_pool")
+    .eq("owner", owner).eq("project_id", project.id).eq("funding_pool", "customer_generation");
   if (callsError) throw new Error(`Builder V2 repair authorization usage read failed: ${callsError.message}`);
   const consumed = (calls || []).reduce((sum, row) => (
     sum + (row.actual_credits != null ? Number(row.actual_credits || 0) : 0)
@@ -118,8 +119,8 @@ async function retainedBuildRepairHeadroom(client, owner, project, resumable) {
   if (project?.budget_approval_id) return approvedRepairHeadroom(client, owner, project);
   const [{ data: calls, error: callsError }, { data: builds, error: buildsError }] = await Promise.all([
     client.from("bv2_model_reservations")
-    .select("state,actual_credits,reserved_credits")
-      .eq("owner", owner).eq("project_id", project.id),
+    .select("state,actual_credits,reserved_credits,funding_pool")
+      .eq("owner", owner).eq("project_id", project.id).eq("funding_pool", "customer_generation"),
     client.from("bv2_builds").select("budget_credits")
       .eq("owner", owner).eq("project_id", project.id),
   ]);

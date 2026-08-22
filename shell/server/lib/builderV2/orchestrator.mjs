@@ -10,6 +10,8 @@
 // gate. Everything else is the real machinery: the real patch engine, the real stage
 // gates via the verification facade, the real asset service, the real snapshot protocol.
 
+import crypto from "node:crypto";
+
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, patchOutcomes } from "./patchEngine.mjs";
@@ -30,6 +32,7 @@ import {
 import {
   verificationDefects, actionableDefects, platformDefectsOf,
   defectEvidence, defectWriteBoundary, defectProgress, defectSignature,
+  verificationDefectRecords,
 } from "./verificationDefects.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -175,6 +178,9 @@ export function lintAssetAttribution(tree, assets = []) {
 }
 
 const problemSignature = (problems) => (problems || []).map((p) => String(p).slice(0, 120)).sort().join("|");
+const treeHash = (tree) => crypto.createHash("sha256").update(JSON.stringify(
+  Object.fromEntries(Object.entries(tree || {}).sort(([a], [b]) => a.localeCompare(b))),
+)).digest("hex");
 const treesEqual = (a, b) => {
   const left = Object.keys(a || {}).sort();
   const right = Object.keys(b || {}).sort();
@@ -288,6 +294,9 @@ export function createOrchestrator({
   maxNoOpRetries = 2,
   events = {},                      // durable composition hooks: contract, patches, snapshot
   classifyContract = null,          // deterministic post-contract complexity refinement
+  deriveEnvelope = null,             // validated contract -> immutable funding/execution envelope
+  contractPreflight = null,          // contract-specific account/entity runtime proof
+  deferGreenPromotion = false,       // production atomically promotes pointers + project projection
   log = () => {},
 } = {}) {
   if (!contractFn || !patchesFn || !assetService || !baseTree) {
@@ -325,7 +334,8 @@ export function createOrchestrator({
     refreshPlatformRuntime(tree), spec.capabilityGraph,
   ).tree;
 
-  async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal }) {
+  async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal,
+    forceFresh = false }) {
     abortIfRequested(signal);
     const graph = memoryGraph(owner, projectId, indexTree(tree));
     const scoped = { ...contract, journeys };
@@ -333,15 +343,26 @@ export function createOrchestrator({
       owner, projectId, contract: scoped, identityContract: contract, graph, cache: verificationCache,
       verificationContext,
     });
+    const drive = forceFresh
+      ? journeys.map((journey) => ({ journey, journeyId: journey.id, cacheKey: null }))
+      : plan.drive;
+    const reused = forceFresh ? [] : plan.reused;
     let driven = { journeys: [] };
-    if (plan.drive.length && journeysFn) {
-      const executionContract = verificationExecutionContract(contract, journeys, plan.drive);
+    if (drive.length && journeysFn) {
+      const executionContract = verificationExecutionContract(contract, journeys, drive);
       driven = await journeysFn({ owner, projectId, buildId, tree,
         contract: executionContract,
-        journeys: plan.drive.map((d) => d.journey), graph, signal });
+        journeys: drive.map((d) => d.journey), graph, signal });
       abortIfRequested(signal);
       driven = { ...driven, journeys: attributeFailures(driven, graph, scoped) };
-      await recordJourneyVerdicts({ owner, projectId, cache: verificationCache, plan, results: driven, snapshotId });
+      if (!forceFresh) {
+        await recordJourneyVerdicts({ owner, projectId, cache: verificationCache, plan, results: driven, snapshotId });
+      }
+      await events.telemetry?.({ owner, projectId, buildId, kind: "browser_verification_pass", details: {
+        fresh: forceFresh, drivenJourneys: drive.length, reusedJourneys: reused.length,
+        passedJourneys: (driven.journeys || []).filter((row) => row.status === "pass").length,
+        failedJourneys: (driven.journeys || []).filter((row) => row.status !== "pass").length,
+      } });
     }
     const platformDefects = driven.journeys.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
     const blockingErrors = [
@@ -351,19 +372,20 @@ export function createOrchestrator({
     for (const defect of platformDefects) log(JSON.stringify({ event: "bv2.platform_defect", ...defect }));
     const merged = [
       ...driven.journeys,
-      ...plan.reused.map((r) => {
+      ...reused.map((r) => {
         const journey = journeys.find((j) => j.id === r.journeyId);
         return { id: r.journeyId, title: journey?.title, priority: journey?.priority, ...r.verdict, reused: true };
       }),
     ];
-    return { journeys: merged, plan, platformDefects, blockingErrors,
+    return { journeys: merged, plan: { ...plan, drive, reused }, platformDefects, blockingErrors,
       unavailable: driven.unavailable === true,
       verifierError: driven.error || null,
       verifierDefects: driven.verifierDefects || [],
       // The pre-journey mechanics probe's verdict travels with the journey verdicts, so a repair
       // brief can lead with the control that provably cannot hold a value.
       mechanics: driven.mechanics || null,
-      consoleErrors: driven.consoleErrors || [], failedRequests: driven.failedRequests || [] };
+      consoleErrors: driven.consoleErrors || [], failedRequests: driven.failedRequests || [],
+      failureRefs: driven.failureRefs || [] };
   }
 
   /**
@@ -945,7 +967,8 @@ export function createOrchestrator({
       // Only REAL bv2_builds columns reach the store; everything else is return-value only
       // (the first live run died writing `problems` into the table). A store failure at
       // finish must never mask the build's actual outcome.
-      const PERSISTED_FIELDS = ["error", "final_snapshot", "contract_id", "spent_credits"];
+      const PERSISTED_FIELDS = ["error", "final_snapshot", "contract_id", "spent_credits",
+        "failure", "customer_state", "last_durable_progress_at"];
       const finish = async (state, extra = {}) => {
         const patch = { state, finished_at: new Date().toISOString() };
         for (const key of PERSISTED_FIELDS) if (key in extra) patch[key] = extra[key];
@@ -961,9 +984,12 @@ export function createOrchestrator({
       // build that has already spent money.
       const setState = async (state) => {
         try { await buildStore.update(buildId, { state }); } catch (error) { log(`state update failed: ${error.message}`); }
+        try { await events.state?.({ owner, projectId, buildId, state }); }
+        catch (error) { log(`customer state projection failed: ${error.message}`); }
       };
 
       let workingSnapshot = null;
+      let repairRoundCeiling = maxRepairs;
       try {
         abortIfRequested(signal);
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
@@ -1039,11 +1065,41 @@ export function createOrchestrator({
           try { await buildStore.update(buildId, { profile: refinedProfile }); }
           catch (error) { log(`profile refinement failed: ${error.message}`); }
         }
+        const envelope = deriveEnvelope ? await deriveEnvelope({
+          owner, projectId, buildId, request, contract, spec, profile: refinedProfile,
+        }) : null;
+        if (envelope) {
+          repairRoundCeiling = Math.max(1, Math.min(maxRepairs,
+            Number(envelope.thralloRecovery?.strategyCapacity || maxRepairs)));
+          await events.envelope?.({ owner, projectId, buildId, envelope });
+          await events.progress?.({ owner, projectId, buildId, kind: "validated_contract", details: {
+            contractHash: envelope.contractHash, complexityBand: envelope.complexityBand,
+          } });
+          if (envelope.approvalRequired) {
+            return finish("blocked", {
+              error: "The validated contract needs a revised generation approval before core generation.",
+              failureClassification: "revised_scope_approval_required",
+              actionRequired: true,
+              customerState: "action_required",
+              envelope,
+            });
+          }
+        }
         const persistedContract = await events.contract?.({ owner, projectId, buildId, contract, tiers,
           bindings, intents });
         if (persistedContract?.id) {
           try { await buildStore.update(buildId, { contract_id: persistedContract.id }); }
           catch (error) { log(`contract id update failed: ${error.message}`); }
+        }
+
+        // Capability proof is proportional to the validated contract. Static sites stop after the
+        // zero-network runtime/config proof; account and entity probes run only when contracted.
+        if (contractPreflight) {
+          await setState("capability_preflight");
+          await contractPreflight({ owner, projectId, buildId, contract, spec, envelope });
+          await events.progress?.({ owner, projectId, buildId, kind: "capability_preflight", details: {
+            requirements: envelope?.runtimeRequirements || null,
+          } });
         }
 
         // 2. assets resolve BEFORE any generation, zero model turns, cache-first.
@@ -1071,6 +1127,8 @@ export function createOrchestrator({
           coreAttempts: core.attempts, coreCorrections: core.corrections,
           workingSnapshotId: core.candidateSnapshotId || null });
         tree = core.tree;
+        await events.progress?.({ owner, projectId, buildId, kind: "completed_required_generation_module",
+          details: { step: "core", snapshotId: core.snapshot?.id || null } });
         const coreAdvisory = core.advisory || [];
         workingSnapshot = core.snapshot;
         let workingReason = "working:core";
@@ -1110,11 +1168,19 @@ export function createOrchestrator({
         // ONE typed view of what the browser proved, recomputed after every verification. Class,
         // owner, control identity and owning modules come from here; nothing below re-reads prose.
         const verificationManifest = deriveVerificationManifest(spec || deriveBuildSpec(contract));
-        const defectsFor = (verdicts, rows) => browserRepairDefects({
-          contract, interactionContract, journeyResults: verdicts, tree,
+        const defectsFor = (verdicts, rows, evidenceTree = tree) => browserRepairDefects({
+          contract, interactionContract, journeyResults: verdicts, tree: evidenceTree,
           backendRowFailures: rows, manifest: verificationManifest,
         });
+        const persistDefects = async (defects, evidenceTree, candidateSnapshotId = null) => {
+          if (!defects?.length) return;
+          await events.verificationDefects?.({ owner, projectId, buildId,
+            records: verificationDefectRecords(defects, {
+              sourceTreeHash: treeHash(evidenceTree), candidateSnapshotId,
+            }) });
+        };
         let coreDefects = defectsFor(coreVerdicts, backendRowFailures);
+        await persistDefects(coreDefects, tree, workingSnapshot?.id || null);
         let repairsAttempted = 0;
         let repairExhausted = false;
         let repairLimit = null;
@@ -1122,6 +1188,7 @@ export function createOrchestrator({
         let repairStopReason = null;
         let repairRoundError = null;
         let budgetExhausted = false;
+        let strategySequence = 0;
 
         // ── THE REPAIR TIER, FOR EVERY CONTRACTED JOURNEY ───────────────────────────────────────
         //
@@ -1138,7 +1205,9 @@ export function createOrchestrator({
         // is reached, or there is nothing an application patch could answer. Spending the approved
         // budget on genuinely DIFFERENT attempts is the point; spending it on identical ones is
         // what this guards against.
-        const REPAIR_STRATEGIES = ["scoped", "unscoped", "regenerate"];
+        const REPAIR_STRATEGIES = [
+          "exact_owning_file_repair", "causal_dependency_repair", "owner_module_regeneration",
+        ];
         // THE ALLOWANCE IS ONE POOL AND THE CORE MUST NOT DRINK IT DRY.
         //
         // The database counts repair DISPATCHES per build, not rounds, and a single round can
@@ -1148,13 +1217,13 @@ export function createOrchestrator({
         // contracted journey is guaranteed part of what remains.
         const secondaryCount = secondaryJourneys.length;
         const coreRepairRounds = secondaryCount
-          ? Math.max(1, Math.ceil(maxRepairs * 0.4)) : maxRepairs;
+          ? Math.max(1, Math.ceil(repairRoundCeiling * 0.4)) : repairRoundCeiling;
         const shareForRemaining = (journeysLeft) => Math.max(1,
-          Math.floor((maxRepairs - repairsAttempted) / Math.max(1, journeysLeft)));
+          Math.floor((repairRoundCeiling - repairsAttempted) / Math.max(1, journeysLeft)));
         async function repairUntilGreen({
           label, journeys: repairJourneys, tree: startTree, snapshot, verdicts, defects,
           eligibility: startEligibility, backendRowFailures: startRows = [], advisory = [], evaluate,
-          maxRounds = maxRepairs,
+          maxRounds = repairRoundCeiling,
         }) {
           let currentTree = startTree;
           let currentSnapshot = snapshot;
@@ -1208,9 +1277,24 @@ export function createOrchestrator({
             const mode = REPAIR_STRATEGIES[strategy];
             // The verifier's own attribution bounds the write — until a round proves the boundary
             // was not where the defect lived, at which point the next attempt is deliberately wider.
-            const boundary = mode === "scoped" ? defectWriteBoundary(currentDefects) : null;
-            const regenerate = mode === "regenerate"
+            const regenerate = mode === "owner_module_regeneration"
               ? [...new Set(actionable.flatMap((defect) => defect.modules))].slice(0, 6) : [];
+            let boundary = mode === "exact_owning_file_repair" ? defectWriteBoundary(currentDefects) : null;
+            if (mode === "causal_dependency_repair") {
+              const graph = memoryGraph(owner, projectId, indexTree(currentTree));
+              const owners = [...new Set(actionable.flatMap((defect) => defect.modules || []))];
+              const allowedFiles = [...new Set(owners.flatMap((path) => [path,
+                ...graph.neighbors(path, { depth: 1, direction: "both" }),
+              ]))].filter((path) => typeof currentTree[path] === "string").sort().slice(0, 18);
+              boundary = allowedFiles.length ? {
+                kind: "browser_repair_dependency_boundary", allowedFiles, allowedPrefixes: [],
+                instruction: "The exact owner repair did not resolve the structural defect. Repair only the "
+                  + "evidence-supported direct owner, caller, or dependency files in this boundary.",
+              } : null;
+            } else if (mode === "owner_module_regeneration" && regenerate.length) {
+              boundary = { kind: "browser_owner_regeneration_boundary", allowedFiles: regenerate,
+                allowedPrefixes: [], instruction: "Regenerate only the proven owner modules." };
+            }
             rounds += 1;
             await setState(`${label}:${rounds}`);
             log(`${label} ${rounds}/${maxRounds} [${mode}]: ${actionable.length} typed defect(s) `
@@ -1218,6 +1302,19 @@ export function createOrchestrator({
               + (boundary ? ` scoped to [${boundary.allowedFiles.join(", ")}]` : "")
               + (regenerate.length ? ` regenerating [${regenerate.join(", ")}]` : ""));
             const defectsBefore = currentDefects;
+            const strategyRow = await events.repairStrategyStarted?.({
+              owner, projectId, buildId, strategyId: mode, sequence: ++strategySequence,
+              targetedOwners: [...new Set(actionable.flatMap((defect) => defect.modules || []))],
+              targetedFiles: boundary?.allowedFiles?.length ? boundary.allowedFiles
+                : regenerate.length ? regenerate
+                  : [...new Set(actionable.flatMap((defect) => [
+                    ...(defect.modules || []), ...(defect.failureRefs || []),
+                  ]))],
+              preTreeHash: treeHash(currentTree),
+              preBindingHash: crypto.createHash("sha256").update(JSON.stringify(bindings || [])).digest("hex"),
+              defectSignatureBefore: signatureOf(defectsBefore),
+              reason: `evidence prerequisites satisfied for ${mode}`,
+            });
             let repair;
             try {
               repair = await buildIncrement({
@@ -1229,6 +1326,9 @@ export function createOrchestrator({
                 regenerateFiles: regenerate,
               });
             } catch (error) {
+              if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
+                postTreeHash: treeHash(currentTree), defectSignatureAfter: signatureOf(currentDefects),
+                outcome: "error", reason: error?.code || error?.message || "repair dispatch failed" });
               if (error?.code === "repair_limit_reached") {
                 exhausted = true;
                 limit = { code: error.code, repairsDispatched: error.repairsDispatched, maxRepairs: error.maxRepairs };
@@ -1236,7 +1336,8 @@ export function createOrchestrator({
               }
               // THE APPROVED CEILING IS A STOP, NOT A CRASH. A build that has genuinely spent what
               // the customer approved keeps its last verified checkpoint and reports honestly.
-              if (["budget_ceiling", "account_budget"].includes(error?.code)) {
+              if (["budget_ceiling", "account_budget", "recovery_envelope_exhausted",
+                "customer_envelope_exhausted", "customer_completion_reserve"].includes(error?.code)) {
                 budgetOut = true;
                 log(`${label}: approved credit ceiling reached after ${rounds} round(s); stopping with the retained checkpoint`);
                 break;
@@ -1266,6 +1367,9 @@ export function createOrchestrator({
             // attempt — and the tier ends only when the strategies are spent, the rounds are gone,
             // or the credits are. The retained checkpoint is untouched either way.
             if (!repair.ok) {
+              if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
+                postTreeHash: treeHash(currentTree), defectSignatureAfter: signatureOf(currentDefects),
+                outcome: "rejected", reason: repair.reason || "no runnable repair candidate" });
               strategy += 1;
               log(`${label} round ${rounds} produced no runnable tree (${repair.reason || "generation failed"})`
                 + (strategy < REPAIR_STRATEGIES.length
@@ -1283,8 +1387,18 @@ export function createOrchestrator({
               owner, projectId, contract, tiers, journeyResults: currentVerdicts.journeys,
             }) : [];
             currentEligibility = evaluate(currentVerdicts, rows);
-            currentDefects = defectsFor(currentVerdicts, rows);
+            currentDefects = defectsFor(currentVerdicts, rows, currentTree);
+            await persistDefects(currentDefects, currentTree, currentSnapshot?.id || null);
             const progress = defectProgress(defectsBefore, currentDefects);
+            if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
+              postTreeHash: treeHash(currentTree),
+              postBindingHash: crypto.createHash("sha256").update(JSON.stringify(bindings || [])).digest("hex"),
+              defectSignatureAfter: signatureOf(currentDefects),
+              outcome: currentEligibility.eligible ? "success" : progress.moved ? "progress" : "no_progress",
+              reason: currentEligibility.eligible ? "contracted assertions green" : progress.reason });
+            if (progress.moved) await events.progress?.({ owner, projectId, buildId,
+              kind: currentEligibility.eligible ? "resolved_behavioral_defect" : "accepted_candidate_checkpoint",
+              details: { strategyId: mode, resolved: progress.resolved, introduced: progress.introduced } });
             if (currentEligibility.eligible) break;
             if (progress.moved) {
               // It is working. Keep the strategy that is working.
@@ -1382,7 +1496,8 @@ export function createOrchestrator({
           eligibility = previewEligibility({ tiers, gates: { ok: true },
             journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures,
             blockingErrors: coreVerdicts.blockingErrors });
-          coreDefects = defectsFor(coreVerdicts, backendRowFailures);
+          coreDefects = defectsFor(coreVerdicts, backendRowFailures, tree);
+          await persistDefects(coreDefects, tree, workingSnapshot?.id || null);
         }
         const coreRepair = await repairUntilGreen({
           label: "repair", journeys: essentialJourneys, tree, snapshot: workingSnapshot,
@@ -1403,14 +1518,14 @@ export function createOrchestrator({
         // it takes the rest of the pool: nothing downstream can use it anyway.
         if (!coreRepair.eligibility.eligible
             && ["repair_share_exhausted", "repair_strategies_exhausted"].includes(coreRepair.stopReason)
-            && coreRepair.rounds < maxRepairs) {
+            && coreRepair.rounds < repairRoundCeiling) {
           log(`core remains red after its reserved share (${coreRepair.rounds}/${coreRepairRounds}); `
             + `continuing into the remaining allowance — a red core means no increment can use it`);
           const overflow = await repairUntilGreen({
             label: "repair", journeys: essentialJourneys, tree: coreRepair.tree,
             snapshot: coreRepair.snapshot, verdicts: coreRepair.verdicts, defects: coreRepair.defects,
             eligibility: coreRepair.eligibility, backendRowFailures: coreRepair.backendRowFailures,
-            advisory: coreAdvisory, maxRounds: maxRepairs - coreRepair.rounds,
+            advisory: coreAdvisory, maxRounds: repairRoundCeiling - coreRepair.rounds,
             evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
               journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
               blockingErrors: nextVerdicts.blockingErrors }),
@@ -1435,7 +1550,7 @@ export function createOrchestrator({
         if (!eligibility.eligible) return finish("blocked", {
           error: `required contracted journeys remain red: ${eligibility.failures.join("; ")}`,
           failureClassification: "contracted_journeys_red",
-          repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
+          repair_exhausted: repairExhausted || repairsAttempted >= repairRoundCeiling,
           repairLimit,
           repairProgressStop,
           repairRounds: repairsAttempted,
@@ -1510,10 +1625,12 @@ export function createOrchestrator({
           // on to the next one, which is how a 60-credit build finished with six red journeys and
           // 39 credits unspent.
           if (increment.ok && !incrementEligibility.eligible) {
+            const incrementDefects = defectsFor(verdicts, [], increment.tree);
+            await persistDefects(incrementDefects, increment.tree, increment.snapshot?.id || null);
             const incrementRepair = await repairUntilGreen({
               label: `${step}:repair`, journeys: regressionJourneys, tree: increment.tree,
               snapshot: increment.snapshot, verdicts,
-              defects: defectsFor(verdicts, []), eligibility: incrementEligibility,
+              defects: incrementDefects, eligibility: incrementEligibility,
               advisory: increment.advisory || [], evaluate: evaluateIncrement,
               // Its share of what the core left, divided across the journeys still to come.
               maxRounds: shareForRemaining(secondaryJourneys.length - shipped.length - pendingIncrements.length),
@@ -1554,6 +1671,8 @@ export function createOrchestrator({
           workingSnapshot = snapshot;
           shipped.push(journey.id);
           completedJourneys.add(journey.id);
+          await events.progress?.({ owner, projectId, buildId, kind: "completed_required_generation_module",
+            details: { step, journeyId: journey.id, snapshotId: snapshot.id } });
           log(`${step}: verified (working snapshot ${snapshot.id})`);
         }
 
@@ -1572,15 +1691,66 @@ export function createOrchestrator({
           // budget remaining and strategies unspent is a platform defect, not a customer outcome.
           repairRounds: repairsAttempted,
           repairRoundError,
-          repair_exhausted: repairExhausted || repairsAttempted >= maxRepairs,
+          repair_exhausted: repairExhausted || repairsAttempted >= repairRoundCeiling,
           repairLimit, budgetExhausted,
           stopReason: repairStopReason || (budgetExhausted ? "approved_credits_exhausted" : "repair_strategies_exhausted"),
           workingSnapshotId: workingSnapshot?.id || candidate.id, providerCalls,
         });
 
-        const finalTree = await snapshotStore.materialize(owner, candidate.id);
+        // Green promotion is based on one complete, fresh browser pass. Differential evidence is
+        // useful while repairing, but cached verdicts can never be the final release authority.
+        let finalTree = await snapshotStore.materialize(owner, candidate.id);
+        await setState("final_fresh_verification");
+        let finalVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+          journeys: contract.journeys || [], tree: finalTree, snapshotId: candidate.id, signal,
+          forceFresh: true });
+        verifierBlock = await blockOnVerifierPlatformFailure(finalVerdicts);
+        if (verifierBlock) return verifierBlock;
+        let finalRows = backendProbeFn ? await backendProbeFn({
+          owner, projectId, contract, tiers, journeyResults: finalVerdicts.journeys,
+        }) : [];
+        const evaluateFinal = (nextVerdicts, rows) => completionEligibility({
+          contract, gates: { ok: true }, journeyResults: { journeys: nextVerdicts.journeys },
+          backendRowFailures: rows, blockingErrors: nextVerdicts.blockingErrors,
+        });
+        let finalEligibility = evaluateFinal(finalVerdicts, finalRows);
+        let finalDefects = defectsFor(finalVerdicts, finalRows, finalTree);
+        await persistDefects(finalDefects, finalTree, candidate.id);
+        if (!finalEligibility.eligible && repairsAttempted < repairRoundCeiling) {
+          const finalRepair = await repairUntilGreen({
+            label: "final_repair", journeys: contract.journeys || [], tree: finalTree,
+            snapshot: candidate, verdicts: finalVerdicts, defects: finalDefects,
+            eligibility: finalEligibility, backendRowFailures: finalRows,
+            maxRounds: repairRoundCeiling - repairsAttempted, evaluate: evaluateFinal,
+          });
+          if (finalRepair.verifierBlock) return finalRepair.verifierBlock;
+          repairsAttempted += finalRepair.rounds;
+          finalTree = finalRepair.tree;
+          candidate = finalRepair.snapshot || candidate;
+          finalVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
+            journeys: contract.journeys || [], tree: finalTree, snapshotId: candidate.id, signal,
+            forceFresh: true });
+          verifierBlock = await blockOnVerifierPlatformFailure(finalVerdicts);
+          if (verifierBlock) return verifierBlock;
+          finalRows = backendProbeFn ? await backendProbeFn({
+            owner, projectId, contract, tiers, journeyResults: finalVerdicts.journeys,
+          }) : [];
+          finalEligibility = evaluateFinal(finalVerdicts, finalRows);
+          finalDefects = defectsFor(finalVerdicts, finalRows, finalTree);
+          await persistDefects(finalDefects, finalTree, candidate.id);
+        }
+        if (!finalEligibility.eligible) return finish("blocked", {
+          error: `final fresh verification remained red: ${finalEligibility.failures?.join("; ")
+            || "one or more contracted journeys failed"}`,
+          failureClassification: "contracted_journeys_red",
+          workingSnapshotId: candidate.id, repairRounds: repairsAttempted,
+        });
+        candidate = await snapshotStore.markCandidateValidated(owner, projectId, candidate.id,
+          { reason: "working:final-fresh" });
+        await events.progress?.({ owner, projectId, buildId, kind: "fresh_verification_green",
+          details: { snapshotId: candidate.id, journeyCount: (contract.journeys || []).length } });
         await events.snapshot?.({ owner, projectId, buildId, snapshot: candidate, tree: finalTree, reason: "complete" });
-        await snapshotStore.promote(owner, projectId, "green", candidate.id);
+        if (!deferGreenPromotion) await snapshotStore.promote(owner, projectId, "green", candidate.id);
 
         return finish("green", {
           final_snapshot: candidate.id,
@@ -1595,6 +1765,14 @@ export function createOrchestrator({
         });
       } catch (error) {
         const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
+        if (error?.code === "internal_extension_required") {
+          return finish("blocked", {
+            error: error.message,
+            failureClassification: "platform_internal_extension_required",
+            customerState: "checking", actionRequired: false,
+            workingSnapshotId: error.checkpointId || workingSnapshot?.id || null,
+          });
+        }
         if (cancelled) {
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled checkpoint cleanup failed: ${cleanupError.message}`); }
@@ -1692,7 +1870,7 @@ export function createOrchestrator({
               tree: initialGate.tree, reason: "working:resumed-preflight", promotable: false });
             await events.snapshot?.({ owner, projectId, buildId, snapshot: retainedCheckpoint,
               tree: initialGate.tree, reason: "resumed-preflight" });
-            await snapshotStore.promote(owner, projectId, "green", retainedCheckpoint.id);
+            if (!deferGreenPromotion) await snapshotStore.promote(owner, projectId, "green", retainedCheckpoint.id);
             return finish("green", { final_snapshot: retainedCheckpoint.id,
               snapshotId: retainedCheckpoint.id, parentSnapshotId: source.snapshotId, providerCalls: 0 });
           }
@@ -1762,7 +1940,7 @@ export function createOrchestrator({
           tree: repair.tree, reason: "working:resumed-repair", promotable: false });
         await events.snapshot?.({ owner, projectId, buildId, snapshot: checkpoint,
           tree: repair.tree, reason: "resumed-repair" });
-        await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
+        if (!deferGreenPromotion) await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
         return finish("green", { final_snapshot: checkpoint.id, snapshotId: checkpoint.id,
           parentSnapshotId: source.snapshotId });
       } catch (error) {
@@ -1840,7 +2018,7 @@ export function createOrchestrator({
           tree: gate.tree, reason: "working:runtime-refresh", promotable: false });
         await events.snapshot?.({ owner, projectId, buildId, snapshot: checkpoint,
           tree: gate.tree, reason: "runtime-refresh" });
-        await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
+        if (!deferGreenPromotion) await snapshotStore.promote(owner, projectId, "green", checkpoint.id);
         return finish("green", { final_snapshot: checkpoint.id, snapshotId: checkpoint.id,
           parentSnapshotId: source.snapshotId, providerCalls: 0 });
       } catch (error) {
@@ -1919,7 +2097,7 @@ export function createOrchestrator({
           owner, projectId, buildId, kind: "decision", key: `edit:${buildId}`,
           value: { text: request, verifiedSnapshot: snapshot.id },
         });
-        await snapshotStore.promote(owner, projectId, "green", snapshot.id);
+        if (!deferGreenPromotion) await snapshotStore.promote(owner, projectId, "green", snapshot.id);
         log(`edit green: snapshot ${snapshot.id} (drove ${verdicts.plan.drive.length}, reused ${verdicts.plan.reused.length})`);
         return finish("green", {
           final_snapshot: snapshot.id,

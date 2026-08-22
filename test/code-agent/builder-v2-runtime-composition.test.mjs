@@ -114,6 +114,14 @@ test("worker failures retain Error messages after classification", () => {
     classification: "worker_error",
     message: "project has no verified source tree to adopt",
     retryable: false,
+    code: "worker_error",
+    action: "stop",
+    providerCallMade: null,
+    reservationState: null,
+    checkpointId: null,
+    customerActionRequired: false,
+    customerMessageKey: null,
+    internalDetail: "project has no verified source tree to adopt",
   });
 });
 

@@ -15,11 +15,11 @@ import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
 import { patchOutcomes } from "./patchEngine.mjs";
 import { classifyComplexity } from "../appBuild/buildProfile.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
-import { resolveBuildContext } from "../appBuild/buildContext.mjs";
+import { resolveBuildContext, resolveManagedRecoveryContext } from "../appBuild/buildContext.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
 import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
-import { proveGeneratedRuntimeBackend, withRuntimeEnv } from "../runtimeEnv.mjs";
+import { proveGeneratedRuntimeBackend, proveGeneratedRuntimeConfig, withRuntimeEnv } from "../runtimeEnv.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { runSandboxJob } from "../../../../build-worker/sandboxRunner.mjs";
@@ -46,6 +46,13 @@ import {
   readDeploymentCommit,
 } from "./sandboxProvenance.mjs";
 import { assertExecutableCandidate } from "../modelCatalogue.mjs";
+import {
+  deriveBuildEnvelope, envelopePoolCeiling, FUNDING_POOL,
+  supabaseBuildEnvelopes, createEnvelopeProgressGuard,
+} from "./buildEnvelope.mjs";
+import { supabaseBuildSettlements } from "./buildSettlement.mjs";
+import { structuredBuildFailure, customerBuildStatus, customerFailureMessage } from "./buildFailure.mjs";
+import { supabaseVerificationEvidenceStore } from "./verificationEvidenceStore.mjs";
 
 const uuid = () => crypto.randomUUID();
 // shell/server/lib/builderV2 → the checkout root, which is also the image's /app.
@@ -54,11 +61,6 @@ const numberEnv = (name, fallback) => {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
-
-// Observed cost of one browser-informed repair dispatch on production builds (1.97-2.31 credits
-// across the 2026-08-19 run). Used only to size the repair-round backstop from the approved
-// budget; the credit ceiling itself remains the authority and fails closed.
-const REPAIR_ROUND_CREDIT_ESTIMATE = 2.5;
 
 function laneProviderId(context) {
   return context.policy?.primaryProvider === "managed" ? "managed" : context.policy?.primaryProvider;
@@ -214,9 +216,38 @@ async function backendFingerprint(client, projectId) {
     entityRows = entities.data || [];
   }
   const rows = { entities: entityRows, appUsers: appUsers.data || [] };
+  const valueShape = (value) => ({
+    type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value,
+    hash: crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex").slice(0, 20),
+  });
+  const redactedEntities = rows.entities.map((row) => ({
+    id: row.id, type: row.type, createdAt: row.created_at,
+    fields: Object.fromEntries(Object.entries(row.data || {}).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, valueShape(value)])),
+  }));
+  const redactedUsers = rows.appUsers.map((row) => ({ id: row.id, createdAt: row.created_at,
+    authUserHash: valueShape(row.auth_user_id).hash }));
   return {
     hash: crypto.createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
     entityCount: rows.entities.length, appUserCount: rows.appUsers.length,
+    entities: redactedEntities, appUsers: redactedUsers,
+  };
+}
+
+function backendDifference(before, after) {
+  const prior = new Map((before?.entities || []).map((row) => [row.id, row]));
+  const next = new Map((after?.entities || []).map((row) => [row.id, row]));
+  return {
+    created: [...next.keys()].filter((id) => !prior.has(id)),
+    deleted: [...prior.keys()].filter((id) => !next.has(id)),
+    changed: [...next.keys()].filter((id) => prior.has(id)
+      && JSON.stringify(prior.get(id)) !== JSON.stringify(next.get(id))).map((id) => ({
+      id,
+      fields: [...new Set([
+        ...Object.keys(prior.get(id)?.fields || {}), ...Object.keys(next.get(id)?.fields || {}),
+      ])].filter((field) => JSON.stringify(prior.get(id)?.fields?.[field])
+        !== JSON.stringify(next.get(id)?.fields?.[field])),
+    })),
   };
 }
 
@@ -271,11 +302,15 @@ export async function prepareBuilderV2PipelineAttempt(workJob, { client = servic
 export function createBuilderV2Runtime({
   client = serviceClient(),
   contextResolver = resolveBuildContext,
+  recoveryContextResolver = async () => resolveManagedRecoveryContext(),
   sandbox = runSandboxJob,
   preview = previewProvider(),
   assets = null,
   snapshots = null,
   reservations = null,
+  envelopes = null,
+  settlements = null,
+  evidence = null,
   historyResolver = routingHistory,
   accountCreditResolver = async (owner) => createBudgetLedger().getBalance(owner),
   runtimePreflight = null,
@@ -287,15 +322,25 @@ export function createBuilderV2Runtime({
     providers: [pexelsProvider()], client, optimiser: createOptimiser({ client }),
   });
   const reservationStore = reservations || supabaseModelReservations(client);
-  let runtimePreflightPromise = null;
-  const ensureRuntimeReady = runtimePreflight || (({ projectId }) => {
-    // EnvironmentFiles are immutable for a running worker. Concurrent work inside this runtime
-    // shares the same promise; a failed proof stays failed until configuration is corrected and
-    // the worker is restarted. The normal worker entry creates a runtime for each pipeline job,
-    // so every backend-dependent qualification gets a fresh pre-dispatch proof.
-    runtimePreflightPromise ||= proveGeneratedRuntimeBackend({ projectId, adminClient: client });
-    return runtimePreflightPromise;
-  });
+  const envelopeStore = envelopes || supabaseBuildEnvelopes(client);
+  const settlementStore = settlements || supabaseBuildSettlements(client);
+  const evidenceStore = evidence || supabaseVerificationEvidenceStore(client);
+  const progressGuard = createEnvelopeProgressGuard({ envelopeStore });
+  const ensureRuntimeReady = runtimePreflight || (({ projectId, requirements }) => (
+    proveGeneratedRuntimeBackend({ projectId, adminClient: client, requirements })
+  ));
+  const retryRuntimePreflight = async (input) => {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try { return await ensureRuntimeReady(input); }
+      catch (error) {
+        lastError = error;
+        if (error?.retryable !== true || attempt === 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** (attempt - 1))));
+      }
+    }
+    throw lastError;
+  };
 
   let sandboxIdentityPromise = null;
   /**
@@ -376,10 +421,9 @@ export function createBuilderV2Runtime({
         ), { code: "preview_isolation_required" });
       }
       if (workJob.payload?.pipelineVersion !== "v2") throw new Error("not a Builder V2 pipeline job");
-      // This is deliberately ahead of recovery, provider-context resolution and contract creation:
-      // backend-dependent generated apps cannot spend a model token unless the worker can inject
-      // and exercise the exact public browser runtime. Service-role values never enter this path.
-      await ensureRuntimeReady({ projectId: workJob.project_id, workJob });
+      // Release/runtime authority proof: local materialisation and public credential shape only.
+      // Contract-specific auth/entity probes run after the contract says they are required.
+      proveGeneratedRuntimeConfig({ projectId: workJob.project_id });
       const sandboxCompatibility = await ensureSandboxCompatible(workJob);
       const recovery = await prepareBuilderV2PipelineAttempt(workJob, { client });
       if (recovery.action === "recovered") return recovery.outcome;
@@ -391,9 +435,27 @@ export function createBuilderV2Runtime({
       const emit = (kind, value) => onEvent?.(kind, typeof value === "string" ? value : JSON.stringify(value));
       const diag = await resumeDiagnostics(client, workJob, request);
       let previewResult = null;
+      let activeBuildId = null;
+      let activeEnvelope = null;
+      let terminalSettled = false;
+      const recoveryStrategyCosts = new Map();
+
+      const settleTerminal = async ({ state, failure = null, greenPreview = false }) => {
+        if (!activeBuildId || terminalSettled) return null;
+        const customerOwnedProviderFailure = failure?.classification === "provider_customer";
+        const cancelled = state === "cancelled" || failure?.code === "cancelled";
+        const settlement = await settlementStore.settle({
+          owner, buildId: activeBuildId, terminalState: state,
+          failureClassification: failure?.classification || null, greenPreview,
+          compensationEligible: !cancelled && !customerOwnedProviderFailure,
+        });
+        terminalSettled = true;
+        return settlement;
+      };
 
       try {
       const context = await contextResolver(owner, { preferProvider: workJob.payload.providerOverride || null });
+      const recoveryContext = await recoveryContextResolver(owner, { purpose: "builder_v2_recovery" });
       assertQueuedProviderSelection(workJob.payload.providerSelection || null, context);
       diag.setByok?.(context.byok);
       if (usesManagedCredits(context.policy) && managedSettlementPaused()) {
@@ -410,11 +472,15 @@ export function createBuilderV2Runtime({
       // The credit ceiling is the real limit and it already fails closed; this count is only a
       // backstop against a pathological loop, so it scales with the money actually approved.
       // An explicit caller value still wins.
+      // This is an emergency loop guard only. The validated contract's strategyCapacity and the
+      // independent recovery credit pool are the actual repair authority.
       const maxRepairs = Number.isInteger(input.maxRepairs)
         ? Math.max(0, Math.min(MAX_REPAIR_DISPATCHES, input.maxRepairs))
-        : Math.max(2, Math.min(MAX_REPAIR_DISPATCHES,
-          Math.floor(ceilingCredits / REPAIR_ROUND_CREDIT_ESTIMATE)));
+        : MAX_REPAIR_DISPATCHES;
       const candidates = candidateSet(context);
+      const recoveryCandidates = candidateSet(recoveryContext).map((candidate) => ({
+        ...candidate, billingLane: "managed", laneProvider: "managed",
+      }));
       const history = await historyResolver(client, owner, projectId);
       const complexity = classifyComplexity({ prompt: request }).level;
       let generationProfile = complexity;
@@ -427,6 +493,16 @@ export function createBuilderV2Runtime({
       const generationPolicy = generationPolicyFor(generationProfile);
       const providerForStep = async ({ step, ...stepContext }) => {
         const routedStep = String(step).startsWith("increment:") ? "increment" : step;
+        const recoveryDispatch = stepContext.recoveryDispatch === true
+          || ["repair", "correction"].includes(routedStep);
+        if (recoveryDispatch && managedSettlementPaused()) {
+          throw Object.assign(new Error("Thrallo recovery is temporarily unavailable; customer provider usage was not consumed."), {
+            code: "recovery_provider_unavailable", classification: "platform", retryable: true,
+            dispatchState: "before_dispatch",
+          });
+        }
+        const routingContext = recoveryDispatch ? recoveryContext : context;
+        const routingCandidates = recoveryDispatch ? recoveryCandidates : candidates;
         const stepComplexity = classifyComplexity({ prompt: request, contract: stepContext.contract || null }).level;
         const decision = routeV2Step({
           step: routedStep,
@@ -434,29 +510,103 @@ export function createBuilderV2Runtime({
           complexity: stepComplexity,
           affectedModules: Number(stepContext.affectedModules || changedModuleCount({ step, ...stepContext })),
           retrievalTokens: Number(stepContext.retrievalTokens || 0),
-          repairRound: Number(stepContext.attempt || 0), candidates, history,
-          policy: context.policy,
+          repairRound: Number(stepContext.attempt || 0), candidates: routingCandidates, history,
+          policy: routingContext.policy,
           // A job may pin automatic routing without mutating the owner's durable preference.
           // This is useful for bounded qualification and for future per-build AUTO selection.
           // Explicit manualModel still wins; all identities remain catalogue-validated below.
           manualModel: workJob.payload.manualModel || (workJob.payload.routingMode === "auto"
             ? null
-            : context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
+            : recoveryDispatch ? null
+              : context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
         const outputPolicy = stepOutputPolicy(routedStep);
         Object.assign(decision, outputPolicy);
-        const chosen = candidates.find((candidate) => candidate.provider === decision.provider
+        const chosen = routingCandidates.find((candidate) => candidate.provider === decision.provider
           && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
         if (!chosen) throw new Error(`routing selected unavailable model ${decision.model}`);
+        decision.usageResponsibility = recoveryDispatch ? "thrallo_repair" : "customer_request";
+        decision.fundingPolicy = recoveryDispatch ? "thrallo_recovery" : "request_owner";
         emit("progress", { kind: "routing", decision });
         return { provider: chosen.executable, decision };
       };
 
       const events = {
         buildCreated: async ({ owner: eventOwner, buildId }) => {
+          activeBuildId = buildId;
           const { error } = await client.from("build_jobs").update({ bv2_build_id: buildId })
             .eq("id", workJob.build_id).eq("owner", eventOwner).eq("pipeline_version", "v2");
           if (error) throw new Error(`Builder V2 job link: ${error.message}`);
+        },
+        envelope: async ({ owner: eventOwner, projectId: eventProject, buildId, envelope }) => {
+          const stored = await envelopeStore.create({
+            owner: eventOwner, projectId: eventProject, buildId, envelope,
+          });
+          activeEnvelope = stored.envelope || envelope;
+          const status = customerBuildStatus({ internalState: "building" });
+          const { error } = await client.from("bv2_builds").update({
+            envelope_version: envelope.version, customer_state: status.state,
+            expected_duration_ms: envelope.execution.expectedDurationMs,
+            hard_safety_duration_ms: envelope.execution.hardSafetyDurationMs,
+            last_durable_progress_at: envelope.execution.lastDurableProgressAt,
+          }).eq("id", buildId).eq("owner", eventOwner);
+          if (error) throw new Error(`Builder V2 envelope projection: ${error.message}`);
+          return stored;
+        },
+        progress: async ({ owner: eventOwner, buildId, kind, details = {} }) => {
+          if (!activeEnvelope) return null;
+          const recorded = await progressGuard.mark(eventOwner, buildId, kind, details);
+          const { error } = await client.from("bv2_builds").update({
+            last_durable_progress_at: recorded.progressed_at || recorded.at,
+          }).eq("id", buildId).eq("owner", eventOwner);
+          if (error) throw new Error(`Builder V2 progress projection: ${error.message}`);
+          return recorded;
+        },
+        telemetry: async ({ owner: eventOwner, buildId, kind, details = {} }) => {
+          if (!activeEnvelope) return null;
+          const { data, error } = await client.from("bv2_build_progress").insert({
+            owner: eventOwner, build_id: buildId, kind, details,
+          }).select("*").single();
+          if (error) throw new Error(`Builder V2 timing telemetry: ${error.message}`);
+          return data;
+        },
+        state: async ({ owner: eventOwner, buildId, state }) => {
+          const customerStatus = customerBuildStatus({ internalState: state, creditsProtected: true });
+          const [internal, publicBuild] = await Promise.all([
+            client.from("bv2_builds").update({ customer_state: customerStatus.state })
+              .eq("id", buildId).eq("owner", eventOwner),
+            client.from("build_jobs").update({ phase: customerStatus.state,
+              updated_at: new Date().toISOString() })
+              .eq("id", workJob.build_id).eq("owner", eventOwner),
+          ]);
+          if (internal.error) throw new Error(`Builder V2 customer state projection: ${internal.error.message}`);
+          if (publicBuild.error) throw new Error(`Builder V2 public state projection: ${publicBuild.error.message}`);
+          emit("progress", { kind: "customer_state", ...customerStatus });
+          return customerStatus;
+        },
+        verificationDefects: ({ owner: eventOwner, projectId: eventProject, buildId, records }) => (
+          evidenceStore.recordDefects({ owner: eventOwner, projectId: eventProject, buildId, records })
+        ),
+        repairStrategyStarted: async (row) => {
+          const ceiling = activeEnvelope
+            ? envelopePoolCeiling(activeEnvelope, FUNDING_POOL.RECOVERY) : preliminaryRecoveryCredits;
+          const budget = await reservationStore.budget?.(row.owner, row.buildId, ceiling, FUNDING_POOL.RECOVERY);
+          const stored = await evidenceStore.startStrategy(row);
+          recoveryStrategyCosts.set(stored.id, Number(budget?.consumedCredits || 0));
+          return stored;
+        },
+        repairStrategyFinished: async ({ id, owner: strategyOwner = owner,
+          buildId: strategyBuildId = activeBuildId, ...row }) => {
+          const ceiling = activeEnvelope
+            ? envelopePoolCeiling(activeEnvelope, FUNDING_POOL.RECOVERY) : preliminaryRecoveryCredits;
+          const budget = await reservationStore.budget?.(
+            strategyOwner, strategyBuildId, ceiling, FUNDING_POOL.RECOVERY,
+          );
+          const before = recoveryStrategyCosts.get(id) || 0;
+          recoveryStrategyCosts.delete(id);
+          return evidenceStore.finishStrategy(id, {
+            ...row, settledRecoveryCost: Math.max(0, Number(budget?.consumedCredits || 0) - before),
+          });
         },
         contract: async ({ owner: eventOwner, projectId: eventProject, buildId, contract, tiers, bindings, intents }) => {
           diag.setContract?.(contract);
@@ -520,6 +670,11 @@ export function createBuilderV2Runtime({
         });
         if (error) throw new Error(`Builder V2 retrieval trace: ${error.message}`);
       };
+      // Bounded planning/correction capacity exists before a valid contract can price the full
+      // recovery strategy graph. Once the envelope is durable, its independent pool is the only
+      // recovery authority.
+      const preliminaryRecoveryCredits = Math.max(3,
+        1.5 + (complexity === "advanced" ? 4 : complexity === "medium" ? 2 : 1));
       const lanes = createModelLanes({
         providerForStep, ceilingCredits, diag, log: (line) => emit("stdout", line),
         reservations: reservationStore, billingLane: context.policy.billingLane, strictKnowledge: true,
@@ -529,6 +684,29 @@ export function createBuilderV2Runtime({
           ? "platform_failure"
           : /qualification/i.test(String(workJob.payload.trigger || ""))
             ? "qualification" : "customer_request",
+        poolCeilingResolver: async ({ fundingPool, step }) => {
+          if (fundingPool === FUNDING_POOL.RECOVERY) {
+            if (!activeEnvelope) return preliminaryRecoveryCredits;
+            const current = activeBuildId ? await envelopeStore.get(owner, activeBuildId) : null;
+            activeEnvelope = current?.envelope || activeEnvelope;
+            return envelopePoolCeiling(activeEnvelope, FUNDING_POOL.RECOVERY);
+          }
+          if (!activeEnvelope) return ceilingCredits;
+          const stages = (activeEnvelope.stages || [])
+            .filter((stage) => stage.required !== false && stage.fundingSource === FUNDING_POOL.CUSTOMER);
+          const currentId = step === "core" ? "core_generation"
+            : String(step).startsWith("increment:") ? `journey_generation:${String(step).slice("increment:".length)}`
+              : null;
+          const currentIndex = stages.findIndex((stage) => stage.id === currentId);
+          const completionReserveCredits = currentIndex >= 0
+            ? stages.slice(currentIndex + 1).reduce((sum, stage) => sum + Number(stage.estimatedCredits || 0), 0)
+            : 0;
+          return { ceilingCredits: envelopePoolCeiling(activeEnvelope, FUNDING_POOL.CUSTOMER),
+            completionReserveCredits };
+        },
+        beforeDispatch: ({ owner: dispatchOwner, buildId }) => (
+          progressGuard.beforeDispatch(dispatchOwner, buildId)
+        ),
       });
       const compile = async (tree, execution = {}) => isolated({
         id: `${workJob.id}-compile-${execution.step || "step"}-${execution.attempt || 0}`,
@@ -587,6 +765,7 @@ export function createBuilderV2Runtime({
           if (!outcome.journeys) throw new Error(`browser verification produced no journey evidence (${outcome.classification || outcome.stderr || "unknown"})`);
           consoleErrors.push(...(outcome.journeys.consoleErrors || []));
           failedRequests.push(...(outcome.journeys.failedRequests || []));
+          const failureRefs = outcome.journeys.failureRefs || [];
           verifierDefects.push(...(outcome.journeys.verifierDefects || []));
           unavailable = unavailable || outcome.journeys.unavailable === true;
           verifierError ||= outcome.journeys.error || null;
@@ -600,13 +779,14 @@ export function createBuilderV2Runtime({
             };
           }
           const after = before ? await backendFingerprint(client, projectId) : null;
+          const entityDiff = before ? backendDifference(before, after) : null;
           for (const verdict of outcome.journeys.journeys || []) {
             results.push({
               ...verdict,
+              failureRefs: [...new Set([...(verdict.failureRefs || []), ...failureRefs])],
               backendEvidence: before ? {
                 required: true, changed: before.hash !== after.hash,
-                before: { entityCount: before.entityCount, appUserCount: before.appUserCount },
-                after: { entityCount: after.entityCount, appUserCount: after.appUserCount },
+                before, after, entityDiff,
               } : { required: false },
             });
           }
@@ -623,6 +803,7 @@ export function createBuilderV2Runtime({
           unavailable,
           error: verifierError,
           mechanics,
+          failureRefs: [...new Set(results.flatMap((row) => row.failureRefs || []))],
         };
         diag.step?.({ agent: "Verifier", kind: "browser", label: "Builder V2 journeys",
           status: journeyResult.pass ? "ok" : "failed", output: JSON.stringify(journeyResult, null, 2) });
@@ -655,6 +836,36 @@ export function createBuilderV2Runtime({
         classifyContract: ({ contract: generatedContract, profile }) => (
           classifyComplexity({ prompt: request, contract: generatedContract }).level || profile
         ),
+        deriveEnvelope: async ({ contract: generatedContract, spec, profile: refined, buildId }) => {
+          const recoveryBudget = await reservationStore.budget?.(
+            owner, buildId, preliminaryRecoveryCredits, FUNDING_POOL.RECOVERY,
+          );
+          return deriveBuildEnvelope({
+            contract: generatedContract, spec, profile: refined,
+            approvedCustomerCredits: ceilingCredits,
+            generationProviderPolicy: context.policy,
+            recoveryProviderPolicy: {
+              ...recoveryContext.policy, usageResponsibility: "thrallo_repair", managedFallback: false,
+            },
+            recoveryFloorCredits: Number(recoveryBudget?.consumedCredits || 0)
+              + Number(recoveryBudget?.reservedCredits || 0),
+          });
+        },
+        deferGreenPromotion: true,
+        contractPreflight: async ({ contract: generatedContract, envelope, buildId }) => {
+          try {
+            const proof = await retryRuntimePreflight({ projectId, workJob, contract: generatedContract,
+              requirements: envelope.runtimeRequirements });
+            await events.telemetry({ owner, projectId, buildId, kind: "capability_preflight_result",
+              details: { ok: true, requirements: envelope.runtimeRequirements } });
+            return proof;
+          } catch (error) {
+            await events.telemetry({ owner, projectId, buildId, kind: "capability_preflight_result",
+              details: { ok: false, code: error?.code || "runtime_preflight_failed",
+                requirements: envelope.runtimeRequirements } });
+            throw error;
+          }
+        },
         log: (line) => emit("stdout", line),
       });
 
@@ -682,20 +893,54 @@ export function createBuilderV2Runtime({
           : await orchestrator.runEdit({ owner, projectId, request, contract, maxRepairs, signal });
 
       if (result.state !== "green") {
+        const failureCode = result.failureClassification || result.stopReason || result.state;
+        const explicitClassification = /verifier|platform|runtime|worker|preview/i.test(failureCode)
+          ? "platform"
+          : /provider|quota|credential|billing/i.test(failureCode) ? "provider_customer"
+            : /interaction_contract|scope_approval|contradict/i.test(failureCode) ? "contract"
+              : /accounting|settlement|reservation/i.test(failureCode) ? "accounting" : "generated_app";
+        const failure = structuredBuildFailure(Object.assign(new Error(result.error || "Builder V2 stopped"), {
+          code: failureCode,
+        }), {
+          classification: explicitClassification,
+          customerActionRequired: result.actionRequired === true || explicitClassification === "provider_customer",
+          checkpointId: result.workingSnapshotId || result.snapshotId || null,
+        });
+        const settlement = await settleTerminal({ state: result.state, failure, greenPreview: false });
+        const customerStatus = customerBuildStatus({ internalState: result.state, failure,
+          creditsProtected: true });
+        if (activeBuildId) {
+          const { error: failureProjectionError } = await client.from("bv2_builds").update({
+            failure, customer_state: customerStatus.state,
+          }).eq("id", activeBuildId).eq("owner", owner);
+          if (failureProjectionError) throw new Error(`Builder V2 failure projection: ${failureProjectionError.message}`);
+        }
         await diag.finish?.(result.state === "cancelled" ? "cancelled" : "failed");
         return { status: result.state === "cancelled" ? "failed" : "failed", stopReason: result.state,
-          result: { buildOk: false, finalText: result.error || "Builder V2 could not produce a verified result." },
+          result: { buildOk: false, finalText: customerFailureMessage(failure),
+            customerStatus, creditsProtected: true },
+          failure, settlement,
           contract, bv2: result };
       }
+      await events.state({ owner, projectId, buildId: activeBuildId, state: "promotion_projection" });
       const tree = await snapshotStore.materialize(owner, result.snapshotId);
       previewResult = await preview.update(projectId, withRuntimeEnv(tree, projectId));
       if (!previewResult?.url) throw new Error("verified Builder V2 snapshot has no healthy preview");
-      await snapshotStore.promote(owner, projectId, "preview", result.snapshotId);
-      const { error: projectError } = await client.from("projects").update({
-        builder_version: "v2", bv2_green_snapshot_id: result.snapshotId,
-        preview_ref: previewResult.url, updated_at: new Date().toISOString(),
-      }).eq("id", projectId).eq("owner", owner);
+      const { data: projection, error: projectError } = await client.rpc("promote_bv2_green_projection", {
+        p_owner: owner, p_project_id: projectId, p_build_id: activeBuildId,
+        p_snapshot_id: result.snapshotId, p_preview_url: previewResult.url,
+      });
       if (projectError) throw new Error(`verified project projection: ${projectError.message}`);
+      terminalSettled = true;
+      const settlement = projection?.settlement || null;
+      const customerStatus = customerBuildStatus({ internalState: "green",
+        previewUrl: previewResult.url, creditsProtected: true });
+      if (activeBuildId) {
+        const { error: stateError } = await client.from("bv2_builds").update({
+          customer_state: customerStatus.state,
+        }).eq("id", activeBuildId).eq("owner", owner);
+        if (stateError) throw new Error(`Builder V2 ready-state projection: ${stateError.message}`);
+      }
       await diag.finish?.("complete");
       return {
         status: "complete", stopReason: null,
@@ -709,11 +954,32 @@ export function createBuilderV2Runtime({
               : "Builder V2 applied and verified the change.",
           buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],
+          customerStatus, creditsProtected: true,
         },
+        settlement,
         contract: contract || diag.contract || null,
         bv2: result,
       };
       } catch (error) {
+        if (activeBuildId && !terminalSettled) {
+          const failure = structuredBuildFailure(error, {
+            checkpointId: error?.checkpointId || null,
+          });
+          try {
+            await settleTerminal({ state: error?.code === "cancelled" ? "cancelled" : "failed",
+              failure, greenPreview: false });
+            await client.from("bv2_builds").update({
+              failure, customer_state: customerBuildStatus({ internalState: "failed", failure }).state,
+              state: error?.code === "cancelled" ? "cancelled" : "failed",
+              error: String(error?.message || error), finished_at: new Date().toISOString(),
+            }).eq("id", activeBuildId).eq("owner", owner);
+          } catch (settlementError) {
+            error = Object.assign(new AggregateError([error, settlementError],
+              "Builder V2 failed and terminal accounting could not be completed"), {
+              code: "terminal_settlement_failed", classification: "accounting", retryable: true,
+            });
+          }
+        }
         try {
           await diag.finish?.(error?.code === "cancelled" || error?.name === "AbortError" ? "cancelled" : "failed");
         } catch { /* diagnostics never hide the canonical build failure */ }

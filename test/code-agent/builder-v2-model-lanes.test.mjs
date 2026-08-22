@@ -10,7 +10,7 @@ import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
   causalRepairProblems, createModelLanes, estimatePromptTokens, HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
   headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
-  repairFailureOwnedPaths, repairFailureReferences,
+  repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
@@ -614,6 +614,62 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
   assert.deepEqual(step.usage.providerRequestIds, ["codex:response:contract-1"]);
 });
 
+test("a rejected planned contract response moves its correction to managed recovery", async () => {
+  const contractJson = JSON.stringify({
+    summary: "Contact site", projectType: "landing",
+    journeys: [{ id: "contact", title: "Send a message", priority: "primary", steps: [
+      { action: "fill in the form", target: "contact form", expect: "fields accept input" },
+      { action: "submit", target: "submit button", expect: "confirmation is visible" },
+    ], acceptance: ["confirmation visible"] }],
+    routes: [{ path: "/", name: "Home" }], entities: [], auth: { required: false }, operations: [],
+  });
+  let providerCalls = 0;
+  const routing = [];
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async ({ recoveryDispatch }) => {
+      routing.push(recoveryDispatch === true);
+      return {
+        provider: { model: "gpt-5.5", providerId: recoveryDispatch ? "openai" : "codex",
+          runTurn: async () => ({ text: providerCalls++ ? contractJson : "not json", toolCalls: [],
+            usage: { input: 100, output: 50, total: 150, providerRequestId: `contract-${providerCalls}` } }) },
+        decision: { provider: recoveryDispatch ? "openai" : "codex", model: "gpt-5.5",
+          billingLane: recoveryDispatch ? "managed" : "connected_allowance",
+          estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+      };
+    },
+    ceilingCredits: 10, reservations, knowledgeStore: memoryKnowledgeStore(),
+    poolCeilingResolver: ({ fundingPool }) => fundingPool === "thrallo_recovery" ? 5 : 10,
+  });
+  const contract = await lanes.contractFn({ owner: "o", projectId: "p", buildId: "b", request: "contact site" });
+  assert.equal(contract.journeys[0].id, "contact");
+  assert.deepEqual(routing, [false, true]);
+  assert.deepEqual(reservations.rows().map((row) => [
+    row.billingLane, row.usageResponsibility, row.fundingPool,
+  ]), [
+    ["connected_allowance", "customer_request", "customer_generation"],
+    ["managed", "thrallo_repair", "thrallo_recovery"],
+  ]);
+});
+
+test("a planned generation call cannot consume the completion reserve for mandatory increments", async () => {
+  let providerCalls = 0;
+  const provider = { model: "gpt-5.5", providerId: "codex", runTurn: async () => {
+    providerCalls += 1;
+    return { text: "ok", toolCalls: [], usage: { input: 10, output: 10, total: 20 } };
+  } };
+  await assert.rejects(runReservedDispatch({
+    reservations: memoryModelReservations(), owner: "o", projectId: "p", buildId: "b",
+    step: "core", sequence: 1, provider,
+    decision: { billingLane: "connected_allowance", estimatedCredits: 2,
+      callCeilingCredits: 5, maxOutputTokens: 4_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "build" }] },
+    ceilingCredits: 5, completionReserveCredits: 4,
+  }), (error) => error.code === "customer_completion_reserve"
+    && error.fundingPool === "customer_generation");
+  assert.equal(providerCalls, 0, "the protected remainder stops the call before dispatch");
+});
+
 test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment correctly", () => {
   const tree = { "src/App.jsx": "export default function App() { return null; }" };
   const a = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS, tree, rejections: [], problems: [] });
@@ -807,7 +863,7 @@ test("a successful provider response with failed settlement stops without rewrit
   }]);
 });
 
-test("qualification correction calls retain qualification funding responsibility", async () => {
+test("qualification correction calls still use Thrallo-managed recovery responsibility", async () => {
   const reserved = [];
   const reservations = {
     reserve: async (input) => { reserved.push(input); return { id: "qualification-hold" }; },
@@ -828,5 +884,6 @@ test("qualification correction calls retain qualification funding responsibility
     owner: "owner", projectId: "project", buildId: "build", step: "correction",
     contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
   });
-  assert.equal(reserved[0].usageResponsibility, "qualification");
+  assert.equal(reserved[0].usageResponsibility, "thrallo_repair");
+  assert.equal(reserved[0].fundingPool, "thrallo_recovery");
 });

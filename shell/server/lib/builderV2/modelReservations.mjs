@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../supabase.mjs";
+import { FUNDING_POOL } from "./buildEnvelope.mjs";
 
 const canonical = (value) => {
   if (Array.isArray(value)) return value.map(canonical);
@@ -24,7 +25,9 @@ const stable = (value) => JSON.stringify(canonical(value));
 // repaired even once. 20260820090000_bv2_widen_repair_dispatch_limit.sql widened it to 40, above
 // the largest allowance the derivation produces, and the approved credit ceiling remains the real
 // limit. `builder-v2-repair-allowance.test.mjs` pins this constant to that migration.
-export const MAX_REPAIR_DISPATCHES = 40;
+// Emergency runaway guard only. Normal recovery is bounded by the contract-derived strategy
+// capacity, no-progress detection and the independent Thrallo recovery credit envelope.
+export const MAX_REPAIR_DISPATCHES = 1000;
 
 export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) {
   const identity = `${buildId}:${step}:${sequence}:${purpose}`;
@@ -35,6 +38,8 @@ const total = (rows, state, field) => rows.filter((row) => row.state === state)
   .reduce((sum, row) => sum + Number(row[field] || 0), 0);
 
 const responsibilityFor = (input) => input.usageResponsibility || "customer_request";
+export const fundingPoolFor = (input) => input.fundingPool
+  || (responsibilityFor(input) === "thrallo_repair" ? FUNDING_POOL.RECOVERY : FUNDING_POOL.CUSTOMER);
 const customerFunded = (input) => input.billingLane === "managed"
   && responsibilityFor(input) === "customer_request";
 
@@ -69,9 +74,13 @@ function allocationFor(input, ownerHeld = { included: 0, purchased: 0 }) {
  * size its next call to actual remaining build headroom instead of treating a stage target as a
  * second build ceiling.
  */
-export function reservationBudget(rows, { owner, buildId, ceilingCredits }) {
+export function reservationBudget(rows, { owner, buildId, ceilingCredits, fundingPool = null }) {
   const siblings = (rows || []).filter((row) => row.owner === owner
-    && (row.buildId || row.build_id) === buildId);
+    && (row.buildId || row.build_id) === buildId
+    && (!fundingPool || fundingPoolFor({
+      fundingPool: row.fundingPool || row.funding_pool,
+      usageResponsibility: row.usageResponsibility || row.usage_responsibility,
+    }) === fundingPool));
   const consumedCredits = total(siblings, "settled", "actualCredits")
     + total(siblings.filter((row) => row.actualCredits == null), "settled", "actual_credits");
   const reservedCredits = total(siblings, "held", "reservedCredits")
@@ -91,8 +100,8 @@ export function memoryModelReservations() {
   const correctionLimits = new Map();
   let serial = 0;
   return {
-    async budget(owner, buildId, ceilingCredits) {
-      return reservationBudget([...rows.values()], { owner, buildId, ceilingCredits });
+    async budget(owner, buildId, ceilingCredits, fundingPool = null) {
+      return reservationBudget([...rows.values()], { owner, buildId, ceilingCredits, fundingPool });
     },
     async reserve(input) {
       const key = `${input.owner}:${input.buildId}:${input.callKey}`;
@@ -117,7 +126,10 @@ export function memoryModelReservations() {
       if (existing) {
         const same = ["projectId", "step", "provider", "model", "billingLane", "reservedCredits"]
           .every((field) => existing[field] === input[field]);
-        if (!same || responsibilityFor(existing) !== responsibilityFor(input)) {
+        if (!same || responsibilityFor(existing) !== responsibilityFor(input)
+            || fundingPoolFor(existing) !== fundingPoolFor(input)
+            || existing.logicalDispatchId !== input.logicalDispatchId
+            || Number(existing.continuationIndex || 0) !== Number(input.continuationIndex || 0)) {
           throw new Error("Builder V2 call key was reused with different reservation identity");
         }
         if (existing.state !== "released") {
@@ -128,7 +140,9 @@ export function memoryModelReservations() {
             repairDispatchCount: dispatched("repair"), correctionDispatchCount: dispatched("correction") };
         }
       }
-      const siblings = [...rows.values()].filter((row) => row.owner === input.owner && row.buildId === input.buildId);
+      const fundingPool = fundingPoolFor(input);
+      const siblings = [...rows.values()].filter((row) => row.owner === input.owner
+        && row.buildId === input.buildId && fundingPoolFor(row) === fundingPool);
       // `repair` = a round briefed by OBSERVED browser failure. `correction` = a deterministic
       // pre-compile fix. They are counted separately: a correction used to consume the one
       // browser-informed repair slot, so a build could reach verification with no repair left.
@@ -136,7 +150,10 @@ export function memoryModelReservations() {
         && ["held", "settled"].includes(row.state)).length;
       const correctionDispatchCount = siblings.filter((row) => row.step === "correction"
         && ["held", "settled"].includes(row.state)).length;
-      if (input.step === "repair" && repairDispatchCount >= maxRepairs) {
+      // New recovery envelopes are credit/strategy bounded. Keep the historical count guard only
+      // for legacy customer-pool callers that have not supplied the recovery funding identity.
+      if (input.step === "repair" && fundingPool !== FUNDING_POOL.RECOVERY
+          && repairDispatchCount >= maxRepairs) {
         throw Object.assign(new Error("Builder V2 repair provider-call limit reached"), {
           code: "repair_limit_reached", repairsDispatched: repairDispatchCount, maxRepairs,
         });
@@ -160,7 +177,7 @@ export function memoryModelReservations() {
           purchased: sum.purchased + Number(row.purchasedReservedCredits || 0),
         }), { included: 0, purchased: 0 });
       const allocation = allocationFor(input, ownerHeld);
-      const normalized = { ...input, usageResponsibility: responsibilityFor(input), ...allocation };
+      const normalized = { ...input, usageResponsibility: responsibilityFor(input), fundingPool, ...allocation };
       const row = existing || { id: `reservation-${++serial}`, actualCredits: null, ...normalized };
       Object.assign(row, normalized);
       Object.assign(row, { state: "held", releasedAt: null });
@@ -223,7 +240,8 @@ export function memoryModelReservations() {
         throw new Error("pending Builder V2 reservation not found");
       }
       Object.assign(row, {
-        usageResponsibility: row.billingLane === "managed" ? "platform_failure" : row.usageResponsibility,
+        usageResponsibility: row.billingLane === "managed" && fundingPoolFor(row) === FUNDING_POOL.CUSTOMER
+          ? "platform_failure" : row.usageResponsibility,
         includedReservedCredits: 0,
         purchasedReservedCredits: 0,
         platformReservedCredits: row.billingLane === "managed" ? row.reservedCredits : 0,
@@ -231,6 +249,25 @@ export function memoryModelReservations() {
         reconciliationReason: reason,
       });
       return row;
+    },
+    async releaseAll(owner, buildId) {
+      const released = [];
+      for (const row of rows.values()) {
+        if (row.owner !== owner || row.buildId !== buildId || row.state !== "held") continue;
+        row.state = "released";
+        row.releasedAt = new Date().toISOString();
+        if (row.reconciliationState === "pending") {
+          if (fundingPoolFor(row) === FUNDING_POOL.CUSTOMER) row.usageResponsibility = "platform_failure";
+          row.includedReservedCredits = 0;
+          row.purchasedReservedCredits = 0;
+          row.platformReservedCredits = row.billingLane === "managed" ? row.reservedCredits : 0;
+          row.reconciliationState = "platform_assumed";
+        } else {
+          row.reconciliationState = "provider_rejected";
+        }
+        released.push({ ...row });
+      }
+      return released;
     },
     rows: () => [...rows.values()].map((row) => ({ ...row })),
   };
@@ -251,21 +288,22 @@ export function supabaseModelReservations(client = serviceClient()) {
     return data;
   };
   return {
-    async budget(owner, buildId, ceilingCredits) {
+    async budget(owner, buildId, ceilingCredits, fundingPool = null) {
       const result = await client.from("bv2_model_reservations")
-        .select("owner,build_id,state,reserved_credits,actual_credits")
+        .select("owner,build_id,state,reserved_credits,actual_credits,funding_pool,usage_responsibility")
         .eq("owner", owner).eq("build_id", buildId);
       const rows = unwrap(result, "read Builder V2 reservation budget");
-      return reservationBudget(rows, { owner, buildId, ceilingCredits });
+      return reservationBudget(rows, { owner, buildId, ceilingCredits, fundingPool });
     },
     async reserve(input) {
       const balance = input.accountBalance || {};
-      const result = unwrap(await client.rpc("reserve_bv2_model_call_v3", {
+      const result = unwrap(await client.rpc("reserve_bv2_model_call_v4", {
         p_owner: input.owner, p_project_id: input.projectId, p_build_id: input.buildId,
         p_call_key: input.callKey, p_step: input.step, p_provider: input.provider,
         p_model: input.model, p_billing_lane: input.billingLane,
         p_reserved_credits: input.reservedCredits, p_ceiling_credits: input.ceilingCredits,
         p_usage_responsibility: responsibilityFor(input),
+        p_funding_pool: fundingPoolFor(input),
         p_included_available_credits: customerFunded(input)
           ? Number(balance.included ?? balance.bundle ?? input.accountAvailableCredits) : null,
         p_usage_period_start: customerFunded(input) ? balance.periodStart : null,
@@ -277,6 +315,7 @@ export function supabaseModelReservations(client = serviceClient()) {
         ...row, buildId: row.build_id, projectId: row.project_id, callKey: row.call_key,
         billingLane: row.billing_lane, reservedCredits: Number(row.reserved_credits),
         usageResponsibility: row.usage_responsibility,
+        fundingPool: row.funding_pool,
         includedReservedCredits: Number(row.included_reserved_credits || 0),
         purchasedReservedCredits: Number(row.purchased_reserved_credits || 0),
         platformReservedCredits: Number(row.platform_reserved_credits || 0),
@@ -312,6 +351,11 @@ export function supabaseModelReservations(client = serviceClient()) {
       return unwrap(await client.rpc("absorb_ambiguous_bv2_model_call", {
         p_owner: owner, p_reservation_id: id, p_reason: reason,
       }), "transfer ambiguous Builder V2 model call to platform");
+    },
+    async releaseAll(owner, buildId) {
+      return unwrap(await client.rpc("release_held_bv2_model_calls", {
+        p_owner: owner, p_build_id: buildId,
+      }), "release held Builder V2 model calls");
     },
   };
 }

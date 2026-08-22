@@ -141,20 +141,8 @@ export function withRuntimeEnv(tree, projectId, { env = process.env, required = 
   };
 }
 
-/**
- * Prove the exact generated-browser backend seam with a disposable authenticated identity and
- * entity. The privileged client is used only to guarantee cleanup after the generated app-auth
- * path creates the identity; it is never passed to the generated backend or returned in evidence.
- */
-export async function proveGeneratedRuntimeBackend({
-  projectId,
-  adminClient,
-  env = process.env,
-  backendFactory = createSupabaseBackend,
-  visitorSession = ensureAppVisitorSession,
-  fetchImpl = globalThis.fetch,
-  randomUUID = () => crypto.randomUUID(),
-} = {}) {
+/** Zero-network runtime authority proof. Safe to run before contract planning or provider spend. */
+export function proveGeneratedRuntimeConfig({ projectId, env = process.env } = {}) {
   const runtime = runtimeEnvContents(projectId, { env });
   const materialized = withRuntimeEnv({}, projectId, { env, required: true });
   const requiredValues = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "VITE_APP_ID", "VITE_AUTH_URL"];
@@ -163,6 +151,36 @@ export async function proveGeneratedRuntimeBackend({
       throw configurationError("runtime_env_materialization_failed",
         `Builder V2 could not materialize ${name}; no provider call was made.`, { field: name });
     }
+  }
+  return { ok: true, source: runtime.config.source, materialized: requiredValues };
+}
+
+/**
+ * Prove the exact generated-browser backend seam with a disposable authenticated identity and
+ * entity. The privileged client is used only to guarantee cleanup after the generated app-auth
+ * path creates the identity; it is never passed to the generated backend or returned in evidence.
+ */
+export async function proveGeneratedRuntimeBackend({
+  projectId,
+  adminClient,
+  requirements = { accounts: true, durableMutation: true },
+  env = process.env,
+  backendFactory = createSupabaseBackend,
+  visitorSession = ensureAppVisitorSession,
+  fetchImpl = globalThis.fetch,
+  randomUUID = () => crypto.randomUUID(),
+} = {}) {
+  const runtimeProof = proveGeneratedRuntimeConfig({ projectId, env });
+  const runtime = runtimeEnvContents(projectId, { env });
+  const needsAccounts = requirements?.accounts === true;
+  const needsDurableMutation = requirements?.durableMutation === true;
+  if (!needsAccounts && !needsDurableMutation) {
+    return {
+      ...runtimeProof,
+      backendInitialised: false, appAuth: false, visitorSession: false,
+      createReadUpdateDelete: false, sessionRecovery: false, cleanup: true,
+      skipped: "contract_requires_no_accounts_or_durable_mutation",
+    };
   }
   if (!adminClient?.auth?.admin?.deleteUser || !adminClient?.from || typeof fetchImpl !== "function") {
     throw configurationError("runtime_backend_preflight_unavailable",
@@ -192,39 +210,50 @@ export async function proveGeneratedRuntimeBackend({
     if (!backend?.auth?.signUp || !backend?.auth?.signIn || !backend?.db?.entity) {
       throw new Error("generated app-scoped backend did not initialise");
     }
+    // Entity RLS uses the generated visitor identity even when the product has no customer-facing
+    // accounts. That internal namespace bootstrap is required for a durable-mutation proof, but
+    // account recovery is not exercised unless accounts are part of the validated contract.
     stage = "app_auth_visitor_signup";
     const signedUp = await visitorSession({
       auth: backend.auth, appId: smokeAppId, storage, randomUUID: () => nonce,
     });
     userId = signedUp?.id || null;
     if (!userId) throw new Error("app-auth returned no visitor identity");
-    const store = backend.db.entity(PREFLIGHT_ENTITY);
-    stage = "authenticated_entity_create";
-    const created = await store.create({ nonce, purpose: "runtime_preflight" });
-    entityId = created?.id || null;
-    if (!entityId) throw new Error("public runtime write returned no entity id");
-    stage = "authenticated_entity_read";
-    const listed = await store.list({ filters: { nonce }, limit: 5 });
-    if (!listed.some((row) => row.id === entityId)) throw new Error("public runtime read did not return its write");
-    stage = "authenticated_entity_update";
-    const updated = await store.update(entityId, { nonce, purpose: "runtime_preflight", updated: true });
-    if (!updated?.data?.updated) throw new Error("public runtime update did not return its change");
-
-    stage = "app_auth_session_recovery";
-    await backend.auth.signOut();
-    backend = backendFactory(backendOptions);
-    const recovered = await visitorSession({
-      auth: backend.auth, appId: smokeAppId, storage, randomUUID: () => nonce,
-    });
-    if (recovered?.id !== userId) throw new Error("app-auth recovery returned a different visitor identity");
-    const recoveredRow = await backend.db.entity(PREFLIGHT_ENTITY).get(entityId);
-    if (recoveredRow?.id !== entityId || !recoveredRow?.data?.updated) {
-      throw new Error("recovered generated runtime could not read its entity");
+    if (needsDurableMutation) {
+      const store = backend.db.entity(PREFLIGHT_ENTITY);
+      stage = "authenticated_entity_create";
+      const created = await store.create({ nonce, purpose: "runtime_preflight" });
+      entityId = created?.id || null;
+      if (!entityId) throw new Error("public runtime write returned no entity id");
+      stage = "authenticated_entity_read";
+      const listed = await store.list({ filters: { nonce }, limit: 5 });
+      if (!listed.some((row) => row.id === entityId)) throw new Error("public runtime read did not return its write");
+      stage = "authenticated_entity_update";
+      const updated = await store.update(entityId, { nonce, purpose: "runtime_preflight", updated: true });
+      if (!updated?.data?.updated) throw new Error("public runtime update did not return its change");
     }
 
-    stage = "authenticated_entity_delete";
-    await backend.db.entity(PREFLIGHT_ENTITY).delete(entityId);
-    entityId = null;
+    if (needsAccounts) {
+      stage = "app_auth_session_recovery";
+      await backend.auth.signOut();
+      backend = backendFactory(backendOptions);
+      const recovered = await visitorSession({
+        auth: backend.auth, appId: smokeAppId, storage, randomUUID: () => nonce,
+      });
+      if (recovered?.id !== userId) throw new Error("app-auth recovery returned a different visitor identity");
+      if (needsDurableMutation) {
+        const recoveredRow = await backend.db.entity(PREFLIGHT_ENTITY).get(entityId);
+        if (recoveredRow?.id !== entityId || !recoveredRow?.data?.updated) {
+          throw new Error("recovered generated runtime could not read its entity");
+        }
+      }
+    }
+
+    if (needsDurableMutation) {
+      stage = "authenticated_entity_delete";
+      await backend.db.entity(PREFLIGHT_ENTITY).delete(entityId);
+      entityId = null;
+    }
     stage = "runtime_session_close";
     await backend.auth.signOut();
   } catch (error) {
@@ -269,19 +298,19 @@ export async function proveGeneratedRuntimeBackend({
       failure.action ? `action=${failure.action}` : null,
       failure.message || null,
     ].filter(Boolean).join("; ");
-    throw configurationError("runtime_app_auth_preflight_failed",
-      `Builder V2 generated app-auth runtime preflight failed at ${stage} (${detail}); no provider call was made.`,
+    const code = stage.startsWith("authenticated_entity")
+      ? "runtime_entity_preflight_failed" : "runtime_app_auth_preflight_failed";
+    throw configurationError(code,
+      `Builder V2 generated runtime capability preflight failed at ${stage} (${detail}); no additional provider call was made.`,
       { stage, status: upstreamStatus, action: failure.action || null, upstream: failure.message || null, retryable });
   }
   return {
-    ok: true,
-    source: runtime.config.source,
-    materialized: requiredValues,
+    ...runtimeProof,
     backendInitialised: !!backend?._client,
-    appAuth: true,
+    appAuth: needsAccounts,
     visitorSession: true,
-    createReadUpdateDelete: true,
-    sessionRecovery: true,
+    createReadUpdateDelete: needsDurableMutation,
+    sessionRecovery: needsAccounts,
     cleanup: true,
   };
 }

@@ -8,6 +8,7 @@ export const ACTIVITY_STATE = Object.freeze({
   checking: "CHECKING",
   finishing: "FINISHING",
   ready: "READY",
+  actionRequired: "ACTION_REQUIRED",
   failed: "FAILED",
   cancelled: "CANCELLED",
 });
@@ -27,6 +28,7 @@ export function activityLabel(state) {
     case ACTIVITY_STATE.checking: return "Checking everything…";
     case ACTIVITY_STATE.finishing: return "Finishing up…";
     case ACTIVITY_STATE.ready: return "Ready";
+    case ACTIVITY_STATE.actionRequired: return "Action required";
     case ACTIVITY_STATE.failed: return "Needs attention";
     case ACTIVITY_STATE.cancelled: return "Cancelled";
     default: return "Idle";
@@ -37,6 +39,18 @@ export function activityFromJob(job) {
   if (!job) return { state: ACTIVITY_STATE.idle, label: activityLabel(ACTIVITY_STATE.idle) };
   const status = String(job.status || "").toLowerCase();
   const phase = String(job.phase || "");
+  const durableState = String(job.state || job.result?.customerStatus?.state || "").toLowerCase();
+
+  if (durableState === "action_required" || job.actionRequired === true) {
+    return { state: ACTIVITY_STATE.actionRequired,
+      label: job.progressLabel || activityLabel(ACTIVITY_STATE.actionRequired) };
+  }
+  const exposed = {
+    building: ACTIVITY_STATE.building, checking: ACTIVITY_STATE.checking,
+    finishing: ACTIVITY_STATE.finishing, ready: ACTIVITY_STATE.ready,
+    failed: ACTIVITY_STATE.failed,
+  }[durableState];
+  if (exposed) return { state: exposed, label: job.progressLabel || activityLabel(exposed) };
 
   if (!ACTIVE_JOB_STATUSES.has(status)) {
     let state = ACTIVITY_STATE.idle;
@@ -85,6 +99,10 @@ export function normalizeProjectSummary(project) {
   const reported = project?.activity || null;
   const job = project?.activeBuild || null;
   const resolved = activityFromJob(job);
+  if (job && resolved.state === ACTIVITY_STATE.actionRequired) {
+    return { ...project, reportedActivity: reported, activity: null, buildJob: job,
+      activityState: resolved.state };
+  }
   if (!job || !isActiveActivity(resolved.state)) {
     return { ...project, reportedActivity: reported, activity: null, buildJob: null };
   }

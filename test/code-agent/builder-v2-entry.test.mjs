@@ -2,13 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { createJob, executeBuildPipelineWork } from "../../shell/server/lib/buildJobs.mjs";
+import { createJob, executeBuildPipelineWork, publicJob } from "../../shell/server/lib/buildJobs.mjs";
 import { startAppBuildV2, startExistingAppWorkV2 } from "../../shell/server/lib/builderV2/entry.mjs";
 
 test("terminal V2 conversation and reconnect events retain durable job and build identities", async () => {
   const source = await readFile(new URL("../../shell/server/lib/builderV2/entry.mjs", import.meta.url), "utf8");
   assert.match(source, /payload:\s*\{[\s\S]*?jobId: data\.jobId,[\s\S]*?buildId: job\.diagSessionId,[\s\S]*?pipelineVersion: "v2"/);
   assert.match(source, /ctx\.emit\("message", \{[\s\S]*?jobId: data\.jobId,[\s\S]*?buildId: job\.diagSessionId,[\s\S]*?pipelineVersion: "v2"/);
+});
+
+test("the public V2 job facade reconstructs action-required state without leaking worker internals", () => {
+  const job = publicJob({
+    id: "job", projectId: "project", mode: "new", status: "failed",
+    phase: "contract_gate_repair", error: "source /srv/jobs/private/App.jsx provider req_123",
+    stopReason: "customer_envelope_exhausted", result: {
+      finalText: "safe", buildOk: false, _worker: { checkpointId: "private" },
+      customerStatus: { state: "action_required", progressLabel: "Action required",
+        retrying: false, actionRequired: true, creditsProtected: true,
+        previewUrl: null, messageKey: "build_scope_action_required" },
+    },
+  });
+  assert.equal(job.state, "action_required");
+  assert.equal(job.stopReason, "action_required");
+  assert.equal(job.error, "The validated scope needs your approval or clarification before generation can continue.");
+  assert.doesNotMatch(JSON.stringify(job), /\/srv\/jobs|req_123|checkpointId|customer_envelope_exhausted/);
 });
 
 test("accepted Builder V2 dispatch is durable-worker-only and returns handled:true", async () => {
@@ -318,4 +335,6 @@ test("the worker durably marks a V2 public lifecycle running before pipeline exe
   assert.match(worker, /worker evidence persistence failed/);
   assert.match(worker, /await eventChain;[\s\S]*if \(eventFailure\) throw eventFailure;[\s\S]*queue\.complete/,
     "completion must wait for durable stdout/stderr evidence");
+  assert.match(worker, /state: classification === "cancelled" \? "cancelled" : "failed",[\s\S]*customer_state: structuredFailure\.customerActionRequired \? "action_required" : "failed",[\s\S]*failure: structuredFailure/,
+    "worker-level terminal failures must keep the internal and customer-safe projections aligned");
 });

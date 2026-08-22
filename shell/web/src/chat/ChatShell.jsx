@@ -1057,6 +1057,7 @@ function projectState(c) {
   }
   if (c.state === "waiting_user") return { label: "Waiting for your input", tone: "waiting" };
   if (resolved.state === ACTIVITY_STATE.ready) return { label: "Ready", tone: "done" };
+  if (resolved.state === ACTIVITY_STATE.actionRequired) return { label: "Action required", tone: "failed" };
   if (resolved.state === ACTIVITY_STATE.failed) return { label: "Needs attention", tone: "failed" };
   if (resolved.state === ACTIVITY_STATE.cancelled) return { label: "Cancelled", tone: "idle" };
   return { label: "Idle", tone: "idle" };

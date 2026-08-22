@@ -213,8 +213,9 @@ test("14S Supabase reservation adapter uses the atomic customer-accounting dispa
   const row = await supabaseModelReservations(client).reserve(dispatchInput({
     callKey: "repair-key", step: "repair",
   }));
-  assert.equal(calls[0].name, "reserve_bv2_model_call_v3");
+  assert.equal(calls[0].name, "reserve_bv2_model_call_v4");
   assert.equal(calls[0].args.p_usage_responsibility, "customer_request");
+  assert.equal(calls[0].args.p_funding_pool, "customer_generation");
   assert.equal(row.acquired, true);
   assert.equal(row.repairDispatchCount, 1);
   assert.equal(row.maxRepairs, 1);

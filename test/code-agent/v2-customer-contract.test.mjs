@@ -70,8 +70,10 @@ test("dashboard active-build summaries expose only owner-scoped queued or runnin
   });
   assert.equal(map.size, 1);
   assert.deepEqual(map.get("project-1"), {
-    jobId: "job-1", projectId: "project-1", status: "running", phase: "running",
+    jobId: "job-1", projectId: "project-1", status: "running", phase: "building",
     mode: "build", pipelineVersion: "v2", error: null, stopReason: null, result: null,
+    state: "building", progressLabel: "Building", retrying: false, actionRequired: false,
+    creditsProtected: true, previewUrl: null, messageKey: null,
   });
 });
 

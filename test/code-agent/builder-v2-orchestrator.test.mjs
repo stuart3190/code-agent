@@ -224,7 +224,7 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
   const build = await buildStore.get(result.buildId);
   assert.deepEqual(build.states, [
     "created", "contracting", "assets", "core", "verify_core",
-    "increment:newsletter-signup", "increment:browse-info", "green",
+    "increment:newsletter-signup", "increment:browse-info", "final_fresh_verification", "green",
   ], "green is written only after every contracted journey passes");
 
   // The green pointer names the LAST increment's snapshot; its tree holds everything.
@@ -697,7 +697,8 @@ test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats 
   assert.equal(repairCalls, 2, "reserved share, then overflow into the rest of the pool");
   assert.equal(result.repairRounds, 2);
   assert.equal(result.repairProgressStop?.reason, "unchanged");
-  assert.ok(["scoped", "unscoped"].includes(result.repairProgressStop?.strategy));
+  assert.ok(["exact_owning_file_repair", "causal_dependency_repair"]
+    .includes(result.repairProgressStop?.strategy));
   // Having used the whole allowance, the tier reports the allowance as the thing that ran out.
   assert.ok(["repair_share_exhausted", "repair_strategies_exhausted", "repair_allowance_exhausted"]
     .includes(result.stopReason), `unexpected stopReason: ${result.stopReason}`);

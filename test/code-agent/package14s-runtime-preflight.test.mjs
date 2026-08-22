@@ -330,6 +330,18 @@ test("14S preflight uses VITE_AUTH_URL app-auth, recovers the visitor, and compl
   assert.ok(requests.every((request) => !JSON.stringify(request).includes(SERVICE_KEY)));
 });
 
+test("14S static contracts skip app-auth and entity probes after zero-network runtime proof", async () => {
+  let backendCalls = 0;
+  const proof = await proveGeneratedRuntimeBackend({
+    projectId: PROJECT, env: env(), requirements: { accounts: false, durableMutation: false },
+    backendFactory: () => { backendCalls += 1; throw new Error("must not initialise"); },
+  });
+  assert.equal(backendCalls, 0);
+  assert.equal(proof.skipped, "contract_requires_no_accounts_or_durable_mutation");
+  assert.equal(proof.appAuth, false);
+  assert.equal(proof.createReadUpdateDelete, false);
+});
+
 test("14S app-auth failure is machine-readable with the exact failing stage before provider dispatch", async () => {
   await assert.rejects(proveGeneratedRuntimeBackend({
     projectId: PROJECT, adminClient: cleanupAdmin(), env: env(),
@@ -382,5 +394,5 @@ test("14S the app-auth refusal carries the upstream status, action and sentence 
     && error.message.includes("HTTP 403")
     && error.message.includes("action=signup")
     && error.message.includes("This application is not eligible for authentication.")
-    && error.message.includes("no provider call was made"));
+    && error.message.includes("no additional provider call was made"));
 });
