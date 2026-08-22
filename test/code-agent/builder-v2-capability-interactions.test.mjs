@@ -376,3 +376,52 @@ test("truly underspecified transformation is rejected with exact missing semanti
     missingFields: ["reads", "writes"],
   }]);
 });
+
+test("an operation no step names claims the interaction the journey already derived", () => {
+  // The journey's prose derives the commit; nothing links the operation to it by identity. A
+  // second, parallel interaction used to be fabricated for the operation — the generator was
+  // briefed to build two commits for one transition, and the fabricated one read the capability's
+  // parameter names while the contracted field values stayed on the flow nobody had bound.
+  const spec = deriveBuildSpec(makeContract({
+    fields: ["contactName", "notes"],
+    operations: [{ id: "update-record", entity: "record", kind: "update", journey: "primary-flow" }],
+    steps: [
+      { action: "edit the contact name and notes", target: "edit form", expect: "the edited contact name and notes are visible" },
+      { action: "update the record", target: "save control", expect: "the saved record shows the edited contact name" },
+    ],
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const mutations = spec.interactionContract.flows.filter((flow) => flow.kind === "mutation");
+  assert.equal(mutations.length, 1, `one durable commit, got ${mutations.map((flow) => flow.id).join(", ")}`);
+  assert.equal(mutations[0].operationId, "update-record");
+  assert.ok(mutations[0].reads.some((path) => path.includes(".draft.contactName")),
+    `the commit lost the contracted field values: ${JSON.stringify(mutations[0].reads)}`);
+});
+
+test("an operation identified by name binds exactly like one identified by id", () => {
+  // `id` and `name` are both accepted as an operation reference by the shared contract layer. The
+  // graph read `id` alone, so a name-only operation had identity undefined — and matched EVERY
+  // flow whose operationId was also unset, stamping capability semantics onto navigation, input
+  // and review interactions that perform nothing.
+  const spec = deriveBuildSpec(makeContract({
+    fields: ["title"],
+    operations: [{ name: "save-record", entity: "record", kind: "create", journey: "primary-flow" }],
+    steps: [
+      { action: "open the workspace", target: "/", expect: "the workspace is visible" },
+      { action: "enter a title", target: "title", operates: ["title"], expect: "the title is visible" },
+      { action: "review the entry", target: "review panel", expect: "the entered title is visible before saving" },
+      { action: "save the record", target: "save control", expect: "a saved status message is visible" },
+    ],
+  }));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const commit = spec.interactionContract.flows.find((flow) => flow.kind === "mutation");
+  assert.equal(commit.operationId, "save-record", "the operation's own identity never reached the graph");
+  for (const kind of ["navigation", "input", "review"]) {
+    for (const flow of spec.interactionContract.flows.filter((flow) => flow.kind === kind)) {
+      assert.equal(flow.operationId ?? null, null,
+        `a ${kind} interaction was claimed by an operation it does not perform (${flow.id})`);
+    }
+  }
+});

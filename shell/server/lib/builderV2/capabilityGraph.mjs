@@ -69,9 +69,22 @@ function descriptionFields(operation, fields) {
     .map(([, value]) => value.field));
 }
 
+/**
+ * An operation's identity, which a contract may spell `id` or `name`.
+ *
+ * The shared contract layer has always accepted either when resolving a step's operation
+ * reference; the graph read `id` alone. An operation carrying only `name` therefore had
+ * identity `undefined` here, and `flow.operationId === operation.id` — undefined on both
+ * sides — matched EVERY flow in the journey, stamping one operation's capability semantics
+ * onto navigation, input and review interactions that perform nothing.
+ */
+const operationIdentity = (operation) => operation?.id || operation?.name || null;
+
 function operationStep(operation, journey) {
   const steps = journey?.steps || [];
-  const direct = steps.findIndex((step) => list(step?.operates).some((value) => normalized(value) === normalized(operation?.id)));
+  const identifier = operationIdentity(operation);
+  if (!identifier) return -1;
+  const direct = steps.findIndex((step) => list(step?.operates).some((value) => normalized(value) === normalized(identifier)));
   if (direct >= 0) return direct;
 
   // Some structured contracts place an operation identity in `reads` on a step that also operates
@@ -80,7 +93,7 @@ function operationStep(operation, journey) {
   // had field operands, leaving the operation at synthetic index -1 while borrowing draft state
   // from step zero. Exact operation identity is authoritative and needs no prose inference.
   const referenced = steps.findIndex((step) => list(step?.reads)
-    .some((value) => normalized(value) === normalized(operation?.id)));
+    .some((value) => normalized(value) === normalized(identifier)));
   if (referenced >= 0) return referenced;
 
   // Backward-compatible structural recovery for contracts produced before operation
@@ -91,7 +104,7 @@ function operationStep(operation, journey) {
     ...tokens(operationKind(operation)),
     ...tokens(operation?.entity),
   ]);
-  const identity = tokens(operation?.id).filter((token) => !excluded.has(token));
+  const identity = tokens(identifier).filter((token) => !excluded.has(token));
   if (!identity.length) return -1;
   return steps.findIndex((step) => {
     if (!Array.isArray(step?.reads) || !step.reads.length || list(step?.operates).length) return false;
@@ -133,7 +146,10 @@ function capabilityOutputPaths(journey, capabilityId, method) {
 }
 
 function operationInteractionIds(operation, flows, stepIndex) {
-  const exact = flows.filter((flow) => flow.operationId === operation.id).map((flow) => flow.id);
+  const identifier = operationIdentity(operation);
+  // An identity-less operation matches NOTHING. Comparing two undefineds claimed every flow.
+  const exact = identifier
+    ? flows.filter((flow) => flow.operationId === identifier).map((flow) => flow.id) : [];
   if (exact.length || stepIndex < 0) return exact;
   return flows.filter((flow) => flow.stepIndex === stepIndex).map((flow) => flow.id);
 }
@@ -145,7 +161,7 @@ function persistenceResponsibility(operation, journey) {
     : method === "list" ? `${journey.id}.durable.records`
       : `${journey.id}.durable.record`;
   return {
-    id: `${operation.id}:persistence`, operationId: operation.id, type: "persistence",
+    id: `${operationIdentity(operation)}:persistence`, operationId: operationIdentity(operation), type: "persistence",
     semanticOperation: method,
     behavior: operation.description || `${method} ${operation.entity || "record"}`,
     entity: operation.entity || null, capabilityId: "crud", capabilityMethod: method,
@@ -172,7 +188,7 @@ function explicitResponsibilities(operation, journey, flows, contract) {
     const declaredWrites = declaredFields(responsibility?.writes || responsibility?.outputs, outputFields);
     const reads = declaredReads.map((field) => statePathForInput(journey, field, flows, stepIndex));
     const outputEffect = responsibility?.outputEffect || functionalOutputEffect(operation, responsibility);
-    const effectWrites = outputEffect ? [`${journey.id}.effect.${slug(operation.id)}`] : [];
+    const effectWrites = outputEffect ? [`${journey.id}.effect.${slug(operationIdentity(operation))}`] : [];
     const writes = unique([...declaredWrites.map((field) => statePathForOutput(journey, field)), ...effectWrites]);
     const downstreamDependencies = downstreamInteractions(journey, flows, stepIndex, declaredWrites, fields);
     const requestedCapability = responsibility?.capabilityId || responsibility?.capability || null;
@@ -189,10 +205,10 @@ function explicitResponsibilities(operation, journey, flows, contract) {
     const capabilityOutputs = type === "custom_functional"
       ? [] : capabilityOutputPaths(journey, capabilityId, capabilityMethod);
     return {
-      id: responsibility.id || `${operation.id}:${persistence ? "persistence" : `functional-${index + 1}`}`,
-      operationId: operation.id, type,
+      id: responsibility.id || `${operationIdentity(operation)}:${persistence ? "persistence" : `functional-${index + 1}`}`,
+      operationId: operationIdentity(operation), type,
       semanticOperation: requestedMethod || operationKind(operation),
-      behavior: responsibility.behavior || operation.description || operation.id,
+      behavior: responsibility.behavior || operation.description || operationIdentity(operation),
       entity: operation.entity || null,
       capabilityId: type === "custom_functional" ? null : capabilityId,
       capabilityMethod,
@@ -228,13 +244,13 @@ function legacyFunctionalResponsibility(operation, journey, flows, contract) {
     .flatMap((flow) => flow.writes || []).filter((path) => String(path).includes(".draft."))
     .map((path) => String(path).split(".").at(-1)));
   const semanticReads = declaredReads.length ? declaredReads : priorFields;
-  const semanticWrites = declaredWrites.length ? declaredWrites : [`${slug(operation.id)}Result`];
+  const semanticWrites = declaredWrites.length ? declaredWrites : [`${slug(operationIdentity(operation))}Result`];
   const interactionIds = stepIndex < 0 ? [] : flows.filter((flow) => flow.stepIndex === stepIndex).map((flow) => flow.id);
   const downstreamDependencies = downstreamInteractions(journey, flows, stepIndex, semanticWrites, fields);
   return {
-    id: `${operation.id}:functional`, operationId: operation.id, type: "custom_functional",
+    id: `${operationIdentity(operation)}:functional`, operationId: operationIdentity(operation), type: "custom_functional",
     semanticOperation: operationKind(operation),
-    behavior: operation.description || step?.action || operation.id,
+    behavior: operation.description || step?.action || operationIdentity(operation),
     entity: operation.entity || null, capabilityId: null, capabilityMethod: null,
     requestedCapability: null, requestedCapabilityMethod: null,
     reads: semanticReads.map((field) => statePathForInput(journey, field, flows, stepIndex)),
@@ -278,7 +294,7 @@ function deriveOperationResponsibilities(operation, journey, flows, contract) {
     };
   }
   return {
-    operationId: operation.id, journeyId: journey.id, entity: operation.entity || null,
+    operationId: operationIdentity(operation), journeyId: journey.id, entity: operation.entity || null,
     stepIndex, responsibilities,
   };
 }
@@ -595,13 +611,14 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
   const operations = new Map((graph?.operationResponsibilities || []).map((operation) => [operation.operationId, operation]));
   for (const operation of contract?.operations || []) {
     if (!operation?.journey) continue;
-    const mapped = operations.get(operation.id);
+    const identifier = operationIdentity(operation);
+    const mapped = operations.get(identifier);
     if (!mapped) {
-      problems.push(`operation ${operation.id} has no semantic responsibility mapping`);
+      problems.push(`operation ${identifier} has no semantic responsibility mapping`);
       continue;
     }
     for (const responsibility of mapped.responsibilities || []) {
-      const prefix = `operation ${operation.id} responsibility ${responsibility.id}`;
+      const prefix = `operation ${identifier} responsibility ${responsibility.id}`;
       if (responsibility.type === "persistence") {
         if (!capabilitySupports(responsibility.capabilityId, responsibility.capabilityMethod, "persistence")) {
           problems.push(`${prefix} is not implemented by the declared persistence capability method`);
@@ -618,7 +635,7 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
           ...(!(responsibility.writes || []).length ? ["writes"] : []),
         ];
         if (missingSemanticFields.length) {
-          problems.push(`capability_graph_semantics_incomplete operation=${operation.id} `
+          problems.push(`capability_graph_semantics_incomplete operation=${identifier} `
             + `responsibility=${responsibility.id} missing=${missingSemanticFields.join(",")}`);
         }
         if (!Array.isArray(responsibility.downstreamDependencies)) {

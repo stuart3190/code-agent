@@ -591,14 +591,31 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     const semantic = functional || persistence;
     if (!semantic) continue;
 
-    const exactTargets = flows.filter((flow) => flow.operationId === operation.operationId
-      && flow.journeyId === operation.journeyId);
+    const kind = interactionKindFor(responsibilities);
+    // Identity must be real on BOTH sides: an operation with none once matched every flow whose
+    // operationId was also unset, i.e. all of them.
+    const exactTargets = operation.operationId
+      ? flows.filter((flow) => flow.operationId === operation.operationId
+        && flow.journeyId === operation.journeyId)
+      : [];
     let targets = exactTargets;
     if (!targets.length && operationsAtStep.get(`${operation.journeyId}:${operation.stepIndex}`) === 1) {
       const candidates = unique(responsibilities.flatMap((responsibility) => responsibility.interactionIds || []))
         .map((id) => byId.get(id)).filter(Boolean)
         .filter((flow) => !flow.operationId && ["action", "lookup", "mutation", "navigation"].includes(flow.kind));
       targets = candidates.length ? [candidates[0]] : [];
+    }
+    if (!targets.length) {
+      // No step NAMES this operation, but the journey's own prose already derived the transition
+      // it performs. Fabricating a second interaction for it put two commits of the same kind in
+      // one journey: the generator was briefed to build both, and the operation's copy read the
+      // capability's parameter names (`input.id`, `input.partialValues`) while the contracted
+      // field values stayed on the flow nobody had bound. Claim the existing one instead — but
+      // only when exactly one unclaimed flow of that kind exists, because a journey with two is a
+      // genuine ambiguity this must never guess at.
+      const unclaimed = flows.filter((flow) => flow.journeyId === operation.journeyId
+        && !flow.operationId && flow.kind === kind);
+      if (unclaimed.length === 1) targets = unclaimed;
     }
 
     const journey = journeys.get(operation.journeyId) || null;
@@ -607,7 +624,6 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     const semanticModule = moduleForNode(semanticNode) || `journey:${operation.journeyId}`;
     const persistenceNode = persistence ? nodes.get(persistence.owner) : null;
     const persistenceModule = moduleForNode(persistenceNode);
-    const kind = interactionKindFor(responsibilities);
 
     if (!targets.length) {
       const id = `${operation.journeyId}:operation:${normalized(operation.operationId)}`;

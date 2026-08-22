@@ -121,14 +121,24 @@ test("HEAD's derivation reproduces the retained interaction contract exactly", (
   //                  COMMIT. The retained row's mutation came from the commit test matching the
   //                  path segment in the target "/book"; a route is an address, not an action.
   //
+  //   operation    — a declared operation NO step performs now carries its own interaction, so the
+  //   coverage       capability graph has an owner to hold responsible for it. This row predates
+  //                  capability graphs entirely: `list-bookings-for-capacity` is a background read
+  //                  behind the capacity journey's prose, and it is recognised structurally — no
+  //                  step index, and an operation identity — never by its kind.
+  //
   // Everything the retained row DID contain must still be reproduced identically — these changes
   // add claims (and drop two that a route path spelled), they do not restate the old ones.
-  const retained = interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
-  const now = rederived.interactionContract.flows.map((flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`);
-  const added = now.filter((id) => !retained.includes(id));
+  const identify = (flow) => `${flow.journeyId}:${flow.stepIndex}:${flow.kind}`;
+  const retained = interactionContract.flows.map(identify);
+  const now = rederived.interactionContract.flows.map(identify);
+  const added = rederived.interactionContract.flows.filter((flow) => !retained.includes(identify(flow)));
   const removed = retained.filter((id) => !now.includes(id));
-  assert.ok(added.every((id) => /:(flow_start|cancellation|navigation)$/.test(id)),
-    `derivation may only have ADDED flow entry, cancellation or navigation, but added ${added.join(", ")}`);
+  const permittedAddition = (flow) => /:(flow_start|cancellation|navigation)$/.test(identify(flow))
+    || (flow.stepIndex === -1 && Boolean(flow.operationId));
+  assert.ok(added.every(permittedAddition),
+    "derivation may only have ADDED flow entry, cancellation, navigation or operation coverage, "
+    + `but added ${added.filter((flow) => !permittedAddition(flow)).map(identify).join(", ")}`);
   assert.deepEqual(removed.filter((id) => !/:(navigation|mutation)$/.test(id)), [],
     "no contracted selection, input, review, recovery, lookup or cancellation may disappear");
   for (const kind of ["selection", "input", "review"]) {
