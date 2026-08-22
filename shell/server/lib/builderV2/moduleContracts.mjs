@@ -26,7 +26,11 @@ const factoryForBinding = (binding) => (CAPABILITIES[binding?.name]?.interface |
 
 function targetModules(flow, modulePlan) {
   const targets = new Set(flow?.responsibleModules || []);
-  const addRole = (pattern) => modulePlan.filter((module) => pattern.test(module.role || ""))
+  const addRole = (pattern) => modulePlan.filter((module) => {
+    const ownedJourneys = module.journeyIds || module.ownedJourneys || [];
+    return pattern.test(module.role || "")
+      && (!ownedJourneys.length || ownedJourneys.includes(flow?.journeyId));
+  })
     .forEach((module) => targets.add(module.path));
   if (["selection", "input", "action"].includes(flow?.kind)) addRole(/flow|form|editor|composition/i);
   if (flow?.kind === "review") addRole(/review|summary/i);

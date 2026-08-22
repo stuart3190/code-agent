@@ -642,6 +642,7 @@ export function capabilityModulePlan(graph, legacyPlan = []) {
     planned.push({
       path: node.extension.module,
       role: `bounded custom behavior for ${node.journeys.join(", ")}`,
+      journeyIds: [...node.journeys],
       requiredExports: node.extension.requiredExports,
       customBehaviorId: node.id,
       stateOwnership: {
@@ -657,18 +658,55 @@ export function capabilityModulePlan(graph, legacyPlan = []) {
 export function scopeCapabilityGraph(graph, journeys = []) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
   const scopedJourneys = (graph?.journeys || []).filter((journey) => ids.has(journey.journeyId));
-  const requiredNodes = new Set(scopedJourneys.flatMap((journey) => journey.requiredNodeIds));
+  const scopedResponsibilities = (graph?.operationResponsibilities || [])
+    .filter((operation) => ids.has(operation.journeyId));
+  const scopedInteractionIds = new Set(scopedJourneys.flatMap((journey) => [
+    ...(journey.dataFlows || []).map((flow) => flow.interactionId),
+    ...(journey.uiInteractionRequirements || []).map((requirement) => requirement.interactionId),
+    ...(journey.operationResponsibilities || []).flatMap((operation) => (operation.responsibilities || [])
+      .flatMap((responsibility) => responsibility.interactionIds || [])),
+  ]).filter(Boolean));
+  const scopedEntities = new Set(scopedJourneys.flatMap((journey) => journey.entities || []));
+  const requiredNodes = new Set(scopedJourneys.flatMap((journey) => journey.requiredNodeIds || []));
   const nodes = (graph?.nodes || []).filter((node) => requiredNodes.has(node.id)
-    || (node.type === "deterministic_capability" && ["session", "crud", "interaction-primitives"].includes(node.capabilityId)));
+    || (node.type === "deterministic_capability" && ["session", "crud", "interaction-primitives"].includes(node.capabilityId)))
+    .map((node) => {
+      const nodeResponsibilities = scopedResponsibilities.flatMap((operation) => operation.responsibilities || [])
+        .filter((responsibility) => responsibility.owner === node.id
+          || responsibility.customBehavior === node.id);
+      const requiredOperations = unique([
+        ...nodeResponsibilities.map((responsibility) => responsibility.capabilityMethod),
+        ...scopedJourneys.flatMap((journey) => (journey.dataFlows || [])
+          .filter((flow) => flow.semanticOwner === node.id)
+          .map((flow) => flow.capabilityMethod)),
+      ]);
+      return {
+        ...node,
+        ...(Array.isArray(node.requiredOperations)
+          ? { requiredOperations: requiredOperations.length ? requiredOperations : node.requiredOperations }
+          : {}),
+        ...(Array.isArray(node.entities)
+          ? { entities: node.entities.filter((entity) => scopedEntities.has(entity)) }
+          : {}),
+        ...(Array.isArray(node.journeys)
+          ? { journeys: node.journeys.filter((journeyId) => ids.has(journeyId)) }
+          : {}),
+        ...(Array.isArray(node.interactions)
+          ? { interactions: node.interactions.filter((interactionId) => scopedInteractionIds.has(interactionId)) }
+          : {}),
+        ...(Array.isArray(node.operationResponsibilities)
+          ? { operationResponsibilities: nodeResponsibilities }
+          : {}),
+      };
+    });
   const nodeIds = new Set(nodes.map((node) => node.id));
+  const retainedEndpoint = (endpoint) => nodeIds.has(endpoint) || scopedInteractionIds.has(endpoint);
   return {
     ...graph,
     nodes,
     journeys: scopedJourneys,
-    operationResponsibilities: (graph?.operationResponsibilities || [])
-      .filter((operation) => ids.has(operation.journeyId)),
-    edges: (graph?.edges || []).filter((edge) => (nodeIds.has(edge.from) || !String(edge.from).startsWith("capability:"))
-      && (nodeIds.has(edge.to) || !String(edge.to).startsWith("capability:"))),
+    operationResponsibilities: scopedResponsibilities,
+    edges: (graph?.edges || []).filter((edge) => retainedEndpoint(edge.from) && retainedEndpoint(edge.to)),
     customBehavior: nodes.filter((node) => node.type === "custom_behavior").map((node) => node.id),
   };
 }

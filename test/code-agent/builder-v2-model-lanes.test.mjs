@@ -5,6 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
   causalRepairProblems, createModelLanes, estimatePromptTokens, HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
@@ -14,6 +15,7 @@ import {
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
 
@@ -149,6 +151,8 @@ test("oversized pre-dispatch core calls compact into one bounded continuation wi
   assert.equal(reservations.rows().length, 1, "only the useful compact dispatch acquires a durable reservation");
   assert.deepEqual(patches.dispatchScope.allowedFiles,
     ["src/components/A.jsx", "src/components/B.jsx", "src/components/C.jsx"]);
+  assert.equal(patches.dispatchScope.expectedPatchTokens, 4_800,
+    "three missing modules reserve a realistic generation envelope");
   assert.match(logs.join("\n"), /continuing internally with 3 module\(s\).*resize 1/);
 });
 
@@ -168,6 +172,54 @@ test("scoped correction prompts use compact module contracts while full generati
     "bounded corrections no longer resend every unrelated module contract");
   assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);
   assert.doesNotMatch(compact, /diagnosticPadding/);
+});
+
+test("a retained complex application continuation carries only the selected module's semantic journey", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const selectedModule = spec.modulePlan.find((module) => (
+    module.journeyIds?.includes("create-auto-layout-project") && /Flow\.jsx$/.test(module.path)
+  ));
+  assert.ok(selectedModule, "the retained application has a journey-owned flow module");
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [selectedModule.path], allowedFiles: [selectedModule.path] },
+    logicalStep: "core",
+  });
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    headroomScope: scope,
+  });
+  const semanticSection = prompt.slice(prompt.indexOf("CAPABILITY GRAPH"),
+    prompt.indexOf("INTERNAL HEADROOM-SCOPED WRITE BOUNDARY"));
+  assert.match(semanticSection, /create-auto-layout-project/);
+  assert.match(semanticSection, /customBehaviorModule/);
+  assert.match(semanticSection, /persistenceHandoff/);
+  assert.doesNotMatch(semanticSection, /"testContract"/,
+    "registry self-tests remain machine-enforced and are not duplicated into a bounded dispatch");
+  for (const journey of fixture.contract.journeys) {
+    if (journey.id === "create-auto-layout-project") continue;
+    assert.doesNotMatch(semanticSection, new RegExp(`"journeyId": "${journey.id}"`));
+  }
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_500,
+    `the selected new modules received only ${plan.maxOutputTokens} output tokens`);
+  assert.ok(plan.estimatedInputTokens < 70_000,
+    `the bounded semantic envelope is still too large: ${plan.estimatedInputTokens}`);
 });
 
 test("browser-repair headroom batching targets only evidence owners and fits a useful one-file continuation", () => {

@@ -246,6 +246,7 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
   const sourceTokens = files.reduce((sum, path) => (
     sum + Math.ceil(String(tree?.[path] || "").length / 4)
   ), 0);
+  const missingFileTokens = files.filter((path) => typeof tree?.[path] !== "string").length * 1_600;
   return {
     ...scope,
     batchIndex: Number(scope.batchIndex || 0) + 1,
@@ -253,7 +254,7 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
     allowedFiles: files,
     remainingFiles: remaining.slice(width),
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
-    expectedPatchTokens: Math.min(6_000, Math.max(1_000, Math.ceil(sourceTokens * 1.1))),
+    expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
     instruction: "Continue the same approved build with only this next bounded module batch. "
       + `Complete [${files.join(", ")}], preserve every retained module, and do not touch unrelated files.`,
   };

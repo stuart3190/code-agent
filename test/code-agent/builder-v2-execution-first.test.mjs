@@ -264,6 +264,8 @@ test("headroom module batches continue automatically and gate only after the ret
       assert.equal(input.step, "correction", "continuations keep the original logical routing and funding step");
       assert.deepEqual(input.headroomScope.allowedFiles, ["src/routes/Booking.jsx", "src/routes/HomePage.jsx"]);
       assert.equal(input.headroomScope.batchIndex, 1);
+      assert.equal(input.headroomScope.expectedPatchTokens, 1_600,
+        "later missing modules retain the same realistic output envelope");
       return asPatches({
         "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
         "src/routes/HomePage.jsx": UNPRESCRIBED["src/routes/HomePage.jsx"],

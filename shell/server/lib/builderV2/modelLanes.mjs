@@ -264,6 +264,75 @@ function isDownstreamFailureEvidence(problem) {
   return /(?:required starting state|journey prerequisites).*could not be established/i.test(value);
 }
 
+// A bounded continuation consumes the same authoritative graph as full generation, projected to
+// the fields needed to implement its selected modules. Registry test contracts and the graph's
+// repeated node/journey copies remain enforced after the patch; serializing those copies again
+// can make the input alone exceed the unchanged per-call ceiling on a complex application.
+function headroomCapabilityGraphBrief(graph) {
+  if (!graph) return null;
+  const compactResponsibility = (responsibility) => ({
+    id: responsibility.id,
+    operationId: responsibility.operationId,
+    type: responsibility.type,
+    behavior: responsibility.behavior,
+    entity: responsibility.entity,
+    capabilityId: responsibility.capabilityId,
+    capabilityMethod: responsibility.capabilityMethod,
+    reads: responsibility.reads || [],
+    writes: responsibility.writes || [],
+    owner: responsibility.owner,
+    customBehavior: responsibility.customBehavior,
+    persistenceHandoff: responsibility.persistenceHandoff || null,
+  });
+  return {
+    version: graph.version,
+    buildProfile: graph.buildProfile,
+    nodes: (graph.nodes || []).map((node) => ({
+      id: node.id,
+      type: node.type,
+      capabilityId: node.capabilityId,
+      version: node.version,
+      proven: node.proven,
+      protected: node.protected,
+      requiredOperations: node.requiredOperations || [],
+      requiredInputs: node.type === "custom_behavior" ? node.requiredInputs || [] : undefined,
+      outputs: node.type === "custom_behavior" ? node.outputs || [] : undefined,
+      stateOwnership: node.stateOwnership,
+      persistenceSemantics: node.persistenceSemantics,
+      dependencies: node.dependencies || [],
+      entities: node.entities || [],
+      journeys: node.journeys || [],
+      interactions: node.interactions || [],
+      compositionModule: node.compositionModule || null,
+      extension: node.extension || null,
+      verificationSemantics: node.type === "custom_behavior" ? {
+        actions: node.verificationSemantics?.actions || [],
+        stateChange: node.verificationSemantics?.stateChange || [],
+        observe: node.verificationSemantics?.observe || [],
+        persistenceHandoff: node.verificationSemantics?.persistenceHandoff || [],
+      } : undefined,
+    })),
+    // Interaction-to-interaction edges repeat the same reads/writes/downstream relationships in
+    // the interaction contract below. Node-level dependency and persistence edges remain here.
+    edges: (graph.edges || []).filter((edge) => ["depends_on", "persistence_handoff"].includes(edge.type)),
+    journeys: (graph.journeys || []).map((journey) => ({
+      journeyId: journey.journeyId,
+      requiredNodeIds: journey.requiredNodeIds || [],
+      entities: journey.entities || [],
+      durableStateOwner: journey.durableStateOwner || null,
+      customBehavior: journey.customBehavior || null,
+    })),
+    operationResponsibilities: (graph.operationResponsibilities || []).map((operation) => ({
+      operationId: operation.operationId,
+      journeyId: operation.journeyId,
+      entity: operation.entity,
+      stepIndex: operation.stepIndex,
+      responsibilities: (operation.responsibilities || []).map(compactResponsibility),
+    })),
+    customBehavior: graph.customBehavior || [],
+  };
+}
+
 export function repairFailureReferences(problems = []) {
   return (problems || [])
     .filter((problem) => !isDownstreamFailureEvidence(problem))
@@ -376,21 +445,59 @@ export function renderPatchPrompt({
   const promptModulePlan = activeScopePaths.length
     ? modulePlan.filter((module) => activeScopePaths.includes(module.path))
     : modulePlan;
+  const contractJourneyIds = new Set((contract?.journeys || []).map((row) => row?.id).filter(Boolean));
+  const headroomJourneyIds = headroomScope && activeScopePaths.length ? (() => {
+    const selectedContracts = (headroomScope.moduleContracts?.specifications?.length
+      ? headroomScope.moduleContracts.specifications
+      : (moduleContracts?.specifications || []).filter((specification) => (
+        activeScopePaths.includes(specification.path)
+      )));
+    const selectedIds = new Set([
+      ...promptModulePlan.flatMap((module) => module.journeyIds || module.ownedJourneys || []),
+      ...selectedContracts.flatMap((specification) => specification.ownedJourneys || []),
+      ...selectedContracts.flatMap((specification) => (specification.semanticInteractions || [])
+        .map((interaction) => interaction.journeyId)),
+      ...selectedContracts.flatMap((specification) => (specification.requiredCapabilities || [])
+        .flatMap((capability) => (capability.methods || [])
+          .flatMap((method) => method.reachableFromJourneys || []))),
+    ].filter((id) => contractJourneyIds.has(id)));
+    const statePaths = selectedContracts.flatMap((specification) => [
+      ...(specification.state?.mayConsume || []),
+      ...(specification.state?.mustProduce || []),
+      ...(specification.downstream?.consumes || []),
+      ...(specification.downstream?.produces || []),
+    ]);
+    for (const journeyId of contractJourneyIds) {
+      if (statePaths.some((path) => String(path).startsWith(`${journeyId}.`))) selectedIds.add(journeyId);
+    }
+    const downstreamInteractionIds = new Set(selectedContracts
+      .flatMap((specification) => specification.downstream?.consumers || []));
+    for (const flow of contract?.interactionContract?.flows || []) {
+      if (downstreamInteractionIds.has(flow.id) && contractJourneyIds.has(flow.journeyId)) {
+        selectedIds.add(flow.journeyId);
+      }
+    }
+    return selectedIds;
+  })() : null;
   const browserRepair = step === "repair" && !repairScope && !moduleCorrectionScope;
   const repairFailures = browserRepair ? repairFailureReferences(problems) : [];
   const failedJourneyIds = new Set(repairFailures.map((failure) => failure.journeyId));
   const correctingIncrement = isRepair && String(originalStep || "").startsWith("increment:");
-  const scopedJourneys = step === "core" || (isRepair && !correctingIncrement)
+  const candidateJourneys = step === "core" || (isRepair && !correctingIncrement)
     ? (contract.journeys || []).filter((j) => browserRepair && failedJourneyIds.size
       ? failedJourneyIds.has(j.id) : tiers.essential.journeys.includes(j.id))
     : isEdit ? (contract.journeys || []) : [journey];
+  const headroomJourneys = headroomJourneyIds?.size
+    ? candidateJourneys.filter((candidate) => headroomJourneyIds.has(candidate?.id))
+    : [];
+  const scopedJourneys = headroomJourneys.length ? headroomJourneys : candidateJourneys;
   const scopedJourneyIds = new Set(scopedJourneys.map((row) => row?.id).filter(Boolean));
   const scopedOperations = (contract.operations || []).filter((operation) => (
     !operation?.journey || scopedJourneyIds.has(operation.journey)
   ));
   const scopedEntityNames = new Set([
     ...scopedOperations.map((operation) => operation.entity).filter(Boolean),
-    ...(step === "core" ? tiers.essential.entities : []),
+    ...(step === "core" && !headroomScope ? tiers.essential.entities : []),
   ]);
   const scopedCapabilityGraph = capabilityGraph
     ? scopeCapabilityGraph(capabilityGraph, scopedJourneys) : null;
@@ -413,19 +520,48 @@ export function renderPatchPrompt({
   // no interaction requirements.
   const repairFlows = browserRepair && matchedRepairFlows.length
     ? matchedRepairFlows : scopedInteractions.flows || [];
-  const repairInteractionPlan = browserRepair ? {
+  const headroomInteractionIds = new Set((headroomScope?.moduleContracts?.specifications || [])
+    .flatMap((specification) => [
+      ...(specification.semanticInteractions || []).map((interaction) => interaction.interactionId),
+      ...(specification.downstream?.consumers || []),
+    ]).filter(Boolean));
+  const promptInteractionFlows = headroomScope && headroomInteractionIds.size
+    ? repairFlows.filter((flow) => headroomInteractionIds.has(flow.id))
+    : repairFlows;
+  const repairInteractionPlan = browserRepair || headroomScope ? {
     version: scopedInteractions.version,
-    flows: repairFlows.map((flow) => ({
-      id: flow.id, journeyId: flow.journeyId, stepIndex: flow.stepIndex, kind: flow.kind,
-      action: flow.action, reads: flow.reads || [], writes: flow.writes || [],
-      control: flow.control ? {
+    flows: promptInteractionFlows.map((flow) => {
+      const compact = {
+        id: flow.id, journeyId: flow.journeyId, stepIndex: flow.stepIndex, kind: flow.kind,
+        action: flow.action, reads: flow.reads || [], writes: flow.writes || [],
+        control: flow.control ? {
+        machineId: flow.control.machineId || null,
         roles: flow.control.roles || [], logicalField: flow.control.logicalField || null,
         inputTypes: flow.control.inputTypes || [], accessibleNames: flow.control.accessibleNames || [],
-        editable: flow.control.editable === true, stateOwner: flow.control.stateOwner || null,
-      } : null,
-      capability: flow.capability || null, observable: flow.observable || null,
-      stateOwner: flow.stateOwner || null, responsibleModules: flow.responsibleModules || [],
-    })),
+        editable: flow.control.editable === true, selectedState: flow.control.selectedState === true,
+        stateOwner: flow.control.stateOwner || null, statePath: flow.control.statePath || null,
+        downstream: flow.control.downstream || [],
+        } : null,
+        capability: flow.capability || null, observable: flow.observable || null,
+        stateOwner: flow.stateOwner || null, responsibleModules: flow.responsibleModules || [],
+        operationId: flow.operationId || null,
+        responsibilityIds: flow.responsibilityIds || [],
+        semanticResponsibilityTypes: flow.semanticResponsibilityTypes || [],
+        actionIdentity: flow.actionIdentity || null,
+        expectedStateTransition: flow.expectedStateTransition || null,
+        downstreamConsumers: flow.downstreamConsumers || [],
+        capabilityId: flow.capabilityId || null,
+        capabilityMethod: flow.capabilityMethod || null,
+        customBehavior: flow.customBehavior || null,
+        customBehaviorModule: flow.customBehaviorModule || null,
+        customBehaviorExports: flow.customBehaviorExports || [],
+        persistenceHandoff: flow.persistenceHandoff || null,
+        verificationObservation: flow.verificationObservation || null,
+      };
+      return Object.fromEntries(Object.entries(compact).filter(([, value]) => (
+        value !== null && value !== undefined && (!Array.isArray(value) || value.length)
+      )));
+    }),
   } : scopedInteractions;
   const repairFocusPaths = browserRepair ? [...new Set(repairFlows.flatMap((flow) => [
     ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
@@ -497,7 +633,9 @@ export function renderPatchPrompt({
       : capabilityRequirementsBrief(scopedContract),
     scopedCapabilityGraph ? [
       "CAPABILITY GRAPH (authoritative behavior/state/data-flow ownership for this scope):",
-      JSON.stringify(scopedCapabilityGraph, null, 2),
+      JSON.stringify(headroomScope
+        ? headroomCapabilityGraphBrief(scopedCapabilityGraph)
+        : scopedCapabilityGraph, null, 2),
     ].join("\n") : "CAPABILITY GRAPH: none.",
     scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
     dependencyPlanBrief(scopedContract.dependencyPlan),
@@ -770,6 +908,7 @@ export function headroomDispatchScope({
   const selectedContracts = (moduleContracts?.specifications || [])
     .filter((specification) => files.includes(specification.path));
   const sourceTokens = files.reduce((sum, path) => sum + Math.ceil(String(tree?.[path] || "").length / 4), 0);
+  const missingFileTokens = files.filter((path) => typeof tree?.[path] !== "string").length * 1_600;
   return {
     kind: "headroom_continuation",
     logicalStep: previousScope?.logicalStep || logicalStep,
@@ -781,7 +920,7 @@ export function headroomDispatchScope({
     allowedPrefixes: active?.allowedPrefixes || [],
     findings: [],
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selectedContracts },
-    expectedPatchTokens: Math.min(6_000, Math.max(1_000, Math.ceil(sourceTokens * 1.1))),
+    expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
     instruction: "This is one bounded continuation of the same approved build. Implement the complete responsibilities "
       + `owned by [${files.join(", ")}], preserve the retained candidate, and do not touch unrelated modules. `
       + "Do not ask the customer to send another message; the orchestrator will continue with the remaining modules.",

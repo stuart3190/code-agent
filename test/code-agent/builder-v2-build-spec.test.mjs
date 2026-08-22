@@ -9,6 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { deriveBuildSpec, scopeBuildSpec, buildSpecSummary } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { scopeCapabilityGraph } from "../../shell/server/lib/builderV2/capabilityGraph.mjs";
 import { deriveModulePlan, journeyStepKinds } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { validateInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 
@@ -70,6 +71,39 @@ test("every view agrees about ownership: module plan, interactions and persisten
     spec.moduleContracts.specifications.map((row) => row.path).sort(),
     [...plannedPaths].sort(),
   );
+});
+
+test("journey modules and their generation contracts do not absorb same-role flows from other journeys", () => {
+  const spec = deriveBuildSpec(CONTRACT);
+  const bookFlow = spec.modulePlan.find((module) => module.path.endsWith("/BookConfirmation.jsx"));
+  const newsletterFlow = spec.modulePlan.find((module) => module.path.endsWith("/NewsletterConfirmation.jsx"));
+  assert.deepEqual(bookFlow.journeyIds, ["book"]);
+  assert.deepEqual(newsletterFlow.journeyIds, ["newsletter"]);
+
+  const bookContract = spec.moduleContracts.specifications.find((row) => row.path === bookFlow.path);
+  const newsletterContract = spec.moduleContracts.specifications.find((row) => row.path === newsletterFlow.path);
+  assert.deepEqual(bookContract.ownedJourneys, ["book"]);
+  assert.ok(bookContract.semanticInteractions.every((flow) => flow.journeyId === "book"));
+  assert.deepEqual(newsletterContract.ownedJourneys, ["newsletter"]);
+  assert.ok(newsletterContract.semanticInteractions.every((flow) => flow.journeyId === "newsletter"));
+});
+
+test("scoped capability graphs remove unrelated shared-node interactions and data-flow edges", () => {
+  const spec = deriveBuildSpec(CONTRACT);
+  const scoped = scopeCapabilityGraph(spec.capabilityGraph, [CONTRACT.journeys[0]]);
+  const interactionIds = new Set(scoped.journeys.flatMap((journey) => (
+    journey.dataFlows || []
+  )).map((flow) => flow.interactionId));
+  const nodeIds = new Set(scoped.nodes.map((node) => node.id));
+
+  assert.deepEqual(scoped.journeys.map((journey) => journey.journeyId), ["book"]);
+  assert.ok(scoped.nodes.every((node) => (node.journeys || []).every((id) => id === "book")));
+  assert.ok(scoped.nodes.every((node) => (node.interactions || []).every((id) => interactionIds.has(id))));
+  assert.ok(scoped.edges.every((edge) => (
+    (nodeIds.has(edge.from) || interactionIds.has(edge.from))
+      && (nodeIds.has(edge.to) || interactionIds.has(edge.to))
+  )));
+  assert.doesNotMatch(JSON.stringify(scoped), /newsletter:/);
 });
 
 test("scoping an increment narrows the same object rather than recomputing it", () => {

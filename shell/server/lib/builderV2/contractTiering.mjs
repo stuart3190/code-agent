@@ -314,21 +314,26 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || [], 
     const name = pascal(journey.id);
     const directory = `src/components/${String(journey.id).replace(/[^a-zA-Z0-9-]+/g, "-").toLowerCase()}`;
     plan.push({ path: `${directory}/${name}Flow.jsx`, role: "step navigation and flow composition",
+      journeyIds: [journey.id],
       stateOwnership: { owns: "ephemeral UI orchestration only", survivesReload: false, durableStateOwner } });
     if (kinds.has("review")) {
       plan.push({ path: `${directory}/${name}Review.jsx`, role: "review presentation",
+        journeyIds: [journey.id],
         stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
     }
     if (kinds.has("mutation")) {
       plan.push({ path: `${directory}/${name}Confirmation.jsx`, role: "confirmation and reference presentation",
+        journeyIds: [journey.id],
         stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
     }
     if (kinds.has("output")) {
       plan.push({ path: `${directory}/${name}Output.jsx`, role: "format serialization and download responsibility",
+        journeyIds: [journey.id],
         stateOwnership: { owns: "ephemeral export preparation only", survivesReload: false, durableStateOwner } });
     }
     if (kinds.has("cancellation") || kinds.has("recovery") || kinds.has("lookup")) {
       plan.push({ path: `${directory}/${name}Status.jsx`, role: "restored and cancelled status presentation",
+        journeyIds: [journey.id],
         stateOwnership: { owns: "presentation only", survivesReload: false, durableStateOwner } });
     }
   }
@@ -337,6 +342,11 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || [], 
     plan.push({
       path: requirement.ownerModule,
       role: `${requirement.capability.replace(/_/g, " ")} specialist rendering module`,
+      journeyIds: [...new Set(
+        requirement.journeyIds?.length
+          ? requirement.journeyIds
+          : [requirement.ownerJourneyId].filter(Boolean),
+      )],
       requiredImports: [requirement.package],
       stateOwnership: {
         owns: "ephemeral rendered scene and interaction state",
