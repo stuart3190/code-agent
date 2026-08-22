@@ -21,6 +21,14 @@ const PROJECTS = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `72000000-0000-4000-8000-00
 const PROJECT_B = "72000000-0000-4000-8000-000000000009";
 const V2_BUILDS = [1, 2, 3, 4, 5, 6, 7].map((n) => `73000000-0000-4000-8000-00000000000${n}`);
 const V2_BUILD_B = "73000000-0000-4000-8000-000000000009";
+const SETTLEMENT_PROJECTS = [
+  "72000000-0000-4000-8000-000000000010",
+  "72000000-0000-4000-8000-000000000011",
+];
+const SETTLEMENT_BUILDS = [
+  "73000000-0000-4000-8000-000000000010",
+  "73000000-0000-4000-8000-000000000011",
+];
 const PUBLIC_BUILDS = [1, 2, 3, 4, 5, 6, 7].map((n) => `74000000-0000-4000-8000-00000000000${n}`);
 const MISSING_WORK_JOB = "75000000-0000-4000-8000-000000000099";
 const DIAG = "76000000-0000-4000-8000-000000000001";
@@ -87,10 +95,19 @@ async function insertPublicBuild(index, project, values = {}) {
 
 const proof = {};
 try {
+  const activation = one(unwrap(await db.rpc("activate_bv2_managed_recovery_policy", {
+    p_deployment_commit: "a".repeat(40),
+    p_deployment_manifest_sha256: "b".repeat(64),
+    p_actor: "disposable_runtime_proof",
+  }), "activate managed recovery policy"));
+  assert.equal(activation.policyVersion, "managed_recovery_v1");
+  assert.equal(activation.deploymentCommit, "a".repeat(40));
+  proof.recoveryPolicyActivation = "deployment_manifest_bound";
   await createPrincipal(OWNER_A, "a");
   await createPrincipal(OWNER_B, "b");
   unwrap(await db.from("projects").insert([
     ...PROJECTS.map((id, index) => ({ id, owner: OWNER_A, name: `runtime proof ${index}`, tree: {} })),
+    ...SETTLEMENT_PROJECTS.map((id, index) => ({ id, owner: OWNER_A, name: `settlement proof ${index}`, tree: {} })),
     { id: PROJECT_B, owner: OWNER_B, name: "runtime proof owner b", tree: {} },
   ]), "projects");
   unwrap(await db.from("bv2_builds").insert([
@@ -101,6 +118,8 @@ try {
     { id: V2_BUILDS[4], owner: OWNER_A, project_id: PROJECTS[4], profile: "proof", request: "proof 5" },
     { id: V2_BUILDS[5], owner: OWNER_A, project_id: PROJECTS[5], profile: "proof", request: "proof 6" },
     { id: V2_BUILDS[6], owner: OWNER_A, project_id: PROJECTS[6], profile: "proof", request: "proof 7" },
+    { id: SETTLEMENT_BUILDS[0], owner: OWNER_A, project_id: SETTLEMENT_PROJECTS[0], profile: "proof", request: "refund proof" },
+    { id: SETTLEMENT_BUILDS[1], owner: OWNER_A, project_id: SETTLEMENT_PROJECTS[1], profile: "proof", request: "service credit proof" },
     { id: V2_BUILD_B, owner: OWNER_B, project_id: PROJECT_B, profile: "proof", request: "proof b" },
   ]), "V2 builds");
 
@@ -167,6 +186,11 @@ try {
   unwrap(await browser.auth.signInWithPassword({
     email: "bv2-runtime-a@example.invalid", password: "Disposable-V2-Runtime-Proof!42",
   }), "browser sign-in");
+  const browserActivation = await browser.rpc("activate_bv2_managed_recovery_policy", {
+    p_deployment_commit: "a".repeat(40), p_deployment_manifest_sha256: "b".repeat(64),
+    p_actor: "browser_must_not_activate",
+  });
+  assert.ok(browserActivation.error);
   const browserRead = await browser.from("bv2_model_reservations").select("id");
   assert.ok(browserRead.error);
   const browserReserve = await browser.rpc("reserve_bv2_model_call_v4", {
@@ -178,6 +202,65 @@ try {
   });
   assert.ok(browserReserve.error);
   proof.ownerAndBrowserIsolation = true;
+
+  const managedRefundReservation = one(unwrap(await reserve({
+    build: SETTLEMENT_BUILDS[0], project: SETTLEMENT_PROJECTS[0], key: "proof-managed-terminal-refund",
+    lane: "managed", credits: 3, available: 10,
+  }), "managed terminal reservation"));
+  unwrap(await db.rpc("settle_bv2_model_call_v2", {
+    p_owner: OWNER_A, p_reservation_id: managedRefundReservation.id, p_actual_credits: 2,
+    p_usage: { input: 10, output: 2 }, p_provider_request_ids: ["proof-managed-terminal-refund"],
+  }), "managed terminal usage settlement");
+  const managedTerminal = one(unwrap(await db.rpc("settle_bv2_build_terminal", {
+    p_owner: OWNER_A, p_build_id: SETTLEMENT_BUILDS[0], p_terminal_state: "failed",
+    p_failure_classification: "generated_app", p_green_preview: false, p_compensation_eligible: true,
+  }), "managed terminal settlement"));
+  const managedTerminalAgain = one(unwrap(await db.rpc("settle_bv2_build_terminal", {
+    p_owner: OWNER_A, p_build_id: SETTLEMENT_BUILDS[0], p_terminal_state: "failed",
+    p_failure_classification: "generated_app", p_green_preview: false, p_compensation_eligible: true,
+  }), "managed terminal settlement replay"));
+  assert.equal(managedTerminalAgain.id, managedTerminal.id);
+  assert.equal(Number(managedTerminal.managed_refund_credits), 2);
+  assert.equal(Number(managedTerminal.service_credit_credits), 0);
+  assert.equal(unwrap(await db.from("credit_ledger").select("id").eq("owner", OWNER_A)
+    .eq("ref", `bv2-terminal:${SETTLEMENT_BUILDS[0]}`).eq("kind", "refund"), "managed refund ledger").length, 1);
+
+  const connectedReservation = one(unwrap(await reserve({
+    build: SETTLEMENT_BUILDS[1], project: SETTLEMENT_PROJECTS[1], key: "proof-connected-terminal-credit",
+    lane: "connected_allowance", credits: 2,
+  }), "connected terminal reservation"));
+  unwrap(await db.rpc("settle_bv2_model_call_v2", {
+    p_owner: OWNER_A, p_reservation_id: connectedReservation.id, p_actual_credits: 1.5,
+    p_usage: { input: 8, output: 2 }, p_provider_request_ids: ["proof-connected-terminal-credit"],
+  }), "connected terminal usage settlement");
+  const recoveryReservation = one(unwrap(await db.rpc("reserve_bv2_model_call_v4", {
+    p_owner: OWNER_A, p_project_id: SETTLEMENT_PROJECTS[1], p_build_id: SETTLEMENT_BUILDS[1],
+    p_call_key: "proof-managed-recovery-not-compensated", p_step: "repair", p_provider: "openai",
+    p_model: "proof-model", p_billing_lane: "managed", p_usage_responsibility: "thrallo_repair",
+    p_funding_pool: "thrallo_recovery", p_reserved_credits: 1, p_ceiling_credits: 10,
+    p_included_available_credits: null, p_usage_period_start: null, p_usage_row_count: null,
+    p_metadata: { proof: true, logicalDispatchId: "proof-managed-recovery-not-compensated" },
+  }), "managed recovery reservation"));
+  unwrap(await db.rpc("settle_bv2_model_call_v2", {
+    p_owner: OWNER_A, p_reservation_id: recoveryReservation.reservation.id, p_actual_credits: 0.75,
+    p_usage: { input: 4, output: 1 }, p_provider_request_ids: ["proof-managed-recovery-not-compensated"],
+  }), "managed recovery usage settlement");
+  const connectedTerminal = one(unwrap(await db.rpc("settle_bv2_build_terminal", {
+    p_owner: OWNER_A, p_build_id: SETTLEMENT_BUILDS[1], p_terminal_state: "failed",
+    p_failure_classification: "generated_app", p_green_preview: false, p_compensation_eligible: true,
+  }), "connected terminal settlement"));
+  const connectedTerminalAgain = one(unwrap(await db.rpc("settle_bv2_build_terminal", {
+    p_owner: OWNER_A, p_build_id: SETTLEMENT_BUILDS[1], p_terminal_state: "failed",
+    p_failure_classification: "generated_app", p_green_preview: false, p_compensation_eligible: true,
+  }), "connected terminal settlement replay"));
+  assert.equal(connectedTerminalAgain.id, connectedTerminal.id);
+  assert.equal(Number(connectedTerminal.managed_refund_credits), 0);
+  assert.equal(Number(connectedTerminal.service_credit_credits), 1.5);
+  assert.equal(Number(connectedTerminal.spent_breakdown["thrallo_recovery:thrallo_repair:managed"]), 0.75);
+  assert.equal(unwrap(await db.from("credit_ledger").select("id").eq("owner", OWNER_A)
+    .eq("ref", `bv2-terminal:${SETTLEMENT_BUILDS[1]}`).eq("kind", "service_credit"), "service credit ledger").length, 1);
+  proof.terminalSettlement = { managedRefundIdempotent: true, serviceCreditIdempotent: true,
+    recoveryCompensated: false };
 
   const beforeWork = await insertPublicBuild(0, PROJECTS[0]);
   const beforeProvider = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {

@@ -158,6 +158,10 @@ test("customer status and messages never expose internal Builder evidence", () =
 test("the additive migration enforces managed-only recovery and idempotent terminal settlement", async () => {
   const sql = await readFile(new URL("../../supabase/migrations/20260822160000_bv2_contract_envelopes_recovery_settlement.sql", import.meta.url), "utf8");
   assert.match(sql, /p_funding_pool='thrallo_recovery'.*p_billing_lane<>'managed'/s);
+  assert.match(sql, /recovery_policy_version text not null default 'legacy_v1'/);
+  assert.match(sql, /activate_bv2_managed_recovery_policy[\s\S]*deploymentManifestSha256/);
+  assert.match(sql, /recovery_policy_version='managed_recovery_v1'[\s\S]*billing_lane='managed'/);
+  assert.doesNotMatch(sql, /created_at<'2026-08-22T16:00:00Z'/);
   assert.match(sql, /unique\(owner,build_id\)/);
   assert.match(sql, /on conflict\(owner,ref,kind,bucket\) do nothing/g);
   assert.match(sql, /funding_pool='customer_generation'.*usage_responsibility='customer_request'/s);
