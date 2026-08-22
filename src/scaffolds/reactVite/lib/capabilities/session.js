@@ -22,6 +22,22 @@ export async function ensureSession() {
   return (await currentUser()) || ensureVisitorSession();
 }
 
+export async function signUp(credentials) {
+  return auth.signUp(credentials);
+}
+
+export async function signIn(credentials) {
+  return auth.signIn(credentials);
+}
+
 export async function signOut() {
   return auth.signOut();
+}
+
+export async function resetPassword(input) {
+  return auth.resetPassword(input);
+}
+
+export async function confirmReset(input) {
+  return auth.confirmReset(input);
 }

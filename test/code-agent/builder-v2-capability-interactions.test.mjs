@@ -177,6 +177,47 @@ test("cross-entity transformation preserves source reads and output-entity write
   assert.equal(flow.persistenceHandoff, null);
 });
 
+test("registered auth surface resolves to session ownership with explicit session output", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "accountView", fields: ["ownerEmail"],
+    operations: [{
+      id: "sign-in", entity: "accountView", kind: "auth", journey: "primary-flow",
+      responsibilities: [{
+        type: "persistence", capability: "auth", capabilityMethod: "signIn",
+        reads: ["ownerEmail"], writes: [],
+      }],
+    }],
+    steps: [
+      { action: "enter an email", target: "email", operates: ["ownerEmail"], expect: "the email is visible" },
+      { action: "sign in", target: "sign-in form", operates: ["sign-in"], expect: "the workspace is visible" },
+    ],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const responsibility = spec.capabilityGraph.operationResponsibilities
+    .find((candidate) => candidate.operationId === "sign-in").responsibilities[0];
+  assert.equal(responsibility.type, "persistence");
+  assert.equal(responsibility.capabilityId, "session");
+  assert.equal(responsibility.capabilityMethod, "signIn");
+  assert.equal(responsibility.owner, "capability:session");
+  assert.ok(responsibility.reads.includes("primary-flow.draft.ownerEmail"));
+  assert.ok(responsibility.reads.includes("primary-flow.input.email"));
+  assert.ok(responsibility.reads.includes("primary-flow.input.password"));
+  assert.deepEqual(responsibility.writes, ["primary-flow.capability.session.session"]);
+  assert.ok(spec.capabilityGraph.nodes.some((node) => node.id === "capability:session"));
+  assert.ok(!spec.capabilityGraph.nodes.some((node) => node.id === "capability:auth"));
+  assert.deepEqual(spec.bindings.find((binding) => binding.name === "session").requiredMethods, ["signIn"]);
+
+  const flow = interactionFor(spec, "sign-in");
+  assertCommonSemantics(flow, "sign-in");
+  assert.equal(flow.stateOwner, "src/lib/capabilities/composed/session.js");
+  assert.equal(flow.capabilityId, "session");
+  assert.equal(flow.capabilityMethod, "signIn");
+  assert.deepEqual(flow.writes, ["primary-flow.capability.session.session"]);
+  assert.ok(spec.compositionPlan.interfaces.find((entry) => entry.module.endsWith("/session.js"))
+    .exports.includes("signIn"));
+});
+
 test("registered functional capability produces a capability-backed interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "booking", fields: ["date", "slotId", "name", "email", "reference", "status"],

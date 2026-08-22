@@ -4,7 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
-import { CAPABILITIES, validateBindings, capabilityBrief } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
+import {
+  CAPABILITIES, canonicalCapabilityId, validateBindings, capabilityBrief,
+} from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { indexFile } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { applyPatches } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { runStageGate } from "../../shell/server/lib/appBuild/stageGate.mjs";
@@ -41,9 +43,18 @@ test("WP4 — binding validation: unknown names and major mismatches fail loudly
   assert.match(major.problems[0], /major 2, platform ships 1\.0\.0/);
 });
 
+test("structured auth declarations resolve to the registered session capability", () => {
+  assert.equal(canonicalCapabilityId("session"), "session");
+  assert.equal(canonicalCapabilityId("auth"), "session");
+  assert.equal(canonicalCapabilityId("teleportation"), null);
+  assert.ok(CAPABILITIES.session.interface.includes("signIn"));
+  assert.ok(CAPABILITIES.session.responsibilitySemantics.persistence.includes("signIn"));
+  assert.deepEqual(CAPABILITIES.session.operationOutputs.signIn, ["session"]);
+});
+
 test("WP4 — the capability brief is byte-stable and sorted (a cacheable prefix segment)", () => {
   assert.equal(capabilityBrief(), capabilityBrief());
-  assert.match(capabilityBrief(["session", "crud"]), /crud@1\.0\.0[\s\S]*session@1\.0\.0/);
+  assert.match(capabilityBrief(["session", "crud"]), /crud@1\.0\.0[\s\S]*session@1\.1\.0/);
 });
 
 test("WP4 — patch engine and stage gate both refuse capability edits", async () => {

@@ -57,9 +57,10 @@ export function entityStore(entityType) {
   }
 
   if (nodes.has("capability:session")) {
-    files[`${COMPOSED_ROOT}/session.js`] = `${banner("session")}export { ensureSession, ensureVisitorSession, currentUser, signOut } from "../session.js";
+    const sessionExports = CAPABILITIES.session.interface;
+    files[`${COMPOSED_ROOT}/session.js`] = `${banner("session")}export { ${sessionExports.join(", ")} } from "../session.js";
 `;
-    interfaces.push({ module: `${COMPOSED_ROOT}/session.js`, exports: ["ensureSession", "ensureVisitorSession", "currentUser", "signOut"] });
+    interfaces.push({ module: `${COMPOSED_ROOT}/session.js`, exports: [...sessionExports] });
   }
 
   if (nodes.has("capability:roles")) {

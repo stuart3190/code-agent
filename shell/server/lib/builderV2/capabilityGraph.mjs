@@ -4,7 +4,7 @@
 // contract. It never guesses implementation from generated source. A flow is either owned by a
 // proven registry capability or is explicitly assigned to one bounded custom_behavior module.
 
-import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { CAPABILITIES, canonicalCapabilityId } from "./capabilityRegistry.mjs";
 import { validateBuildProfileGraph } from "../../../shared/buildProfile.mjs";
 
 export const CAPABILITY_GRAPH_VERSION = 2;
@@ -28,7 +28,7 @@ const list = (value) => (Array.isArray(value) ? unique(value.map(String)) : []);
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const tokens = (value) => String(value || "").toLowerCase().match(/[a-z0-9]+/g) || [];
 const capabilitySupports = (capabilityId, method, responsibility) => {
-  const supported = CAPABILITIES[capabilityId]?.responsibilitySemantics?.[responsibility] || [];
+  const supported = CAPABILITIES[canonicalCapabilityId(capabilityId)]?.responsibilitySemantics?.[responsibility] || [];
   return Boolean(method) && supported.includes(method);
 };
 
@@ -111,8 +111,14 @@ function downstreamInteractions(journey, flows, stepIndex, outputFields, fields)
 }
 
 function capabilityInputPaths(journey, capabilityId, method) {
-  const inputs = CAPABILITIES[capabilityId]?.requiredInputs?.operations?.[method] || [];
+  const inputs = CAPABILITIES[canonicalCapabilityId(capabilityId)]?.requiredInputs?.operations?.[method] || [];
   return unique(inputs.map((input) => `${journey.id}.input.${input}`));
+}
+
+function capabilityOutputPaths(journey, capabilityId, method) {
+  const id = canonicalCapabilityId(capabilityId);
+  const outputs = CAPABILITIES[id]?.operationOutputs?.[method] || [];
+  return unique(outputs.map((output) => `${journey.id}.capability.${id}.${output}`));
 }
 
 function operationInteractionIds(operation, flows, stepIndex) {
@@ -157,14 +163,18 @@ function explicitResponsibilities(operation, journey, flows, contract) {
     const writes = declaredWrites.map((field) => statePathForOutput(journey, field));
     const downstreamDependencies = downstreamInteractions(journey, flows, stepIndex, declaredWrites, fields);
     const requestedCapability = responsibility?.capabilityId || responsibility?.capability || null;
+    const resolvedCapability = canonicalCapabilityId(requestedCapability);
     const requestedMethod = responsibility?.capabilityMethod || responsibility?.method || responsibility?.operation || null;
     const persistence = responsibility?.type === "persistence";
     const automaticPersistence = persistence ? persistenceResponsibility(operation, journey) : null;
-    const capabilityId = persistence ? (requestedCapability || "crud") : requestedCapability;
+    const capabilityId = persistence ? (resolvedCapability || requestedCapability || "crud")
+      : (resolvedCapability || requestedCapability);
     const capabilityMethod = persistence
       ? persistenceCapabilityMethod(operation, responsibility, declaredReads, capabilityId)
       : (capabilitySupports(capabilityId, requestedMethod, "functional") ? requestedMethod : null);
     const type = persistence ? "persistence" : capabilityMethod ? "capability_functional" : "custom_functional";
+    const capabilityOutputs = type === "custom_functional"
+      ? [] : capabilityOutputPaths(journey, capabilityId, capabilityMethod);
     return {
       id: responsibility.id || `${operation.id}:${persistence ? "persistence" : `functional-${index + 1}`}`,
       operationId: operation.id, type,
@@ -177,7 +187,8 @@ function explicitResponsibilities(operation, journey, flows, contract) {
       requestedCapabilityMethod: requestedMethod && requestedMethod !== capabilityMethod ? requestedMethod : null,
       reads: persistence ? unique([...reads, ...(automaticPersistence?.reads || []),
         ...capabilityInputPaths(journey, capabilityId, capabilityMethod)]) : reads,
-      writes: persistence ? unique(automaticPersistence?.writes || writes) : writes,
+      writes: persistence ? unique([...(automaticPersistence?.writes || writes), ...capabilityOutputs])
+        : unique([...writes, ...capabilityOutputs]),
       declaredReads, declaredWrites,
       owner: type === "custom_functional" ? null : `capability:${capabilityId}`,
       customBehavior: null, requiresTransformation: !persistence,
@@ -363,7 +374,8 @@ export function deriveCapabilityGraph(contract, { bindings = [], interactionCont
   const normalizedBindings = [...bindings];
   for (const operation of contract?.operations || []) {
     for (const responsibility of operation?.responsibilities || []) {
-      const capabilityId = responsibility?.capabilityId || responsibility?.capability;
+      const declaredCapability = responsibility?.capabilityId || responsibility?.capability;
+      const capabilityId = canonicalCapabilityId(declaredCapability) || declaredCapability;
       const method = responsibility?.capabilityMethod || responsibility?.method || responsibility?.operation;
       if (!capabilitySupports(capabilityId, method, "functional")) continue;
       if (!normalizedBindings.some((binding) => binding.name === capabilityId)) {

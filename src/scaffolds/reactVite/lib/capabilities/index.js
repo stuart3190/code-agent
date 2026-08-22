@@ -6,7 +6,10 @@
 // a scaffold refresh on iterate updates these files only when the pinned major matches.
 
 export { makeEntityStore } from "./crud.js";
-export { ensureSession, ensureVisitorSession, currentUser, signOut } from "./session.js";
+export {
+  ensureSession, ensureVisitorSession, currentUser, signUp, signIn, signOut,
+  resetPassword, confirmReset,
+} from "./session.js";
 export { isOwner, requireOwner } from "./roles.js";
 export { makeBookingSystem, BOOKING_STATUS, CREATE_RESULT } from "./booking.js";
 export { makeWizardMachine, makeWizardPersistence, WIZARD_STATUS } from "./wizard.js";

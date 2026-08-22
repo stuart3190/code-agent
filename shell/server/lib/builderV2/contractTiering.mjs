@@ -5,7 +5,7 @@
 // unchanged; the orchestrator runs these AFTER contract generation and persists the result,
 // so essential/secondary is decided once, stored, and never recomputed ad hoc.
 
-import { CAPABILITIES, validateBindings } from "./capabilityRegistry.mjs";
+import { CAPABILITIES, canonicalCapabilityId, validateBindings } from "./capabilityRegistry.mjs";
 import { serviceClient } from "../supabase.mjs";
 
 const words = (text) => new Set(String(text || "")
@@ -97,7 +97,12 @@ export function tierContract(contract, { userCritical = [] } = {}) {
 
 /** Which registry capabilities this contract binds — from entities and journey vocabulary. */
 export function bindCapabilities(contract) {
-  const bindings = [capabilityBinding("crud"), capabilityBinding("session")];
+  const sessionMethods = (contract?.operations || []).flatMap((operation) =>
+    (operation?.responsibilities || []).filter((responsibility) =>
+      canonicalCapabilityId(responsibility?.capabilityId || responsibility?.capability) === "session")
+      .map((responsibility) => responsibility?.capabilityMethod || responsibility?.method || responsibility?.operation)
+      .filter((method) => CAPABILITIES.session.supportedOperations.includes(method)));
+  const bindings = [capabilityBinding("crud"), capabilityBinding("session", null, sessionMethods)];
   const entityNames = new Set((contract?.entities || []).map((e) => String(e.name).toLowerCase()));
   // FEATURE vocabulary only — journey ids/titles and route names, never step prose: "enter
   // your contact details" inside a booking form must not bind the contact-form capability.
@@ -149,7 +154,12 @@ export function capabilityRequirementsBrief(contract) {
   return [
     "REQUIRED CAPABILITY BINDINGS (structurally checked after every patch; headless behaviour only):",
     ...required.map((binding) => {
-      const factory = CAPABILITIES[binding.name].interface[0];
+      const entry = CAPABILITIES[binding.name];
+      const factory = entry.interface.find((name) => /^make[A-Z]/.test(name));
+      if (!factory) {
+        return `- ${binding.name}: import [${binding.requiredMethods.join(", ")}] from `
+          + `src/lib/capabilities/composed/${binding.name}.js and use those protected operations.`;
+      }
       const configuration = binding.configuration?.entity
         ? `{ entity: ${JSON.stringify(binding.configuration.entity)} }`
         : binding.configuration?.persistence === "platform" ? "{ id: <stable flow id>, steps: [...] } (platform persistence is automatic)" : "{}";

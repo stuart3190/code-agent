@@ -20,9 +20,13 @@ const LEGACY_CAPABILITIES = Object.freeze({
   },
   session: {
     name: "session",
-    version: "1.0.0",
+    version: "1.1.0",
     package: "src/lib/capabilities/session.js",
-    interface: ["ensureSession", "ensureVisitorSession", "currentUser", "signOut"],
+    aliases: ["auth"],
+    interface: [
+      "ensureSession", "ensureVisitorSession", "currentUser", "signUp", "signIn",
+      "signOut", "resetPassword", "confirmReset",
+    ],
     entities: [],
     uiContract: [],
     upgradePolicy: "replace-on-iterate",
@@ -77,13 +81,22 @@ const metadata = Object.freeze({
     testContract: ["create", "read", "update", "delete"],
   },
   session: {
-    supportedOperations: ["ensure", "recover", "current", "signOut"],
-    requiredInputs: { factory: [], operations: {} }, outputs: { session: "authenticated user or app-scoped visitor", current: "user or null" },
+    supportedOperations: ["ensure", "recover", "current", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"],
+    requiredInputs: { factory: [], operations: {
+      signUp: ["email", "password"], signIn: ["email", "password"],
+      resetPassword: ["email"], confirmReset: ["email", "code", "newPassword"],
+    } },
+    operationOutputs: {
+      ensure: ["session"], recover: ["session"], current: ["current"],
+      signUp: ["session"], signIn: ["session"], signOut: ["signedOut"],
+      resetPassword: ["resetRequested"], confirmReset: ["session"],
+    },
+    outputs: { session: "authenticated user or app-scoped visitor", current: "user or null", signedOut: "signed-out session state", resetRequested: "password reset request accepted" },
     stateOwnership: { owns: "authentication and session identity", scope: "browser and generated backend" },
     persistenceSemantics: { durable: true, owner: "generated auth runtime", browserStorage: "runtime-owned only" },
-    dependencies: [], compatibleUiInteractionPrimitives: [],
-    verificationSemantics: { actions: ["establish", "recover", "signOut"], stateChange: "session identity", durableMutation: false, observe: ["authorized operation succeeds", "current user"] },
-    testContract: ["current", "ensure", "recover", "signOut"],
+    dependencies: [], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["establish", "recover", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"], stateChange: "session identity", durableMutation: false, observe: ["authorized operation succeeds", "current user", "signed-out state"] },
+    testContract: ["current", "ensure", "recover", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"],
   },
   roles: {
     supportedOperations: ["isOwner", "requireOwner"],
@@ -157,7 +170,10 @@ const RESPONSIBILITY_SEMANTICS = Object.freeze({
     persistence: Object.freeze(["list", "get", "create", "update", "remove", "count", "subscribe"]),
     functional: Object.freeze([]),
   }),
-  session: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["ensure", "recover", "current", "signOut"]) }),
+  session: Object.freeze({
+    persistence: Object.freeze(["signUp", "signIn", "signOut", "resetPassword", "confirmReset"]),
+    functional: Object.freeze(["ensure", "recover", "current", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"]),
+  }),
   roles: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["isOwner", "requireOwner"]) }),
   booking: Object.freeze({
     persistence: Object.freeze(["createBooking", "getBooking", "listBookings", "cancelBooking"]),
@@ -184,6 +200,16 @@ export const CAPABILITIES = Object.freeze(Object.fromEntries(
       implementation: Object.freeze({ mode: "deterministic", proven: true, protected: true }),
     })]),
 ));
+
+const CAPABILITY_ALIASES = new Map(Object.entries(CAPABILITIES).flatMap(([id, entry]) => [
+  [id.toLowerCase(), id],
+  ...(entry.aliases || []).map((alias) => [String(alias).toLowerCase(), id]),
+]));
+
+/** Resolve a structured contract capability name to the one registry-owned capability id. */
+export function canonicalCapabilityId(value) {
+  return CAPABILITY_ALIASES.get(String(value || "").trim().toLowerCase()) || null;
+}
 
 /** Validate a contract's capability bindings against the registry. */
 export function validateBindings(bindings = []) {
