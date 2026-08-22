@@ -31,7 +31,10 @@ async function principal(owner, project, build, suffix) {
   const created = await db.auth.admin.createUser({ id: owner, email: `worker-proof-${suffix}@example.invalid`, password: "Disposable-Worker-Proof!42", email_confirm: true });
   if (created.error && !/already/i.test(created.error.message)) throw created.error;
   unwrap(await db.from("projects").upsert({ id: project, owner, name: `worker proof ${suffix}`, tree: {} }), "project");
-  unwrap(await db.from("build_jobs").upsert({ id: build, owner, project_id: project, mode: "build", status: "queued", phase: "queued", server_id: "proof" }), "build");
+  unwrap(await db.from("build_jobs").upsert({
+    id: build, owner, project_id: project, mode: "build", status: "queued", phase: "queued",
+    pipeline_version: "v2",
+  }), "build");
 }
 async function enqueue(owner, project, build, key, payload = { code: "same" }) {
   return one(unwrap(await db.rpc("build_work_enqueue", {
@@ -57,6 +60,19 @@ try {
   const job = await enqueue(A, PA, BA, "proof-race-one");
   const duplicate = await enqueue(A, PA, BA, "proof-race-one");
   assert.equal(duplicate.id, job.id); proof.enqueueIdempotent = true;
+  const publicIdentity = one(unwrap(await db.from("build_jobs")
+    .select("id,owner,project_id,pipeline_version,work_job_id").eq("id", BA).single(), "public worker identity"));
+  assert.deepEqual({
+    id: publicIdentity.id, owner: publicIdentity.owner, project: publicIdentity.project_id,
+    pipeline: publicIdentity.pipeline_version, work: publicIdentity.work_job_id,
+  }, { id: BA, owner: A, project: PA, pipeline: "v2", work: job.id });
+  const payloadIdentity = one(unwrap(await db.from("build_work_payloads")
+    .select("id,owner,project_id,build_id,job_type,payload_sha256")
+    .eq("id", job.payload_ref).single(), "durable payload identity"));
+  assert.equal(payloadIdentity.owner, A); assert.equal(payloadIdentity.project_id, PA);
+  assert.equal(payloadIdentity.build_id, BA); assert.equal(payloadIdentity.job_type, "compile");
+  assert.match(payloadIdentity.payload_sha256, /^[0-9a-f]{64}$/);
+  proof.canonicalWorkerIdentity = true;
 
   const [raceA, raceB] = await Promise.all([lease("proof-worker-a"), lease("proof-worker-b")]);
   const claimed = [raceA, raceB].filter(Boolean);

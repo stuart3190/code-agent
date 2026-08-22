@@ -332,7 +332,7 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 14);
   assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 80);
+  assert.equal(result.active, 81);
   // NOTE: this overlay model reports these as pending, but production has all five APPLIED —
   // confirmed against supabase_migrations.schema_migrations on 2026-08-20. The drift is in the
   // validator's overlay, not in the database, and it predates the last of these entries.
@@ -343,6 +343,7 @@ test("migration history validation reports the effective applied ledger, not the
     { version: "20260815095256", name: "drop_v1_build_job_server_id" },
     { version: "20260820092621", name: "bv2_widen_repair_dispatch_limit" },
     { version: "20260822160000", name: "bv2_contract_envelopes_recovery_settlement" },
+    { version: "20260822223523", name: "fix_bv2_pipeline_retry_durable_payload" },
   ]);
 });
 
@@ -397,7 +398,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes historical ledgers and the current 80-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current 81-migration catalog", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
@@ -414,7 +415,8 @@ test("backup/restore recognizes historical ledgers and the current 80-migration 
   assert.equal(runtimeCatalogEvidence(78).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(79).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(80).tables.length, 98);
-  assert.throws(() => runtimeCatalogEvidence(81), /unsupported production migration count/);
+  assert.equal(runtimeCatalogEvidence(81).tables.length, 98);
+  assert.throws(() => runtimeCatalogEvidence(82), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {

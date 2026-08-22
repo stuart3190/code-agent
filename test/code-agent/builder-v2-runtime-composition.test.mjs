@@ -137,13 +137,28 @@ test("V2 refuses a queued job if its provider or billing lane changed before dis
 
 test("V2 crash recovery restarts only before provider dispatch", async () => {
   const calls = [];
+  const retryPayload = {
+    pipelineVersion: "v2", mode: "resume_repair",
+    input: { sourceBuildId: "source-build", prompt: "resume" },
+    checkpointId: "checkpoint-7", logicalDispatchId: "dispatch-7", continuationIndex: 2,
+    usageResponsibility: "platform_failure",
+  };
   const client = { rpc: async (name, args) => {
     calls.push({ name, args });
-    return { data: { action: "restart_before_provider", abandonedBuildId: "old-build" }, error: null };
+    return { data: { action: "restart_before_provider", abandonedBuildId: "old-build", payload: retryPayload }, error: null };
   } };
-  assert.deepEqual(await prepareBuilderV2PipelineAttempt({
+  const workJob = {
     id: "work", owner: "owner", build_id: "public", attempts: 2,
-  }, { client }), { action: "restart_before_provider", abandonedBuildId: "old-build" });
+    payload: { pipelineVersion: "v2", usageResponsibility: "customer_request" },
+  };
+  assert.deepEqual(await prepareBuilderV2PipelineAttempt(workJob, { client }), {
+    action: "restart_before_provider", abandonedBuildId: "old-build", payload: retryPayload,
+  });
+  assert.equal(workJob.payload, retryPayload, "the active lease adopts the payload reconciled by the RPC");
+  assert.equal(workJob.payload.input.sourceBuildId, "source-build");
+  assert.equal(workJob.payload.checkpointId, "checkpoint-7");
+  assert.equal(workJob.payload.logicalDispatchId, "dispatch-7");
+  assert.equal(workJob.payload.continuationIndex, 2);
   assert.equal(calls[0].name, "prepare_bv2_pipeline_retry");
 });
 
@@ -171,4 +186,24 @@ test("V2 crash retry RPC is service-only and serialises against public build sta
   assert.match(sql, /from public\.bv2_model_reservations/);
   assert.match(sql, /v_reservation_count > 0[\s\S]*provider_replay_unsafe/i);
   assert.match(sql, /revoke execute on function public\.prepare_bv2_pipeline_retry\(uuid, uuid, uuid\)[\s\S]*public, anon, authenticated/i);
+});
+
+test("V2 crash retry uses the canonical durable work payload and fails closed without it", async () => {
+  const sql = await readFile(new URL(
+    "../../supabase/migrations/20260822223523_fix_bv2_pipeline_retry_durable_payload.sql",
+    import.meta.url,
+  ), "utf8");
+  assert.match(sql, /from public\.build_work_jobs j[\s\S]*from public\.build_work_payloads p[\s\S]*v_work\.payload_ref/i);
+  assert.match(sql, /from public\.build_work_payloads p[\s\S]*p\.id = v_work\.payload_ref/i);
+  assert.match(sql, /update public\.build_work_payloads set[\s\S]*payload_sha256 = v_payload_sha256/i);
+  assert.doesNotMatch(sql, /update public\.build_work_jobs set\s+payload/i);
+  assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\('bv2-model:' \|\| p_owner::text, 0\)\)/i);
+  assert.match(sql, /'action', 'retry_state_missing'[\s\S]*'code', 'durable_retry_state_missing'/i);
+
+  await assert.rejects(() => prepareBuilderV2PipelineAttempt({
+    id: "work", owner: "owner", build_id: "public", attempts: 2, payload: { pipelineVersion: "v2" },
+  }, { client: { rpc: async () => ({ data: {
+    action: "retry_state_missing", code: "durable_retry_state_missing", reason: "payload_missing",
+  }, error: null }) } }), (error) => error.code === "durable_retry_state_missing"
+    && error.recovery.reason === "payload_missing" && error.retryable === false);
 });

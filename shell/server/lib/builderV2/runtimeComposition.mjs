@@ -284,7 +284,23 @@ export async function prepareBuilderV2PipelineAttempt(workJob, { client = servic
       },
     };
   }
-  if (decision.action === "restart_before_provider") return decision;
+  if (decision.action === "restart_before_provider") {
+    if (!decision.payload || typeof decision.payload !== "object" || Array.isArray(decision.payload)) {
+      throw Object.assign(new Error("The interrupted Builder V2 build has no valid durable retry payload."), {
+        code: "durable_retry_state_missing", retryable: false, recovery: decision,
+      });
+    }
+    // The lease was materialised before the retry RPC reconciled the prior attempt. Adopt the
+    // refreshed durable payload so this process cannot dispatch with stale funding or continuation
+    // state while the next reclaimed lease sees different authority.
+    workJob.payload = decision.payload;
+    return decision;
+  }
+  if (decision.action === "retry_state_missing" || decision.action === "retry_state_invalid") {
+    throw Object.assign(new Error("The interrupted Builder V2 build has no safe durable retry state."), {
+      code: decision.code || "durable_retry_state_missing", retryable: false, recovery: decision,
+    });
+  }
   throw Object.assign(new Error(
     decision.action === "provider_replay_unsafe"
       ? "The worker stopped after provider dispatch may have begun. The build was not replayed; reconcile provider telemetry before retrying."

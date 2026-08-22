@@ -17,12 +17,12 @@ const db = createClient(url, serviceKey, { auth: { persistSession: false, autoRe
 const browser = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
 const OWNER_A = "71000000-0000-4000-8000-000000000001";
 const OWNER_B = "71000000-0000-4000-8000-000000000002";
-const PROJECTS = [1, 2, 3, 4, 5, 6].map((n) => `72000000-0000-4000-8000-00000000000${n}`);
-const PROJECT_B = "72000000-0000-4000-8000-000000000007";
-const V2_BUILDS = [1, 2, 3, 4, 5].map((n) => `73000000-0000-4000-8000-00000000000${n}`);
-const V2_BUILD_B = "73000000-0000-4000-8000-000000000006";
-const PUBLIC_BUILDS = [1, 2, 3, 4].map((n) => `74000000-0000-4000-8000-00000000000${n}`);
-const WORK_JOBS = [1, 2, 3, 4].map((n) => `75000000-0000-4000-8000-00000000000${n}`);
+const PROJECTS = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `72000000-0000-4000-8000-00000000000${n}`);
+const PROJECT_B = "72000000-0000-4000-8000-000000000009";
+const V2_BUILDS = [1, 2, 3, 4, 5, 6, 7].map((n) => `73000000-0000-4000-8000-00000000000${n}`);
+const V2_BUILD_B = "73000000-0000-4000-8000-000000000009";
+const PUBLIC_BUILDS = [1, 2, 3, 4, 5, 6, 7].map((n) => `74000000-0000-4000-8000-00000000000${n}`);
+const MISSING_WORK_JOB = "75000000-0000-4000-8000-000000000099";
 const DIAG = "76000000-0000-4000-8000-000000000001";
 
 const one = (value) => Array.isArray(value) ? value[0] : value;
@@ -36,12 +36,23 @@ function sql(statement) {
   }).trim();
 }
 async function reserve({ build = V2_BUILDS[0], project = PROJECTS[0], key, lane = "byok_api", credits = 1, ceiling = 10, available = null }) {
-  return db.rpc("reserve_bv2_model_call", {
+  const periodStart = "2000-01-01T00:00:00.000Z";
+  const usage = lane === "managed"
+    ? await db.from("ca_usage_records").select("id", { count: "exact", head: true })
+      .eq("owner", OWNER_A).gte("created_at", periodStart)
+    : { count: null, error: null };
+  if (usage.error) throw new Error(`usage snapshot: ${usage.error.message}`);
+  const result = await db.rpc("reserve_bv2_model_call_v4", {
     p_owner: OWNER_A, p_project_id: project, p_build_id: build, p_call_key: key,
     p_step: "generate", p_provider: "openai", p_model: "proof-model", p_billing_lane: lane,
-    p_reserved_credits: credits, p_ceiling_credits: ceiling,
-    p_account_available_credits: available, p_metadata: { proof: true },
+    p_usage_responsibility: "customer_request", p_funding_pool: "customer_generation",
+    p_reserved_credits: credits, p_ceiling_credits: ceiling, p_included_available_credits: available,
+    p_usage_period_start: lane === "managed" ? periodStart : null,
+    p_usage_row_count: lane === "managed" ? usage.count : null,
+    p_metadata: { proof: true, logicalDispatchId: key, continuationIndex: 0, causalFiles: [] },
   });
+  if (result.error) return result;
+  return { ...result, data: one(result.data)?.reservation || one(result.data) };
 }
 async function release(id) {
   return one(unwrap(await db.rpc("release_bv2_model_call", {
@@ -58,9 +69,20 @@ async function createPrincipal(id, suffix) {
 async function insertPublicBuild(index, project, values = {}) {
   unwrap(await db.from("build_jobs").insert({
     id: PUBLIC_BUILDS[index], owner: OWNER_A, project_id: project, mode: "build",
-    status: "running", phase: "running", server_id: "runtime-proof", pipeline_version: "v2",
-    work_job_id: WORK_JOBS[index], ...values,
+    status: "running", phase: "running", pipeline_version: "v2", ...values,
   }), `public build ${index}`);
+  const payload = {
+    pipelineVersion: "v2", mode: "resume_repair",
+    input: { prompt: `retry proof ${index}`, sourceBuildId: values.bv2_build_id || V2_BUILDS[index] || null },
+    checkpointId: `77000000-0000-4000-8000-00000000000${index + 1}`,
+    logicalDispatchId: `retry-dispatch-${index}`, continuationIndex: index + 1,
+  };
+  return one(unwrap(await db.rpc("build_work_enqueue", {
+    p_owner: OWNER_A, p_project_id: project, p_build_id: PUBLIC_BUILDS[index],
+    p_job_type: "builder_pipeline", p_payload: payload,
+    p_idempotency_key: `runtime-retry-proof:${PUBLIC_BUILDS[index]}`,
+    p_priority: 20, p_max_attempts: 2, p_resource_limits: {},
+  }), `work job ${index}`));
 }
 
 const proof = {};
@@ -77,6 +99,8 @@ try {
     { id: V2_BUILDS[2], owner: OWNER_A, project_id: PROJECTS[2], profile: "proof", request: "proof 3" },
     { id: V2_BUILDS[3], owner: OWNER_A, project_id: PROJECTS[3], profile: "proof", request: "proof 4" },
     { id: V2_BUILDS[4], owner: OWNER_A, project_id: PROJECTS[4], profile: "proof", request: "proof 5" },
+    { id: V2_BUILDS[5], owner: OWNER_A, project_id: PROJECTS[5], profile: "proof", request: "proof 6" },
+    { id: V2_BUILDS[6], owner: OWNER_A, project_id: PROJECTS[6], profile: "proof", request: "proof 7" },
     { id: V2_BUILD_B, owner: OWNER_B, project_id: PROJECT_B, profile: "proof", request: "proof b" },
   ]), "V2 builds");
 
@@ -104,13 +128,13 @@ try {
   assert.equal(ownerRace.filter((result) => !result.error).length, 1);
   assert.equal(ownerRace.filter((result) => result.error).length, 1);
   const managed = one(ownerRace.find((result) => !result.error).data);
-  const settled = one(unwrap(await db.rpc("settle_bv2_model_call", {
+  const settled = one(unwrap(await db.rpc("settle_bv2_model_call_v2", {
     p_owner: OWNER_A, p_reservation_id: managed.id, p_actual_credits: 2.25,
     p_usage: { input: 100, cached: 40, output: 20, reasoning: 5 },
     p_provider_request_ids: ["proof-provider-request-1"],
   }), "settlement"));
   assert.equal(settled.state, "settled");
-  const settledAgain = one(unwrap(await db.rpc("settle_bv2_model_call", {
+  const settledAgain = one(unwrap(await db.rpc("settle_bv2_model_call_v2", {
     p_owner: OWNER_A, p_reservation_id: managed.id, p_actual_credits: 2.25,
     p_usage: { input: 100, cached: 40, output: 20, reasoning: 5 },
     p_provider_request_ids: ["proof-provider-request-1"],
@@ -125,7 +149,7 @@ try {
     build: V2_BUILDS[1], project: PROJECTS[1], key: "proof-provider-collision",
     lane: "managed", credits: 1, available: 10,
   }), "collision reservation"));
-  const duplicateProvider = await db.rpc("settle_bv2_model_call", {
+  const duplicateProvider = await db.rpc("settle_bv2_model_call_v2", {
     p_owner: OWNER_A, p_reservation_id: collision.id, p_actual_credits: 1,
     p_usage: { input: 1, cached: 0, output: 1, reasoning: 0 },
     p_provider_request_ids: ["proof-provider-request-1"],
@@ -134,7 +158,7 @@ try {
   await release(collision.id);
   proof.providerTelemetryDeduplicated = true;
 
-  const crossOwner = await db.rpc("settle_bv2_model_call", {
+  const crossOwner = await db.rpc("settle_bv2_model_call_v2", {
     p_owner: OWNER_B, p_reservation_id: managed.id, p_actual_credits: 2.25,
     p_usage: {}, p_provider_request_ids: [],
   });
@@ -145,47 +169,127 @@ try {
   }), "browser sign-in");
   const browserRead = await browser.from("bv2_model_reservations").select("id");
   assert.ok(browserRead.error);
-  const browserReserve = await browser.rpc("reserve_bv2_model_call", {
+  const browserReserve = await browser.rpc("reserve_bv2_model_call_v4", {
     p_owner: OWNER_A, p_project_id: PROJECTS[0], p_build_id: V2_BUILDS[0],
     p_call_key: "proof-browser-denied", p_step: "generate", p_provider: "openai",
-    p_model: "proof-model", p_billing_lane: "byok_api", p_reserved_credits: 1,
-    p_ceiling_credits: 10, p_account_available_credits: null, p_metadata: {},
+    p_model: "proof-model", p_billing_lane: "byok_api", p_usage_responsibility: "customer_request",
+    p_funding_pool: "customer_generation", p_reserved_credits: 1, p_ceiling_credits: 10,
+    p_included_available_credits: null, p_usage_period_start: null, p_usage_row_count: null, p_metadata: {},
   });
   assert.ok(browserReserve.error);
   proof.ownerAndBrowserIsolation = true;
 
-  await insertPublicBuild(0, PROJECTS[0]);
+  const beforeWork = await insertPublicBuild(0, PROJECTS[0]);
   const beforeProvider = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
-    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[0], p_work_job_id: WORK_JOBS[0],
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[0], p_work_job_id: beforeWork.id,
   }), "retry before provider"));
   assert.equal(beforeProvider.action, "restart_before_provider");
+  assert.equal(beforeProvider.payloadRef, beforeWork.payload_ref);
+  assert.equal(beforeProvider.payload.checkpointId, "77000000-0000-4000-8000-000000000001");
+  assert.equal(beforeProvider.payload.logicalDispatchId, "retry-dispatch-0");
+  assert.equal(beforeProvider.payload.continuationIndex, 1);
 
-  await insertPublicBuild(1, PROJECTS[2], { bv2_build_id: V2_BUILDS[2] });
+  const abandonedWork = await insertPublicBuild(1, PROJECTS[2], { bv2_build_id: V2_BUILDS[2] });
   const abandoned = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
-    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[1], p_work_job_id: WORK_JOBS[1],
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[1], p_work_job_id: abandonedWork.id,
   }), "retry abandoned build"));
   assert.equal(abandoned.action, "restart_before_provider");
-  const abandonedRow = one(unwrap(await db.from("build_jobs").select("bv2_build_id").eq("id", PUBLIC_BUILDS[1]).single(), "abandoned public row"));
+  assert.equal(abandoned.payload.usageResponsibility, "platform_failure");
+  assert.equal(abandoned.payload.recoveryOfBuildId, V2_BUILDS[2]);
+  assert.equal(abandoned.payload.input.sourceBuildId, V2_BUILDS[2]);
+  assert.equal(abandoned.payload.checkpointId, "77000000-0000-4000-8000-000000000002");
+  assert.equal(abandoned.payload.logicalDispatchId, "retry-dispatch-1");
+  assert.equal(abandoned.payload.continuationIndex, 2);
+  const abandonedRow = one(unwrap(await db.from("build_jobs")
+    .select("id,owner,project_id,work_job_id,bv2_build_id").eq("id", PUBLIC_BUILDS[1]).single(), "abandoned public row"));
   assert.equal(abandonedRow.bv2_build_id, null);
+  assert.deepEqual({ id: abandonedRow.id, owner: abandonedRow.owner, project: abandonedRow.project_id,
+    work: abandonedRow.work_job_id }, {
+    id: PUBLIC_BUILDS[1], owner: OWNER_A, project: PROJECTS[2], work: abandonedWork.id,
+  });
+  const abandonedPayload = one(unwrap(await db.from("build_work_payloads")
+    .select("id,owner,project_id,build_id,payload,payload_sha256,byte_size")
+    .eq("id", abandonedWork.payload_ref).single(), "abandoned durable payload"));
+  assert.equal(abandonedPayload.id, abandonedWork.payload_ref);
+  assert.equal(abandonedPayload.owner, OWNER_A); assert.equal(abandonedPayload.project_id, PROJECTS[2]);
+  assert.equal(abandonedPayload.build_id, PUBLIC_BUILDS[1]);
+  assert.deepEqual(abandonedPayload.payload, abandoned.payload);
+  assert.equal(abandonedPayload.payload_sha256, abandoned.payloadSha256);
+  assert.equal(sql(`select payload_sha256=encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex')
+    and byte_size=octet_length(payload::text) from public.build_work_payloads where id='${abandonedWork.payload_ref}';`), "t");
+  proof.durableRetryPayload = true;
 
-  await insertPublicBuild(2, PROJECTS[3], { bv2_build_id: V2_BUILDS[3] });
-  unwrap(await reserve({ build: V2_BUILDS[3], project: PROJECTS[3], key: "proof-replay-unsafe" }), "unsafe reservation");
+  const unsafeWork = await insertPublicBuild(2, PROJECTS[3], { bv2_build_id: V2_BUILDS[3] });
+  const unresolved = one(unwrap(await reserve({
+    build: V2_BUILDS[3], project: PROJECTS[3], key: "proof-replay-unsafe",
+  }), "unsafe reservation"));
   const unsafe = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
-    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[2], p_work_job_id: WORK_JOBS[2],
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[2], p_work_job_id: unsafeWork.id,
   }), "unsafe replay"));
   assert.equal(unsafe.action, "provider_replay_unsafe");
   assert.equal(unsafe.reservationCount, 1);
+  assert.equal(unsafe.unresolvedReservationCount, 1);
+  await release(unresolved.id);
 
-  await insertPublicBuild(3, PROJECTS[4], {
+  const recoveredWork = await insertPublicBuild(3, PROJECTS[4], {
     status: "complete", phase: "complete", result: { ok: true, snapshot: "green" },
     bv2_build_id: V2_BUILDS[4],
   });
   const recovered = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
-    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[3], p_work_job_id: WORK_JOBS[3],
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[3], p_work_job_id: recoveredWork.id,
   }), "durable recovery"));
   assert.equal(recovered.action, "recovered");
   assert.equal(recovered.result.snapshot, "green");
-  proof.retryBoundary = [beforeProvider.action, abandoned.action, unsafe.action, recovered.action];
+
+  const settledWork = await insertPublicBuild(4, PROJECTS[5], { bv2_build_id: V2_BUILDS[5] });
+  const reconciled = one(unwrap(await reserve({
+    build: V2_BUILDS[5], project: PROJECTS[5], key: "proof-retry-settled",
+  }), "reconciled reservation"));
+  unwrap(await db.rpc("settle_bv2_model_call_v2", {
+    p_owner: OWNER_A, p_reservation_id: reconciled.id, p_actual_credits: 1,
+    p_usage: { input: 1, cached: 0, output: 1, reasoning: 0 },
+    p_provider_request_ids: ["proof-provider-retry-settled"],
+  }), "reconciled settlement");
+  const afterSettlement = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[4], p_work_job_id: settledWork.id,
+  }), "retry after settled provider result"));
+  assert.equal(afterSettlement.action, "restart_before_provider");
+  assert.equal(afterSettlement.platformFunded, true);
+  assert.equal(afterSettlement.payload.usageResponsibility, "platform_failure");
+
+  const ambiguousWork = await insertPublicBuild(5, PROJECTS[6], { bv2_build_id: V2_BUILDS[6] });
+  const ambiguousReservation = one(unwrap(await reserve({
+    build: V2_BUILDS[6], project: PROJECTS[6], key: "proof-retry-ambiguous",
+  }), "ambiguous reservation"));
+  unwrap(await db.rpc("mark_bv2_model_call_ambiguous", {
+    p_owner: OWNER_A, p_reservation_id: ambiguousReservation.id,
+    p_reason: "disposable proof", p_provider_request_ids: ["proof-provider-retry-ambiguous"],
+  }), "mark ambiguous");
+  const ambiguousBlocked = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[5], p_work_job_id: ambiguousWork.id,
+  }), "ambiguous retry blocked"));
+  assert.equal(ambiguousBlocked.action, "provider_replay_unsafe");
+  unwrap(await db.rpc("absorb_ambiguous_bv2_model_call", {
+    p_owner: OWNER_A, p_reservation_id: ambiguousReservation.id, p_reason: "proof reconciliation",
+  }), "absorb ambiguous");
+  const ambiguousReconciled = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[5], p_work_job_id: ambiguousWork.id,
+  }), "ambiguous retry reconciled"));
+  assert.equal(ambiguousReconciled.action, "restart_before_provider");
+  assert.equal(ambiguousReconciled.platformFunded, true);
+
+  unwrap(await db.from("build_jobs").insert({
+    id: PUBLIC_BUILDS[6], owner: OWNER_A, project_id: PROJECTS[7], mode: "build",
+    status: "running", phase: "running", pipeline_version: "v2", work_job_id: MISSING_WORK_JOB,
+  }), "missing retry-state public build");
+  const missing = one(unwrap(await db.rpc("prepare_bv2_pipeline_retry", {
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[6], p_work_job_id: MISSING_WORK_JOB,
+  }), "missing retry state"));
+  assert.equal(missing.action, "retry_state_missing");
+  assert.equal(missing.code, "durable_retry_state_missing");
+  assert.equal(missing.reason, "work_job_missing");
+  proof.retryBoundary = [beforeProvider.action, abandoned.action, unsafe.action, recovered.action,
+    afterSettlement.action, ambiguousBlocked.action, ambiguousReconciled.action, missing.action];
 
   const wrongProjectLink = await db.from("build_jobs").update({ bv2_build_id: V2_BUILDS[1] }).eq("id", PUBLIC_BUILDS[0]);
   assert.ok(wrongProjectLink.error);
@@ -195,17 +299,25 @@ try {
   const wrongDiagnosticLink = await db.from("build_jobs").update({ diag_run_id: DIAG }).eq("id", PUBLIC_BUILDS[0]);
   assert.ok(wrongDiagnosticLink.error);
   const browserRetry = await browser.rpc("prepare_bv2_pipeline_retry", {
-    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[0], p_work_job_id: WORK_JOBS[0],
+    p_owner: OWNER_A, p_public_build_id: PUBLIC_BUILDS[0], p_work_job_id: beforeWork.id,
   });
   assert.ok(browserRetry.error);
+  const crossOwnerRetry = await db.rpc("prepare_bv2_pipeline_retry", {
+    p_owner: OWNER_B, p_public_build_id: PUBLIC_BUILDS[0], p_work_job_id: beforeWork.id,
+  });
+  assert.ok(crossOwnerRetry.error);
   proof.relationalOwnerProjectIsolation = true;
+
+  const retryFunction = sql("select pg_get_functiondef('public.prepare_bv2_pipeline_retry(uuid,uuid,uuid)'::regprocedure);");
+  assert.doesNotMatch(retryFunction, /update public\.build_work_jobs set\s+payload/i);
+  assert.match(retryFunction, /update public\.build_work_payloads set/i);
 
   proof.catalog = JSON.parse(sql(`select json_build_object(
     'reservations', (select count(*) from public.bv2_model_reservations where owner='${OWNER_A}'),
     'usage', (select count(*) from public.ca_usage_records where owner='${OWNER_A}'),
     'v2PublicJobs', (select count(*) from public.build_jobs where owner='${OWNER_A}' and pipeline_version='v2'),
     'runtimeFunction', to_regprocedure('public.prepare_bv2_pipeline_retry(uuid,uuid,uuid)') is not null,
-    'reservationFunction', to_regprocedure('public.reserve_bv2_model_call(uuid,uuid,uuid,text,text,text,text,text,numeric,numeric,numeric,jsonb)') is not null
+    'reservationFunction', to_regprocedure('public.reserve_bv2_model_call_v4(uuid,uuid,uuid,text,text,text,text,text,text,text,numeric,numeric,numeric,timestamptz,bigint,jsonb)') is not null
   );`));
   console.log(JSON.stringify({ ok: true, ...proof }, null, 2));
 } finally {

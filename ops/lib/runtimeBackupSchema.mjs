@@ -146,8 +146,8 @@ export function runtimeCatalogEvidence(migrationCount) {
     migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_75, tablesSha256: PRODUCTION_PUBLIC_TABLES_75_SHA256,
     fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_75, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256,
   };
-  if (Number(migrationCount) === 80) return {
-    migrationCount: 80, tables: PRODUCTION_PUBLIC_TABLES_98, tablesSha256: PRODUCTION_PUBLIC_TABLES_98_SHA256,
+  if ([80, 81].includes(Number(migrationCount))) return {
+    migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_98, tablesSha256: PRODUCTION_PUBLIC_TABLES_98_SHA256,
     fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_99, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
   };
   throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
