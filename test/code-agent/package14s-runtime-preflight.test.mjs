@@ -357,3 +357,30 @@ test("14S non-request runtime failures remain terminal before provider dispatch"
     && error.retryable === false
     && error.dispatchState === "before_dispatch");
 });
+
+test("14S the app-auth refusal carries the upstream status, action and sentence into the record", async () => {
+  // A live 403 (job 7688aea2, 2026-08-22) was recorded as "(app_auth_request_failed)" alone. The
+  // status, the action and the function's own sentence are the ONLY things that separate an
+  // ineligible-origin refusal from a disabled account or a rate limit, and by the time anyone
+  // read the record the transient had cleared and the evidence existed nowhere.
+  await assert.rejects(proveGeneratedRuntimeBackend({
+    projectId: PROJECT, adminClient: cleanupAdmin(), env: env(),
+    backendFactory: () => ({
+      _client: {},
+      auth: { currentUser: async () => null,
+        signUp: async () => { throw Object.assign(
+          new Error("This application is not eligible for authentication."),
+          { code: "app_auth_request_failed", status: 403, action: "signup" },
+        ); },
+        signIn: async () => null },
+      db: { entity: () => ({}) },
+    }),
+  }), (error) => error.code === "runtime_app_auth_preflight_failed"
+    && error.status === 403
+    && error.action === "signup"
+    && error.upstream === "This application is not eligible for authentication."
+    && error.message.includes("HTTP 403")
+    && error.message.includes("action=signup")
+    && error.message.includes("This application is not eligible for authentication.")
+    && error.message.includes("no provider call was made"));
+});

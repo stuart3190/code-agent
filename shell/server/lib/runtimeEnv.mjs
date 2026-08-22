@@ -257,9 +257,21 @@ export async function proveGeneratedRuntimeBackend({
     // still occurs before any Builder model reservation or dispatch. Other runtime proof failures
     // remain terminal because replaying their mutations is not proven safe.
     const retryable = failure.code === "app_auth_request_failed";
+    // Carry WHAT the upstream said, not merely that it said something. A live 403 was recorded
+    // as `(app_auth_request_failed)` alone: the status, the action and the function's own
+    // sentence — the only things that distinguish an ineligible-origin refusal from a disabled
+    // account or a rate limit — were dropped here, and by the time anyone looked the transient
+    // had cleared and the evidence did not exist anywhere.
+    const upstreamStatus = Number(failure.status || 0) || null;
+    const detail = [
+      failure.code || failure.name || "runtime_error",
+      upstreamStatus ? `HTTP ${upstreamStatus}` : null,
+      failure.action ? `action=${failure.action}` : null,
+      failure.message || null,
+    ].filter(Boolean).join("; ");
     throw configurationError("runtime_app_auth_preflight_failed",
-      `Builder V2 generated app-auth runtime preflight failed at ${stage} (${failure.code || failure.name || "runtime_error"}); no provider call was made.`,
-      { stage, status: Number(failure.status || 0) || null, retryable });
+      `Builder V2 generated app-auth runtime preflight failed at ${stage} (${detail}); no provider call was made.`,
+      { stage, status: upstreamStatus, action: failure.action || null, upstream: failure.message || null, retryable });
   }
   return {
     ok: true,

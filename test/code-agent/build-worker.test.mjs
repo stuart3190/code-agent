@@ -162,3 +162,18 @@ test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation
   assert.match(runner, /reconcileOrphanSandboxes/);
   assert.match(runner, /jobRoot.*artifactRoot/);
 });
+
+test("a pre-dispatch platform failure is not reported to the customer as a worker crash", async () => {
+  // The worker never stopped (NRestarts=0 across the live incident): the generated-runtime
+  // preflight refused before any build work and before any provider call. The shield stays —
+  // no raw technical text — but the sentence a customer reads has to be true, and has to say
+  // that nothing was charged.
+  const worker = await readFile(new URL("../../build-worker/index.mjs", import.meta.url), "utf8");
+  assert.match(worker, /CUSTOMER_FAILURE_MESSAGE/);
+  assert.match(worker, /No build credits were used/);
+  assert.match(worker, /The isolated build worker stopped before completion\./,
+    "the generic sentence remains the default for genuinely unexplained stops");
+  assert.doesNotMatch(worker,
+    /classification === "cancelled" \? "Cancelled by user\." : "The isolated build worker stopped/,
+    "the fixed two-way message must not come back");
+});

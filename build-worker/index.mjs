@@ -58,6 +58,22 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const tail = (value, max = 16_384) => redactDiagnosticText(String(value || "")).slice(-max);
 const workerState = () => stopping ? "stopped" : draining ? "draining" : paused ? "paused" : "active";
 
+// What the CUSTOMER reads. The shield stays — no raw technical text reaches a customer — but a
+// shielded sentence still has to be true. A generated-runtime preflight failure happens before
+// any build work and before any provider call: the worker did not stop, it never started, and
+// nothing was charged. Telling that customer "the isolated build worker stopped before
+// completion" described a crash that did not happen and hid the fact that they can simply retry.
+// Only classifications proven to occur pre-dispatch belong here; everything else keeps the
+// generic sentence.
+const CUSTOMER_FAILURE_MESSAGE = new Map([
+  ["cancelled", "Cancelled by user."],
+  ["runtime_app_auth_preflight_failed",
+    "The build could not start because a platform service was briefly unavailable. "
+    + "No build credits were used — please try again."],
+]);
+const customerFailureMessage = (classification) => CUSTOMER_FAILURE_MESSAGE.get(classification)
+  || "The isolated build worker stopped before completion.";
+
 function publishWorkerNode(nextProof = previewIsolation) {
   previewIsolation = nextProof;
   nodeHeartbeatChain = nodeHeartbeatChain.catch((error) => {
@@ -260,7 +276,7 @@ async function runJob(job) {
     if (job.job_type === "builder_pipeline" && failedWork && failedWork.state !== "queued") {
       const { data: publicJob, error: publicError } = await client.from("build_jobs").update({
         status: "failed", phase: "failed", stop_reason: classification,
-        error: classification === "cancelled" ? "Cancelled by user." : "The isolated build worker stopped before completion.",
+        error: customerFailureMessage(classification),
         updated_at: new Date().toISOString(),
       }).eq("id", job.build_id).eq("owner", job.owner)
         .not("status", "in", "(complete,failed,interrupted)").select("bv2_build_id").maybeSingle();
