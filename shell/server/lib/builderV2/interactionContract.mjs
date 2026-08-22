@@ -631,6 +631,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     const semanticWrites = unique((functional ? functional.writes : responsibilities.flatMap((row) => row.writes || [])) || []);
     const downstreamConsumers = unique(responsibilities.flatMap((row) => row.downstreamDependencies || []));
     const handoff = functional?.persistenceHandoff || null;
+    const persistenceSource = functional?.persistenceSource || null;
     const requiredExports = semanticNode?.extension?.requiredExports || [];
     const observation = step?.expect || semanticNode?.verificationSemantics?.observe
       || semanticNode?.verificationSemantics?.actions || semantic.behavior || operation.operationId;
@@ -659,10 +660,13 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         customBehavior: functional?.customBehavior || null,
         customBehaviorModule: semanticNode?.type === "custom_behavior" ? semanticNode.extension?.module || null : null,
         customBehaviorExports: semanticNode?.type === "custom_behavior" ? [...requiredExports] : [],
+        outputEffect: functional?.outputEffect || null,
         persistenceHandoff: handoff,
+        persistenceSource,
         expectedStateTransition: {
           produces: semanticWrites,
           persists: handoff?.writes || (persistence ? persistence.writes || [] : []),
+          readsPersisted: persistenceSource?.writes || [],
           requirement: flow.nextStateRequirement || step?.expect || semantic.behavior,
         },
         verificationObservation: observation,
@@ -764,7 +768,8 @@ export function validateInteractionContract(plan, { capabilityGraph = null } = {
         ...(!flow.customBehavior ? ["customBehavior"] : []),
         ...(!flow.customBehaviorModule ? ["customBehaviorModule"] : []),
         ...(!(flow.customBehaviorExports || []).length ? ["customBehaviorExports"] : []),
-        ...(!flow.persistenceHandoff && types.has("persistence") ? ["persistenceHandoff"] : []),
+        ...(!flow.persistenceHandoff && !flow.persistenceSource && types.has("persistence")
+          ? ["persistenceRelationship"] : []),
       );
       if (types.has("capability_functional")) missingFields.push(
         ...(!flow.capabilityId ? ["capabilityId"] : []),

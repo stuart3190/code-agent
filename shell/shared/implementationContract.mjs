@@ -18,6 +18,38 @@ export const CONTRACT_VERSION = 1;
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.
 export const STAGES = ["foundation", "data", "primary_journey", "supporting", "polish"];
 
+// A functional operation does not always mutate an entity field. Read-like operations and
+// terminal browser actions may instead return a transient result: rendered output, a downloadable
+// artifact, or another observable action result. That result is still a real semantic output, but
+// inventing a durable entity field for it would falsely turn an effect into persistence.
+//
+// This vocabulary is deliberately driven by the operation's structured `kind`, never its product
+// name or application prose. Mutating create/update/delete operations remain required to declare
+// their actual field writes.
+const TRANSIENT_RESULT_OPERATION_KINDS = new Map([
+  ["read", "read_result"], ["get", "read_result"], ["find", "read_result"],
+  ["lookup", "read_result"], ["view", "read_result"], ["fetch", "read_result"],
+  ["list", "read_result"], ["search", "read_result"], ["query", "read_result"],
+  ["export", "artifact"], ["download", "artifact"], ["print", "rendered_output"],
+]);
+
+const operationKind = (operation) => String(
+  operation?.kind || operation?.type || operation?.action || "",
+).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || "";
+
+export function functionalOutputEffect(operation, responsibility) {
+  if (responsibility?.type !== "functional" || (responsibility?.writes || []).length) return null;
+  const kind = operationKind(operation);
+  const effect = TRANSIENT_RESULT_OPERATION_KINDS.get(kind);
+  if (!effect) return null;
+  return {
+    type: "transient_result",
+    effect,
+    operationKind: kind,
+    durable: false,
+  };
+}
+
 // ── the shape ─────────────────────────────────────────────────────────────────────────────────
 //
 // {
@@ -258,7 +290,9 @@ export function validateContract(contract) {
           problems.push(`${label} does not name the functional behavior`);
         }
         if (!responsibility.reads?.length) problems.push(`${label} has no declared functional inputs`);
-        if (!responsibility.writes?.length) problems.push(`${label} has no declared functional outputs`);
+        if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)) {
+          problems.push(`${label} has no declared functional outputs`);
+        }
       }
       if (responsibility?.capability && !responsibility?.capabilityMethod) {
         problems.push(`${label} names capability "${responsibility.capability}" without a capabilityMethod`);

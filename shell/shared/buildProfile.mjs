@@ -3,6 +3,8 @@
 // build may spend. Browser input is normalized here again on the server before it becomes
 // authoritative conversation, contract, graph, or build-spec data.
 
+import { functionalOutputEffect } from "./implementationContract.mjs";
+
 export const BUILD_PROFILE_VERSION = 1;
 
 export const BUILD_TYPES = Object.freeze(["auto", "website", "application"]);
@@ -282,8 +284,10 @@ export function validateBuildProfileContract(contract, profile = contract?.build
     problems.push("build_profile_contract_incomplete signal=application missing=behavior_or_stateful_journey");
   }
   for (const signal of profile.requirementSignals || []) {
-    if (signal === "custom_logic" && !functions.some((responsibility) =>
-      (responsibility.reads || []).length && (responsibility.writes || []).length)) {
+    if (signal === "custom_logic" && !(contract?.operations || []).some((operation) =>
+      (operation?.responsibilities || []).some((responsibility) => functions.includes(responsibility)
+        && (responsibility.reads || []).length
+        && ((responsibility.writes || []).length || functionalOutputEffect(operation, responsibility))))) {
       problems.push("build_profile_contract_incomplete signal=custom_logic missing=functional_responsibility_reads_writes");
     }
     if (signal === "saved_data" && (!persistence.length || !(contract?.entities || []).length)) {

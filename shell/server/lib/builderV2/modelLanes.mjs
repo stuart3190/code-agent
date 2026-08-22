@@ -282,7 +282,9 @@ function headroomCapabilityGraphBrief(graph) {
     writes: responsibility.writes || [],
     owner: responsibility.owner,
     customBehavior: responsibility.customBehavior,
+    outputEffect: responsibility.outputEffect || null,
     persistenceHandoff: responsibility.persistenceHandoff || null,
+    persistenceSource: responsibility.persistenceSource || null,
   });
   return {
     version: graph.version,
@@ -314,7 +316,9 @@ function headroomCapabilityGraphBrief(graph) {
     })),
     // Interaction-to-interaction edges repeat the same reads/writes/downstream relationships in
     // the interaction contract below. Node-level dependency and persistence edges remain here.
-    edges: (graph.edges || []).filter((edge) => ["depends_on", "persistence_handoff"].includes(edge.type)),
+    edges: (graph.edges || []).filter((edge) => [
+      "depends_on", "persistence_handoff", "persistence_source",
+    ].includes(edge.type)),
     journeys: (graph.journeys || []).map((journey) => ({
       journeyId: journey.journeyId,
       requiredNodeIds: journey.requiredNodeIds || [],

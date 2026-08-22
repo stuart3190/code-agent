@@ -321,8 +321,9 @@ test("an operation writing an entity that does not exist is refused before gener
 
 // ── the brief the model is given must say the same thing the code enforces ─────────────────────
 
-test("the contract brief tells the model operands are fields", async () => {
+test("the contract brief distinguishes field operands from operation identities", async () => {
   const { SYSTEM_PROMPT: brief } = await import("../../shell/server/lib/appBuild/contractAgent.mjs");
-  assert.match(brief, /"operates" names FIELDS ONLY/,
-    "the brief still invites the operand type confusion the code now refuses");
+  assert.match(brief, /"operates" may also name the declared OPERATION id/);
+  assert.match(brief, /operation id binds the action control and never becomes a textbox/,
+    "the brief must preserve the field/action distinction enforced by interaction derivation");
 });

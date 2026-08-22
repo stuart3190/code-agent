@@ -245,6 +245,111 @@ test("registered functional capability produces a capability-backed interaction 
   assert.equal(flow.persistenceHandoff.capabilityId, "crud");
 });
 
+test("read-like custom operations own an explicit transient result instead of inventing an entity write", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "document", fields: ["sourceContent"],
+    operations: [{
+      id: "render-output", entity: "document", kind: "read", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "render the stored source into a browser-delivered artifact",
+        reads: ["sourceContent"], writes: [],
+      }],
+    }],
+    steps: [
+      { action: "enter source content", target: "source", operates: ["sourceContent"], expect: "the source is visible" },
+      { action: "render the output", target: "render control", reads: ["render-output"], expect: "the rendered artifact is offered" },
+    ],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const operation = spec.capabilityGraph.operationResponsibilities
+    .find((candidate) => candidate.operationId === "render-output");
+  const functional = operation.responsibilities.find((responsibility) => responsibility.requiresTransformation);
+  assert.deepEqual(functional.outputEffect, {
+    type: "transient_result", effect: "read_result", operationKind: "read", durable: false,
+    statePath: "primary-flow.effect.render-output",
+  });
+  assert.deepEqual(functional.writes, ["primary-flow.effect.render-output"]);
+  assert.equal(functional.persistenceHandoff, null);
+  assert.equal(functional.persistenceSource.capabilityId, "crud");
+  assert.equal(functional.persistenceSource.capabilityMethod, "get");
+
+  const flow = interactionFor(spec, "render-output");
+  assertCommonSemantics(flow, "render-output");
+  assert.deepEqual(flow.writes, ["primary-flow.effect.render-output"]);
+  assert.equal(flow.outputEffect.effect, "read_result");
+  assert.equal(flow.persistenceHandoff, null);
+  assert.equal(flow.persistenceSource.capabilityMethod, "get");
+  assert.match(String(flow.verificationObservation), /artifact/i);
+  assert.ok(spec.capabilityGraph.edges.some((edge) => edge.type === "persistence_source"
+    && edge.from === "capability:crud" && edge.to === functional.customBehavior));
+});
+
+test("terminal export operations produce a bounded transient artifact with no fake CRUD handoff", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "report", fields: ["rows"],
+    operations: [{
+      id: "deliver-report", entity: "report", kind: "export", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "encode report rows and deliver the result",
+        reads: ["rows"], writes: [],
+      }],
+    }],
+    steps: [
+      { action: "enter report rows", target: "rows", operates: ["rows"], expect: "the rows are visible" },
+      { action: "deliver the report", target: "delivery control", reads: ["deliver-report"], expect: "a downloadable report is offered" },
+    ],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const flow = interactionFor(spec, "deliver-report");
+  assertCommonSemantics(flow, "deliver-report");
+  assert.equal(flow.outputEffect.effect, "artifact");
+  assert.deepEqual(flow.writes, ["primary-flow.effect.deliver-report"]);
+  assert.equal(flow.persistenceHandoff, null);
+  assert.equal(flow.persistenceSource, null);
+  assert.ok(flow.customBehaviorModule);
+  assert.ok(flow.customBehaviorExports.length);
+});
+
+test("an operation identity in structured reads remains linked when the same step operates fields", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "preset", fields: ["sourceSpecification", "presetName", "appliedSpecification"],
+    operations: [
+      {
+        id: "create-preset", entity: "preset", kind: "create", journey: "primary-flow",
+        responsibilities: [{
+          type: "functional", behavior: "create a reusable preset from the supplied specification",
+          reads: ["sourceSpecification"], writes: ["presetName"],
+        }],
+      },
+      {
+        id: "apply-preset", entity: "preset", kind: "update", journey: "primary-flow",
+        responsibilities: [{
+          type: "functional", behavior: "apply the selected preset to the working specification",
+          reads: ["presetName"], writes: ["appliedSpecification"],
+        }],
+      },
+    ],
+    steps: [
+      { action: "enter a source specification", target: "specification", operates: ["sourceSpecification"], expect: "the specification is visible" },
+      { action: "create a named preset", target: "preset form", operates: ["presetName"], reads: ["create-preset", "sourceSpecification"], expect: "the preset name is visible" },
+      { action: "apply the named preset", target: "preset selector", operates: ["appliedSpecification"], reads: ["apply-preset", "presetName"], expect: "the applied specification is visible" },
+    ],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const create = spec.capabilityGraph.operationResponsibilities
+    .find((operation) => operation.operationId === "create-preset");
+  const apply = spec.capabilityGraph.operationResponsibilities
+    .find((operation) => operation.operationId === "apply-preset");
+  assert.equal(create.stepIndex, 1);
+  assert.equal(apply.stepIndex, 2);
+  assert.ok(interactionFor(spec, "create-preset").reads.includes("primary-flow.draft.sourceSpecification"));
+  assert.ok(interactionFor(spec, "apply-preset").reads.includes("primary-flow.draft.presetName"));
+  assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
+});
+
 test("truly underspecified transformation is rejected with exact missing semantic fields", () => {
   const spec = deriveBuildSpec(makeContract({
     fields: ["source", "result"],

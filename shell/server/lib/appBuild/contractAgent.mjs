@@ -11,7 +11,7 @@
 
 import { runAgent } from "../../../../src/engine/runAgent.mjs";
 import {
-  CONTRACT_VERSION, STAGES, validateContract, contractSummary,
+  CONTRACT_VERSION, STAGES, validateContract, contractSummary, functionalOutputEffect,
 } from "../../../shared/implementationContract.mjs";
 import {
   buildProfileBrief, resolveBuildProfile, validateBuildProfileContract,
@@ -88,9 +88,9 @@ Rules:
   their declared entity field names. State the step merely DEPENDS on goes in "reads". A step that
   chooses a party size within a slot's capacity OPERATES partySize and READS slotId; naming the
   slot in "operates" would tell the verifier to re-open a control the previous step already used.
-  "operates" names FIELDS ONLY — a control has to be able to hold the value. "reads" may name a
-  field OR an operation, because it is context. A step that only performs an operation (a confirm,
-  a cancel) names no field at all: give it a "target" control and leave "operates" out.
+  "operates" may also name the declared OPERATION id the step performs. Fields become value
+  controls; an operation id binds the action control and never becomes a textbox. A step may list
+  both. "reads" names dependencies the step consumes without performing or changing them.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
@@ -105,6 +105,11 @@ Rules:
   outputs are saved. Only name \`capability\` and \`capabilityMethod\` when that exact registered method
   implements the functional behavior; otherwise leave them absent so Builder V2 creates a bounded
   custom_behavior extension.
+- Functional operations that return an observable result without mutating entity state use a
+  structured read-like or terminal kind: read/get/list/search/export/download/print. Their
+  \`writes\` may be empty because Builder V2 gives the returned result transient state ownership;
+  they must still declare the fields they \`read\`. Create/update/delete transformations still
+  require explicit entity-field \`writes\`.
 - Anything you are NOT building goes in "deferred" with a reason. Deferring is honest; a control
   that pretends to work is not.
 - Public marketing content (business name, service list, opening hours) is in-code constants, NOT
@@ -168,16 +173,20 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
     relationships: Array.isArray(entity.relationships) ? entity.relationships : [],
     owned: entity.owned !== false,
   }));
-  c.operations = c.operations.map((operation) => ({
-    ...operation,
-    ...(Array.isArray(operation?.responsibilities) ? {
-      responsibilities: operation.responsibilities.map((responsibility) => ({
+  c.operations = c.operations.map((operation) => {
+    const normalizedOperation = { ...operation };
+    if (!Array.isArray(operation?.responsibilities)) return normalizedOperation;
+    normalizedOperation.responsibilities = operation.responsibilities.map((responsibility) => {
+      const normalizedResponsibility = {
         ...responsibility,
         reads: Array.isArray(responsibility?.reads) ? responsibility.reads.map(String).filter(Boolean) : [],
         writes: Array.isArray(responsibility?.writes) ? responsibility.writes.map(String).filter(Boolean) : [],
-      })),
-    } : {}),
-  }));
+      };
+      const outputEffect = functionalOutputEffect(normalizedOperation, normalizedResponsibility);
+      return outputEffect ? { ...normalizedResponsibility, outputEffect } : normalizedResponsibility;
+    });
+    return normalizedOperation;
+  });
   c.buildProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy });
   return c;
 }

@@ -6,6 +6,7 @@
 
 import { CAPABILITIES, canonicalCapabilityId } from "./capabilityRegistry.mjs";
 import { validateBuildProfileGraph } from "../../../shared/buildProfile.mjs";
+import { functionalOutputEffect } from "../../../shared/implementationContract.mjs";
 
 export const CAPABILITY_GRAPH_VERSION = 2;
 
@@ -24,6 +25,7 @@ const PERSISTENCE_METHOD = Object.freeze({
   update: "update", edit: "update",
   delete: "remove", remove: "remove", destroy: "remove",
 });
+const PERSISTENCE_SOURCE_METHODS = new Set(["get", "list", "count", "subscribe"]);
 const list = (value) => (Array.isArray(value) ? unique(value.map(String)) : []);
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const tokens = (value) => String(value || "").toLowerCase().match(/[a-z0-9]+/g) || [];
@@ -71,6 +73,15 @@ function operationStep(operation, journey) {
   const steps = journey?.steps || [];
   const direct = steps.findIndex((step) => list(step?.operates).some((value) => normalized(value) === normalized(operation?.id)));
   if (direct >= 0) return direct;
+
+  // Some structured contracts place an operation identity in `reads` on a step that also operates
+  // input fields. That means the step depends on/performs the declared operation while its fields
+  // remain browser controls. The previous fallback discarded every such step merely because it
+  // had field operands, leaving the operation at synthetic index -1 while borrowing draft state
+  // from step zero. Exact operation identity is authoritative and needs no prose inference.
+  const referenced = steps.findIndex((step) => list(step?.reads)
+    .some((value) => normalized(value) === normalized(operation?.id)));
+  if (referenced >= 0) return referenced;
 
   // Backward-compatible structural recovery for contracts produced before operation
   // responsibilities existed. Identifier overlap only LINKS an operation to a step; it never
@@ -159,8 +170,10 @@ function explicitResponsibilities(operation, journey, flows, contract) {
   return operation.responsibilities.map((responsibility, index) => {
     const declaredReads = declaredFields(responsibility?.reads || responsibility?.inputs, fields);
     const declaredWrites = declaredFields(responsibility?.writes || responsibility?.outputs, outputFields);
-    const reads = declaredReads.map((field) => statePathForInput(journey, field, flows, Math.max(stepIndex, 0)));
-    const writes = declaredWrites.map((field) => statePathForOutput(journey, field));
+    const reads = declaredReads.map((field) => statePathForInput(journey, field, flows, stepIndex));
+    const outputEffect = responsibility?.outputEffect || functionalOutputEffect(operation, responsibility);
+    const effectWrites = outputEffect ? [`${journey.id}.effect.${slug(operation.id)}`] : [];
+    const writes = unique([...declaredWrites.map((field) => statePathForOutput(journey, field)), ...effectWrites]);
     const downstreamDependencies = downstreamInteractions(journey, flows, stepIndex, declaredWrites, fields);
     const requestedCapability = responsibility?.capabilityId || responsibility?.capability || null;
     const resolvedCapability = canonicalCapabilityId(requestedCapability);
@@ -190,9 +203,10 @@ function explicitResponsibilities(operation, journey, flows, contract) {
       writes: persistence ? unique([...(automaticPersistence?.writes || writes), ...capabilityOutputs])
         : unique([...writes, ...capabilityOutputs]),
       declaredReads, declaredWrites,
+      outputEffect: outputEffect ? { ...outputEffect, statePath: effectWrites[0] } : null,
       owner: type === "custom_functional" ? null : `capability:${capabilityId}`,
       customBehavior: null, requiresTransformation: !persistence,
-      interactionIds, downstreamDependencies, persistenceHandoff: null,
+      interactionIds, downstreamDependencies, persistenceHandoff: null, persistenceSource: null,
     };
   });
 }
@@ -223,11 +237,11 @@ function legacyFunctionalResponsibility(operation, journey, flows, contract) {
     behavior: operation.description || step?.action || operation.id,
     entity: operation.entity || null, capabilityId: null, capabilityMethod: null,
     requestedCapability: null, requestedCapabilityMethod: null,
-    reads: semanticReads.map((field) => statePathForInput(journey, field, flows, Math.max(stepIndex, 0))),
+    reads: semanticReads.map((field) => statePathForInput(journey, field, flows, stepIndex)),
     writes: semanticWrites.map((field) => statePathForOutput(journey, field)),
     declaredReads: semanticReads, declaredWrites: semanticWrites,
     owner: null, customBehavior: null, requiresTransformation: true,
-    interactionIds, downstreamDependencies, persistenceHandoff: null,
+    interactionIds, downstreamDependencies, persistenceHandoff: null, persistenceSource: null,
   };
 }
 
@@ -248,6 +262,14 @@ function deriveOperationResponsibilities(operation, journey, flows, contract) {
   }
   for (const responsibility of responsibilities) {
     if (!responsibility.requiresTransformation || !persistence) continue;
+    if (PERSISTENCE_SOURCE_METHODS.has(persistence.capabilityMethod)) {
+      responsibility.persistenceSource = {
+        responsibilityId: persistence.id, capabilityId: persistence.capabilityId,
+        capabilityMethod: persistence.capabilityMethod, entity: persistence.entity,
+        reads: [...persistence.reads], writes: [...persistence.writes],
+      };
+      continue;
+    }
     persistence.reads = unique([...persistence.reads, ...responsibility.writes]);
     responsibility.persistenceHandoff = {
       responsibilityId: persistence.id, capabilityId: persistence.capabilityId,
@@ -307,6 +329,7 @@ function customNode(journey, flows, responsibilities = []) {
   const id = slug(journey.id);
   const exportName = `run${pascal(journey.id)}CustomBehavior`;
   const handoffs = responsibilities.map((responsibility) => responsibility.persistenceHandoff).filter(Boolean);
+  const sources = responsibilities.map((responsibility) => responsibility.persistenceSource).filter(Boolean);
   return {
     id: `custom_behavior:${id}`,
     type: "custom_behavior",
@@ -328,12 +351,14 @@ function customNode(journey, flows, responsibilities = []) {
     },
     persistenceSemantics: {
       durable: false,
-      owner: "bounded custom transformation; durable writes hand off to a composed capability",
+      owner: "bounded custom transformation; durable state is read from or handed off to composed capabilities",
       handoffs,
+      sources,
       browserStorage: false,
     },
     dependencies: unique([
       ...handoffs.map((handoff) => handoff.capabilityId),
+      ...sources.map((source) => source.capabilityId),
       ...flows.flatMap((flow) => [
         factoryCapability.get(flow.capability), compositionCapability.get(flow.stateOwner),
       ]),
@@ -353,6 +378,7 @@ function customNode(journey, flows, responsibilities = []) {
         responsibilityId: responsibility.id, operationId: responsibility.operationId,
         behavior: responsibility.behavior, inputs: responsibility.reads, outputs: responsibility.writes,
         persistenceHandoff: responsibility.persistenceHandoff,
+        persistenceSource: responsibility.persistenceSource,
       })),
       ...flows.map((flow) => ({ interactionId: flow.id, reads: flow.reads || [], writes: flow.writes || [], observe: flow.observable || null })),
     ],
@@ -517,6 +543,11 @@ export function deriveCapabilityGraph(contract, { bindings = [], interactionCont
           to: `capability:${responsibility.persistenceHandoff.capabilityId}`,
           type: "persistence_handoff", state: [...responsibility.persistenceHandoff.reads] });
       }
+      if (responsibility.persistenceSource) {
+        edges.push({ from: `capability:${responsibility.persistenceSource.capabilityId}`,
+          to: responsibility.customBehavior || responsibility.owner,
+          type: "persistence_source", state: [...responsibility.persistenceSource.writes] });
+      }
     }
   }
   for (const node of nodes) {
@@ -603,7 +634,12 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
           || !(responsibility.writes || []).every((path) => owner.verificationSemantics?.stateChange?.includes(path))) {
           problems.push(`${prefix} has no authoritative verification semantics for its state transformation`);
         }
-        if (PERSISTENCE_METHOD[operationKind(operation)] && !responsibility.persistenceHandoff) {
+        const persistenceMethod = PERSISTENCE_METHOD[operationKind(operation)];
+        if (persistenceMethod && PERSISTENCE_SOURCE_METHODS.has(persistenceMethod)
+          && !responsibility.persistenceSource) {
+          problems.push(`${prefix} has no persistence source for its durable ${operationKind(operation)} input`);
+        } else if (persistenceMethod && !PERSISTENCE_SOURCE_METHODS.has(persistenceMethod)
+          && !responsibility.persistenceHandoff) {
           problems.push(`${prefix} has no persistence handoff for its durable ${operationKind(operation)} effect`);
         }
       } else {

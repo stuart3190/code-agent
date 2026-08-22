@@ -8,6 +8,7 @@ const {
 } = await import("../../shell/shared/buildProfile.mjs");
 const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
 const { generateContract, normaliseContract } = await import("../../shell/server/lib/appBuild/contractAgent.mjs");
+const { validateContract } = await import("../../shell/shared/implementationContract.mjs");
 const { MemoryConversationStore } = await import("../../shell/server/lib/conversationStore.mjs");
 const { MemoryCodeAgentStore } = await import("../../shell/server/lib/codeAgentStore.mjs");
 const { assembleInput, postUserMessage } = await import("../../shell/server/lib/leadAgentService.mjs");
@@ -95,6 +96,43 @@ test("contract generation receives authoritative product guidance before its zer
   assert.equal(outcome.contract.buildProfile.resolvedBuildType, "website");
   assert.match(ask, /AUTHORITATIVE BUILDER V2 PRODUCT PROFILE/);
   assert.match(ask, /Website means content and presentation are likely dominant/);
+});
+
+test("contract normalization makes read and terminal functional results valid before graph derivation", () => {
+  const source = contract({
+    summary: "An application that renders supplied records into a downloadable result",
+    entities: [{ name: "record", fields: [field("rows")], owned: false }],
+    operations: [{
+      id: "render-records", entity: "record", kind: "export", journey: "primary-flow",
+      description: "render the supplied records into an observable artifact",
+      responsibilities: [{
+        type: "functional", behavior: "render the supplied records into an observable artifact",
+        reads: ["rows"], writes: [],
+      }],
+    }],
+    steps: [
+      { action: "enter report rows", target: "rows", operates: ["rows"], expect: "the report rows are visible" },
+      { action: "render the records", target: "render control", reads: ["render-records"], expect: "a downloadable result is offered" },
+    ],
+  });
+  source.acceptance = [
+    { id: "a1", statement: "entered report rows remain visible before rendering", journey: "primary-flow", kind: "interaction" },
+    { id: "a2", statement: "using the render control offers a downloadable result", journey: "primary-flow", kind: "output" },
+    { id: "a3", statement: "the rendered result visibly reflects the supplied rows", journey: "primary-flow", kind: "output" },
+  ];
+
+  const normalized = normaliseContract(source, {
+    prompt: source.summary,
+    buildProfile: { requestedBuildType: "application", requirementSignals: ["custom_logic", "export"] },
+  });
+  const responsibility = normalized.operations[0].responsibilities[0];
+  assert.deepEqual(responsibility.outputEffect, {
+    type: "transient_result", effect: "artifact", operationKind: "export", durable: false,
+  });
+  const verdict = validateContract(normalized);
+  assert.equal(verdict.ok, true, verdict.problems.join("; "));
+  const spec = deriveBuildSpec(normalized);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
 });
 
 test("Auto resolves a simple marketing-site prompt as website without forcing application behavior", () => {
