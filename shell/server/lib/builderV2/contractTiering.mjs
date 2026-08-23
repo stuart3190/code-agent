@@ -7,6 +7,9 @@
 
 import { CAPABILITIES, canonicalCapabilityId, validateBindings } from "./capabilityRegistry.mjs";
 import { serviceClient } from "../supabase.mjs";
+import {
+  contractUsesDurablePersistence, operationUsesDurablePersistence,
+} from "../../../shared/implementationContract.mjs";
 
 const words = (text) => new Set(String(text || "")
   .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -185,11 +188,20 @@ export function bindingsForJourneys(contract, bindings, journeys = []) {
 
 /** Journeys whose contracted outcome must survive a reload or exist outside one JS process. */
 export function durablePersistenceJourneys(contract, journeys = contract?.journeys || []) {
-  const hasPersistedEntity = (contract?.entities || []).length > 0;
+  const durableOperations = (contract?.operations || []).filter((operation) => (
+    operationUsesDurablePersistence(contract, operation)
+  ));
+  const durableJourneyIds = new Set(durableOperations.map((operation) => operation?.journey).filter(Boolean));
+  const legacyEntityContract = !(contract?.operations || []).length && (contract?.entities || []).length > 0;
+  const hasUnscopedDurableOperation = durableOperations.some((operation) => !operation?.journey);
   return (journeys || []).filter((journey) => {
+    if (durableJourneyIds.has(journey?.id)) return true;
+    if (!contractUsesDurablePersistence(contract) && !legacyEntityContract) return false;
     const text = journeyText(journey).toLowerCase();
-    return /persist|durable|reload|refresh|recover|reference|confirm|cancel|booking|reservation/.test(text)
-      || (hasPersistedEntity && /(create|submit|save|store)/.test(text));
+    if (legacyEntityContract || hasUnscopedDurableOperation) {
+      return /persist|durable|reload|refresh|recover|reference|confirm|cancel|booking|reservation|create|submit|save|store/.test(text);
+    }
+    return /persist|durable|reload|refresh|recover/.test(text);
   });
 }
 
@@ -283,7 +295,8 @@ export function deriveModulePlan(contract, journeys = contract?.journeys || [], 
     return ["create", "update", "remove"].every((method) => methods.includes(method));
   });
   const owners = scopedBindings.filter((binding) => binding.requiredMethods?.length);
-  const planned = owners.length ? owners : ((contract?.entities || []).length ? genericStore : []);
+  const planned = owners.length ? owners
+    : (durablePersistenceJourneys(contract, journeys).length ? genericStore : []);
   if (!planned.length && !coordinatedFlow && !(dependencyPlan?.requirements || []).length) return [];
 
   const plan = [];

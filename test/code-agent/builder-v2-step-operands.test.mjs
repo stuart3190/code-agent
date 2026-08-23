@@ -93,6 +93,31 @@ test("what a step READS never becomes a browser action", () => {
     "a read-only dependency became a control");
 });
 
+test("one declared selection can produce metadata without inventing more controls", () => {
+  const contract = JSON.parse(JSON.stringify(PAID));
+  contract.entities[0].fields.push(
+    { name: "dateLabel", type: "string" },
+    { name: "slotCapacityLabel", type: "string" },
+  );
+  contract.journeys[0].steps[1] = {
+    ...contract.journeys[0].steps[1],
+    operates: ["dateId"],
+    produces: ["dateLabel", "slotCapacityLabel"],
+    primitive: "selection",
+  };
+  contract.acceptance = [
+    { id: "a1", statement: "the selected date label is visible" },
+    { id: "a2", statement: "the selected slot capacity is visible" },
+    { id: "a3", statement: "the booking controls remain usable" },
+  ];
+  const controls = flowsFor(contract, 1);
+  assert.deepEqual(controls.map((flow) => flow.control.logicalField), ["dateId"]);
+  assert.deepEqual(controls[0].producedValues, ["dateLabel", "slotCapacityLabel"]);
+  assert.ok(controls[0].writes.includes("complete-booking-lifecycle.draft.dateLabel"));
+  assert.ok(controls[0].writes.includes("complete-booking-lifecycle.draft.slotCapacityLabel"));
+  assert.equal(validation.validateContract(contract).ok, true);
+});
+
 test("declared field types drive the generated control contract", () => {
   const contract = {
     summary: "generic typed editor", projectType: "web app", version: 1,

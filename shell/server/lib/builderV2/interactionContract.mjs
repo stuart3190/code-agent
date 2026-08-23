@@ -16,6 +16,9 @@ import {
 } from "./controlIdentity.mjs";
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
+import {
+  contractUsesDurablePersistence, operationUsesDurablePersistence,
+} from "../../../shared/implementationContract.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
 
@@ -60,6 +63,26 @@ const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
 const unique = (values) => [...new Set(values.filter(Boolean))];
 const list = (value) => (Array.isArray(value) ? value : []);
+const IDENTITY_FIELD = /(?:id|key|reference)$/i;
+const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
+
+/**
+ * One chooser may atomically supply metadata about the selected record. Exactly one identity
+ * field is the user-operated control; descriptive siblings are outputs of that same selection.
+ * Multiple identities remain multiple controls because their ordering cannot be inferred safely.
+ */
+function atomicSelectionPlan(step, operands) {
+  const explicit = list(step?.produces).map((value) => String(value).split(".").pop()).filter(Boolean);
+  if (explicit.length && operands.length === 1) return { controls: operands, produces: explicit };
+  if (step?.primitive !== "selection" || operands.length < 2) return { controls: operands, produces: [] };
+  const identities = operands.filter((field) => IDENTITY_FIELD.test(field));
+  if (identities.length !== 1) return { controls: operands, produces: [] };
+  const derived = operands.filter((field) => field !== identities[0]);
+  if (!derived.length || !derived.every((field) => DERIVED_SELECTION_FIELD.test(field))) {
+    return { controls: operands, produces: [] };
+  }
+  return { controls: identities, produces: derived };
+}
 
 /**
  * Does this step ENTER a multi-step flow?
@@ -300,7 +323,7 @@ export function buildInteractionContract(contract, {
   modulePlan = deriveModulePlan(contract, contract?.journeys || []),
   bindings = bindCapabilities(contract),
 } = {}) {
-  const durableOwner = durableOperationOwner(bindings);
+  const durableOwner = contractUsesDurablePersistence(contract) ? durableOperationOwner(bindings) : null;
   const draftOwner = draftStateOwner(bindings);
   // The only things a browser control can HOLD: the fields the contract's entities declare.
   // Operations, entity names and routes are all legal contract references and none of them is a
@@ -350,6 +373,8 @@ export function buildInteractionContract(contract, {
         .map((operand) => declaredOperations.get(normalized(operand))?.id
           || declaredOperations.get(normalized(operand))?.name)
         .filter(Boolean));
+      const declaredOperationObjects = declaredOperationIds
+        .map((identity) => declaredOperations.get(normalized(identity))).filter(Boolean);
       const operands = declaredOperands?.length
         ? declaredOperands.filter((name) => operableFields.has(normalized(name)))
         : null;
@@ -366,7 +391,15 @@ export function buildInteractionContract(contract, {
       const operandKind = operands
         ? (declaredPrimitive || kinds.find((row) => ["selection", "input"].includes(row)) || "input")
         : null;
-      const effectiveKinds = operands && !kinds.includes(operandKind) ? [...kinds, operandKind] : kinds;
+      const selectionPlan = operandKind === "selection"
+        ? atomicSelectionPlan(step, operands || []) : { controls: operands || [], produces: [] };
+      const controlOperands = operandKind === "selection" ? selectionPlan.controls : operands;
+      const localOperationOnly = declaredOperationObjects.length > 0
+        && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
+      const ownershipKinds = localOperationOnly
+        ? kinds.map((kind) => kind === "mutation" ? "action" : kind) : kinds;
+      const effectiveKinds = operands && !ownershipKinds.includes(operandKind)
+        ? [...ownershipKinds, operandKind] : ownershipKinds;
       for (const kind of effectiveKinds) {
         const drivesValues = ["selection", "input"].includes(kind);
         // A step that performs an operation writes no value THROUGH A CONTROL of its own: the verb
@@ -386,7 +419,7 @@ export function buildInteractionContract(contract, {
         // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
         if (drivesValues && operands && kind !== operandKind) continue;
         const fields = drivesValues
-          ? (operands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind))
+          ? (controlOperands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind))
           : [null];
         for (const field of fields.length ? fields : [null]) {
           const writes = [];
@@ -395,6 +428,11 @@ export function buildInteractionContract(contract, {
             const path = `${journey.id}.draft.${field || `value${stepIndex + 1}`}`;
             writes.push(path);
             draftWrites.push(path);
+            if (kind === "selection" && field === selectionPlan.controls[0]) {
+              const produced = selectionPlan.produces.map((name) => `${journey.id}.draft.${name}`);
+              writes.push(...produced);
+              draftWrites.push(...produced);
+            }
           } else if (kind === "review") reads.push(...(draftWrites.length ? draftWrites : [`${journey.id}.durable.record`]));
           else if (kind === "mutation") {
             reads.push(...(draftWrites.length ? draftWrites : [`${journey.id}.input`]));
@@ -431,6 +469,8 @@ export function buildInteractionContract(contract, {
             responsibleModules: owners,
             action: step.action,
             valueWritten: field || null,
+            producedValues: kind === "selection" && field === selectionPlan.controls[0]
+              ? [...selectionPlan.produces] : [],
             reads: unique(reads),
             writes: unique(writes),
             dependsOn: unique(reads),

@@ -232,6 +232,15 @@ test("Application plus SaaS carries account and durable ownership context withou
   assert.ok(!spec.contract.operations.some((operation) => operation.kind === "payment"));
 });
 
+test("explicitly excluded capabilities do not become inferred requirement signals", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build a basic website using local in-app state; no real payments or backend are required yet.",
+  });
+  assert.equal(profile.resolvedBuildType, "website");
+  assert.equal(profile.requirementSignals.includes("payments"), false);
+  assert.equal(profile.requirementSignals.includes("saved_data"), false);
+});
+
 test("Application plus custom calculations preserves novel transformation as custom_behavior", () => {
   const profile = resolveBuildProfile({
     prompt: "Build an application that calculates derived totals and saves them.",

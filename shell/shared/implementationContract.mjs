@@ -34,8 +34,53 @@ const TRANSIENT_RESULT_OPERATION_KINDS = new Map([
 ]);
 
 const operationKind = (operation) => String(
-  operation?.kind || operation?.type || operation?.action || "",
+  operation?.kind || operation?.type || operation?.action || operation?.id || operation?.name || "",
 ).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || "";
+
+const PERSISTENCE_OPERATION_KINDS = new Set([
+  "create", "insert", "add", "read", "get", "find", "lookup", "view", "fetch",
+  "list", "search", "query", "update", "edit", "delete", "remove", "destroy",
+]);
+const MUTATING_PERSISTENCE_OPERATION_KINDS = new Set([
+  "create", "insert", "add", "update", "edit", "delete", "remove", "destroy",
+]);
+const TRANSIENT_STORAGE = /\b(?:client(?:-only| side)?|browser(?:-only)?|in[- ]?memory|local in-app|local state|ephemeral|transient|current (?:browser )?session|not (?:saved|stored|persisted)|no backend)\b/i;
+
+/**
+ * Structured entity state is not necessarily a database record. Its storage declaration is the
+ * authority that prevents local/session-only workflow state from acquiring invented CRUD.
+ */
+export function entityPersistencePolicy(contract, entityName) {
+  const entity = (contract?.entities || []).find((candidate) => (
+    normaliseReference(candidate?.name) === normaliseReference(entityName)
+  ));
+  if (!entity) return "unspecified";
+  const storage = [entity.storage, entity.persistence, entity.durability].filter(Boolean).join(" ");
+  return TRANSIENT_STORAGE.test(storage) ? "transient" : "unspecified";
+}
+
+export function operationUsesDurablePersistence(contract, operation) {
+  if ((operation?.responsibilities || []).some((responsibility) => responsibility?.type === "persistence")) {
+    return true;
+  }
+  if (entityPersistencePolicy(contract, operation?.entity) === "transient") return false;
+  return PERSISTENCE_OPERATION_KINDS.has(operationKind(operation));
+}
+
+export function operationRequiresDurableMutation(contract, operation) {
+  if (!operationUsesDurablePersistence(contract, operation)) return false;
+  const explicit = (operation?.responsibilities || []).filter((responsibility) => responsibility?.type === "persistence");
+  if (explicit.length) {
+    return explicit.some((responsibility) => MUTATING_PERSISTENCE_OPERATION_KINDS.has(operationKind({
+      kind: responsibility.capabilityMethod || responsibility.method || responsibility.operation || operationKind(operation),
+    })));
+  }
+  return MUTATING_PERSISTENCE_OPERATION_KINDS.has(operationKind(operation));
+}
+
+export function contractUsesDurablePersistence(contract) {
+  return (contract?.operations || []).some((operation) => operationUsesDurablePersistence(contract, operation));
+}
 
 export function functionalOutputEffect(operation, responsibility) {
   if (responsibility?.type !== "functional" || (responsibility?.writes || []).length) return null;
@@ -209,7 +254,7 @@ export function validateContract(contract) {
       // that does not exceed the slot's remaining capacity" was read as operating the SLOT as well
       // — prose cannot tell a verb's object from its subordinate clause, and it should not have to.
       // A reference to something the contract never declared is caught here, before generation.
-      for (const [key, values] of [["operates", step?.operates], ["reads", step?.reads]]) {
+      for (const [key, values] of [["operates", step?.operates], ["reads", step?.reads], ["produces", step?.produces]]) {
         if (values === undefined || values === null) continue;
         if (!Array.isArray(values)) {
           problems.push(`${where} step ${stepIndex + 1} declares "${key}" that is not a list`);
@@ -220,7 +265,8 @@ export function validateContract(contract) {
             problems.push(`${where} step ${stepIndex + 1} names an empty ${key} reference`);
             continue;
           }
-          if (!contractReferences(c).has(normaliseReference(reference))) {
+          const references = key === "produces" ? fieldNames(c) : contractReferences(c);
+          if (!references.has(normaliseReference(reference))) {
             problems.push(`${where} step ${stepIndex + 1} ${key} "${reference}" is not a declared `
               + "entity field or operation — a step may only name things the contract defines");
             continue;
@@ -293,6 +339,10 @@ export function validateContract(contract) {
         if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)) {
           problems.push(`${label} has no declared functional outputs`);
         }
+      }
+      if (responsibility?.type === "persistence"
+          && entityPersistencePolicy(c, operation?.entity) === "transient") {
+        problems.push(`${label} contradicts entity "${operation?.entity || "unknown"}", whose storage policy is transient`);
       }
       if (responsibility?.capability && !responsibility?.capabilityMethod) {
         problems.push(`${label} names capability "${responsibility.capability}" without a capabilityMethod`);

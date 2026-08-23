@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { contractRuntimeRequirements } from "../../shell/server/lib/builderV2/buildEnvelope.mjs";
+import { journeyRequiresPersistentMutation } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
 import {
   interactionDependencyProgress, normalizeInteractionStateDependencies,
   validateInteractionContract,
@@ -10,6 +12,7 @@ import {
   contractDependencyRepairScope, generateContract, mergeContractDependencyRepair,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
+import { inferRequirementSignals } from "../../shell/shared/buildProfile.mjs";
 
 const stateFlow = ({ id, journeyId = "journey", stepIndex, reads = [], writes = [], ...rest }) => ({
   id, journeyId, stepIndex, kind: "action", stateOwner: "src/components/Journey.jsx",
@@ -438,4 +441,85 @@ test("retained smoke 242c7292 binds both draft producers before calculation and 
     flow.journeyId === "skill-question-validation"
       && flow.operationId === "calculate-entry-total" && flow.actionIdentity?.operationId
   )), "the reused calculation operation must remain bound in the validation journey");
+});
+
+test("retained basic-site smoke aa154da3 keeps one chooser and never invents backend persistence", () => {
+  const request = "Build a basic competition website. Use local in-app state; no real payments or backend are required yet.";
+  assert.equal(inferRequirementSignals(request).includes("payments"), false);
+  assert.equal(inferRequirementSignals(request).includes("saved_data"), false);
+
+  const contract = {
+    summary: "A mobile-first competition website with a local entry flow and no backend persistence.",
+    projectType: "landing", auth: { required: false, rules: [] },
+    routes: [{ path: "/", name: "Home" }, { path: "/competitions/:competitionId", name: "Entry" }],
+    entities: [{ name: "entry", owned: false,
+      storage: "local in-app state only for the current browser session; not saved to backend",
+      fields: [
+        ["competitionId", "string"], ["competitionTitle", "string"], ["ticketPricePence", "number"],
+        ["ticketQuantity", "number"], ["totalCostPence", "number"], ["skillAnswer", "string"],
+        ["entrantName", "string"], ["entrantEmail", "string"], ["confirmationStatus", "string"],
+        ["confirmationNumber", "string"],
+      ].map(([name, type]) => ({ name, type, required: true })) }],
+    operations: [{
+      id: "calculate-entry-total", kind: "get", entity: "entry", journey: "enter-a-competition",
+      description: "calculate the visible local total",
+      responsibilities: [{ type: "functional", behavior: "multiply quantity by ticket price",
+        reads: ["ticketQuantity", "ticketPricePence"], writes: ["totalCostPence"] }],
+    }, {
+      id: "confirm-entry", kind: "create", entity: "entry", journey: "enter-a-competition",
+      description: "validate local fields and show a confirmation without backend persistence",
+      responsibilities: [
+        { type: "functional", behavior: "validate the local entry", reads: ["entrantName", "entrantEmail", "ticketQuantity", "skillAnswer"], writes: ["confirmationStatus"] },
+        { type: "functional", behavior: "create a visible local confirmation number", reads: ["competitionId", "ticketQuantity", "entrantEmail"], writes: ["confirmationNumber"] },
+      ],
+    }],
+    journeys: [{ id: "enter-a-competition", title: "A visitor enters a competition", priority: "primary",
+      stage: "primary_journey", steps: [
+        { action: "open the homepage", target: "/", expect: "the competition homepage is visible" },
+        { action: "click the browse competitions call to action", target: "Browse competitions button", expect: "the competitions are visible" },
+        { action: "choose a competition", target: "Enter now action on a competition card",
+          operates: ["competitionId", "competitionTitle", "ticketPricePence"], primitive: "selection",
+          expect: "the selected competition entry view is visible" },
+        { action: "choose a ticket quantity", target: "ticket quantity control",
+          operates: ["ticketQuantity", "calculate-entry-total"], reads: ["ticketPricePence"], primitive: "selection",
+          expect: "the selected quantity and total cost are visible" },
+        { action: "answer the skill-based question", target: "skill answer", operates: ["skillAnswer"], primitive: "textbox", expect: "the answer remains visible" },
+        { action: "enter contact details", target: "contact form", operates: ["entrantName", "entrantEmail"], expect: "the contact details remain visible" },
+        { action: "submit the entry", target: "Submit entry button", operates: ["confirm-entry"],
+          reads: ["competitionId", "competitionTitle", "ticketQuantity", "totalCostPence", "skillAnswer", "entrantName", "entrantEmail"],
+          expect: "a local confirmation with competition, ticket count, total, and next steps is visible" },
+      ] }],
+    integrations: [], states: [], acceptance: [
+      { id: "a1", statement: "choosing a competition opens its entry view" },
+      { id: "a2", statement: "choosing a ticket quantity displays the total cost" },
+      { id: "a3", statement: "submitting valid local details displays a confirmation number" },
+    ], deferred: [{ item: "backend persistence of competition entries", reason: "the entry uses local in-app state" }],
+  };
+
+  const contractVerdict = validateContract(contract);
+  assert.equal(contractVerdict.ok, true, contractVerdict.problems.join("; "));
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const choiceFlows = spec.interactionContract.flows.filter((flow) => (
+    flow.journeyId === "enter-a-competition" && flow.stepIndex === 2 && flow.control
+  ));
+  assert.deepEqual(choiceFlows.map((flow) => flow.control.logicalField), ["competitionId"]);
+  assert.deepEqual(choiceFlows[0].producedValues, ["competitionTitle", "ticketPricePence"]);
+  for (const field of ["competitionId", "competitionTitle", "ticketPricePence"]) {
+    assert.ok(choiceFlows[0].writes.includes(`enter-a-competition.draft.${field}`));
+  }
+
+  const responsibilities = spec.capabilityGraph.operationResponsibilities
+    .flatMap((operation) => operation.responsibilities || []);
+  assert.equal(responsibilities.some((responsibility) => responsibility.type === "persistence"), false);
+  assert.equal(spec.capabilityGraph.journeys[0].requiredNodeIds.includes("capability:crud"), false);
+  assert.deepEqual(spec.capabilityGraph.nodes.find((node) => node.id === "capability:crud")?.entities, []);
+  assert.equal(spec.persistencePlan, null);
+  assert.equal(spec.modulePlan.some((module) => module.path.includes("composed/crud")), false);
+  assert.deepEqual(contractRuntimeRequirements(spec.contract), { accounts: false, durableMutation: false });
+  assert.equal(journeyRequiresPersistentMutation(contract.journeys[0], spec.contract), false);
+  const submit = spec.interactionContract.flows.find((flow) => flow.operationId === "confirm-entry");
+  assert.equal(submit.kind, "action");
+  assert.deepEqual(submit.expectedStateTransition.persists, []);
 });

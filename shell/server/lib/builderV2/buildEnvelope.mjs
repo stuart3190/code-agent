@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { serviceClient } from "../supabase.mjs";
+import { operationRequiresDurableMutation } from "../../../shared/implementationContract.mjs";
 
 export const BUILD_ENVELOPE_VERSION = 1;
 export const FUNDING_POOL = Object.freeze({
@@ -49,9 +50,12 @@ export function contractRuntimeRequirements(contract = {}) {
   const accounts = contract.auth?.required === true
     || (contract.auth?.required !== false
       && /\b(auth|account|sign.?up|sign.?in|log.?in|session|password|profile)\b/.test(accountEvidence));
-  const durableMutation = (contract.entities || []).length > 0
-    || /\b(create|insert|update|delete|cancel|book|reserve|submit|save|persist|mutation)\b/
-      .test(withoutNegatedCapabilities(`${capabilityText} ${actionText}`));
+  const operations = contract.operations || [];
+  const durableMutation = operations.some((operation) => operationRequiresDurableMutation(contract, operation))
+    || (!operations.length && /\bdurable mutation\b/.test(capabilityText))
+    || (!operations.length && (contract.entities || []).length > 0
+      && /\b(create|insert|update|delete|cancel|book|reserve|submit|save|persist|mutation)\b/
+        .test(withoutNegatedCapabilities(`${capabilityText} ${actionText}`)));
   return { accounts, durableMutation };
 }
 

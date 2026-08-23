@@ -6,7 +6,9 @@
 
 import { CAPABILITIES, canonicalCapabilityId } from "./capabilityRegistry.mjs";
 import { validateBuildProfileGraph } from "../../../shared/buildProfile.mjs";
-import { functionalOutputEffect } from "../../../shared/implementationContract.mjs";
+import {
+  functionalOutputEffect, operationUsesDurablePersistence,
+} from "../../../shared/implementationContract.mjs";
 
 export const CAPABILITY_GRAPH_VERSION = 2;
 
@@ -154,7 +156,8 @@ function operationInteractionIds(operation, flows, stepIndex) {
   return flows.filter((flow) => flow.stepIndex === stepIndex).map((flow) => flow.id);
 }
 
-function persistenceResponsibility(operation, journey) {
+function persistenceResponsibility(operation, journey, contract) {
+  if (!operationUsesDurablePersistence(contract, operation)) return null;
   const method = PERSISTENCE_METHOD[operationKind(operation)] || null;
   if (!method) return null;
   const result = method === "remove" ? `${journey.id}.durable.deleted`
@@ -195,7 +198,7 @@ function explicitResponsibilities(operation, journey, flows, contract) {
     const resolvedCapability = canonicalCapabilityId(requestedCapability);
     const requestedMethod = responsibility?.capabilityMethod || responsibility?.method || responsibility?.operation || null;
     const persistence = responsibility?.type === "persistence";
-    const automaticPersistence = persistence ? persistenceResponsibility(operation, journey) : null;
+    const automaticPersistence = persistence ? persistenceResponsibility(operation, journey, contract) : null;
     const capabilityId = persistence ? (resolvedCapability || requestedCapability || "crud")
       : (resolvedCapability || requestedCapability);
     const capabilityMethod = persistence
@@ -264,7 +267,7 @@ function legacyFunctionalResponsibility(operation, journey, flows, contract) {
 function deriveOperationResponsibilities(operation, journey, flows, contract) {
   const stepIndex = operationStep(operation, journey);
   const explicit = explicitResponsibilities(operation, journey, flows, contract);
-  const automaticPersistence = persistenceResponsibility(operation, journey);
+  const automaticPersistence = persistenceResponsibility(operation, journey, contract);
   const responsibilities = explicit.length
     ? [...(automaticPersistence && !explicit.some((responsibility) => responsibility.type === "persistence")
       ? [automaticPersistence] : []), ...explicit]
@@ -305,9 +308,15 @@ const compositionCapability = new Map(Object.keys(CAPABILITIES)
 
 function deterministicNode(binding, contract, flows) {
   const capability = CAPABILITIES[binding.name];
+  const operations = contract?.operations || [];
+  const durableEntityNames = new Set((operations.length
+    ? operations.filter((operation) => operationUsesDurablePersistence(contract, operation))
+      .map((operation) => operation?.entity)
+    : (contract?.entities || []).map((entity) => entity?.name)).filter(Boolean));
   const entities = unique([
     binding.configuration?.entity,
-    ...(binding.name === "crud" ? (contract?.entities || []).map((entity) => entity.name) : []),
+    ...(binding.name === "crud" ? (contract?.entities || [])
+      .map((entity) => entity.name).filter((entity) => durableEntityNames.has(entity)) : []),
     ...(capability.entities || []).filter((entity) => (contract?.entities || [])
       .some((candidate) => candidate.name === entity)),
   ]);
@@ -663,7 +672,8 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
           || !(responsibility.writes || []).every((path) => owner.verificationSemantics?.stateChange?.includes(path))) {
           problems.push(`${prefix} has no authoritative verification semantics for its state transformation`);
         }
-        const persistenceMethod = PERSISTENCE_METHOD[operationKind(operation)];
+        const persistenceMethod = operationUsesDurablePersistence(contract, operation)
+          ? PERSISTENCE_METHOD[operationKind(operation)] : null;
         if (persistenceMethod && PERSISTENCE_SOURCE_METHODS.has(persistenceMethod)
           && !responsibility.persistenceSource) {
           problems.push(`${prefix} has no persistence source for its durable ${operationKind(operation)} input`);

@@ -17,6 +17,18 @@ test("V2 runtime distinguishes persistent journeys from read-only navigation", (
   assert.equal(journeyRequiresPersistentMutation({
     title: "Browse services", steps: [{ action: "Open pricing", expect: "Pricing is visible" }],
   }), false);
+
+  const journey = { id: "submit", title: "Submit a local form", steps: [{ action: "Submit", expect: "Confirmation appears" }] };
+  assert.equal(journeyRequiresPersistentMutation(journey, { capabilityGraph: {
+    operationResponsibilities: [{ journeyId: "submit", responsibilities: [
+      { type: "custom_functional", capabilityMethod: null },
+    ] }],
+  } }), false, "submit prose cannot override structured local-state authority");
+  assert.equal(journeyRequiresPersistentMutation(journey, { capabilityGraph: {
+    operationResponsibilities: [{ journeyId: "submit", responsibilities: [
+      { type: "persistence", capabilityMethod: "create" },
+    ] }],
+  } }), true, "a declared durable mutation still requires independent row evidence");
 });
 
 test("verification visitor identity follows independent and producer-consumer scenarios", () => {

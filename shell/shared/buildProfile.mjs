@@ -112,6 +112,13 @@ function has(patterns, text) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function withoutNegatedRequirements(value) {
+  return String(value || "").replace(
+    /\b(?:no|without|not requiring|does not require|do not require|not needed|are not required)\b[^.!?;\n]{0,64}\b(?:user accounts?|auth(?:entication)?|sign[ -]?in|log[ -]?in|saved data|database|persistence|payments?|billing|checkout|subscriptions?|file uploads?|real[ -]?time|admin(?:istration)?|exports?|downloads?)\b/gi,
+    "",
+  );
+}
+
 function profileError(field, value, allowed = null) {
   const error = new TypeError(`Invalid Builder V2 build profile field ${field}${allowed ? `; expected one of ${allowed.join(", ")}` : ""}.`);
   error.code = "invalid_build_profile";
@@ -156,7 +163,7 @@ export function validateBuildProfileInput(input) {
 }
 
 export function inferRequirementSignals(prompt = "") {
-  const text = String(prompt || "");
+  const text = withoutNegatedRequirements(prompt);
   return REQUIREMENT_SIGNALS.filter((signal) => has(SIGNAL_PATTERNS[signal] || [], text));
 }
 

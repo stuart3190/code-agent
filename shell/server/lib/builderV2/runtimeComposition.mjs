@@ -166,7 +166,20 @@ function runtimeLimits(workJob, kind) {
   };
 }
 
-export function journeyRequiresPersistentMutation(journey) {
+export function journeyRequiresPersistentMutation(journey, contract = null) {
+  const graphOperations = contract?.capabilityGraph?.operationResponsibilities;
+  if (Array.isArray(graphOperations)) {
+    return graphOperations.filter((operation) => operation?.journeyId === journey?.id)
+      .flatMap((operation) => operation?.responsibilities || [])
+      .some((responsibility) => responsibility?.type === "persistence"
+        && !["get", "list", "count", "subscribe"].includes(responsibility?.capabilityMethod));
+  }
+  const structuredFlows = contract?.interactionContract?.flows;
+  if (Array.isArray(structuredFlows)) {
+    return structuredFlows.some((flow) => flow?.journeyId === journey?.id
+      && (flow?.semanticResponsibilityTypes || []).includes("persistence")
+      && (flow?.expectedStateTransition?.persists || []).length > 0);
+  }
   const text = [journey?.title, journey?.description, ...(journey?.steps || []).flatMap((step) => [
     step?.action, step?.target, step?.expect,
   ])].filter(Boolean).join(" ");
@@ -761,7 +774,7 @@ export function createBuilderV2Runtime({
             ),
             secret: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE,
           });
-          const before = journeyRequiresPersistentMutation(journey)
+          const before = journeyRequiresPersistentMutation(journey, journeyContract)
             ? await backendFingerprint(client, projectId) : null;
           const outcome = await isolated({
             id: `${workJob.id}-journey-${uuid()}`, durable_job_id: workJob.id,

@@ -91,6 +91,10 @@ Rules:
   "operates" may also name the declared OPERATION id the step performs. Fields become value
   controls; an operation id binds the action control and never becomes a textbox. A step may list
   both. "reads" names dependencies the step consumes without performing or changing them.
+- When one user action selects an item and atomically supplies related metadata, put only the
+  user-operated identity in "operates" and put the derived fields in "produces". For example, one
+  product choice may operate productId and produce productTitle and unitPrice; those outputs are
+  state written by the same action, not additional controls the visitor must drive.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
@@ -153,10 +157,12 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
       const list = (value) => (Array.isArray(value) ? value.map(String).filter(Boolean) : null);
       const operates = list(step?.operates);
       const reads = list(step?.reads);
+      const produces = list(step?.produces);
       return {
         ...step,
         ...(operates?.length ? { operates } : {}),
         ...(reads?.length ? { reads } : {}),
+        ...(produces?.length ? { produces } : {}),
       };
     }),
     acceptance: Array.isArray(journey.acceptance) ? journey.acceptance : [],
@@ -216,7 +222,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
   const usedFields = new Set([
     ...dependencies.map((issue) => String(issue.missingStatePath || "").split(".").at(-1)),
     ...journeys.flatMap((journey) => (journey.steps || []).flatMap((step) => [
-      ...(step.operates || []), ...(step.reads || []),
+      ...(step.operates || []), ...(step.reads || []), ...(step.produces || []),
     ])),
     ...operations.flatMap((operation) => (operation.responsibilities || []).flatMap((responsibility) => [
       ...(responsibility.reads || []), ...(responsibility.writes || []),
