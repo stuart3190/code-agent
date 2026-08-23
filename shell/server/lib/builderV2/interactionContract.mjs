@@ -512,7 +512,6 @@ export function buildInteractionContract(contract, {
               .findLast((path) => String(path).endsWith(suffix));
             if (priorProducer) return priorProducer;
             const operationProducer = (contract?.operations || []).map((operation) => {
-              if (operation?.journey && operation.journey !== journey.id) return false;
               const writesField = (operation.responsibilities || []).some((responsibility) => (
                 list(responsibility?.writes).some((value) => normalized(value) === normalized(field))
               ));
@@ -521,6 +520,7 @@ export function buildInteractionContract(contract, {
               const producerStep = stepsList.findIndex((candidate) => list(candidate?.operates)
                 .some((value) => normalized(value) === identity)
                 || list(candidate?.reads).some((value) => normalized(value) === identity));
+              if (operation?.journey && operation.journey !== journey.id && producerStep < 0) return null;
               return { operation, producerStep };
             }).find(Boolean);
             if (operationProducer?.producerStep >= 0) return `${journey.id}.custom.${field}`;

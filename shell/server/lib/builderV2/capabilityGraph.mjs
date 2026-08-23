@@ -442,7 +442,19 @@ export function deriveCapabilityGraph(contract, { bindings = [], interactionCont
   for (const journey of contract?.journeys || []) {
     const journeyFlows = flows.filter((flow) => flow.journeyId === journey.id);
     const uncovered = journeyFlows.filter((flow) => !nodeForFlow(flow));
-    const journeyOperations = (contract?.operations || []).filter((operation) => operation.journey === journey.id);
+    // An operation has one owning declaration but may be invoked by more than one contracted
+    // journey (for example, a successful confirmation journey and its negative-validation
+    // journey). Exact structured operation identity on a step is authority to project the same
+    // semantics into that journey. Restricting mapping to `operation.journey` left every reused
+    // operation interaction semantically unbound and made the full contract impossible even when
+    // its owner journey was valid.
+    const invokedOperationIds = new Set((journey.steps || []).flatMap((step) => [
+      ...list(step?.operates), ...list(step?.reads),
+    ]).map(normalized));
+    const journeyOperations = (contract?.operations || []).filter((operation) => (
+      operation.journey === journey.id
+        || invokedOperationIds.has(normalized(operationIdentity(operation)))
+    ));
     const mappedOperations = journeyOperations.map((operation) => (
       deriveOperationResponsibilities(operation, journey, journeyFlows, contract)
     ));
