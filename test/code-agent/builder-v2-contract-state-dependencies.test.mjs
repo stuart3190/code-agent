@@ -143,6 +143,34 @@ test("structured reads never borrow a matching producer from an earlier journey"
   assert.ok(spec.moduleContracts.specifications.length > 0);
 });
 
+test("opening one item produces its selection through the activation instead of a duplicate chooser", () => {
+  const contract = {
+    summary: "Open a featured item", projectType: "website", auth: { required: false },
+    routes: [{ path: "/", name: "Home" }, { path: "/competition", name: "Detail" }],
+    entities: [{ name: "entry", owned: false, fields: [
+      { name: "competitionId", type: "string" }, { name: "ticketQuantity", type: "number" },
+    ] }], operations: [], integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{ id: "reserve-competition-entry", title: "Reserve entry", priority: "primary",
+      stage: "primary_journey", steps: [
+        { action: "open the homepage", target: "/", expect: "featured competitions are visible" },
+        { action: "open a featured competition", target: "featured competition card",
+          operates: ["competitionId"], expect: "the competition detail page is visible" },
+        { action: "choose a ticket quantity", target: "ticket quantity", primitive: "selection",
+          operates: ["ticketQuantity"], reads: ["competitionId"], expect: "the total updates" },
+      ] }],
+  };
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const openFlows = spec.interactionContract.flows.filter((flow) => (
+    flow.journeyId === "reserve-competition-entry" && flow.stepIndex === 1
+  ));
+  assert.equal(openFlows.length, 1, JSON.stringify(openFlows));
+  assert.equal(openFlows[0].kind, "flow_start");
+  assert.equal(openFlows[0].control.accessibleName, "featured competition card");
+  assert.equal(openFlows[0].control.logicalField, "competitionId");
+  assert.ok(openFlows[0].writes.includes("reserve-competition-entry.draft.competitionId"));
+});
+
 test("initial, durable, external, and prior capability state are journey-scoped authorities", () => {
   const plan = {
     version: 2,

@@ -444,6 +444,29 @@ export function buildInteractionContract(contract, {
         }
       }
 
+      // Opening one concrete item is also the act which selects its identity. Representing a
+      // single declared selection operand beside an activation as a second control made the
+      // browser click the card, navigate successfully, and then search the destination page for
+      // a chooser that had correctly disappeared. Fold that state production into the real
+      // activation control. Multi-field/composite selection steps remain separate interactions.
+      if (operands?.length === 1
+          && kinds.some((kind) => ["action", "flow_start"].includes(kind))) {
+        const stepFlows = flows.slice(stepFlowStart);
+        const actionFlow = stepFlows.find((flow) => ["action", "flow_start"].includes(flow.kind)
+          && flow.control);
+        const selectionFlows = stepFlows.filter((flow) => ["selection", "input"].includes(flow.kind));
+        if (actionFlow && selectionFlows.length === 1) {
+          const [selectionFlow] = selectionFlows;
+          actionFlow.writes = unique([...(actionFlow.writes || []), ...(selectionFlow.writes || [])]);
+          actionFlow.valueWritten = selectionFlow.valueWritten;
+          Object.assign(actionFlow.control, {
+            logicalField: selectionFlow.valueWritten,
+            statePath: selectionFlow.writes?.[0] || actionFlow.control.statePath || null,
+          });
+          flows.splice(flows.indexOf(selectionFlow), 1);
+        }
+      }
+
       // An operation identity names what the step DOES, not another value control. Preserve that
       // identity on the step itself before the capability graph is derived. Without it, the graph
       // can only guess among unclaimed interactions of the same kind in the whole journey. A
