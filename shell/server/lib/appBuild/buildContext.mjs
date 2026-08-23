@@ -18,6 +18,18 @@ import { approvedConfiguredModel } from "../modelCatalogue.mjs";
 import { createGeminiEngineProvider } from "./geminiEngineProvider.mjs";
 import { createStoredAccessTokenProvider } from "../../../../src/providers/auth.mjs";
 
+export const CONNECTED_RECOVERY_POLICY_VERSION = "owner_connected_recovery_v1";
+
+function connectedRecoveryAuthorityError(message) {
+  return Object.assign(new Error(message), {
+    code: "recovery_provider_unavailable",
+    classification: "platform",
+    retryable: true,
+    dispatchState: "before_dispatch",
+    customerActionRequired: false,
+  });
+}
+
 function managedModelForIntent(intent) {
   if (intent === "fast") return approvedConfiguredModel("OPENAI_FAST_MODEL", "gpt-5.6-luna", { provider: "openai", tier: "fast" });
   return intent === "edit"
@@ -40,6 +52,70 @@ export function resolveManagedRecoveryContext() {
     byokSafety: null,
     policy: resolveProviderPolicy({ provider: "managed", selectedBy: "thrallo_recovery_policy" }),
     buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
+  };
+}
+
+/**
+ * Resolve Builder-owned correction and repair transport from the private platform recovery
+ * identity. The build owner is deliberately not an input: customer BYOK, connected allowance,
+ * provider preference, and request payloads cannot select or impersonate this authority.
+ *
+ * The credential remains in the existing encrypted owner credential store. This resolver only
+ * proves that the configured internal owner currently has Codex connected, then returns the same
+ * server-side Codex transport used by ordinary connected generation with a distinct funding
+ * policy identity. No token or owner identifier is copied into routing evidence or generated code.
+ */
+export async function resolveConnectedRecoveryContext({
+  env = process.env,
+  credentialResolver = activeAiCredential,
+} = {}) {
+  const recoveryOwnerId = String(env.THRALLO_BV2_RECOVERY_OWNER_ID || "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recoveryOwnerId)) {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery authority is not configured.",
+    );
+  }
+
+  let credential;
+  try {
+    credential = await credentialResolver(recoveryOwnerId);
+  } catch {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery authority is unavailable.",
+    );
+  }
+  if (credential?.provider !== "codex" || !credential?.secret) {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform recovery owner does not have an active Codex connection.",
+    );
+  }
+
+  let context;
+  try {
+    context = await resolveBuildContext(recoveryOwnerId, {
+      credentialResolver: async () => credential,
+    });
+  } catch {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery transport could not be initialized.",
+    );
+  }
+  if (context.policy?.billingLane !== "connected_allowance"
+      || context.policy?.primaryProvider !== "codex") {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform recovery transport resolved outside connected Codex.",
+    );
+  }
+  return {
+    ...context,
+    providerLabel: "codex-platform-recovery",
+    policy: {
+      ...context.policy,
+      selectedBy: "thrallo_recovery_authority",
+      recoveryPolicyVersion: CONNECTED_RECOVERY_POLICY_VERSION,
+      executionAuthority: "platform_connected_codex",
+      allowManagedFallback: false,
+    },
   };
 }
 

@@ -95,12 +95,14 @@ async function insertPublicBuild(index, project, values = {}) {
 
 const proof = {};
 try {
-  const activation = one(unwrap(await db.rpc("activate_bv2_managed_recovery_policy", {
+  const activation = one(unwrap(await db.rpc("activate_bv2_owner_connected_recovery_policy", {
     p_deployment_commit: "a".repeat(40),
     p_deployment_manifest_sha256: "b".repeat(64),
     p_actor: "disposable_runtime_proof",
-  }), "activate managed recovery policy"));
-  assert.equal(activation.policyVersion, "managed_recovery_v1");
+  }), "activate platform connected recovery policy"));
+  assert.equal(activation.policyVersion, "owner_connected_recovery_v1");
+  assert.equal(activation.executionTransport, "platform_connected_codex");
+  assert.equal(activation.fundingSource, "thrallo");
   assert.equal(activation.deploymentCommit, "a".repeat(40));
   proof.recoveryPolicyActivation = "deployment_manifest_bound";
   await createPrincipal(OWNER_A, "a");
@@ -186,7 +188,7 @@ try {
   unwrap(await browser.auth.signInWithPassword({
     email: "bv2-runtime-a@example.invalid", password: "Disposable-V2-Runtime-Proof!42",
   }), "browser sign-in");
-  const browserActivation = await browser.rpc("activate_bv2_managed_recovery_policy", {
+  const browserActivation = await browser.rpc("activate_bv2_owner_connected_recovery_policy", {
     p_deployment_commit: "a".repeat(40), p_deployment_manifest_sha256: "b".repeat(64),
     p_actor: "browser_must_not_activate",
   });
@@ -233,18 +235,41 @@ try {
     p_owner: OWNER_A, p_reservation_id: connectedReservation.id, p_actual_credits: 1.5,
     p_usage: { input: 8, output: 2 }, p_provider_request_ids: ["proof-connected-terminal-credit"],
   }), "connected terminal usage settlement");
+  for (const [lane, provider] of [["managed", "openai"], ["byok_api", "openai"]]) {
+    const forbiddenRecovery = await db.rpc("reserve_bv2_model_call_v4", {
+      p_owner: OWNER_A, p_project_id: SETTLEMENT_PROJECTS[1], p_build_id: SETTLEMENT_BUILDS[1],
+      p_call_key: `proof-forbidden-recovery-${lane}`, p_step: "repair", p_provider: provider,
+      p_model: "proof-model", p_billing_lane: lane, p_usage_responsibility: "thrallo_repair",
+      p_funding_pool: "thrallo_recovery", p_reserved_credits: 1, p_ceiling_credits: 10,
+      p_included_available_credits: null, p_usage_period_start: null, p_usage_row_count: null,
+      p_metadata: { proof: true, logicalDispatchId: `proof-forbidden-recovery-${lane}` },
+    });
+    assert.ok(forbiddenRecovery.error, `${lane} recovery must be rejected before dispatch`);
+  }
+  for (const responsibility of ["platform_failure", "qualification"]) {
+    const forbiddenCustomerFunding = await db.rpc("reserve_bv2_model_call_v4", {
+      p_owner: OWNER_A, p_project_id: SETTLEMENT_PROJECTS[1], p_build_id: SETTLEMENT_BUILDS[1],
+      p_call_key: `proof-forbidden-customer-funding-${responsibility}`, p_step: "repair", p_provider: "codex",
+      p_model: "proof-model", p_billing_lane: "connected_allowance", p_usage_responsibility: responsibility,
+      p_funding_pool: "customer_generation", p_reserved_credits: 1, p_ceiling_credits: 10,
+      p_included_available_credits: null, p_usage_period_start: null, p_usage_row_count: null,
+      p_metadata: { proof: true, logicalDispatchId: `proof-forbidden-customer-funding-${responsibility}` },
+    });
+    assert.ok(forbiddenCustomerFunding.error,
+      `${responsibility} cannot consume the customer generation pool`);
+  }
   const recoveryReservation = one(unwrap(await db.rpc("reserve_bv2_model_call_v4", {
     p_owner: OWNER_A, p_project_id: SETTLEMENT_PROJECTS[1], p_build_id: SETTLEMENT_BUILDS[1],
-    p_call_key: "proof-managed-recovery-not-compensated", p_step: "repair", p_provider: "openai",
-    p_model: "proof-model", p_billing_lane: "managed", p_usage_responsibility: "thrallo_repair",
+    p_call_key: "proof-connected-recovery-not-compensated", p_step: "repair", p_provider: "codex",
+    p_model: "proof-model", p_billing_lane: "connected_allowance", p_usage_responsibility: "thrallo_repair",
     p_funding_pool: "thrallo_recovery", p_reserved_credits: 1, p_ceiling_credits: 10,
     p_included_available_credits: null, p_usage_period_start: null, p_usage_row_count: null,
-    p_metadata: { proof: true, logicalDispatchId: "proof-managed-recovery-not-compensated" },
-  }), "managed recovery reservation"));
+    p_metadata: { proof: true, logicalDispatchId: "proof-connected-recovery-not-compensated" },
+  }), "platform connected recovery reservation"));
   unwrap(await db.rpc("settle_bv2_model_call_v2", {
     p_owner: OWNER_A, p_reservation_id: recoveryReservation.reservation.id, p_actual_credits: 0.75,
-    p_usage: { input: 4, output: 1 }, p_provider_request_ids: ["proof-managed-recovery-not-compensated"],
-  }), "managed recovery usage settlement");
+    p_usage: { input: 4, output: 1 }, p_provider_request_ids: ["proof-connected-recovery-not-compensated"],
+  }), "platform connected recovery usage settlement");
   const connectedTerminal = one(unwrap(await db.rpc("settle_bv2_build_terminal", {
     p_owner: OWNER_A, p_build_id: SETTLEMENT_BUILDS[1], p_terminal_state: "failed",
     p_failure_classification: "generated_app", p_green_preview: false, p_compensation_eligible: true,
@@ -256,7 +281,7 @@ try {
   assert.equal(connectedTerminalAgain.id, connectedTerminal.id);
   assert.equal(Number(connectedTerminal.managed_refund_credits), 0);
   assert.equal(Number(connectedTerminal.service_credit_credits), 1.5);
-  assert.equal(Number(connectedTerminal.spent_breakdown["thrallo_recovery:thrallo_repair:managed"]), 0.75);
+  assert.equal(Number(connectedTerminal.spent_breakdown["thrallo_recovery:thrallo_repair:connected_allowance"]), 0.75);
   assert.equal(unwrap(await db.from("credit_ledger").select("id").eq("owner", OWNER_A)
     .eq("ref", `bv2-terminal:${SETTLEMENT_BUILDS[1]}`).eq("kind", "service_credit"), "service credit ledger").length, 1);
   proof.terminalSettlement = { managedRefundIdempotent: true, serviceCreditIdempotent: true,

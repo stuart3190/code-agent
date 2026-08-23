@@ -16,7 +16,7 @@ const AUTHORITY = {
   PREVIEW_MODE: "vps",
   PROVISIOND_URL: "http://127.0.0.1:8790",
   PROVISIOND_TOKEN: "present",
-  OPENAI_API_KEY: "sk-test-managed-recovery-authority",
+  THRALLO_BV2_RECOVERY_OWNER_ID: "00000000-0000-4000-8000-000000000123",
 };
 
 test("14S exact shell-present worker-absent regression fails closed with preview_isolation_required", () => {

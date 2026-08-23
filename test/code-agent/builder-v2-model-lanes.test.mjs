@@ -16,6 +16,7 @@ import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngin
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { structuredBuildFailure } from "../../shell/server/lib/builderV2/buildFailure.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
 
@@ -614,7 +615,7 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
   assert.deepEqual(step.usage.providerRequestIds, ["codex:response:contract-1"]);
 });
 
-test("a rejected planned contract response moves its correction to managed recovery", async () => {
+test("a rejected planned contract response moves its correction to platform connected recovery", async () => {
   const contractJson = JSON.stringify({
     summary: "Contact site", projectType: "landing",
     journeys: [{ id: "contact", title: "Send a message", priority: "primary", steps: [
@@ -630,11 +631,11 @@ test("a rejected planned contract response moves its correction to managed recov
     providerForStep: async ({ recoveryDispatch }) => {
       routing.push(recoveryDispatch === true);
       return {
-        provider: { model: "gpt-5.5", providerId: recoveryDispatch ? "openai" : "codex",
+        provider: { model: "gpt-5.5", providerId: "codex",
           runTurn: async () => ({ text: providerCalls++ ? contractJson : "not json", toolCalls: [],
             usage: { input: 100, output: 50, total: 150, providerRequestId: `contract-${providerCalls}` } }) },
-        decision: { provider: recoveryDispatch ? "openai" : "codex", model: "gpt-5.5",
-          billingLane: recoveryDispatch ? "managed" : "connected_allowance",
+        decision: { provider: "codex", model: "gpt-5.5",
+          billingLane: "connected_allowance",
           estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
       };
     },
@@ -648,8 +649,12 @@ test("a rejected planned contract response moves its correction to managed recov
     row.billingLane, row.usageResponsibility, row.fundingPool,
   ]), [
     ["connected_allowance", "customer_request", "customer_generation"],
-    ["managed", "thrallo_repair", "thrallo_recovery"],
+    ["connected_allowance", "thrallo_repair", "thrallo_recovery"],
   ]);
+  assert.equal((await reservations.budget("o", "b", 10, "customer_generation")).consumedCredits,
+    reservations.rows()[0].actualCredits);
+  assert.equal((await reservations.budget("o", "b", 5, "thrallo_recovery")).consumedCredits,
+    reservations.rows()[1].actualCredits);
 });
 
 test("a planned generation call cannot consume the completion reserve for mandatory increments", async () => {
@@ -863,7 +868,7 @@ test("a successful provider response with failed settlement stops without rewrit
   }]);
 });
 
-test("qualification correction calls still use Thrallo-managed recovery responsibility", async () => {
+test("qualification correction calls still use Thrallo recovery responsibility", async () => {
   const reserved = [];
   const reservations = {
     reserve: async (input) => { reserved.push(input); return { id: "qualification-hold" }; },
@@ -886,4 +891,32 @@ test("qualification correction calls still use Thrallo-managed recovery responsi
   });
   assert.equal(reserved[0].usageResponsibility, "thrallo_repair");
   assert.equal(reserved[0].fundingPool, "thrallo_recovery");
+});
+
+test("a recovery provider rejection before source exists is platform-classified, never generated-app", async () => {
+  const reservations = memoryModelReservations();
+  const provider = {
+    providerId: "codex", model: "gpt-5.5",
+    runTurn: async () => {
+      throw Object.assign(new Error("Codex HTTP 429: platform allowance unavailable"), {
+        status: 429, dispatchState: "provider_rejected", retrySafe: true,
+      });
+    },
+  };
+  let observed;
+  await assert.rejects(runReservedDispatch({
+    reservations, owner: "customer", projectId: "project", buildId: "build",
+    step: "contract", logicalStep: "contract_protocol_correction", sequence: 2,
+    provider, decision: { provider: "codex", model: "gpt-5.5",
+      billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3 },
+    options: { systemPrompt: "correct", messages: [{ role: "user", content: "fix contract" }] },
+    ceilingCredits: 5, fundingPool: "thrallo_recovery", usageResponsibility: "thrallo_repair",
+  }), (error) => {
+    observed = structuredBuildFailure(error);
+    return observed.classification === "platform" && observed.customerActionRequired === false;
+  });
+  assert.notEqual(observed.classification, "generated_app");
+  assert.equal(reservations.rows()[0].billingLane, "connected_allowance");
+  assert.equal(reservations.rows()[0].fundingPool, "thrallo_recovery");
+  assert.equal(reservations.rows()[0].state, "released");
 });

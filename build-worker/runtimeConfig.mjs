@@ -2,8 +2,13 @@ function previewIsolationError(message) {
   return Object.assign(new Error(message), { code: "preview_isolation_required" });
 }
 
-function managedRecoveryAuthorityError(message) {
-  return Object.assign(new Error(message), { code: "managed_recovery_credential_required" });
+function connectedRecoveryAuthorityError(message) {
+  return Object.assign(new Error(message), {
+    code: "recovery_provider_unavailable",
+    classification: "platform",
+    retryable: true,
+    dispatchState: "before_dispatch",
+  });
 }
 
 export const SUPPORTED_BUILD_JOB_TYPES = Object.freeze([
@@ -50,21 +55,24 @@ export function workerPreviewConfiguration(env = process.env) {
 }
 
 /**
- * Builder V2 correction and repair are always Thrallo-funded managed work. This proof exposes
- * only the policy identity and credential presence; the private credential never leaves the
- * worker process and is never returned, logged, or passed to a sandbox.
+ * Builder V2 correction and repair use an internal owner's encrypted connected-Codex authority.
+ * This synchronous startup proof validates only the private server-side identity selector; the
+ * worker readiness proof separately resolves that owner's stored Codex credential without a
+ * provider call. Neither the selector nor credential is passed to a sandbox or browser.
  */
-export function workerManagedRecoveryConfiguration(env = process.env) {
-  if (!String(env.OPENAI_API_KEY || "").trim()) {
-    throw managedRecoveryAuthorityError(
-      "Builder V2 managed recovery authority is unavailable; no customer state was created.",
+export function workerConnectedRecoveryConfiguration(env = process.env) {
+  const ownerId = String(env.THRALLO_BV2_RECOVERY_OWNER_ID || "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ownerId)) {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery identity is unavailable; no customer state was created.",
     );
   }
   return Object.freeze({
     available: true,
-    provider: "openai",
-    billingLane: "managed",
+    provider: "codex",
+    billingLane: "connected_allowance",
     fundingPool: "thrallo_recovery",
+    policyVersion: "owner_connected_recovery_v1",
   });
 }
 
@@ -81,5 +89,5 @@ export function assertWorkerCredentialAuthority(jobTypes, env = process.env) {
       "Builder pipeline workers require the platform credential encryption key.",
     ), { code: "worker_credential_key_required" });
   }
-  return workerManagedRecoveryConfiguration(env);
+  return workerConnectedRecoveryConfiguration(env);
 }

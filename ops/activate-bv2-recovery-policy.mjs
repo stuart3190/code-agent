@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Zero-provider release operation. The migration only installs the compatibility boundary; this
-// command binds managed-only recovery to the exact deployment manifest at restricted activation.
+// command binds platform-connected Codex recovery to the exact deployment manifest at restricted
+// activation. The prior managed policy record remains immutable historical evidence.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,7 +27,7 @@ if (expectedCommit && expectedCommit !== manifest.gitCommit) {
 
 const client = serviceClient();
 const actor = value("actor", "restricted_release_activation");
-const { data, error } = await client.rpc("activate_bv2_managed_recovery_policy", {
+const { data, error } = await client.rpc("activate_bv2_owner_connected_recovery_policy", {
   p_deployment_commit: manifest.gitCommit,
   p_deployment_manifest_sha256: manifest.manifestSha256,
   p_actor: actor,
@@ -34,7 +35,9 @@ const { data, error } = await client.rpc("activate_bv2_managed_recovery_policy",
 if (error) throw error;
 const activation = Array.isArray(data) ? data[0] : data;
 if (activation?.state !== "active"
-    || activation?.policyVersion !== "managed_recovery_v1"
+    || activation?.policyVersion !== "owner_connected_recovery_v1"
+    || activation?.executionTransport !== "platform_connected_codex"
+    || activation?.fundingSource !== "thrallo"
     || activation?.deploymentCommit !== manifest.gitCommit
     || activation?.deploymentManifestSha256 !== manifest.manifestSha256) {
   throw new Error("database recovery policy activation differs from deployment manifest");
@@ -44,6 +47,8 @@ console.log(JSON.stringify({
   ok: true,
   zeroModel: true,
   policyVersion: activation.policyVersion,
+  executionTransport: activation.executionTransport,
+  fundingSource: activation.fundingSource,
   deploymentCommit: activation.deploymentCommit,
   deploymentManifestSha256: activation.deploymentManifestSha256,
   activatedAt: activation.activatedAt,

@@ -48,6 +48,9 @@ test("validated contracts receive immutable independent generation, recovery, an
   assert.ok(complex.customerGeneration.plannedCredits > basic.customerGeneration.plannedCredits);
   assert.ok(complex.thralloRecovery.approvedCredits > basic.thralloRecovery.approvedCredits);
   assert.ok(complex.thralloRecovery.strategyCapacity > basic.thralloRecovery.strategyCapacity);
+  assert.equal(basic.recoveryProviderPolicy.billingLane, "connected_allowance");
+  assert.equal(basic.recoveryProviderPolicy.executionAuthority, "platform_connected_codex");
+  assert.equal(basic.recoveryProviderPolicy.fundingSource, "thrallo");
   assert.equal(complex.execution.softTargetDurationMs, 1_200_000);
   assert.equal(complex.execution.hardSafetyDurationMs, complex.execution.expectedDurationMs * 3);
   assert.equal(new Set(complex.stages.filter((stage) => stage.estimatedCredits > 0)
@@ -103,7 +106,7 @@ test("an internal duration extension is durable and revises the safety boundary 
   assert.equal(current.envelope.execution.internalExtension.reason, "durable progress continues");
 });
 
-test("BYOK generation and managed recovery settle into isolated pools and compensate only planned usage", async () => {
+test("BYOK generation and platform connected recovery settle into isolated pools and compensate only planned usage", async () => {
   const reservations = memoryModelReservations();
   const base = { owner: "owner", projectId: "project", buildId: "build", maxRepairs: 10, maxCorrections: 10 };
   const customer = await reservations.reserve({ ...base, callKey: "customer-1", step: "core",
@@ -112,7 +115,7 @@ test("BYOK generation and managed recovery settle into isolated pools and compen
     logicalDispatchId: "core:1", continuationIndex: 0 });
   await reservations.settle("owner", customer.id, { actualCredits: 3, providerRequestIds: ["customer-request"] });
   const recovery = await reservations.reserve({ ...base, callKey: "recovery-1", step: "repair",
-    provider: "openai", model: "gpt", billingLane: "managed", reservedCredits: 4,
+    provider: "codex", model: "gpt-5.5", billingLane: "connected_allowance", reservedCredits: 4,
     ceilingCredits: 10, usageResponsibility: "thrallo_repair", fundingPool: FUNDING_POOL.RECOVERY,
     logicalDispatchId: "repair:1", continuationIndex: 0 });
   await reservations.settle("owner", recovery.id, { actualCredits: 2, providerRequestIds: ["recovery-request"] });
@@ -168,4 +171,23 @@ test("the additive migration enforces managed-only recovery and idempotent termi
   assert.match(sql, /billing_lane in \('byok_api','connected_allowance'\)/);
   assert.match(sql, /p_event_type not in \('progress','stdout','stderr','structured_failure'\)/);
   assert.match(sql, /build_work_events_type_check check \([\s\S]*'structured_failure'/);
+});
+
+test("the connected recovery migration preserves old evidence and admits only platform Codex recovery", async () => {
+  const sql = await readFile(new URL(
+    "../../supabase/migrations/20260823101752_bv2_owner_connected_recovery_transport.sql",
+    import.meta.url,
+  ), "utf8");
+  assert.match(sql, /recovery_policy_version in \('legacy_v1','managed_recovery_v1','owner_connected_recovery_v1'\)/);
+  assert.match(sql, /owner_connected_recovery_v1'[\s\S]*funding_pool='thrallo_recovery'[\s\S]*billing_lane='connected_allowance'[\s\S]*provider='codex'/);
+  assert.match(sql, /activate_bv2_owner_connected_recovery_policy[\s\S]*deploymentManifestSha256/);
+  assert.match(sql, /executionTransport','platform_connected_codex'/);
+  assert.match(sql, /managed Builder V2 recovery dispatch is disabled after connected recovery activation/);
+  assert.match(sql, /p_funding_pool='thrallo_recovery'[\s\S]*p_billing_lane<>'connected_allowance'[\s\S]*p_provider<>'codex'/);
+  assert.match(sql, /owner_connected_recovery_v1'[\s\S]*p_funding_pool='customer_generation'[\s\S]*p_usage_responsibility<>'customer_request'/,
+    "platform failure and qualification work cannot consume the customer generation pool");
+  assert.doesNotMatch(sql, /update public\.bv2_model_reservations set[^;]*(?:^|[,\n]\s*)billing_lane\s*=/m,
+    "the policy migration must not relabel historical provider lanes");
+  assert.doesNotMatch(sql, /insert into public\.credit_ledger|settle_bv2_build_terminal/,
+    "transport activation must not create refunds, credits, or settlements");
 });

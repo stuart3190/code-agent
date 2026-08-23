@@ -5,6 +5,7 @@ import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { serviceClient } from "../shell/server/lib/supabase.mjs";
 import { redactDiagnosticText } from "../shell/server/lib/appBuild/buildDiagnostics.mjs";
+import { resolveConnectedRecoveryContext } from "../shell/server/lib/appBuild/buildContext.mjs";
 import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
 import { resolveWorkerReleaseIdentity } from "../shell/server/lib/builderV2/workerReleaseIdentity.mjs";
@@ -105,6 +106,10 @@ const readiness = createPreviewIsolationReadiness({
   maxProofAgeMs: PREVIEW_POLICY.maxProofAgeMs,
   prove: async () => {
     assertWorkerCredentialAuthority(JOB_TYPES);
+    // Credential resolution decrypts the configured platform owner's stored Codex authority but
+    // does not contact a provider. If it is absent or no longer Codex, readiness fails closed and
+    // builder_pipeline is removed from the advertised job types before customer work is leased.
+    await resolveConnectedRecoveryContext();
     return proveWorkerPreviewIsolation({
       preview: previewProvider(),
       randomUUID: () => PREVIEW_ISOLATION_RUN_ID,

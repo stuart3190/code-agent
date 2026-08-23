@@ -15,9 +15,9 @@ Environment=THRALLO_PROCESS_ROLE=build-worker
 Environment=THRALLO_BUILD_SANDBOX=docker
 Environment=HOME=/var/lib/thrallo-build-worker-home
 # Keep the release identity unchanged for private-authority repairs while refusing to start a
-# worker that could accept Builder V2 work without its dedicated managed-recovery credential.
-# The value is read only from the private EnvironmentFile and is never expanded into argv/logs.
-ExecStartPre=/usr/bin/node -e 'if (!String(process.env.OPENAI_API_KEY || "").trim()) process.exit(78)'
+# worker that could accept Builder V2 work without its server-selected platform recovery owner.
+# The identity is read only from the private EnvironmentFile and never comes from customer input.
+ExecStartPre=/usr/bin/node -e 'if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(process.env.THRALLO_BV2_RECOVERY_OWNER_ID || "").trim())) process.exit(78)'
 ExecStart=/usr/bin/node build-worker/index.mjs
 Restart=on-failure
 RestartSec=5

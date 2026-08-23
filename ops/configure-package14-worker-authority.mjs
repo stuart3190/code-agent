@@ -1,5 +1,5 @@
 // Production-only, secret-safe worker credential authority repair for Package 14.
-// Copies only the credential-store selector, encryption key, managed-recovery credential,
+// Copies only the credential-store selector, encryption key, platform recovery owner selector,
 // preview authority and PUBLIC generated-runtime configuration from the shell's existing private
 // environment into the worker's private EnvironmentFile. Values are never logged. Privileged
 // server values remain private to the worker and are never copied into a generated tree.
@@ -52,11 +52,19 @@ const updates = new Map([
   ["CODE_AGENT_STORE", "supabase"],
   [encryptionName, source.values.get(encryptionName)],
 ]);
-const managedRecoveryCredential = source.values.get("OPENAI_API_KEY");
-if (!privateValuePresent(managedRecoveryCredential)) {
-  throw new Error("shell managed recovery credential is unavailable");
+const connectedRecoveryOwnerId = source.values.get("THRALLO_BV2_RECOVERY_OWNER_ID");
+if (!privateValuePresent(connectedRecoveryOwnerId)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(String(connectedRecoveryOwnerId).replace(/^['"]|['"]$/g, "").trim())) {
+  throw new Error("shell platform Codex recovery owner identity is unavailable");
 }
-updates.set("OPENAI_API_KEY", managedRecoveryCredential);
+updates.set("THRALLO_BV2_RECOVERY_OWNER_ID", connectedRecoveryOwnerId);
+// Preserve the existing private managed credential for customer-selected managed generation.
+// It is not a recovery prerequisite and its absence cannot disable connected/BYOK builds.
+const managedCustomerCredential = source.values.get("OPENAI_API_KEY");
+if (privateValuePresent(managedCustomerCredential)) {
+  updates.set("OPENAI_API_KEY", managedCustomerCredential);
+}
 // The worker's private EnvironmentFile is bind-mounted over shell/.env. Builder-pipeline work
 // therefore needs its own preview authority as well as credential authority; otherwise the
 // production runtime safely resolves to local preview and stops before dispatch. Copy only the
@@ -96,6 +104,6 @@ await chown(temporary, targetStat.uid, targetStat.gid);
 await chmod(temporary, 0o640);
 await rename(temporary, targetPath);
 console.log(JSON.stringify({ configured: true, store: "supabase", encryptionKeyPresent: true,
-  managedRecoveryAuthorityPresent: true,
+  connectedRecoveryAuthorityPresent: true,
   previewAuthorityPresent: ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]
     .every((name) => updates.has(name)), publicRuntimePresent: true }));

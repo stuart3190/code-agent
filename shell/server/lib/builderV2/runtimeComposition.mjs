@@ -15,7 +15,7 @@ import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
 import { patchOutcomes } from "./patchEngine.mjs";
 import { classifyComplexity } from "../appBuild/buildProfile.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
-import { resolveBuildContext, resolveManagedRecoveryContext } from "../appBuild/buildContext.mjs";
+import { resolveBuildContext, resolveConnectedRecoveryContext } from "../appBuild/buildContext.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
 import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
@@ -318,7 +318,7 @@ export async function prepareBuilderV2PipelineAttempt(workJob, { client = servic
 export function createBuilderV2Runtime({
   client = serviceClient(),
   contextResolver = resolveBuildContext,
-  recoveryContextResolver = async () => resolveManagedRecoveryContext(),
+  recoveryContextResolver = async () => resolveConnectedRecoveryContext(),
   sandbox = runSandboxJob,
   preview = previewProvider(),
   assets = null,
@@ -471,7 +471,9 @@ export function createBuilderV2Runtime({
 
       try {
       const context = await contextResolver(owner, { preferProvider: workJob.payload.providerOverride || null });
-      const recoveryContext = await recoveryContextResolver(owner, { purpose: "builder_v2_recovery" });
+      // Recovery authority is platform-owned and server-configured. Never pass the customer owner
+      // or queued payload into its resolver; neither may select the transport that pays for repair.
+      const recoveryContext = await recoveryContextResolver({ purpose: "builder_v2_recovery" });
       assertQueuedProviderSelection(workJob.payload.providerSelection || null, context);
       diag.setByok?.(context.byok);
       if (usesManagedCredits(context.policy) && managedSettlementPaused()) {
@@ -494,9 +496,15 @@ export function createBuilderV2Runtime({
         ? Math.max(0, Math.min(MAX_REPAIR_DISPATCHES, input.maxRepairs))
         : MAX_REPAIR_DISPATCHES;
       const candidates = candidateSet(context);
-      const recoveryCandidates = candidateSet(recoveryContext).map((candidate) => ({
-        ...candidate, billingLane: "managed", laneProvider: "managed",
-      }));
+      const recoveryCandidates = candidateSet(recoveryContext);
+      if (!recoveryCandidates.length || recoveryCandidates.some((candidate) => (
+        candidate.billingLane !== "connected_allowance" || candidate.laneProvider !== "codex"
+      ))) {
+        throw Object.assign(new Error("Builder V2 recovery authority resolved outside platform connected Codex."), {
+          code: "recovery_provider_unavailable", classification: "platform", retryable: true,
+          dispatchState: "before_dispatch",
+        });
+      }
       const history = await historyResolver(client, owner, projectId);
       const complexity = classifyComplexity({ prompt: request }).level;
       let generationProfile = complexity;
@@ -511,12 +519,6 @@ export function createBuilderV2Runtime({
         const routedStep = String(step).startsWith("increment:") ? "increment" : step;
         const recoveryDispatch = stepContext.recoveryDispatch === true
           || ["repair", "correction"].includes(routedStep);
-        if (recoveryDispatch && managedSettlementPaused()) {
-          throw Object.assign(new Error("Thrallo recovery is temporarily unavailable; customer provider usage was not consumed."), {
-            code: "recovery_provider_unavailable", classification: "platform", retryable: true,
-            dispatchState: "before_dispatch",
-          });
-        }
         const routingContext = recoveryDispatch ? recoveryContext : context;
         const routingCandidates = recoveryDispatch ? recoveryCandidates : candidates;
         const stepComplexity = classifyComplexity({ prompt: request, contract: stepContext.contract || null }).level;
@@ -543,6 +545,7 @@ export function createBuilderV2Runtime({
         if (!chosen) throw new Error(`routing selected unavailable model ${decision.model}`);
         decision.usageResponsibility = recoveryDispatch ? "thrallo_repair" : "customer_request";
         decision.fundingPolicy = recoveryDispatch ? "thrallo_recovery" : "request_owner";
+        decision.executionAuthority = recoveryDispatch ? "platform_connected_codex" : "request_owner";
         emit("progress", { kind: "routing", decision });
         return { provider: chosen.executable, decision };
       };
@@ -861,7 +864,8 @@ export function createBuilderV2Runtime({
             approvedCustomerCredits: ceilingCredits,
             generationProviderPolicy: context.policy,
             recoveryProviderPolicy: {
-              ...recoveryContext.policy, usageResponsibility: "thrallo_repair", managedFallback: false,
+              ...recoveryContext.policy, usageResponsibility: "thrallo_repair",
+              fundingSource: "thrallo", managedFallback: false,
             },
             recoveryFloorCredits: Number(recoveryBudget?.consumedCredits || 0)
               + Number(recoveryBudget?.reservedCredits || 0),

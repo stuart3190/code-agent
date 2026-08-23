@@ -1207,6 +1207,16 @@ export async function runReservedDispatch({
   } catch (error) {
     const usage = error?.usage || {};
     const failure = classifyProviderFailure(error);
+    // A provider failure on Builder-owned correction/recovery is a platform/provider failure,
+    // never evidence that generated source is defective. Preserve the raw provider error while
+    // giving terminal translation the correct responsibility before source may even exist.
+    if (!error.classification) {
+      const customerOwnedTransport = resolvedPool === FUNDING_POOL.CUSTOMER
+        && ["connected_allowance", "byok_api"].includes(decision?.billingLane);
+      error.classification = customerOwnedTransport ? "provider_customer" : "platform";
+      error.customerActionRequired = false;
+      if (customerOwnedTransport) error.customerActionRequired = true;
+    }
     const actualCredits = creditsForUsage({ usage, model: provider.model });
     try {
       if (failure.hasUsage) {

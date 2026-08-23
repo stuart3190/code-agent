@@ -194,7 +194,10 @@ export function deriveBuildEnvelope({
     complexityBand: band,
     generationProviderPolicy,
     recoveryProviderPolicy: recoveryProviderPolicy || {
-      billingLane: "managed", usageResponsibility: "thrallo_repair", managedFallback: false,
+      primaryProvider: "codex", billingLane: "connected_allowance",
+      selectedBy: "thrallo_recovery_authority", executionAuthority: "platform_connected_codex",
+      recoveryPolicyVersion: "owner_connected_recovery_v1",
+      fundingSource: "thrallo", usageResponsibility: "thrallo_repair", managedFallback: false,
     },
     customerGeneration: {
       approvedCredits: r4(approved), plannedCredits: customerPlanned,
