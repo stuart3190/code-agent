@@ -76,6 +76,73 @@ test("structured journey step reads are rejected when the contract declares no e
   assert.equal(valid.verdict.ok, true, valid.verdict.problems.join("; "));
 });
 
+test("structured reads never borrow a matching producer from an earlier journey", () => {
+  const base = {
+    summary: "Independent competition journeys", projectType: "tool",
+    auth: { required: false }, routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "draft", owned: false, fields: [
+      { name: "competitionId", type: "string" },
+      { name: "competitionTitle", type: "string" },
+      { name: "ticketQuantity", type: "number" },
+      { name: "ticketsRemaining", type: "number" },
+    ] }],
+    operations: [], integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [
+      { id: "view-competition-details", title: "View details", priority: "primary",
+        stage: "primary_journey", steps: [
+          { action: "select a competition", target: "competition", primitive: "selection",
+            operates: ["competitionId"], expect: "competition details are visible" },
+        ] },
+      { id: "enter-demo-competition", title: "Enter a competition", priority: "secondary",
+        stage: "supporting", steps: [
+          { action: "select a competition title", target: "competition title", primitive: "selection",
+            operates: ["competitionTitle"], expect: "the title is selected" },
+          { action: "choose a ticket quantity", target: "ticket quantity", primitive: "selection",
+            operates: ["ticketQuantity", "ticketsRemaining"], expect: "the quantity is selected" },
+        ] },
+      { id: "entry-validation", title: "Validate entry", priority: "secondary",
+        stage: "supporting", steps: [
+          { action: "open the entry form", target: "/", expect: "the form is visible" },
+          { action: "confirm the entry", target: "confirm entry", reads: [
+            "competitionId", "competitionTitle", "ticketQuantity", "ticketsRemaining",
+          ], expect: "validation is visible" },
+        ] },
+    ],
+  };
+
+  const invalid = deriveBuildSpec(base);
+  assert.equal(invalid.verdict.ok, false);
+  const missing = invalid.verdict.interaction.issues
+    .filter((issue) => issue.code === "interaction_state_dependency_missing")
+    .map((issue) => issue.missingStatePath);
+  assert.deepEqual(missing, [
+    "entry-validation.draft.competitionId",
+    "entry-validation.draft.competitionTitle",
+    "entry-validation.draft.ticketQuantity",
+    "entry-validation.draft.ticketsRemaining",
+  ]);
+  assert.ok(missing.every((path) => path.startsWith("entry-validation.")));
+
+  const corrected = {
+    ...base,
+    journeys: base.journeys.map((journey) => journey.id !== "entry-validation" ? journey : {
+      ...journey,
+      steps: [
+        { action: "select a competition", target: "competition", primitive: "selection",
+          operates: ["competitionId", "competitionTitle", "ticketsRemaining"],
+          expect: "the selected competition is visible" },
+        { action: "choose a ticket quantity", target: "ticket quantity", primitive: "selection",
+          operates: ["ticketQuantity"], expect: "the quantity is selected" },
+        journey.steps[1],
+      ],
+    }),
+  };
+  const spec = deriveBuildSpec(corrected);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(spec.modulePlan.length > 0);
+  assert.ok(spec.moduleContracts.specifications.length > 0);
+});
+
 test("initial, durable, external, and prior capability state are journey-scoped authorities", () => {
   const plan = {
     version: 2,

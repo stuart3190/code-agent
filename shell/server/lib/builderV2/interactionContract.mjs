@@ -508,6 +508,7 @@ export function buildInteractionContract(contract, {
           const reads = declaredReadFields.map((field) => {
             const suffix = `.${field}`;
             const priorProducer = flows.slice(0, flows.indexOf(consumer))
+              .filter((flow) => flow.journeyId === journey.id)
               .flatMap((flow) => flow.writes || [])
               .findLast((path) => String(path).endsWith(suffix));
             if (priorProducer) return priorProducer;
