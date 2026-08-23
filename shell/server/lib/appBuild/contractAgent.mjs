@@ -191,6 +191,93 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
   return c;
 }
 
+const DEPENDENCY_ISSUE = "interaction_state_dependency_missing";
+
+/**
+ * Build the smallest contract subset needed to repair invalid journey data flow.
+ * Unaffected journeys and global contract sections are deliberately omitted.
+ */
+export function contractDependencyRepairScope(contract, issues = []) {
+  const dependencies = (issues || []).filter((issue) => issue?.code === DEPENDENCY_ISSUE);
+  if (!contract || !dependencies.length) return null;
+  const journeyIds = new Set(dependencies.map((issue) => issue.journeyId).filter(Boolean));
+  const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
+  const operationIds = new Set(dependencies.flatMap((issue) => [
+    issue.consumerOperationId,
+    ...(issue.candidateProducers || []).map((producer) => producer.operationId),
+  ]).filter(Boolean));
+  for (const operation of contract.operations || []) {
+    if (journeyIds.has(operation?.journey)) operationIds.add(operation.id || operation.name);
+  }
+  const operations = (contract.operations || []).filter((operation) => (
+    operationIds.has(operation?.id || operation?.name)
+  ));
+  const entityNames = new Set(operations.map((operation) => operation?.entity).filter(Boolean));
+  const usedFields = new Set([
+    ...dependencies.map((issue) => String(issue.missingStatePath || "").split(".").at(-1)),
+    ...journeys.flatMap((journey) => (journey.steps || []).flatMap((step) => [
+      ...(step.operates || []), ...(step.reads || []),
+    ])),
+    ...operations.flatMap((operation) => (operation.responsibilities || []).flatMap((responsibility) => [
+      ...(responsibility.reads || []), ...(responsibility.writes || []),
+    ])),
+  ].filter(Boolean).map(String));
+  const entities = (contract.entities || []).filter((entity) => entityNames.has(entity.name)
+    || (entity.fields || []).some((field) => usedFields.has(String(field?.name || field))))
+    .map((entity) => ({
+      ...entity,
+      fields: (entity.fields || []).filter((field) => usedFields.has(String(field?.name || field))),
+    }));
+  return {
+    mode: "interaction_state_dependency_repair",
+    contractSummary: contract.summary || null,
+    invalidDependencies: dependencies.map((issue) => ({
+      journeyId: issue.journeyId,
+      consumerStepId: issue.consumerStepId,
+      consumerOperationId: issue.consumerOperationId,
+      missingStatePath: issue.missingStatePath,
+      expectedProducerSource: issue.expectedProducerSource,
+      expectedProducerSources: issue.expectedProducerSources,
+      candidateProducers: issue.candidateProducers || [],
+    })),
+    journeys,
+    operations,
+    entities,
+    auth: contract.auth || null,
+    states: (contract.states || []).filter((state) => {
+      const text = JSON.stringify(state);
+      return [...usedFields].some((field) => text.includes(field));
+    }),
+    initialState: contract.initialState || null,
+    durableState: contract.durableState || null,
+    externalState: contract.externalState || null,
+  };
+}
+
+const mergeScoped = (current, replacements, allowed, identity) => {
+  const byId = new Map((replacements || []).map((value) => [identity(value), value]).filter(([id]) => id));
+  return (current || []).map((value) => {
+    const id = identity(value);
+    return allowed.has(id) && byId.has(id) ? byId.get(id) : value;
+  });
+};
+
+/** Merge only the dependency subset the correction call was authorized to change. */
+export function mergeContractDependencyRepair(contract, reply, scope) {
+  if (!scope) return reply;
+  const patch = reply?.contractPatch || reply || {};
+  const journeyIds = new Set((scope.journeys || []).map((journey) => journey.id));
+  const operationIds = new Set((scope.operations || []).map((operation) => operation.id || operation.name));
+  const entityNames = new Set((scope.entities || []).map((entity) => entity.name));
+  return {
+    ...contract,
+    journeys: mergeScoped(contract.journeys, patch.journeys, journeyIds, (journey) => journey?.id),
+    operations: mergeScoped(contract.operations, patch.operations, operationIds,
+      (operation) => operation?.id || operation?.name),
+    entities: mergeScoped(contract.entities, patch.entities, entityNames, (entity) => entity?.name),
+  };
+}
+
 /**
  * Produce and validate the contract.
  *
@@ -204,13 +291,15 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
  */
 export async function generateContract({
   provider, prompt, buildProfile = null, knowledge = "", log = () => {}, onUsage = null,
-  priorContract = null, priorProblems = [],
+  priorContract = null, priorProblems = [], priorIssues = [],
 }) {
   const productProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
   const profileGuidance = buildProfileBrief(productProfile);
   const baseAsk = `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`;
   let lastProblems = (priorProblems || []).map(String).filter(Boolean);
   let lastContract = lastProblems.length ? priorContract : null;
+  const dependencyRepairScope = lastContract
+    ? contractDependencyRepairScope(lastContract, priorIssues) : null;
   let usageTotal = null;
   // The best contract seen, even if it did not fully validate. Discarding a contract because one
   // acceptance line reads weakly throws away the journeys, the entities and the deferred list —
@@ -219,9 +308,18 @@ export async function generateContract({
   let best = null;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const ask = lastProblems.length
+    const dependencyAsk = dependencyRepairScope
+      ? `${profileGuidance}\n\nDEPENDENCY REPAIR MODE. Correct only the supplied invalid dependency subset. `
+        + `Do not invent user actions, operations, fields, or business behavior. Reorder an existing producer `
+        + `only when the declared journey semantics permit it; otherwise connect an already-declared producer `
+        + `or return the unresolved dependency unchanged. Return one JSON object containing only corrected `
+        + `journeys, operations, and entities from this subset; unlisted contract sections are preserved `
+        + `server-side.\n\nINVALID DEPENDENCY SUBSET:\n${JSON.stringify(dependencyRepairScope)}\n\n`
+        + `REJECTION DETAILS:\n${lastProblems.map((problem) => `- ${problem}`).join("\n")}`
+      : null;
+    const ask = dependencyAsk || (lastProblems.length
       ? `${baseAsk}\n\n${lastContract ? `Your previous contract:\n${JSON.stringify(lastContract)}\n\n` : ""}Your previous contract was rejected:\n${lastProblems.map((p) => `- ${p}`).join("\n")}\n\nReturn a corrected contract. Every step and acceptance entry must name something a browser test could observe.`
-      : baseAsk;
+      : baseAsk);
 
     const { telemetry, finalText } = await runAgent({
       provider, systemPrompt: SYSTEM_PROMPT, tools: [], toolImpls: {},
@@ -236,7 +334,9 @@ export async function generateContract({
       log(`contract: attempt ${attempt} did not return JSON`);
       continue;
     }
-    const contract = normaliseContract(parsed, { prompt, buildProfile: productProfile });
+    const repaired = dependencyRepairScope
+      ? mergeContractDependencyRepair(priorContract, parsed, dependencyRepairScope) : parsed;
+    const contract = normaliseContract(repaired, { prompt, buildProfile: productProfile });
     const baseVerdict = validateContract(contract);
     const profileVerdict = validateBuildProfileContract(contract, productProfile);
     const verdict = {

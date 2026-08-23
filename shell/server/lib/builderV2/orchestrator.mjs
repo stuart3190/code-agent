@@ -22,7 +22,9 @@ import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
   lintDurablePersistence, persistenceFindingMessages, persistenceRepairScope,
 } from "./persistenceLint.mjs";
-import { interactionFailureDiagnostics, scopeInteractionContract } from "./interactionContract.mjs";
+import {
+  interactionDependencyProgress, interactionFailureDiagnostics, scopeInteractionContract,
+} from "./interactionContract.mjs";
 import {
   moduleCorrectionScope, validateModuleConformance, validateModulePatchScope,
 } from "./moduleContracts.mjs";
@@ -1011,14 +1013,22 @@ export function createOrchestrator({
           log(`contract gate rejected the contract (${failingGates(spec.verdict).join(", ")}): `
             + `${(spec.verdict.problems || []).join(" | ")}`);
           try {
+            const dependencyIssuesBefore = spec.verdict.interaction?.issues || [];
             const repairedContract = await contractFn({
               owner, projectId, buildId, request, profile, buildProfile, signal,
               priorContract: rawContract, problems: spec.verdict.problems || [],
+              issues: dependencyIssuesBefore,
             });
             // Whatever the repair produced is now the build's contract: when it still fails, its
             // problems — not the superseded first attempt's — are what the build died on.
             spec = deriveBuildSpec(repairedContract, { userCritical });
             contractRepairUsed = true;
+            const dependencyProgress = interactionDependencyProgress(
+              dependencyIssuesBefore, spec.verdict.interaction?.issues || [],
+            );
+            if (dependencyProgress.equivalent) {
+              log("contract repair made no dependency progress; the same missing producer remains");
+            }
             log(`contract repair ${spec.verdict.ok ? "produced a derivable contract" : "did not close the gate"}`);
           } catch (error) {
             abortIfRequested(signal);

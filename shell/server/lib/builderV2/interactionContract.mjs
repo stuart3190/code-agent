@@ -59,6 +59,7 @@ const STOP = IDENTITY_STOP_WORDS;
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
 const unique = (values) => [...new Set(values.filter(Boolean))];
+const list = (value) => (Array.isArray(value) ? value : []);
 
 /**
  * Does this step ENTER a multi-step flow?
@@ -310,6 +311,9 @@ export function buildInteractionContract(contract, {
     if (key && !declaredFields.has(key)) declaredFields.set(key, field);
   }
   const operableFields = new Set(declaredFields.keys());
+  const declaredOperations = new Map((contract?.operations || [])
+    .map((operation) => [normalized(operation?.id || operation?.name), operation])
+    .filter(([identity]) => identity));
   const flows = [];
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
@@ -322,6 +326,7 @@ export function buildInteractionContract(contract, {
       return intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
     });
     for (const [stepIndex, step] of stepsList.entries()) {
+      const stepFlowStart = flows.length;
       const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
       // WHICH CONTROLS THIS STEP OPERATES is a structured fact the contract states, not a reading
       // of its prose. "select a party size that does not exceed the slot's remaining capacity"
@@ -341,6 +346,10 @@ export function buildInteractionContract(contract, {
       // `implementationContract.validateContract`), never a control invented from the target text.
       const declaredOperands = Array.isArray(step?.operates)
         ? step.operates.map((value) => String(value).split(".").pop()).filter(Boolean) : null;
+      const declaredOperationIds = unique((declaredOperands || [])
+        .map((operand) => declaredOperations.get(normalized(operand))?.id
+          || declaredOperations.get(normalized(operand))?.name)
+        .filter(Boolean));
       const operands = declaredOperands?.length
         ? declaredOperands.filter((name) => operableFields.has(normalized(name)))
         : null;
@@ -432,6 +441,101 @@ export function buildInteractionContract(contract, {
               ? durableOwner?.factory || null
               : draftOwner?.factory || null,
           });
+        }
+      }
+
+      // An operation identity names what the step DOES, not another value control. Preserve that
+      // identity on the step itself before the capability graph is derived. Without it, the graph
+      // can only guess among unclaimed interactions of the same kind in the whole journey. A
+      // calculation declared beside a quantity control was consequently attached to an earlier
+      // "Enter" button and read both values before their producer controls ran.
+      //
+      // Operation-only commit/action steps already have one suitable interaction. A mixed
+      // value-plus-operation step receives a control-free semantic interaction immediately after
+      // its value flows: selecting the value is the producer; the declared operation is the
+      // consumer. No user action or business behavior is invented.
+      if (declaredOperationIds.length) {
+        const stepFlows = flows.slice(stepFlowStart);
+        const unclaimedActionFlows = stepFlows.filter((flow) => !flow.operationId && !flow.valueWritten
+          && ["action", "lookup", "mutation", "cancellation"].includes(flow.kind));
+        for (const operationId of declaredOperationIds) {
+          if (declaredOperationIds.length === 1 && unclaimedActionFlows.length === 1) {
+            unclaimedActionFlows[0].operationId = operationId;
+            unclaimedActionFlows[0].declaredOperation = true;
+            continue;
+          }
+          const operation = declaredOperations.get(normalized(operationId));
+          const owners = ownerModules(modulePlan, "action", { durableOwner, draftOwner });
+          const stateOwner = owners[0] || `journey:${journey.id}`;
+          flows.push({
+            id: `${journey.id}:operation:${normalized(operationId)}`,
+            journeyId: journey.id,
+            stepIndex,
+            kind: "action",
+            operationId,
+            declaredOperation: true,
+            semanticPurpose: operation?.description || step.action || operationId,
+            stateOwner,
+            responsibleModules: owners,
+            action: step.action || operation?.description || operationId,
+            valueWritten: null,
+            reads: [],
+            writes: [],
+            dependsOn: [],
+            nextStateRequirement: step.expect,
+            observable: step.expect,
+            control: null,
+            capability: null,
+          });
+        }
+      }
+
+      // Structured `reads` are dependencies, not controls. Carry field reads into the state graph
+      // even when no capability operation happens to restate them. Prefer an already-declared
+      // prior producer path; otherwise retain the canonical draft path so validation emits a
+      // precise missing-producer defect instead of silently treating the value as external input.
+      const declaredReadFields = unique(list(step?.reads)
+        .map((value) => String(value).split(".").pop())
+        .filter((name) => operableFields.has(normalized(name))));
+      if (declaredReadFields.length) {
+        const stepFlows = flows.slice(stepFlowStart);
+        const operationConsumers = stepFlows.filter((flow) => flow.operationId);
+        const nonValueConsumers = stepFlows.filter((flow) => !flow.valueWritten);
+        const consumers = operationConsumers.length ? operationConsumers
+          : nonValueConsumers.length ? [nonValueConsumers[0]]
+            : stepFlows.length ? [stepFlows[0]] : [];
+        for (const consumer of consumers) {
+          const reads = declaredReadFields.map((field) => {
+            const suffix = `.${field}`;
+            const priorProducer = flows.slice(0, flows.indexOf(consumer))
+              .flatMap((flow) => flow.writes || [])
+              .findLast((path) => String(path).endsWith(suffix));
+            if (priorProducer) return priorProducer;
+            const operationProducer = (contract?.operations || []).map((operation) => {
+              if (operation?.journey && operation.journey !== journey.id) return false;
+              const writesField = (operation.responsibilities || []).some((responsibility) => (
+                list(responsibility?.writes).some((value) => normalized(value) === normalized(field))
+              ));
+              if (!writesField) return null;
+              const identity = normalized(operation?.id || operation?.name);
+              const producerStep = stepsList.findIndex((candidate) => list(candidate?.operates)
+                .some((value) => normalized(value) === identity)
+                || list(candidate?.reads).some((value) => normalized(value) === identity));
+              return { operation, producerStep };
+            }).find(Boolean);
+            if (operationProducer?.producerStep >= 0) return `${journey.id}.custom.${field}`;
+            // A legacy operation with no structured step identity is bound later by the capability
+            // graph. Let that authority attach its exact custom/capability output path rather than
+            // inventing a parallel draft dependency here.
+            if (operationProducer) return null;
+            // A first-step read is the journey's declared external starting input. Reads introduced
+            // later remain draft dependencies and require an earlier producer or explicit start
+            // authority.
+            return stepIndex === 0
+              ? `${journey.id}.input.${field}` : `${journey.id}.draft.${field}`;
+          }).filter(Boolean);
+          consumer.reads = unique([...(consumer.reads || []), ...reads]);
+          consumer.dependsOn = [...consumer.reads];
         }
       }
     }
@@ -536,15 +640,31 @@ export function buildInteractionContract(contract, {
     const consumes = !produces && touchesDurable
       && (own.some((flow) => flow.durableLifecycle && readsDurable(flow)) || declared === "existing");
     const basis = declared ? "declared-operation" : "data-flow";
-    scenarios[journey.id] = produces
+    const declaredStartAuthority = {
+      initialState: list(journey.initialState),
+      durableState: list(journey.durableState),
+      externalState: list(journey.externalState),
+      capabilityOutputs: list(journey.capabilityOutputs),
+      availableState: list(journey.availableState),
+    };
+    const scenario = produces
       ? { scenario: lifecycle, role: "produces", startState: "fresh", lifecycle, basis }
       : consumes
         ? { scenario: lifecycle, role: "consumes", startState: "inherits", lifecycle, basis }
         : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null,
           basis: touchesDurable ? basis : "data-flow" };
+    scenarios[journey.id] = { ...scenario, ...declaredStartAuthority };
   }
 
-  const plan = { version: INTERACTION_CONTRACT_VERSION, flows, scenarios };
+  const plan = {
+    version: INTERACTION_CONTRACT_VERSION,
+    flows,
+    scenarios,
+    initialState: contract?.initialState || null,
+    durableState: contract?.durableState || null,
+    externalState: contract?.externalState || null,
+    capabilityOutputs: contract?.capabilityOutputs || null,
+  };
   const verdict = validateInteractionContract(plan);
   return { ...plan, valid: verdict.ok, problems: verdict.problems };
 }
@@ -558,6 +678,114 @@ const interactionKindFor = (responsibilities) => {
 const moduleForNode = (node) => node?.type === "custom_behavior"
   ? node.extension?.module || null
   : node?.compositionModule || null;
+
+const statePaths = (value, journeyId) => {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (!value || typeof value !== "object") return [];
+  return [
+    ...list(value[journeyId]).map(String),
+    ...list(value.paths).map(String),
+  ].filter(Boolean);
+};
+
+function journeyStartState(plan, journeyId) {
+  const scenario = plan?.scenarios?.[journeyId] || {};
+  return new Set(unique([
+    ...statePaths(plan?.initialState, journeyId),
+    ...statePaths(plan?.durableState, journeyId),
+    ...statePaths(plan?.externalState, journeyId),
+    ...statePaths(plan?.capabilityOutputs, journeyId),
+    ...statePaths(scenario.initialState, journeyId),
+    ...statePaths(scenario.durableState, journeyId),
+    ...statePaths(scenario.externalState, journeyId),
+    ...statePaths(scenario.capabilityOutputs, journeyId),
+    ...statePaths(scenario.availableState, journeyId),
+  ]));
+}
+
+function stateAvailableAtJourneyStart(plan, journeyId, path, available) {
+  if (available.has(path)) return true;
+  // `.input` is the interaction contract's explicit external-input namespace. It is never a
+  // value silently borrowed from another journey.
+  if (String(path).startsWith(`${journeyId}.input`)) return true;
+  const scenario = plan?.scenarios?.[journeyId] || null;
+  return scenario?.startState === "inherits"
+    && String(path).startsWith(`${journeyId}.durable.`);
+}
+
+const dependencyIssueKey = (issue) => `${issue?.journeyId || "unknown"}|${issue?.missingStatePath || "unknown"}`;
+
+/**
+ * Compare two dependency-defect sets without treating a moved consumer index as progress.
+ */
+export function interactionDependencyProgress(beforeIssues = [], afterIssues = []) {
+  const counts = (issues) => list(issues)
+    .filter((issue) => issue?.code === "interaction_state_dependency_missing")
+    .reduce((map, issue) => map.set(dependencyIssueKey(issue), (map.get(dependencyIssueKey(issue)) || 0) + 1), new Map());
+  const before = counts(beforeIssues);
+  const after = counts(afterIssues);
+  const resolved = [...before.entries()].flatMap(([key, count]) => {
+    const delta = count - (after.get(key) || 0);
+    return delta > 0 ? Array.from({ length: delta }, () => key) : [];
+  });
+  return {
+    moved: resolved.length > 0,
+    resolved,
+    equivalent: before.size > 0 && resolved.length === 0,
+    before: Object.fromEntries(before),
+    after: Object.fromEntries(after),
+  };
+}
+
+function canMoveProducer(producer, consumer) {
+  if (producer.journeyId !== consumer.journeyId) return false;
+  const explicitlyUnconstrained = producer.reorderable === true && consumer.reorderable === true;
+  const sameStepSemanticEdge = producer.stepIndex === consumer.stepIndex && !producer.control;
+  if (!explicitlyUnconstrained && !sameStepSemanticEdge) return false;
+  const consumerWrites = new Set(consumer.writes || []);
+  return !(producer.reads || []).some((path) => consumerWrites.has(path));
+}
+
+/**
+ * Safely topologically normalize already-declared producer/consumer interactions.
+ *
+ * User controls are never moved across steps unless both interactions explicitly declare that
+ * their order is unconstrained. Control-free semantic producers may be moved within their source
+ * step. Missing producers remain structured defects for contract correction.
+ */
+export function normalizeInteractionStateDependencies(plan) {
+  const flows = (plan?.flows || []).map((flow) => ({ ...flow }));
+  const moves = [];
+  for (let consumerIndex = 0; consumerIndex < flows.length; consumerIndex += 1) {
+    const consumer = flows[consumerIndex];
+    for (const path of consumer.reads || []) {
+      const prior = flows.slice(0, consumerIndex).some((flow) => flow.journeyId === consumer.journeyId
+        && (flow.writes || []).includes(path));
+      if (prior || stateAvailableAtJourneyStart(plan, consumer.journeyId, path,
+        journeyStartState(plan, consumer.journeyId))) continue;
+      const relativeProducer = flows.slice(consumerIndex + 1).findIndex((flow) => (
+        flow.journeyId === consumer.journeyId && (flow.writes || []).includes(path)
+        && canMoveProducer(flow, consumer)
+      ));
+      if (relativeProducer < 0) continue;
+      const producerIndex = consumerIndex + 1 + relativeProducer;
+      const [producer] = flows.splice(producerIndex, 1);
+      flows.splice(consumerIndex, 0, producer);
+      moves.push({
+        journeyId: consumer.journeyId,
+        statePath: path,
+        producerInteractionId: producer.id,
+        consumerInteractionId: consumer.id,
+      });
+      consumerIndex += 1;
+    }
+  }
+  return {
+    plan: { ...plan, flows, dependencyNormalization: { changed: moves.length > 0, moves } },
+    changed: moves.length > 0,
+    moves,
+  };
+}
 
 /**
  * Bind the authoritative graph semantics back into the interaction contract.
@@ -727,11 +955,12 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
   });
   for (const flow of flows) delete flow._sourceOrder;
 
-  const composed = {
+  const composedBeforeNormalization = {
     ...plan, version: INTERACTION_CONTRACT_VERSION, flows,
     operationCoverage: coverage,
     capabilityGraphVersion: graph?.version || null,
   };
+  const { plan: composed } = normalizeInteractionStateDependencies(composedBeforeNormalization);
   const verdict = validateInteractionContract(composed, { capabilityGraph: graph });
   return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };
 }
@@ -751,13 +980,45 @@ export function validateInteractionContract(plan, { capabilityGraph = null } = {
     problems.push(`${issue.code} operation=${issue.operationId || "unknown"} `
       + `interaction=${issue.interactionId || "unknown"} missing=${missing.join(",")}`);
   };
-  const produced = new Set();
+  const producedByJourney = new Map();
+  const availableByJourney = new Map();
   for (const flow of plan?.flows || []) {
+    const journeyId = flow.journeyId || "unknown";
+    const produced = producedByJourney.get(journeyId) || new Set();
+    const available = availableByJourney.get(journeyId) || journeyStartState(plan, journeyId);
+    producedByJourney.set(journeyId, produced);
+    availableByJourney.set(journeyId, available);
     if (!flow.id || !flow.journeyId) problems.push("interaction flow is missing identity");
     if ((flow.writes || []).length && !flow.stateOwner) problems.push(`${flow.id} writes state without an owner`);
     const missing = (flow.reads || []).filter((path) => !produced.has(path)
-      && !/\.(?:durable\.(?:record|reference)|input(?:\.|$))/.test(path));
-    if (missing.length) problems.push(`${flow.id} reads state before it is produced: ${missing.join(", ")}`);
+      && !stateAvailableAtJourneyStart(plan, journeyId, path, available));
+    if (missing.length) {
+      const candidateFlows = (plan?.flows || []).filter((candidate) => candidate.journeyId === journeyId
+        && (candidate.writes || []).some((path) => missing.includes(path)));
+      for (const path of missing) {
+        const issue = {
+          code: "interaction_state_dependency_missing",
+          journeyId,
+          consumerStepId: flow.id || null,
+          consumerStepIndex: Number.isInteger(flow.stepIndex) ? flow.stepIndex : null,
+          consumerOperationId: flow.operationId || null,
+          missingStatePath: path,
+          expectedProducerSource: "journey_start_or_prior_step",
+          expectedProducerSources: [
+            "journey_initial_state", "durable_state", "external_input",
+            "capability_output", "prior_step",
+          ],
+          candidateProducers: candidateFlows.filter((candidate) => (candidate.writes || []).includes(path))
+            .map((candidate) => ({
+              interactionId: candidate.id || null,
+              operationId: candidate.operationId || null,
+              stepIndex: Number.isInteger(candidate.stepIndex) ? candidate.stepIndex : null,
+            })),
+        };
+        issues.push(issue);
+      }
+      problems.push(`${flow.id} reads state before it is produced: ${missing.join(", ")}`);
+    }
     if (flow.kind === "review" && !(flow.reads || []).length) problems.push(`${flow.id} review has no source values`);
     if (flow.kind === "mutation" && !(flow.reads || []).length) problems.push(`${flow.id} mutation consumes no contracted input state`);
     // Any bound durable capability may own cancellation; the registry decides which, not a
@@ -768,7 +1029,9 @@ export function validateInteractionContract(plan, { capabilityGraph = null } = {
     if (flow.control && (!flow.control.accessibleName || !(flow.control.roles || []).length)) {
       problems.push(`${flow.id} interactive control has no driveable semantic contract`);
     }
-    if (flow.operationId) {
+    // Declared operation placeholders are intentionally incomplete until composition binds the
+    // capability graph. Enforce the semantic envelope only on the graph-bound final plan.
+    if (flow.operationId && (!flow.declaredOperation || capabilityGraph)) {
       const missingFields = [
         ...(!flow.actionIdentity?.operationId || !flow.actionIdentity?.interactionId ? ["actionIdentity"] : []),
         ...(!flow.stateOwner ? ["stateOwner"] : []),

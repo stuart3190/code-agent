@@ -1362,7 +1362,7 @@ export function createModelLanes({
     bucket,
 
     contractFn: async ({ owner, projectId, buildId, request, buildProfile = null, signal = null,
-      priorContract = null, problems = [] }) => {
+      priorContract = null, problems = [], issues = [] }) => {
       const startedAt = Date.now();
       const before = bucket.summary();
       const repair = Boolean(priorContract && problems.length);
@@ -1403,6 +1403,7 @@ export function createModelLanes({
         outcome = await generateContract({
           provider: dispatchProvider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
           priorContract: repair ? priorContract : null, priorProblems: repair ? problems : [],
+          priorIssues: repair ? issues : [],
         });
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
