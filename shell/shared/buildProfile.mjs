@@ -113,10 +113,31 @@ function has(patterns, text) {
 }
 
 function withoutNegatedRequirements(value) {
-  return String(value || "").replace(
+  return String(value || "")
+    .replace(
+      /\b(?:payments?|billing|checkout)\b[^.!?;\n]{0,64}\b(?:simulat(?:e|ed|ing|ion)|mock(?:ed)?|demo(?:-only)?|rather than real|not real)\b/gi,
+      "",
+    )
+    .replace(
+      /\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?)\b[^.!?;\n]{0,48}\b(?:payments?|billing|checkout)\b/gi,
+      "",
+    )
+    .replace(
     /\b(?:no|without|not requiring|does not require|do not require|not needed|are not required)\b[^.!?;\n]{0,64}\b(?:user accounts?|auth(?:entication)?|sign[ -]?in|log[ -]?in|saved data|database|persistence|payments?|billing|checkout|subscriptions?|file uploads?|real[ -]?time|admin(?:istration)?|exports?|downloads?)\b/gi,
     "",
   );
+}
+
+const DURABLE_REQUEST = /\b(?:save|saved|stored|persist(?:ed|ence|ent)?|database|backend|history|reload|refresh|recover(?:y|ed)?|look[ -]?up|retrieve)\b/i;
+const TRANSIENT_REQUEST = /\b(?:client(?:-only| side)?|local in-app|local state|in[- ]?memory|current (?:browser )?session|no backend)\b/i;
+const SIMULATED_REQUEST = /\b(?:demo|prototype|mock(?:ed)?|simulat(?:e|ed|ing|ion)|placeholder)\b/i;
+const NON_REAL_BEHAVIOR = /\b(?:payments?|billing|checkout|entry|submission|confirmation)\b[^.!?;\n]{0,64}\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?|rather than real|not real)\b|\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?)\b[^.!?;\n]{0,64}\b(?:payments?|billing|checkout|entry|submission|confirmation)\b/i;
+
+/** A simulated journey is transient only when the request does not separately demand durability. */
+export function requestUsesTransientSimulation(prompt = "") {
+  const text = String(prompt || "");
+  if (DURABLE_REQUEST.test(text)) return false;
+  return TRANSIENT_REQUEST.test(text) || (SIMULATED_REQUEST.test(text) && NON_REAL_BEHAVIOR.test(text));
 }
 
 function profileError(field, value, allowed = null) {

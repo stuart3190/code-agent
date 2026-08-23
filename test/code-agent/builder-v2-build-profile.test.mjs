@@ -241,6 +241,21 @@ test("explicitly excluded capabilities do not become inferred requirement signal
   assert.equal(profile.requirementSignals.includes("saved_data"), false);
 });
 
+test("simulated rather than real payments do not become a payment requirement", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Build a demo/basic competition website, so payments should be simulated rather than real.",
+  });
+  assert.equal(profile.resolvedBuildType, "website");
+  assert.equal(profile.requirementSignals.includes("payments"), false);
+  assert.equal(profile.requirementSignals.includes("saved_data"), false);
+
+  const durable = resolveBuildProfile({
+    prompt: "Build a demo checkout with simulated payments, but save entries to the backend for recovery.",
+  });
+  assert.equal(durable.requirementSignals.includes("payments"), false);
+  assert.equal(durable.requirementSignals.includes("saved_data"), true);
+});
+
 test("Application plus custom calculations preserves novel transformation as custom_behavior", () => {
   const profile = resolveBuildProfile({
     prompt: "Build an application that calculates derived totals and saves them.",

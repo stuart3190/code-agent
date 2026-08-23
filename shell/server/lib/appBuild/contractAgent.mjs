@@ -14,7 +14,7 @@ import {
   CONTRACT_VERSION, STAGES, validateContract, contractSummary, functionalOutputEffect,
 } from "../../../shared/implementationContract.mjs";
 import {
-  buildProfileBrief, resolveBuildProfile, validateBuildProfileContract,
+  buildProfileBrief, requestUsesTransientSimulation, resolveBuildProfile, validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
 
 // Exported so a test can hold the brief and the code that enforces it to the same statement:
@@ -117,7 +117,14 @@ Rules:
 - Anything you are NOT building goes in "deferred" with a reason. Deferring is honest; a control
   that pretends to work is not.
 - Public marketing content (business name, service list, opening hours) is in-code constants, NOT
-  backend entities. Only user-created records are entities.`;
+  backend entities. Only user-created records are entities.
+- Do not add reload, recovery, lookup-by-reference, history, authentication, persistence, or backend
+  operations unless the REQUEST explicitly requires that behavior. A visible confirmation does not
+  imply that it can be recovered later.
+- Demo, mock, prototype, placeholder, or simulated submissions are client-only transient state
+  unless the REQUEST separately requires saved data, backend storage, reload, history, or recovery.
+  Mark their entity storage as transient and use functional responsibilities; do not copy the
+  durable booking/recovery example into a basic simulated website.`;
 
 function extractJson(text) {
   const raw = String(text || "").trim();
@@ -194,6 +201,54 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
     return normalizedOperation;
   });
   c.buildProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy });
+  if (requestUsesTransientSimulation(prompt)) {
+    const recoveryPattern = /\b(?:recover(?:y|ed)?|reload|look[ -]?up|lookup|retrieve|read\s+(?:an?\s+)?[^.!?]{0,24}\breference|by reference)\b/i;
+    const operationKind = (operation) => String(
+      operation?.kind || operation?.type || operation?.action || operation?.id || operation?.name || "",
+    ).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || "";
+    const readKinds = new Set(["read", "get", "find", "lookup", "retrieve", "search"]);
+    const removedOperations = new Set(c.operations.filter((operation) => (
+      readKinds.has(operationKind(operation))
+        && recoveryPattern.test(`${operation?.id || ""} ${operation?.name || ""} ${operation?.description || ""}`)
+    )).map((operation) => String(operation?.id || operation?.name || "").toLowerCase()).filter(Boolean));
+    c.operations = c.operations.filter((operation) => !removedOperations.has(
+      String(operation?.id || operation?.name || "").toLowerCase(),
+    )).map((operation) => ({
+      ...operation,
+      responsibilities: (operation.responsibilities || []).map((responsibility) => {
+        if (responsibility?.type !== "persistence") return responsibility;
+        const {
+          capability, capabilityId, capabilityMethod, method, operation: requestedOperation, ...functional
+        } = responsibility;
+        return {
+          ...functional,
+          type: "functional",
+          behavior: responsibility.behavior || operation.description
+            || `produce the simulated ${operation.entity || "result"} state`,
+        };
+      }),
+    }));
+    c.entities = c.entities.map((entity) => ({
+      ...entity,
+      owned: false,
+      storage: "client-only transient state for the simulated journey; not persisted to backend",
+    }));
+    c.journeys = c.journeys.map((journey) => ({
+      ...journey,
+      steps: (journey.steps || []).filter((step) => {
+        const references = [...(step?.operates || []), ...(step?.reads || [])]
+          .map((value) => String(value).toLowerCase());
+        if (references.some((reference) => removedOperations.has(reference))) return false;
+        return !recoveryPattern.test(`${step?.action || ""} ${step?.target || ""}`);
+      }),
+      acceptance: (journey.acceptance || []).filter((entry) => !recoveryPattern.test(
+        typeof entry === "string" ? entry : JSON.stringify(entry),
+      )),
+    }));
+    c.acceptance = c.acceptance.filter((entry) => !recoveryPattern.test(
+      typeof entry === "string" ? entry : JSON.stringify(entry),
+    ));
+  }
   return c;
 }
 
@@ -300,7 +355,10 @@ export async function generateContract({
   priorContract = null, priorProblems = [], priorIssues = [],
 }) {
   const productProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
-  const profileGuidance = buildProfileBrief(productProfile);
+  const transientGuidance = requestUsesTransientSimulation(prompt)
+    ? "\n- This request explicitly describes a simulated/demo flow without durable storage. Keep it client-only and transient; do not add backend persistence, reload, history, or recovery."
+    : "";
+  const profileGuidance = `${buildProfileBrief(productProfile)}${transientGuidance}`;
   const baseAsk = `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`;
   let lastProblems = (priorProblems || []).map(String).filter(Boolean);
   let lastContract = lastProblems.length ? priorContract : null;

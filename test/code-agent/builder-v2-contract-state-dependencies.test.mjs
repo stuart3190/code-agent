@@ -9,7 +9,7 @@ import {
   validateInteractionContract,
 } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import {
-  contractDependencyRepairScope, generateContract, mergeContractDependencyRepair,
+  contractDependencyRepairScope, generateContract, mergeContractDependencyRepair, normaliseContract,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
 import { inferRequirementSignals } from "../../shell/shared/buildProfile.mjs";
@@ -522,4 +522,75 @@ test("retained basic-site smoke aa154da3 keeps one chooser and never invents bac
   const submit = spec.interactionContract.flows.find((flow) => flow.operationId === "confirm-entry");
   assert.equal(submit.kind, "action");
   assert.deepEqual(submit.expectedStateTransition.persists, []);
+});
+
+test("retained basic-site smoke a983b37 removes invented durable recovery from a simulated entry", () => {
+  const prompt = "Build a basic but polished competition website for low-budget competitions, aimed at UK users entering affordable prize draws around £100–£200. The site should feel trustworthy, modern, and simple. Core experience: a homepage with a hero section explaining low-cost competitions, featured live competitions, clear pricing/odds-style information, how it works, recent winners, trust/safety messaging, FAQ, and a call to action. Include a competitions listing page with several demo competitions such as £100 cash, £200 shopping voucher, gaming bundle, weekend treat fund, etc. Include competition detail pages showing prize value, ticket price, remaining tickets, closing date, short description, rules summary, and an entry journey where the user chooses ticket quantity, answers a simple skill question, sees a basket/entry summary, and receives a confirmation-style success state. This is a demo/basic site, so payments should be simulated rather than real. Include responsive layouts for mobile, tablet, and desktop. Use GBP formatting throughout and friendly UK copy. Branding: affordable, cheerful, trustworthy; name the product Budget Competitions.";
+  const contract = normaliseContract({
+    summary: "A basic competition website with a simulated entry flow.",
+    projectType: "landing",
+    auth: { required: false, rules: [] },
+    routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "demoEntry", owned: true, fields: [
+      "competitionId", "remainingTickets", "ticketQuantity", "skillAnswer",
+      "reference", "paymentStatus", "status", "createdAt",
+    ].map((name) => ({ name, type: name === "ticketQuantity" ? "number" : "string" })) }],
+    operations: [{
+      id: "confirmDemoEntry", kind: "create", entity: "demoEntry", journey: "enter-demo-competition",
+      description: "create the confirmation-style simulated entry",
+      responsibilities: [{
+        type: "persistence", capability: "crud", capabilityMethod: "create",
+        reads: ["competitionId", "ticketQuantity", "skillAnswer"],
+        writes: ["reference", "paymentStatus", "status", "createdAt"],
+      }],
+    }, {
+      id: "readEntryByReference", kind: "read", entity: "demoEntry", journey: "enter-demo-competition",
+      description: "recover the entry by reference after reload",
+      responsibilities: [{
+        type: "persistence", capability: "crud", capabilityMethod: "get",
+        reads: ["reference"], writes: ["paymentStatus", "status", "createdAt"],
+      }],
+    }],
+    journeys: [{
+      id: "enter-demo-competition", title: "Enter a demo competition", priority: "primary",
+      stage: "primary_journey", steps: [
+        { action: "open the homepage", target: "/", expect: "competitions are visible" },
+        { action: "select a competition", target: "competition card", primitive: "selection",
+          operates: ["competitionId", "remainingTickets"], expect: "the entry form opens" },
+        { action: "choose a ticket quantity", target: "ticket quantity", primitive: "selection",
+          operates: ["ticketQuantity"], reads: ["remainingTickets"], expect: "the quantity is visible" },
+        { action: "answer the skill question", target: "skill answer", primitive: "textbox",
+          operates: ["skillAnswer"], expect: "the answer is visible" },
+        { action: "review the demo entry", target: "entry summary",
+          reads: ["competitionId", "ticketQuantity", "skillAnswer"], expect: "the summary is visible" },
+        { action: "confirm the simulated entry", target: "confirm entry", operates: ["confirmDemoEntry"],
+          reads: ["competitionId", "ticketQuantity", "skillAnswer"], expect: "a confirmation reference is visible" },
+        { action: "reload and recover the entry", target: "recovery", operates: ["readEntryByReference"],
+          reads: ["reference", "paymentStatus", "status", "createdAt"], expect: "the recovered entry is visible" },
+      ], acceptance: ["the simulated confirmation is visible", "the entry can be recovered after reload"],
+    }],
+    integrations: [], states: [], acceptance: [
+      { id: "a1", statement: "competitions are visible" },
+      { id: "a2", statement: "the entry summary is visible" },
+      { id: "a3", statement: "the simulated confirmation is visible" },
+      { id: "a4", statement: "the entry can be recovered by reference after reload" },
+    ], deferred: [],
+  }, { prompt });
+
+  assert.deepEqual(contract.buildProfile.requirementSignals, []);
+  assert.equal(contract.entities[0].owned, false);
+  assert.match(contract.entities[0].storage, /client-only transient/i);
+  assert.deepEqual(contract.operations.map((operation) => operation.id), ["confirmDemoEntry"]);
+  assert.equal(contract.operations[0].responsibilities[0].type, "functional");
+  assert.equal(contract.journeys[0].steps.some((step) => /recover|reload/i.test(step.action)), false);
+  assert.equal(contract.acceptance.some((entry) => /recover|reload/i.test(JSON.stringify(entry))), false);
+
+  const verdict = validateContract(contract);
+  assert.equal(verdict.ok, true, verdict.problems.join("; "));
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(spec.capabilityGraph.operationResponsibilities.flatMap((row) => row.responsibilities)
+    .some((responsibility) => responsibility.type === "persistence"), false);
+  assert.deepEqual(contractRuntimeRequirements(spec.contract), { accounts: false, durableMutation: false });
+  assert.equal(journeyRequiresPersistentMutation(contract.journeys[0], spec.contract), false);
 });
