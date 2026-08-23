@@ -143,6 +143,12 @@ export function requireFreshWorkerPreviewProof(nodes, {
         - Date.parse(left.metadata.previewIsolation.checkedAt || left.heartbeat_at))[0];
     if (failed) {
       const failure = failed.metadata.previewIsolation;
+      if (failure.code && failure.code !== "preview_isolation_required") {
+        throw Object.assign(new Error(
+          `Builder V2 worker readiness failed on ${failed.worker_id}: ${failure.message}`,
+          { cause: Object.assign(new Error(failure.message), { code: failure.code }) },
+        ), { code: failure.code });
+      }
       throw isolationError(`Builder V2 isolated-preview preflight failed on ${failed.worker_id}: ${failure.message}`,
         Object.assign(new Error(failure.message), { code: failure.code }));
     }

@@ -16,6 +16,7 @@ const AUTHORITY = {
   PREVIEW_MODE: "vps",
   PROVISIOND_URL: "http://127.0.0.1:8790",
   PROVISIOND_TOKEN: "present",
+  OPENAI_API_KEY: "sk-test-managed-recovery-authority",
 };
 
 test("14S exact shell-present worker-absent regression fails closed with preview_isolation_required", () => {

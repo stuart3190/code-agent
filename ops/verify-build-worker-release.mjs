@@ -31,5 +31,6 @@ console.log(JSON.stringify({
   workerId: admission.workerId,
   heartbeatAt: admission.heartbeatAt,
   previewCheckedAt: admission.checkedAt,
+  managedRecoveryAuthorityAvailable: true,
   jobTypes: matching.find((node) => node.worker_id === admission.workerId)?.job_types || [],
 }));

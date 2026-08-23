@@ -2,6 +2,10 @@ function previewIsolationError(message) {
   return Object.assign(new Error(message), { code: "preview_isolation_required" });
 }
 
+function managedRecoveryAuthorityError(message) {
+  return Object.assign(new Error(message), { code: "managed_recovery_credential_required" });
+}
+
 export const SUPPORTED_BUILD_JOB_TYPES = Object.freeze([
   "builder_pipeline", "dependency_install", "compile", "browser_verify", "qa_browser",
   "image_optimise", "publish_package", "proof_slow",
@@ -45,6 +49,25 @@ export function workerPreviewConfiguration(env = process.env) {
   return { mode, provisiondOrigin: url.origin };
 }
 
+/**
+ * Builder V2 correction and repair are always Thrallo-funded managed work. This proof exposes
+ * only the policy identity and credential presence; the private credential never leaves the
+ * worker process and is never returned, logged, or passed to a sandbox.
+ */
+export function workerManagedRecoveryConfiguration(env = process.env) {
+  if (!String(env.OPENAI_API_KEY || "").trim()) {
+    throw managedRecoveryAuthorityError(
+      "Builder V2 managed recovery authority is unavailable; no customer state was created.",
+    );
+  }
+  return Object.freeze({
+    available: true,
+    provider: "openai",
+    billingLane: "managed",
+    fundingPool: "thrallo_recovery",
+  });
+}
+
 export function assertWorkerCredentialAuthority(jobTypes, env = process.env) {
   if (!(jobTypes || []).includes("builder_pipeline")) return;
   workerPreviewConfiguration(env);
@@ -58,4 +81,5 @@ export function assertWorkerCredentialAuthority(jobTypes, env = process.env) {
       "Builder pipeline workers require the platform credential encryption key.",
     ), { code: "worker_credential_key_required" });
   }
+  return workerManagedRecoveryConfiguration(env);
 }

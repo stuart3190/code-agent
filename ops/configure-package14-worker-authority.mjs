@@ -1,11 +1,11 @@
 // Production-only, secret-safe worker credential authority repair for Package 14.
-// Copies only the credential-store selector, encryption key, preview authority and PUBLIC
-// generated-runtime configuration from the shell's existing private environment into the
-// worker's private EnvironmentFile. Values are never logged. Service-role values already used by
-// the queue remain server-only and are never copied into a generated tree.
+// Copies only the credential-store selector, encryption key, managed-recovery credential,
+// preview authority and PUBLIC generated-runtime configuration from the shell's existing private
+// environment into the worker's private EnvironmentFile. Values are never logged. Privileged
+// server values remain private to the worker and are never copied into a generated tree.
 
 import { chmod, chown, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { workerPreviewConfiguration } from "../build-worker/runtimeConfig.mjs";
+import { assertWorkerCredentialAuthority } from "../build-worker/runtimeConfig.mjs";
 
 const sourcePath = "/home/ubuntu/code-agent/shell/.env";
 const targetPath = "/etc/thrallo/build-worker.env";
@@ -29,6 +29,16 @@ function jwtRole(value) {
   catch { return null; }
 }
 
+function privateValuePresent(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return false;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+      || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim().length > 0;
+  }
+  return true;
+}
+
 const source = parse(await readFile(sourcePath, "utf8"));
 const target = parse(await readFile(targetPath, "utf8"));
 const targetStat = await stat(targetPath);
@@ -42,6 +52,11 @@ const updates = new Map([
   ["CODE_AGENT_STORE", "supabase"],
   [encryptionName, source.values.get(encryptionName)],
 ]);
+const managedRecoveryCredential = source.values.get("OPENAI_API_KEY");
+if (!privateValuePresent(managedRecoveryCredential)) {
+  throw new Error("shell managed recovery credential is unavailable");
+}
+updates.set("OPENAI_API_KEY", managedRecoveryCredential);
 // The worker's private EnvironmentFile is bind-mounted over shell/.env. Builder-pipeline work
 // therefore needs its own preview authority as well as credential authority; otherwise the
 // production runtime safely resolves to local preview and stops before dispatch. Copy only the
@@ -49,7 +64,6 @@ const updates = new Map([
 for (const name of ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]) {
   if (source.values.get(name)) updates.set(name, source.values.get(name));
 }
-workerPreviewConfiguration(Object.fromEntries(updates));
 for (const name of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]) {
   if (source.values.get(name)) updates.set(name, source.values.get(name));
 }
@@ -63,6 +77,7 @@ if (publicKey.startsWith("sb_secret_") || jwtRole(publicKey) === "service_role"
     || privileged.includes(publicKey)) {
   throw new Error("refusing to install a privileged Supabase key as generated-browser configuration");
 }
+assertWorkerCredentialAuthority(["builder_pipeline"], Object.fromEntries(updates));
 const seen = new Set();
 const output = target.rows.map((line) => {
   if (!line || line.trimStart().startsWith("#") || !line.includes("=")) return line;
@@ -81,5 +96,6 @@ await chown(temporary, targetStat.uid, targetStat.gid);
 await chmod(temporary, 0o640);
 await rename(temporary, targetPath);
 console.log(JSON.stringify({ configured: true, store: "supabase", encryptionKeyPresent: true,
+  managedRecoveryAuthorityPresent: true,
   previewAuthorityPresent: ["PREVIEW_MODE", "PROVISIOND_URL", "PROVISIOND_TOKEN"]
     .every((name) => updates.has(name)), publicRuntimePresent: true }));
