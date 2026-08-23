@@ -133,6 +133,46 @@ test("visible evidence is not shadowed by an earlier hidden responsive copy", ne
   body = WORKING;
 });
 
+test("retained smoke regression: a visible observation-only section passes without an invented control", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main>
+      <section><h1>Low Budget Competitions</h1></section>
+      <section id="live-competitions">
+        <h2>Competition cards are visible for prizes including £100 cash, £200 cash, shopping vouchers, and tech bundles</h2>
+        <article><h3>£100 cash</h3></article><article><h3>£200 cash</h3></article>
+        <article><h3>Shopping vouchers</h3></article><article><h3>Tech bundles</h3></article>
+      </section>
+    </main>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "browse-to-entry-summary", title: "Browse competitions", priority: "primary",
+    steps: [
+      { action: "open the homepage", target: "/", expect: "Low Budget Competitions is visible" },
+      { action: "view the live competitions section", target: "live competitions list",
+        expect: "competition cards are visible for prizes including £100 cash, £200 cash, shopping vouchers, and tech bundles" },
+    ],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  const observation = result.journeys[0].steps[1];
+  assert.equal(observation.status, "pass");
+  assert.equal(observation.drove, false, "an observation must not invent or click a control");
+  assert.equal(observation.readOnlyAssertion, true);
+  body = WORKING;
+});
+
+test("an observation-only step with missing evidence fails instead of becoming undriveable", needsBrowser, async () => {
+  body = `<!doctype html><html><body><main><h1>Low Budget Competitions</h1></main></body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "browse", title: "Browse competitions", priority: "primary",
+    steps: [{ action: "view the live competitions section", target: "live competitions list",
+      expect: "competition cards and tech bundles are visible" }],
+  }] } });
+  const observation = result.journeys[0].steps[0];
+  assert.equal(observation.status, "fail", JSON.stringify(observation));
+  assert.equal(observation.readOnlyAssertion, true);
+  body = WORKING;
+});
+
 test("an explicitly loading generated surface settles before contracted controls are driven", needsBrowser, async () => {
   body = `<!doctype html><html><body>
     <main id="app"><p role="status">Loading: checking whether a signed-in user can open the workspace.</p></main>

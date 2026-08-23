@@ -1519,15 +1519,17 @@ export function createOrchestrator({
             blockingErrors: nextVerdicts.blockingErrors }),
         });
         if (coreRepair.verifierBlock) return coreRepair.verifierBlock;
-        // THE RESERVATION IS SOFT, BECAUSE A RED CORE ENDS THE BUILD.
+        // THE RESERVATION IS SOFT WHILE A DISTINCT STRATEGY REMAINS.
         //
         // Holding 60% of the allowance back for the secondary journeys only makes sense if those
         // journeys ever run, and they only run once the core is green. On 2026-08-20 the core used
         // its four-round share, stayed red, and the build blocked with 41 of 60 approved credits
-        // unspent and the reserved rounds never touched. If the core is still red after its share,
-        // it takes the rest of the pool: nothing downstream can use it anyway.
+        // unspent and the reserved rounds never touched. If the core reaches its share mid-ladder,
+        // it takes the rest of the pool: nothing downstream can use it anyway. A complete ladder
+        // whose defect set stayed identical is different: it proved there is no new strategy, so
+        // the outer core path must preserve that stop instead of starting the same ladder again.
         if (!coreRepair.eligibility.eligible
-            && ["repair_share_exhausted", "repair_strategies_exhausted"].includes(coreRepair.stopReason)
+            && coreRepair.stopReason === "repair_share_exhausted"
             && coreRepair.rounds < repairRoundCeiling) {
           log(`core remains red after its reserved share (${coreRepair.rounds}/${coreRepairRounds}); `
             + `continuing into the remaining allowance — a red core means no increment can use it`);

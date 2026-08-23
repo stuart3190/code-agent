@@ -369,6 +369,27 @@ export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null)
   });
 }
 
+// A contract may ask the browser to observe a surface that is already present: view a list,
+// inspect a summary, compare a result. These steps have no control or state transition to drive;
+// their whole assertion is whether the named evidence is visible. Treating them as actions makes
+// a correct static surface `identity_absent`, then sends app repair after a control the contract
+// never declared. The structural guards keep this narrow: any route, write, control, or declared
+// interaction remains an action and retains the normal freshness/driveability rules.
+const OBSERVATION_ACTION_PATTERN = /^\s*(?:view|inspect|observe|see|read|review|compare|check|verify)\b/i;
+const ACTION_FLOW_KINDS = new Set([
+  "flow_start", "flow_advance", "selection", "input", "mutation", "cancellation", "lookup",
+  "action", "navigation", "recovery",
+]);
+
+export function isObservationOnlyStep(step = {}, interactionFlows = []) {
+  if (!OBSERVATION_ACTION_PATTERN.test(String(step.action || ""))) return false;
+  if (/^\s*\//.test(String(step.target || ""))) return false;
+  if ((step.operates || []).length > 0) return false;
+  return !(interactionFlows || []).some((flow) => flow.control
+    || (flow.writes || []).length > 0
+    || ACTION_FLOW_KINDS.has(flow.kind));
+}
+
 async function renderedFormControls(page) {
   return page.locator("input, textarea, select").evaluateAll((elements) => elements.map((el) => {
     const labels = el.labels ? [...el.labels].map((label) => (label.innerText || "").trim()).filter(Boolean) : [];
@@ -1397,6 +1418,7 @@ async function runStep(page, step, {
   await waitForActiveSurface(page, 5_000);
   const action = String(step.action || "");
   const expect = String(step.expect || "");
+  const observationOnly = isObservationOnlyStep(step, interactionFlows);
   let drove = false;
   // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
   // path never adds a second action on top of it.
@@ -1833,7 +1855,8 @@ async function runStep(page, step, {
 
   // "use" joined the verb list after a live run: "use the page navigation (Contact
   // navigation link)" drove nothing and the whole journey went undriveable-then-fail.
-  if (!navigated && !droveStepper && !contractDriven && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use|duplicate|download|delete|rename|apply/i.test(action)) {
+  if (!navigated && !droveStepper && !contractDriven && !observationOnly
+      && /click|select|choose|submit|press|tap|continue|advance|proceed|confirm|cancel|sign|book|use|duplicate|download|delete|rename|apply/i.test(action)) {
     // A submit-shaped step acts on the form the journey just filled: that form's OWN submit
     // control outranks every keyword candidate. Live proof (bv2 run 5): keyword matching sent
     // "fill in … and submit (contact form)" to a nav button named "Contact navigation link"
@@ -1928,7 +1951,8 @@ async function runStep(page, step, {
       || (flow.writes || []).length > 0
       || ["navigation", "recovery", "mutation", "cancellation", "lookup", "action"].includes(flow.kind));
   const readOnlyAssertion = hasNoStepWrites && (
-    (Array.isArray(step.reads) && step.reads.length > 0)
+    observationOnly
+      || (Array.isArray(step.reads) && step.reads.length > 0)
       || (isReviewStep && reviewValues.length === 0)
   );
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;

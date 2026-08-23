@@ -705,6 +705,26 @@ test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats 
   assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
 });
 
+test("WP11/V2-20 — an identical full strategy cycle never restarts through core overflow", async () => {
+  let repairCalls = 0;
+  const h = harness({
+    maxJourneyRepairs: 8,
+    failJourneys: ["book-a-visit"],
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => { repairCalls += 1; return [{ file: "src/routes/BookPage.jsx",
+        ops: [{ op: "append", content: `\n// unchanged production-shape repair ${repairCalls}\n` }] }]; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.equal(repairCalls, 3, "each distinct strategy runs once; the outer core loop must not repeat them");
+  assert.equal(result.repairRounds, 3);
+  assert.equal(result.stopReason, "repair_strategies_exhausted");
+});
+
 test("WP11/D4 — a failing backend-row probe blocks eligibility even when the browser journey passed", async () => {
   const h = harness({
     backendProbeFn: async () => [{ journeyId: "book-a-visit", detail: "no booking row was created during verification" }],

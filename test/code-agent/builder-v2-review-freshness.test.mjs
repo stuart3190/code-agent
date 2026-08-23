@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
-  expectationOutcome, mutationCommitEvidence, reviewValuesForStep,
+  expectationOutcome, isObservationOnlyStep, mutationCommitEvidence, reviewValuesForStep,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 
 const base = { wanted: ["review", "selected", "date"], found: ["review", "selected", "date"], fresh: [], drove: true, action: "review the booking" };
@@ -174,6 +174,15 @@ test("a structured read-only assertion judges visible state without inventing an
     drove: false, action: "compare the result", readOnlyAssertion: true,
   });
   assert.equal(missing.status, "fail");
+});
+
+test("only structurally actionless observation steps receive the read-only treatment", () => {
+  const step = { action: "view the live competitions section", target: "live competitions list" };
+  assert.equal(isObservationOnlyStep(step, []), true);
+  assert.equal(isObservationOnlyStep({ ...step, operates: ["competitionId"] }, []), false);
+  assert.equal(isObservationOnlyStep(step, [{ kind: "action", control: { machineId: "act-view" } }]), false);
+  assert.equal(isObservationOnlyStep({ action: "open the competitions page", target: "/competitions" }, []), false);
+  assert.equal(isObservationOnlyStep({ action: "submit the competition", target: "entry form" }, []), false);
 });
 
 test("navigation keeps its own exemption, independent of review", () => {
