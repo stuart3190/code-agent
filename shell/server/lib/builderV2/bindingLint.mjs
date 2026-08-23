@@ -280,6 +280,15 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
     for (const row of matches) claimed.add(row);
 
     const bound = matches.filter((row) => row.binding !== BINDING.UNBOUND);
+    const provenBound = matches.filter((row) => [BINDING.LITERAL, BINDING.BINDING].includes(row.binding));
+    // A bound implementation on a later surface must not mask a second, hand-wired implementation
+    // of the same contracted control. This is narrower than the general textual binding lint: the
+    // unbound element must itself carry the contracted semantic identity, and another element must
+    // prove the platform binding exists elsewhere. That exact mixed state is internally
+    // inconsistent and is safe to correct before a paid browser pass.
+    const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
+      && [...row.identities, ...(row.inheritedIdentities || [])]
+        .some((identity) => semanticKey(identity) === semanticKey(key)));
     coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length });
 
     if (!matches.length && dynamicBindings.length) {
@@ -312,7 +321,18 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
       });
       continue;
     }
-    if (!bound.length) {
+    if (provenBound.length && shadowedUnbound.length) {
+      findings.push({
+        code: "contract_control_binding_conflict", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        shadowedByBoundDuplicate: true,
+        elements: shadowedUnbound.map((row) => ({ file: row.file, line: row.line, element: row.element,
+          via: row.via, identities: row.identities.slice(0, 4) })),
+        message: `the contracted control "${key}" has a machine-bound implementation, but `
+          + `${shadowedUnbound.map((row) => `${row.file}:${row.line}`).join(", ")} also implements `
+          + "that exact control without machine identity; bind the journey-facing implementation",
+      });
+    } else if (!bound.length) {
       // Present, hand-wired, and therefore invisible to the browser's mechanics probe.
       findings.push({
         code: "contract_control_unbound", fails: true, interactionId: flow.id,

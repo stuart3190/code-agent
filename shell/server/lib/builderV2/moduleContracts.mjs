@@ -482,6 +482,17 @@ export function validateModuleConformance(tree, {
   // not facts a module contract promised, and folding them into a module's missing facts made a
   // correctly-corrected module look non-conformant.
   const controlBindings = lintControlBindings(tree, { interactionContract });
+  // Keep the broad binding lint advisory: static inference cannot follow every correct wrapper or
+  // dynamic binding. The one enforceable subset is a mixed implementation where one exact
+  // contracted identity is hand-wired while another copy is demonstrably machine-bound. That is
+  // the production shape where a later-route binding masked the unaddressable entry control.
+  for (const conflict of (controlBindings.findings || [])
+    .filter((finding) => finding.code === "contract_control_binding_conflict")) {
+    for (const element of conflict.elements || []) {
+      add({ ...conflict, module: element.file, file: element.file, line: element.line,
+        journeys: [conflict.journeyId].filter(Boolean) });
+    }
+  }
 
   const interactions = lintInteractiveWorkflow(tree, { interactionContract, modulePlan, bindings });
   for (const issue of interactions.findings || []) {

@@ -1510,7 +1510,14 @@ export function interactionFailureDiagnostics({ contract, interactionContract, j
           accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName],
           expectedStateOwner: flow.stateOwner,
         })),
-        renderedControlFacts: step.controlEvidence?.renderedControls || sourceControls,
+        // Browser facts describe what was rendered; source facts retain where the matching
+        // implementation lives. Keep both. Preferring the browser array used to discard the source
+        // file precisely when a real browser had observed the broken control, leaving repair unable
+        // to target the rendered owner.
+        renderedControlFacts: [
+          ...(step.controlEvidence?.renderedControls || []),
+          ...sourceControls,
+        ],
         attemptedLocators: step.controlEvidence?.attemptedLocators || [],
         responsibleModules: unique([...(result.owners || []), ...related.flatMap((flow) => flow.responsibleModules || [])]),
         stateOwners: unique(related.map((flow) => flow.stateOwner)),

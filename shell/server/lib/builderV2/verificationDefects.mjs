@@ -116,9 +116,13 @@ function controlIdentity(manifest, flows, mechanicsId = null) {
  * owning modules and the flow's declared state owners — never a path scraped out of prose.
  */
 function modulesFor(diagnostic, journey) {
+  const renderedOwners = (diagnostic?.renderedControlFacts || [])
+    .map((control) => control?.file)
+    .filter(generatedSource);
   const attributed = [
     ...(diagnostic?.stateOwners || []),
     ...(diagnostic?.responsibleModules || []),
+    ...renderedOwners,
   ];
   // A composed capability owns the state, but its implementation is deliberately not a repair
   // address. Route integration/configuration corrections to the one bounded model-owned seam and
@@ -275,7 +279,9 @@ export function verificationDefects({
       action: diagnostic.userAction, control,
       modules: modulesFor(diagnostic, journey),
       failureRefs: unique([
-        ...(diagnostic.failureRefs || []), ...(journey?.owners || []), ...(journey?.fallbackRefs || []),
+        ...(diagnostic.failureRefs || []),
+        ...(diagnostic.renderedControlFacts || []).map((control) => control?.file).filter(generatedSource),
+        ...(journey?.owners || []), ...(journey?.fallbackRefs || []),
       ]),
       evidence: {
         expected: diagnostic.expectedStateAfter || null,

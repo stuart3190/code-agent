@@ -224,6 +224,39 @@ test("the write boundary is the verifier's own attribution, and absent attributi
   assert.equal(defectWriteBoundary(unattributed), null);
 });
 
+test("LIVE-SHAPED REGRESSION — rendered source ownership survives browser evidence", () => {
+  const renderedOwner = "src/routes/HomePage.jsx";
+  const tree = {
+    [renderedOwner]: `export default function HomePage({ choose }) {
+      return <button type="button" aria-label="Event date" onClick={() => choose("summer")}>Enter</button>;
+    }`,
+    [JOURNEY_OWNER]: `import { useSemanticSelection } from "../lib/capabilities/react.js";
+      export default function Booking() {
+        const date = useSemanticSelection({ name: "eventDate", label: "Event date" });
+        return <div {...date.groupProps}><button {...date.optionProps("summer")}>Summer</button></div>;
+      }`,
+  };
+  const defects = verificationDefects({
+    contract: SPEC.contract, interactionContract: SPEC.interactionContract, manifest: MANIFEST, tree,
+    journeyResults: verdicts({
+      failAt: 1,
+      step: { status: "undriveable", drove: false,
+        detail: "no selectable control group matched contracted field eventDate",
+        controlEvidence: { renderedControls: [{ role: "button", accessibleName: "Event date" }] } },
+    }),
+  });
+  const defect = defects.find((row) => row.code === "contracted_control_undriveable");
+  assert.ok(defect, JSON.stringify(defects));
+  assert.ok(defect.diagnostic.renderedControlFacts.some((row) => row.file === renderedOwner),
+    "browser facts replaced the source attribution instead of being combined with it");
+  assert.ok(defect.modules.includes(renderedOwner),
+    `the rendered owner was excluded from exact repair: ${JSON.stringify(defect.modules)}`);
+  assert.ok(defect.failureRefs.includes(renderedOwner),
+    "the rendered owner was lost before retrieval/file allow-list construction");
+  assert.ok(defectWriteBoundary([defect]).allowedFiles.includes(renderedOwner),
+    "the exact rendered owner did not enter the repair boundary");
+});
+
 test("a boundary is machine-enforced by the same check a pre-compile correction gets", () => {
   const boundary = defectWriteBoundary(defectsFrom(verdicts({ failAt: 1 })));
   const inside = validateModulePatchScope([{ file: STATE_OWNER, content: "x" }], boundary);

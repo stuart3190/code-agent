@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { BINDING, lintControlBindings } from "../../shell/server/lib/builderV2/bindingLint.mjs";
 import { controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 
 const CONTRACT = {
   summary: "A booking application for a supper club", projectType: "booking", version: 1,
@@ -80,6 +81,40 @@ test("a literal data-thrallo-control PASSES", () => {
     }` };
   const result = lint(tree);
   assert.equal(result.ok, true, JSON.stringify(failing(result)));
+});
+
+test("LIVE-SHAPED REGRESSION — a later bound copy cannot mask the hand-wired entry control", () => {
+  const tree = {
+    "src/routes/HomePage.jsx": `
+      export default function HomePage({ events, choose }) {
+        return <main>{events.map((event) => <button type="button"
+          aria-label={\`Event date \${event.title}\`} onClick={() => choose(event.id)}>
+          Featured event enter control</button>)}</main>;
+      }`,
+    "src/components/book/BookFlow.jsx": `
+      import { useSemanticField, useSemanticSelection } from "../../lib/capabilities/react.js";
+      export function BookFlow() {
+        const date = useSemanticSelection({ name: "eventDate", label: "Event date" });
+        const guest = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <main><div {...date.groupProps}><button {...date.optionProps("a")}>A</button></div>
+          <input {...guest.inputProps} /></main>;
+      }`,
+  };
+
+  const result = lint(tree);
+  const conflict = failing(result).find((row) => row.code === "contract_control_binding_conflict");
+  assert.ok(conflict, `the later-route binding masked the entry control: ${JSON.stringify(result.coverage)}`);
+  assert.equal(conflict.control, "eventDate");
+  assert.equal(conflict.shadowedByBoundDuplicate, true);
+  assert.deepEqual(conflict.elements.map((row) => row.file), ["src/routes/HomePage.jsx"]);
+
+  const conformance = validateModuleConformance(tree, {
+    contract: CONTRACT, modulePlan: SPEC.modulePlan, moduleContracts: SPEC.moduleContracts,
+    interactionContract: SPEC.interactionContract, bindings: SPEC.bindings,
+  });
+  const blocking = conformance.blocking.find((row) => row.code === "contract_control_binding_conflict");
+  assert.equal(blocking?.module, "src/routes/HomePage.jsx",
+    `the exact conflict did not reach the pre-compile correction gate: ${JSON.stringify(conformance.blocking)}`);
 });
 
 // ── the run #8 shape ───────────────────────────────────────────────────────────────────────────

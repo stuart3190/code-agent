@@ -49,6 +49,7 @@ export const BLOCKING_CODES = Object.freeze({
   unknown_capability_factory: "an unrecognised capability factory is bound",
   required_factory_missing: "a contract-required capability is absent from the whole tree",
   capability_composition_invalid: "the canonical graph is missing a protected capability module or a declared custom extension interface",
+  contract_control_binding_conflict: "the same contracted control is proven machine-bound in one place and hand-wired at another exact journey-facing identity",
 
   // ── platform ──
   runtime_configuration_invalid: "the generated runtime cannot reach its backend",
