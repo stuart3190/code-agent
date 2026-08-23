@@ -724,8 +724,14 @@ async function selectionGroups(page) {
     const byParent = new Map();
     for (const el of candidates) {
       if (!el.parentElement) continue;
-      if (!byParent.has(el.parentElement)) byParent.set(el.parentElement, []);
-      byParent.get(el.parentElement).push(el);
+      // A semantic option group commonly renders cards around each option. Grouping strictly by
+      // immediate parent turns four valid options into four one-option "groups", all of which are
+      // discarded below. The nearest declared group is the option-set authority; only legacy
+      // markup without one falls back to the immediate parent.
+      const parent = el.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist]")
+        || el.parentElement;
+      if (!byParent.has(parent)) byParent.set(parent, []);
+      byParent.get(parent).push(el);
     }
     // Position-independent identities the group announces about ITSELF. Read from standard
     // HTML/ARIA only, never from prose or ordinal, so revealing a step cannot renumber a group

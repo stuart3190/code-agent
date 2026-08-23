@@ -1272,7 +1272,8 @@ export function createOrchestrator({
           // through genuinely different attempts from one that has stopped learning anything.
           const signatureOf = (rows) => actionableDefects(rows).map(defectSignature).sort().join("|");
           let cycleBaseline = signatureOf(currentDefects);
-          while (!currentEligibility.eligible && rounds < maxRounds) {
+          while (!currentEligibility.eligible && rounds < maxRounds
+            && strategy < REPAIR_STRATEGIES.length) {
             const actionable = actionableDefects(currentDefects);
             if (!actionable.length) break; // nothing an application patch can answer
             const evidence = browserRepairEvidence({

@@ -171,7 +171,9 @@ function strictBuildStore() {
   };
 }
 
-function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], patchPlan = null, assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null, backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2 } = {}) {
+function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], patchPlan = null,
+  assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null,
+  backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2, events = {} } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const checkpoints = [];
@@ -205,7 +207,10 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
     baseline: REACT_VITE,
     maxJourneyRepairs,
     maxNoOpRetries,
-    events: { checkpoint: async (event) => { checkpoints.push(event); } },
+    events: { ...events, checkpoint: async (event) => {
+      checkpoints.push(event);
+      await events.checkpoint?.(event);
+    } },
   });
   return { orchestrator, buildStore, snapshotStore, assetService, patchCalls, journeyDrives, checkpoints };
 }
@@ -723,6 +728,38 @@ test("WP11/V2-20 — an identical full strategy cycle never restarts through cor
   assert.equal(repairCalls, 3, "each distinct strategy runs once; the outer core loop must not repeat them");
   assert.equal(result.repairRounds, 3);
   assert.equal(result.stopReason, "repair_strategies_exhausted");
+});
+
+test("WP11/V2-20 — rejected repair candidates stop before an undefined strategy is persisted", async () => {
+  const started = [];
+  const finished = [];
+  const h = harness({
+    maxJourneyRepairs: 8,
+    failJourneys: ["book-a-visit"],
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => [],
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    events: {
+      repairStrategyStarted: async (row) => {
+        assert.ok(row.strategyId, "the durable strategy_id must never be null");
+        started.push(row.strategyId);
+        return { id: `strategy-${started.length}`, ...row };
+      },
+      repairStrategyFinished: async (row) => { finished.push(row); },
+    },
+  });
+  const result = await h.orchestrator.runBuild({
+    owner: "o", projectId: "proj-rejected-strategies", request: "booking site",
+  });
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.equal(result.stopReason, "repair_strategies_exhausted");
+  assert.deepEqual(started, [
+    "exact_owning_file_repair", "causal_dependency_repair", "owner_module_regeneration",
+  ]);
+  assert.equal(finished.length, 3, "each started strategy is durably finished once");
 });
 
 test("WP11/D4 — a failing backend-row probe blocks eligibility even when the browser journey passed", async () => {

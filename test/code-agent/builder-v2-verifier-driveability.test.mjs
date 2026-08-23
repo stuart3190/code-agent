@@ -48,7 +48,10 @@ export function Choices() {
     <h1>Choose your plan</h1>
     <div {...tierChoice.groupProps}>
       {["Starter", "Standard", "Premium"].map((o) => (
-        <button key={o} {...tierChoice.optionProps(o, o + " tier")}>{o} tier</button>
+        <article key={o}>
+          <h2>{o} plan</h2>
+          <button {...tierChoice.optionProps(o, o + " tier")}>{o} tier</button>
+        </article>
       ))}
     </div>
     <div {...regionChoice.groupProps}>
@@ -140,6 +143,12 @@ test("REAL VERIFIER — verifyJourneys drives every generated option", { ...need
   }
   assert.equal(journey.status, "pass", `every step must pass:\n${detail}`);
   assert.deepEqual(verdict.consoleErrors, []);
+});
+
+test("NESTED CARD OPTIONS — a declared semantic group remains one driveable group", { ...needsBrowser }, () => {
+  const tier = verdict.journeys[0].steps.find((step) => step.action === "select the Premium tier");
+  assert.equal(tier.status, "pass", tier.detail);
+  assert.doesNotMatch(tier.detail || "", /no selectable control group matched/);
 });
 
 test("SEQUENTIAL GROUPS — each selection lands without disturbing the others", { ...needsBrowser }, async () => {
