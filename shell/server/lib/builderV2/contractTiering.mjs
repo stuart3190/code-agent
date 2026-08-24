@@ -8,7 +8,7 @@
 import { CAPABILITIES, canonicalCapabilityId, validateBindings } from "./capabilityRegistry.mjs";
 import { serviceClient } from "../supabase.mjs";
 import {
-  contractUsesDurablePersistence, operationUsesDurablePersistence,
+  contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
 } from "../../../shared/implementationContract.mjs";
 
 const words = (text) => new Set(String(text || "")
@@ -46,6 +46,19 @@ export function requiresWizard(contract) {
     const finishes = /(review|summary|confirm|confirmation|reference)/.test(text);
     return steps.length >= 4 && chooses && finishes;
   });
+}
+
+/**
+ * A contract that explicitly declares its workflow data as browser-local/transient must not be
+ * upgraded into a platform-persisted booking or wizard merely because its product vocabulary says
+ * "reservation". The entity storage declaration is the contract authority; mixed contracts with
+ * any durable operation remain on the normal durable capability path.
+ */
+export function contractUsesExplicitTransientState(contract) {
+  return !contractUsesDurablePersistence(contract)
+    && (contract?.entities || []).some((entity) => (
+      entityPersistencePolicy(contract, entity?.name) === "transient"
+    ));
 }
 
 function capabilityBinding(name, configuration = null, methods = []) {
@@ -113,10 +126,13 @@ export function bindCapabilities(contract) {
     ...(contract?.journeys || []).map((j) => `${j.id} ${j.title}`),
     ...(contract?.routes || []).map((r) => `${r.path} ${r.name}`),
   ].join(" "));
+  const explicitlyTransient = contractUsesExplicitTransientState(contract);
 
   const bookingEntity = entityFor(contract, /^(booking|reservation)/) || "booking";
-  const bookingRequired = entityNames.has("booking") || vocabulary.has("booking") || vocabulary.has("reservation")
-    || (contract?.operations || []).some((operation) => /booking|reservation/.test(normalized(operation?.entity)));
+  const bookingRequired = !explicitlyTransient && (
+    entityNames.has("booking") || vocabulary.has("booking") || vocabulary.has("reservation")
+    || (contract?.operations || []).some((operation) => /booking|reservation/.test(normalized(operation?.entity)))
+  );
   const allJourneyText = (contract?.journeys || []).map(journeyText).join(" ").toLowerCase();
   if (bookingRequired) {
     const bookingMethods = ["createBooking"];
@@ -128,7 +144,8 @@ export function bindCapabilities(contract) {
       ]));
     }
   }
-  if (vocabulary.has("wizard") || vocabulary.has("onboarding") || vocabulary.has("checkout")) {
+  if (!explicitlyTransient
+      && (vocabulary.has("wizard") || vocabulary.has("onboarding") || vocabulary.has("checkout"))) {
     if (!bindings.some((binding) => binding.name === "wizard")) {
       bindings.push(capabilityBinding("wizard", { persistence: "platform" }, [
         "getState", "subscribe", "restore", "select", "next", "confirm", "cancel",

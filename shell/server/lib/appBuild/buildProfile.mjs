@@ -14,11 +14,16 @@
 // worth driving twice; running the heavyweight path over it spends real money proving nothing.
 // A Roblox generator or a visual editor genuinely does.
 
+import { requestUsesTransientSimulation } from "../../../shared/buildProfile.mjs";
+
 export const COMPLEXITY = Object.freeze({ simple: "simple", medium: "medium", advanced: "advanced" });
 
 const ADVANCED_SIGNALS = [
   /\bide\b|code editor|monaco|codemirror/i,
-  /roblox|luau|unity|unreal|game engine/i,
+  // Engine names are words, not substrings. The production phrase "community prize
+  // competitions" previously matched `unity` inside `community` and sent a basic website down
+  // the complex-interactive path.
+  /\b(?:roblox|luau|unity|unreal|game engine)\b/i,
   /visual editor|drag[- ]and[- ]drop builder|canvas editor|node graph|flow editor/i,
   // Interactive geometry/layout work has the same coordinated state, rendering and verification
   // load as a named visual editor even when the brief calls it a planner. The live Downlight
@@ -79,7 +84,11 @@ export function classifyComplexity({ prompt = "", contract = null } = {}) {
       return steps.length >= 4 && /(choose|select|date|slot|party|quantity|details|guest)/.test(details)
         && /(review|summary|confirm|confirmation|reference)/.test(details);
     });
-  if (explicitMultiStepBooking || contractedMultiStepBooking) {
+  // A multi-step simulated form with an in-browser confirmation is still a basic website when
+  // the request explicitly excludes backend durability. Treating every occurrence of
+  // "reservation + quantity + confirmation" as durable promoted the retained basic competition
+  // request to medium even after its payment signal was correctly negated.
+  if (!requestUsesTransientSimulation(prompt) && (explicitMultiStepBooking || contractedMultiStepBooking)) {
     reasons.push("multi-step booking flow requires coordinated durable state");
     return { level: COMPLEXITY.medium, reasons };
   }

@@ -33,6 +33,7 @@ import crypto from "node:crypto";
 import { interactionFailureDiagnostics } from "./interactionContract.mjs";
 import { PROTECTED_PATHS } from "./patchEngine.mjs";
 import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityComposer.mjs";
+import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 
 export const DEFECT_CLASS = Object.freeze({
   INTERACTION: "interaction",   // the browser could not operate a contracted control
@@ -170,6 +171,17 @@ export function verificationDefects({
   const journeysById = new Map((verdicts.journeys || []).map((journey) => [journey.id, journey]));
   const mechanics = verdicts.mechanics || null;
   const defects = [];
+  const mountedSurfaceFor = (journeyId) => {
+    if (!tree || !journeyId) return null;
+    const context = journeySurfaceContext(tree, contract, [journeyId]);
+    if (!context.unreachableJourneyModules.length) return null;
+    return {
+      routePaths: context.routePaths,
+      routeFiles: context.routeFiles,
+      mountedPaths: context.mountedPaths,
+      unreachableJourneyModules: context.unreachableJourneyModules,
+    };
+  };
 
   // ── platform ────────────────────────────────────────────────────────────────────────────────
   // A verifier that could not run, a driver that threw, a failed journey with no owning module.
@@ -266,6 +278,12 @@ export function verificationDefects({
     // matching several visible elements can be the app naming two controls alike or the platform
     // addressing them too loosely. It stays unknown rather than being charged to the app.
     const ambiguous = addressing?.reason === "ambiguous_identity";
+    const surfaceIntegration = mountedSurfaceFor(diagnostic.journeyId);
+    const causalSurfaceModules = surfaceIntegration ? unique([
+      ...surfaceIntegration.routeFiles,
+      ...surfaceIntegration.mountedPaths,
+      ...surfaceIntegration.unreachableJourneyModules,
+    ]).filter(generatedSource) : [];
     defects.push({
       code: proven ? "control_cannot_hold_value"
         : status === "undriveable" ? "contracted_control_undriveable"
@@ -277,8 +295,9 @@ export function verificationDefects({
       tier: proven ? REPAIR_TIER.CORRECTION : REPAIR_TIER.REPAIR,
       journeyId: diagnostic.journeyId, stepIndex: diagnostic.stepIndex,
       action: diagnostic.userAction, control,
-      modules: modulesFor(diagnostic, journey),
+      modules: unique([...causalSurfaceModules, ...modulesFor(diagnostic, journey)]),
       failureRefs: unique([
+        ...causalSurfaceModules,
         ...(diagnostic.failureRefs || []),
         ...(diagnostic.renderedControlFacts || []).map((control) => control?.file).filter(generatedSource),
         ...(journey?.owners || []), ...(journey?.fallbackRefs || []),
@@ -300,6 +319,7 @@ export function verificationDefects({
         entityBefore: journey?.backendEvidence?.before || null,
         entityAfter: journey?.backendEvidence?.after || null,
         entityDiff: journey?.backendEvidence?.diff || null,
+        surfaceIntegration,
       },
       diagnostic,
     });
@@ -410,6 +430,14 @@ export function defectEvidence(defects = []) {
         + "lands in state and renders back: value + onChange writing through the setter, the capability "
         + "field binding, or an uncontrolled input with defaultValue.");
     }
+    if (defect.evidence?.surfaceIntegration) {
+      const surface = defect.evidence.surfaceIntegration;
+      lines.push(`journey ${defect.journeyId} has generated source that is not reachable from its `
+        + `browser entry route [${(surface.routePaths || []).join(", ")}]: `
+        + `[${(surface.unreachableJourneyModules || []).join(", ")}]. The mounted runtime source is `
+        + `[${(surface.mountedPaths || []).join(", ")}]. Integrate the contracted behaviour into `
+        + "that mounted surface or mount the existing journey module; editing dead source alone cannot change the browser result.");
+    }
     lines.push(JSON.stringify({
       // The code downstream already parses. The fields below it are additive.
       code: "interaction_verification_failure",
@@ -442,6 +470,7 @@ export function defectEvidence(defects = []) {
       consoleErrorsDuringStep: defect.evidence?.consoleErrors || [],
       failedRequestsDuringStep: defect.evidence?.failedRequests || [],
       failureRefs: defect.failureRefs || defect.modules || [],
+      surfaceIntegration: defect.evidence?.surfaceIntegration || null,
     }));
   }
   // Platform and prerequisite defects ride along as CONTEXT with their ownership stated. They
@@ -465,7 +494,17 @@ export function defectEvidence(defects = []) {
  */
 export function defectWriteBoundary(defects = [], { maxFiles = 12 } = {}) {
   const actionable = actionableDefects(defects);
-  const files = unique(actionable.flatMap((defect) => defect.modules)).sort().slice(0, maxFiles);
+  // When the browser failed on a journey whose generated implementation is unreachable, the
+  // mounted route and current mounted flow are the causal callers. Put them before the ordinary
+  // owner list so a large attribution set cannot sort the actual integration seam out of the
+  // bounded first strategy.
+  const surfaceFiles = unique(actionable.flatMap((defect) => [
+    ...(defect.evidence?.surfaceIntegration?.routeFiles || []),
+    ...(defect.evidence?.surfaceIntegration?.mountedPaths || []),
+    ...(defect.evidence?.surfaceIntegration?.unreachableJourneyModules || []),
+  ])).filter(generatedSource).sort();
+  const ownerFiles = unique(actionable.flatMap((defect) => defect.modules)).filter(generatedSource).sort();
+  const files = unique([...surfaceFiles, ...ownerFiles]).slice(0, maxFiles);
   if (!files.length) return null;
   const controls = unique(actionable.map((defect) => defect.control?.logicalField || defect.control?.id));
   return {
@@ -531,6 +570,7 @@ export function verificationDefectRecord(defect, {
     owner: defect.owner,
     defectCode: defect.code,
     signature,
+    surfaceIntegration: defect.evidence?.surfaceIntegration || null,
   };
 }
 

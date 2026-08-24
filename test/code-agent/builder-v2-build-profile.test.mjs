@@ -6,6 +6,7 @@ process.env.CODE_AGENT_STORE = "memory";
 const {
   resolveBuildProfile, validateBuildProfileInput,
 } = await import("../../shell/shared/buildProfile.mjs");
+const { classifyComplexity } = await import("../../shell/server/lib/appBuild/buildProfile.mjs");
 const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
 const { generateContract, normaliseContract } = await import("../../shell/server/lib/appBuild/contractAgent.mjs");
 const { validateContract } = await import("../../shell/shared/implementationContract.mjs");
@@ -254,6 +255,24 @@ test("simulated rather than real payments do not become a payment requirement", 
   });
   assert.equal(durable.requirementSignals.includes("payments"), false);
   assert.equal(durable.requirementSignals.includes("saved_data"), true);
+});
+
+test("retained basic competition request is not mistaken for Unity or real payments", () => {
+  const prompt = `Build a basic public competition website for Budget Competitions.
+    This first version does not need real payments; it should use a simulated reservation and
+    show a confirmation state with entry quantity and entrant details. Keep all state local/in-browser for now; no real payment or backend
+    required. Avoid gambling-heavy visuals; make it feel like transparent community prize competitions.`;
+  const complexity = classifyComplexity({ prompt });
+  const profile = resolveBuildProfile({
+    prompt,
+    input: {
+      version: 1, requestedBuildType: "auto", resolvedBuildType: "auto",
+      applicationSubtype: "auto", requirementSignals: [], inferenceSource: "auto", confidence: 0.45,
+    },
+  });
+  assert.equal(complexity.level, "simple", complexity.reasons.join("; "));
+  assert.equal(profile.resolvedBuildType, "website");
+  assert.equal(profile.requirementSignals.includes("payments"), false);
 });
 
 test("Application plus custom calculations preserves novel transformation as custom_behavior", () => {

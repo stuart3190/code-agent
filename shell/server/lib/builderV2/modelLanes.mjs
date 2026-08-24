@@ -28,6 +28,7 @@ import {
 import { capabilityCompositionBrief } from "./capabilityComposer.mjs";
 import { scopeCapabilityGraph } from "./capabilityGraph.mjs";
 import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
+import { journeySurfaceBrief, journeySurfaceContext } from "./surfaceIntegration.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -514,6 +515,7 @@ export function renderPatchPrompt({
     dependencyPlan: scopeDependencyPlan(contract.dependencyPlan, scopedJourneys),
     capabilityGraph: scopedCapabilityGraph,
   };
+  const mountedSurface = journeySurfaceContext(tree, contract, scopedJourneys, { modulePlan });
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
   const scopedInteractions = scopeInteractionContract(contract.interactionContract, scopedJourneys);
   const failedActions = new Set(repairFailures.map((failure) => `${failure.journeyId}\n${failure.action}`));
@@ -633,6 +635,8 @@ export function renderPatchPrompt({
     "IMPLEMENTATION CONTRACT:",
     compactHeadroomContract || contractBrief(scopedContract),
     "",
+    headroomScope ? "" : journeySurfaceBrief(mountedSurface),
+    "",
     headroomScope
       ? "CAPABILITY REQUIREMENTS: the focused per-module summary below is the dispatch brief; full bindings remain machine-enforced after the patch."
       : capabilityRequirementsBrief(scopedContract),
@@ -721,7 +725,12 @@ export function renderPatchPrompt({
         capabilityPaths,
         onRetrieval,
       })
-      : renderTreeContext(tree, { extraFullPaths: regenerateFiles }),
+      : renderTreeContext(tree, { extraFullPaths: [
+        ...regenerateFiles,
+        // Core has no mounted feature yet. An increment does, and omitting that exact route/flow
+        // is what produced a complete but unreachable journey in production.
+        ...(!isEdit && !isRepair && step !== "core" ? mountedSurface.mountedPaths : []),
+      ] }),
   ];
   if (rejections.length) {
     parts.push("", "PART OF YOUR PREVIOUS PATCH BATCH WAS REJECTED — every reason below is exact.",

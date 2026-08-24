@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeWizardMachine, WIZARD_STATUS } from "../../src/scaffolds/reactVite/lib/capabilities/wizard.js";
-import { bindCapabilities } from "../../shell/server/lib/builderV2/contractTiering.mjs";
+import {
+  bindCapabilities, contractUsesExplicitTransientState, durablePersistenceJourneys,
+} from "../../shell/server/lib/builderV2/contractTiering.mjs";
 
 test("wizard navigation, validation, progress and confirmation are deterministic", async () => {
   const confirmed = [];
@@ -163,6 +165,35 @@ test("booking-only contracts bind booking without imposing a wizard", () => {
   });
   assert.ok(booking.some((binding) => binding.name === "booking"));
   assert.ok(!booking.some((binding) => binding.name === "wizard"));
+});
+
+test("explicitly transient simulated reservations do not acquire durable booking or wizard bindings", () => {
+  const contract = {
+    entities: [{
+      name: "reservation", owned: false,
+      storage: "client-only transient state for the simulated journey; not persisted to backend",
+    }],
+    operations: [{
+      id: "complete-mock-entry", entity: "reservation", kind: "create", journey: "reserve-low-cost-entry",
+      responsibilities: [{
+        type: "functional", behavior: "produce a simulated confirmation",
+        reads: ["competitionId", "ticketQuantity"], writes: ["confirmationId"],
+      }],
+    }],
+    journeys: [{
+      id: "reserve-low-cost-entry", title: "Reserve a simulated competition entry", steps: [
+        { action: "choose a competition", expect: "the competition is selected" },
+        { action: "enter a ticket quantity", expect: "the quantity is shown" },
+        { action: "complete mock entry", expect: "a local confirmation is shown" },
+      ],
+    }],
+    routes: [{ path: "/competitions", name: "Competitions" }], auth: {},
+  };
+  const bindings = bindCapabilities(contract);
+  assert.equal(contractUsesExplicitTransientState(contract), true);
+  assert.equal(bindings.some((binding) => binding.name === "booking"), false);
+  assert.equal(bindings.some((binding) => binding.name === "wizard"), false);
+  assert.deepEqual(durablePersistenceJourneys(contract), []);
 });
 
 test("true multi-step booking and explicit checkout bind the headless wizard", () => {
