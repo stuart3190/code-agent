@@ -1707,7 +1707,12 @@ async function runStep(page, step, {
     && flow.control && !identifiesNothing(flow.control.logicalField || flow.control.accessibleName));
   if ((!navigated || declaredSelections.length)
     && (declaredSelections.length || /\b(choose|select|pick)\b/i.test(action))
-    && !/\bnumbers? of\b|amount|quantity/i.test(action)) {
+    // A validated interaction contract outranks prose heuristics. Quantity-like wording is
+    // excluded only when the verifier is inferring a selector from text, because it may describe
+    // a counter/stepper. When the contract declares a selection and the app exposes that exact
+    // machine identity, bypassing the semantic driver makes a proven scaffold control
+    // undriveable and sends a correct app into repair.
+    && (declaredSelections.length || !/\bnumbers? of\b|amount|quantity/i.test(action))) {
     // "choose to cancel the booking" derives a SELECTION whose field is the bare verb `cancel`,
     // because the step says "choose". There is no option group called cancel — it is a button —
     // and demanding one made a working cancellation undriveable. controlIdentity already names

@@ -43,7 +43,7 @@ export function Choices() {
   const [quantity, setQuantity] = useState(null);
   const tierChoice = useSemanticSelection({ name: "tier", value: tier, onSelect: setTier });
   const regionChoice = useSemanticSelection({ name: "region", value: region, onSelect: setRegion });
-  const quantityChoice = useSemanticSelection({ name: "quantity", value: quantity, onSelect: setQuantity });
+  const quantityChoice = useSemanticSelection({ name: "ticket Quantity", value: quantity, onSelect: setQuantity });
   return <main>
     <h1>Choose your plan</h1>
     <div {...tierChoice.groupProps}>
@@ -144,6 +144,56 @@ test("REAL VERIFIER — verifyJourneys drives every generated option", { ...need
   assert.equal(journey.status, "pass", `every step must pass:\n${detail}`);
   assert.deepEqual(verdict.consoleErrors, []);
 });
+
+test("retained smoke: a contracted ticket quantity selection outranks the stepper prose heuristic",
+  { ...needsBrowser }, async () => {
+    const control = {
+      roles: ["button", "radio", "option", "combobox"],
+      purpose: "ticketQuantity",
+      machineId: "ctl_127f08f8",
+      statePath: "browse-and-enter-competition.draft.ticketQuantity",
+      logicalField: "ticketQuantity",
+      selectedState: true,
+      accessibleName: "ticket Quantity",
+      accessibleNames: ["ticket Quantity"],
+    };
+    const result = await verifyJourneys({
+      previewUrl: baseUrl,
+      timeoutMs: 30_000,
+      contract: {
+        journeys: [{
+          id: "browse-and-enter-competition",
+          title: "A visitor picks a ticket quantity",
+          priority: "primary",
+          steps: [
+            { action: "open the chooser", target: "/", expect: "Choose your plan heading is visible" },
+            {
+              action: "pick a ticket quantity",
+              target: "ticket quantity control",
+              operates: ["ticketQuantity"],
+              expect: "the selected ticket quantity is shown",
+            },
+          ],
+        }],
+        interactionContract: {
+          flows: [{
+            id: "browse-and-enter-competition:2:selection:ticketquantity",
+            journeyId: "browse-and-enter-competition",
+            stepIndex: 1,
+            kind: "selection",
+            valueWritten: "ticketQuantity",
+            control,
+          }],
+        },
+      },
+    });
+
+    const quantity = result.journeys[0].steps[1];
+    assert.equal(quantity.status, "pass", JSON.stringify(result.journeys, null, 2));
+    assert.equal(quantity.drove, true);
+    assert.match(quantity.detail, /selection (created|moved)/i);
+    assert.equal(quantity.controlEvidence.selections[0].contractedField, "ticketQuantity");
+  });
 
 test("NESTED CARD OPTIONS — a declared semantic group remains one driveable group", { ...needsBrowser }, () => {
   const tier = verdict.journeys[0].steps.find((step) => step.action === "select the Premium tier");
