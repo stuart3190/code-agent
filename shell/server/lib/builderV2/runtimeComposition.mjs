@@ -47,12 +47,15 @@ import {
 } from "./sandboxProvenance.mjs";
 import { assertExecutableCandidate } from "../modelCatalogue.mjs";
 import {
-  deriveBuildEnvelope, envelopePoolCeiling, FUNDING_POOL,
+  contractRuntimeRequirements, deriveBuildEnvelope, envelopePoolCeiling, FUNDING_POOL,
   supabaseBuildEnvelopes, createEnvelopeProgressGuard,
 } from "./buildEnvelope.mjs";
 import { supabaseBuildSettlements } from "./buildSettlement.mjs";
 import { structuredBuildFailure, customerBuildStatus, customerFailureMessage } from "./buildFailure.mjs";
 import { supabaseVerificationEvidenceStore } from "./verificationEvidenceStore.mjs";
+import {
+  browserVerificationBudget, browserVerificationUsesBackend,
+} from "./browserVerificationBudget.mjs";
 
 const uuid = () => crypto.randomUUID();
 // shell/server/lib/builderV2 → the checkout root, which is also the image's /app.
@@ -157,10 +160,10 @@ function changedModuleCount(context = {}) {
   return Math.max(1, paths.size || (context.step === "core" ? 6 : 1));
 }
 
-function runtimeLimits(workJob, kind) {
+function runtimeLimits(workJob, kind, overrides = {}) {
   const inherited = workJob.resource_limits || {};
   return {
-    wallSeconds: kind === "browser_verify" ? 240 : Number(inherited.wallSeconds || 300),
+    wallSeconds: Number(overrides.wallSeconds || inherited.wallSeconds || 300),
     cpu: Number(inherited.cpu || 2), memoryMb: Number(inherited.memoryMb || 2048),
     pids: Number(inherited.pids || 256), outputBytes: Number(inherited.outputBytes || 4 * 1024 * 1024),
   };
@@ -763,6 +766,12 @@ export function createBuilderV2Runtime({
         // half-completed wizard or terminal state from the prior candidate.
         const verificationVisitorScope = uuid();
         for (const journey of journeys) {
+          const runtimeRequirements = activeEnvelope?.runtimeRequirements
+            || contractRuntimeRequirements(journeyContract);
+          const usesBackend = browserVerificationUsesBackend(runtimeRequirements);
+          const browserBudget = browserVerificationBudget({
+            journey, contract: journeyContract, usesBackend,
+          });
           // Use a server-only authority to seal stable verifier credentials. Only the derived,
           // purpose-scoped tokens enter the ephemeral sandbox payload; the service credential
           // itself never leaves the durable worker process.
@@ -780,6 +789,7 @@ export function createBuilderV2Runtime({
             id: `${workJob.id}-journey-${uuid()}`, durable_job_id: workJob.id,
             job_type: "browser_verify", attempts: workJob.attempts || 1,
             payload: { previewUrl: previewResult.url,
+              usesBackend,
               contract: { ...journeyContract, journeys: [journey],
                 allJourneys: journeyContract?.allJourneys || journeyContract?.journeys || [],
                 prerequisiteInteractionContract: journeyContract?.prerequisiteInteractionContract
@@ -788,8 +798,11 @@ export function createBuilderV2Runtime({
               // Stable only within this project/journey. The sandbox restores deterministic test
               // credentials, then the app still obtains a real app-auth/RLS session normally.
               verificationIdentity,
-              timeoutMs: 180_000 },
-            resource_limits: runtimeLimits(workJob, "browser_verify"),
+              appTimeoutMs: browserBudget.appTimeoutMs,
+              journeyTimeoutMs: browserBudget.journeyTimeoutMs },
+            resource_limits: runtimeLimits(workJob, "browser_verify", {
+              wallSeconds: browserBudget.wallSeconds,
+            }),
           }, {
             signal: journeySignal || signal,
             onStdout: (chunk) => emit("stdout", chunk), onStderr: (chunk) => emit("stderr", chunk),

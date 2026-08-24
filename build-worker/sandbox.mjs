@@ -52,7 +52,7 @@ async function browserVerify(payload) {
   try {
     const app = await verifyApp({
       previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
-      timeoutMs: Number(payload.timeoutMs) || 180_000, browser,
+      timeoutMs: Number(payload.appTimeoutMs || payload.timeoutMs) || 180_000, browser,
       verificationIdentity: payload.verificationIdentity || null,
     });
     let journeys = null;
@@ -66,7 +66,7 @@ async function browserVerify(payload) {
       };
     } else if (payload.contract?.journeys?.length) {
       journeys = await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
-        timeoutMs: Number(payload.timeoutMs) || 180_000, browser,
+        timeoutMs: Number(payload.journeyTimeoutMs || payload.timeoutMs) || 180_000, browser,
         verificationIdentity: payload.verificationIdentity || null });
     }
     if (journeys && app.verifierDefects?.length) {
