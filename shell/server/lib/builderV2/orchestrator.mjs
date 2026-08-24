@@ -195,11 +195,26 @@ const sourcePaths = (values) => [...new Set((values || []).flatMap((value) => (
 )).map((path) => path.replace(/[):,;]+$/, "")))].sort();
 const directoryPrefix = (path) => path.includes("/") ? `${path.slice(0, path.lastIndexOf("/") + 1)}` : "";
 
-function targetedGateCorrection(gate, tree) {
+export function targetedGateCorrection(gate, tree, contract = null) {
   const failure = gate?.layers?.d0d2?.failure;
   if (!failure?.kind || failure.kind === "expectations") return null;
   const findings = failure.findings || [];
   let files = [...new Set(findings.map((finding) => finding?.file).filter((file) => /^src\//.test(file)))];
+  const unreachable = findings.filter((finding) => finding?.code === "journey_surface_unreachable");
+  const mountedIntegrationFiles = unreachable.flatMap((finding) => {
+    if ((finding.mountedModules || []).length) return finding.mountedModules;
+    const journeyIds = new Set(finding.journeyIds || []);
+    if (!journeyIds.size) {
+      for (const extension of contract?.scaffoldGraph?.extensions || []) {
+        if (extension?.module === finding.file || (extension?.allowedFiles || []).includes(finding.file)) {
+          for (const journeyId of extension.owningJourneys || []) journeyIds.add(journeyId);
+        }
+      }
+    }
+    return (contract?.scaffoldGraph?.journeyOwnership || [])
+      .filter((owner) => journeyIds.has(owner?.journeyId)).map((owner) => owner.mountedModule);
+  }).filter((file) => /^src\//.test(file));
+  files = [...new Set([...files, ...mountedIntegrationFiles])];
   files = [...new Set([...files, ...sourcePaths([
     ...(gate.layers?.d0d2?.problems || []), failure.stderr || "",
   ])])].sort();
@@ -219,6 +234,9 @@ function targetedGateCorrection(gate, tree) {
     instruction: `Retain the candidate and correct the bounded ${failure.kind} failure in `
       + `[${files.join(", ")}]. ${missing.length ? `Create the missing module(s) [${missing.join(", ")}] `
         + "inside the allowed directory boundary. " : ""}`
+      + (unreachable.length
+        ? "Integrate the named journey module from its owning mounted screen and use its declared export in the live interaction; editing or re-exporting the unreachable module alone cannot make progress. "
+        : "")
       + "Do not regenerate the application or change unrelated working modules.",
   };
 }
@@ -920,7 +938,7 @@ export function createOrchestrator({
       lastSignature = signature;
       problems = gateProblems;
       rejections = retainedPartial ? [...retainedPatchRejections] : [];
-      const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree);
+      const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree, contract);
       if (gateScope && corrections < maxCandidateCorrections) {
         if (!treesEqual(applied.tree, gate.tree)) {
           latestCandidate = await snapshotStore.createSnapshot(owner, projectId, gate.tree, {
@@ -1917,7 +1935,7 @@ export function createOrchestrator({
         // candidates still use the ordinary repair path below.
         const initialGate = await verifyStage(source.tree, gateOptions(contract,
           "resume-preflight", allJourneys, { owner, projectId, buildId, step: "resume-preflight", attempt: 0, signal }));
-        const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree);
+        const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree, contract);
         let retainedJourneyProblems = [];
         let retainedDefects = [];
         if (initialGate.ok) {

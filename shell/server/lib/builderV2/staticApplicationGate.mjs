@@ -235,8 +235,20 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
       .filter((path) => typeof tree?.[path] === "string" && !reachable.has(path)),
   ]).filter((path) => !PLATFORM.test(path));
   checks.push({ name: "journey_reachability", ok: unreachable.length === 0, detail: unreachable });
-  blocking.push(...unreachable.map((file) => ({ code: "journey_surface_unreachable", file,
-    message: `${file} implements contracted work but is unreachable from the mounted live application` })));
+  blocking.push(...unreachable.map((file) => {
+    const journeyIds = unique([
+      ...(modulePlan || []).filter((module) => module?.path === file)
+        .flatMap((module) => module.journeyIds || module.ownedJourneys || []),
+      ...(scaffoldGraph?.extensions || []).filter((extension) => extension?.module === file
+        || (extension?.allowedFiles || []).includes(file)).flatMap((extension) => extension.owningJourneys || []),
+      ...(scaffoldGraph?.journeyOwnership || []).filter((owner) => owner?.mountedModule === file)
+        .map((owner) => owner.journeyId),
+    ]).filter((id) => (journeys || []).some((journey) => journey?.id === id));
+    const mountedModules = unique((scaffoldGraph?.journeyOwnership || [])
+      .filter((owner) => journeyIds.includes(owner?.journeyId)).map((owner) => owner.mountedModule));
+    return { code: "journey_surface_unreachable", file, journeyIds, mountedModules,
+      message: `${file} implements contracted work but is unreachable from the mounted live application` };
+  }));
 
   const expansion = structuralSurfaceFinding(tree, scaffoldGraph);
   advisory.push(...expansion);

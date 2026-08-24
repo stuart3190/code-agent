@@ -257,6 +257,13 @@ test("simulated rather than real payments do not become a payment requirement", 
   assert.equal(durable.requirementSignals.includes("saved_data"), true);
 });
 
+test("a demo checkout that explicitly declines payment integration is not a payment requirement", () => {
+  const profile = resolveBuildProfile({
+    prompt: "Competition detail flow. Do not integrate real payments; label checkout as demo/reserve entry so it is safe for preview.",
+  });
+  assert.equal(profile.requirementSignals.includes("payments"), false);
+});
+
 test("retained basic competition request is not mistaken for Unity or real payments", () => {
   const prompt = `Build a basic public competition website for Budget Competitions.
     This first version does not need real payments; it should use a simulated reservation and

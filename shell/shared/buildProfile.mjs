@@ -115,6 +115,10 @@ function has(patterns, text) {
 function withoutNegatedRequirements(value) {
   return String(value || "")
     .replace(
+      /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:integrate|use|process|take|accept|enable|support)\s+(?:real\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
+      "",
+    )
+    .replace(
       /\b(?:payments?|billing|checkout)\b[^.!?;\n]{0,64}\b(?:simulat(?:e|ed|ing|ion)|mock(?:ed)?|demo(?:-only)?|rather than real|not real)\b/gi,
       "",
     )

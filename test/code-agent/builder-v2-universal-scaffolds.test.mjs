@@ -17,6 +17,7 @@ import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS }
 import { deriveVerificationManifest, browserPlan }
   from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import { targetedGateCorrection } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
@@ -199,7 +200,19 @@ test("an unmounted journey module and an undeclared repair identifier are reject
   gate = runStaticApplicationGate(tree, { contract: spec.contract, modulePlan,
     journeys: spec.journeys, requireExtensions: false });
   assert.equal(gate.ok, false);
-  assert.ok(gate.blocking.some((finding) => finding.code === "journey_surface_unreachable" && finding.file === dead));
+  const unreachable = gate.blocking.find((finding) => finding.code === "journey_surface_unreachable"
+    && finding.file === dead);
+  assert.ok(unreachable);
+  const mountedOwner = spec.scaffoldGraph.journeyOwnership
+    .find((owner) => owner.journeyId === "browse-content").mountedModule;
+  assert.deepEqual(unreachable.journeyIds, ["browse-content"]);
+  assert.deepEqual(unreachable.mountedModules, [mountedOwner]);
+  const correction = targetedGateCorrection({ layers: { d0d2: {
+    failure: { kind: "static_application", findings: [unreachable] },
+    problems: [unreachable.message],
+  } } }, tree, spec.contract);
+  assert.deepEqual(correction.allowedFiles, [dead, mountedOwner].sort());
+  assert.match(correction.instruction, /owning mounted screen/);
 
   delete tree[dead];
   const owner = spec.scaffoldGraph.journeyOwnership[0].mountedModule;
