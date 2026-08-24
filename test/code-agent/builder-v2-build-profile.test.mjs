@@ -4,7 +4,7 @@ import test from "node:test";
 process.env.CODE_AGENT_STORE = "memory";
 
 const {
-  resolveBuildProfile, validateBuildProfileInput,
+  latestBuildProfile, resolveBuildProfile, validateBuildProfileInput,
 } = await import("../../shell/shared/buildProfile.mjs");
 const { classifyComplexity } = await import("../../shell/server/lib/appBuild/buildProfile.mjs");
 const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
@@ -146,6 +146,69 @@ test("Auto resolves a simple marketing-site prompt as website without forcing ap
   assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
   assert.equal(spec.buildProfile.resolvedBuildType, "website");
   assert.equal(spec.capabilityGraph.operationResponsibilities.length, 0);
+});
+
+const RETAINED_BUDGET_COMPETITION_REQUEST = "Build a basic, polished public website for a low-budget competition brand called Budget Competitions. It should promote affordable prize draws around £100 and £200. Target users are UK visitors looking for cheap, simple competitions. Key screens/sections: a homepage hero explaining low-cost competitions, featured competition cards for examples such as £100 Cash Boost, £200 Shopping Voucher, and £150 Weekend Treat; each card should show prize value, ticket price, entries remaining/progress, draw date/countdown-style copy, and a clear Enter now call-to-action. Include a simple How it works section (choose a competition, answer/confirm entry, wait for draw), trust/legitimacy messaging, FAQs, and an email/contact interest form for users to register interest or get notified. Since no payment or compliance details were provided, do not implement real-money checkout; make entry buttons open a friendly register interest modal or scroll to the form. Use UK currency formatting and a clean budget-friendly visual identity with bright, trustworthy colours. Make it fully responsive and verify the primary journey: visitor opens site, views competitions, clicks enter, submits interest form, and sees success feedback.";
+
+test("register-interest website copy does not invent account or payment requirements", () => {
+  const profile = resolveBuildProfile({ prompt: RETAINED_BUDGET_COMPETITION_REQUEST });
+  assert.equal(profile.resolvedBuildType, "website");
+  assert.equal(profile.requirementSignals.includes("user_accounts"), false);
+  assert.equal(profile.requirementSignals.includes("payments"), false);
+
+  const genuineAccounts = resolveBuildProfile({
+    prompt: "Build an application where members can register an account and sign in.",
+  });
+  assert.equal(genuineAccounts.requirementSignals.includes("user_accounts"), true);
+});
+
+test("retained smoke profile remains authoritative throughout contract generation", async () => {
+  const retainedProfile = Object.freeze({
+    version: 1,
+    requestedBuildType: "auto",
+    resolvedBuildType: "auto",
+    applicationSubtype: "auto",
+    requirementSignals: [],
+    inferenceSource: "auto",
+    confidence: 0.45,
+  });
+  let dispatches = 0;
+  const fixture = contract({ summary: "A public competition interest website" });
+  fixture.acceptance = [
+    { id: "a1", statement: "the competition cards are visible", journey: "primary-flow", kind: "content" },
+    { id: "a2", statement: "the interest action is reachable", journey: "primary-flow", kind: "interaction" },
+    { id: "a3", statement: "the visitor sees interest feedback", journey: "primary-flow", kind: "interaction" },
+  ];
+  const outcome = await generateContract({
+    prompt: RETAINED_BUDGET_COMPETITION_REQUEST,
+    buildProfile: retainedProfile,
+    provider: {
+      model: "zero-model-retained-smoke",
+      async runTurn() {
+        dispatches += 1;
+        return {
+          text: JSON.stringify(fixture),
+          toolCalls: [], usage: { input: 0, output: 0, total: 0 },
+        };
+      },
+    },
+  });
+
+  assert.equal(dispatches, 1, "a false auth obligation forced a correction dispatch");
+  assert.deepEqual(outcome.contract?.buildProfile, retainedProfile);
+  assert.equal(outcome.problems.length, 0, outcome.problems.join("; "));
+});
+
+test("a stored resolved profile is not re-inferred from register-interest turn copy", () => {
+  const retainedProfile = {
+    version: 1, requestedBuildType: "auto", resolvedBuildType: "auto",
+    applicationSubtype: "auto", requirementSignals: [], inferenceSource: "auto", confidence: 0.45,
+  };
+  const restored = latestBuildProfile([{
+    content: RETAINED_BUDGET_COMPETITION_REQUEST,
+    payload: { build_profile: retainedProfile },
+  }]);
+  assert.deepEqual(restored, retainedProfile);
 });
 
 test("explicit Website remains website-oriented while requested forms and integrations remain represented", () => {

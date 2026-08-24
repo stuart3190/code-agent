@@ -14,7 +14,8 @@ import {
   CONTRACT_VERSION, STAGES, validateContract, contractSummary, functionalOutputEffect,
 } from "../../../shared/implementationContract.mjs";
 import {
-  buildProfileBrief, requestUsesTransientSimulation, resolveBuildProfile, validateBuildProfileContract,
+  adoptBuildProfile, buildProfileBrief, requestUsesTransientSimulation, resolveBuildProfile,
+  validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
 
 // Exported so a test can hold the brief and the code that enforces it to the same statement:
@@ -200,7 +201,11 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
     });
     return normalizedOperation;
   });
-  c.buildProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy });
+  // A complete profile is an intake authority, not another inference hint. Contract prompts may
+  // contain project knowledge or expanded planning prose whose incidental words must not create
+  // new product obligations after intake has been resolved.
+  c.buildProfile = adoptBuildProfile(buildProfile)
+    || resolveBuildProfile({ prompt, input: buildProfile, legacy });
   if (requestUsesTransientSimulation(prompt)) {
     const recoveryPattern = /\b(?:recover(?:y|ed)?|reload|look[ -]?up|lookup|retrieve|read\s+(?:an?\s+)?[^.!?]{0,24}\breference|by reference)\b/i;
     const operationKind = (operation) => String(
@@ -354,7 +359,8 @@ export async function generateContract({
   provider, prompt, buildProfile = null, knowledge = "", log = () => {}, onUsage = null,
   priorContract = null, priorProblems = [], priorIssues = [],
 }) {
-  const productProfile = resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
+  const productProfile = adoptBuildProfile(buildProfile)
+    || resolveBuildProfile({ prompt, input: buildProfile, legacy: !buildProfile });
   const transientGuidance = requestUsesTransientSimulation(prompt)
     ? "\n- This request explicitly describes a simulated/demo flow without durable storage. Keep it client-only and transient; do not add backend persistence, reload, history, or recovery."
     : "";

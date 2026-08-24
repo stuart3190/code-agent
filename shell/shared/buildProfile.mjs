@@ -79,7 +79,9 @@ const APPLICATION_PATTERNS = [
 ];
 const SIGNAL_PATTERNS = Object.freeze({
   user_accounts: [
-    /\b(?:user accounts?|sign[ -]?in|log[ -]?in|register|registered users?|multi[ -]?user|member portal)\b/i,
+    /\b(?:user accounts?|sign[ -]?in|log[ -]?in|registered users?|multi[ -]?user|member portal)\b/i,
+    /\b(?:users?|members?)\s+(?:can\s+|must\s+|may\s+)?register\b/i,
+    /\bregister(?:ed|ing)?\s+(?:users?|members?|an?\s+account|for\s+an?\s+account)\b/i,
     /\bteam members?\s+(?:accounts?|access|log[ -]?in|sign[ -]?in)\b/i,
     /\b(?:tenant|workspace)\s+(?:owner|member|access|account)s?\b/i,
   ],
@@ -115,7 +117,7 @@ function has(patterns, text) {
 function withoutNegatedRequirements(value) {
   return String(value || "")
     .replace(
-      /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:integrate|use|process|take|accept|enable|support)\s+(?:real\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
+      /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:implement|integrate|use|process|take|accept|enable|support)\s+(?:real(?:-money|\s+money)?\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
       "",
     )
     .replace(
@@ -319,7 +321,11 @@ export function latestBuildProfile(turns = []) {
     const stored = turns[index]?.payload?.build_profile;
     if (!stored) continue;
     try {
-      return resolveBuildProfile({ prompt: turns[index]?.content || "", input: stored });
+      // Conversation turns store the already server-resolved DTO. Re-inferring it from later
+      // prose (for example, "register interest") can invent auth obligations that were never in
+      // the accepted profile and that the contract planner was not meant to add.
+      return adoptBuildProfile(stored)
+        || resolveBuildProfile({ prompt: turns[index]?.content || "", input: stored });
     } catch {
       return null;
     }
