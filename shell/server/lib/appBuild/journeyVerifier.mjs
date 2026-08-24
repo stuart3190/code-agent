@@ -728,7 +728,12 @@ async function selectionGroups(page) {
       // immediate parent turns four valid options into four one-option "groups", all of which are
       // discarded below. The nearest declared group is the option-set authority; only legacy
       // markup without one falls back to the immediate parent.
-      const parent = el.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist]")
+      // A repeated card list can be a valid selection surface when the list names the contracted
+      // field and its buttons expose selected state (for example aria-pressed). The retained
+      // Budget Competitions candidate used exactly that accessible shape. Treat only LABELLED
+      // lists as a declared group: an ordinary navigation/list remains ineligible, and the
+      // transition proof below still requires the clicked option to gain selected state.
+      const parent = el.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist],[role=list][aria-label],[role=list][aria-labelledby]")
         || el.parentElement;
       if (!byParent.has(parent)) byParent.set(parent, []);
       byParent.get(parent).push(el);
@@ -737,7 +742,7 @@ async function selectionGroups(page) {
     // HTML/ARIA only, never from prose or ordinal, so revealing a step cannot renumber a group
     // into another group's identity.
     const identitiesOf = (parent, els) => {
-      const container = parent.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist]") || parent;
+      const container = parent.closest("[role=group],fieldset,[role=radiogroup],[role=listbox],[role=tablist],[role=list][aria-label],[role=list][aria-labelledby]") || parent;
       const labelledBy = (container.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
         .map((id) => document.getElementById(id)?.innerText || "");
       const idPrefixes = els.map((el) => (el.id || "").split("-")[0]).filter(Boolean);

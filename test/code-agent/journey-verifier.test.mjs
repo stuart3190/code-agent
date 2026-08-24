@@ -160,6 +160,66 @@ test("retained smoke regression: a visible observation-only section passes witho
   body = WORKING;
 });
 
+test("retained competition regression: a labelled card list is driveable only with a real selection transition", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main>
+      <h1>Budget Competitions</h1>
+      <div role="list" aria-label="competition Id">
+        <article><button type="button" aria-label="competition Id Cash Boost" aria-pressed="false">Enter Cash Boost</button></article>
+        <article><button type="button" aria-label="competition Id Gadget Draw" aria-pressed="false">Enter Gadget Draw</button></article>
+        <article><button type="button" aria-label="competition Id Voucher Draw" aria-pressed="false">Enter Voucher Draw</button></article>
+      </div>
+      <p id="panel">Choose a competition</p>
+    </main>
+    <script>
+      for (const button of document.querySelectorAll('[role="list"] button')) {
+        button.onclick = () => {
+          for (const option of document.querySelectorAll('[role="list"] button')) option.setAttribute('aria-pressed', 'false');
+          button.setAttribute('aria-pressed', 'true');
+          document.getElementById('panel').textContent = 'Competition detail entry panel opens with prize and demo payment notice';
+        };
+      }
+    </script>
+  </body></html>`;
+  const control = {
+    roles: ["button", "radio", "option", "combobox"],
+    purpose: "competitionId",
+    machineId: "ctl_1bf07ca5",
+    statePath: "enter-demo-competition.draft.competitionId",
+    logicalField: "competitionId",
+    selectedState: true,
+    accessibleName: "competition Id",
+    accessibleNames: ["competition Id"],
+  };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "enter-demo-competition", title: "A visitor enters a demo competition", priority: "primary",
+      steps: [{ action: "choose a competition from the listing", target: "competition card enter button",
+        operates: ["competitionId"],
+        expect: "the competition detail entry panel opens showing the selected prize and a demo payment notice" }] }],
+    interactionContract: { flows: [{ id: "enter-demo-competition:2:selection:competitionid",
+      journeyId: "enter-demo-competition", stepIndex: 0, kind: "selection",
+      valueWritten: "competitionId", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  assert.equal(result.journeys[0].steps[0].status, "pass");
+  assert.match(result.journeys[0].steps[0].detail, /selection (created|moved)/i);
+
+  body = body.replace("button.setAttribute('aria-pressed', 'true');", "/* deliberately no selected-state transition */");
+  const unchanged = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "enter-demo-competition", title: "A visitor enters a demo competition", priority: "primary",
+      steps: [{ action: "choose a competition from the listing", target: "competition card enter button",
+        operates: ["competitionId"],
+        expect: "the competition detail entry panel opens showing the selected prize and a demo payment notice" }] }],
+    interactionContract: { flows: [{ id: "enter-demo-competition:2:selection:competitionid",
+      journeyId: "enter-demo-competition", stepIndex: 0, kind: "selection",
+      valueWritten: "competitionId", control }] },
+  } });
+  assert.equal(unchanged.pass, false, "supporting labelled card lists must not weaken selection-state proof");
+  assert.equal(unchanged.journeys[0].steps[0].status, "fail");
+  assert.match(unchanged.journeys[0].steps[0].detail, /never gained a selected state/i);
+  body = WORKING;
+});
+
 test("an observation-only step with missing evidence fails instead of becoming undriveable", needsBrowser, async () => {
   body = `<!doctype html><html><body><main><h1>Low Budget Competitions</h1></main></body></html>`;
   const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{

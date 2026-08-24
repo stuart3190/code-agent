@@ -22,14 +22,9 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
     owner: "platform", repairableByModel: false, targetFiles: [],
     reason: `failure is inside protected deterministic scaffold module ${protectedInternal}`,
   };
-  const extensions = (scaffoldGraph?.extensions || []).filter((extension) => modules.includes(extension.module));
-  if (extensions.length) return {
-    classification: SCAFFOLD_REPAIR_CLASS.CUSTOM_EXTENSION,
-    owner: "app", repairableByModel: true,
-    targetFiles: unique(extensions.flatMap((extension) => extension.allowedFiles || [extension.module])),
-    reason: "failure belongs to a bounded custom extension contract",
-  };
   const owner = (scaffoldGraph?.journeyOwnership || []).find((row) => row.journeyId === defect?.journeyId);
+  const extensions = (scaffoldGraph?.extensions || []).filter((extension) => modules.includes(extension.module));
+  const extensionFiles = new Set(extensions.flatMap((extension) => extension.allowedFiles || [extension.module]));
   const unreachable = defect?.evidence?.surfaceIntegration?.unreachableJourneyModules || [];
   if (unreachable.length && owner?.mountedModule) return {
     classification: SCAFFOLD_REPAIR_CLASS.UNREACHABLE,
@@ -42,6 +37,29 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
     owner: "app", repairableByModel: true,
     targetFiles: unique(["src/extensions/capabilityConfiguration.js", owner?.mountedModule]),
     reason: "failure belongs to model-owned scaffold/capability configuration integration",
+  };
+  // A missing/undriveable control lives on the rendered UI surface. A journey may also call a
+  // bounded custom extension, but that extension cannot mount a button, input, route or group.
+  // Prefer the mounted screen and attributed UI modules before considering extension ownership.
+  // This prevents a functional helper from stealing repair ownership from the live JSX seam.
+  const controlIntegrationDefect = Boolean(defect?.control)
+    && (defect?.defectClass === "interaction" || defect?.classification === "interaction"
+      || defect?.code === "contracted_control_undriveable");
+  if (controlIntegrationDefect && owner?.mountedModule) {
+    const uiModules = modules.filter((path) => !extensionFiles.has(path)
+      && /^src\/(?:screens|routes|components)\//.test(String(path)));
+    return {
+      classification: SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION,
+      owner: "app", repairableByModel: true,
+      targetFiles: unique([owner.mountedModule, ...uiModules]),
+      reason: "repair the contracted control on its mounted live screen, not a non-rendering custom extension",
+    };
+  }
+  if (extensions.length) return {
+    classification: SCAFFOLD_REPAIR_CLASS.CUSTOM_EXTENSION,
+    owner: "app", repairableByModel: true,
+    targetFiles: unique(extensions.flatMap((extension) => extension.allowedFiles || [extension.module])),
+    reason: "failure belongs to a bounded custom extension contract",
   };
   if (owner?.mountedModule) return {
     classification: SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION,

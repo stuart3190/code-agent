@@ -255,6 +255,20 @@ test("scaffold-aware repair targets mounted/config/custom seams and never protec
   const custom = routeScaffoldDefect({ journeyId: owner.journeyId, modules: [extension.module] }, spec.scaffoldGraph);
   assert.equal(custom.classification, SCAFFOLD_REPAIR_CLASS.CUSTOM_EXTENSION);
   assert.deepEqual(custom.targetFiles, extension.allowedFiles);
+  const mountedFlow = "src/screens/scaffold/EnterDemoCompetitionFlow.jsx";
+  const control = routeScaffoldDefect({
+    journeyId: owner.journeyId,
+    code: "contracted_control_undriveable",
+    defectClass: "interaction",
+    control: { logicalField: "competitionId" },
+    modules: [extension.module, mountedFlow, owner.mountedModule],
+    failureRefs: [extension.module, mountedFlow, owner.mountedModule],
+  }, spec.scaffoldGraph);
+  assert.equal(control.classification, SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION,
+    "a custom calculation helper cannot steal an undriveable control from its mounted UI owner");
+  assert.ok(control.targetFiles.includes(owner.mountedModule));
+  assert.ok(control.targetFiles.includes(mountedFlow));
+  assert.ok(!control.targetFiles.includes(extension.module));
   const configuration = routeScaffoldDefect({ journeyId: owner.journeyId,
     modules: ["src/extensions/capabilityConfiguration.js"] }, spec.scaffoldGraph);
   assert.equal(configuration.classification, SCAFFOLD_REPAIR_CLASS.INTEGRATION);
