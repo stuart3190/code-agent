@@ -337,9 +337,12 @@ export function scaffoldCompositionBrief(graph, plan = scaffoldCompositionPlan(g
         owningJourneys: extension.owningJourneys, inputs: extension.inputs, outputs: extension.outputs,
         reads: extension.reads, writes: extension.writes, allowedFiles: extension.allowedFiles,
         requiredExports: extension.requiredExports, integrationPoints: extension.integrationPoints,
+        operationContracts: extension.operationContracts,
         verificationSemantics: extension.verificationSemantics })) }, null, 2),
     "The protected router already mounts every screen above. Implement visual/domain composition inside",
     "those existing screen slots and only the declared custom extension files. Do not write App.jsx,",
     "the composed scaffold root, a competing router, or a free-form replacement application shell.",
+    "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",
+    "object properties. An object spread is not proof that a differently named domain field satisfies the interface.",
   ].join("\n");
 }

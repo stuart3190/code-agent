@@ -40,7 +40,7 @@ export const BLOCKING_CODES = Object.freeze({
   undefined_identifier: "a mounted source module references a lexical identifier that does not exist",
   scaffold_composition_invalid: "the protected scaffold graph, router, or mounted screen contract is broken",
   journey_surface_unreachable: "contracted implementation exists but cannot be reached from the mounted application",
-  custom_extension_invalid: "a bounded custom extension is missing, unexported, or disconnected from its mounted seam",
+  custom_extension_invalid: "a bounded custom extension is missing, unexported, disconnected, or called without its declared semantic inputs",
 
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",

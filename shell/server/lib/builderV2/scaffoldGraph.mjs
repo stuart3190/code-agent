@@ -6,7 +6,7 @@
 
 import { scaffoldEntry, SCAFFOLD_REGISTRY_VERSION, SCAFFOLDS } from "./scaffoldRegistry.mjs";
 
-export const SCAFFOLD_GRAPH_VERSION = 1;
+export const SCAFFOLD_GRAPH_VERSION = 2;
 
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const slug = (value, fallback = "screen") => String(value || fallback).toLowerCase()
@@ -132,6 +132,21 @@ function extensionContracts(contract, capabilityGraph) {
       owningJourneys: [...(node.journeys || [])],
       inputs: [...(node.requiredInputs || [])], outputs: [...(node.outputs || [])],
       reads: [...(node.requiredInputs || [])], writes: [...(node.outputs || [])],
+      operationContracts: (node.operationResponsibilities || []).map((responsibility) => ({
+        responsibilityId: responsibility.id,
+        operationId: responsibility.operationId,
+        selectors: unique([
+          responsibility.operationId,
+          responsibility.semanticOperation,
+          responsibility.id,
+        ]),
+        inputs: [...(responsibility.reads || [])],
+        inputKeys: unique([
+          ...(responsibility.declaredReads || []),
+          ...(responsibility.reads || []).map((input) => String(input).split(".").at(-1)),
+        ]),
+        outputs: [...(responsibility.writes || [])],
+      })),
       stateOwnership: node.stateOwnership,
       allowedFiles: [node.extension.module], module: node.extension.module,
       requiredExports: [...(node.extension.requiredExports || [])],

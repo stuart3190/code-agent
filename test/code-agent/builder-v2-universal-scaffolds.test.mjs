@@ -82,6 +82,36 @@ const TRANSACTION = base({
   ] }], routes: [{ path: "/", name: "Schedule" }],
 });
 
+const RETAINED_COMPETITION_SMOKE = base({
+  summary: "Browse a competition and submit a no-payment demo entry",
+  entities: [{ name: "competition", fields: [
+    { name: "competitionId", type: "string" }, { name: "ticketQuantity", type: "number" },
+    { name: "entryPrice", type: "number" }, { name: "totalCost", type: "number" },
+    { name: "confirmation", type: "string" }, { name: "reference", type: "string" },
+    { name: "noPaymentNotice", type: "string" },
+  ] }],
+  operations: [
+    { id: "calculate-entry-total", entity: "competition", kind: "calculate", journey: "browse-to-demo-entry",
+      responsibilities: [{ type: "functional", behavior: "calculate the demo entry total",
+        reads: ["competitionId", "ticketQuantity", "entryPrice"], writes: ["totalCost"] }] },
+    { id: "submit-demo-entry", entity: "competition", kind: "submit", journey: "browse-to-demo-entry",
+      responsibilities: [{ type: "functional", behavior: "submit a no-payment demo entry",
+        reads: ["competitionId", "ticketQuantity", "totalCost"],
+        writes: ["confirmation", "reference", "noPaymentNotice"] }] },
+  ],
+  journeys: [{ id: "browse-to-demo-entry", title: "Browse to demo entry", priority: "primary", steps: [
+    { action: "select a competition", target: "competition", operates: ["competitionId", "entryPrice"],
+      primitive: "selection", expect: "the competition is selected" },
+    { action: "choose a ticket quantity", target: "ticket quantity", operates: ["ticketQuantity"],
+      primitive: "selection", expect: "the ticket quantity is shown" },
+    { action: "calculate the demo entry total", target: "total", operates: ["calculate-entry-total"],
+      expect: "the total is shown" },
+    { action: "submit the demo entry", target: "submit", operates: ["submit-demo-entry"],
+      expect: "confirmation, mock reference and no-payment notice are shown" },
+  ] }],
+  routes: [{ path: "/", name: "Home" }],
+});
+
 const INTERACTIVE = base({
   summary: "An interactive project workspace with canvas manipulation, calculation, save/reopen and export",
   buildProfile: profile(["custom_logic", "interactive_workspace", "export"]),
@@ -249,6 +279,58 @@ test("a broken custom extension cannot poison the deterministic foundation", () 
   assert.equal(invalid.ok, false);
   assert.match(invalid.problems.join(" "), /must export/);
   assert.deepEqual(Object.fromEntries(plan.protectedFiles.map((path) => [path, hash(tree[path])])), before);
+});
+
+test("retained smoke extension seam rejects a generic id spread before browser and accepts its semantic key", () => {
+  const spec = deriveBuildSpec(RETAINED_COMPETITION_SMOKE);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const { tree } = compose(spec);
+  const extension = spec.scaffoldGraph.extensions.find((candidate) => (
+    candidate.extensionId === "custom_behavior:browse-to-demo-entry"
+  ));
+  assert.ok(extension);
+  assert.equal(extension.operationContracts.length, 2);
+  const exportName = extension.requiredExports[0];
+  const mounted = spec.scaffoldGraph.journeyOwnership[0].mountedModule;
+  const relativeExtension = `../../${extension.module.replace(/^src\//, "").replace(/\.js$/, "")}.js`;
+  tree[extension.module] = `export function ${exportName}(inputs, context) {
+    if (context.operation === "calculate-entry-total") return { totalCost: inputs.entryPrice * inputs.ticketQuantity };
+    if (!inputs.competitionId) return { confirmation: null, reference: null, noPaymentNotice: null };
+    return { confirmation: "Demo entry confirmed", reference: "MOCK-001", noPaymentNotice: "No payment was taken" };
+  }`;
+  tree[mounted] = `import { ${exportName} } from ${JSON.stringify(relativeExtension)};
+export default function HomeScreen() {
+  const selectedCompetition = { id: "cash-100", entryPrice: 0.99 };
+  const ticketQuantity = 2;
+  const totalResult = ${exportName}({ competitionId: selectedCompetition.id, ticketQuantity,
+    entryPrice: selectedCompetition.entryPrice }, { operation: "calculate-entry-total" });
+  const result = ${exportName}({ ...selectedCompetition, ticketQuantity,
+    totalCost: totalResult.totalCost }, { operation: "submit-demo-entry" });
+  return <main><button type="button">Submit demo entry</button><output>{result.confirmation}</output></main>;
+}`;
+
+  let gate = runStaticApplicationGate(tree, { contract: spec.contract, modulePlan: spec.modulePlan,
+    journeys: spec.journeys });
+  assert.equal(gate.ok, false);
+  const mismatch = gate.blocking.find((finding) => finding.code === "custom_extension_invalid"
+    && finding.operation === "submit-demo-entry");
+  assert.ok(mismatch);
+  assert.equal(mismatch.file, mounted);
+  assert.ok(mismatch.missingInputs.some((input) => input.endsWith(".competitionId")));
+  assert.doesNotMatch(mismatch.missingInputs.join(" "), /ticketQuantity|totalCost/);
+  const correction = targetedGateCorrection({ layers: { d0d2: {
+    failure: { kind: "static_application", findings: [mismatch] }, problems: [mismatch.message],
+  } } }, tree, spec.contract);
+  assert.deepEqual(correction.allowedFiles, [mounted]);
+  assert.match(correction.instruction, /explicit object property/);
+  assert.match(correction.instruction, /generic id alias is not sufficient/);
+
+  tree[mounted] = tree[mounted].replace("{ ...selectedCompetition, ticketQuantity,",
+    "{ competitionId: selectedCompetition.id, ticketQuantity,");
+  gate = runStaticApplicationGate(tree, { contract: spec.contract, modulePlan: spec.modulePlan,
+    journeys: spec.journeys });
+  assert.equal(gate.ok, true, JSON.stringify(gate.blocking));
+  assert.equal(gate.checks.find((check) => check.name === "source_integrity").ok, true);
 });
 
 test("scaffold-aware repair targets mounted/config/custom seams and never protected internals", () => {

@@ -187,6 +187,167 @@ function reachablePaths(tree) {
   return reachable;
 }
 
+function parseSource(source, file) {
+  try {
+    return parse(source, { sourceType: "unambiguous", plugins: ["jsx",
+      ...(file.endsWith(".ts") || file.endsWith(".tsx") ? ["typescript"] : [])] });
+  } catch {
+    return null;
+  }
+}
+
+function objectPropertyName(property) {
+  if (!property || property.type === "SpreadElement") return null;
+  if (property.computed && property.key?.type !== "StringLiteral") return null;
+  if (property.key?.type === "Identifier") return property.key.name;
+  if (["StringLiteral", "NumericLiteral"].includes(property.key?.type)) return String(property.key.value);
+  return null;
+}
+
+function literalObjectProperty(object, name) {
+  if (object?.type !== "ObjectExpression") return null;
+  return (object.properties || []).find((property) => objectPropertyName(property) === name) || null;
+}
+
+function literalValue(node) {
+  if (["StringLiteral", "NumericLiteral", "BooleanLiteral"].includes(node?.type)) return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions?.length === 0) {
+    return node.quasis?.[0]?.value?.cooked ?? null;
+  }
+  return null;
+}
+
+function normalizedSelector(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function extensionCallTarget(callee, named, namespaces) {
+  if (callee?.type === "Identifier") return named.get(callee.name) || null;
+  if (!["MemberExpression", "OptionalMemberExpression"].includes(callee?.type)
+    || callee.object?.type !== "Identifier") return null;
+  const extension = namespaces.get(callee.object.name);
+  if (!extension) return null;
+  const exportName = callee.computed ? literalValue(callee.property) : callee.property?.name;
+  return (extension.requiredExports || []).includes(exportName) ? { extension, exportName } : null;
+}
+
+function localObjectBindings(ast) {
+  const bindings = new Map();
+  const ambiguous = new Set();
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier"
+      && node.init?.type === "ObjectExpression") {
+      if (bindings.has(node.id.name)) ambiguous.add(node.id.name);
+      else bindings.set(node.id.name, node.init);
+    }
+    for (const [, child] of childrenOf(node)) visit(child);
+  };
+  visit(ast.program);
+  for (const name of ambiguous) bindings.delete(name);
+  return bindings;
+}
+
+function callObject(argument, bindings) {
+  if (argument?.type === "ObjectExpression") return argument;
+  if (argument?.type === "Identifier") return bindings.get(argument.name) || null;
+  return null;
+}
+
+function inputAliases(input, contract) {
+  const value = String(input || "");
+  const leaf = value.split(".").at(-1);
+  return unique([value, leaf, ...(contract?.inputKeys || []).filter((key) => (
+    key === value || key === leaf || String(key).split(".").at(-1) === leaf
+  ))]);
+}
+
+/**
+ * Prove the directly imported custom-extension seam. The gate intentionally requires an explicit,
+ * inspectable input object: spreading a domain record is not evidence that its generic `id` field
+ * satisfies a contract-owned `competitionId`, `projectId`, or any other semantic input.
+ */
+export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, journeys = []) {
+  const selectedJourneys = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
+  const extensions = (scaffoldGraph?.extensions || []).filter((extension) => (
+    (extension.operationContracts || []).length
+      && (!(extension.owningJourneys || []).length || (extension.owningJourneys || [])
+        .some((journeyId) => selectedJourneys.has(journeyId)))
+  ));
+  if (!extensions.length) return [];
+  const findings = [];
+  for (const [file, source] of Object.entries(tree)) {
+    if (!SOURCE.test(file) || typeof source !== "string" || PLATFORM.test(file)) continue;
+    const ast = parseSource(source, file);
+    if (!ast) continue;
+    const named = new Map();
+    const namespaces = new Map();
+    for (const declaration of ast.program.body || []) {
+      if (declaration.type !== "ImportDeclaration" || typeof declaration.source?.value !== "string") continue;
+      const extension = extensions.find((candidate) => resolvedImportCandidates(file, declaration.source.value)
+        .includes(candidate.module));
+      if (!extension) continue;
+      for (const specifier of declaration.specifiers || []) {
+        if (specifier.type === "ImportNamespaceSpecifier") namespaces.set(specifier.local.name, extension);
+        if (specifier.type !== "ImportSpecifier") continue;
+        const exportName = specifier.imported?.name || specifier.imported?.value;
+        if ((extension.requiredExports || []).includes(exportName)) {
+          named.set(specifier.local.name, { extension, exportName });
+        }
+      }
+    }
+    if (!named.size && !namespaces.size) continue;
+    const bindings = localObjectBindings(ast);
+    const inspect = (node) => {
+      if (!node || typeof node.type !== "string") return;
+      if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
+        const target = extensionCallTarget(node.callee, named, namespaces);
+        if (target) {
+          const inputObject = callObject(node.arguments?.[0], bindings);
+          const contextObject = callObject(node.arguments?.[1], bindings);
+          const operationProperty = literalObjectProperty(contextObject, "operation");
+          const operation = literalValue(operationProperty?.value);
+          const normalizedOperation = normalizedSelector(operation);
+          const contracts = (target.extension.operationContracts || []).filter((contract) => (
+            normalizedOperation
+              ? (contract.selectors || []).some((selector) => normalizedSelector(selector) === normalizedOperation)
+              : target.extension.operationContracts.length === 1
+          ));
+          if (!inputObject || !contracts.length) {
+            findings.push({
+              code: "custom_extension_invalid", file, extensionId: target.extension.extensionId,
+              exportName: target.exportName, operation: operation || null,
+              journeyIds: target.extension.owningJourneys || [],
+              message: !inputObject
+                ? `${file} must call ${target.exportName} with an explicit inspectable input object`
+                : `${file} calls ${target.exportName} with undeclared operation ${JSON.stringify(operation)}`,
+            });
+          } else {
+            const explicitKeys = new Set((inputObject.properties || []).map(objectPropertyName).filter(Boolean));
+            const requiredInputs = unique(contracts.flatMap((contract) => contract.inputs || []));
+            const missingInputs = requiredInputs.filter((input) => !inputAliases(input,
+              contracts.find((contract) => (contract.inputs || []).includes(input)))
+              .some((alias) => explicitKeys.has(alias)));
+            if (missingInputs.length) {
+              findings.push({
+                code: "custom_extension_invalid", file, extensionId: target.extension.extensionId,
+                exportName: target.exportName, operation: operation || contracts[0]?.operationId || null,
+                missingInputs, requiredInputs, explicitKeys: [...explicitKeys].sort(),
+                journeyIds: target.extension.owningJourneys || [],
+                message: `${file} calls ${target.exportName} for ${operation || contracts[0]?.operationId || "its declared operation"} `
+                  + `without explicit contract input(s): ${missingInputs.join(", ")}. Object spreads do not satisfy named extension inputs.`,
+              });
+            }
+          }
+        }
+      }
+      for (const [, child] of childrenOf(node)) inspect(child);
+    };
+    inspect(ast.program);
+  }
+  return findings;
+}
+
 function structuralSurfaceFinding(tree, graph) {
   const expected = graph?.expectedModuleSurface;
   if (!expected?.extremeMaximum) return [];
@@ -221,9 +382,13 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
 
   const undefinedIdentifiers = lintUndefinedIdentifiers(tree);
   const unresolvedImports = lintUnresolvedImports(tree);
-  checks.push({ name: "source_integrity", ok: undefinedIdentifiers.length + unresolvedImports.length === 0,
-    detail: [...undefinedIdentifiers, ...unresolvedImports].map((finding) => finding.message) });
+  const extensionInterfaces = lintCustomExtensionInterfaces(tree, scaffoldGraph, journeys);
+  checks.push({ name: "source_integrity",
+    ok: undefinedIdentifiers.length + unresolvedImports.length + extensionInterfaces.length === 0,
+    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces]
+      .map((finding) => finding.message) });
   blocking.push(...undefinedIdentifiers, ...unresolvedImports);
+  blocking.push(...extensionInterfaces);
 
   const reachable = reachablePaths(tree);
   const scopedContract = { ...contract, journeys };

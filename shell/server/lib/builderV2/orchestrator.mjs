@@ -201,6 +201,8 @@ export function targetedGateCorrection(gate, tree, contract = null) {
   const findings = failure.findings || [];
   let files = [...new Set(findings.map((finding) => finding?.file).filter((file) => /^src\//.test(file)))];
   const unreachable = findings.filter((finding) => finding?.code === "journey_surface_unreachable");
+  const extensionInterfaces = findings.filter((finding) => finding?.code === "custom_extension_invalid"
+    && ((finding?.missingInputs || []).length || finding?.operation));
   const mountedIntegrationFiles = unreachable.flatMap((finding) => {
     if ((finding.mountedModules || []).length) return finding.mountedModules;
     const journeyIds = new Set(finding.journeyIds || []);
@@ -236,6 +238,9 @@ export function targetedGateCorrection(gate, tree, contract = null) {
         + "inside the allowed directory boundary. " : ""}`
       + (unreachable.length
         ? "Integrate the named journey module from its owning mounted screen and use its declared export in the live interaction; editing or re-exporting the unreachable module alone cannot make progress. "
+        : "")
+      + (extensionInterfaces.length
+        ? "At the named custom-extension call site, pass every missing contract input as an explicit object property using its declared semantic key; an object spread or generic id alias is not sufficient. "
         : "")
       + "Do not regenerate the application or change unrelated working modules.",
   };
