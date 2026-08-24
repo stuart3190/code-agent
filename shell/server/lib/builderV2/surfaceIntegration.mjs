@@ -109,6 +109,16 @@ function reachableSource(graph, tree) {
   return seen;
 }
 
+/**
+ * Source modules that the running application can actually load from its canonical entry points.
+ *
+ * Keep this authority shared with every journey-surface consumer. A source file merely existing
+ * in the tree must never satisfy (or conflict with) a contract implemented on the mounted app.
+ */
+export function reachableSourcePaths(tree = {}) {
+  return reachableSource(memoryGraph("surface-reachability", "surface-reachability", indexTree(tree)), tree);
+}
+
 function contractedJourneyModules(tree, contract, journeys, modulePlan) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
   const planned = (modulePlan || []).filter((module) => (

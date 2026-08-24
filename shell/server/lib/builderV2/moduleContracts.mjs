@@ -14,6 +14,7 @@ import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 import { capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
 import { scaffoldCompositionPlan, validateScaffoldComposition } from "./scaffoldComposer.mjs";
+import { reachableSourcePaths } from "./surfaceIntegration.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
 const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|scaffolds\/composed\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
@@ -505,7 +506,14 @@ export function validateModuleConformance(tree, {
   // Reported ALONGSIDE module conformance, never inside it: these are observations about binding,
   // not facts a module contract promised, and folding them into a module's missing facts made a
   // correctly-corrected module look non-conformant.
-  const controlBindings = lintControlBindings(tree, { interactionContract });
+  const scaffoldActive = Boolean(scaffoldGraph
+    && typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string");
+  const controlBindings = lintControlBindings(tree, {
+    interactionContract,
+    // Universal scaffold composition owns the mounted runtime graph. Dead generated routes are
+    // retained as evidence, but can neither satisfy nor conflict with a live journey control.
+    authoritativeFiles: scaffoldActive ? reachableSourcePaths(tree) : null,
+  });
   // Keep the broad binding lint advisory: static inference cannot follow every correct wrapper or
   // dynamic binding. The one enforceable subset is a mixed implementation where one exact
   // contracted identity is hand-wired while another copy is demonstrably machine-bound. That is
@@ -603,6 +611,6 @@ export function moduleCorrectionScope(report, moduleContracts) {
     capabilityPaths,
     findings: blocking,
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
-    instruction: "Correct only the validator-named modules so they satisfy their per-module generation contracts. Preserve every conforming module, the module plan, and visual design; do not regenerate the application.",
+    instruction: "Correct only the validator-named modules so they satisfy their per-module generation contracts. Preserve every conforming module, the module plan, and visual design; do not regenerate the application. For control-binding findings, apply the finding's requiredBinding helper/attribute and exact machineId on the mounted control; data-journey-control is not a verifier identity.",
   };
 }

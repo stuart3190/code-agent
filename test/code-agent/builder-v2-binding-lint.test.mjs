@@ -17,6 +17,11 @@ import { BINDING, lintControlBindings } from "../../shell/server/lib/builderV2/b
 import { controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
+import { composeCapabilityFoundation } from "../../shell/server/lib/builderV2/capabilityComposer.mjs";
+import { composeScaffoldFoundation } from "../../shell/server/lib/builderV2/scaffoldComposer.mjs";
+import { reachableSourcePaths } from "../../shell/server/lib/builderV2/surfaceIntegration.mjs";
+import { fromScaffold } from "../../src/engine/fileTree.mjs";
+import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
 const CONTRACT = {
   summary: "A booking application for a supper club", projectType: "booking", version: 1,
@@ -115,6 +120,80 @@ test("LIVE-SHAPED REGRESSION — a later bound copy cannot mask the hand-wired e
   const blocking = conformance.blocking.find((row) => row.code === "contract_control_binding_conflict");
   assert.equal(blocking?.module, "src/routes/HomePage.jsx",
     `the exact conflict did not reach the pre-compile correction gate: ${JSON.stringify(conformance.blocking)}`);
+});
+
+test("RETAINED SCAFFOLD REGRESSION — dead bound routes cannot conflict with the mounted live screen", () => {
+  const capability = composeCapabilityFoundation(fromScaffold(REACT_VITE), SPEC.capabilityGraph);
+  const composed = composeScaffoldFoundation(capability.tree, SPEC.scaffoldGraph);
+  const screen = SPEC.scaffoldGraph.screens[0].module;
+  const tree = {
+    ...composed.tree,
+    [screen]: `export default function HomeScreen({ choose, name, setName }) {
+      return <main>
+        <div role="group" id="eventDate" aria-label="Event date">
+          <button role="option" aria-pressed="false" onClick={() => choose("a")}>A</button>
+        </div>
+        <label htmlFor="guestName">Guest name</label>
+        <input id="guestName" name="guestName" value={name} onChange={(event) => setName(event.target.value)} />
+      </main>;
+    }`,
+    // Exact production shape: a valid-looking bound module remains as retained evidence, but the
+    // protected scaffold router never imports or renders it.
+    "src/routes/HomePage.jsx": `import { useSemanticField, useSemanticSelection }
+      from "../lib/capabilities/react.js";
+      export default function HomePage() {
+        const date = useSemanticSelection({ name: "eventDate", label: "Event date" });
+        const guest = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <main><div {...date.groupProps}><button {...date.optionProps("a")}>A</button></div>
+          <input {...guest.inputProps} /></main>;
+      }`,
+  };
+  const authoritativeFiles = reachableSourcePaths(tree);
+  assert.equal(authoritativeFiles.has(screen), true, "the composed screen is not reachable");
+  assert.equal(authoritativeFiles.has("src/routes/HomePage.jsx"), false,
+    "the retained dead route became reachable");
+
+  const result = lintControlBindings(tree, {
+    interactionContract: SPEC.interactionContract,
+    authoritativeFiles,
+  });
+  assert.equal(result.authoritativeSurface, true);
+  assert.ok(result.ignoredSourceFiles.includes("src/routes/HomePage.jsx"));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result), null, 2));
+  const unbound = failing(result).find((row) => row.code === "contract_control_unbound"
+    && row.control === "eventDate");
+  assert.equal(unbound?.elements?.[0]?.file, screen);
+  assert.deepEqual(unbound?.requiredBinding, {
+    helper: "useSemanticSelection", name: "eventDate", attribute: "data-thrallo-control",
+    machineId: controlIdFor("eventDate"), spread: "groupProps + optionProps(option)",
+  });
+
+  const conformance = validateModuleConformance(tree, {
+    contract: SPEC.contract, modulePlan: SPEC.modulePlan, moduleContracts: SPEC.moduleContracts,
+    interactionContract: SPEC.interactionContract, bindings: SPEC.bindings,
+    capabilityGraph: SPEC.capabilityGraph, scaffoldGraph: SPEC.scaffoldGraph,
+  });
+  assert.equal(conformance.blocking.some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(conformance.blocking, null, 2));
+  assert.equal(conformance.controlBindings.ignoredSourceFiles.includes("src/routes/HomePage.jsx"), true);
+});
+
+test("useFlowAdvance cannot impersonate an arbitrary contracted action through its visible copy", () => {
+  const actionContract = { flows: [{
+    id: "start:1:flow_start", kind: "flow_start", journeyId: "start",
+    control: { accessibleName: "View live competitions call to action",
+      machineId: "act_d83f91b9" },
+  }] };
+  const tree = { "src/screens/Home.jsx": `import { useFlowAdvance } from "../lib/capabilities/react.js";
+    export default function Home(){
+      const start = useFlowAdvance({ label: "View live competitions call to action", onActivate() {} });
+      return <button {...start.buttonProps}>View live competitions call to action</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: actionContract });
+  assert.equal(result.findings.some((row) => row.code === "contract_control_binding_conflict"), false);
+  assert.equal(failing(result).some((row) => row.code === "contract_control_missing"), true,
+    "the canonical advance identity was accepted as an unrelated action identity");
 });
 
 // ── the run #8 shape ───────────────────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@
 import { parse } from "@babel/parser";
 
 import { identityMatches, semanticAliases, semanticKey } from "./controlIdentity.mjs";
-import { actionIdFor, controlIdFor } from "./verificationManifest.mjs";
+import { ADVANCE_ACTION_NAME, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 
 /** How an element gets its machine identity, or fails to. */
 export const BINDING = Object.freeze({
@@ -110,12 +110,17 @@ function bindingOf(opening, fileSource, raw) {
     const declaration = root
       ? (fileSource.match(new RegExp(`\\b(?:const|let|var)\\s+${root}\\s*=\\s*[\\s\\S]{0,240}`)) || [])[0] || ""
       : "";
-    const boundName = BINDING_FACTORIES.test(declaration)
-      ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
+    const factory = (declaration.match(/\b(useSemanticField|useSemanticSelection|useSemanticAction|useFlowAdvance)\s*\(/)
+      || [])[1] || null;
+    const boundName = factory === "useFlowAdvance" ? ADVANCE_ACTION_NAME
+      : factory ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
       : null;
 
-    if (BINDING_PROPS.test(expression) || BINDING_FACTORIES.test(declaration)) {
+    if (BINDING_FACTORIES.test(declaration)) {
       return { binding: BINDING.BINDING, evidence: expression.slice(0, 60), boundName };
+    }
+    if (BINDING_PROPS.test(expression)) {
+      return { binding: BINDING.UNRESOLVED, evidence: expression.slice(0, 60) };
     }
     // A spread this file cannot follow. It may well be bound — a wrapper component, props forwarded
     // from a parent — and condemning it is exactly the false positive that made the old static
@@ -235,10 +240,13 @@ function walkFile(file, source, elements) {
  *
  * @returns {{ok: boolean, findings: Array, elements: Array, coverage: Array, residualGap: string}}
  */
-export function lintControlBindings(tree, { interactionContract } = {}) {
+export function lintControlBindings(tree, { interactionContract, authoritativeFiles = null } = {}) {
+  const authoritative = authoritativeFiles
+    ? new Set([...authoritativeFiles].map((file) => String(file))) : null;
+  const inAuthority = (file) => !authoritative || authoritative.has(file);
   const elements = [];
   for (const [file, source] of Object.entries(tree || {})) {
-    if (!SOURCE.test(file) || PLATFORM.test(file)) continue;
+    if (!SOURCE.test(file) || PLATFORM.test(file) || !inAuthority(file)) continue;
     walkFile(file, source, elements);
   }
 
@@ -247,15 +255,40 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
   const dynamicBindings = [];
   const FACTORY_CALL = /use(?:SemanticField|SemanticSelection|SemanticAction|FlowAdvance)\s*\(\s*\{[^}]*\}/g;
   for (const [file, source] of Object.entries(tree || {})) {
-    if (!SOURCE.test(file) || PLATFORM.test(file)) continue;
+    if (!SOURCE.test(file) || PLATFORM.test(file) || !inAuthority(file)) continue;
     for (const call of String(source).match(FACTORY_CALL) || []) {
-      if (!/name\s*:\s*['"`]/.test(call)) dynamicBindings.push(`${file}: ${call.replace(/\s+/g, " ").slice(0, 70)}`);
+      if (!/^useFlowAdvance\b/.test(call) && !/name\s*:\s*['"`]/.test(call)) {
+        dynamicBindings.push(`${file}: ${call.replace(/\s+/g, " ").slice(0, 70)}`);
+      }
     }
   }
 
   const findings = [];
   const coverage = [];
   const claimed = new Set();
+
+  const requiredBindingFor = (flow, key) => {
+    const name = String(key || "");
+    if (["input", "selection"].includes(flow.kind)) {
+      const helper = flow.kind === "selection" ? "useSemanticSelection" : "useSemanticField";
+      return {
+        helper,
+        name,
+        attribute: "data-thrallo-control",
+        machineId: flow.control?.machineId || controlIdFor(name),
+        spread: flow.kind === "selection" ? "groupProps + optionProps(option)" : "inputProps",
+      };
+    }
+    const helper = flow.kind === "flow_advance" ? "useFlowAdvance" : "useSemanticAction";
+    const bindingName = flow.kind === "flow_advance" ? ADVANCE_ACTION_NAME : name;
+    return {
+      helper,
+      name: bindingName,
+      attribute: "data-thrallo-action",
+      machineId: flow.control?.machineId || actionIdFor(bindingName),
+      spread: "buttonProps",
+    };
+  };
 
   for (const flow of interactionContract?.flows || []) {
     if (!flow.control) continue;
@@ -271,8 +304,12 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
     // condemn anything — which is why the residual gap below is stated with every result.
     const claims = (row) => {
       if (row.boundName) return semanticKey(row.boundName) === semanticKey(key);
-      if (row.machineId) return [controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
+      if (row.machineId) return [flow.control?.machineId, controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
         actionIdFor(flow.control.accessibleName || key)].includes(row.machineId);
+      // A resolved helper whose semantic name is unknown is not proof that THIS control is bound.
+      // In particular useFlowAdvance always emits the canonical "advance" action; visible copy on
+      // that button cannot turn it into an arbitrary contracted action identity.
+      if (row.binding === BINDING.BINDING) return false;
       return [...row.identities, ...(row.inheritedIdentities || [])].some((identity) =>
         identityMatches([identity], names) || semanticKey(identity) === semanticKey(key));
     };
@@ -289,7 +326,9 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
     const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
       && [...row.identities, ...(row.inheritedIdentities || [])]
         .some((identity) => semanticKey(identity) === semanticKey(key)));
-    coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length });
+    const requiredBinding = requiredBindingFor(flow, key);
+    coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length,
+      authoritativeSurface: Boolean(authoritative) });
 
     if (!matches.length && dynamicBindings.length) {
       // A DYNAMIC BINDING BINDS A CONTROL THIS FILE CANNOT NAME.
@@ -304,6 +343,7 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
       findings.push({
         code: "contract_control_coverage_undetermined", fails: false, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
         dynamicBindings: dynamicBindings.slice(0, 3),
         message: `no static element names the contracted control "${key}", but this tree binds `
           + `controls dynamically (${dynamicBindings[0]}) — coverage cannot be decided offline`,
@@ -317,6 +357,7 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
         code: "contract_control_missing", fails: true, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), expectedRoles: flow.control.roles || [],
         journeyId: flow.journeyId || null, responsibleModules: flow.responsibleModules || [],
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
         message: `no element in the generated tree names the contracted control "${key}"`,
       });
       continue;
@@ -325,6 +366,7 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
       findings.push({
         code: "contract_control_binding_conflict", fails: true, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
         shadowedByBoundDuplicate: true,
         elements: shadowedUnbound.map((row) => ({ file: row.file, line: row.line, element: row.element,
           via: row.via, identities: row.identities.slice(0, 4) })),
@@ -337,6 +379,7 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
       findings.push({
         code: "contract_control_unbound", fails: true, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
         elements: matches.filter((row) => !row.coversOnly).map((row) => ({ file: row.file, line: row.line, element: row.element,
           via: row.via, identities: row.identities.slice(0, 4) })),
         message: `the contracted control "${key}" is hand-wired at `
@@ -377,6 +420,9 @@ export function lintControlBindings(tree, { interactionContract } = {}) {
   return {
     ok: !findings.some((row) => row.fails),
     findings, elements, coverage,
+    authoritativeSurface: Boolean(authoritative),
+    ignoredSourceFiles: authoritative ? Object.keys(tree || {}).filter((file) => SOURCE.test(file)
+      && !PLATFORM.test(file) && !authoritative.has(file)).sort() : [],
     // True whenever ANY binding in the tree was unreadable — not merely for the controls affected.
     coverageUndetermined: undeterminedReasons.length > 0,
     undeterminedReasons,
