@@ -29,7 +29,7 @@ const CONTRACT = {
       { action: "cancel booking", target: "cancel", expect: "cancelled status" },
     ] },
     { id: "newsletter", title: "Join the newsletter", priority: "secondary", steps: [
-      { action: "submit the newsletter form", expect: "subscribed confirmation" },
+      { action: "submit the newsletter form", target: "/manage", expect: "subscribed confirmation" },
     ] },
   ],
 };
@@ -75,8 +75,10 @@ test("every view agrees about ownership: module plan, interactions and persisten
 
 test("journey modules and their generation contracts do not absorb same-role flows from other journeys", () => {
   const spec = deriveBuildSpec(CONTRACT);
-  const bookFlow = spec.modulePlan.find((module) => module.path.endsWith("/BookConfirmation.jsx"));
-  const newsletterFlow = spec.modulePlan.find((module) => module.path.endsWith("/NewsletterConfirmation.jsx"));
+  const bookOwner = spec.scaffoldGraph.journeyOwnership.find((owner) => owner.journeyId === "book");
+  const newsletterOwner = spec.scaffoldGraph.journeyOwnership.find((owner) => owner.journeyId === "newsletter");
+  const bookFlow = spec.modulePlan.find((module) => module.path === bookOwner.mountedModule);
+  const newsletterFlow = spec.modulePlan.find((module) => module.path === newsletterOwner.mountedModule);
   assert.deepEqual(bookFlow.journeyIds, ["book"]);
   assert.deepEqual(newsletterFlow.journeyIds, ["newsletter"]);
 

@@ -181,9 +181,9 @@ test("a retained complex application continuation carries only the selected modu
   ), "utf8"));
   const spec = deriveBuildSpec(fixture.contract);
   const selectedModule = spec.modulePlan.find((module) => (
-    module.journeyIds?.includes("create-auto-layout-project") && /Flow\.jsx$/.test(module.path)
+    module.journeyIds?.includes("create-auto-layout-project") && /Screen\.jsx$/.test(module.path)
   ));
-  assert.ok(selectedModule, "the retained application has a journey-owned flow module");
+  assert.ok(selectedModule, "the retained application has a journey-owned mounted screen module");
   const scope = headroomDispatchScope({
     tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
     repairScope: { files: [selectedModule.path], allowedFiles: [selectedModule.path] },

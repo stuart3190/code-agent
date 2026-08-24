@@ -34,8 +34,13 @@ export const BLOCKING_CODES = Object.freeze({
   build_config_invalid: "the build manifest/entry point cannot produce a running app",
   compile_failed: "the candidate does not compile",
   source_parse_error: "generated source is not parseable, so no gate downstream can be trusted",
+  unresolved_import: "a generated relative module import has no source-tree target",
   persistence_ast_parse_error: "generated source is not parseable, so no gate downstream can be trusted",
   scaffold_placeholder_unreplaced: "the mounted default route is still the empty scaffold placeholder",
+  undefined_identifier: "a mounted source module references a lexical identifier that does not exist",
+  scaffold_composition_invalid: "the protected scaffold graph, router, or mounted screen contract is broken",
+  journey_surface_unreachable: "contracted implementation exists but cannot be reached from the mounted application",
+  custom_extension_invalid: "a bounded custom extension is missing, unexported, or disconnected from its mounted seam",
 
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",
@@ -97,14 +102,17 @@ export const ADVISORY_CODES = Object.freeze({
   fabricated_confirmation_reference: "reload recovery in the browser proves durability; Date.now() alone does not prove fabrication",
   durable_cancellation_missing: "the cancellation journey proves durable cancellation in the browser",
   process_memory: "a mutable module binding is only a defect if reload recovery actually fails",
+  structural_expansion_exceeded: "the source tree is materially larger than its contract-derived scaffold surface",
 });
 
 /** Codes that must never be demoted, even by an explicit override. */
 const UNDEMOTABLE = Object.freeze(new Set([
   "forbidden_persistence", "capability_owner_bypassed",
   "protected_path_violation", "compile_failed", "patch_application_failed",
-  "tree_integrity_invalid", "build_config_invalid", "source_parse_error",
+  "tree_integrity_invalid", "build_config_invalid", "source_parse_error", "unresolved_import",
   "scaffold_placeholder_unreplaced",
+  "undefined_identifier", "scaffold_composition_invalid", "journey_surface_unreachable",
+  "custom_extension_invalid",
   "runtime_configuration_invalid",
   "capability_composition_invalid",
   "required_runtime_dependency_missing", "required_runtime_capability_missing",

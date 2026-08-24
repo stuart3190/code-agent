@@ -34,15 +34,15 @@ const CONTRACT = {
 };
 
 const CORE_PATCH = [{
-  newFile: "src/routes/BookPage.jsx",
+  replaceFile: "src/screens/scaffold/BookingScreen.jsx",
   content: `import React, { useState } from "react";
-import { ASSETS, ASSET_CREDITS } from "../lib/assetData.js";
-import { imageProps, isPlaceholder, placeholderStyle } from "../lib/assets.js";
-import { makeBookingSystem } from "../lib/capabilities/index.js";
+import { ASSETS, ASSET_CREDITS } from "../../lib/assetData.js";
+import { imageProps, isPlaceholder, placeholderStyle } from "../../lib/assets.js";
+import { makeBookingSystem } from "../../lib/capabilities/index.js";
 
 const booking = makeBookingSystem({ entity: "booking" });
 
-export default function BookPage() {
+export default function BookingScreen() {
   const [state, setState] = useState("idle");
   const hero = ASSETS["hero"];
   return (
@@ -59,13 +59,13 @@ export default function BookPage() {
 }];
 
 const NEWSLETTER_PATCH = [{
-  newFile: "src/routes/NewsletterPanel.jsx",
+  replaceFile: "src/screens/scaffold/HomeScreen.jsx",
   content: `import React, { useState } from "react";
-import { makeNewsletter } from "../lib/capabilities/index.js";
+import { makeNewsletter } from "../../lib/capabilities/index.js";
 
 const newsletter = makeNewsletter({ entity: "newslettersignup" });
 
-export default function NewsletterPanel() {
+export default function HomeScreen() {
   const [state, setState] = useState("idle");
   const [email, setEmail] = useState("");
   return (
@@ -80,11 +80,18 @@ export default function NewsletterPanel() {
 }];
 
 const BROWSE_PATCH = [{
-  newFile: "src/routes/AboutSection.jsx",
-  content: `import React from "react";
+  replaceFile: "src/screens/scaffold/HomeScreen.jsx",
+  content: `import React, { useState } from "react";
+import { makeNewsletter } from "../../lib/capabilities/index.js";
 
-export default function AboutSection() {
-  return <section><h2>About the farm</h2><p>Family-run strawberry fields since 1987.</p></section>;
+const newsletter = makeNewsletter({ entity: "newslettersignup" });
+export default function HomeScreen() {
+  const [state, setState] = useState("idle"); const [email, setEmail] = useState("");
+  return <main><section><h2>About the farm</h2><p>Family-run strawberry fields since 1987.</p></section>
+    <section>{state === "done" ? <p role="status">Newsletter subscribed</p> : null}
+      <label>Email address<input type="email" name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
+    </section></main>;
 }
 `,
 }];
@@ -181,7 +188,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
   const plan = patchPlan || {
     core: () => CORE_PATCH,
     // Default repair: a real but futile patch — persistent journey failures still block.
-    repair: () => [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// repair attempt\n" }] }],
+    repair: () => [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: "\n// repair attempt\n" }] }],
     "increment:newsletter-signup": () => NEWSLETTER_PATCH,
     "increment:browse-info": () => BROWSE_PATCH,
   };
@@ -218,7 +225,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
 // ── the proofs ────────────────────────────────────────────────────────────────────────────────
 
 test("WP8 — full first-green e2e: contract → assets → core green → both increments ship, zero model", async () => {
-  const { orchestrator, buildStore, snapshotStore } = harness();
+  const { orchestrator, buildStore, snapshotStore, checkpoints } = harness();
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
 
   assert.equal(result.state, "green", JSON.stringify(result));
@@ -228,7 +235,7 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
 
   const build = await buildStore.get(result.buildId);
   assert.deepEqual(build.states, [
-    "created", "contracting", "assets", "core", "verify_core",
+    "created", "contracting", "assets", "compose_scaffold", "core", "verify_core",
     "increment:newsletter-signup", "increment:browse-info", "final_fresh_verification", "green",
   ], "green is written only after every contracted journey passes");
 
@@ -236,11 +243,16 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
   const pointer = await snapshotStore.pointer("o", "proj-1", "green");
   assert.equal(pointer, result.snapshotId);
   const finalTree = await snapshotStore.materialize("o", pointer);
-  assert.ok(finalTree["src/routes/BookPage.jsx"], "core");
-  assert.ok(finalTree["src/routes/NewsletterPanel.jsx"], "increment 1");
-  assert.ok(finalTree["src/routes/AboutSection.jsx"], "increment 2");
+  assert.ok(finalTree["src/screens/scaffold/BookingScreen.jsx"], "core mounted screen");
+  assert.ok(finalTree["src/screens/scaffold/HomeScreen.jsx"].includes("Newsletter subscribed"), "increment 1");
+  assert.ok(finalTree["src/screens/scaffold/HomeScreen.jsx"].includes("About the farm"), "increment 2");
   assert.match(finalTree["src/lib/assetData.js"], /images\.pexels\.com\/201/, "AssetRefs injected as constants");
   assert.ok(finalTree["src/lib/assets.js"], "the scaffold render helper ships");
+  const foundation = checkpoints.find((event) => event.reason === "foundation:scaffold");
+  assert.ok(foundation?.snapshot?.id, "a compiled deterministic scaffold checkpoint precedes model-owned work");
+  assert.equal(foundation.promotable, false,
+    "the structural foundation is retained but cannot bypass journey verification");
+  assert.ok(foundation.tree["src/lib/scaffolds/composed/manifest.js"]);
 
   // Snapshot lineage: core → newsletter → browse.
   const finalSnap = await snapshotStore.getSnapshot(pointer);
@@ -261,9 +273,12 @@ test("14S — a red required secondary blocks completion while retaining resumab
 
   assert.equal(await snapshotStore.pointer("o", "proj-1", "green"), null,
     "no partial contract can become the project's green authority");
+  assert.ok(events.some((event) => event.reason === "foundation:scaffold"
+    && event.promotable === false && event.tree["src/lib/scaffolds/composed/manifest.js"]),
+  "a failed enhancement does not erase the retained deterministic foundation");
   const working = await orchestrator.resumeWorkingContext("o", "proj-1", result.buildId);
-  assert.ok(working.tree["src/routes/BookPage.jsx"]);
-  assert.ok(working.tree["src/routes/AboutSection.jsx"]);
+  assert.ok(working.tree["src/screens/scaffold/BookingScreen.jsx"]);
+  assert.ok(working.tree["src/screens/scaffold/HomeScreen.jsx"].includes("About the farm"));
   // The red journey's work is RETAINED as its own non-promotable checkpoint, but it is no longer
   // carried into the verified line: `browse-info` is built on the last VERIFIED candidate, not on
   // a tree the browser has just called red. One failed increment poisoning every later one is how
@@ -271,9 +286,9 @@ test("14S — a red required secondary blocks completion while retaining resumab
   const redCheckpoints = events.filter((event) => /newsletter-signup/.test(event.reason || ""));
   assert.ok(redCheckpoints.length, "the red increment is retained as a checkpoint for targeted repair");
   assert.ok(redCheckpoints.every((event) => event.promotable === false));
-  assert.ok(redCheckpoints.some((event) => event.tree["src/routes/NewsletterPanel.jsx"]),
+  assert.ok(redCheckpoints.some((event) => event.tree["src/screens/scaffold/HomeScreen.jsx"]?.includes("Newsletter subscribed")),
     "the retained checkpoint still holds the red work itself");
-  assert.ok(!working.tree["src/routes/NewsletterPanel.jsx"],
+  assert.ok(working.tree["src/screens/scaffold/HomeScreen.jsx"],
     "…and the verified line does not inherit it");
 });
 
@@ -282,10 +297,10 @@ test("a secondary candidate must re-prove every completed journey whose owners i
   const h = harness({
     patchPlan: {
       core: () => CORE_PATCH,
-      repair: () => [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// futile repair\n" }] }],
+      repair: () => [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: "\n// futile repair\n" }] }],
       "increment:newsletter-signup": () => [
         ...NEWSLETTER_PATCH,
-        { file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: "\n// regress-primary\n" }] },
+        { file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: "\n// regress-primary\n" }] },
       ],
       "increment:browse-info": () => BROWSE_PATCH,
     },
@@ -293,7 +308,7 @@ test("a secondary candidate must re-prove every completed journey whose owners i
       drives.push(journeys.map((journey) => journey.id));
       return { journeys: journeys.map((journey) => ({
         id: journey.id, title: journey.title, priority: journey.priority,
-        status: journey.id === "book-a-visit" && /regress-primary/.test(tree["src/routes/BookPage.jsx"] || "")
+        status: journey.id === "book-a-visit" && /regress-primary/.test(tree["src/screens/scaffold/BookingScreen.jsx"] || "")
           ? "fail" : "pass",
       })) };
     },
@@ -333,12 +348,12 @@ test("a parser-rejected repair retries through correction allowance, not a secon
     maxJourneyRepairs: 1,
     patchPlan: {
       core: () => CORE_PATCH,
-      repair: () => [{ file: "src/routes/BookPage.jsx", ops: [{
+      repair: () => [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{
         op: "replace_exact",
         symbol: "<h1>Book a farm visit</h1>",
         content: "<h1>Book a farm visit</h1><p>",
       }] }],
-      correction: () => [{ file: "src/routes/BookPage.jsx", ops: [{
+      correction: () => [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{
         op: "replace_exact",
         symbol: "<h1>Book a farm visit</h1>",
         content: `<h1>Book a farm visit</h1>${selectedDateCopy}`,
@@ -350,11 +365,11 @@ test("a parser-rejected repair retries through correction allowance, not a secon
       journeys: journeys.map((journey) => ({
         id: journey.id, title: journey.title, priority: journey.priority,
         status: journey.id === "book-a-visit"
-          && !String(tree["src/routes/BookPage.jsx"] || "").includes(selectedDateCopy)
+          && !String(tree["src/screens/scaffold/BookingScreen.jsx"] || "").includes(selectedDateCopy)
           ? "fail" : "pass",
         steps: journey.id === "book-a-visit"
           ? [{ action: "select a date", expect: "the selected date remains visible",
-            status: String(tree["src/routes/BookPage.jsx"] || "").includes(selectedDateCopy) ? "pass" : "fail",
+            status: String(tree["src/screens/scaffold/BookingScreen.jsx"] || "").includes(selectedDateCopy) ? "pass" : "fail",
             detail: "the flow advanced but the selected date was not visible" }]
           : [],
       })),
@@ -380,15 +395,15 @@ test("a partially applied browser repair finishes rejected causal edits before r
     patchPlan: {
       core: () => CORE_PATCH,
       repair: () => [{
-        file: "src/routes/HomePage.jsx",
+        file: "src/screens/scaffold/HomeScreen.jsx",
         ops: [{ op: "append", content: "\n// harmless repair sibling\n" }],
       }, {
-        file: "src/routes/BookPage.jsx",
+        file: "src/screens/scaffold/BookingScreen.jsx",
         ops: [{ op: "replace_exact", symbol: "<h1>Book a farm visit</h1>",
           content: "<h1>Book a farm visit</h1><p>" }],
       }],
       correction: () => [{
-        file: "src/routes/BookPage.jsx",
+        file: "src/screens/scaffold/BookingScreen.jsx",
         ops: [{ op: "replace_exact", symbol: "<h1>Book a farm visit</h1>",
           content: `<h1>Book a farm visit</h1>${cancellationCopy}` }],
       }],
@@ -399,9 +414,9 @@ test("a partially applied browser repair finishes rejected causal edits before r
       journeys: journeys.map((journey) => ({
         id: journey.id, title: journey.title, priority: journey.priority,
         status: journey.id === "book-a-visit"
-          && !String(tree["src/routes/BookPage.jsx"] || "").includes(cancellationCopy) ? "fail" : "pass",
+          && !String(tree["src/screens/scaffold/BookingScreen.jsx"] || "").includes(cancellationCopy) ? "fail" : "pass",
         steps: journey.id === "book-a-visit" ? [{ action: "cancel the confirmed booking",
-          expect: "a cancellation control is offered", status: String(tree["src/routes/BookPage.jsx"] || "")
+          expect: "a cancellation control is offered", status: String(tree["src/screens/scaffold/BookingScreen.jsx"] || "")
             .includes(cancellationCopy) ? "pass" : "undriveable" }] : [],
       })),
     }),
@@ -439,18 +454,20 @@ test("C2 — an unattributed essential failure blocks, is recorded separately, a
     contract: ghostContract,
     failJourneys: ["zzqx-ghost-flow"],
     patchPlan: {
-      core: () => CORE_PATCH,
+      core: () => [{ ...CORE_PATCH[0], replaceFile: "src/screens/scaffold/HomeScreen.jsx",
+        content: CORE_PATCH[0].content.replaceAll("BookingScreen", "HomeScreen") }],
       repair: ({ problems }) => {
         repairProblems = problems;
-        return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// bounded unattributed repair attempt\n" }] }];
+        return [{ file: "src/screens/scaffold/HomeScreen.jsx", ops: [{ op: "append", content: "\n// bounded unattributed repair attempt\n" }] }];
       },
     },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
   assert.equal(result.state, "blocked");
-  assert.match(result.error, /zzqx-ghost-flow/);
-  assert.deepEqual(result.platformDefects?.map((d) => d.code), ["journey_ownership_missing"]);
-  assert.ok(repairProblems.some((p) => /bounded fallback files:.*src\//.test(p)), JSON.stringify(repairProblems));
+  assert.equal(deriveBuildSpec(ghostContract).scaffoldGraph.journeyOwnership[0].mountedModule,
+    "src/screens/scaffold/HomeScreen.jsx", "even an unusual contract receives a deterministic mounted owner");
+  assert.deepEqual(result.platformDefects || [], [], "the scaffold graph makes the contracted owner explicit");
+  assert.ok(repairProblems.some((p) => /HomeScreen\.jsx/.test(p)), JSON.stringify(repairProblems));
   assert.ok(!(await snapshotStore.pointer("o", "proj-1", "green")), "unattributed failure promoted nothing");
 });
 
@@ -460,7 +477,7 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
     patchPlan: {
       core: ({ rejections }) => {
         round += 1;
-        if (round === 1) return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "replace_symbol", symbol: "NoSuchSymbol", content: "x" }] }];
+        if (round === 1) return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "replace_symbol", symbol: "NoSuchSymbol", content: "x" }] }];
         assert.ok(rejections.some((r) => /NoSuchSymbol/.test(r.reason)), "the model sees WHY");
         return CORE_PATCH;
       },
@@ -495,8 +512,8 @@ test("WP8 — stop rule: the same defect surviving a repair round blocks instead
           content: unsafeBookings(attempt),
         },
         {
-          newFile: "src/routes/BookPage.jsx",
-          content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";\nimport { create } from \"../data/bookings.js\";\n\nexport default function BookPage() {\n  return <main><h1>zzqx-final-outcome</h1><button onClick={() => create({ date: \"2026-08-10\" })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
+          replaceFile: "src/screens/scaffold/BookingScreen.jsx",
+          content: "import React from \"react\";\nimport { ASSET_CREDITS } from \"../../lib/assetData.js\";\nimport { create } from \"../../data/bookings.js\";\n\nexport default function BookingScreen() {\n  return <main><h1>zzqx-final-outcome</h1><button onClick={() => create({ date: \"2026-08-10\" })}>Submit</button><footer><a href=\"https://www.pexels.com\">Pexels</a>{ASSET_CREDITS.map((credit) => <a href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>;\n}\n",
         },
       ],
       correction: ({ attempt }) => [{
@@ -524,8 +541,8 @@ test("WP8 — rebuilds are cache-warm: second build makes ZERO provider calls an
   // Crash-resume: the green pointer alone brings back tree + index — no model, no search.
   const ctx = await second.orchestrator.resumeContext("o", "proj-1");
   assert.equal(ctx.snapshotId, two.snapshotId);
-  assert.ok(ctx.tree["src/routes/BookPage.jsx"]);
-  assert.ok(ctx.index.files.get("src/routes/BookPage.jsx").symbols.some((s) => s.name === "BookPage"),
+  assert.ok(ctx.tree["src/screens/scaffold/BookingScreen.jsx"]);
+  assert.ok(ctx.index.files.get("src/screens/scaffold/BookingScreen.jsx").symbols.some((s) => s.name === "BookingScreen"),
     "the index rebuilds deterministically from the snapshot");
 });
 
@@ -587,13 +604,13 @@ test("WP9 regression — a capability-usage defect is rejected deterministically
   let round = 0;
   let fedBack = null;
   const BAD_CONTACT_PATCH = [{
-    newFile: "src/routes/BookPage.jsx",
+    replaceFile: "src/screens/scaffold/BookingScreen.jsx",
     content: `import React from "react";
-import { makeContactForm } from "../lib/capabilities";
+import { makeContactForm } from "../../lib/capabilities";
 
 const contactForm = makeContactForm({ entity: "contactMessage" });
 
-export default function BookPage() {
+export default function BookingScreen() {
   async function go() { await contactForm.submit({ name: "x" }); }
   return <main><h1>Book a farm visit</h1><p role="status">Booking confirmed — reference SA-1</p><button onClick={go}>Submit booking</button></main>;
 }
@@ -613,9 +630,9 @@ export default function BookPage() {
       // re-emitted for the one offending module rather than regenerating the whole step.
       correction: ({ problems, moduleCorrectionScope: scope }) => {
         taught.push(...(problems || []));
-        assert.deepEqual(scope.allowedFiles, ["src/routes/BookPage.jsx"]);
-        return [{ replaceFile: "src/routes/BookPage.jsx", content: BAD_CONTACT_PATCH[0].content
-          .replace("import React from \"react\";", "import React from \"react\";\nimport { ASSET_CREDITS } from \"../lib/assetData.js\";")
+        assert.deepEqual(scope.allowedFiles, ["src/screens/scaffold/BookingScreen.jsx"]);
+        return [{ replaceFile: "src/screens/scaffold/BookingScreen.jsx", content: BAD_CONTACT_PATCH[0].content
+          .replace("import React from \"react\";", "import React from \"react\";\nimport { ASSET_CREDITS } from \"../../lib/assetData.js\";")
           .replace("contactForm.submit(", "contactForm.submitContact(")
           .replace("</main>", "<footer><a href=\"https://www.pexels.com\">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a>)}</footer></main>") }];
       },
@@ -634,8 +651,8 @@ export default function BookPage() {
 test("WP11/V2-20 — the repair tier: a verified browser failure earns a targeted round briefed with the evidence, then green", async () => {
   let bookingDrives = 0;
   const REPAIRED_PATCH = [{
-    file: "src/routes/BookPage.jsx",
-    ops: [{ op: "replace_symbol", symbol: "BookPage", content: `export default function BookPage() {
+    file: "src/screens/scaffold/BookingScreen.jsx",
+    ops: [{ op: "replace_symbol", symbol: "BookingScreen", content: `export default function BookingScreen() {
   const [state, setState] = useState("idle");
   return (
     <main>
@@ -671,7 +688,7 @@ test("WP11/V2-20 — the repair tier: a verified browser failure earns a targete
   assert.ok(sawRepairEvidence?.some((p) => /submit the booking form.*confirmation never appeared/.test(p)),
     `the repair round is briefed with the EXACT browser evidence: ${JSON.stringify(sawRepairEvidence)}`);
   const finalTree = await h.snapshotStore.materialize("o", await h.snapshotStore.pointer("o", "proj-1", "green"));
-  assert.match(finalTree["src/routes/BookPage.jsx"], /repaired/, "the repaired tree is what shipped");
+  assert.match(finalTree["src/screens/scaffold/BookingScreen.jsx"], /repaired/, "the repaired tree is what shipped");
 });
 
 test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats an identical round", async () => {
@@ -684,7 +701,7 @@ test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats 
     failJourneys: ["book-a-visit"],
     patchPlan: {
       core: () => CORE_PATCH,
-      repair: () => { repairCalls += 1; return [{ file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: `\n// futile repair ${repairCalls}\n` }] }]; },
+      repair: () => { repairCalls += 1; return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: `\n// futile repair ${repairCalls}\n` }] }]; },
       "increment:newsletter-signup": () => NEWSLETTER_PATCH,
       "increment:browse-info": () => BROWSE_PATCH,
     },
@@ -717,7 +734,7 @@ test("WP11/V2-20 — an identical full strategy cycle never restarts through cor
     failJourneys: ["book-a-visit"],
     patchPlan: {
       core: () => CORE_PATCH,
-      repair: () => { repairCalls += 1; return [{ file: "src/routes/BookPage.jsx",
+      repair: () => { repairCalls += 1; return [{ file: "src/screens/scaffold/BookingScreen.jsx",
         ops: [{ op: "append", content: `\n// unchanged production-shape repair ${repairCalls}\n` }] }]; },
       "increment:newsletter-signup": () => NEWSLETTER_PATCH,
       "increment:browse-info": () => BROWSE_PATCH,
@@ -768,7 +785,7 @@ test("WP11/D4 — a failing backend-row probe blocks eligibility even when the b
     patchPlan: {
       core: () => CORE_PATCH,
       // Repairs can't fix a missing database row that the browser can't see — rounds burn, then block.
-      repair: () => [{ file: "src/routes/BookPage.jsx", ops: [{ op: "append", content: "\n// probe repair attempt\n" }] }],
+      repair: () => [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: "\n// probe repair attempt\n" }] }],
       "increment:newsletter-signup": () => NEWSLETTER_PATCH,
       "increment:browse-info": () => BROWSE_PATCH,
     },

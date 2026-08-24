@@ -17,11 +17,11 @@ const CONTRACT = {
 };
 
 const CORE_PATCH = [{
-  newFile: "src/routes/BookingPanel.jsx",
+  replaceFile: "src/screens/scaffold/HomeScreen.jsx",
   content: `import { useState } from "react";
-import { makeBookingSystem } from "../lib/capabilities/index.js";
+import { makeBookingSystem } from "../../lib/capabilities/index.js";
 const booking = makeBookingSystem({ entity: "booking" });
-export default function BookingPanel() {
+export default function HomeScreen() {
   const [done, setDone] = useState(false);
   return <main><h1>Booking</h1><button onClick={async () => {
     await booking.createBooking({ date: "2026-08-20", slot: "10:00", partySize: 2 });
@@ -29,10 +29,6 @@ export default function BookingPanel() {
   }}>Submit booking</button>
     {done ? <p>Booking confirmed</p> : null}</main>;
 }`,
-}, {
-  replaceFile: "src/routes/HomePage.jsx",
-  content: `import BookingPanel from "./BookingPanel.jsx";
-export default function HomePage() { return <BookingPanel />; }`,
 }];
 
 function harness(browserResult) {
@@ -43,7 +39,7 @@ function harness(browserResult) {
     patchesFn: async ({ step }) => {
       patchCalls.push(step);
       if (step === "core") return CORE_PATCH;
-      return [{ file: "src/routes/HomePage.jsx", ops: [{ op: "append", content: "\n// must not run\n" }] }];
+      return [{ file: "src/screens/scaffold/HomeScreen.jsx", ops: [{ op: "append", content: "\n// must not run\n" }] }];
     },
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }) },
     snapshotStore,

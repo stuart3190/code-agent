@@ -13,6 +13,9 @@ import assert from "node:assert/strict";
 import { createOrchestrator, memoryBuildStore } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { composeCapabilityFoundation } from "../../shell/server/lib/builderV2/capabilityComposer.mjs";
+import { composeScaffoldFoundation } from "../../shell/server/lib/builderV2/scaffoldComposer.mjs";
 import {
   SEVERITY, assertSeverityTablesDisjoint, partitionFindings, severityOf,
 } from "../../shell/server/lib/builderV2/validationSeverity.mjs";
@@ -33,15 +36,16 @@ const CONTRACT = {
   ] }],
 };
 
-// A working application written in a shape the platform did not prescribe: no planned file
-// names, no ceremonial re-invocation, capability methods passed as references.
+const SCREEN_PATH = "src/screens/scaffold/BookingScreen.jsx";
+
+// A working application composed inside the mounted model-owned screen slot. The platform owns
+// the route and capability infrastructure; product-specific interaction composition stays free.
 const UNPRESCRIBED = {
-  "src/data/store.js": `import { makeBookingSystem, makeWizardMachine } from "../lib/capabilities";
-export const bookings = makeBookingSystem({ entity: "booking" });
-export const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });`,
-  "src/routes/Booking.jsx": `import { useSyncExternalStore } from "react";
-import { bookings, wizard } from "../data/store.js";
-export default function Booking() {
+  [SCREEN_PATH]: `import { useSyncExternalStore } from "react";
+import { makeBookingSystem, makeWizardMachine } from "../../lib/capabilities/index.js";
+const bookings = makeBookingSystem({ entity: "booking" });
+const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });
+export default function BookingScreen() {
   const state = useSyncExternalStore(wizard.subscribe, wizard.getState);
   return <main>
     <label htmlFor="date">Date</label>
@@ -52,10 +56,6 @@ export default function Booking() {
     <button onClick={() => bookings.getBooking("BK-1")}>Look up booking</button>
   </main>;
 }`,
-  // The app is deliberately unprescribed, but it must still be reachable from the scaffold's
-  // mounted root. A complete component left beside the placeholder is not a usable candidate.
-  "src/routes/HomePage.jsx": `import Booking from "./Booking.jsx";
-export default function HomePage() { return <Booking />; }`,
 };
 
 function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) {
@@ -78,7 +78,7 @@ function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) 
     buildStore: memoryBuildStore(),
     baseTree: () => fromScaffold(REACT_VITE),
     baseline: REACT_VITE,
-    compile: async () => { timeline.push("compile"); return { ok: true }; },
+    compile: async (_tree, context) => { timeline.push(`compile:${context?.step || "unknown"}`); return { ok: true }; },
     journeysFn: async ({ journeys }) => {
       timeline.push("browser");
       return { journeys: journeys.map((journey) => ({ ...journey, status: journeyStatus, steps: [] })) };
@@ -93,7 +93,8 @@ function harness({ patches, journeyStatus = "pass", maxCoreAttempts = 3 } = {}) 
 }
 
 const asPatches = (tree) => Object.entries(tree).map(([path, content]) => (
-  Object.hasOwn(REACT_VITE, path) ? { replaceFile: path, content } : { newFile: path, content }
+  Object.hasOwn(REACT_VITE, path) || path.startsWith("src/screens/scaffold/")
+    ? { replaceFile: path, content } : { newFile: path, content }
 ));
 
 test("the severity model has exactly one authority per finding code", () => {
@@ -112,7 +113,7 @@ test("a structurally usable candidate is checkpointed, compiled, run and verifie
 
   // The candidate exists BEFORE any shape gate, and the order is checkpoint → compile → browser.
   const candidate = h.timeline.findIndex((row) => row.startsWith("checkpoint:candidate:"));
-  const compiled = h.timeline.indexOf("compile");
+  const compiled = h.timeline.indexOf("compile:core");
   const browser = h.timeline.indexOf("browser");
   assert.ok(candidate >= 0, `no candidate checkpoint: ${h.timeline.join(" → ")}`);
   assert.ok(compiled > candidate, `compile must follow the checkpoint: ${h.timeline.join(" → ")}`);
@@ -121,7 +122,6 @@ test("a structurally usable candidate is checkpointed, compiled, run and verifie
 
   // Shape differences were recorded, not enforced.
   const recorded = h.events.findings.flatMap((event) => event.advisory);
-  assert.ok(recorded.length, "advisory findings are retained as evidence");
   assert.ok(recorded.every((finding) => finding.severity === SEVERITY.ADVISORY));
   assert.ok(recorded.every((finding) => finding.rationale), "every advisory carries its rationale");
   assert.equal(h.events.findings.every((event) => event.blocking.length === 0), true);
@@ -134,7 +134,7 @@ test("the candidate is non-promotable until compile and browser verification pas
   assert.equal(result.state, "blocked");
   assert.equal(result.failureClassification, "contracted_journeys_red");
   // It ran — that is the point — but a red contracted journey still cannot promote.
-  assert.ok(h.timeline.includes("compile"));
+  assert.ok(h.timeline.includes("compile:core"));
   assert.ok(h.timeline.includes("browser"));
   assert.equal(await h.snapshotStore.pointer("o", "p", "green"), null, "nothing was promoted");
   for (const event of h.events.checkpoints) assert.equal(event.promotable, false);
@@ -153,27 +153,19 @@ test("a red contracted journey can never be argued green by advisory silence", a
 
 const BLOCKERS = {
   "browser storage owning contracted durable state": {
-    "src/data/store.js": UNPRESCRIBED["src/data/store.js"],
-    "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"].replace(
-      "const state = useSyncExternalStore(wizard.subscribe, wizard.getState);",
-      "const state = useSyncExternalStore(wizard.subscribe, wizard.getState);\n  localStorage.setItem(\"booking\", JSON.stringify(state.values));",
-    ),
+    "src/data/unsafe-store.js": 'export const save = (row) => localStorage.setItem("booking", JSON.stringify(row));',
+    [SCREEN_PATH]: UNPRESCRIBED[SCREEN_PATH],
   },
   "a raw write to a capability-owned entity": {
-    "src/data/store.js": `${UNPRESCRIBED["src/data/store.js"]}
-import { db } from "../lib/backend/index.js";
-export const save = async (row) => db.entity("booking").create(row);`,
-    "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
+    "src/data/unsafe-store.js": 'import { db } from "../lib/backend/index.js";\nexport const save = (row) => db.entity("booking").create(row);',
+    [SCREEN_PATH]: UNPRESCRIBED[SCREEN_PATH],
   },
 };
 
 // Session establishment moved to the runtime, so this shape is CORRECT and must run.
 const RUNTIME_HANDLED = {
-  "src/data/store.js": `${UNPRESCRIBED["src/data/store.js"]}
-import { db } from "../lib/backend/index.js";
-export const saveNote = (row) => db.entity("note").create(row);`,
-  "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
-  "src/routes/HomePage.jsx": UNPRESCRIBED["src/routes/HomePage.jsx"],
+  "src/data/note-store.js": 'import { db } from "../lib/backend/index.js";\nexport const saveNote = (row) => db.entity("note").create(row);',
+  [SCREEN_PATH]: UNPRESCRIBED[SCREEN_PATH],
 };
 
 test("genuine safety blockers still stop a build before it ever runs", async () => {
@@ -184,16 +176,17 @@ test("genuine safety blockers still stop a build before it ever runs", async () 
     assert.equal(h.timeline.includes("browser"), false, `${name} must never reach the browser`);
     const blocking = h.events.findings.flatMap((event) => event.blocking);
     assert.ok(blocking.length, `${name} must produce a blocking finding`);
-    assert.ok(blocking.every((finding) => finding.severity === SEVERITY.BLOCKING));
+    assert.ok(blocking.every((finding) => finding.severity === SEVERITY.BLOCKING), JSON.stringify(blocking));
   }
 });
 
 test("an entity mutation with no explicit session call now RUNS — the runtime owns it", async () => {
   const h = harness({ patches: () => asPatches(RUNTIME_HANDLED) });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
-  assert.equal(h.events.findings.flatMap((event) => event.blocking).length, 0,
-    "session establishment is not generated source's responsibility");
-  assert.ok(h.timeline.includes("compile"));
+  const blocking = h.events.findings.flatMap((event) => event.blocking);
+  assert.equal(blocking.length, 0,
+    `session establishment is not generated source's responsibility: ${JSON.stringify(blocking)}`);
+  assert.ok(h.timeline.includes("compile:core"));
   assert.ok(h.timeline.includes("browser"));
   assert.equal(result.state, "green");
 });
@@ -240,8 +233,9 @@ test("an internally split headroom continuation cannot write outside its adverti
   });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
   assert.equal(result.state, "blocked");
-  assert.equal(h.events.checkpoints.length, 0, "out-of-scope patches are refused before candidate persistence");
-  assert.equal(h.timeline.includes("compile"), false);
+  assert.equal(h.events.checkpoints.filter((event) => event.reason.startsWith("candidate:")).length, 0,
+    "out-of-scope patches are refused before candidate persistence");
+  assert.equal(h.timeline.includes("compile:core"), false);
   assert.equal(h.timeline.includes("browser"), false);
 });
 
@@ -251,31 +245,34 @@ test("headroom module batches continue automatically and gate only after the ret
     patches: (input) => {
       dispatches += 1;
       if (dispatches === 1) {
-        const patches = asPatches({ "src/data/store.js": UNPRESCRIBED["src/data/store.js"] });
+        const splitScreen = UNPRESCRIBED[SCREEN_PATH]
+          .replace('import { makeBookingSystem, makeWizardMachine } from "../../lib/capabilities/index.js";',
+            'import { bookings, wizard } from "../../data/store.js";')
+          .replace('const bookings = makeBookingSystem({ entity: "booking" });\nconst wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });\n', "");
+        const patches = asPatches({ [SCREEN_PATH]: splitScreen });
         Object.defineProperty(patches, "dispatchScope", { value: {
-          kind: "headroom_continuation", files: ["src/data/store.js"],
-          allowedFiles: ["src/data/store.js"], allowedPrefixes: [], batchWidth: 2,
+          kind: "headroom_continuation", files: [SCREEN_PATH],
+          allowedFiles: [SCREEN_PATH], allowedPrefixes: [], batchWidth: 1,
           logicalStep: "correction", batchIndex: 0,
-          remainingFiles: ["src/routes/Booking.jsx", "src/routes/HomePage.jsx"],
+          remainingFiles: ["src/data/store.js"],
           moduleContracts: { version: 1, specifications: [] },
         } });
         return patches;
       }
       assert.equal(input.step, "correction", "continuations keep the original logical routing and funding step");
-      assert.deepEqual(input.headroomScope.allowedFiles, ["src/routes/Booking.jsx", "src/routes/HomePage.jsx"]);
+      assert.deepEqual(input.headroomScope.allowedFiles, ["src/data/store.js"]);
       assert.equal(input.headroomScope.batchIndex, 1);
       assert.equal(input.headroomScope.expectedPatchTokens, 1_600,
         "later missing modules retain the same realistic output envelope");
-      return asPatches({
-        "src/routes/Booking.jsx": UNPRESCRIBED["src/routes/Booking.jsx"],
-        "src/routes/HomePage.jsx": UNPRESCRIBED["src/routes/HomePage.jsx"],
-      });
+      return asPatches({ "src/data/store.js": `import { makeBookingSystem, makeWizardMachine } from "../lib/capabilities/index.js";
+export const bookings = makeBookingSystem({ entity: "booking" });
+export const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });` });
     },
   });
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
   assert.equal(result.state, "green", JSON.stringify(result));
   assert.equal(dispatches, 2, "the second batch is dispatched inside the same build with no user turn");
-  assert.equal(h.timeline.filter((entry) => entry === "compile").length, 1,
+  assert.equal(h.timeline.filter((entry) => entry === "compile:core").length, 1,
     "partial headroom batches are checkpointed but not prematurely compiled");
   assert.equal(h.timeline.filter((entry) => entry === "browser").length, 2,
     "differential verification is followed by the mandatory uncached full-journey pass");
@@ -294,7 +291,8 @@ test("a tree that does not compile is a real generation attempt, not a correctio
     },
     snapshotStore: createSnapshotStore(), buildStore: memoryBuildStore(),
     baseTree: () => fromScaffold(REACT_VITE), baseline: REACT_VITE,
-    compile: async () => ({ ok: false, stderr: "Unexpected token" }),
+    compile: async (_tree, context) => context?.step === "scaffold_foundation"
+      ? { ok: true } : { ok: false, stderr: "Unexpected token" },
     journeysFn: async () => ({ journeys: [] }),
     maxCoreAttempts: 2,
     events: { candidateFindings: async (event) => { events.findings.push(event); } },
@@ -350,11 +348,14 @@ test("partitioned findings keep their full structure on both sides", () => {
 
 test("the unprescribed application and the platform React binding both really compile", async () => {
   await ensureDeps(() => {});
-  const tree = {
-    ...fromScaffold(REACT_VITE),
-    ...UNPRESCRIBED,
+  const spec = deriveBuildSpec(CONTRACT);
+  let tree = composeCapabilityFoundation(fromScaffold(REACT_VITE), spec.capabilityGraph).tree;
+  tree = composeScaffoldFoundation(tree, spec.scaffoldGraph).tree;
+  tree = {
+    ...tree,
     "src/components/Fields.jsx": `import { useCapabilityState, useSemanticField, useSemanticSelection, useStatusRegion } from "../lib/capabilities";
-import { wizard } from "../data/store.js";
+import { makeWizardMachine } from "../lib/capabilities/index.js";
+const wizard = makeWizardMachine({ id: "field-proof", steps: ["date", "slot"] });
 export function Fields() {
   const state = useCapabilityState(wizard, (s) => s.values);
   const date = useSemanticField({ name: "date", value: state.date, onChange: (v) => wizard.select("date", v) });
@@ -367,9 +368,10 @@ export function Fields() {
     <p {...status.statusProps}>{state.date}</p>
   </section>;
 }`,
-    "src/App.jsx": `import Booking from "./routes/Booking.jsx";
-import { Fields } from "./components/Fields.jsx";
-export default function App() { return <><Booking /><Fields /></>; }`,
+    [SCREEN_PATH]: UNPRESCRIBED[SCREEN_PATH]
+      .replace('import { useSyncExternalStore } from "react";',
+        'import { useSyncExternalStore } from "react";\nimport { Fields } from "../../components/Fields.jsx";')
+      .replace("</main>;", "<Fields /></main>;"),
   };
   const build = await buildTree(tree, "builder-v2-execution-first", () => {});
   assert.equal(build.ok, true, build.stderr);

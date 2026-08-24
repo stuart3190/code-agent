@@ -124,7 +124,13 @@ function contractedJourneyModules(tree, contract, journeys, modulePlan) {
     const compact = normalized(file);
     return [...ids].some((id) => compact.includes(normalized(id)));
   });
-  return unique([...planned, ...flowOwned, ...slugMatches])
+  const scaffoldActive = typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string";
+  const scaffoldOwned = (scaffoldActive ? contract?.scaffoldGraph?.journeyOwnership || [] : [])
+    .filter((row) => ids.has(row.journeyId)).flatMap((row) => [row.mountedModule,
+      ...(scaffoldActive ? contract?.scaffoldGraph?.extensions || [] : [])
+        .filter((extension) => extension.owningJourneys?.includes(row.journeyId))
+        .map((extension) => extension.module)]);
+  return unique([...planned, ...flowOwned, ...scaffoldOwned, ...slugMatches])
     .filter((file) => typeof tree?.[file] === "string" && SOURCE.test(file)).sort();
 }
 
@@ -143,8 +149,16 @@ export function journeySurfaceContext(tree = {}, contract = {}, journeys = [], {
       : journey
   )).filter(Boolean);
   const bindings = mountedRouteBindings(tree);
-  const routePaths = unique(selected.flatMap((journey) => routeTargets(contract, journey)));
+  const scaffoldActive = typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string";
+  const routePaths = unique(selected.flatMap((journey) => [
+    ...routeTargets(contract, journey),
+    (scaffoldActive ? contract?.scaffoldGraph?.journeyOwnership || [] : [])
+      .find((row) => row.journeyId === journey?.id)?.routePath,
+  ]));
+  const scaffoldRoutes = scaffoldActive ? contract?.scaffoldGraph?.routes || [] : [];
   const routeFiles = unique([
+    ...routePaths.map((route) => scaffoldRoutes.find((candidate) => candidate.routePath === route)?.module)
+      .filter(Boolean),
     ...routePaths.map((route) => bindings.get(route)).filter(Boolean),
     ...fallbackRouteFiles(tree, contract, routePaths),
   ]).sort();

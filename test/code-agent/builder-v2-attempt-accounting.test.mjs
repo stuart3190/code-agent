@@ -40,10 +40,18 @@ const CONTRACT = {
 // ── the exact provider fixtures ────────────────────────────────────────────────────────────────
 
 // A and B: what the model actually sent, twice — the scaffold's own content re-emitted.
-const NO_OP_BATCH = () => [
-  { file: "src/App.jsx", ops: [{ op: "replace_symbol", symbol: "ROUTES",
-    content: 'const ROUTES = {\n  "/": HomePage,\n};' }], newFile: null, content: null, deleteFile: null, replaceFile: null },
-];
+function mountedScreen(ctx) {
+  const path = Object.keys(ctx?.tree || {}).find((candidate) => /^src\/screens\/scaffold\/.*Screen\.jsx$/.test(candidate));
+  assert.ok(path, `a composed build must expose one mounted screen slot: ${Object.keys(ctx?.tree || {}).join(", ")}`);
+  return path;
+}
+
+// App.jsx is protected after deterministic composition. A legal protocol no-op is now the model
+// returning the mounted screen slot byte-for-byte without changing it.
+const NO_OP_BATCH = (ctx) => {
+  const path = mountedScreen(ctx);
+  return [{ replaceFile: path, content: ctx.tree[path], file: null, ops: null, newFile: null, deleteFile: null }];
+};
 
 // C: a substantive tree, one file of which does not parse.
 const MALFORMED = "export function useWizard() {\n  const [step, setStep] = useState(0);\n  return { step,\n"; // unbalanced
@@ -120,7 +128,7 @@ function harness({ script, maxCoreAttempts = 3, maxNoOpRetries = 2 } = {}) {
     patchesFn: async (ctx) => {
       const produce = script[Math.min(dispatches.length, script.length - 1)];
       dispatches.push({ rejections: ctx.rejections.map((row) => row.code || row.signature) });
-      return produce();
+      return produce(ctx);
     },
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
     snapshotStore: createSnapshotStore(),
@@ -138,7 +146,10 @@ test("REPRODUCTION — no-op, no-op, malformed: the run that died", async () => 
   // Corrected accounting: the two protocol rounds no longer consume generation attempts, so the
   // substantive attempt is reached rather than being the last of three.
   const { orchestrator, dispatches } = harness({
-    script: [NO_OP_BATCH, NO_OP_BATCH, SUBSTANTIVE_BATCH],
+    script: [NO_OP_BATCH, NO_OP_BATCH, (ctx) => [{
+      replaceFile: mountedScreen(ctx),
+      content: "export default function HomeScreen() {\n  return <main>{\n",
+    }]],
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
   assert.equal(dispatches.length >= 3, true, `all three fixtures dispatched: ${dispatches.length}`);
@@ -156,10 +167,11 @@ test("REPRODUCTION — no-op, no-op, malformed: the run that died", async () => 
 test("a protocol no-op does not consume a substantive generation attempt", async () => {
   // Two no-ops then a good tree: the build must still succeed, because only ONE substantive
   // attempt was ever needed. Before this change the same script exhausted the ceiling.
-  const GOOD = () => [
-    { newFile: "src/routes/BookPage.jsx", content: 'export default function BookPage() {\n  return <main><h1>the booking page is visible</h1><p>the chosen slot is highlighted</p></main>;\n}\n',
-      file: null, ops: null, deleteFile: null, replaceFile: null },
-  ];
+  const GOOD = (ctx) => [{
+    replaceFile: mountedScreen(ctx),
+    content: 'export default function HomeScreen() {\n  return <main><h1>the booking page is visible</h1><p>the chosen slot is highlighted</p></main>;\n}\n',
+    file: null, ops: null, newFile: null, deleteFile: null,
+  }];
   const { orchestrator } = harness({ script: [NO_OP_BATCH, NO_OP_BATCH, GOOD] });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
   // The tree this fixture writes is deliberately minimal, so it is judged on its merits downstream
@@ -233,8 +245,8 @@ test("a retained partial candidate is gated immediately instead of returning sta
     patchesFn: async () => {
       dispatches += 1;
       return [{
-        file: "src/routes/HomePage.jsx",
-        ops: [{ op: "replace_symbol", symbol: "HomePage", content: `export default function HomePage() {
+        file: "src/screens/scaffold/HomeScreen.jsx",
+        ops: [{ op: "replace_symbol", symbol: "HomeScreen", content: `export default function HomeScreen() {
   return <main><h1>The public information is visible</h1></main>;
 }` }],
       }, {
@@ -269,39 +281,34 @@ test("a rejected scoped correction keeps the retained candidate it was correctin
   const orchestrator = createOrchestrator({
     contractFn: async () => contract,
     patchesFn: async (ctx) => {
-      seen.push({ step: ctx.step, hasFeature: Boolean(ctx.tree["src/components/Feature.jsx"]),
-        hasData: Boolean(ctx.tree["src/data/feature.js"]) });
+      const screen = ctx.tree["src/screens/scaffold/HomeScreen.jsx"] || "";
+      seen.push({ step: ctx.step, hasRetainedDefect: screen.includes("{message}") });
       if (seen.length === 1) return [{
-        newFile: "src/components/Feature.jsx",
-        content: 'import { message } from "../data/feature.js";\nexport default function Feature() { return <h1>{message}</h1>; }\n',
-      }, {
-        file: "src/routes/HomePage.jsx",
-        ops: [{ op: "replace_symbol", symbol: "HomePage", content: 'import Feature from "../components/Feature.jsx";\nexport default function HomePage() { return <main><Feature /></main>; }' }],
-      }, {
-        newFile: "src/data/feature.js",
-        content: "export const message = {\n",
+        replaceFile: "src/screens/scaffold/HomeScreen.jsx",
+        content: "export default function HomeScreen() { return <main><h1>{message}</h1></main>; }\n",
       }];
       if (seen.length === 2) return [{
-        replaceFile: "src/components/Feature.jsx",
-        content: "export default function Feature() { return <h1>\n",
+        replaceFile: "src/screens/scaffold/HomeScreen.jsx",
+        content: "export default function HomeScreen() { return <h1>\n",
       }];
       assert.equal(ctx.step, "correction");
-      assert.equal(ctx.tree["src/components/Feature.jsx"]?.includes("../data/feature.js"), true,
-        "the second correction still sees the clean file retained before the rejected correction");
-      return [{ replaceFile: "src/components/Feature.jsx",
-        content: 'export default function Feature() { return <h1>the public information is visible</h1>; }\n' }];
+      assert.equal(ctx.tree["src/screens/scaffold/HomeScreen.jsx"]?.includes("{message}"), true,
+        "the second correction still sees the candidate retained before the rejected correction");
+      return [{ replaceFile: "src/screens/scaffold/HomeScreen.jsx",
+        content: 'export default function HomeScreen() { return <h1>the public information is visible</h1>; }\n' }];
     },
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
     snapshotStore: createSnapshotStore(), buildStore: memoryBuildStore(),
     journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({ id: journey.id, status: "pass" })) }),
     baseTree: () => clone(fromScaffold(REACT_VITE)), baseline: REACT_VITE,
-    compile: async (tree) => tree["src/components/Feature.jsx"]?.includes("the public information is visible")
+    compile: async (tree, context) => context?.step === "scaffold_foundation"
+      || tree["src/screens/scaffold/HomeScreen.jsx"]?.includes("the public information is visible")
       ? { ok: true }
-      : { ok: false, stderr: 'src/components/Feature.jsx: Could not resolve "../data/feature.js"' },
+      : { ok: false, stderr: "src/screens/scaffold/HomeScreen.jsx: message is not defined" },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "retained-correction", request: "information" });
   assert.equal(result.state, "green", JSON.stringify(result));
   assert.deepEqual(seen.map((row) => row.step), ["core", "correction", "correction"]);
-  assert.equal(seen[1].hasFeature, true);
-  assert.equal(seen[2].hasFeature, true);
+  assert.equal(seen[1].hasRetainedDefect, true);
+  assert.equal(seen[2].hasRetainedDefect, true);
 });

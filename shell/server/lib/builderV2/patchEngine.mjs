@@ -15,6 +15,7 @@ export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/backend\//,
   /^src\/lib\/visitorSession\.js$/,
   /^src\/lib\/capabilities\//,
+  /^src\/lib\/scaffolds\/composed\//,
 ]);
 
 // The strict tool schema the orchestrator will register (strict tools proven since P18:
@@ -65,7 +66,15 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
   },
 });
 
-const isProtected = (path) => PROTECTED_PATHS.some((re) => re.test(path));
+export const isProtectedPath = (path, { tree = null, contract = null } = {}) => {
+  if (PROTECTED_PATHS.some((re) => re.test(path))) return true;
+  // App.jsx becomes a protected one-line mount authority only on a composed tree. Legacy trees
+  // and retained fixtures that predate the scaffold manifest preserve their existing behavior.
+  if (path === "src/App.jsx" && tree?.["src/lib/scaffolds/composed/manifest.js"]
+    && contract?.scaffoldGraph) return true;
+  return (contract?.scaffoldGraph?.protectedFiles || []).includes(path)
+    && Boolean(tree?.["src/lib/scaffolds/composed/manifest.js"]);
+};
 
 // Two default exports compile-fail EVERY time — a live run burned a full gate round on
 // "Multiple exports with the same name 'default'" from an append that should have been a
@@ -251,7 +260,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     // ── create ───────────────────────────────────────────────────────────────────────────
     if (patch.newFile) {
       if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
-      if (isProtected(patch.newFile)) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
+      if (isProtectedPath(patch.newFile, { tree: working, contract })) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const probe = indexFile(patch.newFile, patch.content || "");
       if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
         reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED);
@@ -265,7 +274,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     // ── whole-file replace (the ONLY mutation path for index-opaque files like CSS) ──────
     if (patch.replaceFile) {
       if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
-      if (isProtected(patch.replaceFile)) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
+      if (isProtectedPath(patch.replaceFile, { tree: working, contract })) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const content = String(patch.content || "");
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
@@ -279,7 +288,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     // ── delete ───────────────────────────────────────────────────────────────────────────
     if (patch.deleteFile) {
       if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
-      if (isProtected(patch.deleteFile)) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
+      if (isProtectedPath(patch.deleteFile, { tree: working, contract })) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       if (/^src\/(routes|data)\//.test(patch.deleteFile)) {
         reject(patch, null, `deleteFile: ${patch.deleteFile} — route/data modules from earlier stages are never deleted by a patch (anti-collapse)`, REJECTION.WRITE_SCOPE_VIOLATION);
         continue;
@@ -292,7 +301,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     // ── symbol ops on an existing file ───────────────────────────────────────────────────
     const file = patch.file;
     if (!file || !(file in working)) { reject(patch, null, `file ${file} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
-    if (isProtected(file)) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
+    if (isProtectedPath(file, { tree: working, contract })) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
 
     for (const op of patch.ops || []) {
       const current = String(working[file]);

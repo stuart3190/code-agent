@@ -26,10 +26,15 @@ import {
 } from "./capabilityGraph.mjs";
 import { capabilityCompositionPlan } from "./capabilityComposer.mjs";
 import {
+  deriveScaffoldGraph, scaffoldGraphSummary, scaffoldModulePlan, scopeScaffoldGraph,
+  validateScaffoldGraph,
+} from "./scaffoldGraph.mjs";
+import { scaffoldCompositionPlan } from "./scaffoldComposer.mjs";
+import {
   adoptBuildProfile, resolveBuildProfile, validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
 
-export const BUILD_SPEC_VERSION = 2;
+export const BUILD_SPEC_VERSION = 3;
 
 /**
  * Derive the complete build specification from a raw contract.
@@ -71,13 +76,17 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     graphBoundInteraction, capabilityGraph, plannedContract,
   );
   const compositionPlan = capabilityCompositionPlan(capabilityGraph);
-  const enriched = { ...plannedContract, interactionContract, dependencyPlan, capabilityGraph };
+  const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan });
+  const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
+  const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);
+  const enriched = { ...plannedContract, interactionContract, dependencyPlan, capabilityGraph, scaffoldGraph };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
-    contract: enriched, modulePlan, interactionContract, bindings, journeys, capabilityGraph,
+    contract: enriched, modulePlan: finalModulePlan, interactionContract, bindings, journeys, capabilityGraph,
   });
   const interactionVerdict = validateInteractionContract(interactionContract, { capabilityGraph });
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
+  const scaffoldVerdict = validateScaffoldGraph(scaffoldGraph, enriched, capabilityGraph);
   const profileVerdict = validateBuildProfileContract(enriched, buildProfile);
   return {
     version: BUILD_SPEC_VERSION,
@@ -89,18 +98,22 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     tiers,
     bindings,
     dependencyPlan,
-    modulePlan,
+    modulePlan: finalModulePlan,
     interactionContract,
     capabilityGraph,
     compositionPlan,
+    scaffoldGraph,
+    scaffoldCompositionPlan: scaffoldPlan,
     moduleContracts,
-    persistencePlan: persistenceOwnershipPlan(enriched, journeys, modulePlan),
+    persistencePlan: persistenceOwnershipPlan(enriched, journeys, finalModulePlan),
     imageIntents: imageIntents(plannedContract),
     verdict: {
-      ok: interactionVerdict.ok && graphVerdict.ok && profileVerdict.ok,
-      problems: [...interactionVerdict.problems, ...graphVerdict.problems, ...profileVerdict.problems],
+      ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok,
+      problems: [...interactionVerdict.problems, ...graphVerdict.problems,
+        ...scaffoldVerdict.problems, ...profileVerdict.problems],
       interaction: interactionVerdict,
       capabilityGraph: graphVerdict,
+      scaffoldGraph: scaffoldVerdict,
       buildProfile: profileVerdict,
     },
   };
@@ -127,12 +140,13 @@ export function scopeBuildSpec(spec, journeys = []) {
   const bindings = bindingsForJourneys(spec.contract, spec.bindings, scopedJourneys);
   const dependencyPlan = scopeDependencyPlan(spec.dependencyPlan, scopedJourneys);
   const capabilityGraph = scopeCapabilityGraph(spec.capabilityGraph, scopedJourneys);
+  const scaffoldGraph = scopeScaffoldGraph(spec.scaffoldGraph, scopedJourneys);
   const scopedContract = {
     ...spec.contract, journeys: scopedJourneys, operations, entities, interactionContract, dependencyPlan,
-    capabilityGraph,
+    capabilityGraph, scaffoldGraph,
   };
-  const modulePlan = capabilityModulePlan(capabilityGraph,
-    deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan }));
+  const modulePlan = scaffoldModulePlan(scaffoldGraph, capabilityModulePlan(capabilityGraph,
+    deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan })));
   return {
     ...spec,
     scopedContract,
@@ -146,6 +160,8 @@ export function scopeBuildSpec(spec, journeys = []) {
     interactionContract,
     capabilityGraph,
     compositionPlan: capabilityCompositionPlan(capabilityGraph),
+    scaffoldGraph,
+    scaffoldCompositionPlan: scaffoldCompositionPlan(scaffoldGraph),
     moduleContracts: buildModuleGenerationContracts({
       contract: scopedContract, modulePlan, interactionContract, bindings, journeys: scopedJourneys,
       capabilityGraph,
@@ -174,6 +190,8 @@ export function buildSpecSummary(spec) {
     })),
     customBehavior: spec?.capabilityGraph?.customBehavior || [],
     composedModules: spec?.compositionPlan?.protectedFiles || [],
+    scaffold: scaffoldGraphSummary(spec?.scaffoldGraph),
+    scaffoldModules: spec?.scaffoldCompositionPlan?.protectedFiles || [],
     durableJourneys: spec?.persistencePlan?.durableJourneys || [],
   };
 }

@@ -13,9 +13,10 @@ import { lintControlBindings } from "./bindingLint.mjs";
 import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 import { capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
+import { scaffoldCompositionPlan, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|scaffolds\/composed\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const FACTORY_TO_CAPABILITY = new Map(Object.entries(CAPABILITIES).flatMap(([name, capability]) =>
   (capability.interface || []).filter((entry) => /^make[A-Z]/.test(entry)).map((factory) => [factory, name])));
 
@@ -26,6 +27,14 @@ const factoryForBinding = (binding) => (CAPABILITIES[binding?.name]?.interface |
 
 function targetModules(flow, modulePlan) {
   const targets = new Set(flow?.responsibleModules || []);
+  // The scaffold graph is the mounted live-surface authority. Every interaction in a journey is
+  // owned by that journey's generated screen slot even when its semantic kind is a terminal
+  // mutation/recovery that the legacy role-name heuristics would otherwise assign nowhere.
+  for (const module of modulePlan) {
+    if (module?.providedBy === "scaffold_screen_slot" && (module.journeyIds || []).includes(flow?.journeyId)) {
+      targets.add(module.path);
+    }
+  }
   const addRole = (pattern) => modulePlan.filter((module) => {
     const ownedJourneys = module.journeyIds || module.ownedJourneys || [];
     return pattern.test(module.role || "")
@@ -62,6 +71,7 @@ function ownershipRules(bindings) {
 export function buildModuleGenerationContracts({
   contract = null, modulePlan = [], interactionContract = null, bindings = [], journeys = contract?.journeys || [],
   capabilityGraph = contract?.capabilityGraph || null,
+  scaffoldGraph = contract?.scaffoldGraph || null,
 } = {}) {
   const journeyIds = new Set((journeys || []).map((journey) => journey.id));
   const flows = (interactionContract?.flows || []).filter((flow) => journeyIds.has(flow.journeyId));
@@ -289,6 +299,7 @@ function reportModule(reportByPath, path) {
 export function validateModuleConformance(tree, {
   contract = null, modulePlan = [], moduleContracts = null, interactionContract = null, bindings = [],
   capabilityGraph = contract?.capabilityGraph || null,
+  scaffoldGraph = contract?.scaffoldGraph || null,
 } = {}) {
   const contracts = moduleContracts || buildModuleGenerationContracts({
     contract, modulePlan, interactionContract, bindings, capabilityGraph,
@@ -345,7 +356,8 @@ export function validateModuleConformance(tree, {
       else report.satisfiedFacts.push(`import:${requiredImport}`);
     }
     for (const requiredExport of spec.requiredExports || []) {
-      const exported = new RegExp(`\\bexport\\s+(?:default\\s+)?(?:const|let|var|function|class|\\{)[\\s\\S]{0,240}?\\b${requiredExport}\\b`).test(source);
+      const exported = requiredExport === "default" ? /\bexport\s+default\b/.test(source)
+        : new RegExp(`\\bexport\\s+(?:default\\s+)?(?:const|let|var|function|class|\\{)[\\s\\S]{0,240}?\\b${requiredExport}\\b`).test(source);
       if (!exported) add({ code: "required_export_missing", module: spec.path, requiredExport,
         journeys: spec.ownedJourneys, message: `${spec.path} must export ${requiredExport}` });
       else report.satisfiedFacts.push(`export:${requiredExport}`);
@@ -472,6 +484,18 @@ export function validateModuleConformance(tree, {
           ))).map((journey) => journey.journeyId),
         message: problem,
       });
+    }
+  }
+  if (scaffoldGraph && typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string") {
+    const scopedJourneyIds = unique((modulePlan || []).flatMap((module) => module.journeyIds || []));
+    const composition = validateScaffoldComposition(tree, scaffoldGraph,
+      scaffoldCompositionPlan(scaffoldGraph), { requireExtensions: true, rejectScreenSlots: true,
+        journeyIds: scopedJourneyIds.length ? scopedJourneyIds : null });
+    for (const problem of composition.problems) {
+      const module = String(problem).match(/src\/[^\s:]+/)?.[0] || null;
+      add({ code: "scaffold_composition_invalid", module,
+        journeys: (scaffoldGraph.journeyOwnership || []).filter((row) => !module || row.mountedModule === module)
+          .map((row) => row.journeyId), message: problem });
     }
   }
 

@@ -375,12 +375,13 @@ export default function Booking() {
   </main>;
 }`,
   "src/routes/Marketing.jsx": "export default function Marketing() { return <aside>Marketing</aside>; }",
-  "src/routes/HomePage.jsx": `import Booking from "./Booking.jsx";
-export default function HomePage() { return <Booking />; }`,
+  "src/screens/scaffold/BookingScreen.jsx": `import Booking from "../../routes/Booking.jsx";
+export default function BookingScreen() { return <Booking />; }`,
 };
 
 const asPatches = (tree) => Object.entries(tree).map(([path, content]) => (
-  Object.hasOwn(REACT_VITE, path) ? { replaceFile: path, content } : { newFile: path, content }
+  Object.hasOwn(REACT_VITE, path) || path.startsWith("src/screens/scaffold/")
+    ? { replaceFile: path, content } : { newFile: path, content }
 ));
 
 function harness({ browser, repairPatches = null, contract = CONTRACT, allPatches = null } = {}) {
@@ -453,7 +454,8 @@ test("a browser-red journey reaches the repair with its typed defects and its wr
     .filter(Boolean);
   assert.ok(structured.length, "the brief carries structured rows, not only prose");
   assert.equal(structured[0].pageTextWhenItFailed, "nothing was confirmed");
-  assert.ok(structured[0].responsibleModules.includes("src/routes/Booking.jsx"));
+  assert.ok(structured[0].responsibleModules.includes("src/screens/scaffold/BookingScreen.jsx"),
+    "the mounted live screen is the authoritative scaffold integration owner");
   assert.ok(structured[0].defectClass && structured[0].owner);
 
   // …and the repair turned the retained browser defect green.

@@ -150,6 +150,12 @@ const FLOW_REAL = FLOW_WITH_DELAY.replace(
 const ROUTE = `import GenerateValidatedAssetFlow from "../components/generate-validated-asset/GenerateValidatedAssetFlow.jsx";
 export default function HomePage() { return <GenerateValidatedAssetFlow />; }
 `;
+const WORKSPACE_WITH_DELAY = FLOW_WITH_DELAY
+  .replace('from "./Browser3DView.jsx"', 'from "../../components/generate-validated-asset/Browser3DView.jsx"')
+  .replaceAll("GenerateValidatedAssetFlow", "WorkspaceScreen");
+const WORKSPACE_REAL = WORKSPACE_WITH_DELAY.replace(
+  "    await new Promise((resolve) => setTimeout(resolve, 700));\n", "",
+);
 
 test("advanced contract scoping supplies coherent primary modules and hides secondary work", () => {
   const spec = deriveBuildSpec(CONTRACT);
@@ -162,7 +168,9 @@ test("advanced contract scoping supplies coherent primary modules and hides seco
   assert.deepEqual(scoped.operations.map((row) => row.id).sort(), ["create-generation", "create-initial-version"]);
   assert.deepEqual(scoped.entities.map((row) => row.name).sort(), ["assetGeneration", "assetVersion"]);
   assert.ok(scoped.modulePlan.some((row) => row.path.endsWith("/Browser3DView.jsx")), JSON.stringify(scoped.modulePlan));
-  assert.ok(scoped.modulePlan.some((row) => row.path.endsWith("/GenerateValidatedAssetFlow.jsx")));
+  assert.ok(scoped.modulePlan.some((row) => row.path === "src/screens/scaffold/WorkspaceScreen.jsx"));
+  assert.ok(!scoped.modulePlan.some((row) => row.path.endsWith("/GenerateValidatedAssetFlow.jsx")),
+    "the scaffold screen replaces the old speculative whole-flow module");
   assert.ok(scoped.persistencePlan.owners.length > 0, "durable entity adapters have explicit owners");
 
   const prompt = renderPatchPrompt({ step: "core", contract: spec.contract, tiers: spec.tiers,
@@ -193,10 +201,9 @@ test("an advanced build may reach a fourth full generation while a simple build 
     content: "export default function Broken() { return (",
   })];
   const valid = () => [
-    patch({ newFile: "src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx", content: FLOW_REAL }),
     patch({ newFile: "src/components/generate-validated-asset/Browser3DView.jsx", content: THREE_VIEW }),
     patch({ newFile: "src/data/crud.js", content: DATA }),
-    patch({ replaceFile: "src/routes/HomePage.jsx", content: ROUTE }),
+    patch({ replaceFile: "src/screens/scaffold/WorkspaceScreen.jsx", content: WORKSPACE_REAL }),
   ];
   const run = async (profile) => {
     let calls = 0;
@@ -251,15 +258,14 @@ test("orchestrator corrects the retained monolith and fake delay without full re
       calls.push({ step: context.step, originalStep: context.originalStep,
         scope: context.repairScope?.kind || null, paths: Object.keys(context.tree).sort() });
       if (calls.length === 1) return [
-        patch({ newFile: "src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx", content: giant }),
+        patch({ replaceFile: "src/screens/scaffold/WorkspaceScreen.jsx", content: giant }),
         patch({ newFile: "src/components/generate-validated-asset/Browser3DView.jsx", content: THREE_VIEW }),
         patch({ newFile: "src/data/crud.js", content: DATA }),
-        patch({ replaceFile: "src/routes/HomePage.jsx", content: ROUTE }),
       ];
       if (calls.length === 2) return [
-        patch({ replaceFile: "src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx", content: FLOW_WITH_DELAY }),
+        patch({ replaceFile: "src/screens/scaffold/WorkspaceScreen.jsx", content: WORKSPACE_WITH_DELAY }),
       ];
-      return [patch({ replaceFile: "src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx", content: FLOW_REAL })];
+      return [patch({ replaceFile: "src/screens/scaffold/WorkspaceScreen.jsx", content: WORKSPACE_REAL })];
     },
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
     snapshotStore, buildStore: memoryBuildStore(), baseTree: () => clone(fromScaffold(REACT_VITE)),
@@ -292,9 +298,8 @@ test("resume classifies a retained candidate before dispatch and buys only named
   const source = clone(fromScaffold(REACT_VITE));
   source["src/components/generate-validated-asset/Browser3DView.jsx"] =
     "export default function Browser3DView(){return <div><button>Orbit</button><div className='cube'>3D preview</div></div>}";
-  source["src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx"] = FLOW_WITH_DELAY;
+  source["src/screens/scaffold/WorkspaceScreen.jsx"] = WORKSPACE_WITH_DELAY;
   source["src/data/crud.js"] = DATA;
-  source["src/routes/HomePage.jsx"] = ROUTE;
   await snapshotStore.createSnapshot("owner", "resume-project", source, {
     buildId: sourceBuildId, reason: "candidate:core:2",
   });
@@ -306,7 +311,7 @@ test("resume classifies a retained candidate before dispatch and buys only named
       if (context.repairScope?.kind === "runtime_dependency") {
         return [patch({ replaceFile: "src/components/generate-validated-asset/Browser3DView.jsx", content: THREE_VIEW })];
       }
-      return [patch({ replaceFile: "src/components/generate-validated-asset/GenerateValidatedAssetFlow.jsx", content: FLOW_REAL })];
+      return [patch({ replaceFile: "src/screens/scaffold/WorkspaceScreen.jsx", content: WORKSPACE_REAL })];
     },
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }), assetManifestFor: async () => [] },
     snapshotStore, buildStore, baseTree: () => clone(fromScaffold(REACT_VITE)), baseline: REACT_VITE,

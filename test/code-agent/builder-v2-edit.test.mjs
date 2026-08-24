@@ -21,27 +21,28 @@ const CONTRACT = {
   summary: "Sunny Acres strawberry farm booking site",
   entities: [{ name: "booking" }, { name: "newslettersignup" }],
   operations: [{ id: "create-booking", description: "create a booking reservation" }],
-  routes: [{ path: "/", name: "Home" }, { path: "/book", name: "Booking" }],
+  routes: [{ path: "/book", name: "Booking" }, { path: "/newsletter", name: "Newsletter" },
+    { path: "/about", name: "About" }],
   auth: { required: false },
   journeys: [
     { id: "book-a-visit", title: "Book a farm visit", priority: "primary",
-      steps: [{ action: "submit the booking form", expect: "booking confirmed" }] },
+      steps: [{ action: "submit the booking form", target: "/book", expect: "booking confirmed" }] },
     { id: "newsletter-signup", title: "Newsletter signup", priority: "secondary",
-      steps: [{ action: "enter an email", expect: "newsletter subscribed" }] },
+      steps: [{ action: "enter an email", target: "/newsletter", expect: "newsletter subscribed" }] },
     { id: "browse-info", title: "Browse farm information", priority: "secondary",
-      steps: [{ action: "open the about section", expect: "about the farm" }] },
+      steps: [{ action: "open the about section", target: "/about", expect: "about the farm" }] },
   ],
 };
 
 const CORE_PATCH = [{
-  newFile: "src/routes/BookPage.jsx",
+  replaceFile: "src/screens/scaffold/BookingScreen.jsx",
   content: `import React, { useState } from "react";
-import { ASSET_CREDITS } from "../lib/assetData.js";
-import { makeBookingSystem } from "../lib/capabilities/index.js";
+import { ASSET_CREDITS } from "../../lib/assetData.js";
+import { makeBookingSystem } from "../../lib/capabilities/index.js";
 
 const booking = makeBookingSystem({ entity: "booking" });
 
-export default function BookPage() {
+export default function BookingScreen() {
   const [state, setState] = useState("idle");
   return (
     <main>
@@ -53,19 +54,15 @@ export default function BookPage() {
   );
 }
 `,
-}, {
-  replaceFile: "src/routes/HomePage.jsx",
-  content: `import BookPage from "./BookPage.jsx";
-export default function HomePage() { return <BookPage />; }`,
 }];
 const NEWSLETTER_PATCH = [{
-  newFile: "src/routes/NewsletterPanel.jsx",
+  replaceFile: "src/screens/scaffold/NewsletterScreen.jsx",
   content: `import React, { useState } from "react";
-import { makeNewsletter } from "../lib/capabilities/index.js";
+import { makeNewsletter } from "../../lib/capabilities/index.js";
 
 const newsletter = makeNewsletter({ entity: "newslettersignup" });
 
-export default function NewsletterPanel() {
+export default function NewsletterScreen() {
   const [state, setState] = useState("idle");
   const [email, setEmail] = useState("");
   return (
@@ -79,10 +76,10 @@ export default function NewsletterPanel() {
 `,
 }];
 const BROWSE_PATCH = [{
-  newFile: "src/routes/AboutSection.jsx",
+  replaceFile: "src/screens/scaffold/AboutScreen.jsx",
   content: `import React from "react";
 
-export default function AboutSection() {
+export default function AboutScreen() {
   return <section><h2>About the farm</h2><p>Family-run strawberry fields since 1987.</p></section>;
 }
 `,
@@ -90,10 +87,10 @@ export default function AboutSection() {
 
 // The edit: reword ONLY the newsletter panel's confirmation.
 const EDIT_PATCH = [{
-  file: "src/routes/NewsletterPanel.jsx",
+  file: "src/screens/scaffold/NewsletterScreen.jsx",
   ops: [{
-    op: "replace_symbol", symbol: "NewsletterPanel",
-    content: `export default function NewsletterPanel() {
+    op: "replace_symbol", symbol: "NewsletterScreen",
+    content: `export default function NewsletterScreen() {
   const [state, setState] = useState("idle");
   const [email, setEmail] = useState("");
   return (
@@ -182,10 +179,11 @@ test("WP10/C3 — an edit re-drives the touched journey and every zero-owner jou
 
   const edit = await h.orchestrator.runEdit({ owner: "o", projectId: "p1", request: "reword the newsletter confirmation", contract: CONTRACT });
   assert.equal(edit.state, "green", JSON.stringify(edit));
-  assert.deepEqual(edit.drove, ["newsletter-signup", "browse-info"],
-    "the changed owner invalidates newsletter; browse has zero owners and is never cached");
-  assert.deepEqual(edit.reused, ["book-a-visit"], "only a complete matching identity reuses a PASS verdict");
-  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup", "browse-info"]]);
+  assert.deepEqual(edit.drove, ["newsletter-signup"],
+    "the changed mounted owner invalidates exactly its journey");
+  assert.deepEqual(edit.reused, ["book-a-visit", "browse-info"],
+    "complete unchanged mounted owners reuse their PASS verdicts");
+  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup"]]);
 
   // Lineage + promotion: the edit snapshot's parent is the prior green, pointer moved.
   const pointer = await h.snapshotStore.pointer("o", "p1", "green");
@@ -194,7 +192,7 @@ test("WP10/C3 — an edit re-drives the touched journey and every zero-owner jou
   assert.equal(snap.reason, "working:edit");
   assert.equal(snap.parent_snapshot, edit.parentSnapshotId);
   const tree = await h.snapshotStore.materialize("o", pointer);
-  assert.match(tree["src/routes/NewsletterPanel.jsx"], /welcome aboard/);
+  assert.match(tree["src/screens/scaffold/NewsletterScreen.jsx"], /welcome aboard/);
   assert.equal(edit.providerCalls, undefined, "no asset resolution ran at all");
   assert.equal(h.knowledgeFacts.length, 1);
   assert.equal(h.knowledgeFacts[0].value.text, "reword the newsletter confirmation");
@@ -211,15 +209,15 @@ test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", a
   // edit RUNS, its behaviour is verified, and only then is it refused promotion.
   h.failJourneys(["book-a-visit"]);
   h.setEditPatches([{
-    file: "src/routes/BookPage.jsx",
-    ops: [{ op: "replace_symbol", symbol: "BookPage",
-      content: "export default function BookPage() {\n  return <main><h1>Placeholder</h1></main>;\n}" }],
+    file: "src/screens/scaffold/BookingScreen.jsx",
+    ops: [{ op: "replace_symbol", symbol: "BookingScreen",
+      content: "export default function BookingScreen() {\n  return <main><h1>Placeholder</h1></main>;\n}" }],
   }]);
   const edit = await h.orchestrator.runEdit({ owner: "o", projectId: "p1", request: "break it", contract: CONTRACT });
   assert.equal(edit.state, "blocked");
   assert.equal(await h.snapshotStore.pointer("o", "p1", "green"), before, "pointer untouched");
   const tree = await h.snapshotStore.materialize("o", before);
-  assert.match(tree["src/routes/BookPage.jsx"], /Booking confirmed/, "the served tree still works");
+  assert.match(tree["src/screens/scaffold/BookingScreen.jsx"], /Booking confirmed/, "the served tree still works");
   assert.equal(build.state, "green");
   assert.equal(h.knowledgeFacts.length, 0, "a failed edit must not become project knowledge");
 });

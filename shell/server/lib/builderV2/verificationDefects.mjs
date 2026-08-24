@@ -34,6 +34,7 @@ import { interactionFailureDiagnostics } from "./interactionContract.mjs";
 import { PROTECTED_PATHS } from "./patchEngine.mjs";
 import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityComposer.mjs";
 import { journeySurfaceContext } from "./surfaceIntegration.mjs";
+import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS } from "./scaffoldRepairRouting.mjs";
 
 export const DEFECT_CLASS = Object.freeze({
   INTERACTION: "interaction",   // the browser could not operate a contracted control
@@ -383,7 +384,18 @@ export function verificationDefects({
     });
   }
 
-  return defects;
+  return defects.map((defect) => {
+    if (!contract?.scaffoldGraph || typeof tree?.["src/lib/scaffolds/composed/manifest.js"] !== "string") return defect;
+    const scaffoldRouting = routeScaffoldDefect(defect, contract.scaffoldGraph);
+    if (scaffoldRouting.classification === SCAFFOLD_REPAIR_CLASS.INTERNAL) {
+      return { ...defect, owner: DEFECT_OWNER.PLATFORM, tier: REPAIR_TIER.NONE,
+        modules: [], scaffoldRouting };
+    }
+    if (scaffoldRouting.repairableByModel && scaffoldRouting.targetFiles.length) {
+      return { ...defect, modules: scaffoldRouting.targetFiles, scaffoldRouting };
+    }
+    return { ...defect, scaffoldRouting };
+  });
 }
 
 /** Defects an application patch can actually answer. Platform and downstream context are not. */

@@ -29,6 +29,8 @@ import { capabilityCompositionBrief } from "./capabilityComposer.mjs";
 import { scopeCapabilityGraph } from "./capabilityGraph.mjs";
 import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
 import { journeySurfaceBrief, journeySurfaceContext } from "./surfaceIntegration.mjs";
+import { scopeScaffoldGraph } from "./scaffoldGraph.mjs";
+import { scaffoldCompositionBrief } from "./scaffoldComposer.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -57,9 +59,11 @@ against a code index. Rules:
   add_import adds an import line (imports are NOT symbols); replace_symbol swaps a component
   wholesale (never append a second default component); replace_exact safely replaces one unique
   old source excerpt inside a large symbol; replaceFile is for index-opaque files.
-- Pages live in src/routes/<Name>.jsx and MUST be registered in src/App.jsx's ROUTES map
-  (replace_symbol on the existing map or the App component).
-- src/lib/backend/, src/lib/visitorSession.js and src/lib/capabilities/ are protected platform
+- Every contracted route is ALREADY mounted to a model-owned screen listed in the scaffold graph.
+  Implement those existing screen slots (normally src/screens/scaffold/*.jsx). Never edit src/App.jsx,
+  create a competing router, or leave contracted work in an unmounted component.
+- src/App.jsx, src/lib/backend/, src/lib/visitorSession.js, src/lib/capabilities/ and
+  src/lib/scaffolds/composed/ are protected platform
   infrastructure: IMPORT them, never modify or reimplement them. Persistence goes through the
   capabilities (src/lib/capabilities) — never localStorage. Every entity operation establishes
   and recovers this app's visitor session automatically, so use the normal capability/entity
@@ -73,10 +77,10 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
-- Keep components small; one route file per page plus small shared components.
+- Keep components small; compose unique screens and bounded helpers behind the mounted slots.
 - BUILD THE WHOLE ASSIGNED DISPATCH SCOPE IN THIS ONE BATCH. A normal core step is several patches and several
   kilobytes of new JSX: new files for every section/page, real copy, real form state, and
-  the App.jsx registration. A batch that re-emits existing content, leaves scaffold stubs
+  every assigned mounted screen/custom extension. A batch that re-emits existing content, leaves scaffold stubs
   in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
 
 // When the ordinary bounded file prompt still cannot fit, the orchestrator supplies exact source
@@ -438,6 +442,7 @@ export function renderPatchPrompt({
   repairScope = null, moduleCorrectionScope = null, headroomScope = null, repairBoundary = null,
   regenerateFiles = [], advisory = [],
   capabilityGraph = contract?.capabilityGraph || null, compositionPlan = null,
+  scaffoldGraph = contract?.scaffoldGraph || null, scaffoldPlan = null,
 }) {
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
@@ -507,13 +512,15 @@ export function renderPatchPrompt({
   ]);
   const scopedCapabilityGraph = capabilityGraph
     ? scopeCapabilityGraph(capabilityGraph, scopedJourneys) : null;
+  const scopedScaffoldGraph = scaffoldGraph
+    ? scopeScaffoldGraph(scaffoldGraph, scopedJourneys) : null;
   const scopedContract = {
     ...contract,
     journeys: scopedJourneys,
     operations: scopedOperations,
     entities: (contract.entities || []).filter((entity) => scopedEntityNames.has(entity.name)),
     dependencyPlan: scopeDependencyPlan(contract.dependencyPlan, scopedJourneys),
-    capabilityGraph: scopedCapabilityGraph,
+    capabilityGraph: scopedCapabilityGraph, scaffoldGraph: scopedScaffoldGraph,
   };
   const mountedSurface = journeySurfaceContext(tree, contract, scopedJourneys, { modulePlan });
   const persistencePlan = persistenceOwnershipPlan(contract, scopedJourneys, modulePlan);
@@ -647,6 +654,7 @@ export function renderPatchPrompt({
         : scopedCapabilityGraph, null, 2),
     ].join("\n") : "CAPABILITY GRAPH: none.",
     scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
+    scopedScaffoldGraph ? scaffoldCompositionBrief(scopedScaffoldGraph) : "",
     dependencyPlanBrief(scopedContract.dependencyPlan),
     promptModulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
@@ -655,6 +663,10 @@ export function renderPatchPrompt({
         const ownership = module.stateOwnership || {};
         if (module.providedBy === "capability_composer") {
           return `- ${module.path}: PROVIDED AND PROTECTED ${module.role}; import its exported interface; never patch, wrap, or reimplement it.`;
+        }
+        if (module.providedBy === "scaffold_screen_slot") {
+          return `- ${module.path}: PROVIDED, MOUNTED, MODEL-OWNED screen slot for route ${module.routePath}; `
+            + "implement this exact module and keep its default export. Do not register another route or move the journey to a dead component.";
         }
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
           + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `
@@ -1477,6 +1489,8 @@ export function createModelLanes({
             repairScope, moduleCorrectionScope, headroomScope, repairBoundary, regenerateFiles, advisory,
             capabilityGraph: spec?.capabilityGraph || contract?.capabilityGraph || null,
             compositionPlan: spec?.compositionPlan || null,
+            scaffoldGraph: spec?.scaffoldGraph || contract?.scaffoldGraph || null,
+            scaffoldPlan: spec?.scaffoldCompositionPlan || null,
             onRetrieval: (trace) => { retrievalTrace = trace; },
           });
           if (retrievalTrace && recordRetrieval) {

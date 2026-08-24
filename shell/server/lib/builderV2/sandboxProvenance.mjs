@@ -54,6 +54,12 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   "shell/server/lib/builderV2/capabilityRegistry.mjs",
   "shell/server/lib/builderV2/capabilityGraph.mjs",
   "shell/server/lib/builderV2/capabilityComposer.mjs",
+  "shell/server/lib/builderV2/scaffoldRegistry.mjs",
+  "shell/server/lib/builderV2/scaffoldGraph.mjs",
+  "shell/server/lib/builderV2/scaffoldComposer.mjs",
+  "shell/server/lib/builderV2/staticApplicationGate.mjs",
+  "shell/server/lib/builderV2/scaffoldRepairRouting.mjs",
+  "shell/server/lib/builderV2/surfaceIntegration.mjs",
   "shell/server/lib/builderV2/buildSpec.mjs",
   "shell/server/lib/builderV2/moduleContracts.mjs",
   // WHICH controls a step drives is as verdict-deciding as how they are driven. A paid run failed

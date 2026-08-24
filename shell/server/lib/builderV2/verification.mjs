@@ -12,6 +12,8 @@ import crypto from "node:crypto";
 import { runStageGate } from "../appBuild/stageGate.mjs";
 import { verifyJourneys, journeySummary } from "../appBuild/journeyVerifier.mjs";
 import { bindCapabilities } from "./contractTiering.mjs";
+import { runStaticApplicationGate } from "./staticApplicationGate.mjs";
+import { scaffoldJourneyOwners } from "./scaffoldGraph.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 const canonical = (value) => {
@@ -73,7 +75,11 @@ export function attributeFailures(journeyResults, graph, contract) {
   let fallbackRefs = null;
   return (journeyResults?.journeys || []).map((result) => {
     const journey = journeysById.get(result.id) || { id: result.id, title: result.title };
-    const owners = graph ? graph.owners(journey) : [];
+    const scaffoldActive = Boolean(graph?.file?.("src/lib/scaffolds/composed/manifest.js"));
+    const owners = [...new Set([
+      ...(graph ? graph.owners(journey) : []),
+      ...(scaffoldActive ? scaffoldJourneyOwners(contract?.scaffoldGraph, journey.id) : []),
+    ])].filter((path) => !/^src\/lib\/scaffolds\/composed\//.test(path));
     if (result.status === "fail" && owners.length === 0) {
       fallbackRefs ||= boundedAttributionFallback(graph);
       return {
@@ -99,6 +105,22 @@ export function attributeFailures(journeyResults, graph, contract) {
  * Parity with direct runStageGate calls is asserted by test — the facade may never drift.
  */
 export async function verifyStage(tree, options = {}) {
+  const staticGate = runStaticApplicationGate(tree, {
+    contract: options.contract,
+    modulePlan: options.modulePlan || [],
+    journeys: options.stage?.journeys || options.contract?.journeys || [],
+  });
+  if (!staticGate.ok) {
+    return {
+      ok: false,
+      layers: { d0d2: { ok: false, checks: staticGate.checks,
+        problems: staticGate.blocking.map((finding) => finding.message),
+        failure: { kind: "static_application", findings: staticGate.blocking } } },
+      advisory: staticGate.advisory,
+      tree,
+      deterministicRepair: null,
+    };
+  }
   // Builder V2 runs the expectation-copy check as advisory: the browser verifier drives the
   // real page and is the authority on whether an outcome appeared. See validationSeverity.mjs.
   const gate = await runStageGate(tree, { expectationsAdvisory: true, ...options });
@@ -112,8 +134,9 @@ export async function verifyStage(tree, options = {}) {
   }
   return {
     ok: gate.ok,
-    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems, failure: gate.failure || null } },
-    advisory: gate.advisory || [],
+    layers: { d0d2: { ok: gate.ok, checks: [...staticGate.checks, ...(gate.checks || [])], problems,
+      failure: gate.failure || null } },
+    advisory: [...(staticGate.advisory || []), ...(gate.advisory || [])],
     tree: gate.tree,
     deterministicRepair: gate.deterministicRepair || null,
   };
@@ -152,7 +175,10 @@ export function ownersHashOf(journey, graph) {
  */
 export function verificationCacheIdentity({ journey, contract, graph, context = {} }) {
   const effectiveContext = { ...DEFAULT_VERIFICATION_CONTEXT, ...context };
-  const owners = graph.owners(journey).sort();
+  const scaffoldActive = Boolean(graph?.file?.("src/lib/scaffolds/composed/manifest.js"));
+  const owners = [...new Set([
+    ...graph.owners(journey), ...(scaffoldActive ? scaffoldJourneyOwners(contract?.scaffoldGraph, journey.id) : []),
+  ])].sort();
   const closure = new Set();
   const frontier = [...owners];
   while (frontier.length) {
@@ -165,7 +191,8 @@ export function verificationCacheIdentity({ journey, contract, graph, context = 
   }
   const fileIdentity = (path) => ({ path, contentHash: graph.file(path)?.contentHash || "missing" });
   const runtimeFiles = graph.paths()
-    .filter((path) => /^src\/lib\/(?:backend|capabilities)\//.test(path) || path === "src/lib/visitorSession.js")
+    .filter((path) => /^src\/lib\/(?:backend|capabilities|scaffolds\/composed)\//.test(path)
+      || path === "src/lib/visitorSession.js")
     .sort().map(fileIdentity);
   const components = {
     journeyId: journey.id,

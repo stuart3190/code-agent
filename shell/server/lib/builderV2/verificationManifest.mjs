@@ -107,6 +107,7 @@ export function deriveVerificationManifest(spec) {
   const flows = spec?.interactionContract?.flows || [];
   const scenarios = spec?.interactionContract?.scenarios || {};
   const capabilityGraph = spec?.capabilityGraph || spec?.contract?.capabilityGraph || null;
+  const scaffoldGraph = spec?.scaffoldGraph || spec?.contract?.scaffoldGraph || null;
   const controls = [];
   const actions = [];
   const mapping = {};
@@ -206,11 +207,21 @@ export function deriveVerificationManifest(spec) {
       testContract: node.testContract || [],
     };
   }).filter(Boolean));
+  const scaffoldAssertions = (scaffoldGraph?.journeyOwnership || []).map((owner) => ({
+    journeyId: owner.journeyId,
+    routePath: owner.routePath,
+    screenId: owner.screenId,
+    mountedOwner: owner.mountedModule,
+    scaffoldNodeIds: owner.scaffoldNodeIds || [],
+    extensionIds: owner.extensionIds || [],
+    expectedScreen: (scaffoldGraph.routes || []).find((route) => route.screenId === owner.screenId)?.routeName || null,
+  }));
 
   return {
-    version: 2,
+    version: 3,
     capabilityGraphVersion: capabilityGraph?.version || null,
-    controls, actions, outcomes, capabilityAssertions, mapping,
+    scaffoldGraphVersion: scaffoldGraph?.version || null,
+    controls, actions, outcomes, capabilityAssertions, scaffoldAssertions, mapping,
   };
 }
 
@@ -243,5 +254,11 @@ export function browserPlan(manifest) {
     durableMutation: assertion.durableMutation,
     interactions: assertion.interactions,
   }));
-  return { version: manifest?.version || 1, controls, actions, assertions };
+  const scaffoldAssertions = (manifest?.scaffoldAssertions || []).map((assertion) => ({
+    journey: journeyKey(assertion.journeyId),
+    scaffold: controlIdFor(assertion.screenId, "scf"),
+    routePath: assertion.routePath,
+    mounted: Boolean(assertion.mountedOwner),
+  }));
+  return { version: manifest?.version || 1, controls, actions, assertions, scaffoldAssertions };
 }

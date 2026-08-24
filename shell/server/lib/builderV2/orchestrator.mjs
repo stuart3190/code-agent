@@ -40,6 +40,7 @@ import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
 import { composeCapabilityFoundation } from "./capabilityComposer.mjs";
+import { composeScaffoldFoundation, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 
 /**
  * Keep the complete contract needed to reconstruct an isolated journey separate from the
@@ -305,8 +306,9 @@ export function createOrchestrator({
     throw new Error("orchestrator needs contractFn, patchesFn, assetService and baseTree");
   }
 
-  const gateOptions = (contract, stepId, journeys, execution) => ({
+  const gateOptions = (contract, stepId, journeys, execution, modulePlan = []) => ({
     contract, stage: { id: stepId, journeys }, compile: (tree) => compile(tree, execution),
+    modulePlan,
     ...(baseline ? { baseline } : {}), ...extraGateOptions,
   });
 
@@ -332,8 +334,9 @@ export function createOrchestrator({
     return refreshed;
   };
 
-  const refreshDeterministicFoundation = (tree, spec) => composeCapabilityFoundation(
-    refreshPlatformRuntime(tree), spec.capabilityGraph,
+  const refreshDeterministicFoundation = (tree, spec) => composeScaffoldFoundation(
+    composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph).tree,
+    spec.scaffoldGraph,
   ).tree;
 
   async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal,
@@ -863,8 +866,18 @@ export function createOrchestrator({
       abortIfRequested(signal);
       const gate = await verifyStage(applied.tree, gateOptions(contract, step, journeys, {
         owner, projectId, buildId, step, attempt, signal,
-      }));
+      }, scoped.modulePlan));
       advisory = [...advisory, ...(gate.advisory || [])];
+      const staticFindings = gate.layers?.d0d2?.failure?.kind === "static_application"
+        ? gate.layers.d0d2.failure.findings || [] : [];
+      const protectedScaffoldFiles = new Set(scoped.scaffoldCompositionPlan?.protectedFiles || []);
+      await events.telemetry?.({ owner, projectId, buildId, kind: "scaffold_generation_surface", details: {
+        step, attempt, modelGeneratedFiles: filesChanged.filter((path) => !protectedScaffoldFiles.has(path)),
+        customExtensionFiles: filesChanged.filter((path) => (scoped.scaffoldGraph?.extensions || [])
+          .some((extension) => extension.module === path)),
+        preBrowserStaticFailures: staticFindings.length,
+        reachabilityFailures: staticFindings.filter((finding) => finding.code === "journey_surface_unreachable").length,
+      } });
       if (gate.ok) {
         let qualifiedCandidate = latestCandidate;
         if (!treesEqual(applied.tree, gate.tree)) {
@@ -1001,7 +1014,7 @@ export function createOrchestrator({
         // contract, per-module contracts, persistence ownership and image intents all come
         // from here and are passed down, so no subsystem re-reads the contract prose alone.
         let spec = deriveBuildSpec(rawContract, { userCritical });
-        const failingGates = (verdict) => ["interaction", "capabilityGraph", "buildProfile"]
+        const failingGates = (verdict) => ["interaction", "capabilityGraph", "scaffoldGraph", "buildProfile"]
           .filter((gate) => verdict?.[gate] && !verdict[gate].ok);
         let contractRepairUsed = false;
         if (!spec.verdict.ok) {
@@ -1123,19 +1136,57 @@ export function createOrchestrator({
         const essentialJourneys = tiers.essential.journeys.map((id) => journeysById.get(id)).filter(Boolean);
         const secondaryJourneys = tiers.secondary.journeys.map((id) => journeysById.get(id)).filter(Boolean);
 
-        // 3. CORE: the essential set only.
-        await setState("core");
-        let tree = composeCapabilityFoundation(baseTree(), spec.capabilityGraph).tree;
+        // 3. Deterministic application foundation. This zero-model checkpoint is deliberately
+        // earlier than product generation: later optional/custom work may fail, but it cannot
+        // erase the known-good router, mounted screens, capability adapters or extension seams.
+        await setState("compose_scaffold");
+        const compositionStartedAt = Date.now();
+        const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph);
+        const scaffoldFoundation = composeScaffoldFoundation(capabilityFoundation.tree, spec.scaffoldGraph);
+        let tree = scaffoldFoundation.tree;
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
+        const foundationVerdict = validateScaffoldComposition(tree, spec.scaffoldGraph,
+          scaffoldFoundation.plan, { requireExtensions: false, rejectScreenSlots: false });
+        if (!foundationVerdict.ok) return finish("blocked", {
+          error: `Builder V2 scaffold composition failed: ${foundationVerdict.problems.join("; ")}`,
+          failureClassification: "scaffold_platform_defect", problems: foundationVerdict.problems,
+        });
+        const foundationBuild = await compile(tree, {
+          owner, projectId, buildId, step: "scaffold_foundation", attempt: 0, signal,
+        });
+        if (!foundationBuild?.ok) return finish("blocked", {
+          error: `Builder V2 scaffold foundation did not compile: ${String(foundationBuild?.stderr || "unknown compiler failure").slice(0, 1200)}`,
+          failureClassification: "scaffold_platform_defect",
+        });
+        workingSnapshot = await snapshotStore.createSnapshot(owner, projectId, tree, {
+          buildId, parent: null, reason: "foundation:scaffold",
+          assetManifest: await assetService.assetManifestFor?.(owner, projectId) || [],
+        });
+        await events.checkpoint?.({ owner, projectId, buildId, snapshot: workingSnapshot, tree,
+          reason: "foundation:scaffold", promotable: false });
+        await events.telemetry?.({ owner, projectId, buildId, kind: "scaffold_composition", details: {
+          scaffoldGraphVersion: spec.scaffoldGraph.version,
+          registryVersion: spec.scaffoldGraph.registryVersion,
+          families: spec.scaffoldGraph.families.map((node) => node.scaffoldId),
+          deterministicFiles: scaffoldFoundation.deterministicFilesCreated,
+          screenSlots: scaffoldFoundation.screenSlotsCreated,
+          customExtensions: spec.scaffoldGraph.extensions.map((extension) => extension.module),
+          checkpointId: workingSnapshot.id,
+          compositionDurationMs: Math.max(0, Date.now() - compositionStartedAt),
+        } });
+
+        // 4. CORE: the essential product-specific screen/extension set only.
+        await setState("core");
         const core = await buildIncrement({
           step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-          journeys: essentialJourneys, checkpointReason: "working:core", signal, spec,
+          journeys: essentialJourneys, checkpointReason: "working:core",
+          parentSnapshotId: workingSnapshot.id, signal, spec,
           attemptPolicy: buildAttemptPolicy,
         });
         if (!core.ok) return finish("blocked", { error: core.reason, problems: core.problems,
           advisoryFindings: core.advisory || [],
           coreAttempts: core.attempts, coreCorrections: core.corrections,
-          workingSnapshotId: core.candidateSnapshotId || null });
+          workingSnapshotId: core.candidateSnapshotId || workingSnapshot?.id || null });
         tree = core.tree;
         await events.progress?.({ owner, projectId, buildId, kind: "completed_required_generation_module",
           details: { step: "core", snapshotId: core.snapshot?.id || null } });
@@ -1286,6 +1337,14 @@ export function createOrchestrator({
             });
             if (!evidence.length) break;
             const mode = REPAIR_STRATEGIES[strategy];
+            const scaffoldRepairClasses = [...new Set(actionable
+              .map((defect) => defect.scaffoldRouting?.classification).filter(Boolean))];
+            await events.telemetry?.({ owner, projectId, buildId, kind: "scaffold_repair_routing", details: {
+              strategy: mode, classes: scaffoldRepairClasses,
+              scaffoldRepairs: scaffoldRepairClasses.filter((value) => value.startsWith("scaffold_")).length,
+              customExtensionRepairs: scaffoldRepairClasses.includes("custom_extension") ? 1 : 0,
+              unreachableRepairs: scaffoldRepairClasses.includes("unreachable_module") ? 1 : 0,
+            } });
             // The verifier's own attribution bounds the write — until a round proves the boundary
             // was not where the defect lived, at which point the next attempt is deliberately wider.
             const regenerate = mode === "owner_module_regeneration"
@@ -1324,7 +1383,8 @@ export function createOrchestrator({
               preTreeHash: treeHash(currentTree),
               preBindingHash: crypto.createHash("sha256").update(JSON.stringify(bindings || [])).digest("hex"),
               defectSignatureBefore: signatureOf(defectsBefore),
-              reason: `evidence prerequisites satisfied for ${mode}`,
+              reason: `evidence prerequisites satisfied for ${mode}`
+                + (scaffoldRepairClasses.length ? ` (${scaffoldRepairClasses.join(",")})` : ""),
             });
             let repair;
             try {

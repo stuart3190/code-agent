@@ -327,13 +327,21 @@ test("a BLOCKING finding scopes a correction to the offending module and retains
 
 test("orchestrator corrects one offending module without replaying the whole core", async () => {
   const first = { ...CORRECT,
+    "src/screens/scaffold/BookingScreen.jsx": `import "../../data/booking.js";
+import { BookingFlow } from "../../components/book/BookFlow.jsx";
+import "../../components/book/BookReview.jsx";
+import "../../components/book/BookConfirmation.jsx";
+import "../../components/book/BookStatus.jsx";
+export default function BookingScreen(){ return <BookingFlow draft={{}} setDraft={() => {}} confirm={() => {}} cancel={() => {}} />; }`,
     "src/data/booking.js": `${CORRECT["src/data/booking.js"]}\nexport const bypass = (db, row) => db.entity("booking").create(row);` };
   const calls = [];
   const orchestrator = createOrchestrator({
     contractFn: async () => BOOKING,
     patchesFn: async (input) => {
       calls.push(input);
-      if (calls.length === 1) return Object.entries(first).map(([path, content]) => ({ newFile: path, content }));
+      if (calls.length === 1) return Object.entries(first).map(([path, content]) => (
+        path.startsWith("src/screens/scaffold/") ? { replaceFile: path, content } : { newFile: path, content }
+      ));
       return [{ replaceFile: "src/data/booking.js", content: CORRECT["src/data/booking.js"] }];
     },
     assetService: { async resolveIntents() { return { resolved: [] }; }, async assetManifestFor() { return []; } },
