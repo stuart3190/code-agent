@@ -38,12 +38,13 @@ const reducer = (state, action) => ({ ...state, [action.field]: action.value });
 
 const FLOW = `${shared}
 export function Flow() {
-  const [dateId, setDateId] = useState(null);
+  const [dateId, setDateId] = useState(MODE === "preselected" || MODE === "selectionbroken" ? DATES[0] : null);
   const [draft, setDraft] = useState({ guestName: "", guestEmail: "", guestPhone: "" });
   const [store, dispatch] = useReducer(reducer, { reduced: "" });
   const [uncontrolled] = useState("");
 
-  const dates = useSemanticSelection({ name: "dateId", label: "Date", value: dateId, onSelect: setDateId });
+  const dates = useSemanticSelection({ name: "dateId", label: "Date", value: dateId,
+    onSelect: MODE === "selectionbroken" ? () => {} : setDateId });
   const advance = useFlowAdvance({ label: "Continue", onActivate: () => {} });
 
   // ── THE RUN #7 SHAPES ────────────────────────────────────────────────────────────────────────

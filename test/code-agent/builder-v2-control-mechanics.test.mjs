@@ -150,6 +150,41 @@ test("the corrected build covers a controlled field, a defaultValue field and a 
   assert.deepEqual(probe.failures, []);
 });
 
+test("a default-selected first option is probed through a different option", needsBrowser, async () => {
+  const { chromium } = requireCjs("playwright");
+  const result = await open("preselected", async (url) => {
+    const browser = await chromium.launch({ args: ["--no-sandbox"] });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(600);
+    const probe = await probeControlMechanics(page, PLAN);
+    const selected = await page.locator('[data-thrallo-control][data-thrallo-option]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("aria-pressed")));
+    await browser.close();
+    return { probe, selected };
+  });
+  const dateId = controlIdFor("dateId");
+  assert.equal(result.probe.failures.some((row) => row.id === dateId), false,
+    `a working default selection was rejected: ${JSON.stringify(result.probe.failures)}`);
+  assert.deepEqual(result.selected, ["false", "true"], "the probe did not choose the unselected option");
+});
+
+test("a default-selected group whose handler is dead still fails the mechanics gate", needsBrowser, async () => {
+  const { chromium } = requireCjs("playwright");
+  const probe = await open("selectionbroken", async (url) => {
+    const browser = await chromium.launch({ args: ["--no-sandbox"] });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(600);
+    const result = await probeControlMechanics(page, PLAN);
+    await browser.close();
+    return result;
+  });
+  const failure = probe.failures.find((row) => row.id === controlIdFor("dateId"));
+  assert.equal(failure?.expected, "selection_state_changed");
+  assert.equal(failure?.observed, "unchanged");
+});
+
 // ── 2. THE TWO LEVELS, AS A PURE RULE ──────────────────────────────────────────────────────────
 
 test("only structure that settles the question is PROVEN", () => {

@@ -2646,7 +2646,26 @@ export async function probeControlMechanics(page, controls = []) {
           el.getAttribute("aria-selected") || "", el.getAttribute("data-selected") || "",
           el.className || ""].join(":"))).catch(() => []));
       const before = await snapshot();
-      await options.first().click({ timeout: 5_000 }).catch(() => {});
+      // A valid selector may default its first option. Clicking that same option cannot produce a
+      // transition, and used to condemn working generated apps before their journeys even ran.
+      // Probe the first UNSELECTED option (the same invariant used by the journey driver) so an
+      // unchanged result proves a dead control rather than a no-op chosen by the verifier.
+      const selectedBefore = await options.evaluateAll((els) => els.map((el) => {
+        const state = (el.getAttribute("data-state") || "").toLowerCase();
+        const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
+        return el.getAttribute("aria-selected") === "true"
+          || el.getAttribute("aria-pressed") === "true"
+          || el.checked === true
+          || ["on", "active", "selected", "checked"].includes(state)
+          || /(^|[\s_-])(is[-_])?(selected|active)([\s_-]|$)/.test(cls);
+      })).catch(() => []);
+      const clickIndex = selectedBefore.findIndex((selected) => selected !== true);
+      if (clickIndex === -1) {
+        failures.push({ id: control.id, primitive: "selection", expected: "one_unselected_option",
+          observed: "all_selected", detail: "the contracted selection exposes no unselected option to drive" });
+        continue;
+      }
+      await options.nth(clickIndex).click({ timeout: 5_000 }).catch(() => {});
       await page.waitForTimeout(200);
       const after = await snapshot();
       probed += 1;
