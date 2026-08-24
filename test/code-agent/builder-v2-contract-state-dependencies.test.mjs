@@ -524,6 +524,108 @@ test("retained basic-site smoke aa154da3 keeps one chooser and never invents bac
   assert.deepEqual(submit.expectedStateTransition.persists, []);
 });
 
+test("retained smoke 8fe1191e composes every responsibility owned by one operation", () => {
+  const contract = {
+    summary: "A transient multi-step basket and simulated checkout.",
+    projectType: "other",
+    auth: { required: false, model: "none", rules: [] },
+    routes: [{ path: "/", name: "Home" }],
+    entities: [{
+      name: "basketItem", storage: "transient", owned: false,
+      fields: [
+        ["competitionId", "string"], ["quantity", "number"], ["skillAnswer", "string"],
+        ["validationMessage", "string"], ["basketTotal", "number"],
+      ].map(([name, type]) => ({ name, type, required: true })),
+    }, {
+      name: "simulatedOrder", storage: "transient", owned: false,
+      fields: [
+        ["orderNumber", "string"], ["basketCleared", "boolean"], ["basketTotal", "number"],
+      ].map(([name, type]) => ({ name, type, required: true })),
+    }],
+    operations: [{
+      id: "add-to-basket", entity: "basketItem", kind: "create", journey: "enter-a-competition",
+      description: "Validate and copy a selected entry into transient basket state.",
+      responsibilities: [{
+        type: "functional", behavior: "validate the entry",
+        reads: ["competitionId", "quantity", "skillAnswer"], writes: ["validationMessage"],
+      }, {
+        type: "functional", behavior: "copy the selected entry into the basket",
+        reads: ["competitionId", "quantity", "skillAnswer"],
+        writes: ["competitionId", "quantity", "skillAnswer"],
+      }, {
+        type: "functional", behavior: "calculate the basket total",
+        reads: ["quantity"], writes: ["basketTotal"],
+      }],
+    }, {
+      id: "complete-simulated-order", entity: "simulatedOrder", kind: "create",
+      journey: "enter-a-competition", description: "Confirm the local order and clear the basket.",
+      responsibilities: [{
+        type: "functional", behavior: "create the simulated confirmation",
+        reads: ["competitionId", "quantity", "skillAnswer", "basketTotal"],
+        writes: ["orderNumber"],
+      }, {
+        type: "functional", behavior: "clear the transient basket after confirmation",
+        reads: ["competitionId", "quantity"], writes: ["basketCleared"],
+      }],
+    }],
+    journeys: [{
+      id: "enter-a-competition", title: "Enter a competition", priority: "primary",
+      stage: "primary_journey", steps: [
+        { action: "open the homepage", target: "/", expect: "the homepage is visible" },
+        { action: "choose a competition", target: "competition card", primitive: "selection",
+          operates: ["competitionId"], expect: "the competition is selected" },
+        { action: "choose a quantity", target: "quantity", primitive: "selection",
+          operates: ["quantity"], expect: "the quantity is selected" },
+        { action: "answer the skill question", target: "skill answer", primitive: "textbox",
+          operates: ["skillAnswer"], expect: "the answer is visible" },
+        { action: "add the entries to the basket", target: "add entries", operates: ["add-to-basket"],
+          reads: ["competitionId", "quantity", "skillAnswer"],
+          expect: "the basket total and entry are visible" },
+        { action: "complete the simulated checkout", target: "complete entry",
+          operates: ["complete-simulated-order"],
+          reads: ["competitionId", "quantity", "skillAnswer", "basketTotal"],
+          expect: "the order number is visible" },
+        { action: "check the basket after checkout", target: "basket indicator",
+          reads: ["basketCleared"], expect: "the basket is empty" },
+      ],
+      acceptance: ["the transient order completes and clears the basket"],
+    }],
+    integrations: [], states: [],
+    acceptance: [
+      { id: "selection", statement: "the competition, quantity, and answer remain selected" },
+      { id: "total", statement: "adding the entry displays a basket total" },
+      { id: "order", statement: "the simulated order completes and clears the basket" },
+    ],
+    deferred: [],
+  };
+
+  const contractVerdict = validateContract(contract);
+  assert.equal(contractVerdict.ok, true, contractVerdict.problems.join("; "));
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const flows = spec.interactionContract.flows
+    .filter((flow) => flow.journeyId === "enter-a-competition");
+  const add = flows.find((flow) => flow.operationId === "add-to-basket");
+  const complete = flows.find((flow) => flow.operationId === "complete-simulated-order");
+  for (const path of [
+    "enter-a-competition.custom.competitionId",
+    "enter-a-competition.custom.quantity",
+    "enter-a-competition.custom.skillAnswer",
+    "enter-a-competition.custom.basketTotal",
+  ]) assert.ok(add.writes.includes(path), `${path} must be produced by add-to-basket`);
+  for (const path of [
+    "enter-a-competition.custom.competitionId",
+    "enter-a-competition.custom.quantity",
+    "enter-a-competition.custom.skillAnswer",
+    "enter-a-competition.custom.basketTotal",
+  ]) assert.ok(complete.reads.includes(path), `${path} must reach complete-simulated-order`);
+  assert.ok(complete.writes.includes("enter-a-competition.custom.basketCleared"));
+  assert.ok(flows.indexOf(add) < flows.indexOf(complete));
+  assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
+  assert.ok(spec.modulePlan.length > 0);
+});
+
 test("retained basic-site smoke a983b37 removes invented durable recovery from a simulated entry", () => {
   const prompt = "Build a basic but polished competition website for low-budget competitions, aimed at UK users entering affordable prize draws around £100–£200. The site should feel trustworthy, modern, and simple. Core experience: a homepage with a hero section explaining low-cost competitions, featured live competitions, clear pricing/odds-style information, how it works, recent winners, trust/safety messaging, FAQ, and a call to action. Include a competitions listing page with several demo competitions such as £100 cash, £200 shopping voucher, gaming bundle, weekend treat fund, etc. Include competition detail pages showing prize value, ticket price, remaining tickets, closing date, short description, rules summary, and an entry journey where the user chooses ticket quantity, answers a simple skill question, sees a basket/entry summary, and receives a confirmation-style success state. This is a demo/basic site, so payments should be simulated rather than real. Include responsive layouts for mobile, tablet, and desktop. Use GBP formatting throughout and friendly UK copy. Branding: affordable, cheerful, trustworthy; name the product Budget Competitions.";
   const contract = normaliseContract({

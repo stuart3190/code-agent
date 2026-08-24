@@ -878,7 +878,9 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
 
   for (const operation of graph?.operationResponsibilities || []) {
     const responsibilities = operation.responsibilities || [];
-    const functional = responsibilities.find((responsibility) => responsibility.requiresTransformation) || null;
+    const functionalResponsibilities = responsibilities
+      .filter((responsibility) => responsibility.requiresTransformation);
+    const functional = functionalResponsibilities[0] || null;
     const persistence = responsibilities.find((responsibility) => responsibility.type === "persistence") || null;
     const semantic = functional || persistence;
     if (!semantic) continue;
@@ -935,8 +937,16 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       targets = [created];
     }
 
-    const semanticReads = unique((functional ? functional.reads : responsibilities.flatMap((row) => row.reads || [])) || []);
-    const semanticWrites = unique((functional ? functional.writes : responsibilities.flatMap((row) => row.writes || [])) || []);
+    // One operation may own several independent functional responsibilities (validation, copying
+    // selected state, calculating totals, clearing state). Downstream edges are derived from all
+    // of them, so the producer flow must expose all of their reads/writes too. Selecting only the
+    // first responsibility made later consumers depend on custom state that no flow produced.
+    // Persistence remains represented through its handoff/source contract when transformations
+    // exist; it is the fallback semantic surface only for persistence-only operations.
+    const semanticResponsibilities = functionalResponsibilities.length
+      ? functionalResponsibilities : responsibilities;
+    const semanticReads = unique(semanticResponsibilities.flatMap((row) => row.reads || []));
+    const semanticWrites = unique(semanticResponsibilities.flatMap((row) => row.writes || []));
     const downstreamConsumers = unique(responsibilities.flatMap((row) => row.downstreamDependencies || []));
     const handoff = functional?.persistenceHandoff || null;
     const persistenceSource = functional?.persistenceSource || null;
