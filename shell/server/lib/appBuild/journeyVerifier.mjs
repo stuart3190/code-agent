@@ -27,6 +27,13 @@ import {
 import {
   ADVANCE_ACTION_ID, browserPlan, controlIdFor, deriveVerificationManifest,
 } from "../builderV2/verificationManifest.mjs";
+import {
+  LEGACY_RICH_VERIFIER_POLICY,
+  MINIMAL_CONTRACT_VERIFIER_POLICY,
+  VERIFICATION_RESULT_CLASS,
+  isMinimalContractVerifier,
+  verificationVerdict,
+} from "./verifierPolicy.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -384,16 +391,22 @@ export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null)
 // a correct static surface `identity_absent`, then sends app repair after a control the contract
 // never declared. The structural guards keep this narrow: any route, write, control, or declared
 // interaction remains an action and retains the normal freshness/driveability rules.
-const OBSERVATION_ACTION_PATTERN = /^\s*(?:view|inspect|observe|see|read|review|compare|check|verify)\b/i;
+const OBSERVATION_ACTION_PATTERN = /^\s*(?:view|inspect|observe|see|read|review|compare|check|verify|wait\s+for)\b/i;
 const ACTION_FLOW_KINDS = new Set([
   "flow_start", "flow_advance", "selection", "input", "mutation", "cancellation", "lookup",
   "action", "navigation", "recovery",
 ]);
 
-export function isObservationOnlyStep(step = {}, interactionFlows = []) {
-  if (!OBSERVATION_ACTION_PATTERN.test(String(step.action || ""))) return false;
+export function isObservationOnlyStep(step = {}, interactionFlows = [], {
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+} = {}) {
+  const action = String(step.action || "");
+  if (!OBSERVATION_ACTION_PATTERN.test(action)) return false;
   if (/^\s*\//.test(String(step.target || ""))) return false;
   if ((step.operates || []).length > 0) return false;
+  if (/\b(?:click|type|enter|select|choose|submit|save|create|update|delete|navigate|drag|move|press|tap)\b/i
+    .test(action)) return false;
+  if (isMinimalContractVerifier(verifierPolicy)) return true;
   return !(interactionFlows || []).some((flow) => flow.control
     || (flow.writes || []).length > 0
     || ACTION_FLOW_KINDS.has(flow.kind));
@@ -451,7 +464,10 @@ function contractedLocators(page, control) {
 }
 
 /** Drive only the fields the machine-readable contract assigns to this step. */
-async function fillContractedFields(page, flows, marker) {
+async function fillContractedFields(page, flows, marker, {
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+} = {}) {
+  const minimal = isMinimalContractVerifier(verifierPolicy);
   const evidence = { attemptedLocators: [], renderedControls: await renderedFormControls(page), fields: [] };
   const filled = [];
   for (const flow of flows) {
@@ -473,9 +489,10 @@ async function fillContractedFields(page, flows, marker) {
       // the positional guessing this architecture exists to remove — and it would be silent. Two
       // controls that must both be driveable need distinct names (the scaffold accepts a `scope`,
       // so `intake.notes` and `review.notes` are distinct); until then, this is reported.
-      if (attempt.machine && visible.length > 1) {
+      if ((minimal || attempt.machine) && visible.length > 1) {
         ambiguous = { description: attempt.description, matches: visible.length };
-        break;
+        if (!minimal) break;
+        continue;
       }
       [field] = visible;
       matchedBy = attempt.description;
@@ -484,8 +501,11 @@ async function fillContractedFields(page, flows, marker) {
     const contractedFixture = verificationFixtureFor(flow, marker);
     const fieldEvidence = { field: logicalField, expectedStateOwner: flow.stateOwner, matchedBy,
       fixtureAuthority: contractedFixture === null ? "native_or_generated" : "contract",
-      accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName] };
-    if (ambiguous) {
+      accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName],
+      ...(ambiguous && field ? { identityAdvisory: {
+        code: "ambiguous_identity", matchedBy: ambiguous.description, matches: ambiguous.matches,
+      } } : {}) };
+    if (ambiguous && !field) {
       evidence.fields.push({ ...fieldEvidence, status: "ambiguous_identity", matchedBy: ambiguous.description,
         detail: `${ambiguous.matches} visible controls share the machine identity ${flow.control.machineId} — `
           + "give each one a distinct scoped name so the contract can address them separately" });
@@ -493,6 +513,11 @@ async function fillContractedFields(page, flows, marker) {
     }
     if (!field) {
       evidence.fields.push({ ...fieldEvidence, status: "missing" });
+      continue;
+    }
+    if (minimal && flow.control.requiresVerificationFixture && contractedFixture === null) {
+      evidence.fields.push({ ...fieldEvidence, status: "fixture_unavailable",
+        detail: "the contract requires an explicit domain-valid verification fixture" });
       continue;
     }
     const disabled = await field.isDisabled().catch(() => true);
@@ -557,6 +582,15 @@ async function fillContractedFields(page, flows, marker) {
     // natively valid final fixture so an edit journey makes a real mutation before its Save step.
     // If the field's constraints admit no alternate, clear and restore it as a final driveability
     // probe. A dead controlled input that ignores both writes still fails the unchanged verdict.
+    if (minimal && flow.control.validity !== "invalid" && value === currentValue && currentValue !== "") {
+      const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
+        message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
+      const status = validity.valid ? "filled" : "fixture_invalid";
+      evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue: currentValue,
+        previousValue: currentValue, alreadyAccepted: true, facts, validityMessage: validity.message });
+      if (status === "filled") filled.push(logicalField);
+      continue;
+    }
     let probeValue = null;
     let probeChanged = false;
     if (flow.control.validity !== "invalid" && value === currentValue && currentValue !== "") {
@@ -583,7 +617,7 @@ async function fillContractedFields(page, flows, marker) {
       message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
     const expectsInvalid = flow.control.validity === "invalid";
     const changed = probeChanged || observedValue !== currentValue;
-    const status = observedValue !== value || (!expectsInvalid && !changed)
+    const status = observedValue !== value || (!minimal && !expectsInvalid && !changed)
       ? "value_not_accepted"
       : (expectsInvalid || validity.valid ? "filled" : "fixture_invalid");
     evidence.fields.push({ ...fieldEvidence, status, expectedValue: value, observedValue,
@@ -928,14 +962,38 @@ async function waitForAutoAdvanceEvidence(page, nextControl, expect, textBefore,
  * Shared by flow entry and prerequisite setup so both resolve a description the same way, and
  * neither ever falls back to prose.
  */
-async function activateContractedControl(page, control) {
+async function activateContractedControl(page, control, {
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+  evidence = null,
+} = {}) {
+  const minimal = isMinimalContractVerifier(verifierPolicy);
+  const uniqueVisible = async (locator) => {
+    const count = Math.min(await locator.count().catch(() => 0), 4);
+    const visible = [];
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      if (await candidate.isVisible().catch(() => false)) visible.push(candidate);
+    }
+    return visible.length === 1 ? visible[0] : null;
+  };
   // The contract's own opaque identity, when the app emitted one: no prose, no aliasing, and
   // immune to the label being renamed, translated or replaced by an icon.
   if (control?.machineId) {
-    const byIdentity = page.locator(`[data-thrallo-action="${control.machineId}"]`).first();
-    if (await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
-      if (await byIdentity.isDisabled().catch(() => true)) return false;
-      try { await byIdentity.click({ timeout: 5_000 }); return true; } catch { return false; }
+    const identityLocator = page.locator(`[data-thrallo-action="${control.machineId}"]`);
+    const byIdentity = minimal ? await uniqueVisible(identityLocator) : identityLocator.first();
+    if (byIdentity && await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
+      if (await byIdentity.isDisabled().catch(() => true)) {
+        if (evidence) evidence.reason = "disabled";
+        return false;
+      }
+      try {
+        await byIdentity.click({ timeout: 5_000 });
+        if (evidence) evidence.matchedBy = "machine_identity";
+        return true;
+      } catch {
+        if (evidence) evidence.reason = "click_failed";
+        return false;
+      }
     }
   }
   const aliases = unique(controlAliases(control).flatMap((alias) => {
@@ -949,13 +1007,26 @@ async function activateContractedControl(page, control) {
   }));
   for (const alias of aliases) {
     for (const role of DRIVEABLE_ACTION_ROLES) {
-      const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
+      const locator = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") });
+      const candidate = minimal ? await uniqueVisible(locator) : locator.first();
+      if (!candidate) continue;
       if (!(await candidate.count().catch(() => 0))) continue;
       if (!(await candidate.isVisible().catch(() => false))) continue;
-      if (await candidate.isDisabled().catch(() => true)) return false;
-      try { await candidate.click({ timeout: 5_000 }); return true; } catch { return false; }
+      if (await candidate.isDisabled().catch(() => true)) {
+        if (evidence) evidence.reason = "disabled";
+        return false;
+      }
+      try {
+        await candidate.click({ timeout: 5_000 });
+        if (evidence) evidence.matchedBy = `role:${role}`;
+        return true;
+      } catch {
+        if (evidence) evidence.reason = "click_failed";
+        return false;
+      }
     }
   }
+  if (evidence) evidence.reason = "not_reliably_located";
   return false;
 }
 
@@ -1445,7 +1516,9 @@ async function runStep(page, step, {
   marker, authMarker = marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
   authState = { accounts: [], active: null }, allowEstablishedState = false,
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
 }) {
+  const minimal = isMinimalContractVerifier(verifierPolicy);
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   // NEVER JUDGE A SCREEN THAT IS STILL LOADING.
   //
@@ -1462,7 +1535,7 @@ async function runStep(page, step, {
   await waitForActiveSurface(page, 5_000);
   const action = String(step.action || "");
   const expect = String(step.expect || "");
-  const observationOnly = isObservationOnlyStep(step, interactionFlows);
+  const observationOnly = isObservationOnlyStep(step, interactionFlows, { verifierPolicy });
   let drove = false;
   // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
   // path never adds a second action on top of it.
@@ -1569,7 +1642,7 @@ async function runStep(page, step, {
     const inputsAreSelections = effectiveContractedInputs.length > 0 && effectiveContractedInputs.every((flow) =>
       selectionKeys.has(semanticKey(flow.control.logicalField || flow.control.accessibleName)));
     if (effectiveContractedInputs.length && !inputsAreSelections) {
-      let result = await fillContractedFields(page, effectiveContractedInputs, marker);
+      let result = await fillContractedFields(page, effectiveContractedInputs, marker, { verifierPolicy });
       // The contracted fields may belong to a step the flow has not reached. Advance and retry,
       // bounded, and only while advancing actually changes the page.
       const advances = [];
@@ -1577,7 +1650,7 @@ async function runStep(page, step, {
         const advance = await advanceFlow(page);
         advances.push(advance);
         if (!advance.advanced) break;
-        result = await fillContractedFields(page, effectiveContractedInputs, marker);
+        result = await fillContractedFields(page, effectiveContractedInputs, marker, { verifierPolicy });
       }
       if (advances.length) result.evidence.flowAdvances = advances;
       controlEvidence = result.evidence;
@@ -1664,14 +1737,16 @@ async function runStep(page, step, {
   // activated by that identity — never by hoping the action prose contains a click verb. It only
   // worked for "start the booking flow" because "booking" happens to contain "book"; "begin
   // checkout" contains no verb the generic path recognises and the step was undriveable.
-  if (!navigated && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
+  if (!navigated && !observationOnly
+    && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
     const entry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control);
-    const activated = await activateContractedControl(page, entry.control);
+    const activation = {};
+    const activated = await activateContractedControl(page, entry.control, { verifierPolicy, evidence: activation });
     drove = drove || activated;
     if (!activated) {
       return { drove, status: "undriveable",
         detail: `the contracted flow-entry control was not offered (${entry.control.accessibleName})`,
-        controlEvidence: { contractedField: entry.control.accessibleName } };
+        controlEvidence: { contractedField: entry.control.accessibleName, activation } };
     }
     await page.waitForTimeout(700);
     if (isAuthenticationFlow(entry, step)) {
@@ -1702,7 +1777,7 @@ async function runStep(page, step, {
   // only a control that names itself with the generic advance vocabulary, and it passes only if
   // the control the CONTRACT names next becomes observable. Clicking Continue and landing
   // anywhere else is a failure, not a pass, and no DOM change on its own counts.
-  if (!navigated && interactionFlows.some((flow) => flow.kind === "flow_advance")) {
+  if (!navigated && !observationOnly && interactionFlows.some((flow) => flow.kind === "flow_advance")) {
     const advanceFlowSpec = interactionFlows.find((flow) => flow.kind === "flow_advance");
     const target = nextContractedControl(journeyFlows, advanceFlowSpec);
     const advances = [];
@@ -1873,11 +1948,14 @@ async function runStep(page, step, {
 
   // A fill is not a commit. When one contracted step types values AND owns a durable action,
   // activate that exact action even though `drove` is already true from typing.
-  if (!navigated && !contractDriven) {
+  if (!navigated && !contractDriven && !observationOnly) {
     const contractedAction = interactionFlows.find((flow) => flow.control
       && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
     if (contractedAction) {
-      let activated = await activateContractedControl(page, contractedAction.control);
+      const activation = {};
+      let activated = await activateContractedControl(page, contractedAction.control, {
+        verifierPolicy, evidence: activation,
+      });
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never
       // another form and never a keyword-selected page button.
@@ -1889,13 +1967,15 @@ async function runStep(page, step, {
           if (!(await submit.count().catch(() => 0)) || await submit.isDisabled().catch(() => true)) continue;
           await submit.click({ timeout: 5_000 }).catch(() => {});
           activated = true;
+          activation.matchedBy = "contracted_field_form_submit";
+          delete activation.reason;
           break;
         }
       }
       if (!activated) {
         return { drove, status: "undriveable",
           detail: `the contracted ${contractedAction.kind} control was not offered (${contractedAction.control.accessibleName})`,
-          controlEvidence };
+          controlEvidence: { ...(controlEvidence || {}), activation } };
       }
       drove = true;
       contractDriven = true;
@@ -1943,7 +2023,7 @@ async function runStep(page, step, {
     if (target) {
       await target.click({ timeout: 5_000 }).catch(() => {});
       drove = true;
-    } else if (!isReviewObservation) {
+    } else if (!isReviewObservation && !minimal) {
       // A submit control the description did not name: the last enabled submit-ish button.
       const submit = page.locator("button[type=submit]:visible, button:visible").last();
       if (await submit.count().catch(() => 0)) {
@@ -1987,23 +2067,27 @@ async function runStep(page, step, {
   // passes; undriven/static checks still resolve on the first sample.
   let found = [];
   let fresh = [];
+  let observedStateChanged = false;
   // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
   // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
   const mutationFlow = durableTransitionFlow(interactionFlows);
   const commits = interactionFlows.length
     ? interactionFlows.some((flow) => ["mutation", "cancellation"].includes(flow.kind))
     : /submit|send|confirm|book|reserve|pay/i.test(action);
+  const requiresExplicitOutcome = commits || interactionFlows.some((flow) => (
+    ["action", "mutation", "cancellation", "lookup", "recovery", "flow_start"].includes(flow.kind)
+  ));
   const isReviewStep = interactionFlows.some((flow) => flow.kind === "review");
   const reviewValues = isReviewStep ? reviewValuesForStep(step, enteredValues) : [];
   const hasNoStepWrites = !(step.operates || []).length
     && !interactionFlows.some((flow) => flow.control
       || (flow.writes || []).length > 0
       || ["navigation", "recovery", "mutation", "cancellation", "lookup", "action"].includes(flow.kind));
-  const readOnlyAssertion = hasNoStepWrites && (
+  const readOnlyAssertion = (minimal && observationOnly) || (hasNoStepWrites && (
     observationOnly
       || (Array.isArray(step.reads) && step.reads.length > 0)
       || (isReviewStep && reviewValues.length === 0)
-  );
+  ));
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   let mutationEvidence = { checked: false, ok: false };
@@ -2017,6 +2101,8 @@ async function runStep(page, step, {
       // New since the step ran, which is the only kind of evidence that the step DID something.
       if (!before.includes(word)) fresh.push(word);
     }
+    const currentText = await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore);
+    observedStateChanged = currentText !== textBefore || page.url() !== urlBefore;
     if (mutationFlow && found.length / wanted.length >= 0.5 && fresh.length === 0) {
       const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       mutationEvidence = mutationCommitEvidence({
@@ -2026,12 +2112,24 @@ async function runStep(page, step, {
     if (Date.now() >= pollDeadline) break;
     const early = expectationOutcome({ wanted, found, fresh, drove, action,
       urlChanged: page.url() !== urlBefore, readOnlyAssertion,
-      mutationWithValues: mutationEvidence.ok });
+      mutationWithValues: mutationEvidence.ok, verifierPolicy,
+      stateChanged: observedStateChanged && !requiresExplicitOutcome,
+      actionProven: contractDriven || navigated || filledSomething || droveStepper });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
   }
 
-  if (viewportChanged) {
+  if (viewportChanged && minimal) {
+    const layout = await page.evaluate(() => ({
+      width: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      bodyScrollWidth: document.body?.scrollWidth || 0,
+    })).catch(() => null);
+    controlEvidence = { ...(controlEvidence || {}), advisories: [
+      ...((controlEvidence || {}).advisories || []),
+      { code: "responsive_layout_advisory", layout },
+    ] };
+  } else if (viewportChanged) {
     const layout = await page.evaluate(() => ({
       width: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
@@ -2142,12 +2240,16 @@ async function runStep(page, step, {
     // Its first step often asserts that starting state. The contracted evidence must still be
     // present, but it cannot also be newly added after the setup that made it present.
     establishedState: allowEstablishedState,
+    verifierPolicy,
+    stateChanged: observedStateChanged && !requiresExplicitOutcome,
+    actionProven: contractDriven || navigated || filledSomething || droveStepper || Boolean(route),
   });
 
   if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
     const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     const missingValues = reviewValues.filter(({ value }) => !reviewText.includes(value));
     if (missingValues.length) return { ...outcome, status: "fail",
+      ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE } : {}),
       detail: `review omitted exact contracted values: ${missingValues.map((row) => row.field).join(", ")}`,
       controlEvidence: { enteredValues: reviewValues, missingValues } };
     outcome.detail += ` · review contains ${reviewValues.length} exact entered value(s)`;
@@ -2214,6 +2316,8 @@ async function runStep(page, step, {
     const verdict = recoveryEvidenceVerdict(evidence, textAfter);
     if (verdict.checked) {
       return { ...outcome, status: verdict.ok ? "pass" : "fail", detail: verdict.detail,
+        ...(minimal ? { classification: verdict.ok ? VERIFICATION_RESULT_CLASS.PASS
+          : VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE } : {}),
         controlEvidence: { ...(controlEvidence || {}), durable: evidence } };
     }
   }
@@ -2241,9 +2345,32 @@ async function runStep(page, step, {
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
   mutationWithValues = false, navigational: declaredNavigational = null, establishedState = false,
-  readOnlyAssertion = false,
+  readOnlyAssertion = false, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+  stateChanged = false, actionProven = false,
 }) {
   const ratio = found.length / wanted.length;
+  if (isMinimalContractVerifier(verifierPolicy)) {
+    if (ratio >= 0.5 || reviewWithValues || mutationWithValues || urlChanged || stateChanged) {
+      const advisory = ratio >= 0.5 && !fresh.length && drove && !urlChanged && !stateChanged
+        ? [{ code: "text_freshness_not_observed", detail: "the contracted result was already visible" }]
+        : [];
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS,
+        ratio >= 0.5 ? `contracted result visible: ${found.join(", ")}`
+          : urlChanged ? "the contracted navigation changed route"
+            : "the contracted action produced an observable state change",
+        { drove, readOnlyAssertion: readOnlyAssertion || undefined, advisories: advisory });
+    }
+    if (!drove || !actionProven || readOnlyAssertion) {
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+        readOnlyAssertion
+          ? `the verifier could not establish the observation from contract evidence (${wanted.join(", ") || "no exact outcome"})`
+          : `the verifier could not reliably drive the contracted action: ${action.slice(0, 80)}`,
+        { drove, readOnlyAssertion: readOnlyAssertion || undefined });
+    }
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      `the contracted action was performed but its required result did not occur (${wanted.join(", ") || "no observable result"})`,
+      { drove });
+  }
   // A REVIEW step is the one place the freshness rule marks correct applications broken. Showing
   // the running selection as it is made is good UX, so by the time review runs its words are
   // already on screen and nothing can be "new" — four live qualifications failed here with
@@ -2380,7 +2507,9 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
  * themselves use. Nothing is guessed: a prerequisite that cannot be established is reported as a
  * machine-readable setup failure, and the journey is NOT_REACHED rather than failed.
  */
-async function establishPrerequisites(page, controls, { marker, authMarker = marker, journeyFlows }) {
+async function establishPrerequisites(page, controls, {
+  marker, authMarker = marker, journeyFlows, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+}) {
   const performed = [];
   // Exact values entered while reconstructing the producing journey. They are not satisfied by
   // an input's DOM value because body.innerText excludes form values; one must be rendered by the
@@ -2415,10 +2544,10 @@ async function establishPrerequisites(page, controls, { marker, authMarker = mar
       continue;
     }
     if (flow.kind === "input") {
-      let result = await fillContractedFields(page, [flow], marker);
+      let result = await fillContractedFields(page, [flow], marker, { verifierPolicy });
       for (let attempt = 0; !result.complete && attempt < MAX_FLOW_ADVANCES; attempt += 1) {
         if (!(await advanceFlow(page)).advanced) break;
-        result = await fillContractedFields(page, [flow], marker);
+        result = await fillContractedFields(page, [flow], marker, { verifierPolicy });
       }
       if (!result.complete) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "field not fillable" } };
@@ -2789,6 +2918,36 @@ const selectionSnapshot = (page, id) => page.evaluate((controlId) => [...documen
   .map((el) => `${el.getAttribute("aria-pressed") || ""}:${el.getAttribute("aria-selected") || ""}`
     + `:${el.getAttribute("data-selected") || ""}:${el.className || ""}`), id).catch(() => []);
 
+function applyMinimalStepClassification(outcome, fatalRuntimeErrors = []) {
+  if (outcome?.status !== "pass" && fatalRuntimeErrors.length) {
+    return verificationVerdict(
+      VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE,
+      `a fatal runtime error prevented the contracted step: ${fatalRuntimeErrors[0]}`,
+      { ...outcome, fatalRuntimeErrors },
+    );
+  }
+  if (outcome?.classification) return outcome;
+  if (outcome?.status === "pass") {
+    return { ...outcome, classification: VERIFICATION_RESULT_CLASS.PASS };
+  }
+  const fieldFailure = (outcome?.controlEvidence?.fields || []).some((field) => (
+    ["not_editable", "value_not_accepted"].includes(field.status) && field.matchedBy
+  ));
+  const activationFailure = ["disabled", "click_failed"].includes(
+    outcome?.controlEvidence?.activation?.reason,
+  );
+  if (fieldFailure || activationFailure) {
+    return { ...outcome, classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      status: "fail" };
+  }
+  if (["undriveable", "not_reached", "skipped"].includes(outcome?.status)) {
+    return { ...outcome, classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      status: "undriveable" };
+  }
+  return { ...outcome, classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+    status: "fail" };
+}
+
 // Generated applications may resolve their public session before mounting the contracted
 // workspace. A fixed post-navigation sleep sampled a legitimate visible `role=status` loading
 // surface in production and then falsely concluded that the workspace control did not exist.
@@ -2819,10 +2978,16 @@ export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
   browser: sharedBrowser = null,
   verificationIdentity = null,
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
 }) {
+  const minimal = isMinimalContractVerifier(verifierPolicy);
   const results = [];
   const consoleErrors = [];
   const failedRequests = [];
+  const fatalErrors = [];
+  const runtimeErrors = [];
+  const platformSignals = [];
+  const advisories = [];
   const verifierDefects = [];
   const marker = String(Date.now()).slice(-6);
   // Form data stays fresh on every drive so persistence probes observe a real change. Account
@@ -2853,13 +3018,19 @@ export async function verifyJourneys({
       const created = await browser.newContext({ viewport });
       await seedVerificationVisitorStorage(created, verificationIdentity, visitorPurpose);
       const opened = await created.newPage();
-      opened.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
+      opened.on("pageerror", (e) => {
+        const detail = e.message.slice(0, 200);
+        consoleErrors.push(detail);
+        runtimeErrors.push(detail);
+      });
       opened.on("console", (m) => {
         // Chromium emits this generic console line for the same HTTP failure reported with its
         // exact method, status and URL by the response/requestfailed listeners below. Keeping both
         // made one recovered app-auth race count as two independent blockers.
         if (m.type() === "error" && !/^Failed to load resource:/i.test(m.text())) {
           consoleErrors.push(m.text().slice(0, 200));
+        } else if (minimal && m.type() === "warning") {
+          advisories.push({ code: "non_blocking_console_warning", detail: m.text().slice(0, 200) });
         }
       });
       opened.on("response", (r) => {
@@ -2867,7 +3038,10 @@ export async function verifyJourneys({
           failedRequests.push(`${r.status()} ${r.request().method()} ${r.url().slice(0, 140)}`);
         }
         const defect = appAuthRateLimitDefect(r);
-        if (defect) verifierDefects.push(defect);
+        if (defect) {
+          if (minimal) platformSignals.push(defect);
+          else verifierDefects.push(defect);
+        }
       });
       opened.on("requestfailed", (request) => {
         const reason = request.failure()?.errorText || "failed";
@@ -2892,8 +3066,9 @@ export async function verifyJourneys({
     if (!reachable) {
       return {
         pass: null, unavailable: true, journeys: [],
+        verifierPolicy,
         error: `the preview did not load (${landing?.error?.message?.slice(0, 120) || `HTTP ${landing?.status?.()}`})`,
-        consoleErrors, failedRequests,
+        consoleErrors, failedRequests, fatalErrors, advisories,
       };
     }
     await waitForActiveSurface(page);
@@ -2936,7 +3111,9 @@ export async function verifyJourneys({
 
     for (const journey of ordered) {
       if (Date.now() > deadline) {
-        results.push({ id: journey.id, title: journey.title, priority: journey.priority, status: "skipped", steps: [] });
+        results.push({ id: journey.id, title: journey.title, priority: journey.priority,
+          status: minimal ? "undriveable" : "skipped", steps: [],
+          ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}) });
         continue;
       }
       // Scenario isolation. An independent journey opens the app as a brand-new visitor would;
@@ -2950,6 +3127,10 @@ export async function verifyJourneys({
           || (scenario.role === "produces" && journey.priority !== "primary")))) {
         page = await openContext();
       }
+      // Include fatal errors raised while the contracted surface mounts in the first step's
+      // evidence. Once a step passes, those errors are consumed as non-blocking diagnostics so an
+      // unrelated page error cannot poison a later action that demonstrably works.
+      let runtimeEvidenceCursor = runtimeErrors.length;
       // Every journey starts from a clean load of the app, not from wherever the last one ended.
       await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
       await waitForActiveSurface(page);
@@ -2991,12 +3172,17 @@ export async function verifyJourneys({
         });
       let setup = null;
       if (prerequisites.controls.length) {
-        setup = await establishPrerequisites(page, prerequisites.controls, { marker, authMarker, journeyFlows });
+        setup = await establishPrerequisites(page, prerequisites.controls, {
+          marker, authMarker, journeyFlows, verifierPolicy,
+        });
         if (!setup.ok) {
           results.push({
             id: journey.id, title: journey.title, priority: journey.priority,
-            status: "not_reached", steps: (journey.steps || []).map((step) => ({
-              action: step.action, expect: step.expect, status: "not_reached",
+            status: minimal ? "undriveable" : "not_reached",
+            ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}),
+            steps: (journey.steps || []).map((step) => ({
+              action: step.action, expect: step.expect, status: minimal ? "undriveable" : "not_reached",
+              ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}),
               detail: `not reached: the journey's required starting state could not be established (${setup.failure.control}: ${setup.failure.reason})`,
             })),
             failedSteps: 0, undriveableSteps: 0,
@@ -3007,7 +3193,11 @@ export async function verifyJourneys({
       }
       let blockedBy = null;
       for (const [stepIndex, step] of (journey.steps || []).entries()) {
-        if (Date.now() > deadline) { steps.push({ ...step, status: "skipped" }); continue; }
+        if (Date.now() > deadline) {
+          steps.push({ ...step, status: minimal ? "undriveable" : "skipped",
+            ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}) });
+          continue;
+        }
         if (blockedBy) {
           steps.push({ action: step.action, expect: step.expect, status: "not_reached",
             detail: `not reached because step ${blockedBy.stepIndex + 1} was ${blockedBy.status}`,
@@ -3028,17 +3218,32 @@ export async function verifyJourneys({
         // bounded so a page of text cannot bloat the record.
         const consoleBefore = consoleErrors.length;
         const requestsBefore = failedRequests.length;
-        const outcome = await runStep(page, step, {
+        const fatalBefore = runtimeEvidenceCursor;
+        const platformBefore = platformSignals.length;
+        let outcome = await runStep(page, step, {
           marker, authMarker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
-          authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true,
+          authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true, verifierPolicy,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
           verifierDefect: { code: "journey_driver_error", detail: error.message.slice(0, 200) },
         }));
+        if (minimal) outcome = applyMinimalStepClassification(outcome, runtimeErrors.slice(fatalBefore));
+        runtimeEvidenceCursor = runtimeErrors.length;
+        if (minimal && outcome.status !== "pass" && platformSignals.length > platformBefore) {
+          outcome = verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+            platformSignals[platformBefore].detail || "the verification platform could not establish the step",
+            { ...outcome, platformSignal: platformSignals[platformBefore] });
+        }
+        if (outcome.classification === VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE) {
+          fatalErrors.push(...(outcome.fatalRuntimeErrors || []));
+        }
         if (outcome.verifierDefect) verifierDefects.push({
           ...outcome.verifierDefect, journeyId: journey.id, stepIndex, action: step.action,
         });
         if (outcome.selectedText) selections.push(outcome.selectedText);
+        for (const advisory of outcome.advisories || outcome.controlEvidence?.advisories || []) {
+          advisories.push({ journeyId: journey.id, stepIndex, ...advisory });
+        }
         if (!["pass", "skipped", "not_reached"].includes(outcome.status)) {
           outcome.observation = {
             text: (await page.evaluate(() => document.body?.innerText || "").catch(() => ""))
@@ -3058,13 +3263,16 @@ export async function verifyJourneys({
         // A contracted step the browser cannot drive is not qualified. It remains distinct from a
         // behavioural failure for diagnosis, but the journey cannot become green around it.
         status: failed.length ? "fail" : (undriveable.length ? "undriveable" : "pass"),
+        ...(minimal ? { classification: failed[0]?.classification
+          || (undriveable.length ? VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE
+            : VERIFICATION_RESULT_CLASS.PASS) } : {}),
         steps, failedSteps: failed.length, undriveableSteps: undriveable.length,
       });
     }
   } catch (error) {
     return {
-      pass: null, journeys: results, error: error.message, mechanics,
-      consoleErrors, failedRequests,
+      pass: null, journeys: results, error: error.message, mechanics, verifierPolicy,
+      consoleErrors, failedRequests, fatalErrors, advisories,
       // A verifier that cannot start must not be read as "the app is broken".
       unavailable: true,
     };
@@ -3075,7 +3283,10 @@ export async function verifyJourneys({
 
   const primary = results.find((j) => j.priority === "primary") || results[0];
   return {
-    pass: primary ? primary.status === "pass" : null,
+    pass: minimal
+      ? (results.length ? results.every((journey) => journey.status === "pass") : null)
+      : (primary ? primary.status === "pass" : null),
+    verifierPolicy,
     primaryStatus: primary?.status || null,
     journeys: results,
     failures: results.filter((j) => j.status === "fail"),
@@ -3087,6 +3298,12 @@ export async function verifyJourneys({
     verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
     consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
     failedRequests: [...new Set(failedRequests)].slice(0, 10),
+    fatalErrors: [...new Set(fatalErrors)].slice(0, 10),
+    advisories: [
+      ...advisories,
+      ...(minimal ? [...new Set(consoleErrors)].map((detail) => ({ code: "non_blocking_console", detail })) : []),
+      ...(minimal ? [...new Set(failedRequests)].map((detail) => ({ code: "non_blocking_network", detail })) : []),
+    ].slice(0, 40),
   };
 }
 
@@ -3099,8 +3316,11 @@ export function journeyFailures(result) {
       out.push(`the journey "${journey.title}" fails at "${step.action}": ${step.detail}`);
     }
   }
-  for (const error of result?.consoleErrors || []) out.push(`the browser console reports: ${error}`);
-  for (const request of result?.failedRequests || []) out.push(`a network request failed: ${request}`);
+  for (const error of result?.fatalErrors || []) out.push(`a fatal browser runtime error reports: ${error}`);
+  if (result?.verifierPolicy !== MINIMAL_CONTRACT_VERIFIER_POLICY) {
+    for (const error of result?.consoleErrors || []) out.push(`the browser console reports: ${error}`);
+    for (const request of result?.failedRequests || []) out.push(`a network request failed: ${request}`);
+  }
   return out;
 }
 

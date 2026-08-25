@@ -54,6 +54,7 @@ async function browserVerify(payload) {
       previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
       timeoutMs: Number(payload.appTimeoutMs || payload.timeoutMs) || 180_000, browser,
       verificationIdentity: payload.verificationIdentity || null,
+      verifierPolicy: payload.verifierPolicy,
     });
     let journeys = null;
     if (app.verifierDefects?.length) {
@@ -67,7 +68,8 @@ async function browserVerify(payload) {
     } else if (payload.contract?.journeys?.length) {
       journeys = await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
         timeoutMs: Number(payload.journeyTimeoutMs || payload.timeoutMs) || 180_000, browser,
-        verificationIdentity: payload.verificationIdentity || null });
+        verificationIdentity: payload.verificationIdentity || null,
+        verifierPolicy: payload.verifierPolicy });
     }
     if (journeys && app.verifierDefects?.length) {
       journeys = {

@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { verifyJourneys } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
@@ -189,6 +190,7 @@ before(async () => {
     results.set(name, await verifyJourneys({
       previewUrl: `http://127.0.0.1:${server.address().port}`,
       contract: contractFor(shape), timeoutMs: 120_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
     }));
   }
 }, { timeout: 900_000 });
@@ -223,8 +225,8 @@ for (const [name, shape] of Object.entries(CASES)) {
         return;
       }
       if (shape.forceDisabled) {
-        assert.equal(journey.status, "undriveable", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
-        assert.equal(journey.steps[2].status, "undriveable", transcript);
+        assert.equal(journey.status, "fail", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
+        assert.equal(journey.steps[2].classification, "APP_FUNCTIONAL_FAILURE", transcript);
         assert.equal(journey.steps[2].drove, false, "a swallowed click failure must never be reported as activation");
         return;
       }

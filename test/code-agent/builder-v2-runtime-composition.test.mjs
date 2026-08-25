@@ -115,7 +115,7 @@ test("V2 differential verification retains primary prerequisites when only a red
     [primaryFlow, cachedFlow, redFlow], "the primary setup graph is retained even though its PASS was cached");
   assert.deepEqual(execution.interactionContract.flows, [redFlow],
     "the browser still drives only the red differential subset");
-  assert.match(VERIFICATION_CACHE_VERSION, /^journey-verifier\/2026-08-20\./);
+  assert.match(VERIFICATION_CACHE_VERSION, /^journey-verifier\/2026-08-25\./);
 });
 
 test("worker failures retain Error messages after classification", () => {

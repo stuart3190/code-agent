@@ -42,6 +42,7 @@ import { generationPolicyFor } from "./generationPolicy.mjs";
 import { composeCapabilityFoundation } from "./capabilityComposer.mjs";
 import { composeScaffoldFoundation, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 import { transformWizardEntryState, wizardEntryTransformSummary } from "../appBuild/wizardEntryTransform.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
 
 /**
  * Keep the complete contract needed to reconstruct an isolated journey separate from the
@@ -395,8 +396,7 @@ export function createOrchestrator({
     }
     const platformDefects = driven.journeys.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
     const blockingErrors = [
-      ...(driven.consoleErrors || []).map((detail) => `browser console: ${detail}`),
-      ...(driven.failedRequests || []).map((detail) => `network request: ${detail}`),
+      ...(driven.fatalErrors || []).map((detail) => `fatal browser runtime: ${detail}`),
     ];
     for (const defect of platformDefects) log(JSON.stringify({ event: "bv2.platform_defect", ...defect }));
     const merged = [
@@ -414,6 +414,8 @@ export function createOrchestrator({
       // brief can lead with the control that provably cannot hold a value.
       mechanics: driven.mechanics || null,
       consoleErrors: driven.consoleErrors || [], failedRequests: driven.failedRequests || [],
+      fatalErrors: driven.fatalErrors || [], advisories: driven.advisories || [],
+      verifierPolicy: driven.verifierPolicy || verificationContext.verifierPolicy || null,
       failureRefs: driven.failureRefs || [] };
   }
 
@@ -1013,6 +1015,7 @@ export function createOrchestrator({
       maxRepairs = maxJourneyRepairs, userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile, request, state: "created",
+        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
         budget_credits: budgetCredits, max_repair_dispatches: maxRepairs,
         started_at: new Date().toISOString(),
       });
@@ -1924,6 +1927,7 @@ export function createOrchestrator({
       const sourceBuild = await buildStore.get(sourceBuildId);
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: sourceBuild?.profile || "simple", request, state: "created",
+        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
         // Persist the dispatch allowance as well as inheriting historical source metadata. Old
         // repair rows pre-date ceiling propagation and can legitimately have a null budget.
         budget_credits: Number(budgetCredits || sourceBuild?.budget_credits || 0) || null,
@@ -2074,6 +2078,7 @@ export function createOrchestrator({
       userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "verify", request, state: "created",
+        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
         max_repair_dispatches: 0, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_verify", sourceBuildId });
@@ -2149,6 +2154,7 @@ export function createOrchestrator({
       userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
+        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
         max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "edit" });

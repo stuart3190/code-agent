@@ -11,6 +11,7 @@ import path from "node:path";
 
 import { verifyJourneys } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { buildTree, ensureDeps, workDirFor } from "../../harness/workspace.mjs";
@@ -49,6 +50,8 @@ const answerFlow = contract.interactionContract.flows.find((flow) => (
 ));
 assert.equal(answerFlow.control.verificationValue, "100",
   "the build spec must carry the planner fixture into the browser interaction authority");
+assert.equal(answerFlow.control.requiresVerificationFixture, true,
+  "domain-valid answers must never fall back to an invented browser value");
 
 const app = {
   "src/App.jsx": `import { useState } from "react";
@@ -93,6 +96,7 @@ before(async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   result = await verifyJourneys({
     previewUrl: `http://127.0.0.1:${server.address().port}`, contract, timeoutMs: 60_000,
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
   });
 }, { timeout: 300_000 });
 

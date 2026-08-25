@@ -19,6 +19,7 @@ import { resolveBuildContext, resolveConnectedRecoveryContext } from "../appBuil
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
 import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
 import { proveGeneratedRuntimeBackend, proveGeneratedRuntimeConfig, withRuntimeEnv } from "../runtimeEnv.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { serviceClient } from "../supabase.mjs";
@@ -757,6 +758,8 @@ export function createBuilderV2Runtime({
         const results = [];
         const consoleErrors = [];
         const failedRequests = [];
+        const fatalErrors = [];
+        const advisories = [];
         const verifierDefects = [];
         let unavailable = false;
         let verifierError = null;
@@ -798,6 +801,7 @@ export function createBuilderV2Runtime({
               // Stable only within this project/journey. The sandbox restores deterministic test
               // credentials, then the app still obtains a real app-auth/RLS session normally.
               verificationIdentity,
+              verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
               appTimeoutMs: browserBudget.appTimeoutMs,
               journeyTimeoutMs: browserBudget.journeyTimeoutMs },
             resource_limits: runtimeLimits(workJob, "browser_verify", {
@@ -810,6 +814,8 @@ export function createBuilderV2Runtime({
           if (!outcome.journeys) throw new Error(`browser verification produced no journey evidence (${outcome.classification || outcome.stderr || "unknown"})`);
           consoleErrors.push(...(outcome.journeys.consoleErrors || []));
           failedRequests.push(...(outcome.journeys.failedRequests || []));
+          fatalErrors.push(...(outcome.journeys.fatalErrors || []));
+          advisories.push(...(outcome.journeys.advisories || []));
           const failureRefs = outcome.journeys.failureRefs || [];
           verifierDefects.push(...(outcome.journeys.verifierDefects || []));
           unavailable = unavailable || outcome.journeys.unavailable === true;
@@ -841,9 +847,12 @@ export function createBuilderV2Runtime({
         }
         const journeyResult = {
           pass: !unavailable && !verifierDefects.length
-            && results.every((row) => row.status === "pass") && !consoleErrors.length && !failedRequests.length,
+            && results.every((row) => row.status === "pass"),
+          verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
           journeys: results,
           consoleErrors: [...new Set(consoleErrors)], failedRequests: [...new Set(failedRequests)],
+          fatalErrors: [...new Set(fatalErrors)],
+          advisories,
           verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
           unavailable,
           error: verifierError,
@@ -873,6 +882,7 @@ export function createBuilderV2Runtime({
             sandboxCompatibility.sandboxVerifier || "in-process",
             sandboxCompatibility.hostCommit || VERIFICATION_CACHE_VERSION,
           ].join(":"),
+          verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
           backendRuntimeVersion: process.env.THRALLO_RUNTIME_VERSION || "unknown",
           environmentVersion: process.env.THRALLO_ENV_VERSION || "unknown", capabilityVersions: "registry-current",
           indexerVersion: INDEXER_VERSION,

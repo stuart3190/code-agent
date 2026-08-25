@@ -162,6 +162,7 @@ function clientChain(rows, nextId) {
 const BUILD_COLUMNS = new Set([
   "owner", "project_id", "profile", "request", "state", "budget_credits", "spent_credits",
   "contract_id", "final_snapshot", "error", "started_at", "finished_at", "max_repair_dispatches",
+  "verifier_policy",
 ]);
 function strictBuildStore() {
   const rows = new Map();

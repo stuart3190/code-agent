@@ -17,7 +17,7 @@ import {
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
-  contractUsesDurablePersistence, operationUsesDurablePersistence,
+  contractUsesDurablePersistence, operationUsesDurablePersistence, verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
@@ -363,6 +363,7 @@ export function buildInteractionContract(contract, {
       return intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
     });
     for (const [stepIndex, step] of stepsList.entries()) {
+      const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
       const stepFlowStart = flows.length;
       const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
       // WHICH CONTROLS THIS STEP OPERATES is a structured fact the contract states, not a reading
@@ -507,6 +508,8 @@ export function buildInteractionContract(contract, {
             statePath: writes[0] || null,
             validationOwner: kind === "input" ? stateOwner : null,
             ...(kind === "input" ? { validity: validityFor(step, field, fields) } : {}),
+            ...(kind === "input" && fixtureRequired.has(normalized(field))
+              ? { requiresVerificationFixture: true } : {}),
             ...(["input", "selection"].includes(kind)
               && verificationValueFor(step, field) !== undefined
               ? { verificationValue: verificationValueFor(step, field) } : {}),

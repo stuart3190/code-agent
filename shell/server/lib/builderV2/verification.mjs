@@ -11,6 +11,7 @@
 import crypto from "node:crypto";
 import { runStageGate } from "../appBuild/stageGate.mjs";
 import { verifyJourneys, journeySummary } from "../appBuild/journeyVerifier.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
 import { bindCapabilities } from "./contractTiering.mjs";
 import { runStaticApplicationGate } from "./staticApplicationGate.mjs";
 import { scaffoldJourneyOwners } from "./scaffoldGraph.mjs";
@@ -22,9 +23,10 @@ const canonical = (value) => {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
 };
 
-export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-20.4";
+export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-25.1";
 export const DEFAULT_VERIFICATION_CONTEXT = Object.freeze({
   verifierVersion: VERIFICATION_CACHE_VERSION,
+  verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
   backendVersion: "generated-backend/1",
   runtimeVersion: "react-vite-runtime/1",
   environmentVersion: "preview-environment/1",
@@ -143,8 +145,9 @@ export async function verifyStage(tree, options = {}) {
 }
 
 /** D3 browser journeys through the existing verifier, with mandatory attribution. */
-export async function verifyJourneysAttributed({ previewUrl, contract, graph, timeoutMs }) {
-  const raw = await verifyJourneys({ previewUrl, contract, timeoutMs });
+export async function verifyJourneysAttributed({ previewUrl, contract, graph, timeoutMs,
+  verifierPolicy = MINIMAL_CONTRACT_VERIFIER_POLICY }) {
+  const raw = await verifyJourneys({ previewUrl, contract, timeoutMs, verifierPolicy });
   const attributed = attributeFailures(raw, graph, contract);
   const failures = attributed.filter((j) => j.status === "fail");
   const platformDefects = attributed.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);

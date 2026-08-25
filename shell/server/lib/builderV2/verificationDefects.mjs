@@ -35,6 +35,11 @@ import { PROTECTED_PATHS } from "./patchEngine.mjs";
 import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityComposer.mjs";
 import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS } from "./scaffoldRepairRouting.mjs";
+import {
+  MINIMAL_CONTRACT_VERIFIER_POLICY,
+  VERIFICATION_RESULT_CLASS,
+  isAppRepairableVerificationClass,
+} from "../appBuild/verifierPolicy.mjs";
 
 export const DEFECT_CLASS = Object.freeze({
   INTERACTION: "interaction",   // the browser could not operate a contracted control
@@ -169,6 +174,7 @@ export function verificationDefects({
   tree = null, backendRowFailures = [], manifest = null,
 } = {}) {
   const verdicts = journeyResults || { journeys: [] };
+  const minimal = verdicts.verifierPolicy === MINIMAL_CONTRACT_VERIFIER_POLICY;
   const journeysById = new Map((verdicts.journeys || []).map((journey) => [journey.id, journey]));
   const mechanics = verdicts.mechanics || null;
   const defects = [];
@@ -243,9 +249,9 @@ export function verificationDefects({
       code: named ? "journey_prerequisite_control_missing" : (journey.setup.code || "journey_prerequisites_unmet"),
       // Named control → an interaction defect a patch can answer. Unnamed → genuinely nothing to
       // aim at, so it stays context.
-      defectClass: named ? DEFECT_CLASS.INTERACTION : DEFECT_CLASS.CONTRACT,
-      owner: DEFECT_OWNER.UNKNOWN,
-      tier: named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE,
+      defectClass: minimal ? DEFECT_CLASS.PLATFORM : (named ? DEFECT_CLASS.INTERACTION : DEFECT_CLASS.CONTRACT),
+      owner: minimal ? DEFECT_OWNER.PLATFORM : DEFECT_OWNER.UNKNOWN,
+      tier: minimal ? REPAIR_TIER.NONE : (named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE),
       uncertain: true, downstream: !named,
       prerequisite: true,
       journeyId: journey.id, stepIndex: null, action: null,
@@ -268,7 +274,14 @@ export function verificationDefects({
     const flows = flowsForStep(interactionContract, diagnostic.journeyId, diagnostic.stepIndex);
     const kinds = unique(flows.map((flow) => flow.kind));
     const status = String(diagnostic.status || step?.status || "").toLowerCase();
-    const defectClass = classifyStep({ status, drove: step?.drove, kinds });
+    const resultClass = step?.classification || null;
+    const platformInconclusive = minimal
+      && resultClass === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE;
+    const repairableResult = !minimal || isAppRepairableVerificationClass(resultClass);
+    const defectClass = resultClass === VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE
+      ? DEFECT_CLASS.DURABILITY
+      : platformInconclusive ? DEFECT_CLASS.PLATFORM
+        : classifyStep({ status, drove: step?.drove, kinds });
     const control = controlIdentity(manifest, flows);
     const addressing = addressingFor(mechanics, control?.id);
     // A control the probe PROVED cannot hold a value is an addressed structural defect: the
@@ -279,6 +292,7 @@ export function verificationDefects({
     // matching several visible elements can be the app naming two controls alike or the platform
     // addressing them too loosely. It stays unknown rather than being charged to the app.
     const ambiguous = addressing?.reason === "ambiguous_identity";
+    const inconclusiveAddressing = minimal && ambiguous;
     const surfaceIntegration = mountedSurfaceFor(diagnostic.journeyId);
     const causalSurfaceModules = surfaceIntegration ? unique([
       ...surfaceIntegration.routeFiles,
@@ -291,9 +305,11 @@ export function verificationDefects({
         : defectClass === DEFECT_CLASS.DURABILITY ? "durable_outcome_missing"
         : "contracted_outcome_missing",
       defectClass: proven ? DEFECT_CLASS.INTERACTION : defectClass,
-      owner: ambiguous ? DEFECT_OWNER.UNKNOWN : DEFECT_OWNER.APP,
+      owner: platformInconclusive || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
+        : (ambiguous ? DEFECT_OWNER.UNKNOWN : DEFECT_OWNER.APP),
       uncertain: ambiguous || undefined,
-      tier: proven ? REPAIR_TIER.CORRECTION : REPAIR_TIER.REPAIR,
+      tier: platformInconclusive || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE
+        : (proven ? REPAIR_TIER.CORRECTION : REPAIR_TIER.REPAIR),
       journeyId: diagnostic.journeyId, stepIndex: diagnostic.stepIndex,
       action: diagnostic.userAction, control,
       modules: unique([...causalSurfaceModules, ...modulesFor(diagnostic, journey)]),
@@ -336,8 +352,9 @@ export function verificationDefects({
     if (journey.setup?.ok === false) continue; // already reported as a prerequisite defect
     defects.push({
       code: "journey_failed_without_step_evidence",
-      defectClass: DEFECT_CLASS.UNKNOWN, owner: DEFECT_OWNER.UNKNOWN, uncertain: true,
-      tier: REPAIR_TIER.REPAIR,
+      defectClass: minimal ? DEFECT_CLASS.PLATFORM : DEFECT_CLASS.UNKNOWN,
+      owner: minimal ? DEFECT_OWNER.PLATFORM : DEFECT_OWNER.UNKNOWN, uncertain: true,
+      tier: minimal ? REPAIR_TIER.NONE : REPAIR_TIER.REPAIR,
       journeyId: journey.id, stepIndex: null, action: null, control: null,
       modules: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])].filter(generatedSource)),
       failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
@@ -351,6 +368,7 @@ export function verificationDefects({
   // ── mechanics failures no failing step accounted for ────────────────────────────────────────
   // A dead control the journeys never reached is still a proven, addressed defect.
   for (const failure of mechanics?.failures || []) {
+    if (minimal) continue;
     if (!failure.id || coveredControls.has(failure.id)) continue;
     const mapped = manifest?.mapping?.[failure.id] || null;
     const flows = (interactionContract?.flows || []).filter((flow) => flow.control?.machineId === failure.id);
