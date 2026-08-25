@@ -154,6 +154,7 @@ test("C7 cutover leaves no shell fallback and rejects non-V2 worker payloads", a
 test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation", async () => {
   const unit = await readFile(new URL("../../build-worker/thrallo-build-worker.service", import.meta.url), "utf8");
   const runner = await readFile(new URL("../../build-worker/sandboxRunner.mjs", import.meta.url), "utf8");
+  const proof = await readFile(new URL("../../ops/prove-build-worker-sandbox.mjs", import.meta.url), "utf8");
   assert.match(unit, /MemoryMax=3G/); assert.match(unit, /CPUQuota=250%/); assert.match(unit, /KillMode=control-group/);
   assert.match(runner, /--memory/); assert.match(runner, /--cpus/); assert.match(runner, /--pids-limit/);
   assert.match(runner, /--read-only/); assert.match(runner, /--cap-drop/); assert.match(runner, /no-new-privileges/);
@@ -161,6 +162,8 @@ test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation
   assert.match(runner, /thrallo\.durable-job-id/); assert.match(runner, /removeSandboxContainer\(name\)/);
   assert.match(runner, /reconcileOrphanSandboxes/);
   assert.match(runner, /jobRoot.*artifactRoot/);
+  assert.match(proof, /memoryMb: 384, pids: 96/,
+    "the browser proof retains its memory guard and measured Chromium task headroom");
 });
 
 test("a pre-dispatch platform failure is not reported to the customer as a worker crash", async () => {

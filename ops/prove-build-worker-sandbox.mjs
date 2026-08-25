@@ -14,7 +14,10 @@ const image = process.env.THRALLO_BUILD_SANDBOX_IMAGE || "thrallo-build-sandbox:
 const artifactRoot = path.resolve(process.env.THRALLO_BUILD_ARTIFACT_ROOT || "/tmp/thrallo-c7-sandbox-proof");
 if (!artifactRoot.startsWith("/tmp/thrallo-c7-")) throw new Error("sandbox proof requires an isolated /tmp/thrallo-c7-* root");
 
-const limits = { wallSeconds: 30, cpu: 0.5, memoryMb: 384, pids: 64, outputBytes: 1024 * 1024 };
+// Chromium currently peaks at 69 tasks during this proof. The historical cap of 64 caused
+// nondeterministic clone/thread denial (pids.events:max > 0) before the page could open. Keep a
+// bounded 39% margin here; production browser jobs remain independently capped by worker policy.
+const limits = { wallSeconds: 30, cpu: 0.5, memoryMb: 384, pids: 96, outputBytes: 1024 * 1024 };
 const job = (id, jobType, payload, resourceLimits = limits) => ({
   id, owner: "proof-owner", project_id: "proof-project", attempts: 1,
   job_type: jobType, payload, resource_limits: resourceLimits,
@@ -41,7 +44,7 @@ try {
   const inspected = JSON.parse(docker("inspect", "thrallo-job-inspect-limits"))[0];
   assert.equal(inspected.HostConfig.Memory, 384 * 1024 * 1024);
   assert.equal(inspected.HostConfig.NanoCpus, 500_000_000);
-  assert.equal(inspected.HostConfig.PidsLimit, 64);
+  assert.equal(inspected.HostConfig.PidsLimit, 96);
   assert.equal(inspected.HostConfig.ReadonlyRootfs, true);
   assert.equal(inspected.HostConfig.NetworkMode, "none");
   assert.ok(inspected.HostConfig.SecurityOpt.includes("no-new-privileges"));
