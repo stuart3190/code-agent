@@ -94,8 +94,12 @@ function interactivity(opening) {
  * conservative — anything it cannot follow becomes UNRESOLVED, which never fails a build.
  */
 function bindingOf(opening, fileSource, raw) {
-  const literal = attrNode(opening, "data-thrallo-control") || attrNode(opening, "data-thrallo-action");
-  if (literal) return { binding: BINDING.LITERAL, evidence: "attribute", machineId: text(literal.value) || null };
+  const literalControl = attrNode(opening, "data-thrallo-control");
+  const literalAction = attrNode(opening, "data-thrallo-action");
+  const literal = literalAction || literalControl;
+  if (literal) return { binding: BINDING.LITERAL, evidence: "attribute",
+    attribute: literalAction ? "data-thrallo-action" : "data-thrallo-control",
+    machineId: text(literal.value) || null };
 
   const spreads = (opening.attributes || []).filter((row) => row?.type === "JSXSpreadAttribute");
   if (!spreads.length) return { binding: BINDING.UNBOUND, evidence: null };
@@ -115,9 +119,13 @@ function bindingOf(opening, fileSource, raw) {
     const boundName = factory === "useFlowAdvance" ? ADVANCE_ACTION_NAME
       : factory ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
       : null;
+    const actionName = factory === "useSemanticSelection"
+      ? (declaration.match(/actionName\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
+      : null;
 
     if (BINDING_FACTORIES.test(declaration)) {
-      return { binding: BINDING.BINDING, evidence: expression.slice(0, 60), boundName };
+      return { binding: BINDING.BINDING, evidence: expression.slice(0, 60), boundName,
+        actionName, factory };
     }
     if (BINDING_PROPS.test(expression)) {
       return { binding: BINDING.UNRESOLVED, evidence: expression.slice(0, 60) };
@@ -210,19 +218,22 @@ function walkFile(file, source, elements) {
         elements.push({
           file, line: node.loc?.start?.line || null, element: `<${jsxName(opening)}>`,
           via: "container", binding: resolved.binding, bindingEvidence: resolved.evidence,
-          boundName: resolved.boundName || null, machineId: resolved.machineId || null,
+          boundName: resolved.boundName || null, actionName: resolved.actionName || null,
+          factory: resolved.factory || null, attribute: resolved.attribute || null,
+          machineId: resolved.machineId || null,
           identities, inheritedIdentities: inheritedFor.get(node) || [], coversOnly: true,
         });
       }
       return;
     }
-    const { binding, evidence, boundName = null, machineId = null } = bindingOf(opening, raw, raw);
+    const { binding, evidence, boundName = null, actionName = null, factory = null,
+      attribute = null, machineId = null } = bindingOf(opening, raw, raw);
     elements.push({
       file, line: node.loc?.start?.line || null,
       element: `<${jsxName(opening)}${interactive.role ? ` role="${interactive.role}"` : ""}>`,
       via: interactive.via, binding, bindingEvidence: evidence,
       // What the BINDING says this control is — the authoritative link when one exists.
-      boundName, machineId,
+      boundName, actionName, factory, attribute, machineId,
       identities: identitiesOf(node, opening, raw, labels),
       // …plus whatever names the container it sits in, so a grouped chooser is identifiable.
       inheritedIdentities: inheritedFor.get(node) || [],
@@ -279,8 +290,20 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
         spread: flow.kind === "selection" ? "groupProps + optionProps(option)" : "inputProps",
       };
     }
+    if (flow.kind === "flow_start" && flow.control?.logicalField) {
+      const actionName = String(flow.control.accessibleName || flow.control.purpose || name);
+      return {
+        helper: "useSemanticSelection",
+        name,
+        actionName,
+        attribute: "data-thrallo-control + data-thrallo-action",
+        machineId: flow.control?.machineId || actionIdFor(actionName),
+        spread: "groupProps + optionProps(option)",
+      };
+    }
     const helper = flow.kind === "flow_advance" ? "useFlowAdvance" : "useSemanticAction";
-    const bindingName = flow.kind === "flow_advance" ? ADVANCE_ACTION_NAME : name;
+    const bindingName = flow.kind === "flow_advance" ? ADVANCE_ACTION_NAME
+      : String(flow.control?.accessibleName || flow.control?.purpose || name);
     return {
       helper,
       name: bindingName,
@@ -302,7 +325,10 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     //  3. only for UNBOUND elements: the text on it matches the control's semantic key
     // The first two are exact. The third is the fragile one, and it is the only one used to
     // condemn anything — which is why the residual gap below is stated with every result.
+    const actionFlow = !["input", "selection"].includes(flow.kind);
+    const expectedActionName = String(flow.control?.accessibleName || flow.control?.purpose || key);
     const claims = (row) => {
+      if (row.actionName && actionFlow) return semanticKey(row.actionName) === semanticKey(expectedActionName);
       if (row.boundName) return semanticKey(row.boundName) === semanticKey(key);
       if (row.machineId) return [flow.control?.machineId, controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
         actionIdFor(flow.control.accessibleName || key)].includes(row.machineId);
@@ -316,7 +342,22 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     const matches = elements.filter(claims);
     for (const row of matches) claimed.add(row);
 
+    const compatibleBinding = (row) => {
+      if (row.binding === BINDING.UNBOUND) return false;
+      if (row.binding === BINDING.LITERAL) {
+        return row.attribute === (actionFlow ? "data-thrallo-action" : "data-thrallo-control")
+          && (!row.machineId || row.machineId === flow.control?.machineId);
+      }
+      if (flow.kind === "input") return row.factory === "useSemanticField";
+      if (flow.kind === "selection") return row.factory === "useSemanticSelection";
+      if (flow.kind === "flow_advance") return row.factory === "useFlowAdvance";
+      if (flow.kind === "flow_start" && row.factory === "useSemanticSelection") {
+        return semanticKey(row.actionName) === semanticKey(expectedActionName);
+      }
+      return row.factory === "useSemanticAction";
+    };
     const bound = matches.filter((row) => row.binding !== BINDING.UNBOUND);
+    const compatibleBound = matches.filter(compatibleBinding);
     const provenBound = matches.filter((row) => [BINDING.LITERAL, BINDING.BINDING].includes(row.binding));
     // A bound implementation on a later surface must not mask a second, hand-wired implementation
     // of the same contracted control. This is narrower than the general textual binding lint: the
@@ -328,6 +369,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
         .some((identity) => semanticKey(identity) === semanticKey(key)));
     const requiredBinding = requiredBindingFor(flow, key);
     coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length,
+      compatibleBound: compatibleBound.length,
       authoritativeSurface: Boolean(authoritative) });
 
     if (!matches.length && dynamicBindings.length) {
@@ -362,7 +404,20 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       });
       continue;
     }
-    if (provenBound.length && shadowedUnbound.length) {
+    if (bound.length && !compatibleBound.length) {
+      findings.push({
+        code: "contract_control_wrong_binding", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        elements: bound.filter((row) => !row.coversOnly).map((row) => ({
+          file: row.file, line: row.line, element: row.element, via: row.via,
+          factory: row.factory, boundName: row.boundName, actionName: row.actionName,
+          attribute: row.attribute, machineId: row.machineId,
+        })),
+        message: `the contracted ${flow.kind} control "${key}" is bound through an incompatible `
+          + `semantic primitive; apply ${requiredBinding.helper} with the declared machine identity`,
+      });
+    } else if (provenBound.length && shadowedUnbound.length) {
       findings.push({
         code: "contract_control_binding_conflict", fails: true, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,

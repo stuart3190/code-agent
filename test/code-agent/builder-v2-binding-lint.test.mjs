@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { BINDING, lintControlBindings } from "../../shell/server/lib/builderV2/bindingLint.mjs";
-import { controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
+import { actionIdFor, controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { composeCapabilityFoundation } from "../../shell/server/lib/builderV2/capabilityComposer.mjs";
@@ -194,6 +194,52 @@ test("useFlowAdvance cannot impersonate an arbitrary contracted action through i
   assert.equal(result.findings.some((row) => row.code === "contract_control_binding_conflict"), false);
   assert.equal(failing(result).some((row) => row.code === "contract_control_missing"), true,
     "the canonical advance identity was accepted as an unrelated action identity");
+});
+
+test("retained smoke shape — a selection identity cannot impersonate its flow-entry action", () => {
+  const actionName = "competition card enter button";
+  const flowEntryContract = { flows: [{
+    id: "submit-demo-entry:1:flow_start", kind: "flow_start", journeyId: "submit-demo-entry",
+    control: {
+      logicalField: "competitionId", accessibleName: actionName,
+      machineId: actionIdFor(actionName), roles: ["button", "link"], flowEntry: true,
+    },
+  }] };
+  const tree = { "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities/react.js";
+    export default function HomeScreen() {
+      const listing = useSemanticSelection({ name: "competition Id", value: "", onSelect() {} });
+      return <div {...listing.groupProps}>{["one", "two"].map((id) =>
+        <button key={id} aria-label="${actionName}" {...listing.optionProps(id)}>Enter</button>)}</div>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: flowEntryContract });
+  const wrong = failing(result).find((row) => row.code === "contract_control_wrong_binding");
+  assert.equal(wrong?.control, "competitionId", JSON.stringify(result.findings, null, 2));
+  assert.deepEqual(wrong.requiredBinding, {
+    helper: "useSemanticSelection", name: "competitionId", actionName,
+    attribute: "data-thrallo-control + data-thrallo-action",
+    machineId: actionIdFor(actionName), spread: "groupProps + optionProps(option)",
+  });
+});
+
+test("a selection-backed flow entry passes when it declares the independent action identity", () => {
+  const actionName = "competition card enter button";
+  const flowEntryContract = { flows: [{
+    id: "submit-demo-entry:1:flow_start", kind: "flow_start", journeyId: "submit-demo-entry",
+    control: {
+      logicalField: "competitionId", accessibleName: actionName,
+      machineId: actionIdFor(actionName), roles: ["button", "link"], flowEntry: true,
+    },
+  }] };
+  const tree = { "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities/react.js";
+    export default function HomeScreen() {
+      const listing = useSemanticSelection({ name: "competition Id", actionName: "${actionName}", value: "", onSelect() {} });
+      return <div {...listing.groupProps}>{["one", "two"].map((id) =>
+        <button key={id} {...listing.optionProps(id)}>Enter</button>)}</div>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: flowEntryContract });
+  assert.equal(failing(result).some((row) => row.code === "contract_control_wrong_binding"), false,
+    JSON.stringify(result.findings, null, 2));
+  assert.equal(result.coverage[0]?.compatibleBound > 0, true, JSON.stringify(result.coverage));
 });
 
 // ── the run #8 shape ───────────────────────────────────────────────────────────────────────────

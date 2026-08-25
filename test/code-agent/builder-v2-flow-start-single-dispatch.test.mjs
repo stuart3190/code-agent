@@ -39,7 +39,7 @@ const needsBrowser = { skip: playwrightAvailable ? false : "requires playwright"
  * @param {string} shape.decoy     a control whose name collides with the action's vocabulary
  * @param {string} shape.heading   copy proving the flow actually opened
  */
-const appFor = ({ entry, decoy, heading, persistentProbe = false }) => ({
+const appFor = ({ entry, decoy, heading, persistentProbe = false, selectionBackedEntry = false }) => ({
   "src/App.jsx": `import { useState } from "react";
 import { useSemanticSelection } from "./lib/capabilities/react.js";
 
@@ -48,9 +48,12 @@ export default function App() {
     ? `() => localStorage.getItem("mechanics-selected") === "yes"`
     : "false"});
   const [tier, setTier] = useState(null);
-  const choice = useSemanticSelection({ name: "tierId", value: tier, onSelect: (next) => {
+  const choice = useSemanticSelection({ name: "tierId", value: tier,
+    ${selectionBackedEntry ? `actionName: ${JSON.stringify(entry)},` : ""}
+    onSelect: (next) => {
     setTier(next);
-    ${persistentProbe ? `localStorage.setItem("mechanics-selected", "yes"); setStarted(true);` : ""}
+    ${persistentProbe ? `localStorage.setItem("mechanics-selected", "yes"); setStarted(true);`
+    : selectionBackedEntry ? "setStarted(true);" : ""}
   } });
   const tierChoices = <div {...choice.groupProps}>
     {["Bronze", "Silver"].map((t) => (
@@ -65,7 +68,8 @@ export default function App() {
   if (!started) return <main>
     <h1>Northwind</h1>
     <p>The Northwind headline and summary are shown.</p>
-    <div><button type="button" onClick={() => setStarted(true)}>${entry}</button></div>
+    ${selectionBackedEntry ? "{tierChoices}"
+    : `<div><button type="button" onClick={() => setStarted(true)}>${entry}</button></div>`}
     <div><a href="/elsewhere">${decoy}</a></div>
     ${persistentProbe ? "{tierChoices}" : ""}
   </main>;
@@ -115,6 +119,14 @@ const CASES = {
     contract: contractFor({ id: "start-configuration", action: "start configuration",
       target: "start configuration control",
       expect: "the available tiers and the current wizard step indicator are shown" }),
+  },
+  selectionBackedEntry: {
+    app: appFor({ entry: "competition card enter button", decoy: "Read competition rules",
+      heading: "The selected competition detail and current entry form are shown.",
+      selectionBackedEntry: true }),
+    contract: contractFor({ id: "submit-demo-entry", action: "open a sample competition",
+      target: "competition card enter button",
+      expect: "the selected competition detail and current entry form are shown" }),
   },
 };
 

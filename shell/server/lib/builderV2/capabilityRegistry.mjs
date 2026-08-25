@@ -236,7 +236,7 @@ export const REACT_BINDINGS = [
   "useCapabilityState(store, selector?) → live state via useSyncExternalStore(store.subscribe, store.getState)",
   "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
   "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps } with a guaranteed accessible name",
-  "useSemanticSelection({ name, value, onSelect }) → { groupProps, optionProps(option) }; keeps the native button role and reports selection via aria-pressed",
+  "useSemanticSelection({ name, value, onSelect, actionName? }) → { groupProps, optionProps(option) }; keeps the native button role, reports selection via aria-pressed, and actionName binds the same option as a contracted flow-entry action",
   "useSemanticAction({ name, label, onActivate }) → { buttonProps } for a contracted action; label freely",
   "useFlowAdvance({ label, onActivate, disabled }) → { buttonProps } for the control that moves a multi-step flow FORWARD; label freely",
   "useStatusRegion({ label }) → { statusProps } announcing a state transition",
@@ -261,7 +261,7 @@ const ASSEMBLY_PATTERNS = Object.freeze({
       "  <div {...choice.groupProps}>",
       "    {options.map((o) => <button key={o} {...choice.optionProps(o)}>{label(o)}</button>)}",
       "  </div>",
-      "  // optionProps supplies the accessible name and aria-pressed; the element stays a button. Style it however you like.",
+      '  // optionProps supplies name/aria-pressed and keeps a button; when the choice is also a contracted flow entry, pass actionName: "<contract control accessibleName>" to carry both identities.',
     ],
   },
   flowAdvance: {

@@ -515,11 +515,13 @@ export function validateModuleConformance(tree, {
     authoritativeFiles: scaffoldActive ? reachableSourcePaths(tree) : null,
   });
   // Keep the broad binding lint advisory: static inference cannot follow every correct wrapper or
-  // dynamic binding. The one enforceable subset is a mixed implementation where one exact
-  // contracted identity is hand-wired while another copy is demonstrably machine-bound. That is
-  // the production shape where a later-route binding masked the unaddressable entry control.
+  // dynamic binding. The enforceable subsets are a mixed implementation where one exact
+  // contracted identity is hand-wired while another copy is demonstrably machine-bound, and a
+  // literal/helper binding whose primitive is provably different from the contract. These are
+  // exact source facts, not behavioural guesses.
   for (const conflict of (controlBindings.findings || [])
-    .filter((finding) => finding.code === "contract_control_binding_conflict")) {
+    .filter((finding) => ["contract_control_binding_conflict", "contract_control_wrong_binding"]
+      .includes(finding.code))) {
     for (const element of conflict.elements || []) {
       add({ ...conflict, module: element.file, file: element.file, line: element.line,
         journeys: [conflict.journeyId].filter(Boolean) });

@@ -41,6 +41,7 @@ import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
 import { composeCapabilityFoundation } from "./capabilityComposer.mjs";
 import { composeScaffoldFoundation, validateScaffoldComposition } from "./scaffoldComposer.mjs";
+import { transformWizardEntryState, wizardEntryTransformSummary } from "../appBuild/wizardEntryTransform.mjs";
 
 /**
  * Keep the complete contract needed to reconstruct an isolated journey separate from the
@@ -588,6 +589,16 @@ export function createOrchestrator({
             + "lands and one that does not.",
         });
       }
+      let deterministicEntryChanges = [];
+      if (!applied.modularityFailed && applied.tree) {
+        const alignedEntry = transformWizardEntryState(applied.tree, { contract });
+        if (alignedEntry.changes.length) {
+          applied.tree = alignedEntry.tree;
+          deterministicEntryChanges = alignedEntry.changes;
+          log(`${step}: deterministic flow-entry identity — ${wizardEntryTransformSummary(alignedEntry)}`);
+        }
+      }
+      const deterministicEntryFiles = new Set(deterministicEntryChanges.map((change) => change.file));
       const evidenceTree = applied.modularityFailed && applied.provisionalTree
         ? applied.provisionalTree : applied.tree;
       const filesChanged = [...new Set([
@@ -675,7 +686,8 @@ export function createOrchestrator({
         }
       }
       if (activeScope) {
-        const outsideScope = filesChanged.filter((path) => !(activeScope.allowedFiles || []).includes(path)
+        const outsideScope = filesChanged.filter((path) => !deterministicEntryFiles.has(path)
+          && !(activeScope.allowedFiles || []).includes(path)
           && !(activeScope.allowedPrefixes || []).some((prefix) => path.startsWith(prefix)));
         if (outsideScope.length) {
           // A validator-owned correction that reached wider than its boundary drops back to a
@@ -895,7 +907,10 @@ export function createOrchestrator({
         ? gate.layers.d0d2.failure.findings || [] : [];
       const protectedScaffoldFiles = new Set(scoped.scaffoldCompositionPlan?.protectedFiles || []);
       await events.telemetry?.({ owner, projectId, buildId, kind: "scaffold_generation_surface", details: {
-        step, attempt, modelGeneratedFiles: filesChanged.filter((path) => !protectedScaffoldFiles.has(path)),
+        step, attempt,
+        modelGeneratedFiles: filesChanged.filter((path) => !protectedScaffoldFiles.has(path)
+          && !deterministicEntryFiles.has(path)),
+        deterministicIntegrationFiles: [...deterministicEntryFiles].sort(),
         customExtensionFiles: filesChanged.filter((path) => (scoped.scaffoldGraph?.extensions || [])
           .some((extension) => extension.module === path)),
         preBrowserStaticFailures: staticFindings.length,

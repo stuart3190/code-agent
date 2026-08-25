@@ -39,6 +39,34 @@ export function Flow() {
 }`,
 });
 
+const selectionEntryContract = {
+  interactionContract: { flows: [{
+    id: "submit-demo-entry:1:flow_start", journeyId: "submit-demo-entry", stepIndex: 0,
+    kind: "flow_start", writes: ["submit-demo-entry.flowStarted", "submit-demo-entry.draft.competitionId"],
+    control: {
+      logicalField: "competitionId", purpose: "competitionId",
+      accessibleName: "competition card enter button", machineId: "act_1277e8f4",
+    },
+    stateOwner: "src/components/browse-competitions/BrowseCompetitionsFlow.jsx",
+    responsibleModules: ["src/components/browse-competitions/BrowseCompetitionsFlow.jsx"],
+  }] },
+  scaffoldGraph: { journeyOwnership: [{
+    journeyId: "submit-demo-entry", mountedModule: "src/screens/scaffold/HomeScreen.jsx",
+  }] },
+};
+
+const selectionEntryTree = () => ({
+  "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities";
+export default function HomeScreen() {
+  const listingSelection = useSemanticSelection({
+    name: "competition Id", value: "", onSelect: (competitionId) => openCompetition(competitionId),
+  });
+  return <main><div {...listingSelection.groupProps}>{["one", "two"].map((competitionId) =>
+    <button key={competitionId} aria-label="competition card enter button"
+      {...listingSelection.optionProps(competitionId)}>Enter</button>)}</div></main>;
+}`,
+});
+
 const treeFor = ({ first = "intro", impossible = "home", name = "Start booking control" } = {}) => ({
   "src/data/wizard.js": `import { makeWizardMachine } from "../lib/capabilities";
 export const STEPS = [{ id: "${first}", label: "Start" }, { id: "details", label: "Details" }];
@@ -131,6 +159,30 @@ test("causal latching declines ambiguous components with multiple capability sta
 test("causal latching declines a contract without a statically matched first outcome", () => {
   const tree = causalTreeFor();
   const result = transformWizardEntryState(tree, { contract: causalContractFor({ field: "unknownField" }) });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("retained smoke shape — a selection-backed flow entry receives its exact action identity", () => {
+  const tree = selectionEntryTree();
+  const result = transformWizardEntryState(tree, { contract: selectionEntryContract });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["flow_entry_action_identity_bound"]);
+  assert.match(result.tree["src/screens/scaffold/HomeScreen.jsx"],
+    /actionName: "competition card enter button"/);
+  assert.match(result.tree["src/screens/scaffold/HomeScreen.jsx"],
+    /listingSelection\.optionProps\(competitionId\)/,
+    "the existing state-producing handler was replaced instead of annotated");
+
+  const repeated = transformWizardEntryState(result.tree, { contract: selectionEntryContract });
+  assert.equal(repeated.changes.length, 0, "the flow-entry identity transform is not idempotent");
+  assert.strictEqual(repeated.tree, result.tree);
+});
+
+test("selection-backed flow-entry identity normalization declines ambiguous owners", () => {
+  const tree = selectionEntryTree();
+  tree["src/components/browse-competitions/BrowseCompetitionsFlow.jsx"] =
+    tree["src/screens/scaffold/HomeScreen.jsx"].replace("HomeScreen", "BrowseCompetitionsFlow");
+  const result = transformWizardEntryState(tree, { contract: selectionEntryContract });
   assert.equal(result.changes.length, 0);
   assert.strictEqual(result.tree, tree);
 });

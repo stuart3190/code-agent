@@ -176,7 +176,9 @@ export function useSemanticField({
  *   const slot = useSemanticSelection({ name: "slot", value: chosen, onSelect: setChosen });
  *   {slots.map((s) => <button key={s} {...slot.optionProps(s)} className="…">{s}</button>)}
  */
-export function useSemanticSelection({ name, value = null, onSelect = null, label = null } = {}) {
+export function useSemanticSelection({
+  name, value = null, onSelect = null, label = null, actionName = null,
+} = {}) {
   const groupName = String(name || "selection");
   const accessibleName = label || titled(groupName);
 
@@ -195,13 +197,18 @@ export function useSemanticSelection({ name, value = null, onSelect = null, labe
       // Every option of a group carries the GROUP's identity, so the group is addressable as one
       // thing however its options are labelled, ordered or re-rendered.
       "data-thrallo-control": controlId(groupName),
+      // A selection can also be the contracted action that enters a flow (for example, choosing
+      // one card from a catalogue opens its detail flow). Keep the value-selection identity and
+      // add the independently-derived action identity; funding, verification and repair can then
+      // address the live entry surface without asking generated code to duplicate its handler.
+      "data-thrallo-action": actionName ? actionId(actionName) : undefined,
       "data-thrallo-option": slug(optionValue),
       "aria-pressed": selected,
       "aria-label": text,
       "data-selected": selected ? "true" : "false",
       onClick: () => onSelect?.(optionValue),
     };
-  }, [groupName, value, onSelect]);
+  }, [groupName, value, onSelect, actionName]);
 
   return {
     // `group` keeps the set announced without changing what its children are.

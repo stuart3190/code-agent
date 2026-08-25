@@ -78,6 +78,10 @@ function normalizeControlName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function normalizeBindingName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function importedWizard(local, module, definitions) {
   const imported = module.imports.get(local);
   if (!imported) return null;
@@ -131,11 +135,14 @@ function flowStartBindings(module, wantedNames) {
     const call = node.init;
     if (!["CallExpression", "OptionalCallExpression"].includes(call?.type)
       || call.callee?.type !== "Identifier"
-      || !["useSemanticAction", "useFlowStart"].includes(call.callee.name)) return;
+      || !["useSemanticAction", "useFlowStart", "useSemanticSelection"].includes(call.callee.name)) return;
     const options = call.arguments?.[0];
-    const names = [literalString(objectProperty(options, "name")), literalString(objectProperty(options, "label"))]
+    const names = call.callee.name === "useSemanticSelection"
+      ? [literalString(objectProperty(options, "actionName"))]
+      : [literalString(objectProperty(options, "name")), literalString(objectProperty(options, "label"))];
+    const normalized = names
       .map(normalizeControlName).filter(Boolean);
-    if (names.some((name) => wantedNames.has(name))) bindings.add(node.id.name);
+    if (normalized.some((name) => wantedNames.has(name))) bindings.add(node.id.name);
   });
   return bindings;
 }
@@ -157,23 +164,30 @@ function semanticBindings(module, wantedNames) {
   return bindings;
 }
 
+function spreadBindingReference(argument) {
+  const member = ["CallExpression", "OptionalCallExpression"].includes(argument?.type)
+    ? argument.callee : argument;
+  if (!["MemberExpression", "OptionalMemberExpression"].includes(member?.type)
+    || member.object?.type !== "Identifier") return null;
+  return { binding: member.object.name, property: propertyName(member.property) };
+}
+
 function jsxElementMatchesBinding(node, bindings, allowedProps) {
   if (node?.type !== "JSXElement") return false;
-  return (node.openingElement?.attributes || []).some((attribute) => attribute.type === "JSXSpreadAttribute"
-    && ["MemberExpression", "OptionalMemberExpression"].includes(attribute.argument?.type)
-    && attribute.argument.object?.type === "Identifier"
-    && bindings.has(attribute.argument.object.name)
-    && allowedProps.has(propertyName(attribute.argument.property)));
+  return (node.openingElement?.attributes || []).some((attribute) => {
+    if (attribute.type !== "JSXSpreadAttribute") return false;
+    const reference = spreadBindingReference(attribute.argument);
+    return reference && bindings.has(reference.binding) && allowedProps.has(reference.property);
+  });
 }
 
 function jsxElementMatchesFlowStart(node, bindings, wantedNames) {
   if (node?.type !== "JSXElement") return false;
   return (node.openingElement?.attributes || []).some((attribute) => {
-    if (attribute.type === "JSXSpreadAttribute"
-      && ["MemberExpression", "OptionalMemberExpression"].includes(attribute.argument?.type)
-      && attribute.argument.object?.type === "Identifier"
-      && bindings.has(attribute.argument.object.name)
-      && ["buttonProps", "linkProps", "actionProps"].includes(propertyName(attribute.argument.property))) {
+    const reference = attribute.type === "JSXSpreadAttribute"
+      ? spreadBindingReference(attribute.argument) : null;
+    if (reference && bindings.has(reference.binding)
+      && ["buttonProps", "linkProps", "actionProps", "optionProps"].includes(reference.property)) {
       return true;
     }
     if (attribute.type !== "JSXAttribute" || attribute.name?.name !== "aria-label") return false;
@@ -245,16 +259,81 @@ function contractEntrySpecs(contract) {
   return specs;
 }
 
+function contractFlowEntryIdentitySpecs(contract) {
+  const mountedByJourney = new Map((contract?.scaffoldGraph?.journeyOwnership || [])
+    .map((row) => [row.journeyId, row.mountedModule]));
+  return (contract?.interactionContract?.flows || []).filter((flow) => flow?.kind === "flow_start")
+    .map((flow) => {
+      const actionName = String(flow.control?.accessibleName || "").trim();
+      const fieldNames = new Set([flow.control?.logicalField, flow.control?.purpose]
+        .map(normalizeBindingName).filter(Boolean));
+      const actionNames = new Set([actionName, ...(flow.control?.accessibleNames || [])]
+        .map(normalizeControlName).filter(Boolean));
+      const allowedFiles = new Set([mountedByJourney.get(flow.journeyId), flow.stateOwner,
+        flow.control?.stateOwner, ...(flow.responsibleModules || [])].filter(Boolean));
+      return { journeyId: flow.journeyId, actionName, actionNames, fieldNames, allowedFiles };
+    })
+    .filter((spec) => spec.actionName && spec.actionNames.size && spec.fieldNames.size);
+}
+
+function flowEntryIdentityCandidate(module, spec) {
+  if (spec.allowedFiles.size && !spec.allowedFiles.has(module.file)) return null;
+  const candidates = [];
+  walk(module.ast, (node) => {
+    if (node.type !== "VariableDeclarator" || node.id?.type !== "Identifier") return;
+    const call = node.init;
+    if (!["CallExpression", "OptionalCallExpression"].includes(call?.type)
+      || call.callee?.type !== "Identifier" || call.callee.name !== "useSemanticSelection") return;
+    const options = call.arguments?.[0];
+    if (options?.type !== "ObjectExpression") return;
+    const boundName = normalizeBindingName(literalString(objectProperty(options, "name")));
+    if (!spec.fieldNames.has(boundName)) return;
+    let drivesAnOption = false;
+    walk(module.ast, (candidate) => {
+      if (drivesAnOption || candidate.type !== "JSXSpreadAttribute") return;
+      const reference = spreadBindingReference(candidate.argument);
+      if (reference?.binding === node.id.name && reference.property === "optionProps") drivesAnOption = true;
+    });
+    if (drivesAnOption) candidates.push({ declaration: node, options });
+  });
+  if (candidates.length !== 1) return null;
+  const [{ options }] = candidates;
+  const existing = objectProperty(options, "actionName");
+  if (existing) {
+    const current = literalString(existing);
+    if (current === spec.actionName) return { alreadyCorrect: true };
+    if (current === null) return null;
+    return {
+      start: existing.start, end: existing.end, replacement: JSON.stringify(spec.actionName),
+      change: {
+        code: "flow_entry_action_identity_aligned", file: module.file, journeyId: spec.journeyId,
+        actionName: spec.actionName,
+        message: `${module.file}: aligned the selection-backed flow-entry action identity`,
+      },
+    };
+  }
+  const beforeClose = module.source.slice(options.start, options.end - 1).trimEnd();
+  const comma = !(options.properties || []).length ? "" : beforeClose.endsWith(",") ? " " : ", ";
+  return {
+    start: options.end - 1, end: options.end - 1,
+    replacement: `${comma}actionName: ${JSON.stringify(spec.actionName)}`,
+    change: {
+      code: "flow_entry_action_identity_bound", file: module.file, journeyId: spec.journeyId,
+      actionName: spec.actionName,
+      message: `${module.file}: bound the existing selection control as the contracted flow-entry action`,
+    },
+  };
+}
+
 function jsxContainsFlowStart(node, bindings, wantedNames) {
   let found = false;
   walk(node, (child) => {
     if (found || child.type !== "JSXOpeningElement") return;
     for (const attribute of child.attributes || []) {
-      if (attribute.type === "JSXSpreadAttribute"
-        && ["MemberExpression", "OptionalMemberExpression"].includes(attribute.argument?.type)
-        && attribute.argument.object?.type === "Identifier"
-        && bindings.has(attribute.argument.object.name)
-        && ["buttonProps", "linkProps", "actionProps"].includes(propertyName(attribute.argument.property))) {
+      const reference = attribute.type === "JSXSpreadAttribute"
+        ? spreadBindingReference(attribute.argument) : null;
+      if (reference && bindings.has(reference.binding)
+        && ["buttonProps", "linkProps", "actionProps", "optionProps"].includes(reference.property)) {
         found = true;
         return;
       }
@@ -545,6 +624,27 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
   }
 
   const editsByFile = new Map();
+
+  // A selectable card/list item can also be the action that enters a contracted flow. The
+  // selection binding already owns the correct state transition; deterministically add the
+  // contract's independent action identity instead of asking a repair model to duplicate or
+  // replace that handler. Only one reachable/owned literal binding is eligible, so ambiguous or
+  // dynamic implementations remain untouched for the ordinary correction path.
+  for (const spec of contractFlowEntryIdentitySpecs(contract)) {
+    const alreadyBound = [...modules.values()].some((module) => (
+      flowStartBindings(module, spec.actionNames).size > 0
+    ));
+    if (alreadyBound) continue;
+    const candidates = [...modules.values()].map((module) => ({
+      module, edit: flowEntryIdentityCandidate(module, spec),
+    })).filter((row) => row.edit && !row.edit.alreadyCorrect);
+    if (candidates.length !== 1) continue;
+    const [{ module, edit }] = candidates;
+    const edits = editsByFile.get(module.file) || [];
+    edits.push(edit);
+    editsByFile.set(module.file, edits);
+  }
+
   for (const module of modules.values()) {
     const stateVariables = new Map();
     for (const [name, expression] of module.declarations) {
@@ -613,7 +713,12 @@ export function transformWizardEntryState(tree, { contract = null } = {}) {
 }
 
 export function wizardEntryTransformSummary({ changes = [] } = {}) {
-  return changes.map((change) => change.code === "wizard_entry_state_aligned"
-    ? `${change.file} ${change.from} -> ${change.to}`
-    : `${change.file} flow entry latched`).join("; ");
+  return changes.map((change) => {
+    if (change.code === "wizard_entry_state_aligned") return `${change.file} ${change.from} -> ${change.to}`;
+    if (change.code === "flow_entry_action_identity_bound"
+      || change.code === "flow_entry_action_identity_aligned") {
+      return `${change.file} flow-entry action identity ${JSON.stringify(change.actionName)}`;
+    }
+    return `${change.file} flow entry latched`;
+  }).join("; ");
 }
