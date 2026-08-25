@@ -152,6 +152,38 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
     });
 
+    await t.test("repeated collection entries drive one stable flow-entry candidate", async () => {
+      const entry = {
+        ...control("competitionId", "featured-card", ["button", "link"]),
+        accessibleName: "featured competition card",
+        accessibleNames: ["featured competition card"],
+        flowEntry: true,
+      };
+      const result = await run(`<main>
+        <button aria-label="featured competition card"
+          onclick="document.getElementById('out').textContent='Competition detail prize title ticket price Enter Now'">First competition</button>
+        <button aria-label="featured competition card"
+          onclick="document.getElementById('out').textContent='Competition detail prize title ticket price Enter Now'">Second competition</button>
+        <p id="out"></p></main>`,
+      { action: "open a featured competition detail",
+        expect: "competition detail prize title ticket price Enter Now" },
+      [{ kind: "flow_start", valueWritten: "competitionId", control: entry }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
+    });
+
+    await t.test("repeated ordinary commit actions remain inconclusive", async () => {
+      const action = control("save project", "missing-save-identity", ["button"]);
+      const result = await run(`<main>
+        <button aria-label="save project">Save one</button>
+        <button aria-label="save project">Save two</button>
+        <p id="out"></p></main>`,
+      { action: "click save project", expect: "project saved result visible" },
+      [{ kind: "action", control: action }]);
+      assert.equal(result.journeys[0].classification,
+        VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE, JSON.stringify(result.journeys));
+    });
+
     await t.test("an unlocatable control is platform-inconclusive and cannot request repair", async () => {
       const action = control("save project", "missing-action", ["button"]);
       const contract = contractFor({ action: "click save project", expect: "project saved result visible" },

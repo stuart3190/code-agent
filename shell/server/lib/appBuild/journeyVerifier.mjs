@@ -965,22 +965,28 @@ async function waitForAutoAdvanceEvidence(page, nextControl, expect, textBefore,
 async function activateContractedControl(page, control, {
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
   evidence = null,
+  allowEquivalentCandidates = false,
 } = {}) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
-  const uniqueVisible = async (locator) => {
+  const reliableVisible = async (locator) => {
     const count = Math.min(await locator.count().catch(() => 0), 4);
     const visible = [];
     for (let index = 0; index < count; index += 1) {
       const candidate = locator.nth(index);
       if (await candidate.isVisible().catch(() => false)) visible.push(candidate);
     }
-    return visible.length === 1 ? visible[0] : null;
+    if (visible.length === 1) return visible[0];
+    if (allowEquivalentCandidates && visible.length > 1) {
+      if (evidence) evidence.equivalentCandidates = visible.length;
+      return visible[0];
+    }
+    return null;
   };
   // The contract's own opaque identity, when the app emitted one: no prose, no aliasing, and
   // immune to the label being renamed, translated or replaced by an icon.
   if (control?.machineId) {
     const identityLocator = page.locator(`[data-thrallo-action="${control.machineId}"]`);
-    const byIdentity = minimal ? await uniqueVisible(identityLocator) : identityLocator.first();
+    const byIdentity = minimal ? await reliableVisible(identityLocator) : identityLocator.first();
     if (byIdentity && await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
       if (await byIdentity.isDisabled().catch(() => true)) {
         if (evidence) evidence.reason = "disabled";
@@ -1008,7 +1014,7 @@ async function activateContractedControl(page, control, {
   for (const alias of aliases) {
     for (const role of DRIVEABLE_ACTION_ROLES) {
       const locator = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") });
-      const candidate = minimal ? await uniqueVisible(locator) : locator.first();
+      const candidate = minimal ? await reliableVisible(locator) : locator.first();
       if (!candidate) continue;
       if (!(await candidate.count().catch(() => 0))) continue;
       if (!(await candidate.isVisible().catch(() => false))) continue;
@@ -1741,12 +1747,20 @@ async function runStep(page, step, {
     && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
     const entry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control);
     const activation = {};
-    const activated = await activateContractedControl(page, entry.control, { verifierPolicy, evidence: activation });
+    // A flow-entry control can legitimately be repeated for a collection: product cards, search
+    // results, projects, catalogue items, and similar choices all offer the same contracted
+    // action more than once. In that case every exact match is an equivalent way to begin the
+    // journey, so drive the first visible match in stable DOM order and let the contracted result
+    // decide whether it worked. Keep ordinary commit/destructive actions uniqueness-strict.
+    const activated = await activateContractedControl(page, entry.control, {
+      verifierPolicy, evidence: activation, allowEquivalentCandidates: true,
+    });
     drove = drove || activated;
+    controlEvidence = { ...(controlEvidence || {}), activation };
     if (!activated) {
       return { drove, status: "undriveable",
         detail: `the contracted flow-entry control was not offered (${entry.control.accessibleName})`,
-        controlEvidence: { contractedField: entry.control.accessibleName, activation } };
+        controlEvidence: { ...controlEvidence, contractedField: entry.control.accessibleName } };
     }
     await page.waitForTimeout(700);
     if (isAuthenticationFlow(entry, step)) {
