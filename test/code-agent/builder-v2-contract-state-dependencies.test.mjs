@@ -48,6 +48,72 @@ test("journey state dependencies accept only prior producers or declared start a
   }]);
 });
 
+test("journey initial-state values authorize their exact draft and custom state fields", () => {
+  const verdict = validateInteractionContract({
+    version: 2,
+    scenarios: {
+      catalogue: {
+        startState: "fresh",
+        initialState: { pricingFilter: "", favouriteSoftwareIds: [] },
+      },
+    },
+    flows: [
+      stateFlow({ id: "catalogue:filter", journeyId: "catalogue", stepIndex: 0,
+        reads: ["catalogue.draft.pricingFilter"] }),
+      stateFlow({ id: "catalogue:favourites", journeyId: "catalogue", stepIndex: 1,
+        reads: ["catalogue.custom.favouriteSoftwareIds"] }),
+      stateFlow({ id: "catalogue:unknown", journeyId: "catalogue", stepIndex: 2,
+        reads: ["catalogue.custom.unlistedState"] }),
+    ],
+  });
+
+  assert.equal(verdict.ok, false);
+  assert.deepEqual(verdict.issues.map((issue) => issue.missingStatePath), [
+    "catalogue.custom.unlistedState",
+  ]);
+});
+
+test("a transient software catalogue search does not invent a durable lookup lifecycle", () => {
+  const contract = {
+    summary: "Search a local software catalogue", projectType: "tool",
+    auth: { required: false }, routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogSession", owned: false,
+      storage: "client-only transient state; not persisted to a backend",
+      fields: [
+        { name: "searchQuery", type: "string" },
+        { name: "favouriteSoftwareIds", type: "array" },
+      ] }],
+    operations: [{
+      id: "toggle-favourite", entity: "catalogSession", kind: "update",
+      journey: "browse-catalogue", responsibilities: [{
+        type: "functional", behavior: "toggle the selected catalogue item in the local list",
+        reads: ["searchQuery", "favouriteSoftwareIds"], writes: ["favouriteSoftwareIds"],
+      }],
+    }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{
+      id: "browse-catalogue", title: "Browse catalogue", priority: "primary", stage: "primary_journey",
+      initialState: { favouriteSoftwareIds: [] },
+      steps: [
+        { action: "open the software catalogue", target: "/", expect: "the catalogue is visible" },
+        { action: "search for software", target: "software search input", operates: ["searchQuery"],
+          expect: "matching software is visible" },
+        { action: "toggle a favourite", target: "favourite control", operates: ["toggle-favourite"],
+          reads: ["searchQuery", "favouriteSoftwareIds"], expect: "the local favourites list updates" },
+      ],
+    }],
+  };
+
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(spec.interactionContract.scenarios["browse-catalogue"].initialState,
+    { favouriteSoftwareIds: [] });
+  assert.ok(!spec.interactionContract.flows.some((flow) => (
+    [...(flow.reads || []), ...(flow.writes || [])].some((path) => String(path).includes(".durable."))
+  )));
+  assert.equal(spec.interactionContract.scenarios["browse-catalogue"].lifecycle, null);
+});
+
 test("structured journey step reads are rejected when the contract declares no earlier producer", () => {
   const contract = {
     summary: "Generic state dependency", projectType: "tool",

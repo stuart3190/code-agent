@@ -63,6 +63,17 @@ const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-
 const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
 const unique = (values) => [...new Set(values.filter(Boolean))];
 const list = (value) => (Array.isArray(value) ? value : []);
+const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
+const scopedStateValue = (value, journeyId) => {
+  const record = object(value);
+  return record && Object.hasOwn(record, journeyId) ? record[journeyId] : value;
+};
+const initialStateFields = (value, journeyId) => {
+  const record = object(scopedStateValue(value, journeyId));
+  return record ? Object.keys(record).filter((key) => key !== "paths") : [];
+};
+const initialStateFieldPaths = (value, journeyId) => initialStateFields(value, journeyId)
+  .flatMap((field) => [`${journeyId}.draft.${field}`, `${journeyId}.custom.${field}`]);
 const IDENTITY_FIELD = /(?:id|key|reference)$/i;
 const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
 
@@ -331,7 +342,8 @@ export function buildInteractionContract(contract, {
   modulePlan = deriveModulePlan(contract, contract?.journeys || []),
   bindings = bindCapabilities(contract),
 } = {}) {
-  const durableOwner = contractUsesDurablePersistence(contract) ? durableOperationOwner(bindings) : null;
+  const durableContract = contractUsesDurablePersistence(contract);
+  const durableOwner = durableContract ? durableOperationOwner(bindings) : null;
   const durableEntity = durableOwner?.capability
     ? ((contract?.entities || []).find((entity) => (bindings || [])
       .some((binding) => binding.name === durableOwner.capability
@@ -418,8 +430,12 @@ export function buildInteractionContract(contract, {
       const controlOperands = operandKind === "selection" ? valuePlan.controls : operands;
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
-      const ownershipKinds = localOperationOnly
-        ? kinds.map((kind) => kind === "mutation" ? "action" : kind) : kinds;
+      const durableKinds = new Set(["mutation", "cancellation", "lookup", "recovery"]);
+      const inferredLocalValueOnly = !durableContract && operands?.length
+        && declaredOperationObjects.length === 0;
+      const ownershipKinds = kinds
+        .filter((kind) => !(inferredLocalValueOnly && durableKinds.has(kind)))
+        .map((kind) => (!durableContract || localOperationOnly) && durableKinds.has(kind) ? "action" : kind);
       const effectiveKinds = operands && !ownershipKinds.includes(operandKind)
         ? [...ownershipKinds, operandKind] : ownershipKinds;
       for (const kind of effectiveKinds) {
@@ -466,6 +482,8 @@ export function buildInteractionContract(contract, {
               ...statePaths(contract?.durableState, journey.id),
               ...statePaths(contract?.externalState, journey.id),
               ...statePaths(contract?.capabilityOutputs, journey.id),
+              ...initialStateFieldPaths(contract?.initialState, journey.id),
+              ...initialStateFieldPaths(journey.initialState, journey.id),
               ...list(journey.initialState).map(String),
               ...list(journey.durableState).map(String),
               ...list(journey.externalState).map(String),
@@ -758,7 +776,7 @@ export function buildInteractionContract(contract, {
       && (own.some((flow) => flow.durableLifecycle && readsDurable(flow)) || declared === "existing");
     const basis = declared ? "declared-operation" : "data-flow";
     const declaredStartAuthority = {
-      initialState: list(journey.initialState),
+      initialState: object(journey.initialState) || list(journey.initialState),
       durableState: list(journey.durableState),
       externalState: list(journey.externalState),
       capabilityOutputs: list(journey.capabilityOutputs),
@@ -817,6 +835,8 @@ function journeyStartState(plan, journeyId) {
     ...statePaths(scenario.externalState, journeyId),
     ...statePaths(scenario.capabilityOutputs, journeyId),
     ...statePaths(scenario.availableState, journeyId),
+    ...initialStateFieldPaths(plan?.initialState, journeyId),
+    ...initialStateFieldPaths(scenario.initialState, journeyId),
   ]));
 }
 
