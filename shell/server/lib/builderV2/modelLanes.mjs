@@ -58,7 +58,8 @@ against a code index. Rules:
 - newFile creates files; never rewrite an existing file via newFile. Ops modify existing files:
   add_import adds an import line (imports are NOT symbols); replace_symbol swaps a component
   wholesale (never append a second default component); replace_exact safely replaces one unique
-  old source excerpt inside a large symbol; replaceFile is for index-opaque files.
+  old source excerpt inside a large symbol. For replace_exact, the symbol field is the COMPLETE literal
+  old code block, never a function/component name. replaceFile is for index-opaque files.
 - Every contracted route is ALREADY mounted to a model-owned screen listed in the scaffold graph.
   Implement those existing screen slots (normally src/screens/scaffold/*.jsx). Never edit src/App.jsx,
   create a competing router, or leave contracted work in an unmounted component.

@@ -519,9 +519,20 @@ export function createOrchestrator({
         || (repairScope ? "correction" : contractCorrectionScope ? "correction" : step);
       const correctionDispatch = dispatchStep === "correction";
       retryAsCorrection = false;
+      // A scoped finding consumes the first correction before any patch is attempted. If that
+      // patch is then rejected, a simple build has only one correction left. Use that final
+      // dispatch for the escalation the patch engine promises instead of spending it on the same
+      // fragile symbol surgery and discovering the repeated rejection only after the allowance is
+      // gone. The boundary remains the validator-named file and every normal gate still runs.
+      const finalCorrectionRegeneration = correctionDispatch
+        && corrections >= maxCandidateCorrections
+        ? [...new Set(rejectionHistory.map((row) => row.file)
+          .filter((file) => file && Object.hasOwn(working, file)))]
+        : [];
       const regenerateFiles = [...new Set([
         ...forcedRegenerateFiles,
         ...escalationPlan(rejectionHistory).regenerateFiles,
+        ...finalCorrectionRegeneration,
       ])];
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,

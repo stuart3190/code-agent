@@ -198,7 +198,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
     contractFn: contractFn || (async () => contract),
     patchesFn: async (ctx) => {
       patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
-        rejections: ctx.rejections.length, problems: ctx.problems });
+        rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles });
       // A pre-compile `correction` is a scoped re-emission of its originating step.
       const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
       return plan[stage](ctx);
@@ -490,6 +490,42 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
   assert.equal(result.state, "green");
   assert.equal(patchCalls.filter((c) => c.step === "core").length, 2);
   assert.equal(patchCalls[1].rejections, 1, "round 2 was briefed with the rejection");
+});
+
+test("the last candidate correction escalates a rejected file to complete replacement", async () => {
+  const unsafe = `import { db } from "../lib/backend/index.js";
+export const create = (draft) => db.entity("booking").create(draft);
+`;
+  const safe = `import { makeBookingSystem } from "../lib/capabilities/index.js";
+const booking = makeBookingSystem({ entity: "booking" });
+export const create = (draft) => booking.createBooking(draft);
+`;
+  let correctionRound = 0;
+  const { orchestrator, patchCalls } = harness({
+    patchPlan: {
+      core: () => [...CORE_PATCH, { newFile: "src/data/bookings.js", content: unsafe }],
+      correction: () => {
+        correctionRound += 1;
+        if (correctionRound === 1) {
+          return [{ file: "src/data/bookings.js", ops: [{
+            op: "replace_exact", symbol: "create", content: "export const create = (draft) => (",
+          }] }];
+        }
+        return [{ replaceFile: "src/data/bookings.js", content: safe }];
+      },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+
+  const result = await orchestrator.runBuild({
+    owner: "o", projectId: "proj-final-correction-escalation", request: "booking site",
+  });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  const corrections = patchCalls.filter((call) => call.step === "correction");
+  assert.equal(corrections.length, 2);
+  assert.deepEqual(corrections[1].regenerateFiles, ["src/data/bookings.js"],
+    "the final allowance is a whole-file escalation, not repeated fragile symbol surgery");
 });
 
 test("WP8 — stop rule: the same defect surviving a repair round blocks instead of burning attempts", async () => {

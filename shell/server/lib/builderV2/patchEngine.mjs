@@ -50,8 +50,8 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
                 required: ["op", "symbol", "content"],
                 properties: {
                   op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
-                  symbol: { type: ["string", "null"] },
-                  content: { type: ["string", "null"] },
+                  symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); for symbol operations, the indexed symbol name" },
+                  content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
                 },
               },
             },
@@ -351,6 +351,12 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         if (!expected) {
           reject(patch, op, "replace_exact: symbol must contain the non-empty exact old source excerpt",
             REJECTION.INVALID_PATCH_OPERATION);
+          continue;
+        }
+        if (index.symbols.some((symbol) => symbol.name === expected)) {
+          reject(patch, op, `replace_exact: "${expected}" is only an indexed symbol name, not an exact old `
+            + "source excerpt. Put the complete unique old code block in symbol, or use replace_symbol with "
+            + "the complete replacement declaration", REJECTION.INVALID_PATCH_OPERATION);
           continue;
         }
         const first = current.indexOf(expected);

@@ -268,6 +268,12 @@ test("replace_exact surgically patches one unique nested excerpt and fails close
     op: "replace_exact", symbol: expected, content: "if (!ready) return (",
   }] }]);
   assert.match(malformed.rejected[0].reason, /does not parse/);
+  const mistakenSymbolName = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: "Nested", content: "<section>Replacement fragment</section>",
+  }] }]);
+  assert.equal(mistakenSymbolName.rejected[0].code, "invalid_patch_operation");
+  assert.match(mistakenSymbolName.rejected[0].reason, /only an indexed symbol name/);
+  assert.match(mistakenSymbolName.rejected[0].reason, /complete unique old code block/);
   const unresolved = applyPatches(tree, [{ file: routePath, ops: [{
     op: "replace_exact", symbol: expected,
     content: "if (!ready) { setStep('workspace'); return <button onClick={start}>Start</button>; }",
@@ -283,4 +289,6 @@ test("replace_exact surgically patches one unique nested excerpt and fails close
   assert.equal(locallyBound.rejected.length, 0, JSON.stringify(locallyBound.rejected));
   assert.ok(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
     .properties.op.enum.includes("replace_exact"));
+  assert.match(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
+    .properties.symbol.description, /never only a function\/component name/);
 });
