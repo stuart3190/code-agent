@@ -394,12 +394,19 @@ export function buildInteractionContract(contract, {
       // not the platform's verb list happens to contain that word. `primitive` states it outright.
       const declaredPrimitive = step?.primitive === "selection" ? "selection"
         : ["textbox", "input"].includes(step?.primitive) ? "input" : null;
+      // A single operated identity with explicit produced values is an atomic selection even when
+      // prose intent is ambiguous. A retained contract targeted an "Enter Now" button; the target
+      // word "Enter" was read as typed input, so the interaction dropped the contract-declared
+      // ticket metadata and a later calculation appeared to read unproduced state. Structured
+      // `operates` + `produces` is the stronger authority here. An explicit textbox/input primitive
+      // still wins for contracts that intentionally derive values from typed input.
+      const explicitAtomicProduces = operands?.length === 1 && list(step?.produces).length > 0;
       const operandKind = operands
-        ? (declaredPrimitive || kinds.find((row) => ["selection", "input"].includes(row)) || "input")
+        ? (declaredPrimitive || (explicitAtomicProduces ? "selection" : null)
+          || kinds.find((row) => ["selection", "input"].includes(row)) || "input")
         : null;
-      const selectionPlan = operandKind === "selection"
-        ? atomicSelectionPlan(step, operands || []) : { controls: operands || [], produces: [] };
-      const controlOperands = operandKind === "selection" ? selectionPlan.controls : operands;
+      const valuePlan = atomicSelectionPlan(step, operands || []);
+      const controlOperands = operandKind === "selection" ? valuePlan.controls : operands;
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
       const ownershipKinds = localOperationOnly
@@ -434,8 +441,8 @@ export function buildInteractionContract(contract, {
             const path = `${journey.id}.draft.${field || `value${stepIndex + 1}`}`;
             writes.push(path);
             draftWrites.push(path);
-            if (kind === "selection" && field === selectionPlan.controls[0]) {
-              const produced = selectionPlan.produces.map((name) => `${journey.id}.draft.${name}`);
+            if (field === valuePlan.controls[0]) {
+              const produced = valuePlan.produces.map((name) => `${journey.id}.draft.${name}`);
               writes.push(...produced);
               draftWrites.push(...produced);
             }
@@ -503,8 +510,7 @@ export function buildInteractionContract(contract, {
             responsibleModules: owners,
             action: step.action,
             valueWritten: field || null,
-            producedValues: kind === "selection" && field === selectionPlan.controls[0]
-              ? [...selectionPlan.produces] : [],
+            producedValues: field === valuePlan.controls[0] ? [...valuePlan.produces] : [],
             reads: unique(reads),
             writes: unique(writes),
             dependsOn: unique(reads),

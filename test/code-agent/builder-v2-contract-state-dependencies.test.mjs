@@ -605,6 +605,31 @@ test("retained basic-site smoke aa154da3 keeps one chooser and never invents bac
   const submit = spec.interactionContract.flows.find((flow) => flow.operationId === "confirm-entry");
   assert.equal(submit.kind, "action");
   assert.deepEqual(submit.expectedStateTransition.persists, []);
+
+  // Retained production build 3407db0f: the selected item was expressed as one identity plus
+  // explicit metadata outputs, but "Enter Now" made the prose classifier call it typed input.
+  // Structured produces must remain authoritative without requiring the model to add a primitive.
+  const retainedActivation = structuredClone(contract);
+  retainedActivation.journeys[0].steps[2] = {
+    action: "open an entry panel from a competition card",
+    target: "Enter Now button",
+    operates: ["competitionId"],
+    produces: ["competitionTitle", "ticketPricePence"],
+    expect: "the selected competition entry panel is visible",
+  };
+  const retainedSpec = deriveBuildSpec(retainedActivation);
+  assert.equal(retainedSpec.verdict.ok, true, retainedSpec.verdict.problems.join("; "));
+  const retainedProducer = retainedSpec.interactionContract.flows.find((flow) => (
+    flow.journeyId === "enter-a-competition" && flow.stepIndex === 2
+      && flow.valueWritten === "competitionId"
+  ));
+  assert.equal(retainedProducer.kind, "selection");
+  assert.deepEqual(retainedProducer.producedValues, ["competitionTitle", "ticketPricePence"]);
+  for (const field of ["competitionId", "competitionTitle", "ticketPricePence"]) {
+    assert.ok(retainedProducer.writes.includes(`enter-a-competition.draft.${field}`));
+  }
+  assert.ok(retainedProducer.control.roles.includes("button"));
+  assert.ok(!retainedSpec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
 });
 
 test("retained smoke 8fe1191e composes every responsibility owned by one operation", () => {
