@@ -351,7 +351,7 @@ test("comma-separated exclusions and session-local catalogue selections remain t
     "No user accounts, team workspaces, or administrative backend.",
     "Let visitors browse software entries, filter them, open a detail view, select an item for comparison, and see confirmation.",
     "Persist comparison selections locally for the session if appropriate.",
-  ].join(" ");
+  ].join("\n");
   const source = contract({
     summary: "A searchable software catalogue with session-local comparison selections",
     entities: [{
@@ -413,7 +413,7 @@ test("comma-separated exclusions and session-local catalogue selections remain t
 });
 
 test("session-local qualification does not hide a separate durable backend requirement", () => {
-  const prompt = "Persist draft filters locally for the session, but save member records to the backend and restore them after reload.";
+  const prompt = "Persist draft filters locally for the session,\nbut save member records to the backend and restore them after reload.";
   assert.equal(requestUsesTransientSimulation(prompt), false);
   assert.equal(resolveBuildProfile({ prompt }).requirementSignals.includes("saved_data"), true);
 });

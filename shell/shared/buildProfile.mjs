@@ -114,8 +114,12 @@ function has(patterns, text) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function normalizeClauseWhitespace(value) {
+  return String(value || "").replace(/\r?\n(?!\s*\r?\n)/g, " ");
+}
+
 function withoutNegatedRequirements(value) {
-  return String(value || "")
+  return normalizeClauseWhitespace(value)
     // A comma-separated exclusion such as "no payments, accounts, or admin backend" previously
     // stopped at the first recognized capability (`accounts`) and left `backend` behind as a
     // positive durability signal. Consume the complete negated infrastructure clause, while an
@@ -150,14 +154,14 @@ const QUALIFIED_TRANSIENT_STORAGE = /\b(?:save|store|persist|retain|keep)(?:s|d|
 
 function withoutQualifiedTransientStorage(value) {
   QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
-  const stripped = String(value || "").replace(QUALIFIED_TRANSIENT_STORAGE, "");
+  const stripped = normalizeClauseWhitespace(value).replace(QUALIFIED_TRANSIENT_STORAGE, "");
   QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
   return stripped;
 }
 
 function hasQualifiedTransientStorage(value) {
   QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
-  const matched = QUALIFIED_TRANSIENT_STORAGE.test(String(value || ""));
+  const matched = QUALIFIED_TRANSIENT_STORAGE.test(normalizeClauseWhitespace(value));
   QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
   return matched;
 }
