@@ -305,8 +305,16 @@ export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, j
         if (target) {
           const inputObject = callObject(node.arguments?.[0], bindings);
           const contextObject = callObject(node.arguments?.[1], bindings);
-          const operationProperty = literalObjectProperty(contextObject, "operation");
-          const operation = literalValue(operationProperty?.value);
+          // `operation` is the canonical selector documented by the scaffold contract. Generated
+          // extensions have also long accepted the equally explicit `operationId` context key.
+          // Treating the runtime-supported alias as absent made a valid multi-operation extension
+          // impossible to correct: every repaired call still failed here as operation=null.
+          const operationSelectors = ["operation", "operationId"]
+            .map((name) => literalValue(literalObjectProperty(contextObject, name)?.value))
+            .filter((value) => value !== null && value !== undefined);
+          const selectorIdentities = unique(operationSelectors.map(normalizedSelector).filter(Boolean));
+          const conflictingSelectors = selectorIdentities.length > 1;
+          const operation = conflictingSelectors ? null : operationSelectors[0] ?? null;
           const normalizedOperation = normalizedSelector(operation);
           const contracts = (target.extension.operationContracts || []).filter((contract) => (
             normalizedOperation
@@ -320,7 +328,11 @@ export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, j
               journeyIds: target.extension.owningJourneys || [],
               message: !inputObject
                 ? `${file} must call ${target.exportName} with an explicit inspectable input object`
-                : `${file} calls ${target.exportName} with undeclared operation ${JSON.stringify(operation)}`,
+                : conflictingSelectors
+                  ? `${file} calls ${target.exportName} with conflicting literal context.operation and context.operationId selectors`
+                  : operation === null
+                    ? `${file} must call ${target.exportName} with a literal context.operation or context.operationId selector`
+                    : `${file} calls ${target.exportName} with undeclared operation ${JSON.stringify(operation)}`,
             });
           } else {
             const explicitKeys = new Set((inputObject.properties || []).map(objectPropertyName).filter(Boolean));

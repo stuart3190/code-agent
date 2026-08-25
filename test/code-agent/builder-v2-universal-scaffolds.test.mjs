@@ -331,6 +331,26 @@ export default function HomeScreen() {
     journeys: spec.journeys });
   assert.equal(gate.ok, true, JSON.stringify(gate.blocking));
   assert.equal(gate.checks.find((check) => check.name === "source_integrity").ok, true);
+
+  // Retained production shape: the generated runtime and both call sites use the explicit
+  // `operationId` context alias. This is just as inspectable as `operation` and must not be
+  // reported as operation=null before compilation.
+  tree[mounted] = tree[mounted]
+    .replace('{ operation: "calculate-entry-total" }',
+      '{ operationId: "calculate-entry-total", responsibilityId: "calculate-entry-total:functional-1" }')
+    .replace('{ operation: "submit-demo-entry" }',
+      '{ operationId: "submit-demo-entry", responsibilityId: "submit-demo-entry:functional-1" }');
+  gate = runStaticApplicationGate(tree, { contract: spec.contract, modulePlan: spec.modulePlan,
+    journeys: spec.journeys });
+  assert.equal(gate.ok, true, JSON.stringify(gate.blocking));
+
+  tree[mounted] = tree[mounted].replace('operationId: "calculate-entry-total",',
+    'operation: "submit-demo-entry", operationId: "calculate-entry-total",');
+  gate = runStaticApplicationGate(tree, { contract: spec.contract, modulePlan: spec.modulePlan,
+    journeys: spec.journeys });
+  const conflict = gate.blocking.find((finding) => finding.code === "custom_extension_invalid");
+  assert.ok(conflict);
+  assert.match(conflict.message, /conflicting literal context\.operation and context\.operationId/);
 });
 
 test("scaffold-aware repair targets mounted/config/custom seams and never protected internals", () => {

@@ -77,8 +77,10 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
-- Custom-extension calls must pass the selected operation's declared input keys explicitly. Do not
-  rely on spreading a domain object whose generic fields (for example id) may not match the extension contract.
+- Custom-extension calls must select the operation with a literal second-argument context such as
+  { operation: "<operationId>" } and pass that operation's declared input keys explicitly. The
+  explicit legacy key operationId is also supported. Do not rely on spreading a domain object whose
+  generic fields (for example id) may not match the extension contract.
 - Keep components small; compose unique screens and bounded helpers behind the mounted slots.
 - BUILD THE WHOLE ASSIGNED DISPATCH SCOPE IN THIS ONE BATCH. A normal core step is several patches and several
   kilobytes of new JSX: new files for every section/page, real copy, real form state, and

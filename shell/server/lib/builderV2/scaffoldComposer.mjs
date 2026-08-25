@@ -342,6 +342,8 @@ export function scaffoldCompositionBrief(graph, plan = scaffoldCompositionPlan(g
     "The protected router already mounts every screen above. Implement visual/domain composition inside",
     "those existing screen slots and only the declared custom extension files. Do not write App.jsx,",
     "the composed scaffold root, a competing router, or a free-form replacement application shell.",
+    "Select each custom-extension operation with a literal second-argument context such as",
+    "{ operation: \"<operationId>\" }. The explicit legacy key operationId is also supported.",
     "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",
     "object properties. An object spread is not proof that a differently named domain field satisfies the interface.",
   ].join("\n");
