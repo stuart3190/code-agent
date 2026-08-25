@@ -35,7 +35,7 @@ export default function HomeScreen() {
 }`,
 }];
 
-function harness(browserResult, contract = CONTRACT) {
+function harness(browserResult, contract = CONTRACT, events = {}) {
   const patchCalls = [];
   const snapshotStore = createSnapshotStore();
   const orchestrator = createOrchestrator({
@@ -48,13 +48,53 @@ function harness(browserResult, contract = CONTRACT) {
     assetService: { resolveIntents: async () => ({ resolved: [], providerCalls: 0 }) },
     snapshotStore,
     buildStore: memoryBuildStore(),
-    journeysFn: async () => browserResult,
+    journeysFn: async (context) => typeof browserResult === "function"
+      ? browserResult(context) : browserResult,
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
     maxJourneyRepairs: 1,
+    events,
   });
   return { orchestrator, patchCalls };
 }
+
+test("a platform block after repair durably closes the started strategy", async () => {
+  let verification = 0;
+  const started = [];
+  const finished = [];
+  const h = harness(() => {
+    verification += 1;
+    if (verification > 1) return {
+      unavailable: true, error: "preview transport unavailable", journeys: [],
+    };
+    return {
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      journeys: [{
+        ...CONTRACT.journeys[0], status: "fail",
+        steps: [{ ...CONTRACT.journeys[0].steps[0], status: "fail", drove: true,
+          classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+          detail: "the contracted result was not visible" }],
+      }],
+      blockingErrors: [], consoleErrors: [], failedRequests: [], mechanics: { failures: [] },
+    };
+  }, CONTRACT, {
+    repairStrategyStarted: async (row) => {
+      started.push(row);
+      return { id: `strategy-${started.length}`, ...row };
+    },
+    repairStrategyFinished: async (row) => { finished.push(row); },
+  });
+
+  const result = await h.orchestrator.runBuild({
+    owner: "owner", projectId: "project-platform-after-repair", request: "booking site",
+  });
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.equal(result.failureClassification, "verification_platform_defect", JSON.stringify(result));
+  assert.equal(started.length, 1);
+  assert.equal(finished.length, 1, "every started repair strategy must reach a terminal outcome");
+  assert.equal(finished[0].id, "strategy-1");
+  assert.equal(finished[0].outcome, "failed");
+});
 
 test("a derived platform-inconclusive journey defect stops before repair", async () => {
   const h = harness({

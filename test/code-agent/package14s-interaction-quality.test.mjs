@@ -40,16 +40,24 @@ const CONTRACT = {
 };
 
 const TREE = {
-  "src/App.jsx": `import { BookingFlow } from "./components/book/BookFlow";
-export default function App(){ return <BookingFlow />; }`,
-  "src/data/booking.js": `const booking = makeBookingSystem({ entity: "booking" });
+  "src/screens/scaffold/BookingScreen.jsx": `import { BookingFlow } from "../../components/book/BookFlow.jsx";
+export default function BookingScreen(){ return <BookingFlow />; }`,
+  "src/data/booking.js": `import { makeBookingSystem } from "../lib/capabilities/booking.js";
+const booking = makeBookingSystem({ entity: "booking" });
 export const create = (draft) => booking.createBooking(draft);
 export const lookup = (id) => booking.getBooking(id);
 export const cancel = (id) => booking.cancelBooking(id);`,
-  "src/data/wizard.js": `const wizard = makeWizardMachine({ id: "booking", steps: ["date","slot","contact","review","confirm"] });
+  "src/data/wizard.js": `import { makeWizardMachine } from "../lib/capabilities/wizard.js";
+const wizard = makeWizardMachine({ id: "booking", steps: ["date","slot","contact","review","confirm"] });
 wizard.getState(); wizard.subscribe(() => {}); wizard.restore(); wizard.select("date", "2026-08-10");
 wizard.next(); wizard.confirm(); wizard.cancel(); export { wizard };`,
-  "src/components/book/BookFlow.jsx": `export function BookingFlow(){ const draft = { date: "", slot: "", partySize: 1, name: "", email: "", phone: "" };
+  "src/components/book/BookFlow.jsx": `import { create, lookup, cancel } from "../../data/booking.js";
+import { wizard } from "../../data/wizard.js";
+import { BookReview } from "./BookReview.jsx";
+import { BookConfirmation } from "./BookConfirmation.jsx";
+import { BookStatus } from "./BookStatus.jsx";
+export function BookingFlow(){ const draft = { date: "", slot: "", partySize: 1, name: "", email: "", phone: "" };
+const booking = { reference: "pending", status: "draft" };
 return <main>
   <button aria-label="date option" aria-pressed={draft.date === "2026-08-10"}>Select date</button>
   <button aria-label="slot option" aria-pressed={draft.slot === "10:00"}>Select slot</button>
@@ -57,7 +65,8 @@ return <main>
   <label>Name<input name="name" aria-label="name" /></label>
   <label>Email<input type="email" name="email" aria-label="email" /></label>
   <label>Phone<input name="phone" aria-label="phone" /></label>
-  <button>Confirm booking</button><button>Cancel booking</button>
+  <button onClick={() => create(draft)}>Confirm booking</button><button onClick={() => cancel(booking.reference)}>Cancel booking</button>
+  <BookReview draft={draft} /><BookConfirmation booking={booking} /><BookStatus booking={lookup(booking.reference) || booking} />
 </main> }`,
   "src/components/book/BookReview.jsx": `export function BookingReview({ draft }){ return <dl>{draft.date}{draft.slot}{draft.partySize}{draft.name}{draft.email}{draft.phone}</dl> }`,
   "src/components/book/BookConfirmation.jsx": `export function BookingConfirmation({ booking }){ return <p>Booking reference {booking.reference}</p> }`,
@@ -263,6 +272,7 @@ test("14S repair exhaustion remains metadata while contracted red journeys remai
   let browserContract = null;
   const scaffold = fromScaffold(REACT_VITE);
   const patches = Object.entries(TREE).map(([path, content]) => scaffold[path] === undefined
+    && !path.startsWith("src/screens/scaffold/")
     ? { newFile: path, content } : { replaceFile: path, content });
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,

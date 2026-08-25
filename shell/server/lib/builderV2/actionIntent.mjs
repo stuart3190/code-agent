@@ -90,7 +90,6 @@ const FAMILIES = [
   {
     intent: ACTION_INTENT.RECOVER,
     stems: ["reload", "refresh", "recover", "restore"],
-    phrases: ["signs?\\s?-?\\s?in", "logs?\\s?-?\\s?in"],
   },
   {
     intent: ACTION_INTENT.LOOKUP,
@@ -211,6 +210,13 @@ export function actionIntents(step) {
   // step whose structured `operates` named three chooser fields was reduced to navigation only.
   if (/\bmake\b[\s\S]*\bselections?\b/i.test(String(step?.action || ""))) {
     found.add(ACTION_INTENT.SELECTION);
+  }
+  // Authentication is not durable-record recovery by itself. Only an explicit return to an
+  // existing session ("sign in again" / "sign back in") carries recovery intent; treating every
+  // first sign-in as recovery invented a durable read before the journey's first record existed.
+  if (/\b(?:sign|log)(?:s|ed|ing)?(?:\s*-\s*|\s+)in\s+again\b|\b(?:sign|log)(?:s|ed|ing)?\s+back\s+in\b/i
+    .test(String(step?.action || ""))) {
+    found.add(ACTION_INTENT.RECOVER);
   }
   return found;
 }

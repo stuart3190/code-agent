@@ -1755,6 +1755,7 @@ async function runStep(page, step, {
     const activated = await activateContractedControl(page, entry.control, {
       verifierPolicy, evidence: activation, allowEquivalentCandidates: true,
     });
+    activation.requiredAtFlowEntry = true;
     drove = drove || activated;
     controlEvidence = { ...(controlEvidence || {}), activation };
     if (!activated) {
@@ -1865,7 +1866,9 @@ async function runStep(page, step, {
         }
         if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
           detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
-          controlEvidence: { contractedField: flow.control.logicalField, flowAdvances: advances,
+          controlEvidence: { contractedField: flow.control.logicalField,
+            requiredControl: { kind: "selection", reason: "not_reliably_located" },
+            flowAdvances: advances,
             aliases: flow.control.accessibleNames || [flow.control.accessibleName] } };
         used.add(outcome.groupKey);
         outcomes.push(outcome);
@@ -1967,6 +1970,7 @@ async function runStep(page, step, {
       && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
     if (contractedAction) {
       const activation = {};
+      activation.requiredAtContractedStep = true;
       let activated = await activateContractedControl(page, contractedAction.control, {
         verifierPolicy, evidence: activation,
       });
@@ -2460,8 +2464,15 @@ export function expectationOutcome({
 export function journeyPrerequisites(flows, journeyId, primaryId, {
   requiresPrimaryRecord = false, reconstructIsolated = false,
 } = {}) {
-  const controlKey = (flow) => semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
-  const ordered = (id) => flows.filter((flow) => flow.journeyId === id && flow.control)
+  const routeTarget = (flow) => flow?.kind === "navigation"
+    && /^\/[\w/-]*$/.test(String(flow?.target || "").trim())
+    && String(flow.target).trim() !== "/"
+    ? String(flow.target).trim() : null;
+  const controlKey = (flow) => routeTarget(flow)
+    ? `route:${routeTarget(flow)}`
+    : semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
+  const ordered = (id) => flows.filter((flow) => flow.journeyId === id
+      && (flow.control || routeTarget(flow)))
     .sort((a, b) => {
       const step = a.stepIndex - b.stepIndex;
       if (step) return step;
@@ -2531,7 +2542,28 @@ async function establishPrerequisites(page, controls, {
   const enteredValues = [];
   let durableCommitted = false;
   for (const flow of controls) {
-    const label = flow.control.logicalField || flow.control.accessibleName;
+    const route = flow.kind === "navigation" && /^\/[\w/-]*$/.test(String(flow.target || "").trim())
+      ? String(flow.target).trim() : null;
+    const label = route || flow.control?.logicalField || flow.control?.accessibleName || flow.kind;
+    if (route) {
+      const destination = new URL(route, page.url());
+      // Prerequisite navigation is restricted to the preview's current origin. The interaction
+      // contract can restore a route, never send the verifier to an external site.
+      if (destination.origin !== new URL(page.url()).origin) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: "the contracted prerequisite route left the preview origin" } };
+      }
+      const response = await page.goto(destination.href, {
+        waitUntil: "domcontentloaded", timeout: 10_000,
+      }).catch(() => null);
+      if (!response && page.url() !== destination.href) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: "the contracted prerequisite route could not be opened" } };
+      }
+      await waitForActiveSurface(page);
+      performed.push({ control: label, kind: flow.kind, detail: `opened ${destination.pathname}` });
+      continue;
+    }
     if (flow.kind === "selection") {
       let outcome = await driveSelection(page, { action: `select ${label}`, expect: flow.observable || "" },
         flow, new Set(), journeyFlows);
@@ -2950,7 +2982,25 @@ function applyMinimalStepClassification(outcome, fatalRuntimeErrors = []) {
   const activationFailure = ["disabled", "click_failed"].includes(
     outcome?.controlEvidence?.activation?.reason,
   );
-  if (fieldFailure || activationFailure) {
+  // A flow-entry control is required on the active surface by the structured contract itself.
+  // Once the preview loaded without a platform/fatal signal, the browser proving that exact entry
+  // absent is an application interaction failure. Treating it as verifier uncertainty prevented
+  // repair entirely and turned a concrete missing control into a terminal platform block.
+  const requiredEntryMissing = outcome?.controlEvidence?.activation?.requiredAtFlowEntry === true
+    && outcome?.controlEvidence?.activation?.reason === "not_reliably_located";
+  const requiredActionMissing = outcome?.controlEvidence?.activation?.requiredAtContractedStep === true
+    && outcome?.controlEvidence?.activation?.reason === "not_reliably_located";
+  const requiredSelectionMissing = outcome?.controlEvidence?.requiredControl?.kind === "selection"
+    && outcome?.controlEvidence?.requiredControl?.reason === "not_reliably_located";
+  const requiredFieldMissing = (outcome?.controlEvidence?.fields || []).some((field) => (
+    ["missing", "ambiguous_identity"].includes(field.status)
+  ));
+  if (activationFailure || requiredEntryMissing || requiredActionMissing
+    || requiredSelectionMissing || requiredFieldMissing) {
+    return { ...outcome, classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      status: "undriveable" };
+  }
+  if (fieldFailure) {
     return { ...outcome, classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
       status: "fail" };
   }
@@ -3278,8 +3328,10 @@ export async function verifyJourneys({
         // behavioural failure for diagnosis, but the journey cannot become green around it.
         status: failed.length ? "fail" : (undriveable.length ? "undriveable" : "pass"),
         ...(minimal ? { classification: failed[0]?.classification
+          || undriveable[0]?.classification
           || (undriveable.length ? VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE
             : VERIFICATION_RESULT_CLASS.PASS) } : {}),
+        ...(setup ? { setup: { ok: true, ...setup } } : {}),
         steps, failedSteps: failed.length, undriveableSteps: undriveable.length,
       });
     }

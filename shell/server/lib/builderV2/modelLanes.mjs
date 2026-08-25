@@ -555,7 +555,8 @@ export function renderPatchPrompt({
     flows: promptInteractionFlows.map((flow) => {
       const compact = {
         id: flow.id, journeyId: flow.journeyId, stepIndex: flow.stepIndex, kind: flow.kind,
-        action: flow.action, reads: flow.reads || [], writes: flow.writes || [],
+        action: flow.action, target: flow.target || null,
+        reads: flow.reads || [], writes: flow.writes || [],
         control: flow.control ? {
         machineId: flow.control.machineId || null,
         roles: flow.control.roles || [], logicalField: flow.control.logicalField || null,

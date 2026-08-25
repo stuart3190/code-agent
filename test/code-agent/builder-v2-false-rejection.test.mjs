@@ -88,15 +88,14 @@ export function BookFlow() {
 export const wizard = makeWizardMachine({ id: "book", steps: ["date", "slot", "review"] });`,
     "src/data/booking.js": `import { makeBookingSystem } from "../lib/capabilities";
 export const bookings = makeBookingSystem({ entity: "booking" });`,
-    "src/components/book/BookFlow.jsx": `import { useCapabilityState, useSemanticField } from "../../lib/capabilities";
+    "src/components/book/BookFlow.jsx": `import { useCapabilityState, useSemanticSelection } from "../../lib/capabilities";
 import { wizard } from "../../data/wizard.js";
 import { bookings } from "../../data/booking.js";
 export function BookFlow() {
   const state = useCapabilityState(wizard);
-  const date = useSemanticField({ name: "date", value: state.values.date, onChange: (v) => wizard.select("date", v) });
+  const date = useSemanticSelection({ name: "date", value: state.values.date, onSelect: (v) => wizard.select("date", v) });
   return <main>
-    <label {...date.labelProps} />
-    <input {...date.inputProps} />
+    <div {...date.groupProps}><button {...date.optionProps("2026-08-12")}>August 12</button></div>
     <button onClick={() => { wizard.restore(); wizard.next(); }}>Next</button>
     <button onClick={async () => { const r = await bookings.createBooking(state.values); wizard.confirm(r); }}>Confirm</button>
     <button onClick={async () => { await bookings.cancelBooking("BK-1"); wizard.cancel(); }}>Cancel</button>

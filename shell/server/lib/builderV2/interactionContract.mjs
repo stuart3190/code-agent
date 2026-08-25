@@ -523,6 +523,11 @@ export function buildInteractionContract(contract, {
             stateOwner,
             responsibleModules: owners,
             action: step.action,
+            // Keep an explicit route as structured execution data. Secondary-journey setup may
+            // need to replay this navigation before a primary control is reachable; prose is not
+            // a safe substitute for the contract's own target.
+            target: /^\/[\w/-]*$/.test(String(step.target || "").trim())
+              ? String(step.target).trim() : null,
             valueWritten: field || null,
             producedValues: field === valuePlan.controls[0] ? [...valuePlan.produces] : [],
             reads: unique(reads),
@@ -1212,6 +1217,7 @@ export function interactionContractBrief(plan) {
     "INTERACTION CONTRACT (machine-enforced JSON; implement these state/data-flow edges before styling):",
     JSON.stringify({ version: plan.version, flows: plan.flows }, null, 2),
     "Every contracted control must be present, editable when it accepts input, semantically identifiable through standard HTML/ARIA, connected to its declared state owner, and propagated to downstream review/confirmation consumers.",
+    "Every non-null control.machineId is also mandatory runtime identity: emit it through the matching platform semantic helper, or as data-thrallo-control for input/selection controls and data-thrallo-action for action/flow-entry controls. An accessible label does not replace this identity.",
     "Use label/htmlFor, a wrapping label, aria-label, or aria-labelledby for accessible names; name/id/placeholder may assist location but do not replace an accessible name.",
     "Visual design remains unrestricted.",
   ].join("\n");

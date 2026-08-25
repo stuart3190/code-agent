@@ -328,3 +328,9 @@ test("opening a lookup AREA is navigation; looking a record up is a lookup", () 
     `the record cannot be on screen before it has been asked for: ${opening.join(", ")}`);
   assert.ok(opening.includes("1:lookup"), opening.join(", "));
 });
+
+test("a first sign-in authenticates without inventing durable-record recovery", () => {
+  assert.equal(has("sign in and open a workspace", "workspace", ACTION_INTENT.RECOVER), false);
+  assert.equal(has("sign in again", "account form", ACTION_INTENT.RECOVER), true);
+  assert.equal(has("sign back in", "account form", ACTION_INTENT.RECOVER), true);
+});

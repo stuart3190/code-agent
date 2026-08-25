@@ -292,7 +292,11 @@ export function verificationDefects({
     // matching several visible elements can be the app naming two controls alike or the platform
     // addressing them too loosely. It stays unknown rather than being charged to the app.
     const ambiguous = addressing?.reason === "ambiguous_identity";
-    const inconclusiveAddressing = minimal && ambiguous;
+    // Exact runtime contract failure remains repairable even when the page exposes duplicates.
+    // The ambiguity is useful evidence and keeps ownership unknown, but it cannot demote a
+    // browser-classified application interaction defect into an unrepairable platform stop.
+    const inconclusiveAddressing = minimal && ambiguous
+      && !isAppRepairableVerificationClass(resultClass);
     const surfaceIntegration = mountedSurfaceFor(diagnostic.journeyId);
     const causalSurfaceModules = surfaceIntegration ? unique([
       ...surfaceIntegration.routeFiles,

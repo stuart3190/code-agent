@@ -172,7 +172,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
     });
 
-    await t.test("repeated ordinary commit actions remain inconclusive", async () => {
+    await t.test("repeated unbound ordinary commit actions are app-repairable", async () => {
       const action = control("save project", "missing-save-identity", ["button"]);
       const result = await run(`<main>
         <button aria-label="save project">Save one</button>
@@ -181,20 +181,110 @@ test("retained false negatives and concrete failures classify correctly in a rea
       { action: "click save project", expect: "project saved result visible" },
       [{ kind: "action", control: action }]);
       assert.equal(result.journeys[0].classification,
-        VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE, JSON.stringify(result.journeys));
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
     });
 
-    await t.test("an unlocatable control is platform-inconclusive and cannot request repair", async () => {
+    await t.test("a required unlocatable control is an app interaction defect", async () => {
       const action = control("save project", "missing-action", ["button"]);
       const contract = contractFor({ action: "click save project", expect: "project saved result visible" },
         [{ kind: "action", control: action }]);
       pageBody = "<main><h1>Project</h1></main>";
       const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 35_000,
         verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
-      assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE);
+      assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
       const defects = verificationDefects({ contract, journeyResults: result });
-      assert.equal(actionableDefects(defects).length, 0, JSON.stringify(defects));
-      assert.ok(platformDefectsOf(defects).length > 0, JSON.stringify(defects));
+      assert.equal(actionableDefects(defects).length, 1, JSON.stringify(defects));
+      assert.equal(platformDefectsOf(defects).length, 0, JSON.stringify(defects));
+      assert.equal(actionableDefects(defects)[0].defectClass, "interaction");
+    });
+
+    await t.test("a required flow entry absent from a healthy active surface is app-repairable", async () => {
+      const entry = {
+        ...control("catalogueItem", "open-catalogue-item", ["button", "link"]),
+        accessibleName: "open catalogue item",
+        accessibleNames: ["open catalogue item"],
+        flowEntry: true,
+      };
+      const contract = contractFor({
+        action: "open a catalogue item", expect: "software details are visible",
+      }, [{ kind: "flow_start", valueWritten: "catalogueItem", control: entry }]);
+      pageBody = "<main><h1>Software catalogue</h1><p>Available tools</p></main>";
+      const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
+      assert.equal(result.journeys[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.reason,
+        "not_reliably_located");
+      const defects = verificationDefects({ contract, journeyResults: result });
+      assert.equal(actionableDefects(defects).length, 1, JSON.stringify(defects));
+      assert.equal(platformDefectsOf(defects).length, 0, JSON.stringify(defects));
+      assert.equal(actionableDefects(defects)[0].defectClass, "interaction");
+    });
+
+    await t.test("a required selection absent from a healthy active surface is app-repairable", async () => {
+      const category = {
+        ...control("categoryId", "software-category", ["group"]),
+        accessibleName: "software category", accessibleNames: ["software category"],
+        selectedState: true,
+      };
+      const result = await run("<main><h1>Software catalogue</h1><p>Available tools</p></main>",
+        { action: "select a software category", operates: ["categoryId"],
+          expect: "filtered software results are visible" },
+        [{ kind: "selection", valueWritten: "categoryId", control: category }]);
+      assert.equal(result.journeys[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.requiredControl.kind, "selection");
+    });
+
+    await t.test("a required input absent from a healthy active surface is app-repairable", async () => {
+      const query = control("searchQuery", "search-query");
+      const result = await run("<main><h1>Software catalogue</h1><p>Available tools</p></main>",
+        { action: "enter a search query", operates: ["searchQuery"],
+          expect: "matching software is visible" },
+        [{ kind: "input", valueWritten: "searchQuery", control: query }]);
+      assert.equal(result.journeys[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].status, "missing");
+    });
+
+    await t.test("secondary setup replays the primary route before a contracted choice", async () => {
+      const category = {
+        ...control("categoryId", "catalogue-category", ["group"]),
+        accessibleName: "software category",
+        accessibleNames: ["software category"], selectedState: true,
+      };
+      const primary = { id: "browse", title: "Browse software", priority: "primary", steps: [] };
+      const secondary = { id: "filter", title: "Filter software", priority: "secondary", steps: [{
+        action: "select a software category", operates: ["categoryId"],
+        expect: "filtered software results are visible",
+      }] };
+      const navigation = { id: "browse:route", journeyId: "browse", stepIndex: 0,
+        kind: "navigation", target: "/catalogue", control: null };
+      const primaryChoice = { id: "browse:category", journeyId: "browse", stepIndex: 1,
+        kind: "selection", valueWritten: "categoryId", control: category };
+      const secondaryChoice = { id: "filter:category", journeyId: "filter", stepIndex: 0,
+        kind: "selection", valueWritten: "categoryId", control: category };
+      pageBody = `<main id="app"></main><script>
+        if (location.pathname === '/catalogue') {
+          document.getElementById('app').innerHTML = '<h1>Software catalogue</h1>'
+            + '<div role="group" aria-label="software category" data-thrallo-control="catalogue-category">'
+            + '<button data-thrallo-control="catalogue-category" data-thrallo-option="editor" aria-pressed="false">Editors</button>'
+            + '<button data-thrallo-control="catalogue-category" data-thrallo-option="testing" aria-pressed="false">Testing</button></div>'
+            + '<p id="result"></p>';
+          for (const button of document.querySelectorAll('button')) button.onclick = () => {
+            for (const item of document.querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button));
+            document.getElementById('result').textContent = 'Filtered software results are visible';
+          };
+        } else document.getElementById('app').innerHTML = '<h1>Home</h1>';
+      </script>`;
+      const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY, contract: {
+          journeys: [secondary], allJourneys: [primary, secondary],
+          interactionContract: { flows: [secondaryChoice] },
+          prerequisiteInteractionContract: { flows: [navigation, primaryChoice, secondaryChoice] },
+        } });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.deepEqual(result.journeys[0].setup.performed.map((row) => row.kind), ["navigation"]);
     });
 
     await t.test("a real dead button is an app-functional failure", async () => {

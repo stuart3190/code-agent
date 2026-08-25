@@ -93,6 +93,25 @@ test("what a step READS never becomes a browser action", () => {
     "a read-only dependency became a control");
 });
 
+test("explicit route navigation remains structured for secondary prerequisite replay", () => {
+  const contract = {
+    summary: "Software catalogue", projectType: "website", version: 1,
+    auth: { required: false }, routes: [{ path: "/", name: "Home" },
+      { path: "/catalogue", name: "Catalogue" }],
+    entities: [{ name: "selection", fields: [{ name: "categoryId", type: "string" }] }],
+    operations: [],
+    journeys: [{ id: "browse", title: "Browse software", priority: "primary", steps: [
+      { action: "open the catalogue", target: "/catalogue", expect: "software entries are visible" },
+      { action: "select a software category", target: "category filter",
+        operates: ["categoryId"], expect: "matching software is visible" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const navigation = buildInteractionContract(contract).flows.find((flow) => flow.kind === "navigation");
+  assert.equal(navigation?.target, "/catalogue");
+  assert.equal(navigation?.control, null);
+});
+
 test("one declared selection can produce metadata without inventing more controls", () => {
   const contract = JSON.parse(JSON.stringify(PAID));
   contract.entities[0].fields.push(

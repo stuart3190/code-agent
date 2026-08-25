@@ -1507,7 +1507,12 @@ export function createOrchestrator({
             currentVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
               journeys: repairJourneys, tree: currentTree, snapshotId: null, signal });
             const block = await blockOnVerifierPlatformFailure(currentVerdicts);
-            if (block) return { ...done(), verifierBlock: block };
+            if (block) {
+              if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
+                postTreeHash: treeHash(currentTree), defectSignatureAfter: signatureOf(currentDefects),
+                outcome: "failed", reason: block.failureClassification || "verification platform blocked" });
+              return { ...done(), verifierBlock: block };
+            }
             rows = backendProbeFn ? await backendProbeFn({
               owner, projectId, contract, tiers, journeyResults: currentVerdicts.journeys,
             }) : [];
@@ -1515,7 +1520,14 @@ export function createOrchestrator({
             currentDefects = defectsFor(currentVerdicts, rows, currentTree);
             await persistDefects(currentDefects, currentTree, currentSnapshot?.id || null);
             const derivedBlock = await blockOnVerifierPlatformFailure(currentVerdicts, currentDefects);
-            if (derivedBlock) return { ...done(), verifierBlock: derivedBlock };
+            if (derivedBlock) {
+              if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
+                postTreeHash: treeHash(currentTree),
+                postBindingHash: crypto.createHash("sha256").update(JSON.stringify(bindings || [])).digest("hex"),
+                defectSignatureAfter: signatureOf(currentDefects), outcome: "failed",
+                reason: derivedBlock.failureClassification || "verification platform blocked" });
+              return { ...done(), verifierBlock: derivedBlock };
+            }
             const progress = defectProgress(defectsBefore, currentDefects);
             if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
               postTreeHash: treeHash(currentTree),

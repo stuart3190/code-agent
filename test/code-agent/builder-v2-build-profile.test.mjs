@@ -148,10 +148,10 @@ test("Auto resolves a simple marketing-site prompt as website without forcing ap
   assert.equal(spec.capabilityGraph.operationResponsibilities.length, 0);
 });
 
-const RETAINED_BUDGET_COMPETITION_REQUEST = "Build a basic, polished public website for a low-budget competition brand called Budget Competitions. It should promote affordable prize draws around £100 and £200. Target users are UK visitors looking for cheap, simple competitions. Key screens/sections: a homepage hero explaining low-cost competitions, featured competition cards for examples such as £100 Cash Boost, £200 Shopping Voucher, and £150 Weekend Treat; each card should show prize value, ticket price, entries remaining/progress, draw date/countdown-style copy, and a clear Enter now call-to-action. Include a simple How it works section (choose a competition, answer/confirm entry, wait for draw), trust/legitimacy messaging, FAQs, and an email/contact interest form for users to register interest or get notified. Since no payment or compliance details were provided, do not implement real-money checkout; make entry buttons open a friendly register interest modal or scroll to the form. Use UK currency formatting and a clean budget-friendly visual identity with bright, trustworthy colours. Make it fully responsive and verify the primary journey: visitor opens site, views competitions, clicks enter, submits interest form, and sees success feedback.";
+const TRANSIENT_SOFTWARE_CATALOGUE_REQUEST = "Build a basic public software catalogue website with sample entries and informational detail pages. No user accounts, team workspaces, administrative tools, or file uploads. Keep browsing preferences in local session state only; no durable backend is required.";
 
-test("register-interest website copy does not invent account or payment requirements", () => {
-  const profile = resolveBuildProfile({ prompt: RETAINED_BUDGET_COMPETITION_REQUEST });
+test("transient software-catalogue copy does not invent account or payment requirements", () => {
+  const profile = resolveBuildProfile({ prompt: TRANSIENT_SOFTWARE_CATALOGUE_REQUEST });
   assert.equal(profile.resolvedBuildType, "website");
   assert.equal(profile.requirementSignals.includes("user_accounts"), false);
   assert.equal(profile.requirementSignals.includes("payments"), false);
@@ -180,7 +180,7 @@ test("retained smoke profile remains authoritative throughout contract generatio
     { id: "a3", statement: "the visitor sees interest feedback", journey: "primary-flow", kind: "interaction" },
   ];
   const outcome = await generateContract({
-    prompt: RETAINED_BUDGET_COMPETITION_REQUEST,
+    prompt: TRANSIENT_SOFTWARE_CATALOGUE_REQUEST,
     buildProfile: retainedProfile,
     provider: {
       model: "zero-model-retained-smoke",
@@ -205,7 +205,7 @@ test("a stored resolved profile is not re-inferred from register-interest turn c
     applicationSubtype: "auto", requirementSignals: [], inferenceSource: "auto", confidence: 0.45,
   };
   const restored = latestBuildProfile([{
-    content: RETAINED_BUDGET_COMPETITION_REQUEST,
+    content: TRANSIENT_SOFTWARE_CATALOGUE_REQUEST,
     payload: { build_profile: retainedProfile },
   }]);
   assert.deepEqual(restored, retainedProfile);
