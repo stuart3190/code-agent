@@ -44,7 +44,7 @@ const PERSISTENCE_OPERATION_KINDS = new Set([
 const MUTATING_PERSISTENCE_OPERATION_KINDS = new Set([
   "create", "insert", "add", "update", "edit", "delete", "remove", "destroy",
 ]);
-const TRANSIENT_STORAGE = /\b(?:client(?:-only| side)?|browser(?:-only)?|in[- ]?memory|local in-app|local state|ephemeral|transient|current (?:browser )?session|not (?:saved|stored|persisted)|no backend)\b/i;
+const TRANSIENT_STORAGE = /\b(?:client(?:-only| side| session)?|browser(?:-only| session)?|session(?:-only| local)?|in[- ]?memory|local in-app|local state|ephemeral|transient|current (?:browser )?session|not (?:saved|stored|persisted)|no backend)\b/i;
 
 /**
  * Structured entity state is not necessarily a database record. Its storage declaration is the
@@ -55,7 +55,10 @@ export function entityPersistencePolicy(contract, entityName) {
     normaliseReference(candidate?.name) === normaliseReference(entityName)
   ));
   if (!entity) return "unspecified";
-  const storage = [entity.storage, entity.persistence, entity.durability].filter(Boolean).join(" ");
+  // Contract agents commonly serialize enum-like authorities as `client_session`. Storage is a
+  // semantic declaration, so separators must not change whether it is recognized as transient.
+  const storage = [entity.storage, entity.persistence, entity.durability]
+    .filter(Boolean).join(" ").replace(/[_]+/g, " ");
   return TRANSIENT_STORAGE.test(storage) ? "transient" : "unspecified";
 }
 

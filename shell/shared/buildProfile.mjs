@@ -116,6 +116,14 @@ function has(patterns, text) {
 
 function withoutNegatedRequirements(value) {
   return String(value || "")
+    // A comma-separated exclusion such as "no payments, accounts, or admin backend" previously
+    // stopped at the first recognized capability (`accounts`) and left `backend` behind as a
+    // positive durability signal. Consume the complete negated infrastructure clause, while an
+    // explicit adversative clause ("but save to the backend") remains authoritative.
+    .replace(
+      /\b(?:no|without|not requiring|does not require|do not require|does not need|do not need|not needed)\b(?:(?!\b(?:but|however)\b)[^.!?;\n]){0,120}\b(?:database|backend|saved data|persistence)\b(?:(?!\b(?:but|however)\b)[^.!?;\n])*/gi,
+      "",
+    )
     .replace(
       /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:implement|integrate|use|process|take|accept|enable|support)\s+(?:real(?:-money|\s+money)?\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
       "",
@@ -135,9 +143,24 @@ function withoutNegatedRequirements(value) {
 }
 
 const DURABLE_REQUEST = /\b(?:save|saved|stored|persist(?:ed|ence|ent)?|database|backend|history|reload|refresh|recover(?:y|ed)?|look[ -]?up|retrieve)\b/i;
-const TRANSIENT_REQUEST = /\b(?:client(?:-only| side)?|local in-app|local state|local\/in[- ]?browser|in[- ]?memory|current (?:browser )?session|no backend)\b/i;
+const TRANSIENT_REQUEST = /\b(?:client(?:-only| side)?|local in-app|local state|local\/in[- ]?browser|in[- ]?memory|locally(?:\s+(?:in|for)\s+(?:the\s+)?(?:browser|session))?|(?:current )?(?:browser )?session(?:-only)?|no backend)\b/i;
 const SIMULATED_REQUEST = /\b(?:demo|prototype|mock(?:ed)?|simulat(?:e|ed|ing|ion)|placeholder)\b/i;
 const NON_REAL_BEHAVIOR = /\b(?:payments?|billing|checkout|entry|submission|confirmation)\b[^.!?;\n]{0,64}\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?|rather than real|not real)\b|\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?)\b[^.!?;\n]{0,64}\b(?:payments?|billing|checkout|entry|submission|confirmation)\b/i;
+const QUALIFIED_TRANSIENT_STORAGE = /\b(?:save|store|persist|retain|keep)(?:s|d|ed|ing)?\b[^.!?;\n]{0,80}\b(?:locally(?:\s+(?:in|for)\s+(?:the\s+)?(?:browser|session))?|in[- ]?(?:the[- ]?)?browser|in[- ]?memory|for\s+(?:the\s+)?(?:current\s+)?(?:browser\s+)?session|client(?:-only| side)?|local state)\b/gi;
+
+function withoutQualifiedTransientStorage(value) {
+  QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
+  const stripped = String(value || "").replace(QUALIFIED_TRANSIENT_STORAGE, "");
+  QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
+  return stripped;
+}
+
+function hasQualifiedTransientStorage(value) {
+  QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
+  const matched = QUALIFIED_TRANSIENT_STORAGE.test(String(value || ""));
+  QUALIFIED_TRANSIENT_STORAGE.lastIndex = 0;
+  return matched;
+}
 
 /** A simulated journey is transient only when the request does not separately demand durability. */
 export function requestUsesTransientSimulation(prompt = "") {
@@ -145,8 +168,9 @@ export function requestUsesTransientSimulation(prompt = "") {
   // Negated infrastructure is not a durability request. The retained competition brief said
   // "no real payment or backend required"; testing the raw word `backend` first inverted that
   // instruction and classified the explicitly in-browser simulation as durable.
-  if (DURABLE_REQUEST.test(withoutNegatedRequirements(text))) return false;
-  return TRANSIENT_REQUEST.test(text) || (SIMULATED_REQUEST.test(text) && NON_REAL_BEHAVIOR.test(text));
+  if (DURABLE_REQUEST.test(withoutNegatedRequirements(withoutQualifiedTransientStorage(text)))) return false;
+  return TRANSIENT_REQUEST.test(text) || hasQualifiedTransientStorage(text)
+    || (SIMULATED_REQUEST.test(text) && NON_REAL_BEHAVIOR.test(text));
 }
 
 function profileError(field, value, allowed = null) {
@@ -193,7 +217,10 @@ export function validateBuildProfileInput(input) {
 }
 
 export function inferRequirementSignals(prompt = "") {
-  const text = withoutNegatedRequirements(prompt);
+  // "Persist locally for this session" describes transient browser state, not a durable-data
+  // obligation. Remove that qualified phrase before generic words such as `persist` are scored;
+  // any separate backend/reload/history requirement remains and still selects saved_data.
+  const text = withoutNegatedRequirements(withoutQualifiedTransientStorage(prompt));
   return REQUIREMENT_SIGNALS.filter((signal) => has(SIGNAL_PATTERNS[signal] || [], text));
 }
 

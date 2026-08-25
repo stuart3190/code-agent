@@ -4,7 +4,7 @@ import test from "node:test";
 process.env.CODE_AGENT_STORE = "memory";
 
 const {
-  latestBuildProfile, resolveBuildProfile, validateBuildProfileInput,
+  latestBuildProfile, requestUsesTransientSimulation, resolveBuildProfile, validateBuildProfileInput,
 } = await import("../../shell/shared/buildProfile.mjs");
 const { classifyComplexity } = await import("../../shell/server/lib/appBuild/buildProfile.mjs");
 const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
@@ -343,6 +343,79 @@ test("retained basic competition request is not mistaken for Unity or real payme
   assert.equal(complexity.level, "simple", complexity.reasons.join("; "));
   assert.equal(profile.resolvedBuildType, "website");
   assert.equal(profile.requirementSignals.includes("payments"), false);
+});
+
+test("comma-separated exclusions and session-local catalogue selections remain transient", () => {
+  const prompt = [
+    "Build a polished software catalogue with sample data.",
+    "No user accounts, team workspaces, or administrative backend.",
+    "Let visitors browse software entries, filter them, open a detail view, select an item for comparison, and see confirmation.",
+    "Persist comparison selections locally for the session if appropriate.",
+  ].join(" ");
+  const source = contract({
+    summary: "A searchable software catalogue with session-local comparison selections",
+    entities: [{
+      name: "catalogueSelection", owned: false, storage: "client_session",
+      fields: [field("softwareId"), field("softwareName"), field("category"),
+        field("platform"), field("successMessage")],
+    }],
+    operations: [{
+      id: "record-catalogue-selection", entity: "catalogueSelection", kind: "create",
+      journey: "primary-flow", description: "record a comparison selection in session-local state",
+      responsibilities: [{
+        id: "record-selection", type: "persistence",
+        capability: "crud", capabilityMethod: "create",
+        reads: ["softwareId", "softwareName", "category"], writes: ["successMessage"],
+      }],
+    }],
+    steps: [
+      { action: "browse software", target: "catalogue grid", expect: "software entries are visible" },
+      { action: "filter software", target: "category filter", operates: ["category"], expect: "matching software is visible" },
+      { action: "open software details", target: "software card", operates: ["softwareId", "softwareName", "platform"], expect: "the detail view is visible" },
+      { action: "select software for comparison", target: "compare control", operates: ["record-catalogue-selection", "successMessage"], expect: "a visible selection confirmation appears" },
+      { action: "review the selection", target: "confirmation panel",
+        reads: ["softwareId", "softwareName", "category"], expect: "the selected software is visible" },
+    ],
+  });
+  source.acceptance = [
+    { id: "a1", statement: "catalogue entries can be filtered by category", journey: "primary-flow", kind: "interaction" },
+    { id: "a2", statement: "software details open from the catalogue", journey: "primary-flow", kind: "interaction" },
+    { id: "a3", statement: "a comparison selection shows visible confirmation", journey: "primary-flow", kind: "output" },
+  ];
+
+  assert.equal(requestUsesTransientSimulation(prompt), true);
+  const profile = resolveBuildProfile({ prompt });
+  assert.equal(profile.requirementSignals.includes("saved_data"), false);
+  const normalized = normaliseContract(source, { prompt, buildProfile: profile });
+  assert.equal(normalized.entities[0].storage.includes("client-only transient"), true);
+  assert.equal(normalized.operations[0].responsibilities[0].type, "functional");
+  assert.equal("capability" in normalized.operations[0].responsibilities[0], false);
+  assert.equal(validateContract(normalized).ok, true, validateContract(normalized).problems.join("; "));
+
+  const spec = deriveBuildSpec(normalized);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(spec.capabilityGraph.nodes.some((node) => node.id === "capability:client_session"), false);
+  const crudNode = spec.capabilityGraph.nodes.find((node) => node.id === "capability:crud");
+  assert.deepEqual(crudNode?.entities, []);
+  assert.deepEqual(crudNode?.requiredOperations, []);
+  assert.equal(spec.capabilityGraph.journeys.some((journey) => (
+    journey.requiredNodeIds.includes("capability:crud")
+  )), false);
+  const responsibility = spec.capabilityGraph.operationResponsibilities[0].responsibilities[0];
+  assert.equal(responsibility.type, "custom_functional");
+  assert.deepEqual(responsibility.declaredReads, ["softwareId", "softwareName", "category"]);
+  assert.deepEqual(responsibility.declaredWrites, ["successMessage"]);
+  const customBehavior = spec.capabilityGraph.nodes.find((node) => (
+    node.id === responsibility.customBehavior
+  ));
+  assert.ok(customBehavior?.extension?.module);
+  assert.ok(spec.modulePlan.length > 0, "the retained contract did not reach module planning");
+});
+
+test("session-local qualification does not hide a separate durable backend requirement", () => {
+  const prompt = "Persist draft filters locally for the session, but save member records to the backend and restore them after reload.";
+  assert.equal(requestUsesTransientSimulation(prompt), false);
+  assert.equal(resolveBuildProfile({ prompt }).requirementSignals.includes("saved_data"), true);
 });
 
 test("Application plus custom calculations preserves novel transformation as custom_behavior", () => {
