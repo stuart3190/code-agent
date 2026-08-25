@@ -35,11 +35,11 @@ export default function HomeScreen() {
 }`,
 }];
 
-function harness(browserResult) {
+function harness(browserResult, contract = CONTRACT) {
   const patchCalls = [];
   const snapshotStore = createSnapshotStore();
   const orchestrator = createOrchestrator({
-    contractFn: async () => CONTRACT,
+    contractFn: async () => contract,
     patchesFn: async ({ step }) => {
       patchCalls.push(step);
       if (step === "core") return CORE_PATCH;
@@ -51,6 +51,7 @@ function harness(browserResult) {
     journeysFn: async () => browserResult,
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
+    maxJourneyRepairs: 1,
   });
   return { orchestrator, patchCalls };
 }
@@ -86,6 +87,53 @@ test("a derived platform-inconclusive journey defect stops before repair", async
   assert.ok(result.platformDefects.some((defect) => defect.owner === "platform"), JSON.stringify(result));
   assert.ok(result.workingSnapshotId, "the candidate remains available for zero-model re-verification");
   assert.deepEqual(h.patchCalls, ["core"], "a derived platform defect must not dispatch correction or repair");
+});
+
+test("mixed platform and application defects retain application repair authority", async () => {
+  const contract = {
+    ...CONTRACT,
+    journeys: [{
+      ...CONTRACT.journeys[0],
+      steps: [
+        ...CONTRACT.journeys[0].steps,
+        { action: "review the booking confirmation", expect: "booking confirmed" },
+      ],
+    }],
+  };
+  const h = harness({
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+    journeys: [{
+      ...contract.journeys[0],
+      status: "fail",
+      steps: [{
+        ...contract.journeys[0].steps[0],
+        status: "undriveable",
+        classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+        drove: false,
+        detail: "the driver could not establish a unique contracted control",
+      }, {
+        ...contract.journeys[0].steps[1],
+        status: "fail",
+        classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+        drove: true,
+        detail: "the expected confirmation was not visible",
+      }],
+    }],
+    blockingErrors: [],
+    consoleErrors: [],
+    failedRequests: [],
+    mechanics: { failures: [] },
+  }, contract);
+
+  const result = await h.orchestrator.runBuild({
+    owner: "owner",
+    projectId: "project-mixed-defects",
+    request: "booking site",
+  });
+
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.equal(result.failureClassification, "contracted_journeys_red", JSON.stringify(result));
+  assert.ok(h.patchCalls.some((step) => step === "repair"), JSON.stringify(h.patchCalls));
 });
 
 for (const [name, browserResult, expectedCode] of [

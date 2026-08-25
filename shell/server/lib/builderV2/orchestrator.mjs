@@ -1240,9 +1240,12 @@ export function createOrchestrator({
         // repair turn. The live Roblox-concept run spent both repair rounds trying to fix JSX for
         // a 14-character fixture the verifier itself had put into a 20-character prompt.
         const blockOnVerifierPlatformFailure = async (verdicts, derivedDefects = []) => {
+          const derivedPlatformDefects = platformDefectsOf(derivedDefects);
+          const platformOnly = derivedPlatformDefects.length > 0
+            && actionableDefects(derivedDefects).length === 0;
           const defects = [
             ...(verdicts.verifierDefects || []),
-            ...platformDefectsOf(derivedDefects),
+            ...(platformOnly ? derivedPlatformDefects : []),
           ];
           if (verdicts.unavailable) defects.push({ code: "journey_verifier_unavailable",
             detail: verdicts.verifierError || "the browser verifier was unavailable" });
