@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   validateContract, isVague, primaryJourney, journeysForStage,
-  contractBrief, contractSummary, STAGES, CONTRACT_VERSION,
+  contractBrief, contractSummary, verificationFixtureFields, STAGES, CONTRACT_VERSION,
 } from "../../shell/shared/implementationContract.mjs";
 
 // The booking contract the brief enumerates, in full — this is the shape PR5-PR7 consume.
@@ -212,6 +212,46 @@ test("no contract produces no brief rather than a misleading one", () => {
   assert.equal(contractBrief(null), "");
   assert.equal(contractSummary(null), "no contract");
   assert.match(contractSummary(BOOKING), /3 journeys · 1 entities · 2 operations · 4 acceptance tests · 1 deferred/);
+});
+
+test("domain-correct inputs require one explicit non-secret verification fixture", () => {
+  const contract = {
+    version: CONTRACT_VERSION,
+    summary: "A visitor answers a sample skill question and confirms an entry.",
+    projectType: "form",
+    journeys: [{ id: "enter-competition", title: "Complete a sample entry", priority: "primary",
+      steps: [
+        { action: "open the entry form", target: "/", expect: "the sample entry form is visible" },
+        { action: "enter name, email, and the correct skill question answer", target: "entry form",
+          operates: ["entrantName", "entrantEmail", "skillAnswer"],
+          expect: "the entered details are visible" },
+      ] }],
+    routes: [{ path: "/", name: "Entry" }],
+    entities: [{ name: "demoEntry", owned: false, fields: [
+      { name: "entrantName", type: "string" }, { name: "entrantEmail", type: "string" },
+      { name: "skillAnswer", type: "string" },
+    ] }],
+    auth: { required: false, rules: [] }, operations: [], integrations: [], states: [],
+    acceptance: [
+      { id: "a1", statement: "the sample entry form is visible", journey: "enter-competition" },
+      { id: "a2", statement: "the entered details are visible", journey: "enter-competition" },
+      { id: "a3", statement: "the correct answer remains in the form", journey: "enter-competition" },
+    ], deferred: [],
+  };
+  assert.deepEqual(verificationFixtureFields(contract.journeys[0].steps[1], contract), ["skillAnswer"]);
+  const missing = validateContract(contract);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.problems.some((problem) => /verificationValues\.skillAnswer/.test(problem)),
+    JSON.stringify(missing.problems));
+
+  const legacy = structuredClone(contract);
+  legacy.version = 1;
+  assert.equal(validateContract(legacy).ok, true,
+    "persisted v1 contracts remain readable; only newly planned v2 contracts require the fixture authority");
+
+  contract.journeys[0].steps[1].verificationValues = { skillAnswer: "100" };
+  assert.equal(validateContract(contract).ok, true, JSON.stringify(validateContract(contract).problems));
+  assert.match(contractBrief(contract), /verification inputs: \{"skillAnswer":"100"\}/);
 });
 
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {

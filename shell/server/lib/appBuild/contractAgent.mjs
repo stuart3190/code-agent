@@ -97,6 +97,13 @@ Rules:
   product choice may operate productId and produce productTitle and unitPrice; those outputs are
   state written by the same action, not additional controls the visitor must drive.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
+- When a step asks for a domain-correct or domain-incorrect value that cannot be derived from the
+  native input type, add "verificationValues": { "fieldName": "synthetic test value" } for the
+  affected operated field. This value is the single non-secret authority used by generation and
+  browser verification. The generated sample data/business rule MUST accept or reject it exactly
+  as the step asks. Never put a real password, token, credential, customer record, or other secret
+  in verificationValues. Ordinary names, emails, numbers and dates need no override when their
+  native HTML constraints fully describe validity.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.

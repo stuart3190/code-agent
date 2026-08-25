@@ -228,7 +228,16 @@ function numericFixtureFor(facts, currentValue) {
   return String(Number(candidate.toFixed(10)));
 }
 
+export function verificationFixtureFor(flow, marker) {
+  if (flow?.control?.verificationValue === undefined || flow?.control?.verificationValue === null) return null;
+  return String(flow.control.verificationValue)
+    .replaceAll("{{runMarker}}", String(marker))
+    .replaceAll("{{testEmail}}", `journey+${marker}@thrallo.dev`);
+}
+
 function fixtureValueFor(flow, facts, marker, currentValue = "") {
+  const contracted = verificationFixtureFor(flow, marker);
+  if (contracted !== null) return contracted;
   const logicalField = flow.control.logicalField || flow.valueWritten || flow.control.accessibleName;
   const declaredType = String(flow.control.valueType || "").toLowerCase();
   const browserType = String(facts?.type || "text").toLowerCase();
@@ -472,7 +481,9 @@ async function fillContractedFields(page, flows, marker) {
       matchedBy = attempt.description;
       break;
     }
+    const contractedFixture = verificationFixtureFor(flow, marker);
     const fieldEvidence = { field: logicalField, expectedStateOwner: flow.stateOwner, matchedBy,
+      fixtureAuthority: contractedFixture === null ? "native_or_generated" : "contract",
       accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName] };
     if (ambiguous) {
       evidence.fields.push({ ...fieldEvidence, status: "ambiguous_identity", matchedBy: ambiguous.description,
@@ -525,7 +536,7 @@ async function fillContractedFields(page, flows, marker) {
       continue;
     }
     let value = fixtureValueFor(flow, facts, marker, currentValue);
-    if (flow.control.validity === "invalid") {
+    if (flow.control.validity === "invalid" && contractedFixture === null) {
       value = invalidValueFor(logicalField, flow.control.inputTypes);
       if (value === null) {
         evidence.fields.push({ ...fieldEvidence, status: "validation_intent_unsupported",
@@ -1049,8 +1060,28 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
 
   const before = group.options;
   const beforeSelected = before.findIndex((o) => o.selected);
-  // Click a DIFFERENT available option than the current selection (or the first, if none).
-  const clickIndex = before.findIndex((o, i) => i !== beforeSelected);
+  const contractedFixture = verificationFixtureFor(flow, "selection");
+  const fixtureMatch = (option) => contractedFixture !== null && [option.value, option.label, option.text]
+    .filter((value) => value !== null && value !== undefined)
+    .some((value) => String(value).trim().toLowerCase() === contractedFixture.trim().toLowerCase());
+  // A declared domain fixture outranks option order. Without one, click a DIFFERENT available
+  // option than the current selection (or the first, if none) to prove a real transition.
+  const clickIndex = contractedFixture === null
+    ? before.findIndex((o, i) => i !== beforeSelected)
+    : before.findIndex(fixtureMatch);
+  if (contractedFixture !== null && clickIndex === -1) {
+    return {
+      drove: false,
+      groupKey: group.key,
+      status: "undriveable",
+      detail: `the contracted verification value ${JSON.stringify(contractedFixture)} is not an available option`,
+      selectedText: null,
+      groupId: group.groupId,
+      controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+        fixtureAuthority: "contract", verificationValue: contractedFixture,
+        selectedGroupContext: group.contextText, selectedOptions: before, autoAdvance: null },
+    };
+  }
   if (clickIndex === -1) return null;
 
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
@@ -1081,6 +1112,8 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     selectedText: verdict.selectedText || null,
     groupId: group.groupId,
     controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+      fixtureAuthority: contractedFixture === null ? "option_transition" : "contract",
+      ...(contractedFixture === null ? {} : { verificationValue: contractedFixture }),
       selectedGroupContext: group.contextText, selectedOptions: after, autoAdvance },
   };
 }

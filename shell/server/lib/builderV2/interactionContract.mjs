@@ -66,6 +66,14 @@ const list = (value) => (Array.isArray(value) ? value : []);
 const IDENTITY_FIELD = /(?:id|key|reference)$/i;
 const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
 
+function verificationValueFor(step, field) {
+  if (!field || !step?.verificationValues || Array.isArray(step.verificationValues)
+      || typeof step.verificationValues !== "object") return undefined;
+  const match = Object.entries(step.verificationValues)
+    .find(([candidate]) => normalized(candidate) === normalized(field));
+  return match?.[1];
+}
+
 /**
  * One chooser may atomically supply metadata about the selected record. Exactly one identity
  * field is the user-operated control; descriptive siblings are outputs of that same selection.
@@ -499,6 +507,9 @@ export function buildInteractionContract(contract, {
             statePath: writes[0] || null,
             validationOwner: kind === "input" ? stateOwner : null,
             ...(kind === "input" ? { validity: validityFor(step, field, fields) } : {}),
+            ...(["input", "selection"].includes(kind)
+              && verificationValueFor(step, field) !== undefined
+              ? { verificationValue: verificationValueFor(step, field) } : {}),
           });
           flows.push({
             id: `${journey.id}:${stepIndex + 1}:${kind}${field ? `:${normalized(field)}` : ""}`,

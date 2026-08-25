@@ -13,7 +13,7 @@
 // Shared between server and web deliberately — the same vocabulary in the generator, the verifier
 // and the Diagnostics view, so the three cannot drift into describing different things.
 
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
 
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.
 export const STAGES = ["foundation", "data", "primary_journey", "supporting", "polish"];
@@ -192,6 +192,49 @@ export function isVague(text) {
 /** Everything a step is allowed to name: the contract's own declared vocabulary, nothing else. */
 const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+const VERIFICATION_VALUE_INTENT = /\b(?:correct|incorrect)(?:ly)?\b/i;
+const VERIFICATION_VALUE_STOP_WORDS = new Set([
+  "a", "an", "and", "answer", "control", "details", "field", "form", "input", "question", "the", "value",
+]);
+
+const referenceWords = (value) => String(value || "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+  .toLowerCase().match(/[a-z][a-z0-9]*/g) || [];
+
+/**
+ * Domain-valid values the verifier cannot safely invent from an HTML input type.
+ *
+ * Native constraints are enough for ordinary names, email addresses, numbers and dates. They are
+ * not enough for prose such as "the correct answer": only the application knows which otherwise
+ * valid string its business rule accepts. Pick the field named most specifically around that
+ * intent and require the planner to declare a non-secret synthetic fixture for it.
+ */
+export function verificationFixtureFields(step = {}, contract = {}) {
+  if (!VERIFICATION_VALUE_INTENT.test(String(step.action || ""))) return [];
+  const operated = (step.operates || []).map(String).filter((reference) => (
+    fieldNames(contract).has(normaliseReference(reference))
+  ));
+  if (!operated.length) return [];
+  const actionWords = referenceWords(step.action);
+  const intentIndexes = actionWords.map((word, index) => (
+    /^(?:correct|incorrect)(?:ly)?$/.test(word) ? index : -1
+  )).filter((index) => index >= 0);
+  const scored = operated.map((field) => {
+    const words = referenceWords(String(field).split(".").pop())
+      .filter((word) => !VERIFICATION_VALUE_STOP_WORDS.has(word));
+    const positions = words.flatMap((word) => actionWords
+      .map((candidate, index) => candidate === word ? index : -1).filter((index) => index >= 0));
+    const matchedWords = new Set(words.filter((word) => actionWords.includes(word))).size;
+    const distance = positions.length && intentIndexes.length
+      ? Math.min(...positions.flatMap((position) => intentIndexes.map((index) => Math.abs(position - index))))
+      : Number.POSITIVE_INFINITY;
+    return { field, matchedWords, distance, score: matchedWords * 100 - distance };
+  }).filter((row) => row.matchedWords > 0);
+  if (!scored.length) return operated.length === 1 ? operated : [];
+  const best = Math.max(...scored.map((row) => row.score));
+  return scored.filter((row) => row.score === best).map((row) => row.field);
+}
+
 export function contractReferences(contract) {
   const references = new Set();
   for (const entity of contract?.entities || []) {
@@ -283,6 +326,32 @@ export function validateContract(contract) {
             && !fieldNames(c).has(normaliseReference(reference))) {
             problems.push(`${where} step ${stepIndex + 1} operates "${reference}", which is an entity, `
               + "not a control — name the field(s) the step changes, or the operation it performs");
+          }
+        }
+      }
+      const verificationValues = step?.verificationValues;
+      if (verificationValues !== undefined && (verificationValues === null
+          || Array.isArray(verificationValues) || typeof verificationValues !== "object")) {
+        problems.push(`${where} step ${stepIndex + 1} verificationValues is not an object keyed by operated field`);
+      } else if (verificationValues) {
+        const operated = new Set((step.operates || []).map(normaliseReference));
+        for (const [field, value] of Object.entries(verificationValues)) {
+          if (!fieldNames(c).has(normaliseReference(field)) || !operated.has(normaliseReference(field))) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues names "${field}", which is not an operated entity field`);
+          }
+          if (!["string", "number", "boolean"].includes(typeof value)
+              || (typeof value === "string" && !value.trim())) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a non-empty JSON primitive`);
+          }
+        }
+      }
+      if (Number(c.version || 1) >= 2) {
+        for (const field of verificationFixtureFields(step, c)) {
+          const declared = Object.entries(verificationValues || {})
+            .some(([candidate]) => normaliseReference(candidate) === normaliseReference(field));
+          if (!declared) {
+            problems.push(`${where} step ${stepIndex + 1} requires verificationValues.${String(field).split(".").pop()} `
+              + `because "${step.action}" asks for a domain-constrained value the browser cannot safely invent`);
           }
         }
       }
@@ -406,6 +475,9 @@ export function contractBrief(contract) {
   if (primary) {
     lines.push(`PRIMARY JOURNEY (the preview cannot ship until this passes) — ${primary.title}:`);
     for (const [i, step] of (primary.steps || []).entries()) {
+      if (step.verificationValues && Object.keys(step.verificationValues).length) {
+        lines.push(`     verification inputs: ${JSON.stringify(step.verificationValues)}`);
+      }
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
     }
     lines.push("");

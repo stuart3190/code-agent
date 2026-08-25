@@ -77,6 +77,10 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
+- A contracted control's verificationValue is the authoritative non-secret synthetic browser
+  fixture for its domain rule. Configure sample data and validation so that exact value has the
+  valid/invalid meaning stated by the journey. Do not replace it with a different hidden answer,
+  and do not merely echo it as static copy.
 - Custom-extension calls must select the operation with a literal second-argument context such as
   { operation: "<operationId>" } and pass that operation's declared input keys explicitly. The
   explicit legacy key operationId is also supported. Do not rely on spreading a domain object whose
@@ -556,6 +560,7 @@ export function renderPatchPrompt({
         machineId: flow.control.machineId || null,
         roles: flow.control.roles || [], logicalField: flow.control.logicalField || null,
         inputTypes: flow.control.inputTypes || [], accessibleNames: flow.control.accessibleNames || [],
+        verificationValue: flow.control.verificationValue ?? null,
         editable: flow.control.editable === true, selectedState: flow.control.selectedState === true,
         stateOwner: flow.control.stateOwner || null, statePath: flow.control.statePath || null,
         downstream: flow.control.downstream || [],
