@@ -5,7 +5,7 @@ import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs"
 import { contractRuntimeRequirements } from "../../shell/server/lib/builderV2/buildEnvelope.mjs";
 import { journeyRequiresPersistentMutation } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
 import {
-  interactionDependencyProgress, normalizeInteractionStateDependencies,
+  buildInteractionContract, interactionDependencyProgress, normalizeInteractionStateDependencies,
   validateInteractionContract,
 } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import {
@@ -77,6 +77,89 @@ test("structured journey step reads are rejected when the contract declares no e
     ] }],
   });
   assert.equal(valid.verdict.ok, true, valid.verdict.problems.join("; "));
+});
+
+test("retained competition correction keeps observational review out of the state graph", () => {
+  const retainedCorrection = {
+    summary: "Budget competition interest application", projectType: "website",
+    auth: { required: false }, routes: [{ path: "/", name: "Home" }],
+    entities: [{ name: "entryInterest", owned: false, fields: [
+      { name: "competitionId", type: "string", required: true },
+      { name: "competitionTitle", type: "string" },
+      { name: "prizeAmount", type: "number" },
+      { name: "ticketPrice", type: "number" },
+      { name: "remainingEntries", type: "number" },
+      { name: "drawDate", type: "string" },
+      { name: "ticketQuantity", type: "number", required: true },
+      { name: "totalEntryCost", type: "number" },
+      { name: "name", type: "string", required: true },
+      { name: "email", type: "string", required: true },
+    ] }],
+    operations: [{ id: "create-entry-interest", name: "create-entry-interest", kind: "create",
+      entity: "entryInterest", journey: "submit-entry-interest" }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{ id: "submit-entry-interest", title: "Submit competition interest",
+      priority: "primary", stage: "primary_journey", steps: [
+        { action: "open the homepage", target: "/", expect: "featured competitions are visible" },
+        { action: "review the featured competition cards", target: "featured competitions section",
+          expect: "each featured card shows its prize, price, remaining entries, and draw date" },
+        { action: "choose a featured competition", target: "competition card", primitive: "selection",
+          operates: ["competitionId"],
+          produces: ["competitionTitle", "prizeAmount", "ticketPrice", "remainingEntries", "drawDate"],
+          expect: "the chosen competition is selected" },
+        { action: "choose a ticket quantity", target: "ticket quantity", primitive: "selection",
+          operates: ["ticketQuantity"], reads: ["ticketPrice", "remainingEntries"],
+          produces: ["totalEntryCost"], expect: "the entry total is shown" },
+        { action: "enter contact details and submit interest", target: "register interest form",
+          operates: ["name", "email", "create-entry-interest"], reads: [
+            "competitionId", "competitionTitle", "prizeAmount", "ticketPrice", "remainingEntries",
+            "drawDate", "ticketQuantity", "totalEntryCost",
+          ], expect: "a success confirmation is visible" },
+      ] }],
+  };
+
+  const spec = deriveBuildSpec(retainedCorrection);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(spec.modulePlan.length > 0);
+  assert.ok(spec.moduleContracts.specifications.length > 0);
+  assert.equal(spec.contract.journeys[0].steps[1].action, "review the featured competition cards",
+    "the observational step remains part of the browser journey");
+  assert.equal(spec.interactionContract.flows.some((flow) => (
+    flow.journeyId === "submit-entry-interest" && flow.stepIndex === 1 && flow.kind === "review"
+  )), false, "observation without a state source does not fabricate an interaction dependency");
+
+  const competition = spec.interactionContract.flows.find((flow) => (
+    flow.journeyId === "submit-entry-interest" && flow.valueWritten === "competitionId"
+  ));
+  const quantity = spec.interactionContract.flows.find((flow) => (
+    flow.journeyId === "submit-entry-interest" && flow.valueWritten === "ticketQuantity"
+  ));
+  const mutation = spec.interactionContract.flows.find((flow) => (
+    flow.journeyId === "submit-entry-interest" && flow.kind === "mutation"
+  ));
+  assert.ok(competition.writes.includes("submit-entry-interest.draft.competitionId"));
+  assert.ok(quantity.writes.includes("submit-entry-interest.draft.totalEntryCost"));
+  assert.ok(mutation.reads.includes("submit-entry-interest.draft.competitionId"));
+  assert.ok(mutation.reads.includes("submit-entry-interest.draft.ticketQuantity"));
+  assert.ok(mutation.reads.includes("submit-entry-interest.draft.totalEntryCost"));
+});
+
+test("review of a contract-declared existing record retains its durable state dependency", () => {
+  const plan = buildInteractionContract({
+    summary: "Review an existing durable record", projectType: "tool", auth: { required: false },
+    routes: [{ path: "/record", name: "Record" }],
+    entities: [{ name: "record", fields: [{ name: "reference", type: "string" }] }],
+    operations: [{ id: "read-record", kind: "read", entity: "record", journey: "review-record" }],
+    journeys: [{ id: "review-record", title: "Review record", priority: "primary", steps: [
+      { action: "review the existing record", target: "record summary",
+        expect: "the saved record is visible" },
+    ] }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+  }, { modulePlan: [], bindings: [] });
+
+  assert.equal(plan.valid, true, plan.problems.join("; "));
+  assert.equal(plan.scenarios["review-record"].startState, "inherits");
+  assert.deepEqual(plan.flows[0].reads, ["review-record.durable.record"]);
 });
 
 test("structured reads never borrow a matching producer from an earlier journey", () => {

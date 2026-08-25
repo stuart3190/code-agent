@@ -324,6 +324,12 @@ export function buildInteractionContract(contract, {
   bindings = bindCapabilities(contract),
 } = {}) {
   const durableOwner = contractUsesDurablePersistence(contract) ? durableOperationOwner(bindings) : null;
+  const durableEntity = durableOwner?.capability
+    ? ((contract?.entities || []).find((entity) => (bindings || [])
+      .some((binding) => binding.name === durableOwner.capability
+        && binding.configuration?.entity === entity?.name))?.name
+      || contract?.entities?.[0]?.name || "record")
+    : contract?.entities?.[0]?.name || "record";
   const draftOwner = draftStateOwner(bindings);
   // The only things a browser control can HOLD: the fields the contract's entities declare.
   // Operations, entity names and routes are all legal contract references and none of them is a
@@ -433,7 +439,35 @@ export function buildInteractionContract(contract, {
               writes.push(...produced);
               draftWrites.push(...produced);
             }
-          } else if (kind === "review") reads.push(...(draftWrites.length ? draftWrites : [`${journey.id}.durable.record`]));
+          } else if (kind === "review") {
+            // A review is a state consumer only when the contract identifies real state to review.
+            // Purely observational prose such as "review the featured cards" still remains in the
+            // browser journey, but it must not fabricate a durable record before a later CREATE.
+            // That invented dependency made contract correction impossible: the model removed every
+            // invalid explicit read, then deterministic derivation added `durable.record` back.
+            const declaredStartState = unique([
+              ...statePaths(contract?.initialState, journey.id),
+              ...statePaths(contract?.durableState, journey.id),
+              ...statePaths(contract?.externalState, journey.id),
+              ...statePaths(contract?.capabilityOutputs, journey.id),
+              ...list(journey.initialState).map(String),
+              ...list(journey.durableState).map(String),
+              ...list(journey.externalState).map(String),
+              ...list(journey.capabilityOutputs).map(String),
+              ...list(journey.availableState).map(String),
+            ]);
+            if (draftWrites.length) reads.push(...draftWrites);
+            else if (declaredStartState.length) reads.push(...declaredStartState);
+            else if (declaredLifecycleRole(contract, journey, { entity: durableEntity }) === "existing") {
+              reads.push(`${journey.id}.durable.record`);
+            } else if (list(step?.reads).length) {
+              // Keep the consumer so the structured-read pass below can bind its exact paths (or
+              // produce a precise missing-producer defect). Only an entirely state-free review is
+              // observational.
+            } else {
+              continue;
+            }
+          }
           else if (kind === "mutation") {
             reads.push(...(draftWrites.length ? draftWrites : [`${journey.id}.input`]));
             durableRecord ||= `${journey.id}.durable.record`;
@@ -621,12 +655,6 @@ export function buildInteractionContract(contract, {
   // The lifecycle is therefore named once, from the contract's durable owner and its entity, and
   // stamped on every flow that reads or writes durable state. Unrelated entities cannot collide
   // because they resolve to different owners/entities.
-  const durableEntity = durableOwner?.capability
-    ? ((contract?.entities || []).find((entity) => (bindings || [])
-      .some((binding) => binding.name === durableOwner.capability
-        && binding.configuration?.entity === entity?.name))?.name
-      || contract?.entities?.[0]?.name || "record")
-    : contract?.entities?.[0]?.name || "record";
   const lifecycle = `${durableOwner?.capability || "durable"}:${durableEntity}`;
   for (const flow of flows) {
     const touchesDurable = [...(flow.reads || []), ...(flow.writes || [])]
