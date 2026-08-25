@@ -29,6 +29,8 @@ const stable = (value) => JSON.stringify(canonical(value));
 // capacity, no-progress detection and the independent Thrallo recovery credit envelope.
 export const MAX_REPAIR_DISPATCHES = 1000;
 
+const RECOVERY_RESPONSIBILITIES = new Set(["thrallo_repair", "platform_failure", "qualification"]);
+
 export function modelCallKey({ buildId, step, sequence, purpose = "dispatch" }) {
   const identity = `${buildId}:${step}:${sequence}:${purpose}`;
   return `${step}:${sequence}:${crypto.createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
@@ -39,7 +41,8 @@ const total = (rows, state, field) => rows.filter((row) => row.state === state)
 
 const responsibilityFor = (input) => input.usageResponsibility || "customer_request";
 export const fundingPoolFor = (input) => input.fundingPool
-  || (responsibilityFor(input) === "thrallo_repair" ? FUNDING_POOL.RECOVERY : FUNDING_POOL.CUSTOMER);
+  || (RECOVERY_RESPONSIBILITIES.has(responsibilityFor(input))
+    ? FUNDING_POOL.RECOVERY : FUNDING_POOL.CUSTOMER);
 const customerFunded = (input) => input.billingLane === "managed"
   && responsibilityFor(input) === "customer_request";
 

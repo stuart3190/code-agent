@@ -66,6 +66,15 @@ const numberEnv = (name, fallback) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
+export function defaultUsageResponsibilityFor(payload = {}) {
+  // A trigger describes why a job was queued, not who funds its provider calls. Release and
+  // qualification builds still exercise a customer's approved generation lane. Platform-funded
+  // work must opt in explicitly so it enters the independent recovery pool accepted by the
+  // reservation authority.
+  return ["platform_failure", "qualification"].includes(payload.usageResponsibility)
+    ? payload.usageResponsibility : "customer_request";
+}
+
 function laneProviderId(context) {
   return context.policy?.primaryProvider === "managed" ? "managed" : context.policy?.primaryProvider;
 }
@@ -716,10 +725,7 @@ export function createBuilderV2Runtime({
         reservations: reservationStore, billingLane: context.policy.billingLane, strictKnowledge: true,
         recordRetrieval, accountCreditResolver, maxRepairs,
         maxCorrections: generationPolicy.maxCandidateCorrections,
-        defaultUsageResponsibility: workJob.payload.usageResponsibility === "platform_failure"
-          ? "platform_failure"
-          : /qualification/i.test(String(workJob.payload.trigger || ""))
-            ? "qualification" : "customer_request",
+        defaultUsageResponsibility: defaultUsageResponsibilityFor(workJob.payload),
         poolCeilingResolver: async ({ fundingPool, step }) => {
           if (fundingPool === FUNDING_POOL.RECOVERY) {
             if (!activeEnvelope) return preliminaryRecoveryCredits;

@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { memoryModelReservations, modelCallKey } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import {
+  fundingPoolFor, memoryModelReservations, modelCallKey,
+} from "../../shell/server/lib/builderV2/modelReservations.mjs";
+
+test("reservation responsibilities select the only database-valid funding pool", () => {
+  assert.equal(fundingPoolFor({ usageResponsibility: "customer_request" }), "customer_generation");
+  for (const usageResponsibility of ["thrallo_repair", "platform_failure", "qualification"]) {
+    assert.equal(fundingPoolFor({ usageResponsibility }), "thrallo_recovery", usageResponsibility);
+  }
+});
 
 const input = (overrides = {}) => ({
   owner: "owner-a", projectId: "project-a", buildId: "build-a",

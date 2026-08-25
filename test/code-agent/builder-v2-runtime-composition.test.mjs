@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
-  assertQueuedProviderSelection, journeyRequiresPersistentMutation, prepareBuilderV2PipelineAttempt,
+  assertQueuedProviderSelection, defaultUsageResponsibilityFor, journeyRequiresPersistentMutation,
+  prepareBuilderV2PipelineAttempt,
   verificationVisitorScopeForJourney,
 } from "../../shell/server/lib/builderV2/runtimeComposition.mjs";
 import { verificationExecutionContract } from "../../shell/server/lib/builderV2/orchestrator.mjs";
@@ -172,6 +173,16 @@ test("V2 crash recovery restarts only before provider dispatch", async () => {
   assert.equal(workJob.payload.logicalDispatchId, "dispatch-7");
   assert.equal(workJob.payload.continuationIndex, 2);
   assert.equal(calls[0].name, "prepare_bv2_pipeline_retry");
+});
+
+test("qualification trigger metadata does not move customer generation into a platform funding pool", () => {
+  assert.equal(defaultUsageResponsibilityFor({ trigger: "bv2_release_qualification" }), "customer_request");
+  assert.equal(defaultUsageResponsibilityFor({
+    trigger: "internal", usageResponsibility: "qualification",
+  }), "qualification");
+  assert.equal(defaultUsageResponsibilityFor({
+    trigger: "internal", usageResponsibility: "platform_failure",
+  }), "platform_failure");
 });
 
 test("V2 crash recovery returns durable completion and blocks provider ambiguity", async () => {
