@@ -1239,16 +1239,24 @@ export function createOrchestrator({
         // evidence that generated source is wrong. Preserve the candidate and stop before a model
         // repair turn. The live Roblox-concept run spent both repair rounds trying to fix JSX for
         // a 14-character fixture the verifier itself had put into a 20-character prompt.
-        const blockOnVerifierPlatformFailure = async (verdicts) => {
-          const defects = [...(verdicts.verifierDefects || [])];
+        const blockOnVerifierPlatformFailure = async (verdicts, derivedDefects = []) => {
+          const defects = [
+            ...(verdicts.verifierDefects || []),
+            ...platformDefectsOf(derivedDefects),
+          ];
           if (verdicts.unavailable) defects.push({ code: "journey_verifier_unavailable",
             detail: verdicts.verifierError || "the browser verifier was unavailable" });
-          if (!defects.length) return null;
-          const reason = defects.map((defect) => `${defect.code}: ${defect.detail || "verification platform failure"}`).join("; ");
+          const uniqueDefects = [...new Map(defects.map((defect) => [
+            [defect.code, defect.journeyId, defect.stepIndex].join(":"), defect,
+          ])).values()];
+          if (!uniqueDefects.length) return null;
+          const reason = uniqueDefects.map((defect) => `${defect.code}: ${
+            defect.detail || defect.evidence?.observed || "verification platform failure"
+          }`).join("; ");
           return finish("blocked", {
             error: `Builder V2 verification platform failure: ${reason}`,
             failureClassification: "verification_platform_defect",
-            platformDefects: defects,
+            platformDefects: uniqueDefects,
             workingSnapshotId: workingSnapshot?.id || null,
           });
         };
@@ -1283,6 +1291,8 @@ export function createOrchestrator({
         };
         let coreDefects = defectsFor(coreVerdicts, backendRowFailures);
         await persistDefects(coreDefects, tree, workingSnapshot?.id || null);
+        verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts, coreDefects);
+        if (verifierBlock) return verifierBlock;
         let repairsAttempted = 0;
         let repairExhausted = false;
         let repairLimit = null;
@@ -1501,6 +1511,8 @@ export function createOrchestrator({
             currentEligibility = evaluate(currentVerdicts, rows);
             currentDefects = defectsFor(currentVerdicts, rows, currentTree);
             await persistDefects(currentDefects, currentTree, currentSnapshot?.id || null);
+            const derivedBlock = await blockOnVerifierPlatformFailure(currentVerdicts, currentDefects);
+            if (derivedBlock) return { ...done(), verifierBlock: derivedBlock };
             const progress = defectProgress(defectsBefore, currentDefects);
             if (strategyRow?.id) await events.repairStrategyFinished?.({ id: strategyRow.id,
               postTreeHash: treeHash(currentTree),
@@ -1610,6 +1622,8 @@ export function createOrchestrator({
             blockingErrors: coreVerdicts.blockingErrors });
           coreDefects = defectsFor(coreVerdicts, backendRowFailures, tree);
           await persistDefects(coreDefects, tree, workingSnapshot?.id || null);
+          verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts, coreDefects);
+          if (verifierBlock) return verifierBlock;
         }
         const coreRepair = await repairUntilGreen({
           label: "repair", journeys: essentialJourneys, tree, snapshot: workingSnapshot,
@@ -1741,6 +1755,8 @@ export function createOrchestrator({
           if (increment.ok && !incrementEligibility.eligible) {
             const incrementDefects = defectsFor(verdicts, [], increment.tree);
             await persistDefects(incrementDefects, increment.tree, increment.snapshot?.id || null);
+            verifierBlock = await blockOnVerifierPlatformFailure(verdicts, incrementDefects);
+            if (verifierBlock) return verifierBlock;
             const incrementRepair = await repairUntilGreen({
               label: `${step}:repair`, journeys: regressionJourneys, tree: increment.tree,
               snapshot: increment.snapshot, verdicts,
@@ -1830,6 +1846,8 @@ export function createOrchestrator({
         let finalEligibility = evaluateFinal(finalVerdicts, finalRows);
         let finalDefects = defectsFor(finalVerdicts, finalRows, finalTree);
         await persistDefects(finalDefects, finalTree, candidate.id);
+        verifierBlock = await blockOnVerifierPlatformFailure(finalVerdicts, finalDefects);
+        if (verifierBlock) return verifierBlock;
         if (!finalEligibility.eligible && repairsAttempted < repairRoundCeiling) {
           const finalRepair = await repairUntilGreen({
             label: "final_repair", journeys: contract.journeys || [], tree: finalTree,
@@ -1852,6 +1870,8 @@ export function createOrchestrator({
           finalEligibility = evaluateFinal(finalVerdicts, finalRows);
           finalDefects = defectsFor(finalVerdicts, finalRows, finalTree);
           await persistDefects(finalDefects, finalTree, candidate.id);
+          verifierBlock = await blockOnVerifierPlatformFailure(finalVerdicts, finalDefects);
+          if (verifierBlock) return verifierBlock;
         }
         if (!finalEligibility.eligible) return finish("blocked", {
           error: `final fresh verification remained red: ${finalEligibility.failures?.join("; ")

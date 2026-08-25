@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import { createOrchestrator, memoryBuildStore } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
+import {
+  MINIMAL_CONTRACT_VERIFIER_POLICY,
+  VERIFICATION_RESULT_CLASS,
+} from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { clone, fromScaffold } from "../../src/engine/fileTree.mjs";
 
@@ -50,6 +54,39 @@ function harness(browserResult) {
   });
   return { orchestrator, patchCalls };
 }
+
+test("a derived platform-inconclusive journey defect stops before repair", async () => {
+  const h = harness({
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+    journeys: [{
+      ...CONTRACT.journeys[0],
+      status: "undriveable",
+      steps: [{
+        ...CONTRACT.journeys[0].steps[0],
+        status: "undriveable",
+        classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+        drove: false,
+        detail: "the driver could not establish a unique contracted control",
+      }],
+    }],
+    blockingErrors: [],
+    consoleErrors: [],
+    failedRequests: [],
+    mechanics: { failures: [] },
+  });
+
+  const result = await h.orchestrator.runBuild({
+    owner: "owner",
+    projectId: "project-derived-platform-defect",
+    request: "booking site",
+  });
+
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.equal(result.failureClassification, "verification_platform_defect", JSON.stringify(result));
+  assert.ok(result.platformDefects.some((defect) => defect.owner === "platform"), JSON.stringify(result));
+  assert.ok(result.workingSnapshotId, "the candidate remains available for zero-model re-verification");
+  assert.deepEqual(h.patchCalls, ["core"], "a derived platform defect must not dispatch correction or repair");
+});
 
 for (const [name, browserResult, expectedCode] of [
   ["unavailable verifier", { unavailable: true, error: "preview transport unavailable", journeys: [] },
