@@ -520,7 +520,7 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
 
 const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
-const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query)\b/i;
+const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query|not|without|excludes?)\b/i;
 const COLLECTION_POSTCONDITION_CLAUSE_PATTERN = /\b(?:count|total|message|state|status)\b|\b(?:is|are|was|were|remains?|becomes?|equals?)\b/i;
 
 // A named collection containing several named members is stronger than global page copy. The

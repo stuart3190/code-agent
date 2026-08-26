@@ -160,6 +160,9 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.equal(collectionMembershipExpectationSpec(
     "the visible software list shows only software matching the search and selected filters",
   ), null);
+  assert.equal(collectionMembershipExpectationSpec(
+    "the software grid shows Atlas Metrics and does not show unrelated categories",
+  ), null);
   assert.deepEqual(collectionMembershipExpectationSpec(
     "the favourites list contains Atlas Editor and Compass Deploy and the favourite count is 2",
   ), { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] });
