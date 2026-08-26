@@ -522,6 +522,30 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.match(unchanged.journeys[0].steps[0].detail, /never gained a selected state/i);
     });
 
+    await t.test("a clipped accessibility mirror cannot shadow the visible catalogue selection", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-editor",
+        selectedState: true,
+      };
+      const step = { action: "select the visible software item", operates: ["selectedSoftwareId"],
+        expect: "selected software details are visible" };
+      const flow = { kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem };
+      const result = await run(`<main>
+        <div role="radiogroup" aria-label="selected software mirror"
+          style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">
+          <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="false">Accessibility mirror</button>
+        </div>
+        <div role="radiogroup" aria-label="selected software">
+          <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed','true'); document.getElementById('out').textContent='Selected software details are visible'">Atlas Editor</button>
+          <button data-thrallo-control="software-item" value="compass-deploy" aria-pressed="false">Compass Deploy</button>
+        </div>
+        <p id="out"></p></main>`, step, [flow]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.match(result.journeys[0].steps[0].detail, /selection created/i);
+    });
+
     await t.test("a required input absent from a healthy active surface is app-repairable", async () => {
       const query = control("searchQuery", "search-query");
       const result = await run("<main><h1>Software catalogue</h1><p>Available tools</p></main>",

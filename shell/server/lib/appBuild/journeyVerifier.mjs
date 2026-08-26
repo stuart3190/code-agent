@@ -1180,13 +1180,35 @@ async function selectionGroups(page) {
     };
     const groups = [];
     let id = 0;
+    const isUserPerceivable = (el) => {
+      if (!el || el.offsetParent === null) return false;
+      const ownRect = el.getBoundingClientRect();
+      if (ownRect.width <= 1 || ownRect.height <= 1) return false;
+      for (let current = el; current && current !== document.documentElement; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility)
+          || Number(style.opacity || 1) <= 0.01 || style.contentVisibility === "hidden") return false;
+        const clip = String(style.clip || "auto").toLowerCase();
+        if (clip !== "auto") {
+          const edges = clip.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+          if (edges.length >= 4 && (edges[1] - edges[3] <= 1 || edges[2] - edges[0] <= 1)) return false;
+        }
+        const clipPath = String(style.clipPath || "none").replace(/\s+/g, "").toLowerCase();
+        if (clipPath === "inset(50%)" || clipPath === "inset(100%)") return false;
+        if (/hidden|clip/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+          const rect = current.getBoundingClientRect();
+          if (rect.width <= 1 || rect.height <= 1) return false;
+        }
+      }
+      return true;
+    };
 
     // Native selects are first-class selection controls. The former option collector only knew
     // about button/ARIA option groups, so an identity-bound <select> passed mechanics as "skipped"
     // and then became undriveable in the real journey. Enumerate its enabled native options and
     // preserve the same before/after selected-state proof used for custom option groups.
     for (const select of document.querySelectorAll("select")) {
-      if (select.offsetParent === null || select.disabled) continue;
+      if (!isUserPerceivable(select) || select.disabled) continue;
       const options = [...select.options]
         .map((option, domIndex) => ({ option, domIndex }))
         .filter(({ option }) => !option.disabled);
@@ -1214,7 +1236,7 @@ async function selectionGroups(page) {
 
     const candidates = [...document.querySelectorAll(
       '[role="option"],[role="tab"],[role="radio"],[aria-selected],[aria-pressed],[data-state],input[type="radio"],button',
-    )].filter((el) => el.offsetParent !== null && !el.disabled);
+    )].filter((el) => isUserPerceivable(el) && !el.disabled);
     const byParent = new Map();
     for (const el of candidates) {
       if (!el.parentElement) continue;
