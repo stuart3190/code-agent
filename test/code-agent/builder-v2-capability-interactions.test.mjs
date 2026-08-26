@@ -368,12 +368,12 @@ test("truly underspecified transformation is rejected with exact missing semanti
     "capability_graph_semantics_incomplete operation=unowned-transform responsibility=unowned-transform:functional-1 missing=reads,writes",
   ));
   assert.ok(spec.verdict.problems.includes(
-    "interaction_contract_semantics_incomplete operation=unowned-transform interaction=primary-flow:operation:unownedtransform missing=reads,writes",
+    "interaction_contract_semantics_incomplete operation=unowned-transform interaction=primary-flow:2:operation:unownedtransform missing=reads,writes",
   ));
   assert.deepEqual(spec.verdict.interaction.issues, [{
     code: "interaction_contract_semantics_incomplete",
     operationId: "unowned-transform",
-    interactionId: "primary-flow:operation:unownedtransform",
+    interactionId: "primary-flow:2:operation:unownedtransform",
     missingFields: ["reads", "writes"],
   }]);
 });

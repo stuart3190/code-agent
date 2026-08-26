@@ -121,7 +121,7 @@ test("operation-managed catalogue collections remain action state instead of tex
       storage: "client-only transient state; not persisted to a backend",
       fields: [
         { name: "selectedItemId", type: "string" },
-        { name: "favouriteItemIds", type: "string[]" },
+        { name: "favouriteItemIds", type: "string[]", required: true },
       ] }],
     operations: [{
       id: "toggle-favourite", entity: "catalogueSessionState", kind: "update",
@@ -140,6 +140,10 @@ test("operation-managed catalogue collections remain action state instead of tex
           operates: ["favouriteItemIds", "toggle-favourite"],
           reads: ["selectedItemId", "favouriteItemIds"],
           expect: "the session favourites list includes the selected software" },
+        { action: "toggle the selected software in session favourites", target: "favourite button",
+          operates: ["favouriteItemIds", "toggle-favourite"],
+          reads: ["selectedItemId", "favouriteItemIds"],
+          expect: "the session favourites list no longer includes the selected software" },
       ],
     }],
   };
@@ -152,11 +156,15 @@ test("operation-managed catalogue collections remain action state instead of tex
   assert.ok(!spec.interactionContract.flows.some((flow) => (
     flow.control?.logicalField === "favouriteItemIds"
   )));
-  const toggleFlow = spec.interactionContract.flows.find((flow) => (
+  const toggleFlows = spec.interactionContract.flows.filter((flow) => (
     flow.operationId === "toggle-favourite"
   ));
-  assert.ok(toggleFlow?.control);
-  assert.deepEqual(toggleFlow.control.roles, ["button"]);
+  assert.equal(toggleFlows.length, 2);
+  assert.equal(new Set(toggleFlows.map((flow) => flow.id)).size, 2,
+    "reusing one operation must not collide its per-step interaction records");
+  assert.equal(new Set(toggleFlows.map((flow) => flow.control?.machineId)).size, 1,
+    "the per-step interaction records still address one stable operation control");
+  assert.deepEqual(toggleFlows[0].control.roles, ["button"]);
 });
 
 test("structured journey step reads are rejected when the contract declares no earlier producer", () => {

@@ -76,6 +76,7 @@ const initialStateFields = (value, journeyId) => {
 const initialStateFieldPaths = (value, journeyId) => initialStateFields(value, journeyId)
   .flatMap((field) => [`${journeyId}.draft.${field}`, `${journeyId}.custom.${field}`]);
 const transientDefaultValue = (field) => {
+  if (Object.hasOwn(field || {}, "initialValue")) return field.initialValue;
   if (Object.hasOwn(field || {}, "default")) return field.default;
   const type = String(field?.type || "").toLowerCase();
   if (/\[\]\s*$/.test(type) || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type)) return [];
@@ -98,13 +99,23 @@ const transientStateDefaults = (contract, journey) => {
     const entity = (contract?.entities || []).find((candidate) => (
       normalized(candidate?.name) === normalized(operation?.entity)
     ));
-    const optionalFields = new Map((entity?.fields || [])
-      .filter((field) => field?.required !== true)
+    const fields = new Map((entity?.fields || [])
       .map((field) => [normalized(field?.name), field]));
     for (const responsibility of operation.responsibilities) {
+      const writes = new Set(list(responsibility?.writes).map(normalized));
       for (const read of list(responsibility?.reads)) {
-        const field = optionalFields.get(normalized(read));
-        if (field) defaults[field.name] = transientDefaultValue(field);
+        const field = fields.get(normalized(read));
+        if (!field) continue;
+        const type = String(field.type || "").toLowerCase();
+        const collectionAccumulator = writes.has(normalized(read))
+          && (/\[\]\s*$/.test(type) || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type));
+        // Optional transient inputs have canonical empty values. A required collection that an
+        // operation reads and writes is an accumulator and also needs an empty start; "required"
+        // means the state must exist, not that a visitor can supply a value before first use.
+        if (field.required !== true || collectionAccumulator
+          || Object.hasOwn(field, "initialValue") || Object.hasOwn(field, "default")) {
+          defaults[field.name] = transientDefaultValue(field);
+        }
       }
     }
   }
@@ -664,7 +675,7 @@ export function buildInteractionContract(contract, {
           const owners = ownerModules(modulePlan, "action", { durableOwner, draftOwner });
           const stateOwner = owners[0] || `journey:${journey.id}`;
           flows.push({
-            id: `${journey.id}:operation:${normalized(operationId)}`,
+            id: `${journey.id}:${stepIndex + 1}:operation:${normalized(operationId)}`,
             journeyId: journey.id,
             stepIndex,
             kind: "action",
@@ -1054,7 +1065,9 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     const persistenceModule = moduleForNode(persistenceNode);
 
     if (!targets.length) {
-      const id = `${operation.journeyId}:operation:${normalized(operation.operationId)}`;
+      const id = operation.stepIndex >= 0
+        ? `${operation.journeyId}:${operation.stepIndex + 1}:operation:${normalized(operation.operationId)}`
+        : `${operation.journeyId}:operation:${normalized(operation.operationId)}`;
       const control = step ? controlRequirement(kind, null, step, null, operation.operationId) : null;
       const created = {
         id, journeyId: operation.journeyId, stepIndex: operation.stepIndex, kind,
