@@ -11,6 +11,7 @@
 // gates via the verification facade, the real asset service, the real snapshot protocol.
 
 import crypto from "node:crypto";
+import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
@@ -197,7 +198,7 @@ const sourcePaths = (values) => [...new Set((values || []).flatMap((value) => (
 )).map((path) => path.replace(/[):,;]+$/, "")))].sort();
 const directoryPrefix = (path) => path.includes("/") ? `${path.slice(0, path.lastIndexOf("/") + 1)}` : "";
 
-export function targetedGateCorrection(gate, tree, contract = null) {
+export function targetedGateCorrection(gate, tree, contract = null, modulePlan = []) {
   const failure = gate?.layers?.d0d2?.failure;
   if (!failure?.kind || failure.kind === "expectations") return null;
   const findings = failure.findings || [];
@@ -205,7 +206,14 @@ export function targetedGateCorrection(gate, tree, contract = null) {
   const unreachable = findings.filter((finding) => finding?.code === "journey_surface_unreachable");
   const extensionInterfaces = findings.filter((finding) => finding?.code === "custom_extension_invalid"
     && ((finding?.missingInputs || []).length || finding?.operation));
+  const plannedImporters = (target) => (modulePlan || []).filter((module) => (
+    (module.requiredImports || []).some((specifier) => (
+      path.posix.normalize(path.posix.join(path.posix.dirname(module.path), specifier)) === target
+    ))
+  )).map((module) => module.path);
   const mountedIntegrationFiles = unreachable.flatMap((finding) => {
+    const directImporters = plannedImporters(finding.file);
+    if (directImporters.length) return directImporters;
     if ((finding.mountedModules || []).length) return finding.mountedModules;
     const journeyIds = new Set(finding.journeyIds || []);
     if (!journeyIds.size) {
@@ -253,7 +261,7 @@ export function targetedGateCorrection(gate, tree, contract = null) {
       + `[${files.join(", ")}]. ${missing.length ? `Create the missing module(s) [${missing.join(", ")}] `
         + "inside the allowed directory boundary. " : ""}`
       + (unreachable.length
-        ? "Integrate the named journey module from its owning mounted screen and use its declared export in the live interaction; editing or re-exporting the unreachable module alone cannot make progress. "
+        ? "Integrate the named module from its planned live importer and use its declared export in the live interaction; editing or re-exporting the unreachable module alone cannot make progress. "
         : "")
       + (extensionInterfaces.length
         ? "At the named custom-extension call site, pass every missing contract input as an explicit object property using its declared semantic key; an object spread or generic id alias is not sufficient. "
@@ -985,7 +993,7 @@ export function createOrchestrator({
       lastSignature = signature;
       problems = gateProblems;
       rejections = retainedPartial ? [...retainedPatchRejections] : [];
-      const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree, contract);
+      const gateScope = targetedGateCorrection(gate, gate.tree || applied.tree, contract, spec?.modulePlan);
       if (gateScope && corrections < maxCandidateCorrections) {
         if (!treesEqual(applied.tree, gate.tree)) {
           latestCandidate = await snapshotStore.createSnapshot(owner, projectId, gate.tree, {
@@ -2040,7 +2048,8 @@ export function createOrchestrator({
         // candidates still use the ordinary repair path below.
         const initialGate = await verifyStage(source.tree, gateOptions(contract,
           "resume-preflight", allJourneys, { owner, projectId, buildId, step: "resume-preflight", attempt: 0, signal }));
-        const initialRepairScope = initialGate.ok ? null : targetedGateCorrection(initialGate, source.tree, contract);
+        const initialRepairScope = initialGate.ok ? null
+          : targetedGateCorrection(initialGate, source.tree, contract, spec?.modulePlan);
         let retainedJourneyProblems = [];
         let retainedDefects = [];
         if (initialGate.ok) {

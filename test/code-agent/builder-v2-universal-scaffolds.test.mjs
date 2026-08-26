@@ -242,7 +242,7 @@ test("an unmounted journey module and an undeclared repair identifier are reject
     problems: [unreachable.message],
   } } }, tree, spec.contract);
   assert.deepEqual(correction.allowedFiles, [dead, mountedOwner].sort());
-  assert.match(correction.instruction, /owning mounted screen/);
+  assert.match(correction.instruction, /planned live importer/);
 
   const crowdedCorrection = targetedGateCorrection({ layers: { d0d2: {
     failure: { kind: "static_application", findings: [
@@ -261,6 +261,26 @@ test("an unmounted journey module and an undeclared repair identifier are reject
   assert.deepEqual(crowdedCorrection.allowedFiles, [mountedOwner],
     "several unreachable children sharing one mounted screen reduce to the causal integration owner");
   assert.match(crowdedCorrection.instruction, /editing or re-exporting the unreachable module alone cannot make progress/);
+
+  const extensionJourneys = ["browse-catalogue", "empty-result", "session-favourites"];
+  const importerPlan = extensionJourneys.map((journeyId) => ({
+    path: `src/components/${journeyId}/${journeyId}Flow.jsx`,
+    requiredImports: [`../../extensions/custom/${journeyId}.js`],
+  }));
+  const extensionFindings = extensionJourneys.map((journeyId) => ({
+    code: "journey_surface_unreachable",
+    file: `src/extensions/custom/${journeyId}.js`,
+    journeyIds: [journeyId],
+    message: `${journeyId} custom behaviour is not reachable from its mounted screen`,
+  }));
+  const extensionTree = Object.fromEntries([...importerPlan.map((module) => module.path),
+    ...extensionFindings.map((finding) => finding.file)].map((file) => [file, "export default function Module(){}"]));
+  const extensionCorrection = targetedGateCorrection({ layers: { d0d2: {
+    failure: { kind: "static_application", findings: extensionFindings },
+    problems: extensionFindings.map((finding) => finding.message),
+  } } }, extensionTree, spec.contract, importerPlan);
+  assert.deepEqual(extensionCorrection.allowedFiles, importerPlan.map((module) => module.path).sort(),
+    "unreachable custom behaviour must be integrated by its planned child flow, not by the screen");
 
   delete tree[dead];
   const owner = spec.scaffoldGraph.journeyOwnership[0].mountedModule;

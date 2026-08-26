@@ -324,11 +324,27 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
   const isRequiredChildFlow = (module) => String(module?.path || "").startsWith("src/components/")
     && /flow composition/i.test(module?.role || "")
     && (module?.journeyIds || []).some((journeyId) => decomposedJourneyIds.has(journeyId));
+  const extensions = (graph?.extensions || []).map((extension) => ({
+    path: extension.module, role: `bounded custom extension ${extension.extensionId}`,
+    journeyIds: extension.owningJourneys, requiredExports: extension.requiredExports,
+    customExtensionId: extension.extensionId, stateOwnership: {
+      owns: (extension.writes || []).join(", ") || "declared extension outputs",
+      survivesReload: false, durableStateOwner: "capability handoff when contracted",
+    },
+  }));
   const boundedExisting = (existingPlan || []).filter((module) => module?.providedBy === "capability_composer"
     || module?.protected === true || module?.customBehaviorId || module?.customExtensionId
     || (module?.requiredImports || []).length || String(module?.path || "").startsWith("src/extensions/")
     || isRequiredChildFlow(module));
-  const childFlows = boundedExisting.filter(isRequiredChildFlow);
+  const integratedExisting = boundedExisting.map((module) => {
+    if (!isRequiredChildFlow(module)) return module;
+    const journeyIds = new Set(module.journeyIds || []);
+    const requiredImports = extensions.filter((extension) => (extension.journeyIds || [])
+      .some((journeyId) => journeyIds.has(journeyId)))
+      .map((extension) => relativeImport(module.path, extension.path));
+    return { ...module, requiredImports: unique([...(module.requiredImports || []), ...requiredImports]) };
+  });
+  const childFlows = integratedExisting.filter(isRequiredChildFlow);
   const screens = (graph?.screens || []).map((screen) => {
     const journeyIds = (graph.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
       .map((row) => row.journeyId);
@@ -347,15 +363,7 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
       requiredExports: ["default"],
     };
   });
-  const extensions = (graph?.extensions || []).map((extension) => ({
-    path: extension.module, role: `bounded custom extension ${extension.extensionId}`,
-    journeyIds: extension.owningJourneys, requiredExports: extension.requiredExports,
-    customExtensionId: extension.extensionId, stateOwnership: {
-      owns: (extension.writes || []).join(", ") || "declared extension outputs",
-      survivesReload: false, durableStateOwner: "capability handoff when contracted",
-    },
-  }));
-  return [...new Map([...boundedExisting, ...screens, ...extensions].map((row) => [row.path, row])).values()];
+  return [...new Map([...integratedExisting, ...screens, ...extensions].map((row) => [row.path, row])).values()];
 }
 
 export function scopeScaffoldGraph(graph, journeys = []) {

@@ -14,6 +14,7 @@ import {
 import { scopeCapabilityGraph } from "../../shell/server/lib/builderV2/capabilityGraph.mjs";
 import { deriveModulePlan, journeyStepKinds } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { validateInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
+import { scaffoldModulePlan } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
 
 const CONTRACT = {
   summary: "A workshop booking system with review, recovery and cancellation",
@@ -192,6 +193,35 @@ test("a crowded mounted screen retains bounded child-flow modules in the canonic
     [...plannedPaths].sort());
   assert.deepEqual(spec.moduleContracts.specifications
     .find((row) => row.path === screen.path).requiredImports.sort(), expectedChildImports);
+});
+
+test("crowded software-catalogue child flows must invoke their planned custom behaviour modules", () => {
+  const journeyIds = ["browse-catalogue", "empty-result", "session-favourites"];
+  const graph = {
+    screens: [{ screenId: "catalogue-screen", module: "src/screens/scaffold/CatalogueScreen.jsx",
+      routePath: "/" }],
+    journeyOwnership: journeyIds.map((journeyId) => ({ journeyId, screenId: "catalogue-screen" })),
+    extensions: journeyIds.map((journeyId) => ({
+      extensionId: `custom_behavior:${journeyId}`,
+      module: `src/extensions/custom/${journeyId}.js`,
+      owningJourneys: [journeyId],
+      requiredExports: [`run${journeyId.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("")}CustomBehavior`],
+      writes: [`${journeyId}.custom.result`],
+    })),
+  };
+  const existingPlan = journeyIds.map((journeyId) => ({
+    path: `src/components/${journeyId}/${journeyId}Flow.jsx`,
+    role: "step navigation and flow composition",
+    journeyIds: [journeyId],
+  }));
+  const plan = scaffoldModulePlan(graph, existingPlan);
+
+  for (const journeyId of journeyIds) {
+    const child = plan.find((module) => module.journeyIds?.length === 1
+      && module.journeyIds[0] === journeyId && /flow composition/i.test(module.role || ""));
+    assert.deepEqual(child.requiredImports, [`../../extensions/custom/${journeyId}.js`],
+      `${journeyId} must not duplicate its custom behaviour inside the view or leave it unreachable`);
+  }
 });
 
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {
