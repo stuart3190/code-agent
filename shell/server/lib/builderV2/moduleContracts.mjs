@@ -26,6 +26,24 @@ const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-
 const factoryForBinding = (binding) => (CAPABILITIES[binding?.name]?.interface || [])
   .find((entry) => /^make[A-Z]/.test(entry)) || null;
 
+/**
+ * Reserve output for missing planned modules from their deterministic responsibilities.
+ * Ordinary leaf modules retain the observed 1,600-token baseline. A shared journey controller
+ * owns several interaction state transitions, so size it from its declared controls while still
+ * respecting the same enforced per-file boundary as generated source.
+ */
+export function expectedMissingModuleTokens(paths = [], moduleContracts = null) {
+  const specifications = new Map((moduleContracts?.specifications || [])
+    .map((specification) => [specification.path, specification]));
+  return unique(paths).reduce((total, path) => {
+    const specification = specifications.get(path);
+    if (!specification?.sharedControllerFor) return total + 1_600;
+    const interactions = (specification.semanticInteractions || []).length;
+    const boundary = Math.max(1_600, Number(specification.moduleSizeBoundary || FILE_MAX_TOKENS));
+    return total + Math.min(boundary, Math.max(1_600, 1_200 + (interactions * 250)));
+  }, 0);
+}
+
 function targetModules(flow, modulePlan) {
   const targets = new Set(flow?.responsibleModules || []);
   const plannedVisualController = modulePlan.find((module) => (

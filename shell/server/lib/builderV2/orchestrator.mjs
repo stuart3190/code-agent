@@ -27,7 +27,7 @@ import {
   interactionDependencyProgress, interactionFailureDiagnostics, scopeInteractionContract,
 } from "./interactionContract.mjs";
 import {
-  moduleCorrectionScope, validateModuleConformance, validateModulePatchScope,
+  expectedMissingModuleTokens, moduleCorrectionScope, validateModuleConformance, validateModulePatchScope,
 } from "./moduleContracts.mjs";
 import {
   verifyStage, attributeFailures, planJourneyVerification, recordJourneyVerdicts, memoryVerificationCache,
@@ -302,7 +302,8 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
   const sourceTokens = files.reduce((sum, path) => (
     sum + Math.ceil(String(tree?.[path] || "").length / 4)
   ), 0);
-  const missingFileTokens = files.filter((path) => typeof tree?.[path] !== "string").length * 1_600;
+  const missingFiles = files.filter((path) => typeof tree?.[path] !== "string");
+  const missingFileTokens = expectedMissingModuleTokens(missingFiles, moduleContracts);
   return {
     ...scope,
     batchIndex: Number(scope.batchIndex || 0) + 1,
@@ -312,7 +313,38 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
     expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
     instruction: "Continue the same approved build with only this next bounded module batch. "
-      + `Complete [${files.join(", ")}], preserve every retained module, and do not touch unrelated files.`,
+      + `Complete [${files.join(", ")}], preserve every retained module, and do not touch unrelated files.`
+      + (missingFiles.length
+        ? ` Files [${missingFiles.join(", ")}] do not exist: create each with newFile; file/ops and replaceFile are invalid until it exists.`
+        : ""),
+  };
+}
+
+export function rejectedHeadroomContinuation(scope, moduleContracts, tree, rejected = []) {
+  const boundary = new Set(scope?.allowedFiles || []);
+  const files = [...new Set(rejected.map((row) => row?.file)
+    .filter((file) => file && boundary.has(file)))];
+  if (!files.length) return null;
+  const selected = (moduleContracts?.specifications || [])
+    .filter((specification) => files.includes(specification.path));
+  const sourceTokens = files.reduce((sum, file) => (
+    sum + Math.ceil(String(tree?.[file] || "").length / 4)
+  ), 0);
+  const missingFiles = files.filter((file) => typeof tree?.[file] !== "string");
+  const missingFileTokens = expectedMissingModuleTokens(missingFiles, moduleContracts);
+  return {
+    ...scope,
+    batchIndex: Number(scope?.batchIndex || 0) + 1,
+    files,
+    allowedFiles: files,
+    remainingFiles: [...new Set(scope?.remainingFiles || [])],
+    moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
+    expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
+    instruction: "Retry only the rejected or unfinished file(s) from the retained headroom batch. "
+      + `Complete [${files.join(", ")}]; every clean sibling is already retained and must not be re-emitted.`
+      + (missingFiles.length
+        ? ` Files [${missingFiles.join(", ")}] do not exist: create each with newFile; file/ops and replaceFile are invalid until it exists.`
+        : ""),
   };
 }
 
@@ -640,6 +672,9 @@ export function createOrchestrator({
         ...Object.keys(evidenceTree).filter((path) => evidenceTree[path] !== working[path]),
         ...Object.keys(working).filter((path) => !(path in evidenceTree)),
       ])].sort();
+      const rejectedHeadroomScope = internalHeadroomSplit
+        ? rejectedHeadroomContinuation(activeScope, moduleContracts, evidenceTree, applied.rejected)
+        : null;
       await events.patches?.({
         owner, projectId, buildId, step: dispatchStep, attempt, patches,
         outcome: applied.rejected.length ? "rejected" : "applied",
@@ -647,12 +682,13 @@ export function createOrchestrator({
         outcomes: patchOutcomes(patches, applied), filesChanged,
       });
       if (applied.rejected.length) {
-        headroomScope = null;
+        headroomScope = internalHeadroomSplit ? (rejectedHeadroomScope || activeScope) : null;
         rejectionHistory.push(...applied.rejected);
         rejections = applied.rejected;
         const classes = [...new Set(applied.rejected.map((row) => row.code).filter(Boolean))];
         const structuralScope = structuralCandidateCorrection(applied);
         if (structuralScope && corrections < maxCandidateCorrections) {
+          headroomScope = null;
           const signature = problemSignature(applied.structuralProblems);
           if (signature === lastSignature) {
             return failure("the same structural defect survived a scoped correction (stop rule)", {
@@ -704,6 +740,25 @@ export function createOrchestrator({
             class: `${classes[0] || "patch_not_applicable"}_partial_candidate`, substantive: true,
             rejected: applied.rejected.length, retainedFiles: filesChanged });
         } else {
+          if (internalHeadroomSplit && rejectedHeadroomScope) {
+            working = applied.tree;
+            headroomScope = rejectedHeadroomScope;
+            if (step === "repair" || correctionDispatch) {
+              if (!scheduleCorrectionRetry()) {
+                return failure(`${step === "repair" ? "the repair" : "the candidate correction"} patch remained invalid after the correction allowance`, {
+                  problems: applied.rejected.map((row) => row.reason),
+                });
+              }
+            } else {
+              attempts += 1;
+            }
+            attemptLedger.push({ attempt, dispatch: dispatchStep,
+              class: `${classes[0] || "patch_not_applicable"}_headroom_retry`, substantive: true,
+              rejected: applied.rejected.length, retainedFiles: [] });
+            log(`${step}: rejected headroom work remains bounded to `
+              + `[${headroomScope.allowedFiles.join(", ")}]; retrying only those unfinished files`);
+            continue;
+          }
           working = correctionDispatch && latestCandidate ? working : originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
           if (step === "repair" || correctionDispatch) {
@@ -824,6 +879,18 @@ export function createOrchestrator({
       });
       await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
         tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
+
+      if (internalHeadroomSplit && rejectedHeadroomScope) {
+        working = applied.tree;
+        headroomScope = rejectedHeadroomScope;
+        repairScope = null;
+        contractCorrectionScope = null;
+        attemptLedger.push({ attempt, dispatch: dispatchStep, class: "headroom_rejected_continuation",
+          substantive: true, rejected: retainedPatchRejections.length, retainedFiles: filesChanged });
+        log(`${step}: retained ${filesChanged.length} clean headroom file(s) in ${latestCandidate.id}; `
+          + `retrying only rejected [${headroomScope.allowedFiles.join(", ")}] before queued modules or gates`);
+        continue;
+      }
 
       if (internalHeadroomSplit && activeScope.remainingFiles?.length) {
         working = applied.tree;

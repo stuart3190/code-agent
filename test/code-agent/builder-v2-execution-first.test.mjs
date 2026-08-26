@@ -10,7 +10,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createOrchestrator, memoryBuildStore } from "../../shell/server/lib/builderV2/orchestrator.mjs";
+import {
+  createOrchestrator, memoryBuildStore, rejectedHeadroomContinuation,
+} from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
@@ -277,6 +279,71 @@ export const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", 
   assert.equal(h.timeline.filter((entry) => entry === "browser").length, 2,
     "differential verification is followed by the mandatory uncached full-journey pass");
   assert.ok(h.events.checkpoints.length >= 2, "each useful batch is durably retained");
+});
+
+test("a rejected missing file in a partial headroom batch retries alone before compile", async () => {
+  const storePath = "src/data/store.js";
+  let dispatches = 0;
+  const h = harness({
+    patches: (input) => {
+      dispatches += 1;
+      if (dispatches === 1) {
+        const splitScreen = UNPRESCRIBED[SCREEN_PATH]
+          .replace('import { makeBookingSystem, makeWizardMachine } from "../../lib/capabilities/index.js";',
+            'import { bookings, wizard } from "../../data/store.js";')
+          .replace('const bookings = makeBookingSystem({ entity: "booking" });\nconst wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });\n', "");
+        const patches = [
+          { replaceFile: SCREEN_PATH, content: splitScreen },
+          { file: storePath, ops: [{ op: "append", symbol: null,
+            content: "export const unfinished = true;" }] },
+        ];
+        Object.defineProperty(patches, "dispatchScope", { value: {
+          kind: "headroom_continuation", files: [SCREEN_PATH, storePath],
+          allowedFiles: [SCREEN_PATH, storePath], allowedPrefixes: [], batchWidth: 2,
+          logicalStep: "core", batchIndex: 0, remainingFiles: [],
+          moduleContracts: { version: 1, specifications: [] },
+        } });
+        return patches;
+      }
+      assert.deepEqual(input.headroomScope.allowedFiles, [storePath],
+        "the clean mounted screen is retained and excluded from the retry");
+      assert.deepEqual(input.headroomScope.remainingFiles, []);
+      assert.match(input.headroomScope.instruction, /create each with newFile/);
+      assert.match(input.rejections[0].reason, /does not exist/);
+      return [{ newFile: storePath,
+        content: `import { makeBookingSystem, makeWizardMachine } from "../lib/capabilities/index.js";
+export const bookings = makeBookingSystem({ entity: "booking" });
+export const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", "confirm"] });` }];
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "p", request: "booking" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(dispatches, 2);
+  assert.equal(h.timeline.filter((entry) => entry === "compile:core").length, 1,
+    "compile waits until the rejected missing module has been created");
+});
+
+test("a rejected shared controller retry preserves queued work and its interaction-sized output budget", () => {
+  const controller = "src/components/catalogue/SoftwareCatalogueController.jsx";
+  const queued = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const moduleContracts = { version: 1, specifications: [{
+    path: controller, sharedControllerFor: "software-catalogue",
+    semanticInteractions: Array.from({ length: 14 }, (_, index) => ({
+      interactionId: `catalogue-control-${index + 1}`,
+    })),
+    moduleSizeBoundary: 5_500,
+  }] };
+  const retry = rejectedHeadroomContinuation({
+    kind: "headroom_continuation", allowedFiles: [controller, queued], files: [controller, queued],
+    remainingFiles: ["src/extensions/catalogue/formatDetails.js"], batchWidth: 2, batchIndex: 0,
+    allowedPrefixes: [],
+  }, moduleContracts, { [queued]: "export default function SoftwareCatalogueScreen(){return <main/>}" }, [{
+    file: controller, code: "patch_not_applicable", reason: "the planned source file is not present",
+  }]);
+  assert.deepEqual(retry.allowedFiles, [controller]);
+  assert.deepEqual(retry.remainingFiles, ["src/extensions/catalogue/formatDetails.js"]);
+  assert.equal(retry.expectedPatchTokens, 4_700);
+  assert.match(retry.instruction, /create each with newFile/);
 });
 
 test("a tree that does not compile is a real generation attempt, not a correction", async () => {

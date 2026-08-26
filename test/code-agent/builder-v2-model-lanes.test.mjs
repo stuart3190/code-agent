@@ -189,6 +189,38 @@ test("initial generation is told to mount one shared controller for a crowded sc
   assert.match(prompt, /rejects a file above 5000 tokens that implements more than 2 journeys/);
 });
 
+test("scaffold headroom excludes legacy routes and sizes a missing shared controller from its interaction contract", () => {
+  const controller = "src/components/catalogue/SoftwareCatalogueController.jsx";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const modulePlan = [
+    { path: controller, role: "shared step navigation and flow composition",
+      journeyIds: ["browse-catalogue", "filter-catalogue", "inspect-catalogue"],
+      sharedControllerFor: "software-catalogue" },
+    { path: screen, role: "mounted screen composition", providedBy: "scaffold_screen_slot",
+      journeyIds: ["browse-catalogue", "filter-catalogue", "inspect-catalogue"] },
+  ];
+  const moduleContracts = { version: 1, specifications: [{
+    ...modulePlan[0], ownedJourneys: modulePlan[0].journeyIds,
+    semanticInteractions: Array.from({ length: 14 }, (_, index) => ({
+      interactionId: `catalogue-control-${index + 1}`,
+    })),
+    moduleSizeBoundary: 5_500,
+  }] };
+  const tree = {
+    "src/App.jsx": "export default function App(){return null}",
+    "src/routes/HomePage.jsx": "export default function HomePage(){return null}",
+    "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};",
+    [screen]: "export default function SoftwareCatalogueScreen(){return <main/>}",
+  };
+  const scope = headroomDispatchScope({ tree, modulePlan, moduleContracts, logicalStep: "core" });
+  assert.deepEqual(scope.allowedFiles, [controller]);
+  assert.equal(scope.remainingFiles.includes("src/App.jsx"), false);
+  assert.equal(scope.remainingFiles.includes("src/routes/HomePage.jsx"), false);
+  assert.equal(scope.expectedPatchTokens, 4_700,
+    "the 14 declared interactions receive useful output headroom within the 5,500-token file guard");
+  assert.match(scope.instruction, /create each with newFile/);
+});
+
 test("a retained complex application continuation carries only the selected module's semantic journey", () => {
   const fixture = JSON.parse(readFileSync(new URL(
     "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,

@@ -26,7 +26,7 @@ import { FUNDING_POOL } from "./buildEnvelope.mjs";
 import { classifyProviderFailure, replayUnsafe } from "../providerOutcome.mjs";
 import { assemblyNeeds, interactionContractBrief, scopeInteractionContract } from "./interactionContract.mjs";
 import {
-  moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
+  expectedMissingModuleTokens, moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
 } from "./moduleContracts.mjs";
 import { capabilityCompositionBrief } from "./capabilityComposer.mjs";
 import { scopeCapabilityGraph } from "./capabilityGraph.mjs";
@@ -936,7 +936,11 @@ export function headroomDispatchScope({
   const candidates = targeted.length ? targeted : [...new Set([
     ...missing,
     ...planned,
-    ...["src/App.jsx", "src/routes/HomePage.jsx"].filter((path) => typeof tree?.[path] === "string"),
+    // The composed scaffold is the canonical mounted application. Its protected manifest proves
+    // that App/HomePage are legacy scaffold residue, not unfinished generation targets.
+    ...((typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string") ? []
+      : ["src/App.jsx", "src/routes/HomePage.jsx"]
+        .filter((path) => typeof tree?.[path] === "string")),
   ])];
   if (!candidates.length) return null;
   const priorFiles = previousScope?.allowedFiles || activeFiles;
@@ -971,7 +975,11 @@ export function headroomDispatchScope({
   const selectedContracts = (moduleContracts?.specifications || [])
     .filter((specification) => files.includes(specification.path));
   const sourceTokens = files.reduce((sum, path) => sum + Math.ceil(String(tree?.[path] || "").length / 4), 0);
-  const missingFileTokens = files.filter((path) => typeof tree?.[path] !== "string").length * 1_600;
+  const missingFiles = files.filter((path) => typeof tree?.[path] !== "string");
+  const missingFileTokens = expectedMissingModuleTokens(missingFiles, moduleContracts);
+  const creationInstruction = missingFiles.length
+    ? ` Files [${missingFiles.join(", ")}] do not exist: create each with newFile; file/ops and replaceFile are invalid until it exists.`
+    : "";
   return {
     kind: "headroom_continuation",
     logicalStep: previousScope?.logicalStep || logicalStep,
@@ -986,7 +994,8 @@ export function headroomDispatchScope({
     expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
     instruction: "This is one bounded continuation of the same approved build. Implement the complete responsibilities "
       + `owned by [${files.join(", ")}], preserve the retained candidate, and do not touch unrelated modules. `
-      + "Do not ask the customer to send another message; the orchestrator will continue with the remaining modules.",
+      + "Do not ask the customer to send another message; the orchestrator will continue with the remaining modules."
+      + creationInstruction,
   };
 }
 
