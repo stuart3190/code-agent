@@ -51,6 +51,7 @@ export const BLOCKING_CODES = Object.freeze({
 
   // ── capability integrity: provably broken at runtime, not merely unusual ──
   capability_method_unknown: "a method is called that the capability demonstrably does not export",
+  semantic_field_event_handler_invalid: "useSemanticField passes a value, so dereferencing its callback argument as a DOM event is guaranteed to fail",
   unknown_capability_factory: "an unrecognised capability factory is bound",
   required_factory_missing: "a contract-required capability is absent from the whole tree",
   capability_composition_invalid: "the canonical graph is missing a protected capability module or a declared custom extension interface",
@@ -114,6 +115,7 @@ const UNDEMOTABLE = Object.freeze(new Set([
   "scaffold_placeholder_unreplaced",
   "undefined_identifier", "scaffold_composition_invalid", "journey_surface_unreachable",
   "custom_extension_invalid",
+  "semantic_field_event_handler_invalid",
   "contract_control_wrong_binding",
   "runtime_configuration_invalid",
   "capability_composition_invalid",

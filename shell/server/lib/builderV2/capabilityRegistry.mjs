@@ -235,7 +235,7 @@ export function validateBindings(bindings = []) {
 export const REACT_BINDINGS = [
   "useCapabilityState(store, selector?) → live state via useSyncExternalStore(store.subscribe, store.getState)",
   "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
-  "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps } with a guaranteed accessible name",
+  "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps }; onChange receives the semantic value directly, NEVER a DOM event",
   "useSemanticSelection({ name, value, onSelect, actionName? }) → { groupProps, optionProps(option) }; keeps the native button role, reports selection via aria-pressed, and actionName binds the same option as a contracted flow-entry action",
   "useSemanticAction({ name, label, onActivate }) → { buttonProps } for a contracted action; label freely",
   "useFlowAdvance({ label, onActivate, disabled }) → { buttonProps } for the control that moves a multi-step flow FORWARD; label freely",
@@ -286,6 +286,7 @@ const ASSEMBLY_PATTERNS = Object.freeze({
       "FORM FIELD — an accessible name is what makes a field findable:",
       '  const field = useSemanticField({ name: "<field>", value: draft.<field>, type: "<text|email|tel|number>", onChange: (v) => setDraft({ ...draft, <field>: v }) });',
       "  <label {...field.labelProps} /> <input {...field.inputProps} />",
+      "  // onChange receives v directly. Never read v.target.value or v.currentTarget.value.",
     ],
   },
   entities: {

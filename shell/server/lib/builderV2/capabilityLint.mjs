@@ -96,6 +96,14 @@ export function lintCapabilitySafety(tree, bindings = []) {
     }
   }
 
+  // `useSemanticField` normalises a browser change event to the field's semantic value before it
+  // invokes generated code. Treating that value as a DOM event is a guaranteed runtime failure:
+  // `value.target` is undefined, so `value.target.value` throws on the first keystroke. A live
+  // qualification reproduced this through core generation and every browser-repair strategy
+  // because the invalid callback looked structurally bound. Catch the exact, provable misuse
+  // before Chromium and teach the correction lane the real callback shape.
+  for (const finding of semanticFieldHandlerFindings(tree)) findings.push(finding);
+
   // NOTE: `sessionless_mutation` was retired here. It required generated modules to call
   // ensureVisitorSession() before mutating, which was correct while session establishment was
   // the application's job. It no longer is: createSupabaseBackend establishes and recovers the
@@ -350,6 +358,101 @@ function parseGeneratedModules(tree) {
     }
   }
   return modules;
+}
+
+function memberName(node) {
+  if (!["MemberExpression", "OptionalMemberExpression"].includes(node?.type)) return null;
+  return propertyName(node.property);
+}
+
+function firstParameterName(fn) {
+  const parameter = fn?.params?.[0];
+  if (parameter?.type === "Identifier") return parameter.name;
+  if (parameter?.type === "AssignmentPattern" && parameter.left?.type === "Identifier") {
+    return parameter.left.name;
+  }
+  return null;
+}
+
+function directlyDereferencesEventValue(fn) {
+  const parameter = firstParameterName(fn);
+  if (!parameter) return false;
+  let invalid = false;
+  const inspect = (node, root = false) => {
+    if (!node || invalid || typeof node !== "object") return;
+    if (!root && ["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration"]
+      .includes(node.type)) return;
+    if (memberName(node) === "value" && !node.optional) {
+      const eventTarget = unwrapExpression(node.object);
+      const eventValue = unwrapExpression(eventTarget?.object);
+      if (["target", "currentTarget"].includes(memberName(eventTarget)) && !eventTarget.optional
+        && eventValue?.type === "Identifier" && eventValue.name === parameter) {
+        invalid = true;
+        return;
+      }
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (AST_KEYS_TO_SKIP.has(key)) continue;
+      if (Array.isArray(value)) for (const child of value) inspect(child);
+      else inspect(value);
+    }
+  };
+  inspect(fn.body, true);
+  return invalid;
+}
+
+function semanticFieldHandlerFindings(tree) {
+  const findings = [];
+  for (const [file, module] of parseGeneratedModules(tree)) {
+    const functions = new Map();
+    const semanticFieldLocals = new Set();
+    walkAst(module.ast, (node) => {
+      if (node.type === "ImportDeclaration"
+        && /(?:^|\/)lib\/capabilities(?:\/|$)/.test(String(node.source?.value || ""))) {
+        for (const specifier of node.specifiers || []) {
+          if (specifier.type === "ImportSpecifier" && propertyName(specifier.imported) === "useSemanticField") {
+            semanticFieldLocals.add(specifier.local.name);
+          }
+        }
+      } else if (node.type === "FunctionDeclaration" && node.id?.name) {
+        functions.set(node.id.name, functions.has(node.id.name) ? null : node);
+      } else if (node.type === "VariableDeclarator" && node.id?.type === "Identifier"
+        && ["ArrowFunctionExpression", "FunctionExpression"].includes(unwrapExpression(node.init)?.type)) {
+        functions.set(node.id.name, functions.has(node.id.name) ? null : unwrapExpression(node.init));
+      }
+    });
+    if (!semanticFieldLocals.size) continue;
+    walkAst(module.ast, (node) => {
+      if (!["CallExpression", "OptionalCallExpression"].includes(node.type)) return;
+      const callee = unwrapExpression(node.callee);
+      if (callee?.type !== "Identifier" || !semanticFieldLocals.has(callee.name)) return;
+      const options = unwrapExpression(node.arguments?.[0]);
+      if (options?.type !== "ObjectExpression") return;
+      const onChange = (options.properties || []).find((property) => (
+        ["ObjectProperty", "ObjectMethod"].includes(property.type)
+        && propertyName(property.key) === "onChange"
+      ));
+      let handler = onChange?.type === "ObjectMethod" ? onChange : unwrapExpression(onChange?.value);
+      if (handler?.type === "Identifier") handler = functions.get(handler.name);
+      if (!["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration", "ObjectMethod"]
+        .includes(handler?.type) || !directlyDereferencesEventValue(handler)) return;
+      const nameProperty = (options.properties || []).find((property) => (
+        property.type === "ObjectProperty" && propertyName(property.key) === "name"
+      ));
+      const fieldName = nameProperty?.value?.type === "StringLiteral" ? nameProperty.value.value : null;
+      const line = onChange?.loc?.start?.line || node.loc?.start?.line || null;
+      findings.push({
+        code: "semantic_field_event_handler_invalid",
+        file,
+        module: file,
+        line,
+        field: fieldName,
+        message: `${file}${line ? `:${line}` : ""}: useSemanticField${fieldName ? `(${JSON.stringify(fieldName)})` : ""} `
+          + "passes the semantic value directly to onChange, never a DOM event; accept (value) and use value directly instead of reading event.target.value",
+      });
+    });
+  }
+  return findings;
 }
 
 function increment(map, name) {

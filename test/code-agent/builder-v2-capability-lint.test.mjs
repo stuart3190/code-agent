@@ -72,6 +72,50 @@ async function go() {
   assert.match(bad.problems[0], /\[subscribe\]/);
 });
 
+test("D1 lint — rejects semantic fields that treat the provided value as a DOM event", () => {
+  const invalid = lintCapabilitySafety({
+    "src/components/SoftwareCatalogue.jsx": `
+import { useSemanticField } from "../lib/capabilities/react.js";
+export default function SoftwareCatalogue() {
+  const search = useSemanticField({
+    name: "searchQuery",
+    value: "",
+    onChange: (event) => updateSearch(event.target.value),
+  });
+  return <input {...search.inputProps} />;
+}
+`,
+  });
+  assert.deepEqual(codes(invalid), ["semantic_field_event_handler_invalid"]);
+  assert.equal(invalid.findings[0].file, "src/components/SoftwareCatalogue.jsx");
+  assert.equal(invalid.findings[0].field, "searchQuery");
+  assert.match(invalid.problems[0], /passes the semantic value directly/);
+  assert.equal(severityOf("semantic_field_event_handler_invalid"), SEVERITY.BLOCKING);
+
+  const namedInvalid = lintCapabilitySafety({
+    "src/components/SoftwareCatalogue.jsx": `
+import { useSemanticField } from "../lib/capabilities/react.js";
+function applySearch(event) { updateSearch(event.currentTarget.value); }
+export default function SoftwareCatalogue() {
+  const search = useSemanticField({ name: "searchQuery", value: "", onChange: applySearch });
+  return <input {...search.inputProps} />;
+}
+`,
+  });
+  assert.deepEqual(codes(namedInvalid), ["semantic_field_event_handler_invalid"]);
+
+  const valid = lintCapabilitySafety({
+    "src/components/SoftwareCatalogue.jsx": `
+import { useSemanticField } from "../lib/capabilities/react.js";
+export default function SoftwareCatalogue() {
+  const search = useSemanticField({ name: "searchQuery", value: "", onChange: (value) => updateSearch(value) });
+  return <input {...search.inputProps} />;
+}
+`,
+  });
+  assert.equal(valid.ok, true, JSON.stringify(valid.problems));
+});
+
 test("D1 lint — the AST authority sees grammars the old regex could not", () => {
   // Destructured, aliased and cross-module usage all resolve to the same provenance, so an
   // unknown method is caught wherever it is written — and a VALID one is never falsely flagged.
@@ -136,6 +180,7 @@ test("D1 lint — the capability brief carries the instance methods AND the Reac
   assert.match(brief, /useCapabilityState/);
   assert.match(brief, /useSyncExternalStore/);
   assert.match(brief, /useSemanticField/);
+  assert.match(brief, /onChange receives the semantic value directly, NEVER a DOM event/);
   assert.match(brief, /may be CALLED or PASSED as a reference/);
 });
 
