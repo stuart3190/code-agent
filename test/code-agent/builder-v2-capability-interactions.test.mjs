@@ -460,6 +460,52 @@ test("one declared operation keeps one action identity across journey-specific w
   assert.ok(actions.every((action) => action.id === expectedId), JSON.stringify(actions));
 });
 
+test("shared transient controls provide defaults to an independent catalogue journey", () => {
+  const contract = {
+    summary: "A software catalogue with shared local filter controls",
+    projectType: "tool", auth: { required: false, rules: [] }, integrations: [], states: [],
+    acceptance: [], deferred: [],
+    entities: [{
+      name: "catalogueViewState",
+      storage: "client-only transient state; not persisted",
+      fields: [
+        { name: "searchQuery", type: "string", required: true },
+        { name: "categoryFilter", type: "string", required: true },
+        { name: "pricingFilter", type: "string", required: true },
+        { name: "filteredSoftwareIds", type: "string[]", required: true },
+      ],
+    }],
+    operations: [{
+      id: "filter-catalogue", entity: "catalogueViewState", kind: "update", journey: "empty-search",
+      responsibilities: [{ type: "functional",
+        reads: ["searchQuery", "categoryFilter", "pricingFilter"], writes: ["filteredSoftwareIds"],
+        behavior: "filter in-code catalogue items using the current local controls" }],
+    }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    journeys: [
+      { id: "browse-controls", title: "Browse with filters", priority: "primary", steps: [
+        { action: "choose a category", target: "category filter", operates: ["categoryFilter"],
+          expect: "the category selection is visible", verificationValues: { categoryFilter: "Editors" } },
+        { action: "choose a pricing band", target: "pricing filter", operates: ["pricingFilter"],
+          expect: "the pricing selection is visible", verificationValues: { pricingFilter: "Team" } },
+      ] },
+      { id: "empty-search", title: "See an empty search", priority: "secondary", steps: [
+        { action: "enter a missing catalogue term", target: "catalogue search", operates: ["searchQuery"],
+          expect: "the search value is visible", verificationValues: { searchQuery: "missing-entry" } },
+        { action: "apply the catalogue search", target: "catalogue search action",
+          operates: ["filter-catalogue"], expect: "the empty catalogue state is visible" },
+      ] },
+    ],
+  };
+  const spec = deriveBuildSpec(contract);
+  const dependencyProblems = spec.verdict.problems
+    .filter((problem) => problem.includes("reads state before it is produced"));
+
+  assert.deepEqual(dependencyProblems, [], spec.verdict.problems.join("; "));
+  assert.equal(spec.interactionContract.scenarios["empty-search"].initialState.categoryFilter, "");
+  assert.equal(spec.interactionContract.scenarios["empty-search"].initialState.pricingFilter, "");
+});
+
 test("distinct declared operations retain distinct action identities", () => {
   const contract = {
     summary: "A software catalogue with two local actions",

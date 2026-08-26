@@ -124,6 +124,14 @@ const transientStateDefaults = (contract, journey) => {
     return list(step?.operates).map(normalized).filter((value) => !operationIds.has(value)
       && !operationOwnsActionState(step, value, declaredFields.get(value), managedFields));
   }));
+  const globallyVisitorOperatedFields = new Set((contract?.journeys || []).flatMap((candidateJourney) =>
+    (candidateJourney?.steps || []).flatMap((step) => {
+      const stepOperations = list(step?.operates)
+        .map((value) => operationsById.get(normalized(value))).filter(Boolean);
+      const managedFields = functionalManagedState(stepOperations, step);
+      return list(step?.operates).map(normalized).filter((value) => !operationIds.has(value)
+        && !operationOwnsActionState(step, value, declaredFields.get(value), managedFields));
+    })));
   const defaults = {};
   for (const operation of contract?.operations || []) {
     const operationId = normalized(operation?.id || operation?.name);
@@ -155,6 +163,13 @@ const transientStateDefaults = (contract, journey) => {
         // a later reset operation also owned the same required fields.
         const resettableScalar = !collection && writes.has(normalized(read))
           && !visitorOperatedFields.has(normalized(read));
+        // A shared transient control has a value on every fresh rendering even when this journey
+        // never changes it. Another journey operating that exact declared field proves it is UI
+        // state rather than an unstated external input. Treat its canonical default as available
+        // here so an independent search/empty-state journey can read untouched filter controls
+        // without inventing a producer inside that journey.
+        const sharedControlDefault = !collection && !visitorOperatedFields.has(normalized(read))
+          && globallyVisitorOperatedFields.has(normalized(read));
         // A required transient collection which no operation writes and no visitor control
         // supplies is bundled seed/configuration data (for example, an in-code catalogue). It
         // exists at journey start just like an accumulator's empty collection. Scalar required
@@ -164,7 +179,8 @@ const transientStateDefaults = (contract, journey) => {
         // Optional transient inputs have canonical empty values. A required collection that an
         // operation reads and writes is an accumulator and also needs an empty start; "required"
         // means the state must exist, not that a visitor can supply a value before first use.
-        if (field.required !== true || collectionAccumulator || resettableScalar || readOnlySeedCollection
+        if (field.required !== true || collectionAccumulator || resettableScalar || sharedControlDefault
+          || readOnlySeedCollection
           || Object.hasOwn(field, "initialValue") || Object.hasOwn(field, "default")) {
           defaults[field.name] = transientDefaultValue(field);
         }
