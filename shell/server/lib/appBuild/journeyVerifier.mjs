@@ -59,7 +59,7 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
-  "main", "heading", "naming", "labelled", "labeled"]);
+  "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -885,6 +885,40 @@ async function selectionGroups(page) {
         || ["on", "active", "selected", "checked"].includes(state)
         || /(^|[\s_-])(is[-_])?(selected|active)([\s_-]|$)/.test(cls);
     };
+    const groups = [];
+    let id = 0;
+
+    // Native selects are first-class selection controls. The former option collector only knew
+    // about button/ARIA option groups, so an identity-bound <select> passed mechanics as "skipped"
+    // and then became undriveable in the real journey. Enumerate its enabled native options and
+    // preserve the same before/after selected-state proof used for custom option groups.
+    for (const select of document.querySelectorAll("select")) {
+      if (select.offsetParent === null || select.disabled) continue;
+      const options = [...select.options]
+        .map((option, domIndex) => ({ option, domIndex }))
+        .filter(({ option }) => !option.disabled);
+      if (!options.length) continue;
+      select.setAttribute("data-thrallo-native-select", String(id));
+      const labelledBy = (select.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+        .map((labelId) => document.getElementById(labelId)?.innerText || "");
+      const labels = select.labels ? [...select.labels].map((label) => label.innerText || "") : [];
+      groups.push({
+        groupId: id,
+        nativeSelect: true,
+        machineId: select.getAttribute("data-thrallo-control") || null,
+        identities: [...new Set([
+          select.getAttribute("name") || "", select.getAttribute("aria-label") || "",
+          select.id || "", ...labelledBy, ...labels,
+        ].map((value) => String(value).trim()).filter(Boolean))],
+        contextText: `${select.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${select.closest("label")?.innerText || ""}`.slice(0, 400).toLowerCase(),
+        options: options.map(({ option, domIndex }, index) => ({
+          index, domIndex, text: (option.textContent || option.value || "").trim().slice(0, 80),
+          label: option.label || null, value: option.value, selected: option.selected === true,
+        })),
+      });
+      id += 1;
+    }
+
     const candidates = [...document.querySelectorAll(
       '[role="option"],[role="tab"],[role="radio"],[aria-selected],[aria-pressed],[data-state],input[type="radio"],button',
     )].filter((el) => el.offsetParent !== null && !el.disabled);
@@ -921,8 +955,6 @@ async function selectionGroups(page) {
         ...idPrefixes,
       ].map((value) => String(value).trim()).filter(Boolean);
     };
-    const groups = [];
-    let id = 0;
     for (const [parent, els] of byParent) {
       const machineId = els.map((el) => el.getAttribute("data-thrallo-control")).find(Boolean) || null;
       // Filtering can legitimately leave one selectable result. A single ordinary button is not
@@ -952,8 +984,17 @@ async function selectionGroups(page) {
   }).catch(() => []);
 }
 
-async function groupState(page, groupId) {
-  return page.evaluate((gid) => {
+async function groupState(page, group) {
+  return page.evaluate((descriptor) => {
+    if (descriptor.nativeSelect) {
+      const select = document.querySelector(`[data-thrallo-native-select="${descriptor.groupId}"]`);
+      if (!select) return [];
+      return [...select.options].filter((option) => !option.disabled).map((option, index) => ({
+        index,
+        text: (option.textContent || option.value || "").trim().slice(0, 80),
+        selected: option.selected === true,
+      }));
+    }
     const isSelected = (el) => {
       const state = (el.getAttribute("data-state") || "").toLowerCase();
       const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
@@ -963,14 +1004,14 @@ async function groupState(page, groupId) {
         || ["on", "active", "selected", "checked"].includes(state)
         || /(^|[\s_-])(is[-_])?(selected|active)([\s_-]|$)/.test(cls);
     };
-    return [...document.querySelectorAll(`[data-thrallo-opt^="${gid}:"]`)]
+    return [...document.querySelectorAll(`[data-thrallo-opt^="${descriptor.groupId}:"]`)]
       .map((el) => ({
         index: Number(el.getAttribute("data-thrallo-opt").split(":")[1]),
         text: (el.innerText || el.value || "").trim().slice(0, 80),
         selected: isSelected(el),
       }))
       .sort((a, b) => a.index - b.index);
-  }, groupId).catch(() => []);
+  }, { groupId: group.groupId, nativeSelect: Boolean(group.nativeSelect) }).catch(() => []);
 }
 
 /**
@@ -1337,9 +1378,15 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   }
 
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-  await page.locator(`[data-thrallo-opt="${group.groupId}:${clickIndex}"]`).click({ timeout: 5_000 }).catch(() => {});
+  if (group.nativeSelect) {
+    const domIndex = group.options[clickIndex]?.domIndex;
+    await page.locator(`[data-thrallo-native-select="${group.groupId}"]`)
+      .selectOption({ index: domIndex }, { timeout: 5_000 }).catch(() => {});
+  } else {
+    await page.locator(`[data-thrallo-opt="${group.groupId}:${clickIndex}"]`).click({ timeout: 5_000 }).catch(() => {});
+  }
   await page.waitForTimeout(600);
-  const after = await groupState(page, group.groupId);
+  const after = await groupState(page, group);
 
   // Only when the group has gone entirely: gather what it would take to prove the disappearance
   // was the contracted advance rather than an unrelated transition.
@@ -3050,12 +3097,17 @@ export async function probeControlMechanics(page, controls = []) {
       // An identity-addressed group exposes its options by attribute. A hand-wired group has no
       // attributes at all, so its options are the interactive descendants of whatever the
       // contract-supplied name found.
-      const options = located.addressedBy === "identity"
+      const nativeSelect = await target.evaluate((element) => element.tagName === "SELECT").catch(() => false);
+      const options = nativeSelect
+        ? target.locator("option:not([disabled])")
+        : located.addressedBy === "identity"
         ? page.locator(`[data-thrallo-control="${control.id}"][data-thrallo-option]`)
         : target.locator(OPTION_SELECTOR);
       const count = await options.count().catch(() => 0);
       if (!count) { skipped.push({ id: control.id, primitive: "selection", reason: "no_options_on_entry" }); continue; }
-      const snapshot = () => (located.addressedBy === "identity"
+      const snapshot = () => (nativeSelect
+        ? options.evaluateAll((elements) => elements.map((option) => `${option.value}:${option.selected}`)).catch(() => [])
+        : located.addressedBy === "identity"
         ? selectionSnapshot(page, control.id)
         : options.evaluateAll((els) => els.map((el) => [el.getAttribute("aria-pressed") || "",
           el.getAttribute("aria-selected") || "", el.getAttribute("data-selected") || "",
@@ -3066,6 +3118,7 @@ export async function probeControlMechanics(page, controls = []) {
       // Probe the first UNSELECTED option (the same invariant used by the journey driver) so an
       // unchanged result proves a dead control rather than a no-op chosen by the verifier.
       const selectedBefore = await options.evaluateAll((els) => els.map((el) => {
+        if (el.tagName === "OPTION") return el.selected === true;
         const state = (el.getAttribute("data-state") || "").toLowerCase();
         const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
         return el.getAttribute("aria-selected") === "true"
@@ -3080,7 +3133,16 @@ export async function probeControlMechanics(page, controls = []) {
           observed: "all_selected", detail: "the contracted selection exposes no unselected option to drive" });
         continue;
       }
-      await options.nth(clickIndex).click({ timeout: 5_000 }).catch(() => {});
+      if (nativeSelect) {
+        const domIndex = await options.nth(clickIndex).evaluate((option) => (
+          [...option.parentElement.options].indexOf(option)
+        )).catch(() => -1);
+        if (domIndex >= 0) {
+          await target.selectOption({ index: domIndex }, { timeout: 5_000 }).catch(() => {});
+        }
+      } else {
+        await options.nth(clickIndex).click({ timeout: 5_000 }).catch(() => {});
+      }
       await page.waitForTimeout(200);
       const after = await snapshot();
       probed += 1;

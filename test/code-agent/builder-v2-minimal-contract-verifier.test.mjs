@@ -220,6 +220,26 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].alreadyAccepted, true);
     });
 
+    await t.test("selection journeys drive an identity-bound native select", async () => {
+      const category = { ...control("categoryFilter", "category-filter", ["combobox"]),
+        valueType: "string", verificationValue: "testing", selectedState: true };
+      const result = await run(`<main><label>Category
+          <select data-thrallo-control="category-filter"
+            onchange="document.getElementById('out').textContent='Selected category value is displayed'">
+            <option value="" disabled>Select a category</option><option value="editor">Editors</option>
+            <option value="testing">Testing</option>
+          </select></label><p id="out"></p></main>`,
+      { action: "choose a category filter", operates: ["categoryFilter"],
+        expect: "the selected category value is displayed" },
+      [{ kind: "selection", valueWritten: "categoryFilter", control: category }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].selectedTexts.includes("Testing"), true,
+        JSON.stringify(result.journeys[0].steps[0]));
+      assert.equal(result.mechanics.skipped.some((row) => (
+        row.id === "category-filter" && row.reason === "no_options_on_entry"
+      )), false, JSON.stringify(result.mechanics));
+    });
+
     await t.test("unchanged wording does not fail a satisfied result", async () => {
       const action = control("save", "save", ["button"]);
       const result = await run(`<main><button data-thrallo-action="save">Save</button>

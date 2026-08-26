@@ -125,6 +125,13 @@ test("empty-state implementation wording does not dilute the visible catalogue a
   assert.equal(outcome.status, "pass", outcome.detail);
 });
 
+test("empty-state narrative prefixes do not outweigh the visible result copy", () => {
+  const wanted = expectationKeywords(
+    "an empty state message says no software matches the current search and filters",
+  );
+  assert.deepEqual(wanted, ["software", "matches", "current", "search", "filters"]);
+});
+
 test("accessibility structure wording does not dilute the named visible controls", () => {
   const wanted = expectationKeywords(
     "the page has a visible main heading naming Meridian Tools and a labelled catalogue search input",
