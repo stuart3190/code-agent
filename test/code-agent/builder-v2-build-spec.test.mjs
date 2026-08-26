@@ -275,6 +275,25 @@ test("shared controllers retain only the journeys from their own mounted screen"
   assert.deepEqual(rebound.flows[1].responsibleModules, [modules[1].path]);
 });
 
+test("bounded custom behaviour keeps its helper responsibility but binds visible state to the mounted controller", () => {
+  const extension = "src/extensions/custom/clear-filters.js";
+  const controller = "src/components/catalogue/CatalogueFlow.jsx";
+  const plan = { version: 2, flows: [{
+    id: "clear:1", journeyId: "clear", stateOwner: extension,
+    responsibleModules: [extension], control: {
+      stateOwner: extension, validationOwner: extension,
+    },
+  }] };
+  const rebound = bindInteractionModulePlan(plan, [
+    { path: extension, role: "bounded custom behaviour", journeyIds: ["clear"] },
+    { path: controller, role: "shared step navigation and flow composition", journeyIds: ["clear"] },
+  ]);
+  assert.equal(rebound.flows[0].stateOwner, controller);
+  assert.equal(rebound.flows[0].control.stateOwner, controller);
+  assert.equal(rebound.flows[0].control.validationOwner, controller);
+  assert.deepEqual(rebound.flows[0].responsibleModules, [extension, controller]);
+});
+
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {
   const inventory = {
     summary: "An inventory system for stock levels",

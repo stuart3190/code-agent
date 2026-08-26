@@ -1456,6 +1456,18 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
       && (module.journeyIds || module.ownedJourneys || []).includes(journeyId)
   )) || (modulePlan || []).find((module) => module.providedBy === "scaffold_screen_slot"
     && (module.journeyIds || []).includes(journeyId)) || null;
+  const boundVisualOwner = (declaredOwner, visual) => {
+    if (PLATFORM.test(String(declaredOwner || ""))) return declaredOwner;
+    // A bounded custom extension supplies behaviour to a mounted controller; it does not render
+    // or own the React state that exposes the contracted result. Keeping the extension as the
+    // flow's stateOwner made a visible browser failure repair the helper repeatedly while the
+    // mounted controller remained outside the exact write boundary. Retain the extension in
+    // responsibleModules, but bind visual state and controls to the generated controller.
+    if (visual?.path && String(declaredOwner || "").startsWith("src/extensions/custom/")) {
+      return visual.path;
+    }
+    return plannedPaths.has(declaredOwner) ? declaredOwner : visual?.path || declaredOwner;
+  };
   return {
     ...plan,
     flows: (plan?.flows || []).map((flow) => {
@@ -1464,13 +1476,12 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
         ...(flow.responsibleModules || []).filter((path) => plannedPaths.has(path)),
         visual?.path,
       ]);
-      const stateOwner = plannedPaths.has(flow.stateOwner) ? flow.stateOwner : visual?.path || flow.stateOwner;
+      const stateOwner = boundVisualOwner(flow.stateOwner, visual);
       const control = flow.control ? {
         ...flow.control,
-        stateOwner: plannedPaths.has(flow.control.stateOwner)
-          ? flow.control.stateOwner : visual?.path || flow.control.stateOwner,
-        validationOwner: flow.control.validationOwner && !plannedPaths.has(flow.control.validationOwner)
-          ? visual?.path || flow.control.validationOwner : flow.control.validationOwner,
+        stateOwner: boundVisualOwner(flow.control.stateOwner, visual),
+        validationOwner: flow.control.validationOwner
+          ? boundVisualOwner(flow.control.validationOwner, visual) : flow.control.validationOwner,
       } : null;
       return { ...flow, responsibleModules, stateOwner, control };
     }),
