@@ -125,6 +125,18 @@ test("empty-state implementation wording does not dilute the visible catalogue a
   assert.equal(outcome.status, "pass", outcome.detail);
 });
 
+test("accessibility structure wording does not dilute the named visible controls", () => {
+  const wanted = expectationKeywords(
+    "the page has a visible main heading naming Meridian Tools and a labelled catalogue search input",
+  );
+  assert.deepEqual(wanted, ["meridian", "tools", "catalogue", "search"]);
+  const outcome = expectationOutcome({
+    wanted, found: wanted, fresh: [], drove: true,
+    action: "open the public software catalogue", verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+  });
+  assert.equal(outcome.status, "pass", outcome.detail);
+});
+
 // ── URL change is navigation, whatever the verb ───────────────────────────────────────────────
 
 test("a click that changes the URL is navigational — pre-existing words on the target page pass", () => {

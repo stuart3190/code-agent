@@ -164,7 +164,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <p id="empty">No software matches the current search.</p>
           <section id="results" hidden><h2>Software cards</h2><p>Default catalogue item</p></section></main>`,
       { action: "clear the current search and filters",
-        expect: "the empty state disappears, the search box is blank, filters return to their all-options values, and the default software cards are visible again" },
+        expect: "the full software card grid returns and the no-results empty state is hidden" },
       [{ kind: "action", operationId: "clear-catalogue-filters", control: clear }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.resetTransition.ok, true);

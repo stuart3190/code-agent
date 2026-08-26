@@ -110,6 +110,10 @@ Rules:
 - A transient functional search/filter/query operation also needs verificationValues for EVERY
   operated search or filter field. Choose one exact combination that the generated sample data
   will match; use a non-empty all-options sentinel for optional filters rather than an empty value.
+  An all-options sentinel is normally the initial/default selection, so it MUST NOT be the only
+  field in its own selection step unless an earlier step changed that same field to a non-default
+  value. Keep the sentinel in a compound filter step where another field genuinely changes, choose
+  a non-default option, or first change this field so the browser has a real transition to verify.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.

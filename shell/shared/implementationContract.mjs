@@ -376,6 +376,31 @@ export function validateContract(contract) {
           }
         }
       }
+      if (Number(c.version || 1) >= 2 && step?.primitive === "selection") {
+        const operatedFields = (step?.operates || []).filter((reference) => (
+          fieldNames(c).has(normaliseReference(reference))
+        ));
+        if (operatedFields.length === 1) {
+          const field = operatedFields[0];
+          const fixture = Object.entries(verificationValues || {})
+            .find(([candidate]) => normaliseReference(candidate) === normaliseReference(field))?.[1];
+          const allOptionsSentinel = typeof fixture === "string"
+            && /^(?:all|any|every|no preference|no filter)(?:\b|[-_])/i.test(fixture.trim());
+          const previouslyChanged = journey.steps.slice(0, stepIndex).some((prior) => (
+            (prior?.operates || []).some((reference) => normaliseReference(reference) === normaliseReference(field))
+            && Object.entries(prior?.verificationValues || {}).some(([candidate, value]) => (
+              normaliseReference(candidate) === normaliseReference(field)
+              && !(typeof value === "string"
+                && /^(?:all|any|every|no preference|no filter)(?:\b|[-_])/i.test(value.trim()))
+            ))
+          ));
+          if (allOptionsSentinel && !previouslyChanged) {
+            problems.push(`${where} step ${stepIndex + 1} selects all-options value ${JSON.stringify(fixture)} `
+              + `for ${field} before that field has changed - it is normally the default and gives the browser no transition to verify; `
+              + "combine it with another filter that changes, select a non-default value, or first change this field in an earlier step");
+          }
+        }
+      }
       if (Number(c.version || 1) >= 2) {
         for (const field of verificationFixtureFields(step, c)) {
           const declared = Object.entries(verificationValues || {})

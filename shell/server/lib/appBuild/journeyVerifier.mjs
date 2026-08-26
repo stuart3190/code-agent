@@ -58,7 +58,8 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "click", "clicks", "select", "selects", "enter", "enters", "type", "types", "open", "opens",
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
-  "area", "message", "when", "have", "has", "had", "been", "being", "empty-state"]);
+  "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
+  "main", "heading", "naming", "labelled", "labeled"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -1729,7 +1730,7 @@ async function runStep(page, step, {
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
   // match was the word "booking" in the button the step had just clicked.
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-  const resetExpected = expectationRequestsControlReset(expect);
+  const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
   const urlBefore = page.url();
   let controlEvidence = null;
