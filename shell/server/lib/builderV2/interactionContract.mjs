@@ -95,6 +95,10 @@ const transientStateDefaults = (contract, journey) => {
   const referencedOperations = new Set((journey?.steps || []).flatMap((step) => [
     ...list(step?.operates), ...list(step?.reads),
   ]).map(normalized));
+  const operationIds = new Set((contract?.operations || [])
+    .map((operation) => normalized(operation?.id || operation?.name)));
+  const visitorOperatedFields = new Set((journey?.steps || []).flatMap((step) => list(step?.operates))
+    .map(normalized).filter((value) => !operationIds.has(value)));
   const defaults = {};
   for (const operation of contract?.operations || []) {
     const operationId = normalized(operation?.id || operation?.name);
@@ -107,18 +111,29 @@ const transientStateDefaults = (contract, journey) => {
     ));
     const fields = new Map((entity?.fields || [])
       .map((field) => [normalized(field?.name), field]));
+    const entityWrites = new Set((contract?.operations || [])
+      .filter((candidate) => normalized(candidate?.entity) === normalized(operation?.entity))
+      .flatMap((candidate) => candidate?.responsibilities || [])
+      .flatMap((responsibility) => list(responsibility?.writes)).map(normalized));
     for (const responsibility of operation.responsibilities) {
       const writes = new Set(list(responsibility?.writes).map(normalized));
       for (const read of list(responsibility?.reads)) {
         const field = fields.get(normalized(read));
         if (!field) continue;
         const type = String(field.type || "").toLowerCase();
-        const collectionAccumulator = writes.has(normalized(read))
-          && (/\[\]\s*$/.test(type) || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type));
+        const collection = /\[\]\s*$/.test(type)
+          || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type);
+        const collectionAccumulator = writes.has(normalized(read)) && collection;
+        // A required transient collection which no operation writes and no visitor control
+        // supplies is bundled seed/configuration data (for example, an in-code catalogue). It
+        // exists at journey start just like an accumulator's empty collection. Scalar required
+        // inputs and visitor-operated collections still need an explicit producer.
+        const readOnlySeedCollection = collection && !entityWrites.has(normalized(read))
+          && !visitorOperatedFields.has(normalized(read));
         // Optional transient inputs have canonical empty values. A required collection that an
         // operation reads and writes is an accumulator and also needs an empty start; "required"
         // means the state must exist, not that a visitor can supply a value before first use.
-        if (field.required !== true || collectionAccumulator
+        if (field.required !== true || collectionAccumulator || readOnlySeedCollection
           || Object.hasOwn(field, "initialValue") || Object.hasOwn(field, "default")) {
           defaults[field.name] = transientDefaultValue(field);
         }

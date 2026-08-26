@@ -113,6 +113,46 @@ test("a transient software catalogue search does not invent a durable lookup lif
   assert.equal(spec.interactionContract.scenarios["browse-catalogue"].lifecycle, null);
 });
 
+test("a required read-only local catalogue collection is available as journey seed state", () => {
+  const contract = {
+    summary: "Filter a bundled software catalogue", projectType: "tool",
+    auth: { required: false }, routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueSession", owned: false,
+      storage: "local session-only state; no durable backend",
+      fields: [
+        { name: "softwareCatalogue", type: "object[]", required: true },
+        { name: "searchQuery", type: "string" },
+        { name: "visibleSoftwareIds", type: "string[]", required: true },
+      ] }],
+    operations: [{
+      id: "filter-catalogue", entity: "catalogueSession", kind: "search",
+      journey: "filter-catalogue", responsibilities: [{
+        type: "functional", behavior: "filter the bundled catalogue by the local query",
+        reads: ["softwareCatalogue", "searchQuery"], writes: ["visibleSoftwareIds"],
+      }],
+    }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{
+      id: "filter-catalogue", title: "Filter catalogue", priority: "primary", stage: "primary_journey",
+      steps: [
+        { action: "open the software catalogue", target: "/", expect: "software cards are visible" },
+        { action: "search the software catalogue", target: "catalogue search",
+          operates: ["searchQuery", "filter-catalogue"],
+          expect: "matching software cards remain visible" },
+      ],
+    }],
+  };
+
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(spec.interactionContract.scenarios["filter-catalogue"].initialState, {
+    softwareCatalogue: [], searchQuery: "",
+  });
+  assert.ok(!spec.verdict.problems.some((problem) => (
+    problem.includes("softwareCatalogue") && problem.includes("reads state before it is produced")
+  )));
+});
+
 test("operation-managed catalogue collections remain action state instead of text inputs", () => {
   const contract = {
     summary: "Browse a local software catalogue and keep session favourites", projectType: "tool",
