@@ -97,6 +97,9 @@ Rules:
   product choice may operate productId and produce productTitle and unitPrice; those outputs are
   state written by the same action, not additional controls the visitor must drive.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
+- A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
+  MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry
+  controls and selection controls into separate journey steps so each step has one primitive.
 - When a step asks for a domain-correct or domain-incorrect value that cannot be derived from the
   native input type, add "verificationValues": { "fieldName": "synthetic test value" } for the
   affected operated field. This value is the single non-secret authority used by generation and

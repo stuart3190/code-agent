@@ -196,6 +196,12 @@ export function isVague(text) {
 const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const VERIFICATION_VALUE_INTENT = /\b(?:correct|incorrect)(?:ly)?\b/i;
+// Keyboard focus is a real control interaction, not an observation. Without structured operands
+// the verifier has no authoritative control identity and can only guess from prose. A production
+// catalogue contract named several controls this way and passed planning, then stopped as a
+// platform-undriveable journey after generation even though the controls existed. Require the
+// planner to split mixed control types and identify each focusable field before any build spend.
+const KEYBOARD_FOCUS_INTENT = /\b(?:focus(?:es|ed|ing)?|tab(?:s|bed|bing)?(?:\s+through)?)\b/i;
 const DOMAIN_SEARCH_OPERATION_KINDS = new Set(["filter", "query", "search"]);
 const VERIFICATION_VALUE_STOP_WORDS = new Set([
   "a", "an", "and", "answer", "control", "details", "field", "form", "input", "question", "the", "value",
@@ -339,6 +345,19 @@ export function validateContract(contract) {
             problems.push(`${where} step ${stepIndex + 1} operates "${reference}", which is an entity, `
               + "not a control — name the field(s) the step changes, or the operation it performs");
           }
+        }
+      }
+      if (KEYBOARD_FOCUS_INTENT.test(String(step?.action || ""))) {
+        const operatedFields = (step?.operates || []).filter((reference) => (
+          fieldNames(c).has(normaliseReference(reference))
+        ));
+        if (!operatedFields.length) {
+          problems.push(`${where} step ${stepIndex + 1} focuses or tabs through controls without naming `
+            + "their operated entity field(s) - add operates, and split mixed control types into separate steps");
+        }
+        if (!["selection", "textbox"].includes(step?.primitive)) {
+          problems.push(`${where} step ${stepIndex + 1} focuses or tabs through controls without a driveable `
+            + 'primitive - use "textbox" or "selection", and split mixed control types into separate steps');
         }
       }
       const verificationValues = step?.verificationValues;

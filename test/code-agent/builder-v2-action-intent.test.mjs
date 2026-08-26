@@ -269,7 +269,10 @@ const contractFor = (steps) => ({
   routes: [{ path: "/", name: "Home" }],
   entities: [{ name: "record", fields: [{ name: "reference", type: "string" }, { name: "title", type: "string" },
     { name: "status", type: "string" }] }],
-  operations: [], journeys: [{ id: "journey", title: "journey", priority: "primary", steps }],
+  operations: [{ id: "read-record", entity: "record", kind: "read", journey: "journey",
+    responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "get",
+      reads: ["reference"], writes: [] }] }],
+  journeys: [{ id: "journey", title: "journey", priority: "primary", steps }],
   acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
 });
 const kindsOf = (steps) => {
