@@ -641,18 +641,55 @@ export function verificationDefectRecords(defects, options = {}) {
  * defect — new defects appearing while none were resolved is a regression, not progress.
  */
 export function defectProgress(before = [], after = []) {
-  const priorSet = new Set(actionableDefects(before).map(defectSignature));
-  const nextSet = new Set(actionableDefects(after).map(defectSignature));
+  const prior = actionableDefects(before);
+  const next = actionableDefects(after);
+  const priorSet = new Set(prior.map(defectSignature));
+  const nextSet = new Set(next.map(defectSignature));
   const resolved = [...priorSet].filter((signature) => !nextSet.has(signature));
   const persisted = [...priorSet].filter((signature) => nextSet.has(signature));
   const introduced = [...nextSet].filter((signature) => !priorSet.has(signature));
   if (!priorSet.size) return { moved: true, resolved, persisted, introduced, reason: "first_round" };
-  if (resolved.length) {
+
+  // A changed signature is not necessarily progress. A candidate that crashes at an earlier
+  // step makes the old defect disappear too, as does one that breaks a journey which was green.
+  // Compare the earliest actionable frontier per journey so the repair may advance downstream,
+  // but may never trade one contracted journey (or an earlier step) for another.
+  const position = (defect) => ({
+    step: Number.isInteger(defect.stepIndex) ? defect.stepIndex : -1,
+    // Making a control driveable and then observing a missing outcome is real progress within
+    // the same contracted step. Behaviour/durability are downstream of interaction mechanics.
+    phase: defect.defectClass === DEFECT_CLASS.INTERACTION ? 0 : 1,
+  });
+  const comparePosition = (left, right) => left.step - right.step || left.phase - right.phase;
+  const frontier = (defects) => {
+    const byJourney = new Map();
+    for (const defect of defects) {
+      const key = defect.journeyId || "__global__";
+      const nextPosition = position(defect);
+      const current = byJourney.get(key);
+      if (!current || comparePosition(nextPosition, current) < 0) byJourney.set(key, nextPosition);
+    }
+    return byJourney;
+  };
+  const priorFrontier = frontier(prior);
+  const nextFrontier = frontier(next);
+  const regressed = next.some((defect) => {
+    if (!introduced.includes(defectSignature(defect))) return false;
+    const journeyId = defect.journeyId || "__global__";
+    return !priorFrontier.has(journeyId)
+      || comparePosition(position(defect), priorFrontier.get(journeyId)) <= 0;
+  });
+  const advanced = [...priorFrontier].some(([journeyId, priorPosition]) => (
+    !nextFrontier.has(journeyId)
+      || comparePosition(nextFrontier.get(journeyId), priorPosition) > 0
+  ));
+
+  if (!regressed && advanced) {
     return { moved: true, resolved, persisted, introduced,
       reason: introduced.length ? "partial_progress" : "progress" };
   }
   return {
     moved: false, resolved, persisted, introduced,
-    reason: introduced.length ? "regressed" : "unchanged",
+    reason: regressed ? "regressed" : "unchanged",
   };
 }

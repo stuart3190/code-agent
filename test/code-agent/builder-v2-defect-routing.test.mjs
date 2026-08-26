@@ -332,6 +332,13 @@ test("progress is measured on defects, not on whether the wording changed", () =
   const fixed = defectProgress(before, []);
   assert.equal(fixed.moved, true);
   assert.equal(fixed.reason, "progress");
+
+  const driveable = defectsFrom(verdicts({ failAt: 2,
+    step: { status: "undriveable", drove: false, detail: "the control was not offered" } }));
+  const outcomeMissing = defectsFrom(verdicts({ failAt: 2,
+    step: { status: "fail", drove: true, detail: "the confirmation did not appear" } }));
+  assert.equal(defectProgress(driveable, outcomeMissing).moved, true,
+    "making a control driveable advances within the same contracted step");
 });
 
 test("new defects with none resolved is a regression, and stops the loop too", () => {
@@ -351,6 +358,27 @@ test("new defects with none resolved is a regression, and stops the loop too", (
   const progress = defectProgress(before, worse);
   assert.equal(progress.moved, false);
   assert.equal(progress.reason, "regressed");
+});
+
+test("a changed defect identity cannot hide an earlier-step or previously-green journey regression", () => {
+  const defect = (journeyId, stepIndex, code = "contracted_outcome_missing") => ({
+    defectClass: DEFECT_CLASS.BEHAVIOUR,
+    owner: DEFECT_OWNER.APP,
+    tier: REPAIR_TIER.REPAIR,
+    code,
+    journeyId,
+    stepIndex,
+    control: null,
+  });
+  const before = [defect("catalogue", 3)];
+
+  const earlier = defectProgress(before, [defect("catalogue", 0, "fatal_runtime_error")]);
+  assert.equal(earlier.moved, false);
+  assert.equal(earlier.reason, "regressed");
+
+  const traded = defectProgress(before, [defect("catalogue", 4), defect("empty-state", 0)]);
+  assert.equal(traded.moved, false);
+  assert.equal(traded.reason, "regressed");
 });
 
 // ── the orchestrated loop ─────────────────────────────────────────────────────────────────────

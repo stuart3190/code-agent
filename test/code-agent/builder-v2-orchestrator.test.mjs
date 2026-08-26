@@ -806,6 +806,60 @@ test("WP11/V2-20 — an unmoved repair escalates its strategy and never repeats 
   assert.ok(!(await h.snapshotStore.pointer("o", "proj-1", "green")), "nothing promoted");
 });
 
+test("WP11/V2-20 — a regressive repair is rolled back before the next strategy", async () => {
+  const contract = structuredClone(CONTRACT);
+  contract.journeys[0].steps = [
+    { action: "open the booking page", target: "/book", expect: "the booking form is visible" },
+    { action: "submit the booking form", target: "submit booking", expect: "booking confirmed" },
+  ];
+  let repairCalls = 0;
+  const h = harness({
+    contract,
+    maxJourneyRepairs: 2,
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: ({ tree }) => {
+        repairCalls += 1;
+        if (repairCalls === 2) {
+          assert.doesNotMatch(tree["src/screens/scaffold/BookingScreen.jsx"], /regressive-candidate/,
+            "the next strategy must start from the retained browser checkpoint");
+        }
+        return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append",
+          content: repairCalls === 1 ? "\n// regressive-candidate\n" : "\n// repaired-candidate\n" }] }];
+      },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys, tree }) => ({
+      journeys: journeys.map((journey) => {
+        if (journey.id !== "book-a-visit") {
+          return { id: journey.id, title: journey.title, priority: journey.priority, status: "pass" };
+        }
+        if (/repaired-candidate/.test(tree["src/screens/scaffold/BookingScreen.jsx"] || "")) {
+          return { id: journey.id, title: journey.title, priority: journey.priority, status: "pass",
+            steps: journey.steps.map((step) => ({ ...step, status: "pass", drove: true })) };
+        }
+        const failAt = /regressive-candidate/.test(tree["src/screens/scaffold/BookingScreen.jsx"] || "") ? 0 : 1;
+        return { id: journey.id, title: journey.title, priority: journey.priority, status: "fail",
+          owners: ["src/screens/scaffold/BookingScreen.jsx"],
+          steps: journey.steps.map((step, index) => ({ ...step,
+            status: index < failAt ? "pass" : index === failAt ? "fail" : "not_reached",
+            drove: index <= failAt,
+          })) };
+      }),
+    }),
+  });
+
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-repair-rollback",
+    request: "booking site" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(repairCalls, 2);
+  const finalTree = await h.snapshotStore.materialize("o",
+    await h.snapshotStore.pointer("o", "proj-repair-rollback", "green"));
+  assert.doesNotMatch(finalTree["src/screens/scaffold/BookingScreen.jsx"], /regressive-candidate/);
+  assert.match(finalTree["src/screens/scaffold/BookingScreen.jsx"], /repaired-candidate/);
+});
+
 test("WP11/V2-20 — an identical full strategy cycle never restarts through core overflow", async () => {
   let repairCalls = 0;
   const h = harness({

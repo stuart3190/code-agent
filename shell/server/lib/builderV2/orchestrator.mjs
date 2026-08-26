@@ -1541,6 +1541,10 @@ export function createOrchestrator({
                   : " — every repair strategy is spent"));
               continue;
             }
+            const retained = {
+              tree: currentTree, snapshot: currentSnapshot, verdicts: currentVerdicts,
+              defects: currentDefects, eligibility: currentEligibility, rows,
+            };
             currentTree = repair.tree;
             currentSnapshot = repair.snapshot;
             currentVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
@@ -1583,6 +1587,15 @@ export function createOrchestrator({
               strategy = 0;
               continue;
             }
+            // Keep the last browser-proven checkpoint as the repair baseline. A compilable
+            // candidate can still be a behavioural regression; carrying it into the next wider
+            // strategy lets one failed repair poison every attempt that follows.
+            currentTree = retained.tree;
+            currentSnapshot = retained.snapshot;
+            currentVerdicts = retained.verdicts;
+            currentDefects = retained.defects;
+            currentEligibility = retained.eligibility;
+            rows = retained.rows;
             progressStop = { round: rounds, strategy: mode, ...progress };
             strategy += 1;
             log(`${label} ${rounds} ${progress.reason} under [${mode}]: `
