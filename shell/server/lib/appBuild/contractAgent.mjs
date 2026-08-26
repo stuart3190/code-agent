@@ -127,6 +127,8 @@ Rules:
   outputs are saved. Only name \`capability\` and \`capabilityMethod\` when that exact registered method
   implements the functional behavior; otherwise leave them absent so Builder V2 creates a bounded
   custom_behavior extension.
+- \`operation.entity\` is the output/state owner. Every responsibility \`writes\` entry must be a
+  field declared on that entity. Functional \`reads\` may consume fields from other entities.
 - Functional operations that return an observable result without mutating entity state use a
   structured read-like or terminal kind: read/get/list/search/export/download/print. Their
   \`writes\` may be empty because Builder V2 gives the returned result transient state ownership;

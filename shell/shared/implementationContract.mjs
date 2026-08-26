@@ -427,6 +427,10 @@ export function validateContract(contract) {
   const declaredEntities = entityNames(c);
   for (const [index, operation] of (c.operations || []).entries()) {
     const where = operation?.id || `operation ${index + 1}`;
+    const operationEntityFields = new Set((c.entities || [])
+      .filter((entity) => normaliseReference(entity?.name) === normaliseReference(operation?.entity))
+      .flatMap((entity) => entity.fields || [])
+      .map((field) => normaliseReference(field?.name)).filter(Boolean));
     if (operation?.journey && !declaredJourneys.has(operation.journey)) {
       problems.push(`operation "${where}" names journey "${operation.journey}", which this contract `
         + "does not declare — its lifecycle role would be silently lost");
@@ -453,6 +457,10 @@ export function validateContract(contract) {
           const references = key === "writes" ? fieldNames(c) : contractReferences(c);
           if (!references.has(normaliseReference(reference))) {
             problems.push(`${label} ${key} "${reference}" is not a declared ${key === "writes" ? "entity field" : "entity field or operation"}`);
+          } else if (key === "writes" && operation?.entity
+              && !operationEntityFields.has(normaliseReference(reference))) {
+            problems.push(`${label} writes "${reference}" outside its operation entity "${operation.entity}"; `
+              + "functional inputs may cross entity boundaries, but outputs belong to the declared operation entity");
           }
         }
       }

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   contractDependencyRepairScope, mergeContractDependencyRepair,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
+import { validateContract } from "../../shell/shared/implementationContract.mjs";
 
 const field = (name, type = "string") => ({ name, type, required: false });
 
@@ -80,4 +81,24 @@ test("scoped semantic repair includes its operation and preserves unlisted share
     CONTRACT.operations[1]);
   assert.deepEqual(merged.journeys.find((journey) => journey.id === "view-item-detail"),
     CONTRACT.journeys[1]);
+});
+
+test("contract validation rejects functional writes outside the operation entity", () => {
+  const contract = structuredClone(CONTRACT);
+  contract.entities = [{
+    name: "catalogueState",
+    storage: "session-only",
+    fields: [field("query"), field("visibleItems", "string[]")],
+  }, {
+    name: "detailState",
+    storage: "session-only",
+    fields: [field("detailPanel")],
+  }];
+  contract.operations[0].responsibilities[0].writes = ["detailPanel"];
+
+  const verdict = validateContract(contract);
+  assert.equal(verdict.ok, false);
+  assert.ok(verdict.problems.some((problem) => (
+    problem.includes('writes "detailPanel" outside its operation entity "catalogueState"')
+  )));
 });
