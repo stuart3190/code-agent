@@ -186,6 +186,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
       const result = await run(`<main><label>search Query
           <input id="query" type="search" value="no-match"></label>
           <button data-thrallo-action="clear-filters" onclick="document.getElementById('query').value=''; document.getElementById('empty').hidden=true; document.getElementById('results').hidden=false">Clear filters</button>
+          <button data-thrallo-action="clear-filters" onclick="document.getElementById('query').value=''; document.getElementById('empty').hidden=true; document.getElementById('results').hidden=false">Reset catalogue</button>
           <p id="empty">No software matches the current search.</p>
           <section id="results" hidden><h2>Software cards</h2><p>Default catalogue item</p></section></main>`,
       { action: "clear the current search and filters",
@@ -193,6 +194,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
       [{ kind: "action", operationId: "clear-catalogue-filters", control: clear }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.resetTransition.ok, true);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
     });
 
     await t.test("numeric and checkbox fixtures use native control types", async () => {
@@ -400,10 +402,13 @@ test("retained false negatives and concrete failures classify correctly in a rea
         <button data-thrallo-action="remove-catalogue-software" aria-label="saved catalogue remove control"
           onclick="document.getElementById('saved-item').remove();document.getElementById('empty').hidden=false">Remove</button>
         </section><section aria-label="Saved catalogue"><h2>Saved catalogue</h2><ul>
-        <li id="saved-item">Atlas Editor</li>
+        <li id="saved-item">Atlas Editor <button data-thrallo-action="remove-catalogue-software"
+          aria-label="saved catalogue remove control"
+          onclick="document.getElementById('saved-item').remove();document.getElementById('empty').hidden=false">Remove</button></li>
         </ul><p id="empty" data-empty-state hidden>No saved software yet</p></section></main>`, step,
       [{ kind: "action", operationId: "remove-catalogue-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);

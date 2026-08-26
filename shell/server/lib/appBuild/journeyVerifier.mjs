@@ -2535,7 +2535,11 @@ async function runStep(page, step, {
       activation.requiredAtContractedStep = true;
       let activated = await activateContractedControl(page, contractedAction.control, {
         verifierPolicy, evidence: activation,
-        allowEquivalentCandidates: requestsSingleCollectionMemberAction(step),
+        // The same operation may be placed in both a primary panel and its contextual empty/list
+        // state. It is safe to choose one stable exact match only when the outcome is independently
+        // proved by a native reset or a named collection-member removal transition.
+        allowEquivalentCandidates: requestsSingleCollectionMemberAction(step)
+          || Boolean(removalSpec) || resetExpected,
       });
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never
