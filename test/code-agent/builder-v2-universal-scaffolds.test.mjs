@@ -422,6 +422,20 @@ test("scaffold-aware repair targets mounted/config/custom seams and never protec
   assert.ok(control.targetFiles.includes(owner.mountedModule));
   assert.ok(control.targetFiles.includes(mountedFlow));
   assert.ok(!control.targetFiles.includes(extension.module));
+  const sharedController = "src/components/catalogue/SoftwareCatalogueController.jsx";
+  const visibleOutcome = routeScaffoldDefect({
+    journeyId: owner.journeyId,
+    code: "contracted_outcome_missing",
+    defectClass: "behaviour",
+    control: null,
+    diagnostic: { stateOwners: [sharedController] },
+    modules: ["src/extensions/capabilityConfiguration.js", extension.module,
+      sharedController, owner.mountedModule],
+    failureRefs: [extension.module, sharedController, owner.mountedModule],
+  }, spec.scaffoldGraph);
+  assert.equal(visibleOutcome.classification, SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION);
+  assert.deepEqual(visibleOutcome.targetFiles, [sharedController],
+    "a missing rendered outcome is repaired in its declared JSX state owner before non-rendering seams");
   const configuration = routeScaffoldDefect({ journeyId: owner.journeyId,
     modules: ["src/extensions/capabilityConfiguration.js"] }, spec.scaffoldGraph);
   assert.equal(configuration.classification, SCAFFOLD_REPAIR_CLASS.INTEGRATION);

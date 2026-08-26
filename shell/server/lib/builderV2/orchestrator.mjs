@@ -1722,6 +1722,17 @@ export function createOrchestrator({
           // having known it. The model owns that name: it wrote the contract the name came from.
           const mapping = deriveVerificationManifest(spec || deriveBuildSpec(contract)).mapping || {};
           const named = (id) => (mapping[id]?.logicalField ? `${id} (the contracted "${mapping[id].logicalField}")` : id);
+          const mechanicsFiles = [...new Set(failures.flatMap((row) => [
+            mapping[row.id]?.stateOwner,
+            ...(mapping[row.id]?.responsibleModules || []),
+          ]).filter((file) => typeof tree?.[file] === "string"))];
+          const mechanicsBoundary = mechanicsFiles.length ? {
+            kind: "mechanics_correction_boundary",
+            allowedFiles: mechanicsFiles,
+            allowedPrefixes: [],
+            instruction: "The browser mechanics probe identified these exact generated state owners. "
+              + "Repair only the named control binding there; retain every unrelated module.",
+          } : null;
           const evidence = failures.map((row) => `control ${named(row.id)} (${row.primitive}) failed its `
             + `mechanics probe: expected ${JSON.stringify(row.expected)}, observed ${JSON.stringify(row.observed)}`
             + ` — ${row.detail}. The control is present and located by its declared identity, so bind it `
@@ -1739,7 +1750,7 @@ export function createOrchestrator({
               checkpointReason: `working:mechanics:${mechanicsCorrections}`,
               parentSnapshotId: workingSnapshot?.id || null, signal, spec,
               // …drawing on the CORRECTION allowance, which is the whole point.
-              dispatchAs: "correction",
+              dispatchAs: "correction", repairBoundary: mechanicsBoundary,
               attemptPolicy: buildAttemptPolicy,
             });
           } catch (error) {

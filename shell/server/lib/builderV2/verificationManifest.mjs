@@ -120,7 +120,11 @@ export function deriveVerificationManifest(spec) {
 
     if (primitive === "textbox" || primitive === "selection") {
       const id = controlIdFor(logical);
-      mapping[id] = { logicalField: logical, journeyId: flow.journeyId, flowId: flow.id };
+      mapping[id] = {
+        logicalField: logical, journeyId: flow.journeyId, flowId: flow.id,
+        stateOwner: flow.stateOwner || null,
+        responsibleModules: [...new Set((flow.responsibleModules || []).filter(Boolean))],
+      };
       controls.push({
         id,
         primitive,
@@ -142,7 +146,11 @@ export function deriveVerificationManifest(spec) {
     // accessibility prose split one declared operation into several incompatible DOM identities.
     const id = primitive === "advance" ? ADVANCE_ACTION_ID
       : (flow.control.machineId || actionIdFor(flow.control.accessibleName || logical));
-    mapping[id] = { logicalField: logical, journeyId: flow.journeyId, flowId: flow.id };
+    mapping[id] = {
+      logicalField: logical, journeyId: flow.journeyId, flowId: flow.id,
+      stateOwner: flow.stateOwner || null,
+      responsibleModules: [...new Set((flow.responsibleModules || []).filter(Boolean))],
+    };
     actions.push({
       id,
       primitive,

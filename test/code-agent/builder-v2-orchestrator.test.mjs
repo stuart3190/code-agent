@@ -199,7 +199,8 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
     patchesFn: async (ctx) => {
       patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
         rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles,
-        journeyIds: (ctx.spec?.journeys || []).map((journey) => journey.id) });
+        journeyIds: (ctx.spec?.journeys || []).map((journey) => journey.id),
+        repairBoundary: ctx.repairBoundary, treeFiles: Object.keys(ctx.tree || {}) });
       // A pre-compile `correction` is a scoped re-emission of its originating step.
       const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
       return plan[stage](ctx);
@@ -976,6 +977,16 @@ const MECHANICS_FAILURE = {
     observed: "", detail: "the contracted textbox did not retain a probe value" }],
 };
 
+const MECHANICS_PATCH_PLAN = {
+  core: () => CORE_PATCH,
+  repair: (ctx) => [{
+    file: ctx.repairBoundary?.allowedFiles?.[0] || "src/screens/scaffold/BookingScreen.jsx",
+    ops: [{ op: "append", content: "\n// mechanics correction attempt\n" }],
+  }],
+  "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+  "increment:browse-info": () => BROWSE_PATCH,
+};
+
 /** A browser layer whose probe fails until `healAfter` verifications have run. */
 const mechanicsJourneys = ({ healAfter = Infinity } = {}) => {
   let verifications = 0;
@@ -991,7 +1002,9 @@ const mechanicsJourneys = ({ healAfter = Infinity } = {}) => {
 };
 
 test("MECHANICS — a probe-proven dead control is charged to the correction allowance", async () => {
-  const { orchestrator, patchCalls } = harness({ journeysFn: mechanicsJourneys() });
+  const { orchestrator, patchCalls } = harness({
+    journeysFn: mechanicsJourneys(), patchPlan: MECHANICS_PATCH_PLAN,
+  });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "mech-1", request: "booking site" });
 
   // The build still blocks — nothing in this harness repairs the control — but WHERE the round was
@@ -1000,6 +1013,11 @@ test("MECHANICS — a probe-proven dead control is charged to the correction all
   const mechanicsRounds = patchCalls.filter((row) => row.dispatchReason === "mechanics_correction");
   assert.equal(mechanicsRounds.length, 1,
     `dispatch identities: ${JSON.stringify(patchCalls.map((row) => `${row.originalStep || row.step}→${row.step}`))}`);
+  const mapped = deriveVerificationManifest(deriveBuildSpec(CONTRACT)).mapping[MECHANICS_CONTROL.id];
+  const expectedOwners = [...new Set([mapped.stateOwner, ...(mapped.responsibleModules || [])]
+    .filter((file) => mechanicsRounds[0].treeFiles.includes(file)))];
+  assert.deepEqual(mechanicsRounds[0].repairBoundary?.allowedFiles, expectedOwners,
+    "the correction is bounded to the generated state owner instead of replaying every planned module");
   assert.equal(result.mechanicsCorrections, 1);
   // It ran BEFORE the repair tier and did not exhaust it.
   assert.equal(result.mechanicsFailures.length, 1);

@@ -25,6 +25,8 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
   const owner = (scaffoldGraph?.journeyOwnership || []).find((row) => row.journeyId === defect?.journeyId);
   const extensions = (scaffoldGraph?.extensions || []).filter((extension) => modules.includes(extension.module));
   const extensionFiles = new Set(extensions.flatMap((extension) => extension.allowedFiles || [extension.module]));
+  const declaredUiStateOwners = unique(defect?.diagnostic?.stateOwners || [])
+    .filter((path) => /^src\/(?:screens|routes|components)\//.test(String(path)));
   const unreachable = defect?.evidence?.surfaceIntegration?.unreachableJourneyModules || [];
   if (unreachable.length && owner?.mountedModule) return {
     classification: SCAFFOLD_REPAIR_CLASS.UNREACHABLE,
@@ -32,6 +34,18 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
     targetFiles: unique([owner.mountedModule, ...unreachable]),
     reason: "repair the mounted screen integration seam, not an unrendered source file alone",
   };
+  // A driven behaviour whose visible result is missing belongs first to its declared JSX state
+  // owner. Capability and custom-extension files may participate in the journey, but they cannot
+  // render an initial panel/empty state. Sending the first repair to those non-rendering seams
+  // consumed the recovery pool before the controller that owned the conditional was reached.
+  if ((defect?.defectClass === "behaviour" || defect?.classification === "behaviour")
+      && declaredUiStateOwners.length) {
+    return {
+      classification: SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION,
+      owner: "app", repairableByModel: true, targetFiles: declaredUiStateOwners,
+      reason: "repair the missing visible outcome in its declared JSX state owner",
+    };
+  }
   if (modules.includes("src/extensions/capabilityConfiguration.js")) return {
     classification: SCAFFOLD_REPAIR_CLASS.INTEGRATION,
     owner: "app", repairableByModel: true,
