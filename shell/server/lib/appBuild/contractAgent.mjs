@@ -275,20 +275,36 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
 }
 
 const DEPENDENCY_ISSUE = "interaction_state_dependency_missing";
+const SEMANTICS_ISSUE = "interaction_contract_semantics_incomplete";
 
 /**
- * Build the smallest contract subset needed to repair invalid journey data flow.
+ * Build the smallest contract subset needed to repair invalid journey data flow or operation
+ * semantics.
  * Unaffected journeys and global contract sections are deliberately omitted.
  */
 export function contractDependencyRepairScope(contract, issues = []) {
   const dependencies = (issues || []).filter((issue) => issue?.code === DEPENDENCY_ISSUE);
-  if (!contract || !dependencies.length) return null;
-  const journeyIds = new Set(dependencies.map((issue) => issue.journeyId).filter(Boolean));
+  const semantics = (issues || []).filter((issue) => issue?.code === SEMANTICS_ISSUE);
+  if (!contract || (!dependencies.length && !semantics.length)) return null;
+  const semanticOperationIds = new Set(semantics.map((issue) => issue.operationId).filter(Boolean));
+  const semanticOperations = (contract.operations || []).filter((operation) => (
+    semanticOperationIds.has(operation?.id || operation?.name)
+  ));
+  const semanticJourneyIds = semantics.map((issue) => issue.journeyId || (contract.journeys || [])
+    .map((journey) => journey.id).filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .find((journeyId) => String(issue.interactionId || "").startsWith(`${journeyId}:`)));
+  const journeyIds = new Set([
+    ...dependencies.map((issue) => issue.journeyId),
+    ...semanticJourneyIds,
+    ...semanticOperations.map((operation) => operation?.journey),
+  ].filter(Boolean));
   const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
   const operationIds = new Set(dependencies.flatMap((issue) => [
     issue.consumerOperationId,
     ...(issue.candidateProducers || []).map((producer) => producer.operationId),
   ]).filter(Boolean));
+  for (const operationId of semanticOperationIds) operationIds.add(operationId);
   for (const operation of contract.operations || []) {
     if (journeyIds.has(operation?.journey)) operationIds.add(operation.id || operation.name);
   }
@@ -312,7 +328,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
       fields: (entity.fields || []).filter((field) => usedFields.has(String(field?.name || field))),
     }));
   return {
-    mode: "interaction_state_dependency_repair",
+    mode: semantics.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
     contractSummary: contract.summary || null,
     invalidDependencies: dependencies.map((issue) => ({
       journeyId: issue.journeyId,
@@ -322,6 +338,12 @@ export function contractDependencyRepairScope(contract, issues = []) {
       expectedProducerSource: issue.expectedProducerSource,
       expectedProducerSources: issue.expectedProducerSources,
       candidateProducers: issue.candidateProducers || [],
+    })),
+    invalidSemantics: semantics.map((issue) => ({
+      operationId: issue.operationId || null,
+      interactionId: issue.interactionId || null,
+      journeyId: issue.journeyId || null,
+      missingFields: issue.missingFields || [],
     })),
     journeys,
     operations,
@@ -345,6 +367,22 @@ const mergeScoped = (current, replacements, allowed, identity) => {
   });
 };
 
+const mergeScopedEntities = (current, replacements, allowed) => {
+  const byId = new Map((replacements || []).map((value) => [value?.name, value]).filter(([id]) => id));
+  return (current || []).map((entity) => {
+    if (!allowed.has(entity?.name) || !byId.has(entity?.name)) return entity;
+    const replacement = byId.get(entity.name);
+    const replacementFields = new Map((replacement.fields || [])
+      .map((field) => [String(field?.name ?? field), field]));
+    const retained = (entity.fields || []).map((field) => (
+      replacementFields.get(String(field?.name ?? field)) || field
+    ));
+    const existing = new Set((entity.fields || []).map((field) => String(field?.name ?? field)));
+    const added = (replacement.fields || []).filter((field) => !existing.has(String(field?.name ?? field)));
+    return { ...entity, ...replacement, name: entity.name, fields: [...retained, ...added] };
+  });
+};
+
 /** Merge only the dependency subset the correction call was authorized to change. */
 export function mergeContractDependencyRepair(contract, reply, scope) {
   if (!scope) return reply;
@@ -357,7 +395,11 @@ export function mergeContractDependencyRepair(contract, reply, scope) {
     journeys: mergeScoped(contract.journeys, patch.journeys, journeyIds, (journey) => journey?.id),
     operations: mergeScoped(contract.operations, patch.operations, operationIds,
       (operation) => operation?.id || operation?.name),
-    entities: mergeScoped(contract.entities, patch.entities, entityNames, (entity) => entity?.name),
+    // The repair scope intentionally sends only fields used by the invalid journeys. Replacing a
+    // shared entity with that subset deletes fields owned by untouched journeys. Merge returned
+    // fields by identity and preserve every unlisted field; new corrected fields remain allowed
+    // inside the already-authorized entity.
+    entities: mergeScopedEntities(contract.entities, patch.entities, entityNames),
   };
 }
 
@@ -396,7 +438,7 @@ export async function generateContract({
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const dependencyAsk = dependencyRepairScope
-      ? `${profileGuidance}\n\nDEPENDENCY REPAIR MODE. Correct only the supplied invalid dependency subset. `
+      ? `${profileGuidance}\n\nSCOPED INTERACTION CONTRACT REPAIR MODE. Correct only the supplied invalid dependency or semantic subset. `
         + `Do not invent user actions, operations, fields, or business behavior. Reorder an existing producer `
         + `only when the declared journey semantics permit it; otherwise connect an already-declared producer `
         + `or return the unresolved dependency unchanged. Return one JSON object containing only corrected `
