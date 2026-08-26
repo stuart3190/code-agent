@@ -21,12 +21,19 @@ function sse(events) {
   };
 }
 
-function fakeResponse({ ok = true, status = 200, headers = {}, events = [], failMidStream = false } = {}) {
+function fakeResponse({ ok = true, status = 200, headers = {}, events = [], failMidStream = false,
+  failAfterEvents = false } = {}) {
   const body = failMidStream
     ? {
       async *[Symbol.asyncIterator]() {
         yield Buffer.from(`data: ${JSON.stringify(events[0])}\n\n`);
         throw new Error("stream reset by peer");
+      },
+    }
+    : failAfterEvents ? {
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+        throw new Error("terminated");
       },
     }
     : sse(events);
@@ -98,6 +105,19 @@ test("a failed call retains its identifier when the backend opened a response", 
     midFail.runTurn({ systemPrompt: "s", messages: [{ role: "user", content: "hi" }] }),
     (error) => error.providerRequestId === "codex:response:resp_C",
   );
+});
+
+test("an unclean EOF after response.completed retains the completed tool turn", async () => {
+  const call = { type: "response.output_item.done", item: { type: "function_call",
+    call_id: "call_catalogue", name: "emit_catalogue", arguments: '{"section":"tools"}' } };
+  const provider = providerFor([fakeResponse({
+    events: [created("resp_complete"), call, completed("resp_complete")], failAfterEvents: true,
+  })]);
+  const result = await provider.runTurn({ systemPrompt: "s", messages: [{ role: "user", content: "hi" }] });
+  assert.equal(result.usage.providerRequestId, "codex:response:resp_complete");
+  assert.equal(result.usage.total, 110);
+  assert.deepEqual(result.toolCalls, [{ id: "call_catalogue", name: "emit_catalogue",
+    rawArguments: '{"section":"tools"}', arguments: { section: "tools" } }]);
 });
 
 test("no identifier is invented when the backend provides none", async () => {

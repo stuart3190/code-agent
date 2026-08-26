@@ -136,6 +136,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
     let text = "";
     const toolCalls = [];
     let usage = null;
+    let responseCompleted = false;
     let buf = "";
     const decoder = new TextDecoder();
     try {
@@ -168,15 +169,26 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
               args = { __raw: it.arguments };
             }
             toolCalls.push({ id: it.call_id, name: it.name, rawArguments: it.arguments, arguments: args });
-          } else if (evt.type === "response.completed" && evt.response?.usage) {
-            usage = evt.response.usage;
+          } else if (evt.type === "response.completed") {
+            responseCompleted = true;
+            if (evt.response?.usage) usage = evt.response.usage;
           }
         }
       }
     } catch (streamError) {
+      // Undici can report an unclean transport EOF after the backend has already emitted the
+      // authoritative response.completed event. The model turn and its output are complete in
+      // that case; treating the trailing socket error as ambiguous discards a usable tool call
+      // and strands its durable reservation even though no replay is needed. Only the protocol's
+      // terminal event permits this recovery. Any earlier interruption remains fail-closed.
+      if (responseCompleted) {
+        return { text: text.trim(), toolCalls,
+          usage: { ...normalizeUsage(usage), providerRequestId } };
+      }
       // The backend opened a response and the stream died mid-flight: the turn happened, tokens
       // may have been consumed, and its identifier is the only handle support has. Retain it.
       streamError.providerRequestId = providerRequestId;
+      if (usage) streamError.usage = { ...normalizeUsage(usage), providerRequestId };
       throw providerFailure(streamError, { state: DISPATCH_STATES.ambiguous, providerRequestId });
     }
 
