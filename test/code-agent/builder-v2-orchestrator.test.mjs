@@ -181,7 +181,7 @@ function strictBuildStore() {
 
 function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], patchPlan = null,
   assetService = recordedAssetService(), buildStore = memoryBuildStore(), journeysFn = null,
-  backendProbeFn = null, maxJourneyRepairs = 2, maxNoOpRetries = 2, events = {} } = {}) {
+  backendProbeFn = null, compile = undefined, maxJourneyRepairs = 2, maxNoOpRetries = 2, events = {} } = {}) {
   const snapshotStore = createSnapshotStore();
   const patchCalls = [];
   const checkpoints = [];
@@ -209,6 +209,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
     snapshotStore,
     buildStore,
     backendProbeFn,
+    compile,
     journeysFn: journeysFn || (async ({ journeys }) => {
       journeyDrives.push(journeys.map((j) => j.id));
       return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: failSet.has(j.id) ? "fail" : "pass" })) };
@@ -569,6 +570,75 @@ export const create = (draft) => booking.createBooking(draft);
   assert.equal(corrections.length, 2);
   assert.deepEqual(corrections[1].regenerateFiles, ["src/data/bookings.js"],
     "the final allowance is a whole-file escalation, not repeated fragile symbol surgery");
+});
+
+test("a stale final correction excerpt gets one bounded whole-file protocol retry", async () => {
+  const file = "src/screens/scaffold/CatalogueScreen.jsx";
+  const catalogueContract = {
+    summary: "Generic software catalogue",
+    entities: [{ name: "catalogueitem" }],
+    operations: [],
+    routes: [{ path: "/", name: "Catalogue" }],
+    auth: { required: false },
+    journeys: [{
+      id: "browse-catalogue", title: "Browse the software catalogue", priority: "primary",
+      steps: [{ action: "view the catalogue", expect: "software catalogue" }],
+    }],
+  };
+  const initial = `export default function CatalogueScreen() {
+  const firstIssue = true;
+  const secondIssue = true;
+  return <main><h1>Software catalogue</h1>{String(firstIssue || secondIssue)}</main>;
+}`;
+  const corrected = `export default function CatalogueScreen() {
+  const firstIssue = false;
+  const secondIssue = false;
+  return <main><h1>Software catalogue</h1>{String(firstIssue || secondIssue)}</main>;
+}`;
+  let correctionRound = 0;
+  const h = harness({
+    contract: catalogueContract,
+    maxNoOpRetries: 1,
+    assetService: {
+      resolveIntents: async () => ({ resolved: [], providerCalls: 0 }),
+      assetManifestFor: async () => [],
+    },
+    compile: async (tree) => {
+      const source = String(tree[file] || "");
+      if (source.includes("const firstIssue = true")) {
+        return { ok: false, stderr: `${file}:2: first catalogue compile issue` };
+      }
+      if (source.includes("const secondIssue = true")) {
+        return { ok: false, stderr: `${file}:3: second catalogue compile issue` };
+      }
+      return { ok: true };
+    },
+    patchPlan: {
+      core: () => [{ replaceFile: file, content: initial }],
+      correction: (ctx) => {
+        correctionRound += 1;
+        if (correctionRound === 1) {
+          return [{ file, ops: [{ op: "replace_exact", symbol: "const firstIssue = true;",
+            content: "const firstIssue = false;" }] }];
+        }
+        if (correctionRound === 2) {
+          return [{ file, ops: [{ op: "replace_exact", symbol: "const firstIssue = true;",
+            content: "const firstIssue = false;" }] }];
+        }
+        assert.deepEqual(ctx.regenerateFiles, [file]);
+        return [{ replaceFile: file, content: corrected }];
+      },
+    },
+  });
+
+  const result = await h.orchestrator.runBuild({
+    owner: "o", projectId: "proj-final-protocol-retry", request: "software catalogue",
+  });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  const corrections = h.patchCalls.filter((call) => call.step === "correction");
+  assert.equal(corrections.length, 3);
+  assert.equal(corrections[2].dispatchReason, "final_patch_protocol_correction");
+  assert.deepEqual(corrections[2].regenerateFiles, [file]);
 });
 
 test("WP8 — stop rule: the same defect surviving a repair round blocks instead of burning attempts", async () => {

@@ -15,7 +15,7 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches, escalationPlan, patchOutcomes } from "./patchEngine.mjs";
+import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
@@ -512,6 +512,8 @@ export function createOrchestrator({
     let contractCorrectionScope = null;
     let headroomScope = null;
     let retryAsCorrection = false;
+    let protocolRetryPending = false;
+    const protocolRegenerateFiles = new Set();
     let moduleCorrectionUsed = false;
     let latestCandidate = null;
     let advisory = [];
@@ -543,7 +545,8 @@ export function createOrchestrator({
     const maxGenerationAttempts = policy.maxGenerationAttempts;
     const maxCandidateCorrections = policy.maxCandidateCorrections;
     const maxDispatches = maxGenerationAttempts + maxCandidateCorrections;
-    const exhausted = () => attempts >= maxGenerationAttempts || spend() >= maxDispatches
+    const exhausted = () => (!protocolRetryPending
+      && (attempts >= maxGenerationAttempts || spend() >= maxDispatches))
       || noOps > protocolRetryLimit;
     const failure = (reason, extra = {}) => ({
       ok: false, reason, problems, advisory, advisoryFindings: advisory,
@@ -566,6 +569,8 @@ export function createOrchestrator({
       const attempt = spend() + 1;
       // Pre-compile corrections dispatch under their own step identity so they draw on the
       // correction allowance, never on the single browser-informed repair slot.
+      const protocolCorrectionDispatch = protocolRetryPending;
+      protocolRetryPending = false;
       const scopeRejectionCorrection = retryAsCorrection;
       const dispatchStep = dispatchAs
         || headroomScope?.logicalStep
@@ -587,13 +592,16 @@ export function createOrchestrator({
         ...forcedRegenerateFiles,
         ...escalationPlan(rejectionHistory).regenerateFiles,
         ...finalCorrectionRegeneration,
+        ...(protocolCorrectionDispatch ? protocolRegenerateFiles : []),
       ])];
+      if (protocolCorrectionDispatch) protocolRegenerateFiles.clear();
       const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
         repairBoundary, regenerateFiles, advisory: [...splitFindings, ...advisory],
         dispatchReason: dispatchAs === "correction" ? "mechanics_correction"
+          : protocolCorrectionDispatch ? "final_patch_protocol_correction"
           : scopeRejectionCorrection ? "scope_rejection_correction" : null,
         spec: scoped, signal });
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
@@ -761,6 +769,25 @@ export function createOrchestrator({
           }
           working = correctionDispatch && latestCandidate ? working : originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
+          const staleCorrectionFiles = correctionDispatch && corrections >= maxCandidateCorrections
+            ? [...new Set(applied.rejected
+              .filter((row) => row.code === REJECTION.PATCH_NOT_APPLICABLE
+                && row.file && Object.hasOwn(working, row.file))
+              .map((row) => row.file))]
+            : [];
+          if (staleCorrectionFiles.length && noOps < protocolRetryLimit) {
+            noOps += 1;
+            retryAsCorrection = true;
+            protocolRetryPending = true;
+            for (const file of staleCorrectionFiles) protocolRegenerateFiles.add(file);
+            attemptLedger.push({ attempt, dispatch: dispatchStep,
+              class: "final_correction_stale_excerpt_protocol_retry", substantive: false,
+              rejected: applied.rejected.length, retainedFiles: [] });
+            log(`${step}: final correction referenced stale source; re-briefing `
+              + `[${staleCorrectionFiles.join(", ")}] as complete replacement `
+              + `(protocol round ${noOps}/${protocolRetryLimit})`);
+            continue;
+          }
           if (step === "repair" || correctionDispatch) {
             if (!scheduleCorrectionRetry()) {
               return failure(`${step === "repair" ? "the repair" : "the candidate correction"} patch remained invalid after the correction allowance`, {
