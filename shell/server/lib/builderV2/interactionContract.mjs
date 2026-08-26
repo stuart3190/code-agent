@@ -92,14 +92,38 @@ const transientDefaultValue = (field) => {
   if (/^(?:string|text|email|url|date|time)\b/.test(type)) return "";
   return null;
 };
+const COLLECTION_VALUE_TYPE = /\[\]\s*$|^(?:array|list|collection|set)(?:\b|<|\[)/;
+const RESET_OPERATION_ACTION = /\b(?:clear|reset|restore)\b/i;
+const functionalManagedState = (operations = [], step = null) => new Set((operations || []).flatMap((operation) => (
+  (operation?.responsibilities || [])
+    .filter((responsibility) => responsibility?.type === "functional")
+    .flatMap((responsibility) => {
+      const writes = new Set(list(responsibility?.writes).map(normalized));
+      if (RESET_OPERATION_ACTION.test(String(step?.action || ""))) return [...writes];
+      return list(responsibility?.reads).map(normalized).filter((field) => writes.has(field));
+    })
+)));
+const operationOwnsActionState = (step, fieldName, declaredField, managedFields) => {
+  const field = normalized(fieldName);
+  if (!managedFields.has(field) || verificationValueFor(step, fieldName) !== undefined) return false;
+  return COLLECTION_VALUE_TYPE.test(String(declaredField?.type || "").toLowerCase())
+    || RESET_OPERATION_ACTION.test(String(step?.action || ""));
+};
 const transientStateDefaults = (contract, journey) => {
   const referencedOperations = new Set((journey?.steps || []).flatMap((step) => [
     ...list(step?.operates), ...list(step?.reads),
   ]).map(normalized));
-  const operationIds = new Set((contract?.operations || [])
-    .map((operation) => normalized(operation?.id || operation?.name)));
-  const visitorOperatedFields = new Set((journey?.steps || []).flatMap((step) => list(step?.operates))
-    .map(normalized).filter((value) => !operationIds.has(value)));
+  const operationsById = new Map((contract?.operations || [])
+    .map((operation) => [normalized(operation?.id || operation?.name), operation]));
+  const operationIds = new Set(operationsById.keys());
+  const declaredFields = new Map((contract?.entities || []).flatMap((entity) => entity?.fields || [])
+    .map((field) => [normalized(field?.name), field]));
+  const visitorOperatedFields = new Set((journey?.steps || []).flatMap((step) => {
+    const stepOperations = list(step?.operates).map((value) => operationsById.get(normalized(value))).filter(Boolean);
+    const managedFields = functionalManagedState(stepOperations, step);
+    return list(step?.operates).map(normalized).filter((value) => !operationIds.has(value)
+      && !operationOwnsActionState(step, value, declaredFields.get(value), managedFields));
+  }));
   const defaults = {};
   for (const operation of contract?.operations || []) {
     const operationId = normalized(operation?.id || operation?.name);
@@ -122,8 +146,7 @@ const transientStateDefaults = (contract, journey) => {
         const field = fields.get(normalized(read));
         if (!field) continue;
         const type = String(field.type || "").toLowerCase();
-        const collection = /\[\]\s*$/.test(type)
-          || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type);
+        const collection = COLLECTION_VALUE_TYPE.test(type);
         const collectionAccumulator = writes.has(normalized(read)) && collection;
         // A transient reset/clear operation commonly reads the current scalar UI state and writes
         // its default back. When no visitor control supplies that field before the operation, the
@@ -536,18 +559,12 @@ export function buildInteractionContract(contract, {
         : ["textbox", "input"].includes(step?.primitive) ? "input" : null;
       // A functional operation may own a collection or accumulator by reading and writing the
       // same field. Naming that state beside the operation identifies what the action mutates; it
-      // does not turn the collection into a browser-editable textbox. An explicit primitive still
-      // wins when a contract intentionally exposes an editor for operation-owned state.
-      const operationManagedFields = new Set(declaredOperationObjects.flatMap((operation) => (
-        (operation?.responsibilities || [])
-          .filter((responsibility) => responsibility?.type === "functional")
-          .flatMap((responsibility) => {
-            const writes = new Set(list(responsibility?.writes).map(normalized));
-            return list(responsibility?.reads).map(normalized).filter((field) => writes.has(field));
-          })
-      )));
+      // does not turn the collection into a browser-editable control. A reset likewise owns every
+      // field it restores. A field-specific verification value remains the explicit authority for
+      // a real editor when one is intentionally exposed beside either operation shape.
+      const operationManagedFields = functionalManagedState(declaredOperationObjects, step);
       const valueOperands = operands?.filter((field) => (
-        declaredPrimitive || !operationManagedFields.has(normalized(field))
+        !operationOwnsActionState(step, field, declaredFields.get(normalized(field)), operationManagedFields)
       ));
       // Operands that were operations or operation-managed state perform an action and write no
       // value through a value-holding control. The action control still comes from the kinds below.

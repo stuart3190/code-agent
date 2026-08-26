@@ -188,8 +188,9 @@ test("required transient filter defaults reset by an operation are available at 
           operates: ["query"], expect: "the query is visible" },
         { action: "apply the current filters", target: "apply filters control",
           operates: ["apply-filters"], expect: "an empty catalogue state is visible" },
-        { action: "clear all filters", target: "clear filters control",
-          operates: ["clear-filters"], expect: "the default software cards are visible again" },
+        { action: "activate the reset filters control", target: "clear filters control",
+          operates: ["query", "categoryFilter", "platformFilter", "clear-filters"],
+          primitive: "selection", expect: "the default software cards are visible again" },
       ],
     }],
   };
@@ -199,6 +200,12 @@ test("required transient filter defaults reset by an operation are available at 
   assert.deepEqual(spec.interactionContract.scenarios["view-empty-filter-state"].initialState, {
     query: "", categoryFilter: "", platformFilter: "",
   });
+  const clearFlows = spec.interactionContract.flows.filter((flow) => (
+    flow.journeyId === "view-empty-filter-state" && flow.stepIndex === 3
+  ));
+  assert.deepEqual(clearFlows.map((flow) => flow.kind), ["action"]);
+  assert.deepEqual(clearFlows[0].control.roles, ["button"]);
+  assert.equal(clearFlows[0].operationId, "clear-filters");
   assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
 });
 
@@ -227,10 +234,12 @@ test("operation-managed catalogue collections remain action state instead of tex
           operates: ["selectedItemId"], expect: "the software item is selected" },
         { action: "add the selected software to session favourites", target: "favourite button",
           operates: ["favouriteItemIds", "toggle-favourite"],
+          primitive: "selection",
           reads: ["selectedItemId", "favouriteItemIds"],
           expect: "the session favourites list includes the selected software" },
         { action: "toggle the selected software in session favourites", target: "favourite button",
           operates: ["favouriteItemIds", "toggle-favourite"],
+          primitive: "selection",
           reads: ["selectedItemId", "favouriteItemIds"],
           expect: "the session favourites list no longer includes the selected software" },
       ],
