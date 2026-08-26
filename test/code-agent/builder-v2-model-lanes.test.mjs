@@ -418,6 +418,59 @@ test("an irreducible large component resizes to exact causal fragments inside re
   assert.match(logs.join("\n"), /resize 2/);
 });
 
+test("structural modularity correction keeps the complete module and cannot degrade to a handler fragment", () => {
+  const filePath = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const source = [
+    'import { useState } from "react";',
+    "const SOFTWARE = [];",
+    "export default function SoftwareCatalogueFlow() {",
+    "  const [query, setQuery] = useState(\"\");",
+    `  ${"// retained catalogue presentation\n  ".repeat(900)}`,
+    "  return <main><input value={query} onChange={(event) => setQuery(event.target.value)} /></main>;",
+    "}",
+  ].join("\n");
+  const tree = { [filePath]: source, "src/App.jsx": "export default function App(){return null}" };
+  const repairScope = {
+    kind: "structural_modularity",
+    files: [filePath],
+    allowedFiles: [filePath],
+    allowedPrefixes: ["src/components/catalogue/"],
+    findings: [{ code: "tree_integrity_failed", message: `${filePath} is structurally too broad` }],
+    instruction: "Split the retained catalogue flow into focused sibling modules.",
+    expectedPatchTokens: 6_000,
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree, repairScope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.equal(retrieval.tokens, Math.ceil(source.length / 4));
+  assert.match(prompt, /STRUCTURALLY INVALID MODULES IN FULL/);
+  assert.match(prompt, /retained catalogue presentation/);
+  assert.match(prompt, /handler-only.*NOT structural/s);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT:/,
+    "the bounded decomposition does not resend the unrelated application contract");
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 20_000,
+    "the complete structural source fits without resending the application architecture");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000,
+    callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: repairScope.expectedPatchTokens },
+    fundingPolicy: "thrallo_recovery",
+    budget: { approvedCeilingCredits: 7.69, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 7.69 },
+  });
+  assert.ok(plan.maxOutputTokens >= 6_000,
+    `the complete decomposition received only ${plan.maxOutputTokens} output tokens`);
+
+  const fullFileScope = headroomDispatchScope({ tree, repairScope, logicalStep: "correction" });
+  assert.equal(fullFileScope.wholeFileRequired, true);
+  assert.equal(headroomDispatchScope({
+    tree, repairScope, previousScope: fullFileScope, logicalStep: "correction",
+  }), null, "structural decomposition must fail closed instead of receiving an unusable handler excerpt");
+});
+
 test("repair scoping parses the emitted journey evidence and ignores downstream undriveable cascades", () => {
   const problems = [
     'journey send-message Â· step "fill the form" FAILED in a real browser: control missing',

@@ -225,6 +225,51 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
   ].join("\n");
 }
 
+function renderStructuralModularityPrompt({ tree, repairScope, onRetrieval = null }) {
+  const files = [...new Set(repairScope?.files || repairScope?.allowedFiles || [])].sort();
+  const prefixes = [...new Set(repairScope?.allowedPrefixes || [])].sort();
+  const included = files.map((path) => ({
+    path,
+    form: "full",
+    reason: "structural modularity requires the complete module",
+    tokens: Math.ceil(String(tree?.[path] || "").length / 4),
+  }));
+  onRetrieval?.({
+    query: { step: "repair", kind: "structural_modularity", files },
+    included,
+    omittedCount: Math.max(0, Object.keys(tree || {}).length - included.length),
+    tokens: included.reduce((sum, row) => sum + row.tokens, 0),
+  });
+  return [
+    "STEP: correction",
+    "STRUCTURAL MODULARITY CORRECTION: the retained application is behaviorally intact, but the",
+    "validator proved that the named module is structurally too broad. This correction is ONLY a",
+    "source decomposition. Preserve every route, export, visible behavior, label, machine ID, state",
+    "transition, capability/custom-extension call, and existing interaction.",
+    "",
+    repairScope?.instruction || "Split the named module into focused sibling modules.",
+    `Validator findings: ${JSON.stringify(repairScope?.findings || [])}`,
+    `Existing files that may be replaced: [${files.join(", ")}]`,
+    `New supporting modules may be created only under: [${prefixes.join(", ")}]`,
+    "",
+    "REQUIRED PROGRESS:",
+    `- The corrected tree must remove every named modularity finding. A file must stay at or below ${FILE_MAX_TOKENS} tokens.`,
+    `- A file above ${MULTI_JOURNEY_MIN_TOKENS} tokens may not implement more than ${MAX_JOURNEYS_PER_FILE} journeys.`,
+    "- Move existing data/constants, presentation sections, and focused child components into sibling",
+    "  modules, then import and compose them from a smaller coordinator.",
+    "- A handler-only, conditional-only, copy-only, or custom-extension call change is NOT structural",
+    "  progress and will leave the validator finding unchanged.",
+    "- Use replaceFile for each named existing module and newFile for its new siblings. Do not edit",
+    "  unrelated files. Call emit_patches now.",
+    "",
+    "FILE TREE (paths only):",
+    ...Object.keys(tree || {}).sort().map((path) => `  ${path}`),
+    "",
+    "STRUCTURALLY INVALID MODULES IN FULL:",
+    ...files.flatMap((path) => ["", `--- ${path} ---`, String(tree?.[path] || "")]),
+  ].join("\n");
+}
+
 /** Deterministic edit-scope targeting: generated files ranked by request-keyword hits. */
 export function editTargets(tree, request, { limit = 3 } = {}) {
   const words = [...new Set(String(request).toLowerCase().match(/[a-z]{4,}/g) || [])];
@@ -466,6 +511,9 @@ export function renderPatchPrompt({
   capabilityGraph = contract?.capabilityGraph || null, compositionPlan = null,
   scaffoldGraph = contract?.scaffoldGraph || null, scaffoldPlan = null,
 }) {
+  if (repairScope?.kind === "structural_modularity") {
+    return renderStructuralModularityPrompt({ tree, repairScope, onRetrieval });
+  }
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
   }
@@ -954,6 +1002,7 @@ export function headroomDispatchScope({
   // prompt still cannot fit, expose only exact verifier-relevant excerpts and require a unique
   // exact-source replacement. This is a real semantic resize, not a retry of identical bytes.
   if (previousScope && previousScope.allowedFiles?.length === 1 && files.length === 1) {
+    if (previousScope.wholeFileRequired) return null;
     if (previousScope.fragmented) return null;
     const fragments = headroomSourceFragments(tree?.[files[0]], problems);
     if (!fragments.length) return null;
@@ -989,6 +1038,8 @@ export function headroomDispatchScope({
     remainingFiles,
     batchWidth: width,
     allowedPrefixes: active?.allowedPrefixes || [],
+    wholeFileRequired: previousScope?.wholeFileRequired === true
+      || active?.kind === "structural_modularity",
     findings: [],
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selectedContracts },
     expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
