@@ -225,7 +225,7 @@ for (const [name, shape] of Object.entries(CASES)) {
         return;
       }
       if (shape.forceDisabled) {
-        assert.equal(journey.status, "fail", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
+        assert.equal(journey.status, "undriveable", `${transcript}\n${JSON.stringify(journey, null, 2)}`);
         assert.equal(journey.steps[2].classification, "APP_FUNCTIONAL_FAILURE", transcript);
         assert.equal(journey.steps[2].drove, false, "a swallowed click failure must never be reported as activation");
         return;

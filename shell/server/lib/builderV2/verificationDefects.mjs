@@ -164,6 +164,24 @@ function classifyStep({ status, drove, kinds }) {
 }
 
 /**
+ * The browser found the contracted selection group, enumerated its live options and proved that
+ * none exposes the contract's exact fixture as text, label or value. That is not an uncertain
+ * driver failure: the generated option surface omitted the machine-readable domain value. The
+ * mounted application can repair it (for example, a card button exposes value={item.id}).
+ */
+function selectionFixtureIsUnexposed(step, status) {
+  const evidence = step?.controlEvidence;
+  if (status !== "undriveable" || evidence?.fixtureAuthority !== "contract"
+    || evidence?.verificationValue === undefined || evidence?.verificationValue === null
+    || !Array.isArray(evidence?.selectedOptions) || !evidence.selectedOptions.length) return false;
+  const expected = String(evidence.verificationValue).trim().toLowerCase();
+  const exposed = evidence.selectedOptions.some((option) => [option?.value, option?.label, option?.text]
+    .filter((value) => value !== undefined && value !== null)
+    .some((value) => String(value).trim().toLowerCase() === expected));
+  return !exposed && /not an available option/i.test(String(step?.detail || ""));
+}
+
+/**
  * Every defect this verification run proved, typed and addressed.
  *
  * @returns {Array<object>} deterministic order: platform first (they invalidate everything after
@@ -277,10 +295,12 @@ export function verificationDefects({
     const resultClass = step?.classification || null;
     const platformInconclusive = minimal
       && resultClass === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE;
-    const repairableResult = !minimal || isAppRepairableVerificationClass(resultClass);
+    const appSelectionValueMissing = platformInconclusive && selectionFixtureIsUnexposed(step, status);
+    const repairableResult = !minimal || isAppRepairableVerificationClass(resultClass)
+      || appSelectionValueMissing;
     const defectClass = resultClass === VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE
       ? DEFECT_CLASS.DURABILITY
-      : platformInconclusive ? DEFECT_CLASS.PLATFORM
+      : platformInconclusive && !appSelectionValueMissing ? DEFECT_CLASS.PLATFORM
         : classifyStep({ status, drove: step?.drove, kinds });
     const control = controlIdentity(manifest, flows);
     const addressing = addressingFor(mechanics, control?.id);
@@ -309,10 +329,10 @@ export function verificationDefects({
         : defectClass === DEFECT_CLASS.DURABILITY ? "durable_outcome_missing"
         : "contracted_outcome_missing",
       defectClass: proven ? DEFECT_CLASS.INTERACTION : defectClass,
-      owner: platformInconclusive || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
+      owner: (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
         : (ambiguous ? DEFECT_OWNER.UNKNOWN : DEFECT_OWNER.APP),
       uncertain: ambiguous || undefined,
-      tier: platformInconclusive || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE
+      tier: (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE
         : (proven ? REPAIR_TIER.CORRECTION : REPAIR_TIER.REPAIR),
       journeyId: diagnostic.journeyId, stepIndex: diagnostic.stepIndex,
       action: diagnostic.userAction, control,

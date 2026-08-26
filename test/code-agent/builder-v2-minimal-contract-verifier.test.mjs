@@ -5,7 +5,8 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 
 import {
-  expectationOutcome, isObservationOnlyStep, verifyJourneys,
+  controlResetTransition, expectationOutcome, expectationRequestsControlReset,
+  isObservationOnlyStep, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -83,6 +84,49 @@ test("minimal_contract_v1 keeps only contract outcome evidence blocking", async 
   assert.equal(broken.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
 });
 
+test("explicit reset expectations accept a proven native control reset", () => {
+  const expect = "the empty state disappears, the search box is blank, filters return to their all-options values, and the default software cards are visible again";
+  assert.equal(expectationRequestsControlReset(expect), true);
+  assert.equal(expectationRequestsControlReset("the result card appears"), false);
+  const reset = controlResetTransition(
+    [{ key: "input:search:0", type: "search", value: "no-match", selectedIndex: -1, checked: false }],
+    [{ key: "input:search:0", type: "search", value: "", selectedIndex: -1, checked: false }],
+  );
+  assert.equal(reset.ok, true);
+  const outcome = expectationOutcome({
+    wanted: ["empty", "state", "disappears", "search", "box"], found: [], fresh: [],
+    drove: true, actionProven: true, stateChanged: reset.ok, action: "clear filters",
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+  });
+  assert.equal(outcome.classification, VERIFICATION_RESULT_CLASS.PASS);
+});
+
+test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
+  const selection = { ...control("selectedItemId", "selected-item", ["button", "radio", "option", "combobox"]),
+    verificationValue: "catalogue-item-1", selectedState: true };
+  const step = { action: "select the matching catalogue item", operates: ["selectedItemId"],
+    expect: "the item detail panel is visible" };
+  const contract = contractFor(step, [{ id: "journey:1:selection:selecteditemid", kind: "selection",
+    valueWritten: "selectedItemId", control: selection }]);
+  const defects = verificationDefects({ contract, interactionContract: contract.interactionContract,
+    journeyResults: {
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      journeys: [{ id: "journey", title: "Minimal contract journey", priority: "primary",
+        owners: ["src/App.jsx"], status: "undriveable", steps: [{ ...step, status: "undriveable",
+          drove: false, classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+          detail: "the contracted verification value \"catalogue-item-1\" is not an available option",
+          controlEvidence: { contractedField: "selectedItemId", fixtureAuthority: "contract",
+            verificationValue: "catalogue-item-1",
+            selectedOptions: [{ text: "Catalogue Item One", label: "selected Item Id", value: null,
+              selected: false }] } }] }],
+    } });
+  assert.equal(defects[0].defectClass, "interaction", JSON.stringify(defects));
+  assert.equal(defects[0].owner, "app", JSON.stringify(defects));
+  assert.equal(defects[0].tier, "repair", JSON.stringify(defects));
+  assert.equal(actionableDefects(defects).length, 1);
+  assert.equal(platformDefectsOf(defects).length, 0);
+});
+
 test("observation steps require no control identity", () => {
   assert.equal(isObservationOnlyStep({
     action: "view live competitions", expect: "competition cards are visible", reads: ["competitions"],
@@ -110,6 +154,20 @@ test("retained false negatives and concrete failures classify correctly in a rea
       [{ kind: "input", valueWritten: "displayName", control: field }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].alreadyAccepted, true);
+    });
+
+    await t.test("a clear action is proven by a non-default input returning to blank", async () => {
+      const clear = control("clear filters control", "clear-filters", ["button"]);
+      const result = await run(`<main><label>search Query
+          <input id="query" type="search" value="no-match"></label>
+          <button data-thrallo-action="clear-filters" onclick="document.getElementById('query').value=''; document.getElementById('empty').hidden=true; document.getElementById('results').hidden=false">Clear filters</button>
+          <p id="empty">No software matches the current search.</p>
+          <section id="results" hidden><h2>Software cards</h2><p>Default catalogue item</p></section></main>`,
+      { action: "clear the current search and filters",
+        expect: "the empty state disappears, the search box is blank, filters return to their all-options values, and the default software cards are visible again" },
+      [{ kind: "action", operationId: "clear-catalogue-filters", control: clear }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.resetTransition.ok, true);
     });
 
     await t.test("numeric and checkbox fixtures use native control types", async () => {

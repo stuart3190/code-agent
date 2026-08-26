@@ -121,7 +121,7 @@ test("a dead selection is reported by its own identity, not by the step that tri
 test("a contracted BUTTON that carries no machine identity says so on the defect", () => {
   // The run #8 shape: the model hand-wired the control, so every identity-addressed path is blind
   // to it. The action probe answers that before a journey ever runs.
-  const confirmId = actionIdFor("confirm booking");
+  const confirmId = actionIdFor("create-booking");
   const defects = defectsFrom(verdicts({
     failAt: 2,
     step: { status: "undriveable", drove: false, detail: "the contracted action could not be activated" },

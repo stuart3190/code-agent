@@ -82,6 +82,62 @@ export function expectationKeywords(expect) {
   return keywords(expect, 5);
 }
 
+// Reset/clear outcomes are expressed through control state, not positive page copy. Requiring
+// the words from "the search box is blank" to remain visible after the action inverts the
+// contract: a correct clear operation removes the value and often removes the empty-state copy.
+// Keep this deliberately structural and narrow. Ordinary actions still need their contracted
+// visible outcome; only explicit reset language may be answered by a real non-default -> default
+// transition in a native form control.
+export function expectationRequestsControlReset(expect) {
+  return /\b(?:is|becomes?|remains?)\s+blank\b|\bclear(?:s|ed|ing)?\b|\breset(?:s|ted|ting)?\b|\breturn(?:s|ed|ing)?\s+to\b/i
+    .test(String(expect || ""));
+}
+
+export function controlResetTransition(before = [], after = []) {
+  const afterByKey = new Map((after || []).map((row) => [row.key, row]));
+  const changes = [];
+  for (const prior of before || []) {
+    const next = afterByKey.get(prior.key);
+    if (!next) continue;
+    if (["text", "search", "email", "url", "tel", "number", "textarea"].includes(prior.type)
+      && String(prior.value || "").length > 0 && String(next.value || "").length === 0) {
+      changes.push({ key: prior.key, transition: "value_cleared" });
+    } else if (prior.type === "select" && Number(prior.selectedIndex) > 0
+      && Number(next.selectedIndex) === 0) {
+      changes.push({ key: prior.key, transition: "selection_reset" });
+    } else if (["checkbox", "radio"].includes(prior.type) && prior.checked === true && next.checked === false) {
+      changes.push({ key: prior.key, transition: "selection_cleared" });
+    }
+  }
+  return { checked: (before || []).length > 0, ok: changes.length > 0, changes };
+}
+
+async function visibleControlState(page) {
+  return page.evaluate(() => {
+    const ordinals = new Map();
+    return [...document.querySelectorAll("input, textarea, select")]
+      .filter((element) => element.offsetParent !== null && !element.disabled)
+      .map((element, index) => {
+      const label = element.labels?.[0]?.innerText || "";
+      const identity = element.getAttribute("data-thrallo-control") || element.id
+        || element.getAttribute("name") || element.getAttribute("aria-label") || label || `control-${index}`;
+      const tag = element.tagName.toLowerCase();
+      const baseKey = `${tag}:${identity}`;
+      const ordinal = ordinals.get(baseKey) || 0;
+      ordinals.set(baseKey, ordinal + 1);
+      const nativeType = tag === "select" ? "select" : tag === "textarea" ? "textarea"
+        : String(element.getAttribute("type") || "text").toLowerCase();
+      return {
+        key: `${baseKey}:${ordinal}`,
+        type: nativeType,
+        value: "value" in element ? String(element.value || "") : "",
+        checked: "checked" in element ? Boolean(element.checked) : false,
+        selectedIndex: tag === "select" ? element.selectedIndex : -1,
+      };
+      });
+  }).catch(() => []);
+}
+
 /**
  * Every locator worth trying for one described control — REAL CONTROLS for every word
  * before prose for any word. The old per-word ordering let getByText("number") (the
@@ -1613,6 +1669,8 @@ async function runStep(page, step, {
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
   // match was the word "booking" in the button the step had just clicked.
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  const resetExpected = expectationRequestsControlReset(expect);
+  const controlsBefore = resetExpected ? await visibleControlState(page) : [];
   const urlBefore = page.url();
   let controlEvidence = null;
 
@@ -2144,6 +2202,7 @@ async function runStep(page, step, {
   let found = [];
   let fresh = [];
   let observedStateChanged = false;
+  let resetEvidence = { checked: false, ok: false, changes: [] };
   // Submit-shaped outcomes ride a real backend round-trip — visitor-session establishment
   // through the app-auth edge function measured ~12s on a cold start, past the 10s window.
   const mutationFlow = durableTransitionFlow(interactionFlows);
@@ -2179,6 +2238,7 @@ async function runStep(page, step, {
     }
     const currentText = await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore);
     observedStateChanged = currentText !== textBefore || page.url() !== urlBefore;
+    if (resetExpected) resetEvidence = controlResetTransition(controlsBefore, await visibleControlState(page));
     if (mutationFlow && found.length / wanted.length >= 0.5 && fresh.length === 0) {
       const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       mutationEvidence = mutationCommitEvidence({
@@ -2189,7 +2249,7 @@ async function runStep(page, step, {
     const early = expectationOutcome({ wanted, found, fresh, drove, action,
       urlChanged: page.url() !== urlBefore, readOnlyAssertion,
       mutationWithValues: mutationEvidence.ok, verifierPolicy,
-      stateChanged: observedStateChanged && !requiresExplicitOutcome,
+      stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok,
       actionProven: contractDriven || navigated || filledSomething || droveStepper });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
@@ -2317,9 +2377,12 @@ async function runStep(page, step, {
     // present, but it cannot also be newly added after the setup that made it present.
     establishedState: allowEstablishedState,
     verifierPolicy,
-    stateChanged: observedStateChanged && !requiresExplicitOutcome,
+    stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok,
     actionProven: contractDriven || navigated || filledSomething || droveStepper || Boolean(route),
   });
+  if (resetEvidence.checked) {
+    controlEvidence = { ...(controlEvidence || {}), resetTransition: resetEvidence };
+  }
 
   if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
     const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");

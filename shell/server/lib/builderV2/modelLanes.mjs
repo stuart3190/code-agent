@@ -88,8 +88,10 @@ against a code index. Rules:
   copy. A literal data-thrallo-action must equal the supplied control.machineId.
 - A contracted control's verificationValue is the authoritative non-secret synthetic browser
   fixture for its domain rule. Configure sample data and validation so that exact value has the
-  valid/invalid meaning stated by the journey. Do not replace it with a different hidden answer,
-  and do not merely echo it as static copy.
+  valid/invalid meaning stated by the journey. A selectable card/button/radio option must expose
+  that exact domain value through its native value attribute (for example value={item.id}); visible
+  title copy alone is not a machine-readable option value. Do not replace the fixture with a
+  different hidden answer, and do not merely echo it as static copy.
 - Custom-extension calls must select the operation with a literal second-argument context such as
   { operation: "<operationId>" } and pass that operation's declared input keys explicitly. The
   explicit legacy key operationId is also supported. Do not rely on spreading a domain object whose
