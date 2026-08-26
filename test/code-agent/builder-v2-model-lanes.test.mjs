@@ -221,6 +221,28 @@ test("scaffold headroom excludes legacy routes and sizes a missing shared contro
   assert.match(scope.instruction, /create each with newFile/);
 });
 
+test("whole-core retry keeps every missing planned module queued after prioritising the named failure", () => {
+  const extension = "src/extensions/custom/catalogue.js";
+  const controller = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const modulePlan = [
+    { path: extension, role: "bounded custom catalogue extension" },
+    { path: controller, role: "shared catalogue flow" },
+    { path: screen, role: "mounted catalogue screen" },
+  ];
+  const scope = headroomDispatchScope({
+    tree: { "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};" },
+    modulePlan,
+    moduleContracts: { version: 1, specifications: [] },
+    problems: [`${controller} still has a named pre-compile finding`],
+    logicalStep: "core",
+  });
+  assert.equal(scope.allowedFiles[0], controller, "the causal module remains first");
+  assert.deepEqual(new Set([...scope.allowedFiles, ...scope.remainingFiles]),
+    new Set([extension, controller, screen]),
+    "resetting a whole-core attempt cannot silently drop clean modules that now need regeneration");
+});
+
 test("a retained complex application continuation carries only the selected module's semantic journey", () => {
   const fixture = JSON.parse(readFileSync(new URL(
     "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
@@ -469,6 +491,63 @@ test("structural modularity correction keeps the complete module and cannot degr
   assert.equal(headroomDispatchScope({
     tree, repairScope, previousScope: fullFileScope, logicalStep: "correction",
   }), null, "structural decomposition must fail closed instead of receiving an unusable handler excerpt");
+});
+
+test("custom-extension correction receives every call site in one whole-file dispatch", () => {
+  const filePath = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const source = [
+    'import { runBrowseCatalogue, runClearCatalogue } from "../../extensions/catalogue.js";',
+    `const retained = "${"catalogue-layout-".repeat(1_000)}";`,
+    "export default function SoftwareCatalogueFlow() {",
+    "  const apply = (runner, input, operation) => runner(input, { operation });",
+    "  return null;",
+    "}",
+  ].join("\n");
+  const tree = { [filePath]: source };
+  const repairScope = {
+    kind: "static_application",
+    files: [filePath],
+    allowedFiles: [filePath],
+    findings: [
+      { code: "custom_extension_invalid", exportName: "runBrowseCatalogue",
+        operation: "filter-catalogue", missingInputs: ["catalogue.draft.searchQuery", "catalogue.input.categoryFilter"] },
+      { code: "custom_extension_invalid", exportName: "runClearCatalogue",
+        operation: "clear-catalogue", missingInputs: ["catalogue.input.visibleItemIds"] },
+    ],
+    instruction: "Pass every named extension input explicitly at its direct call site.",
+    expectedPatchTokens: 6_000,
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree, repairScope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.equal(retrieval.tokens, Math.ceil(source.length / 4));
+  assert.match(prompt, /runBrowseCatalogue/);
+  assert.match(prompt, /runClearCatalogue/);
+  assert.match(prompt, /searchQuery/);
+  assert.match(prompt, /visibleItemIds/);
+  assert.match(prompt, /Repair ALL listed operations/);
+  assert.match(prompt, /VALIDATOR-NAMED MODULES IN FULL/);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT:/);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 20_000);
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000,
+    callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: repairScope.findings.length, expectedPatchTokens: repairScope.expectedPatchTokens },
+    fundingPolicy: "thrallo_recovery",
+    budget: { approvedCeilingCredits: 7.69, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 7.69 },
+  });
+  assert.ok(plan.maxOutputTokens >= 6_000,
+    `the complete call-site correction received only ${plan.maxOutputTokens} output tokens`);
+
+  const fullFileScope = headroomDispatchScope({ tree, repairScope, logicalStep: "correction" });
+  assert.equal(fullFileScope.wholeFileRequired, true);
+  assert.equal(headroomDispatchScope({
+    tree, repairScope, previousScope: fullFileScope, logicalStep: "correction",
+  }), null, "multi-call-site corrections cannot be reduced to the first matching handler");
 });
 
 test("repair scoping parses the emitted journey evidence and ignores downstream undriveable cascades", () => {

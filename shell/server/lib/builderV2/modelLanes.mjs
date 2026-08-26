@@ -270,6 +270,55 @@ function renderStructuralModularityPrompt({ tree, repairScope, onRetrieval = nul
   ].join("\n");
 }
 
+const customExtensionFindings = (scope) => (scope?.findings || [])
+  .filter((finding) => finding?.code === "custom_extension_invalid");
+
+function renderCustomExtensionCorrectionPrompt({ tree, repairScope, onRetrieval = null }) {
+  const files = [...new Set(repairScope?.files || repairScope?.allowedFiles || [])].sort();
+  const findings = customExtensionFindings(repairScope);
+  const included = files.map((path) => ({
+    path,
+    form: "full",
+    reason: "all custom-extension call sites must be corrected together",
+    tokens: Math.ceil(String(tree?.[path] || "").length / 4),
+  }));
+  onRetrieval?.({
+    query: { step: "repair", kind: "custom_extension_invalid", files },
+    included,
+    omittedCount: Math.max(0, Object.keys(tree || {}).length - included.length),
+    tokens: included.reduce((sum, row) => sum + row.tokens, 0),
+  });
+  return [
+    "STEP: correction",
+    "CUSTOM-EXTENSION CALL-SITE CORRECTION: the retained application is intact. Fix every validator",
+    "finding below in this one bounded pass and preserve all unrelated behavior, copy, machine IDs,",
+    "routes, exports, state transitions, and layout.",
+    "",
+    repairScope?.instruction || "Correct every named custom-extension call site.",
+    `Validator findings: ${JSON.stringify(findings)}`,
+    `Allowed existing files: [${files.join(", ")}]`,
+    "",
+    "REQUIRED PROGRESS:",
+    "- Invoke each named custom-extension export directly at its operation call site. Do not hide the",
+    "  export behind a runner variable, selected function, wrapper, spread, or generic input alias.",
+    "- Pass an explicit object literal whose property names are the final semantic key of every",
+    "  required/missing input named in that finding (for example, a path ending in searchQuery must",
+    "  appear as searchQuery: <current value>). Keep the existing operation selector argument.",
+    "- Repair ALL listed operations and exports, not only the first matching handler.",
+    "- Emit one replaceFile with the complete corrected content for each named existing module.",
+    "  Do not edit unrelated files. Call emit_patches now.",
+    "",
+    "FILE TREE (paths only):",
+    ...Object.keys(tree || {}).sort().map((path) => `  ${path}`),
+    "",
+    "VALIDATOR-NAMED MODULES IN FULL:",
+    ...files.flatMap((path) => ["", `--- ${path} ---`, String(tree?.[path] || "")]),
+  ].join("\n");
+}
+
+const wholeFileRepairRequired = (scope) => scope?.kind === "structural_modularity"
+  || customExtensionFindings(scope).length > 0;
+
 /** Deterministic edit-scope targeting: generated files ranked by request-keyword hits. */
 export function editTargets(tree, request, { limit = 3 } = {}) {
   const words = [...new Set(String(request).toLowerCase().match(/[a-z]{4,}/g) || [])];
@@ -513,6 +562,9 @@ export function renderPatchPrompt({
 }) {
   if (repairScope?.kind === "structural_modularity") {
     return renderStructuralModularityPrompt({ tree, repairScope, onRetrieval });
+  }
+  if (customExtensionFindings(repairScope).length) {
+    return renderCustomExtensionCorrectionPrompt({ tree, repairScope, onRetrieval });
   }
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
@@ -981,15 +1033,18 @@ export function headroomDispatchScope({
   // A browser/pre-compile repair already names its owning modules. Queuing every other missing
   // planned module turned a one-file repair into unrelated continuations and exhausted the
   // retained build's headroom. Planned modules remain the fallback for unscoped generation.
-  const candidates = targeted.length ? targeted : [...new Set([
-    ...missing,
-    ...planned,
-    // The composed scaffold is the canonical mounted application. Its protected manifest proves
-    // that App/HomePage are legacy scaffold residue, not unfinished generation targets.
-    ...((typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string") ? []
-      : ["src/App.jsx", "src/routes/HomePage.jsx"]
-        .filter((path) => typeof tree?.[path] === "string")),
-  ])];
+  const unscopedGeneration = !active && !["repair", "correction"].includes(logicalStep);
+  const candidates = targeted.length
+    ? [...new Set([...targeted, ...(unscopedGeneration ? missing : [])])]
+    : [...new Set([
+      ...missing,
+      ...planned,
+      // The composed scaffold is the canonical mounted application. Its protected manifest proves
+      // that App/HomePage are legacy scaffold residue, not unfinished generation targets.
+      ...((typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string") ? []
+        : ["src/App.jsx", "src/routes/HomePage.jsx"]
+          .filter((path) => typeof tree?.[path] === "string")),
+    ])];
   if (!candidates.length) return null;
   const priorFiles = previousScope?.allowedFiles || activeFiles;
   const width = priorFiles.length
@@ -1039,7 +1094,7 @@ export function headroomDispatchScope({
     batchWidth: width,
     allowedPrefixes: active?.allowedPrefixes || [],
     wholeFileRequired: previousScope?.wholeFileRequired === true
-      || active?.kind === "structural_modularity",
+      || wholeFileRepairRequired(active),
     findings: [],
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selectedContracts },
     expectedPatchTokens: Math.min(6_000, Math.max(1_000, missingFileTokens, Math.ceil(sourceTokens * 1.1))),
