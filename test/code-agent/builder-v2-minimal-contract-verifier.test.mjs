@@ -5,8 +5,8 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 
 import {
-  controlResetTransition, expectationOutcome, expectationRequestsControlReset,
-  isObservationOnlyStep, requestsSingleCollectionMemberAction, verifyJourneys,
+  controlResetTransition, expectationKeywords, expectationOutcome, expectationRequestsControlReset,
+  isObservationOnlyStep, removalExpectationSpec, requestsSingleCollectionMemberAction, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -99,6 +99,31 @@ test("explicit reset expectations accept a proven native control reset", () => {
     verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
   });
   assert.equal(outcome.classification, VERIFICATION_RESULT_CLASS.PASS);
+});
+
+test("layout guidance does not become required visible copy", () => {
+  assert.deepEqual(
+    expectationKeywords("a distinctive Atlas Suite hero is visible above the software catalogue section"),
+    ["atlas", "suite", "software", "catalogue", "section"],
+  );
+});
+
+test("removal expectations retain a separate positive postcondition", () => {
+  const spec = removalExpectationSpec({
+    action: "remove the selected software from the saved catalogue",
+    expect: "Atlas Editor is removed from the saved catalogue and the saved catalogue empty state is visible again",
+  });
+  assert.deepEqual(spec, {
+    target: "Atlas Editor",
+    collection: "saved catalogue",
+    postcondition: "the saved catalogue empty state is visible again",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
+  assert.equal(removalExpectationSpec({
+    action: "remove the selected software",
+    expect: "Atlas Editor is removed from the saved catalogue",
+  }), null);
 });
 
 test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
@@ -359,6 +384,49 @@ test("retained false negatives and concrete failures classify correctly in a rea
       [{ kind: "action", operationId: "remove-saved-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
+    });
+
+    await t.test("a contracted removal proves disappearance and its positive empty state", async () => {
+      const remove = {
+        ...control("saved catalogue remove control", "remove-catalogue-software", ["button"]),
+        accessibleName: "saved catalogue remove control",
+        accessibleNames: ["saved catalogue remove control"],
+      };
+      const step = {
+        action: "remove the selected software from the saved catalogue",
+        expect: "Atlas Editor is removed from the saved catalogue and the saved catalogue empty state is visible again",
+      };
+      const result = await run(`<main><section aria-label="Software detail"><h2>Atlas Editor</h2>
+        <button data-thrallo-action="remove-catalogue-software" aria-label="saved catalogue remove control"
+          onclick="document.getElementById('saved-item').remove();document.getElementById('empty').hidden=false">Remove</button>
+        </section><section aria-label="Saved catalogue"><h2>Saved catalogue</h2><ul>
+        <li id="saved-item">Atlas Editor</li>
+        </ul><p id="empty" data-empty-state hidden>No saved software yet</p></section></main>`, step,
+      [{ kind: "action", operationId: "remove-catalogue-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
+    });
+
+    await t.test("an empty-state message cannot hide a failed contracted removal", async () => {
+      const remove = {
+        ...control("saved catalogue remove control", "remove-catalogue-software", ["button"]),
+        accessibleName: "saved catalogue remove control",
+        accessibleNames: ["saved catalogue remove control"],
+      };
+      const result = await run(`<main><section aria-label="Software detail"><h2>Atlas Editor</h2>
+        <button data-thrallo-action="remove-catalogue-software" aria-label="saved catalogue remove control"
+          onclick="document.getElementById('empty').hidden=false">Remove</button>
+        </section><section aria-label="Saved catalogue"><h2>Saved catalogue</h2><ul>
+        <li>Atlas Editor</li>
+        </ul><p id="empty" data-empty-state hidden>No saved software yet</p></section></main>`,
+      { action: "remove the selected software from the saved catalogue",
+        expect: "Atlas Editor is removed from the saved catalogue and the saved catalogue empty state is visible again" },
+      [{ kind: "action", operationId: "remove-catalogue-software", control: remove }]);
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.ok, false);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 1);
     });
 
     await t.test("repeated unbound ordinary commit actions are app-repairable", async () => {

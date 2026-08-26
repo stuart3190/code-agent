@@ -60,7 +60,8 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
-  "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads"]);
+  "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads",
+  "hero", "above", "again"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -68,7 +69,8 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
 // assertions; adjectives never do.
 export const QUALITATIVE = new Set(["polished", "premium", "modern", "professional", "beautiful",
   "elegant", "stylish", "seamless", "delightful", "clean", "sleek", "attractive", "lovely",
-  "gorgeous", "immersive", "impressive", "refined", "sophisticated", "crisp", "tasteful"]);
+  "gorgeous", "immersive", "impressive", "refined", "sophisticated", "crisp", "tasteful",
+  "distinctive"]);
 
 function keywords(text, limit = 6) {
   return [...new Set(wordsOf(text))].filter((w) => !NOISE.has(w) && !QUALITATIVE.has(w)).slice(0, limit);
@@ -480,6 +482,156 @@ export function requestsSingleCollectionMemberAction(step = {}) {
   const expect = String(step?.expect || "");
   return /\b(?:remove|delete|archive|dismiss|detach)\s+(?:one|a|an)\b/i.test(action)
     && /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(expect);
+}
+
+const REMOVAL_ACTION_PATTERN = /\b(?:remove|delete|archive|dismiss|detach)\b/i;
+const REMOVAL_RESULT_PATTERN = /\s+(?:is|was|has\s+been|gets?)\s+(?:removed|deleted|archived|dismissed|detached)\b/i;
+const POSITIVE_POSTCONDITION_PATTERN = /\b(?:and|while|but|however|yet)\b/i;
+
+// A successful removal is observable as absence, so the removed entity's name cannot also be
+// required as positive page copy. Keep this structural and deliberately narrow: the action must
+// be removal-shaped, the expectation must name the entity before the removal result, and a
+// separate positive postcondition must remain authoritative after the connector.
+export function removalExpectationSpec({ action = "", expect = "" } = {}) {
+  if (!REMOVAL_ACTION_PATTERN.test(String(action))) return null;
+  const text = String(expect || "").trim();
+  const result = REMOVAL_RESULT_PATTERN.exec(text);
+  if (!result || result.index < 1) return null;
+  const rawTarget = text.slice(0, result.index).replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
+  if (!rawTarget || rawTarget.split(/\s+/).length > 8) return null;
+  const suffix = text.slice(result.index + result[0].length);
+  const connector = POSITIVE_POSTCONDITION_PATTERN.exec(suffix);
+  if (!connector) return null;
+  const collection = suffix.slice(0, connector.index)
+    .replace(/^\s*(?:from|in|out\s+of)\s+(?:the\s+)?/i, "").trim();
+  const postcondition = suffix.slice(connector.index + connector[0].length).trim();
+  if (!collection || !postcondition || !keywords(rawTarget, 5).length
+    || !keywords(collection, 5).length || !keywords(postcondition, 5).length) return null;
+  return { target: rawTarget, collection, postcondition,
+    emptyStateRequired: /\bempty(?:-|\s+)state\b/i.test(postcondition),
+    remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
+}
+
+async function collectionActionMemberState(page, spec, control, { mark = false, marker = null } = {}) {
+  const markerValue = mark ? `removal-${Date.now()}-${Math.random().toString(16).slice(2)}` : marker;
+  return page.evaluate(({ wantedTarget, collectionTopics, machineId, accessibleNames, markerValue, requireTarget }) => {
+    const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const targetText = normalized(wantedTarget);
+    const names = new Set((accessibleNames || []).map(normalized).filter(Boolean));
+    const visible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+        && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = [...document.querySelectorAll(
+      "[data-thrallo-action], button, a, input[type='button'], input[type='submit'], [role='button'], [role='link']",
+    )].filter((element) => {
+      if (!visible(element)) return false;
+      if (machineId && element.getAttribute("data-thrallo-action") === machineId) return true;
+      const identity = normalized(element.getAttribute("aria-label") || element.getAttribute("title")
+        || element.getAttribute("name") || element.innerText || element.value);
+      return names.has(identity);
+    });
+    const markedRegion = markerValue
+      ? document.querySelector(`[data-thrallo-verifier-removal-region="${markerValue}"]`) : null;
+    const regions = [...document.querySelectorAll(
+      "section, aside, [role='region'], [role='list'], ul, ol, table",
+    )].filter(visible).map((element) => {
+      const text = normalized(element.innerText);
+      return { element, text, targetPresent: text.includes(targetText),
+        topicMatches: collectionTopics.filter((topic) => text.includes(topic)).length };
+    }).filter((row) => row.topicMatches > 0 && (!requireTarget || row.targetPresent))
+      .sort((left, right) => right.topicMatches - left.topicMatches || left.text.length - right.text.length);
+    const collectionRegion = markedRegion || regions[0]?.element || null;
+    const members = [];
+    for (const candidate of candidates) {
+      let member = candidate.parentElement;
+      for (let depth = 0; member && depth < 7 && ![document.body, document.documentElement].includes(member);
+        depth += 1, member = member.parentElement) {
+        if (!normalized(member.innerText).includes(targetText)) continue;
+        members.push(member);
+        break;
+      }
+    }
+    const uniqueMembers = [...new Set(members)];
+    let regionMarked = false;
+    if (markerValue && (collectionRegion || uniqueMembers[0])) {
+      uniqueMembers[0]?.setAttribute("data-thrallo-verifier-removal-member", markerValue);
+      const region = collectionRegion || uniqueMembers[0].closest("section, aside, [role='region']")
+        || uniqueMembers[0].parentElement?.parentElement || uniqueMembers[0].parentElement;
+      if (region && ![document.body, document.documentElement].includes(region)) {
+        region.setAttribute("data-thrallo-verifier-removal-region", markerValue);
+        regionMarked = true;
+      }
+    }
+    return {
+      checked: true,
+      matchedControlCount: candidates.length,
+      targetMemberCount: collectionRegion
+        ? Number(normalized(collectionRegion.innerText).includes(targetText)) : uniqueMembers.length,
+      targetPresent: collectionRegion
+        ? normalized(collectionRegion.innerText).includes(targetText) : uniqueMembers.length > 0,
+      marker: markerValue,
+      regionMarked,
+    };
+  }, {
+    wantedTarget: spec.target,
+    collectionTopics: keywords(spec.collection, 5),
+    machineId: control?.machineId || null,
+    accessibleNames: unique([control?.accessibleName, ...(control?.accessibleNames || [])]),
+    markerValue,
+    requireTarget: mark,
+  }).catch(() => ({ checked: false, matchedControlCount: 0, targetMemberCount: 0,
+    targetPresent: false, marker: markerValue, regionMarked: false }));
+}
+
+async function removalPositiveState(page, spec, baseline, current) {
+  const wanted = keywords(spec.postcondition, 5);
+  const found = [];
+  for (const word of wanted) {
+    if (await anyVisibleTextMatch(page, word)) found.push(word);
+  }
+  const keywordEvidence = wanted.length > 0 && found.length / wanted.length >= 0.5;
+  const remainingMemberEvidence = spec.remainingMemberRequired
+    && current.matchedControlCount > 0
+    && current.matchedControlCount < baseline.matchedControlCount;
+  let emptyStateEvidence = null;
+  if (spec.emptyStateRequired) {
+    emptyStateEvidence = await page.evaluate(({ marker, topics }) => {
+      const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const visible = (element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+          && rect.width > 0 && rect.height > 0;
+      };
+      const markedRegion = marker
+        ? document.querySelector(`[data-thrallo-verifier-removal-region="${marker}"]`) : null;
+      const root = markedRegion || document.body;
+      const candidates = [...root.querySelectorAll(
+        "[data-empty-state], [data-state='empty'], [class*='empty' i], [id*='empty' i], [role='status'], p",
+      )].filter(visible);
+      for (const candidate of candidates) {
+        const text = normalized(candidate.innerText || candidate.textContent);
+        if (!text) continue;
+        const structural = candidate.hasAttribute("data-empty-state")
+          || candidate.getAttribute("data-state") === "empty"
+          || /empty/i.test(`${candidate.id} ${candidate.className}`);
+        const semantic = /\b(?:no|none|nothing)\b.{0,80}\b(?:yet|saved|items?|entries|results?|records?|available|selected)\b/i.test(text);
+        const topicMatch = (topics || []).some((topic) => text.includes(topic));
+        if ((structural || semantic) && (Boolean(markedRegion) || topicMatch)) {
+          return { visible: true, text: text.slice(0, 160), inMarkedRegion: Boolean(markedRegion) };
+        }
+      }
+      return { visible: false, text: null, inMarkedRegion: Boolean(markedRegion) };
+    }, { marker: baseline.marker, topics: wanted }).catch(() => ({ visible: false, text: null }));
+  }
+  return {
+    ok: keywordEvidence || remainingMemberEvidence || emptyStateEvidence?.visible === true,
+    wanted, found, keywordEvidence, remainingMemberEvidence,
+    emptyStateEvidence: emptyStateEvidence || { visible: false, text: null },
+  };
 }
 
 /** Resolve an explicitly contracted responsive viewport without depending on one exact verb. */
@@ -1920,6 +2072,12 @@ async function runStep(page, step, {
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
+  const removalSpec = removalExpectationSpec({ action, expect });
+  const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
+    && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
+  const removalBaseline = removalFlow
+    ? await collectionActionMemberState(page, removalSpec, removalFlow.control, { mark: true })
+    : { checked: false, targetPresent: false, targetMemberCount: 0, matchedControlCount: 0 };
   const urlBefore = page.url();
   let controlEvidence = null;
 
@@ -2516,6 +2674,7 @@ async function runStep(page, step, {
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   let mutationEvidence = { checked: false, ok: false };
+  let removalEvidence = { checked: false, ok: false };
   for (;;) {
     found = [];
     fresh = [];
@@ -2529,6 +2688,19 @@ async function runStep(page, step, {
     const currentText = await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore);
     observedStateChanged = currentText !== textBefore || page.url() !== urlBefore;
     if (resetExpected) resetEvidence = controlResetTransition(controlsBefore, await visibleControlState(page));
+    if (removalFlow && removalBaseline.targetPresent) {
+      const current = await collectionActionMemberState(page, removalSpec, removalFlow.control,
+        { marker: removalBaseline.marker });
+      const postcondition = await removalPositiveState(page, removalSpec, removalBaseline, current);
+      removalEvidence = {
+        checked: true,
+        ok: current.targetMemberCount < removalBaseline.targetMemberCount && postcondition.ok,
+        target: removalSpec.target,
+        beforeCount: removalBaseline.targetMemberCount,
+        afterCount: current.targetMemberCount,
+        postcondition,
+      };
+    }
     if (mutationFlow && found.length / wanted.length >= 0.5 && fresh.length === 0) {
       const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       mutationEvidence = mutationCommitEvidence({
@@ -2539,7 +2711,8 @@ async function runStep(page, step, {
     const early = expectationOutcome({ wanted, found, fresh, drove, action,
       urlChanged: page.url() !== urlBefore, readOnlyAssertion,
       mutationWithValues: mutationEvidence.ok, verifierPolicy,
-      stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok,
+      stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok || removalEvidence.ok,
+      requiredStateTransition: removalBaseline.targetPresent,
       actionProven: contractDriven || navigated || filledSomething || droveStepper });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
@@ -2667,11 +2840,15 @@ async function runStep(page, step, {
     // present, but it cannot also be newly added after the setup that made it present.
     establishedState: allowEstablishedState,
     verifierPolicy,
-    stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok,
+    stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok || removalEvidence.ok,
+    requiredStateTransition: removalBaseline.targetPresent,
     actionProven: contractDriven || navigated || filledSomething || droveStepper || Boolean(route),
   });
   if (resetEvidence.checked) {
     controlEvidence = { ...(controlEvidence || {}), resetTransition: resetEvidence };
+  }
+  if (removalEvidence.checked) {
+    controlEvidence = { ...(controlEvidence || {}), removalTransition: removalEvidence };
   }
 
   if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
@@ -2775,9 +2952,24 @@ export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
   mutationWithValues = false, navigational: declaredNavigational = null, establishedState = false,
   readOnlyAssertion = false, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
-  stateChanged = false, actionProven = false,
+  stateChanged = false, requiredStateTransition = false, actionProven = false,
 }) {
   const ratio = found.length / wanted.length;
+  if (requiredStateTransition && !stateChanged) {
+    if (isMinimalContractVerifier(verifierPolicy)) {
+      return verificationVerdict(drove && actionProven
+        ? VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE
+        : VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      drove && actionProven
+        ? "the contracted removal action ran, but the collection member did not leave its required state"
+        : "the verifier could not establish the contracted removal transition",
+      { drove });
+    }
+    return { drove, status: drove && actionProven ? "fail" : "undriveable",
+      detail: drove && actionProven
+        ? "the contracted removal action ran, but the collection member did not leave its required state"
+        : "the verifier could not establish the contracted removal transition" };
+  }
   if (isMinimalContractVerifier(verifierPolicy)) {
     if (ratio >= 0.5 || reviewWithValues || mutationWithValues || urlChanged || stateChanged) {
       const advisory = ratio >= 0.5 && !fresh.length && drove && !urlChanged && !stateChanged
