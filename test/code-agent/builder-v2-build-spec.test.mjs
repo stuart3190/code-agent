@@ -8,7 +8,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { deriveBuildSpec, scopeBuildSpec, buildSpecSummary } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import {
+  buildSpecSummary, deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec,
+} from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { scopeCapabilityGraph } from "../../shell/server/lib/builderV2/capabilityGraph.mjs";
 import { deriveModulePlan, journeyStepKinds } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { validateInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
@@ -121,6 +123,30 @@ test("scoping an increment narrows the same object rather than recomputing it", 
   // Every scoped view stays mutually consistent.
   const scopedPaths = new Set(scoped.modulePlan.map((module) => module.path));
   assert.deepEqual(scoped.moduleContracts.specifications.map((row) => row.path).sort(), [...scopedPaths].sort());
+});
+
+test("a mounted screen is one generation unit across its contracted journeys", () => {
+  const contract = {
+    summary: "A software catalogue with a separate preferences screen",
+    entities: [], operations: [], auth: { required: false },
+    routes: [{ path: "/", name: "Catalogue" }, { path: "/preferences", name: "Preferences" }],
+    journeys: [
+      { id: "browse-catalogue", title: "Browse catalogue", priority: "primary",
+        steps: [{ action: "open the catalogue", target: "/", expect: "catalogue entries are visible" }] },
+      { id: "empty-catalogue-result", title: "See an empty result", priority: "secondary",
+        steps: [{ action: "filter the catalogue", target: "/", expect: "an empty result is visible" }] },
+      { id: "open-preferences", title: "Open preferences", priority: "secondary",
+        steps: [{ action: "open preferences", target: "/preferences", expect: "preferences are visible" }] },
+    ],
+  };
+  const spec = deriveBuildSpec(contract);
+  const unit = journeysInMountedScreenUnit(spec, [contract.journeys[0]]);
+
+  assert.deepEqual(unit.map((journey) => journey.id), ["browse-catalogue", "empty-catalogue-result"]);
+  assert.equal(spec.scaffoldGraph.journeyOwnership[0].mountedModule,
+    spec.scaffoldGraph.journeyOwnership[1].mountedModule);
+  assert.notEqual(spec.scaffoldGraph.journeyOwnership[0].mountedModule,
+    spec.scaffoldGraph.journeyOwnership[2].mountedModule);
 });
 
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {

@@ -88,6 +88,46 @@ test("a literal data-thrallo-control PASSES", () => {
   assert.equal(result.ok, true, JSON.stringify(failing(result)));
 });
 
+test("one operation-backed semantic action satisfies differently worded journeys", () => {
+  const operationId = "filter-catalogue";
+  const interactionContract = { flows: [
+    { id: "browse:action", journeyId: "browse", stepIndex: 0, kind: "action", operationId,
+      control: { accessibleName: "catalogue search and filter controls",
+        machineId: actionIdFor(operationId), roles: ["button"] } },
+    { id: "empty:action", journeyId: "empty", stepIndex: 0, kind: "action", operationId,
+      control: { accessibleName: "catalogue search control",
+        machineId: actionIdFor(operationId), roles: ["button"] } },
+  ] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const filter = useSemanticAction({ name: "filter-catalogue", label: "Search catalogue" });
+      return <button {...filter.buttonProps}>Search catalogue</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.equal(result.ok, true, JSON.stringify(failing(result)));
+  assert.equal(result.coverage.filter((row) => row.bound > 0).length, 2);
+});
+
+test("operation-backed actions reject helper names derived from journey wording", () => {
+  const operationId = "filter-catalogue";
+  const interactionContract = { flows: [{ id: "browse:action", journeyId: "browse", stepIndex: 0,
+    kind: "action", operationId, control: { accessibleName: "catalogue search control",
+      machineId: actionIdFor(operationId), roles: ["button"] } }] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const filter = useSemanticAction({ name: "catalogue search control" });
+      return <button {...filter.buttonProps}>Search catalogue</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.ok(failing(result).some((row) => row.code === "contract_control_wrong_binding"),
+    JSON.stringify(result.findings));
+  assert.equal(failing(result)[0].requiredBinding.name, operationId);
+});
+
 test("LIVE-SHAPED REGRESSION — a later bound copy cannot mask the hand-wired entry control", () => {
   const tree = {
     "src/routes/HomePage.jsx": `

@@ -15,8 +15,8 @@ import crypto from "node:crypto";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, patchOutcomes } from "./patchEngine.mjs";
-import { completionEligibility, previewEligibility } from "./contractTiering.mjs";
-import { deriveBuildSpec, scopeBuildSpec } from "./buildSpec.mjs";
+import { completionEligibility } from "./contractTiering.mjs";
+import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
@@ -1187,6 +1187,20 @@ export function createOrchestrator({
         const journeysById = new Map((contract.journeys || []).map((j) => [j.id, j]));
         const essentialJourneys = tiers.essential.journeys.map((id) => journeysById.get(id)).filter(Boolean);
         const secondaryJourneys = tiers.secondary.journeys.map((id) => journeysById.get(id)).filter(Boolean);
+        const coreJourneys = journeysInMountedScreenUnit(spec, essentialJourneys);
+        const coreJourneyIds = new Set(coreJourneys.map((journey) => journey.id));
+        const incrementJourneys = secondaryJourneys.filter((journey) => !coreJourneyIds.has(journey.id));
+        // This override is local to generation scope. It does not alter the persisted product tier:
+        // it tells the model that every journey writing the core's mounted screen is in this batch.
+        const coreGenerationTiers = {
+          ...tiers,
+          essential: { ...tiers.essential, journeys: [...coreJourneyIds] },
+        };
+        const evaluateCore = (nextVerdicts, rows = []) => completionEligibility({
+          contract: { ...contract, journeys: coreJourneys }, gates: { ok: true },
+          journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
+          blockingErrors: nextVerdicts.blockingErrors,
+        });
 
         // 3. Deterministic application foundation. This zero-model checkpoint is deliberately
         // earlier than product generation: later optional/custom work may fail, but it cannot
@@ -1227,11 +1241,11 @@ export function createOrchestrator({
           compositionDurationMs: Math.max(0, Date.now() - compositionStartedAt),
         } });
 
-        // 4. CORE: the essential product-specific screen/extension set only.
+        // 4. CORE: every journey in the essential product screen's model-owned write unit.
         await setState("core");
         const core = await buildIncrement({
-          step: "core", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-          journeys: essentialJourneys, checkpointReason: "working:core",
+          step: "core", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+          bindings, tree, assets: resolved, journeys: coreJourneys, checkpointReason: "working:core",
           parentSnapshotId: workingSnapshot.id, signal, spec,
           attemptPolicy: buildAttemptPolicy,
         });
@@ -1281,14 +1295,13 @@ export function createOrchestrator({
         //    evidence, each re-verified differentially (passing journeys reuse verdicts).
         await setState("verify_core");
         let coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
-          journeys: essentialJourneys, tree, snapshotId: null, signal });
+          journeys: coreJourneys, tree, snapshotId: null, signal });
         let verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
         if (verifierBlock) return verifierBlock;
         let backendRowFailures = backendProbeFn ? await backendProbeFn({
           owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
         }) : [];
-        let eligibility = previewEligibility({ tiers, gates: { ok: true }, journeyResults: { journeys: coreVerdicts.journeys },
-          backendRowFailures, blockingErrors: coreVerdicts.blockingErrors });
+        let eligibility = evaluateCore(coreVerdicts, backendRowFailures);
         // ONE typed view of what the browser proved, recomputed after every verification. Class,
         // owner, control identity and owning modules come from here; nothing below re-reads prose.
         const verificationManifest = deriveVerificationManifest(spec || deriveBuildSpec(contract));
@@ -1341,7 +1354,7 @@ export function createOrchestrator({
         // and then all six secondary journeys failed on one dispatch each with nothing left to
         // repair them. The core gates everything so it keeps the larger share, but every
         // contracted journey is guaranteed part of what remains.
-        const secondaryCount = secondaryJourneys.length;
+        const secondaryCount = incrementJourneys.length;
         const coreRepairRounds = secondaryCount
           ? Math.max(1, Math.ceil(repairRoundCeiling * 0.4)) : repairRoundCeiling;
         const shareForRemaining = (journeysLeft) => Math.max(1,
@@ -1349,7 +1362,7 @@ export function createOrchestrator({
         async function repairUntilGreen({
           label, journeys: repairJourneys, tree: startTree, snapshot, verdicts, defects,
           eligibility: startEligibility, backendRowFailures: startRows = [], advisory = [], evaluate,
-          maxRounds = repairRoundCeiling,
+          maxRounds = repairRoundCeiling, generationTiers = tiers,
         }) {
           let currentTree = startTree;
           let currentSnapshot = snapshot;
@@ -1454,7 +1467,8 @@ export function createOrchestrator({
             let repair;
             try {
               repair = await buildIncrement({
-                step: "repair", owner, projectId, buildId, contract, tiers, bindings,
+                step: "repair", owner, projectId, buildId, contract,
+                tiers: generationTiers, bindings,
                 tree: currentTree, assets: resolved, journeys: repairJourneys,
                 initialProblems: evidence, checkpointReason: `working:${label}:${rounds}`,
                 parentSnapshotId: currentSnapshot?.id || null, signal, spec,
@@ -1618,8 +1632,8 @@ export function createOrchestrator({
           let corrected;
           try {
             corrected = await buildIncrement({
-              step: "repair", owner, projectId, buildId, contract, tiers, bindings, tree, assets: resolved,
-              journeys: essentialJourneys, initialProblems: evidence,
+              step: "repair", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+              bindings, tree, assets: resolved, journeys: coreJourneys, initialProblems: evidence,
               checkpointReason: `working:mechanics:${mechanicsCorrections}`,
               parentSnapshotId: workingSnapshot?.id || null, signal, spec,
               // …drawing on the CORRECTION allowance, which is the whole point.
@@ -1637,28 +1651,24 @@ export function createOrchestrator({
           workingSnapshot = corrected.snapshot;
           workingReason = `working:mechanics:${mechanicsCorrections}`;
           coreVerdicts = await verifyJourneySet({ owner, projectId, buildId, contract,
-            journeys: essentialJourneys, tree, snapshotId: null, signal });
+            journeys: coreJourneys, tree, snapshotId: null, signal });
           verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts);
           if (verifierBlock) return verifierBlock;
           backendRowFailures = backendProbeFn ? await backendProbeFn({
             owner, projectId, contract, tiers, journeyResults: coreVerdicts.journeys,
           }) : [];
-          eligibility = previewEligibility({ tiers, gates: { ok: true },
-            journeyResults: { journeys: coreVerdicts.journeys }, backendRowFailures,
-            blockingErrors: coreVerdicts.blockingErrors });
+          eligibility = evaluateCore(coreVerdicts, backendRowFailures);
           coreDefects = defectsFor(coreVerdicts, backendRowFailures, tree);
           await persistDefects(coreDefects, tree, workingSnapshot?.id || null);
           verifierBlock = await blockOnVerifierPlatformFailure(coreVerdicts, coreDefects);
           if (verifierBlock) return verifierBlock;
         }
         const coreRepair = await repairUntilGreen({
-          label: "repair", journeys: essentialJourneys, tree, snapshot: workingSnapshot,
+          label: "repair", journeys: coreJourneys, tree, snapshot: workingSnapshot,
           verdicts: coreVerdicts, defects: coreDefects, eligibility,
           backendRowFailures, advisory: coreAdvisory,
           maxRounds: coreRepairRounds,
-          evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
-            journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
-            blockingErrors: nextVerdicts.blockingErrors }),
+          evaluate: evaluateCore, generationTiers: coreGenerationTiers,
         });
         if (coreRepair.verifierBlock) return coreRepair.verifierBlock;
         // THE RESERVATION IS SOFT WHILE A DISTINCT STRATEGY REMAINS.
@@ -1676,13 +1686,11 @@ export function createOrchestrator({
           log(`core remains red after its reserved share (${coreRepair.rounds}/${coreRepairRounds}); `
             + `continuing into the remaining allowance — a red core means no increment can use it`);
           const overflow = await repairUntilGreen({
-            label: "repair", journeys: essentialJourneys, tree: coreRepair.tree,
+            label: "repair", journeys: coreJourneys, tree: coreRepair.tree,
             snapshot: coreRepair.snapshot, verdicts: coreRepair.verdicts, defects: coreRepair.defects,
             eligibility: coreRepair.eligibility, backendRowFailures: coreRepair.backendRowFailures,
             advisory: coreAdvisory, maxRounds: repairRoundCeiling - coreRepair.rounds,
-            evaluate: (nextVerdicts, rows) => previewEligibility({ tiers, gates: { ok: true },
-              journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,
-              blockingErrors: nextVerdicts.blockingErrors }),
+            evaluate: evaluateCore, generationTiers: coreGenerationTiers,
           });
           if (overflow.verifierBlock) return overflow.verifierBlock;
           Object.assign(coreRepair, overflow, { rounds: coreRepair.rounds + overflow.rounds });
@@ -1744,9 +1752,9 @@ export function createOrchestrator({
         // 6. Secondary increments are verified one at a time and remain unpromoted until complete.
         let candidate = coreSnapshot;
         const shipped = [];
-        const completedJourneys = new Set(essentialJourneys.map((journey) => journey.id));
-        const pendingIncrements = [...eligibility.pendingIncrements];
-        for (const journey of secondaryJourneys) {
+        const completedJourneys = new Set(coreJourneys.map((journey) => journey.id));
+        const pendingIncrements = [];
+        for (const journey of incrementJourneys) {
           const step = `increment:${journey.id}`;
           // A secondary is only shippable if it preserves every journey already proved green.
           // Differential verification will reuse unchanged owners and re-drive any earlier journey
@@ -1789,7 +1797,7 @@ export function createOrchestrator({
               defects: incrementDefects, eligibility: incrementEligibility,
               advisory: increment.advisory || [], evaluate: evaluateIncrement,
               // Its share of what the core left, divided across the journeys still to come.
-              maxRounds: shareForRemaining(secondaryJourneys.length - shipped.length - pendingIncrements.length),
+              maxRounds: shareForRemaining(incrementJourneys.length - shipped.length - pendingIncrements.length),
             });
             if (incrementRepair.verifierBlock) return incrementRepair.verifierBlock;
             incrementTree = incrementRepair.tree;

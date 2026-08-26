@@ -81,6 +81,11 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
+- A declared operation has one stable machine action identity across every assigned journey. When
+  multiple journeys exercise the same operation, reuse one existing action control and preserve
+  its machine identity; never replace it with a journey-specific action identity or duplicate it.
+  With useSemanticAction, set name to the operationId and label to the journey-facing accessible
+  copy. A literal data-thrallo-action must equal the supplied control.machineId.
 - A contracted control's verificationValue is the authoritative non-secret synthetic browser
   fixture for its domain rule. Configure sample data and validation so that exact value has the
   valid/invalid meaning stated by the journey. Do not replace it with a different hidden answer,

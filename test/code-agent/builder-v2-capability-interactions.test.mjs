@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { actionIdFor, deriveVerificationManifest } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 
 const makeContract = ({ entity = "record", fields, operations, steps, title = "Capability interaction" }) => ({
   summary: `${title} contract`, projectType: "tool",
@@ -424,4 +425,64 @@ test("an operation identified by name binds exactly like one identified by id", 
         `a ${kind} interaction was claimed by an operation it does not perform (${flow.id})`);
     }
   }
+});
+
+test("one declared operation keeps one action identity across journey-specific wording", () => {
+  const contract = {
+    summary: "A software catalogue with local browsing controls",
+    projectType: "tool", auth: { required: false, rules: [] }, integrations: [], states: [],
+    acceptance: [], deferred: [],
+    entities: [{ name: "catalogueItem", fields: [{ name: "title", type: "string" }] }],
+    operations: [{ id: "filter-catalogue", entity: "catalogueItem", kind: "read",
+      journey: "browse-catalogue" }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    journeys: [
+      { id: "browse-catalogue", title: "Browse catalogue", priority: "primary", steps: [{
+        action: "search catalogue entries", target: "catalogue search and filter controls",
+        operates: ["filter-catalogue"], expect: "matching entries are visible",
+      }] },
+      { id: "empty-catalogue-result", title: "See an empty result", priority: "secondary", steps: [{
+        action: "search for an absent entry", target: "catalogue search control",
+        operates: ["filter-catalogue"], expect: "an empty result is visible",
+      }] },
+    ],
+  };
+  const spec = deriveBuildSpec(contract);
+  const flows = spec.interactionContract.flows
+    .filter((flow) => flow.operationId === "filter-catalogue" && flow.control);
+  const expectedId = actionIdFor("filter-catalogue");
+
+  assert.equal(flows.length, 2, JSON.stringify(flows));
+  assert.deepEqual([...new Set(flows.map((flow) => flow.control.machineId))], [expectedId]);
+  const actions = deriveVerificationManifest(spec).actions
+    .filter((action) => flows.some((flow) => flow.journeyId === action.journeyId));
+  assert.ok(actions.length >= 2, JSON.stringify(actions));
+  assert.ok(actions.every((action) => action.id === expectedId), JSON.stringify(actions));
+});
+
+test("distinct declared operations retain distinct action identities", () => {
+  const contract = {
+    summary: "A software catalogue with two local actions",
+    projectType: "tool", auth: { required: false, rules: [] }, integrations: [], states: [],
+    acceptance: [], deferred: [], entities: [], routes: [{ path: "/", name: "Catalogue" }],
+    operations: [
+      { id: "refresh-list", kind: "read", journey: "refresh" },
+      { id: "clear-view", kind: "update", journey: "clear" },
+    ],
+    journeys: [
+      { id: "refresh", title: "Refresh entries", priority: "primary", steps: [{
+        action: "apply the catalogue control", target: "catalogue control",
+        operates: ["refresh-list"], expect: "entries are refreshed",
+      }] },
+      { id: "clear", title: "Clear the current view", priority: "secondary", steps: [{
+        action: "apply the catalogue control", target: "catalogue control",
+        operates: ["clear-view"], expect: "the current view is empty",
+      }] },
+    ],
+  };
+  const flows = deriveBuildSpec(contract).interactionContract.flows
+    .filter((flow) => ["refresh-list", "clear-view"].includes(flow.operationId) && flow.control);
+
+  assert.deepEqual(new Set(flows.map((flow) => flow.control.machineId)),
+    new Set([actionIdFor("refresh-list"), actionIdFor("clear-view")]));
 });

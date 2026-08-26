@@ -331,7 +331,7 @@ function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null
  * registry and without the model being told an id. Accessible names remain, but as a FALLBACK for
  * controls that carry no machine identity — never as the primary way to recognise meaning.
  */
-function controlRequirement(kind, field, step, declaredField = null) {
+function controlRequirement(kind, field, step, declaredField = null, operationId = null) {
   const name = field || String(step?.target || step?.action || "control");
   if (kind === "input") {
     const aliases = fieldAliases(name);
@@ -367,7 +367,10 @@ function controlRequirement(kind, field, step, declaredField = null) {
   }
   if (["mutation", "cancellation", "lookup", "action"].includes(kind)) {
     return { purpose: name, roles: ["button"],
-      machineId: actionIdFor(String(step?.target || step?.action || name)),
+      // A declared operation is one semantic action even when several journeys exercise it.
+      // Deriving this identity from each journey's prose gave the same mounted control a different
+      // id in every flow, so a later increment replaced the identity an earlier journey required.
+      machineId: actionIdFor(String(operationId || step?.target || step?.action || name)),
       accessibleName: String(step?.target || step?.action || name) };
   }
   return null;
@@ -652,6 +655,9 @@ export function buildInteractionContract(contract, {
           if (declaredOperationIds.length === 1 && unclaimedActionFlows.length === 1) {
             unclaimedActionFlows[0].operationId = operationId;
             unclaimedActionFlows[0].declaredOperation = true;
+            if (unclaimedActionFlows[0].control) {
+              unclaimedActionFlows[0].control.machineId = actionIdFor(operationId);
+            }
             continue;
           }
           const operation = declaredOperations.get(normalized(operationId));
@@ -674,7 +680,7 @@ export function buildInteractionContract(contract, {
             dependsOn: [],
             nextStateRequirement: step.expect,
             observable: step.expect,
-            control: valueOperands?.length ? null : controlRequirement("action", null, step),
+            control: valueOperands?.length ? null : controlRequirement("action", null, step, null, operationId),
             capability: null,
           });
         }
@@ -1049,7 +1055,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
 
     if (!targets.length) {
       const id = `${operation.journeyId}:operation:${normalized(operation.operationId)}`;
-      const control = step ? controlRequirement(kind, null, step) : null;
+      const control = step ? controlRequirement(kind, null, step, null, operation.operationId) : null;
       const created = {
         id, journeyId: operation.journeyId, stepIndex: operation.stepIndex, kind,
         semanticPurpose: semantic.behavior || operation.operationId,
@@ -1083,6 +1089,10 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       || semanticNode?.verificationSemantics?.actions || semantic.behavior || operation.operationId;
 
     for (const flow of targets) {
+      const operationMachineId = flow.control
+        && ["action", "lookup", "mutation", "cancellation", "flow_start"].includes(flow.kind)
+        ? actionIdFor(operation.operationId) : flow.control?.machineId || null;
+      if (flow.control && operationMachineId) flow.control.machineId = operationMachineId;
       const reads = unique([...(flow.reads || []), ...semanticReads]);
       const writes = unique([...(flow.writes || []), ...semanticWrites]);
       const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
@@ -1092,7 +1102,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         semanticResponsibilityTypes: responsibilities.map((responsibility) => responsibility.type),
         actionIdentity: {
           operationId: operation.operationId, interactionId: flow.id,
-          controlId: flow.control?.machineId || null,
+          controlId: operationMachineId,
         },
         stateOwner: semanticModule,
         responsibleModules,

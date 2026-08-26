@@ -303,7 +303,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     }
     const helper = flow.kind === "flow_advance" ? "useFlowAdvance" : "useSemanticAction";
     const bindingName = flow.kind === "flow_advance" ? ADVANCE_ACTION_NAME
-      : String(flow.control?.accessibleName || flow.control?.purpose || name);
+      : String(flow.operationId || flow.control?.accessibleName || flow.control?.purpose || name);
     return {
       helper,
       name: bindingName,
@@ -327,9 +327,11 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // condemn anything — which is why the residual gap below is stated with every result.
     const actionFlow = !["input", "selection"].includes(flow.kind);
     const expectedActionName = String(flow.control?.accessibleName || flow.control?.purpose || key);
+    const expectedBindingName = actionFlow && flow.operationId ? String(flow.operationId) : String(key);
     const claims = (row) => {
       if (row.actionName && actionFlow) return semanticKey(row.actionName) === semanticKey(expectedActionName);
-      if (row.boundName) return semanticKey(row.boundName) === semanticKey(key);
+      if (row.boundName) return [key, expectedBindingName]
+        .some((candidate) => semanticKey(row.boundName) === semanticKey(candidate));
       if (row.machineId) return [flow.control?.machineId, controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
         actionIdFor(flow.control.accessibleName || key)].includes(row.machineId);
       // A resolved helper whose semantic name is unknown is not proof that THIS control is bound.
@@ -354,7 +356,8 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       if (flow.kind === "flow_start" && row.factory === "useSemanticSelection") {
         return semanticKey(row.actionName) === semanticKey(expectedActionName);
       }
-      return row.factory === "useSemanticAction";
+      return row.factory === "useSemanticAction"
+        && (!flow.operationId || semanticKey(row.boundName) === semanticKey(expectedBindingName));
     };
     const bound = matches.filter((row) => row.binding !== BINDING.UNBOUND);
     const compatibleBound = matches.filter(compatibleBinding);

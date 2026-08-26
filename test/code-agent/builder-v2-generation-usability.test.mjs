@@ -213,7 +213,12 @@ test("session failures stay red — the runtime never swallows an auth failure",
 // ── A. selection assembly guidance (generic, no validator) ────────────────────────────────────
 
 const domainCase = (id, steps, entities = [{ name: "record", fields: [{ name: "value" }] }]) => ({
-  summary: "generic workflow", entities, operations: [], routes: [{ path: "/", name: "Main" }],
+  summary: "generic workflow", entities,
+  // Session guidance is required only when the contract explicitly owns a durable operation.
+  // An entity plus UI prose alone must not invent persistence.
+  operations: entities.length
+    ? [{ id: "complete-record", entity: "record", kind: "create", journey: id }] : [],
+  routes: [{ path: "/", name: "Main" }],
   auth: { required: false },
   journeys: [{ id, title: "Complete the workflow", priority: "primary", steps }],
 });
@@ -312,7 +317,8 @@ test("GUIDANCE — the finished-flow pattern generalises beyond any one domain",
   for (const [id, steps] of Object.entries(wizardFlows)) {
     const contract = {
       summary: `A ${id} flow`, entities: [{ name: "record", fields: [{ name: "value" }] }],
-      operations: [], routes: [{ path: "/", name: id }], auth: { required: false },
+      operations: [{ id: "complete-flow", entity: "record", kind: "create", journey: id }],
+      routes: [{ path: "/", name: id }], auth: { required: false },
       journeys: [{ id, title: id, priority: "primary", steps }],
     };
     const spec = deriveBuildSpec(contract);

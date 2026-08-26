@@ -198,7 +198,8 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
     contractFn: contractFn || (async () => contract),
     patchesFn: async (ctx) => {
       patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
-        rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles });
+        rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles,
+        journeyIds: (ctx.spec?.journeys || []).map((journey) => journey.id) });
       // A pre-compile `correction` is a scoped re-emission of its originating step.
       const stage = plan[ctx.step] ? ctx.step : ctx.originalStep;
       return plan[stage](ctx);
@@ -262,6 +263,47 @@ test("WP8 — full first-green e2e: contract → assets → core green → both 
   assert.equal(mid.reason, "working:increment:newsletter-signup");
   assert.equal((await snapshotStore.getSnapshot(mid.parent_snapshot)).reason, "working:core");
   assert.ok(finalSnap.asset_manifest.length >= 2, "the asset manifest versions with the snapshot");
+});
+
+test("core generates and verifies every journey sharing its mounted screen exactly once", async () => {
+  const contract = {
+    summary: "A software catalogue with separate preferences",
+    entities: [], operations: [], auth: { required: false },
+    routes: [{ path: "/", name: "Catalogue" }, { path: "/preferences", name: "Preferences" }],
+    journeys: [
+      { id: "browse-catalogue", title: "Browse catalogue", priority: "primary",
+        steps: [{ action: "open catalogue", target: "/", expect: "catalogue entries are visible" }] },
+      { id: "empty-catalogue-result", title: "See empty result", priority: "secondary",
+        steps: [{ action: "filter catalogue", target: "/", expect: "empty result is visible" }] },
+      { id: "open-preferences", title: "Open preferences", priority: "secondary",
+        steps: [{ action: "open preferences", target: "/preferences", expect: "preferences are visible" }] },
+    ],
+  };
+  const corePatch = [{ replaceFile: "src/screens/scaffold/CatalogueScreen.jsx", content:
+    "export default function CatalogueScreen() { return <main><h1>Software catalogue</h1><p>Catalogue entries are visible</p><p>Empty result is visible</p></main>; }" }];
+  const preferencesPatch = [{ replaceFile: "src/screens/scaffold/PreferencesScreen.jsx", content:
+    "export default function PreferencesScreen() { return <main><h1>Preferences are visible</h1></main>; }" }];
+  const h = harness({ contract,
+    assetService: {
+      resolveIntents: async () => ({ resolved: [], providerCalls: 0 }),
+      assetManifestFor: async () => [],
+    },
+    patchPlan: {
+      core: () => corePatch,
+      "increment:open-preferences": () => preferencesPatch,
+    } });
+
+  const result = await h.orchestrator.runBuild({
+    owner: "o", projectId: "shared-screen-unit", request: "software catalogue",
+  });
+
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.deepEqual(h.patchCalls.find((call) => call.step === "core")?.journeyIds,
+    ["browse-catalogue", "empty-catalogue-result"]);
+  assert.equal(h.patchCalls.some((call) => call.originalStep === "increment:empty-catalogue-result"), false);
+  assert.deepEqual(h.patchCalls.find((call) => call.step === "increment:open-preferences")?.journeyIds,
+    ["open-preferences"]);
+  assert.deepEqual(h.journeyDrives[0], ["browse-catalogue", "empty-catalogue-result"]);
 });
 
 test("14S — a red required secondary blocks completion while retaining resumable work", async () => {

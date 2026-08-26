@@ -138,7 +138,10 @@ export function deriveVerificationManifest(spec) {
       continue;
     }
 
-    const id = primitive === "advance" ? ADVANCE_ACTION_ID : actionIdFor(flow.control.accessibleName || logical);
+    // The interaction contract owns action identity. Re-deriving it from journey-specific
+    // accessibility prose split one declared operation into several incompatible DOM identities.
+    const id = primitive === "advance" ? ADVANCE_ACTION_ID
+      : (flow.control.machineId || actionIdFor(flow.control.accessibleName || logical));
     mapping[id] = { logicalField: logical, journeyId: flow.journeyId, flowId: flow.id };
     actions.push({
       id,

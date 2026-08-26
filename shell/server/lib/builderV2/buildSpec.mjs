@@ -170,6 +170,27 @@ export function scopeBuildSpec(spec, journeys = []) {
   };
 }
 
+/**
+ * A mounted screen is one model-owned write unit. Include every journey rendered by a screen
+ * already required by the seed set so generation cannot rewrite that file once per journey and
+ * invalidate an identity or state transition which was previously browser-green.
+ */
+export function journeysInMountedScreenUnit(spec, seedJourneys = []) {
+  const seeds = new Set(seedJourneys.map((journey) => journey?.id).filter(Boolean));
+  if (!seeds.size) return [];
+  const ownership = spec?.scaffoldGraph?.journeyOwnership || [];
+  const mountedModules = new Set(ownership
+    .filter((owner) => seeds.has(owner.journeyId))
+    .map((owner) => owner.mountedModule).filter(Boolean));
+  const included = new Set([
+    ...seeds,
+    ...ownership.filter((owner) => mountedModules.has(owner.mountedModule))
+      .map((owner) => owner.journeyId),
+  ]);
+  return (spec?.contract?.journeys || spec?.journeys || [])
+    .filter((journey) => included.has(journey?.id));
+}
+
 /** Machine-readable summary for diagnostics — what Thrallo believed it was asking for. */
 export function buildSpecSummary(spec) {
   return {
