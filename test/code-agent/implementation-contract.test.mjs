@@ -254,6 +254,47 @@ test("domain-correct inputs require one explicit non-secret verification fixture
   assert.match(contractBrief(contract), /verification inputs: \{"skillAnswer":"100"\}/);
 });
 
+test("transient software search inputs require one matching generated-data fixture set", () => {
+  const contract = {
+    version: CONTRACT_VERSION,
+    summary: "A visitor filters a generic software catalogue.",
+    projectType: "catalogue",
+    journeys: [{ id: "filter-software", title: "Filter software", priority: "primary",
+      steps: [
+        { action: "open the software catalogue", target: "/", expect: "software entries are visible" },
+        { action: "search and filter the software catalogue", target: "catalogue filters",
+          operates: ["query", "categoryFilter", "filter-software-catalogue"],
+          expect: "matching software entries and a result count are visible" },
+      ] }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueSession", owned: false,
+      storage: "client-only transient session state", fields: [
+        { name: "query", type: "string", required: false },
+        { name: "categoryFilter", type: "string", required: false },
+        { name: "visibleSoftwareIds", type: "array", required: false },
+      ] }],
+    auth: { required: false, rules: [] },
+    operations: [{ id: "filter-software-catalogue", kind: "search", entity: "catalogueSession",
+      journey: "filter-software", description: "Filter the in-code software catalogue.",
+      responsibilities: [{ type: "functional", reads: ["query", "categoryFilter"],
+        writes: ["visibleSoftwareIds"], behavior: "match the in-code catalogue" }] }],
+    integrations: [], states: [], deferred: [], acceptance: [
+      { id: "a1", statement: "software entries are visible", journey: "filter-software" },
+      { id: "a2", statement: "filters update the result count", journey: "filter-software" },
+      { id: "a3", statement: "the filtered catalogue remains usable", journey: "filter-software" },
+    ],
+  };
+  assert.deepEqual(verificationFixtureFields(contract.journeys[0].steps[1], contract),
+    ["query", "categoryFilter"]);
+  const missing = validateContract(contract);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.problems.some((problem) => /verificationValues\.query/.test(problem)));
+  assert.ok(missing.problems.some((problem) => /verificationValues\.categoryFilter/.test(problem)));
+
+  contract.journeys[0].steps[1].verificationValues = { query: "Atlas", categoryFilter: "Planning" };
+  assert.equal(validateContract(contract).ok, true, JSON.stringify(validateContract(contract).problems));
+});
+
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {
   // Every one of these was rejected by the first version of isVague, in production, on a real
   // contract — which was then discarded whole, dropping the build back to uncontracted one-shot

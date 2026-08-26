@@ -104,6 +104,9 @@ Rules:
   as the step asks. Never put a real password, token, credential, customer record, or other secret
   in verificationValues. Ordinary names, emails, numbers and dates need no override when their
   native HTML constraints fully describe validity.
+- A transient functional search/filter/query operation also needs verificationValues for EVERY
+  operated search or filter field. Choose one exact combination that the generated sample data
+  will match; use a non-empty all-options sentinel for optional filters rather than an empty value.
 - EXACTLY ONE journey has priority "primary".
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.

@@ -196,6 +196,7 @@ export function isVague(text) {
 const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const VERIFICATION_VALUE_INTENT = /\b(?:correct|incorrect)(?:ly)?\b/i;
+const DOMAIN_SEARCH_OPERATION_KINDS = new Set(["filter", "query", "search"]);
 const VERIFICATION_VALUE_STOP_WORDS = new Set([
   "a", "an", "and", "answer", "control", "details", "field", "form", "input", "question", "the", "value",
 ]);
@@ -213,11 +214,19 @@ const referenceWords = (value) => String(value || "")
  * intent and require the planner to declare a non-secret synthetic fixture for it.
  */
 export function verificationFixtureFields(step = {}, contract = {}) {
-  if (!VERIFICATION_VALUE_INTENT.test(String(step.action || ""))) return [];
   const operated = (step.operates || []).map(String).filter((reference) => (
     fieldNames(contract).has(normaliseReference(reference))
   ));
   if (!operated.length) return [];
+  const operatedReferences = new Set((step.operates || []).map(normaliseReference));
+  const domainSearch = (contract?.operations || []).some((operation) => (
+    operatedReferences.has(normaliseReference(operation?.id || operation?.name))
+    && DOMAIN_SEARCH_OPERATION_KINDS.has(String(operation?.kind || "").toLowerCase())
+    && entityPersistencePolicy(contract, operation?.entity) === "transient"
+    && (operation?.responsibilities || []).some((responsibility) => responsibility?.type === "functional")
+  ));
+  if (domainSearch) return operated;
+  if (!VERIFICATION_VALUE_INTENT.test(String(step.action || ""))) return [];
   const actionWords = referenceWords(step.action);
   const intentIndexes = actionWords.map((word, index) => (
     /^(?:correct|incorrect)(?:ly)?$/.test(word) ? index : -1

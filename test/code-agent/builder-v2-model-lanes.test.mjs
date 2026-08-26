@@ -175,6 +175,20 @@ test("scoped correction prompts use compact module contracts while full generati
   assert.doesNotMatch(compact, /diagnosticPadding/);
 });
 
+test("initial generation is told to decompose a mounted screen that owns several journeys", () => {
+  const modulePlan = [{
+    path: "src/screens/scaffold/SoftwareCatalogueScreen.jsx",
+    role: "mounted screen composition and application-specific visual design",
+    providedBy: "scaffold_screen_slot", routePath: "/",
+    journeyIds: ["browse-software", "clear-filters", "inspect-layout"],
+  }];
+  const prompt = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: {}, modulePlan, moduleContracts: { version: 1, specifications: [] } });
+  assert.match(prompt, /Keep it as a small mounted coordinator/);
+  assert.match(prompt, /each journey implementation in bounded child component modules from the first batch/);
+  assert.match(prompt, /rejects a file above 5000 tokens that implements more than 2 journeys/);
+});
+
 test("a retained complex application continuation carries only the selected module's semantic journey", () => {
   const fixture = JSON.parse(readFileSync(new URL(
     "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,

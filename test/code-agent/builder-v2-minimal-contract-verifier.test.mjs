@@ -130,6 +130,38 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(fields.find((row) => row.field === "enabled").observedValue, "true");
     });
 
+    await t.test("native select inputs use an enabled option instead of an invented text fixture", async () => {
+      const category = { ...control("categoryFilter", "category-filter", ["combobox"]),
+        valueType: "string" };
+      const result = await run(`<main><label>Category
+          <select data-thrallo-control="category-filter"
+            onchange="document.getElementById('out').textContent='Filtered software results are visible'">
+            <option value="">All software</option><option value="editor">Editors</option>
+            <option value="testing">Testing</option>
+          </select></label><p id="out"></p></main>`,
+      { action: "filter the software catalogue", operates: ["categoryFilter"],
+        expect: "filtered software results are visible" },
+      [{ kind: "input", valueWritten: "categoryFilter", control: category }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const field = result.journeys[0].steps[0].controlEvidence.fields[0];
+      assert.equal(field.expectedValue, "editor");
+      assert.equal(field.observedValue, "editor");
+    });
+
+    await t.test("a native select already holding its contracted option is accepted", async () => {
+      const category = { ...control("categoryFilter", "category-filter", ["combobox"]),
+        valueType: "string", verificationValue: "testing" };
+      const result = await run(`<main><label>Category
+          <select data-thrallo-control="category-filter">
+            <option value="editor">Editors</option><option value="testing" selected>Testing</option>
+          </select></label><p>Filtered software results are visible</p></main>`,
+      { action: "filter the software catalogue", operates: ["categoryFilter"],
+        expect: "filtered software results are visible" },
+      [{ kind: "input", valueWritten: "categoryFilter", control: category }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].alreadyAccepted, true);
+    });
+
     await t.test("unchanged wording does not fail a satisfied result", async () => {
       const action = control("save", "save", ["button"]);
       const result = await run(`<main><button data-thrallo-action="save">Save</button>

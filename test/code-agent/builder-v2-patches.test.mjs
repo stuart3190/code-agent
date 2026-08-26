@@ -282,6 +282,12 @@ test("replace_exact surgically patches one unique nested excerpt and fails close
   assert.equal(unresolved.rejected[0].code, "tree_integrity_failed");
   assert.match(unresolved.rejected[0].reason, /unresolved call identifier\(s\): setStep/);
 
+  const standardBuiltins = applyPatches(tree, [{ file: routePath, ops: [{
+    op: "replace_exact", symbol: expected,
+    content: "if (!ready) { const values = new Set([String(1)]); return <button onClick={start}>{values.size}</button>; }",
+  }] }]);
+  assert.equal(standardBuiltins.rejected.length, 0, JSON.stringify(standardBuiltins.rejected));
+
   const locallyBound = applyPatches(tree, [{ file: routePath, ops: [{
     op: "replace_exact", symbol: expected,
     content: "if (!ready) { const advance = () => true; return <button onClick={advance}>Start</button>; }",

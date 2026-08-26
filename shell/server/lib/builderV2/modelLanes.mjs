@@ -8,6 +8,9 @@ import { generateContract } from "../appBuild/contractAgent.mjs";
 import { contractBrief } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
+import {
+  FILE_MAX_TOKENS, MAX_JOURNEYS_PER_FILE, MULTI_JOURNEY_MIN_TOKENS,
+} from "../appBuild/modularity.mjs";
 import { EMIT_PATCHES_SCHEMA } from "./patchEngine.mjs";
 import { CAPABILITIES, capabilityBrief, preferredAssemblyBrief } from "./capabilityRegistry.mjs";
 import { indexTree } from "./indexer.mjs";
@@ -676,8 +679,16 @@ export function renderPatchPrompt({
           return `- ${module.path}: PROVIDED AND PROTECTED ${module.role}; import its exported interface; never patch, wrap, or reimplement it.`;
         }
         if (module.providedBy === "scaffold_screen_slot") {
+          const journeyIds = module.journeyIds || [];
+          const decomposition = journeyIds.length > MAX_JOURNEYS_PER_FILE
+            ? ` This slot coordinates ${journeyIds.length} journeys. Keep it as a small mounted coordinator and `
+              + `put each journey implementation in bounded child component modules from the first batch; the `
+              + `gate rejects a file above ${MULTI_JOURNEY_MIN_TOKENS} tokens that implements more than `
+              + `${MAX_JOURNEYS_PER_FILE} journeys, and every file remains capped at ${FILE_MAX_TOKENS} tokens.`
+            : "";
           return `- ${module.path}: PROVIDED, MOUNTED, MODEL-OWNED screen slot for route ${module.routePath}; `
-            + "implement this exact module and keep its default export. Do not register another route or move the journey to a dead component.";
+            + "implement this exact module and keep its default export. Do not register another route or move the journey to a dead component."
+            + decomposition;
         }
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
           + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `

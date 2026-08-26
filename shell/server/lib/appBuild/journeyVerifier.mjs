@@ -540,6 +540,60 @@ async function fillContractedFields(page, flows, marker, {
     // When no rule can be derived from the contract, the field is left alone and the step reports
     // an unsupported intent rather than guessing at a rule the contract never stated.
     const currentValue = await field.inputValue().catch(() => "");
+    if (facts?.tag === "select") {
+      const options = await field.locator("option").evaluateAll((elements) => elements.map((option, index) => ({
+        index, value: String(option.value), label: String(option.textContent || "").trim(),
+        disabled: Boolean(option.disabled),
+      }))).catch(() => []);
+      const available = options.filter((option) => !option.disabled);
+      const target = contractedFixture === null
+        ? available.find((option) => option.value !== currentValue && option.value !== "")
+          || available.find((option) => option.value !== currentValue)
+        : available.find((option) => option.value === contractedFixture || option.label === contractedFixture);
+      if (!target) {
+        evidence.fields.push({ ...fieldEvidence,
+          status: contractedFixture === null ? "value_not_accepted" : "fixture_invalid",
+          expectedValue: contractedFixture, observedValue: currentValue, previousValue: currentValue,
+          facts, availableOptions: available.map((option) => ({ value: option.value, label: option.label })),
+          detail: contractedFixture === null
+            ? "the native select offers no enabled option that can prove a value transition"
+            : "the contracted verification fixture does not match an enabled native option" });
+        continue;
+      }
+      if (minimal && target.value === currentValue) {
+        const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
+          message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
+        const status = validity.valid ? "filled" : "fixture_invalid";
+        evidence.fields.push({ ...fieldEvidence, status, expectedValue: target.value,
+          selectedLabel: target.label, observedValue: currentValue, previousValue: currentValue,
+          alreadyAccepted: true, facts, validityMessage: validity.message });
+        if (status === "filled") filled.push(logicalField);
+        continue;
+      }
+      let probeValue = null;
+      let probeChanged = false;
+      if (target.value === currentValue) {
+        const alternate = available.find((option) => option.value !== currentValue);
+        if (alternate) {
+          await field.selectOption({ value: alternate.value }, { timeout: 3_000 }).catch(() => {});
+          probeValue = await field.inputValue().catch(() => currentValue);
+          probeChanged = probeValue === alternate.value;
+        }
+      }
+      await field.selectOption({ value: target.value }, { timeout: 3_000 }).catch(() => {});
+      const observedValue = await field.inputValue().catch(() => currentValue);
+      const validity = await field.evaluate((el) => ({ valid: el.checkValidity(),
+        message: el.validationMessage || null })).catch(() => ({ valid: true, message: null }));
+      const changed = probeChanged || observedValue !== currentValue;
+      const status = observedValue === target.value && changed && validity.valid
+        ? "filled" : "value_not_accepted";
+      evidence.fields.push({ ...fieldEvidence, status, expectedValue: target.value,
+        selectedLabel: target.label, observedValue, previousValue: currentValue,
+        ...(probeValue === null ? {} : { probeValue }), facts,
+        validityMessage: validity.message });
+      if (status === "filled") filled.push(logicalField);
+      continue;
+    }
     const booleanControl = flow.control.valueType === "boolean" || facts?.type === "checkbox";
     if (booleanControl && flow.control.validity !== "invalid") {
       const before = await field.isChecked().catch(() => false);
