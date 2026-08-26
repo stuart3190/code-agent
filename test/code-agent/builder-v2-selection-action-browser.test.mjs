@@ -30,6 +30,20 @@ before(async () => {
           document.getElementById('out').textContent='Atlas Editor disappears and the saved software empty state is visible'">
         Remove saved software
       </button>
+      <div role="group" aria-label="software category" data-thrallo-control="software-category">
+        <button type="button" value="all-categories" data-thrallo-control="software-category"
+          data-thrallo-option="all-categories" aria-pressed="true">All categories</button>
+        <button type="button" value="developer-tools" data-thrallo-control="software-category"
+          data-thrallo-option="developer-tools" aria-pressed="false"
+          onclick="this.parentElement.querySelectorAll('button').forEach((button) => button.setAttribute('aria-pressed', 'false')); this.setAttribute('aria-pressed', 'true')">Developer Tools</button>
+      </div>
+      <div role="group" aria-label="software platform" data-thrallo-control="software-platform">
+        <button type="button" value="all-platforms" data-thrallo-control="software-platform"
+          data-thrallo-option="all-platforms" aria-pressed="true">All platforms</button>
+        <button type="button" value="desktop" data-thrallo-control="software-platform"
+          data-thrallo-option="desktop" aria-pressed="false">Desktop</button>
+      </div>
+      <article>Atlas Editor is Developer Tools software</article>
       <p id="out"></p>
     </main>`);
   });
@@ -91,4 +105,53 @@ test("an already-selected exact target still runs its separate contracted action
     assert.ok(result.journeys[0].steps[0].controlEvidence.activation,
       JSON.stringify(result.journeys[0].steps[0]));
     assert.equal(result.journeys[0].steps[0].controlEvidence.activation.matchedBy, "machine_identity");
+  });
+
+test("a compound filter step may retain one exact sentinel while another selection moves",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const step = {
+      action: "choose a software category while keeping all platforms visible",
+      target: "software filters",
+      operates: ["categoryFilter", "platformFilter"],
+      verificationValues: { categoryFilter: "developer-tools", platformFilter: "all-platforms" },
+      expect: "Atlas Editor remains visible as Developer Tools software",
+    };
+    const selection = (logicalField, machineId, verificationValue) => ({
+      id: `filter-software:1:selection:${logicalField}`,
+      journeyId: "filter-software",
+      stepIndex: 0,
+      kind: "selection",
+      valueWritten: logicalField,
+      control: {
+        logicalField,
+        accessibleName: logicalField,
+        accessibleNames: [logicalField],
+        machineId,
+        roles: ["button", "radio", "option", "combobox"],
+        selectedState: true,
+        statePath: `filter-software.draft.${logicalField}`,
+        verificationValue,
+      },
+      stateOwner: "src/App.jsx",
+      responsibleModules: ["src/App.jsx"],
+      reads: [],
+      writes: [],
+    });
+    const flows = [
+      selection("categoryFilter", "software-category", "developer-tools"),
+      selection("platformFilter", "software-platform", "all-platforms"),
+    ];
+    const result = await verifyJourneys({
+      previewUrl: baseUrl,
+      timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: {
+        journeys: [{ id: "filter-software", title: "Filter software", priority: "primary", steps: [step] }],
+        interactionContract: { flows },
+      },
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys));
+    const evidence = result.journeys[0].steps[0].controlEvidence.selections;
+    assert.equal(evidence[1].precondition, "already_selected");
   });

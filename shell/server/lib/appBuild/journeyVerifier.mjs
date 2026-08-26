@@ -57,7 +57,8 @@ function wordsOf(text) {
 const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "into", "this", "their",
   "click", "clicks", "select", "selects", "enter", "enters", "type", "types", "open", "opens",
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
-  "display", "visible", "appears", "appear", "should", "must", "step", "value", "input"]);
+  "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
+  "area", "message", "when", "have", "has", "had", "been", "being", "empty-state"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -2018,7 +2019,12 @@ async function runStep(page, step, {
     if (selectionFlows.length) {
       const companionAction = interactionFlows.find((flow) => flow.control
         && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
-      const selectionOptions = { allowAlreadySelected: Boolean(companionAction) };
+      // One contracted step can set several independent filters. A fixture may deliberately keep
+      // one at its current sentinel while another filter makes the real transition. Treat the
+      // exact current value as that field's established precondition, but only for a compound
+      // selection and only when at least one sibling selection actually moves.
+      const compoundSelection = selectionFlows.length > 1;
+      const selectionOptions = { allowAlreadySelected: Boolean(companionAction) || compoundSelection };
       const outcomes = [];
       const used = new Set();
       const advances = [];
@@ -2055,6 +2061,10 @@ async function runStep(page, step, {
         detail: outcomes.map((row) => row.detail).join("; "),
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
         controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
+      if (compoundSelection && !selectionResult.drove && !companionAction) {
+        return { ...selectionResult, status: "fail",
+          detail: "every contracted selection value was already selected, so no transition was observed" };
+      }
       if (!companionAction) return selectionResult;
       drove = drove || selectionResult.drove;
       controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
