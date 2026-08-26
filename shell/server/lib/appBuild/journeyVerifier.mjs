@@ -471,6 +471,17 @@ export function isObservationOnlyStep(step = {}, interactionFlows = [], {
     || ACTION_FLOW_KINDS.has(flow.kind));
 }
 
+// A collection member action legitimately renders the same exact contracted control once per
+// item. It is safe to choose the first stable DOM match only when the step explicitly asks for one
+// member and the required outcome proves that another member remains. Ordinary repeated commits
+// stay ambiguity-strict.
+export function requestsSingleCollectionMemberAction(step = {}) {
+  const action = String(step?.action || "");
+  const expect = String(step?.expect || "");
+  return /\b(?:remove|delete|archive|dismiss|detach)\s+(?:one|a|an)\b/i.test(action)
+    && /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(expect);
+}
+
 /** Resolve an explicitly contracted responsive viewport without depending on one exact verb. */
 export function viewportForAction(action) {
   const value = String(action || "");
@@ -2366,6 +2377,7 @@ async function runStep(page, step, {
       activation.requiredAtContractedStep = true;
       let activated = await activateContractedControl(page, contractedAction.control, {
         verifierPolicy, evidence: activation,
+        allowEquivalentCandidates: requestsSingleCollectionMemberAction(step),
       });
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never

@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   controlResetTransition, expectationOutcome, expectationRequestsControlReset,
-  isObservationOnlyStep, verifyJourneys,
+  isObservationOnlyStep, requestsSingleCollectionMemberAction, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -337,6 +337,30 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
     });
 
+    await t.test("one collection member action drives one exact repeated control", async () => {
+      const remove = {
+        ...control("saved software list remove control", "remove-saved-software", ["button"]),
+        accessibleName: "saved software list remove control",
+        accessibleNames: ["saved software list remove control"],
+      };
+      const step = {
+        action: "remove one saved software item",
+        expect: "the removed software is no longer shown and the remaining favourite is still visible",
+      };
+      assert.equal(requestsSingleCollectionMemberAction(step), true);
+      const result = await run(`<main><ul>
+        <li>Atlas Editor <button data-thrallo-action="remove-saved-software"
+          aria-label="saved software list remove control"
+          onclick="this.closest('li').remove();document.getElementById('out').textContent='Removed software; remaining favourite is still visible'">Remove</button></li>
+        <li>Compass Deploy <button data-thrallo-action="remove-saved-software"
+          aria-label="saved software list remove control"
+          onclick="this.closest('li').remove();document.getElementById('out').textContent='Removed software; remaining favourite is still visible'">Remove</button></li>
+        </ul><p id="out"></p></main>`, step,
+      [{ kind: "action", operationId: "remove-saved-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
+    });
+
     await t.test("repeated unbound ordinary commit actions are app-repairable", async () => {
       const action = control("save project", "missing-save-identity", ["button"]);
       const result = await run(`<main>
@@ -347,6 +371,9 @@ test("retained false negatives and concrete failures classify correctly in a rea
       [{ kind: "action", control: action }]);
       assert.equal(result.journeys[0].classification,
         VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(requestsSingleCollectionMemberAction({
+        action: "save the project", expect: "the project remains visible",
+      }), false);
     });
 
     await t.test("a required unlocatable control is an app interaction defect", async () => {
