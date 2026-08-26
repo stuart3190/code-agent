@@ -156,6 +156,9 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.equal(collectionMembershipExpectationSpec(
     "the visible software list shows only software matching the search and selected filters",
   ), null);
+  assert.deepEqual(collectionMembershipExpectationSpec(
+    "the favourites list contains Atlas Editor and Compass Deploy and the favourite count is 2",
+  ), { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] });
 });
 
 test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
@@ -542,6 +545,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
             onclick="this.setAttribute('aria-pressed','true');document.getElementById('favourite-members').innerHTML='<li>Compass Deploy</li>'">Add Compass Deploy</button>
         </section>
         <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <p id="favourite-count">Favourite count is 1</p>
           <ul id="favourite-members"><li>Atlas Editor</li></ul>
         </section></main>`,
       { action: "add a second software item to favourites", operates: ["favouriteSoftwareIds"],
@@ -560,13 +564,14 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <article>Atlas Editor</article><article>Compass Deploy</article>
           <button data-thrallo-control="add-favourite-software" data-thrallo-option="compass-deploy"
             value="compass-deploy" aria-pressed="false"
-            onclick="this.setAttribute('aria-pressed','true');document.getElementById('favourite-members').insertAdjacentHTML('beforeend','<li>Compass Deploy</li>')">Add Compass Deploy</button>
+            onclick="this.setAttribute('aria-pressed','true');document.getElementById('favourite-members').insertAdjacentHTML('beforeend','<li>Compass Deploy</li>');document.getElementById('favourite-count').textContent='Favourite count is 2'">Add Compass Deploy</button>
         </section>
         <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <p id="favourite-count">Favourite count is 1</p>
           <ul id="favourite-members"><li>Atlas Editor</li></ul>
         </section></main>`,
       { action: "add a second software item to favourites", operates: ["favouriteSoftwareIds"],
-        expect: "the favourites list contains Atlas Editor and Compass Deploy" },
+        expect: "the favourites list contains Atlas Editor and Compass Deploy and the favourite count is 2" },
       [{ kind: "selection", valueWritten: "favouriteSoftwareIds", control: favourite },
         { kind: "action", operationId: "toggle-favourite", reads: ["favouriteSoftwareIds"],
           writes: ["favouriteSoftwareIds"] }]);

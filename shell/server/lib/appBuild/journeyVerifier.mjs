@@ -521,6 +521,7 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
 const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
 const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query)\b/i;
+const COLLECTION_POSTCONDITION_CLAUSE_PATTERN = /\b(?:count|total|message|state|status)\b|\b(?:is|are|was|were|remains?|becomes?|equals?)\b/i;
 
 // A named collection containing several named members is stronger than global page copy. The
 // same subjects may legitimately remain visible in catalogue cards or a detail panel, so page-
@@ -529,8 +530,11 @@ export function collectionMembershipExpectationSpec(expect = "") {
   const match = COLLECTION_MEMBERSHIP_PATTERN.exec(String(expect || "").trim());
   if (!match) return null;
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
-  const members = match[2].split(/\s*(?:,|\band\b)\s*/i)
+  const clauses = match[2].split(/\s*(?:,|\band\b)\s*/i)
     .map((member) => member.replace(/[.;:]$/, "").trim()).filter(Boolean);
+  const postconditionIndex = clauses.findIndex((clause, index) => index >= 2
+    && COLLECTION_POSTCONDITION_CLAUSE_PATTERN.test(clause));
+  const members = postconditionIndex < 0 ? clauses : clauses.slice(0, postconditionIndex);
   if (!keywords(collection, 5).length || members.length < 2 || members.length > 5
     || members.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length
       || COLLECTION_MEMBER_CLAUSE_PATTERN.test(member))) return null;
