@@ -78,7 +78,7 @@ const initialStateFieldPaths = (value, journeyId) => initialStateFields(value, j
 const transientDefaultValue = (field) => {
   if (Object.hasOwn(field || {}, "default")) return field.default;
   const type = String(field?.type || "").toLowerCase();
-  if (/^(?:array|list|collection|set)(?:\b|<|\[)/.test(type)) return [];
+  if (/\[\]\s*$/.test(type) || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type)) return [];
   if (/^(?:object|map|record)(?:\b|<)/.test(type)) return {};
   if (/^(?:boolean|bool)\b/.test(type)) return false;
   if (/^(?:string|text|email|url|date|time)\b/.test(type)) return "";
@@ -441,38 +441,52 @@ export function buildInteractionContract(contract, {
       const operands = declaredOperands?.length
         ? declaredOperands.filter((name) => operableFields.has(normalized(name)))
         : null;
-      // Operands that were ALL operations: the step performs them and writes no value of its own.
-      // Its commit/action control still comes from the kinds below — this only stops the invented
-      // textbox — and an empty `operates: []` means the same as omitting it.
-      const operandsAreOperations = Boolean(declaredOperands?.length) && !operands?.length;
       // With operands declared, one step drives ONE kind of control. The verb usually names the
       // primitive ("select"/"enter"); when it does not ("set the reorder quantity", "update the
       // status"), the CONTRACT decides — a declared operand means a control is operated whether or
       // not the platform's verb list happens to contain that word. `primitive` states it outright.
       const declaredPrimitive = step?.primitive === "selection" ? "selection"
         : ["textbox", "input"].includes(step?.primitive) ? "input" : null;
+      // A functional operation may own a collection or accumulator by reading and writing the
+      // same field. Naming that state beside the operation identifies what the action mutates; it
+      // does not turn the collection into a browser-editable textbox. An explicit primitive still
+      // wins when a contract intentionally exposes an editor for operation-owned state.
+      const operationManagedFields = new Set(declaredOperationObjects.flatMap((operation) => (
+        (operation?.responsibilities || [])
+          .filter((responsibility) => responsibility?.type === "functional")
+          .flatMap((responsibility) => {
+            const writes = new Set(list(responsibility?.writes).map(normalized));
+            return list(responsibility?.reads).map(normalized).filter((field) => writes.has(field));
+          })
+      )));
+      const valueOperands = operands?.filter((field) => (
+        declaredPrimitive || !operationManagedFields.has(normalized(field))
+      ));
+      // Operands that were operations or operation-managed state perform an action and write no
+      // value through a value-holding control. The action control still comes from the kinds below.
+      const operandsAreOperations = Boolean(declaredOperands?.length) && !valueOperands?.length;
       // A single operated identity with explicit produced values is an atomic selection even when
       // prose intent is ambiguous. A retained contract targeted an "Enter Now" button; the target
       // word "Enter" was read as typed input, so the interaction dropped the contract-declared
       // ticket metadata and a later calculation appeared to read unproduced state. Structured
       // `operates` + `produces` is the stronger authority here. An explicit textbox/input primitive
       // still wins for contracts that intentionally derive values from typed input.
-      const explicitAtomicProduces = operands?.length === 1 && list(step?.produces).length > 0;
-      const operandKind = operands
+      const explicitAtomicProduces = valueOperands?.length === 1 && list(step?.produces).length > 0;
+      const operandKind = valueOperands
         ? (declaredPrimitive || (explicitAtomicProduces ? "selection" : null)
           || kinds.find((row) => ["selection", "input"].includes(row)) || "input")
         : null;
-      const valuePlan = atomicSelectionPlan(step, operands || []);
-      const controlOperands = operandKind === "selection" ? valuePlan.controls : operands;
+      const valuePlan = atomicSelectionPlan(step, valueOperands || []);
+      const controlOperands = operandKind === "selection" ? valuePlan.controls : valueOperands;
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
       const durableKinds = new Set(["mutation", "cancellation", "lookup", "recovery"]);
-      const inferredLocalValueOnly = !durableContract && operands?.length
+      const inferredLocalValueOnly = !durableContract && valueOperands?.length
         && declaredOperationObjects.length === 0;
       const ownershipKinds = kinds
         .filter((kind) => !(inferredLocalValueOnly && durableKinds.has(kind)))
         .map((kind) => (!durableContract || localOperationOnly) && durableKinds.has(kind) ? "action" : kind);
-      const effectiveKinds = operands && !ownershipKinds.includes(operandKind)
+      const effectiveKinds = valueOperands && !ownershipKinds.includes(operandKind)
         ? [...ownershipKinds, operandKind] : ownershipKinds;
       for (const kind of effectiveKinds) {
         const drivesValues = ["selection", "input"].includes(kind);
@@ -488,10 +502,10 @@ export function buildInteractionContract(contract, {
         // input in `effectiveKinds` is not authority to type after changing routes.
         const routeWithoutValueIntent = /^\s*\//.test(String(step?.target || ""))
           && !kinds.includes(kind);
-        if (drivesValues && operands && (kinds.includes("recovery") || routeWithoutValueIntent)) continue;
+        if (drivesValues && valueOperands && (kinds.includes("recovery") || routeWithoutValueIntent)) continue;
         // A second value-writing kind on a step whose operands are declared is an artefact of an
         // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
-        if (drivesValues && operands && kind !== operandKind) continue;
+        if (drivesValues && valueOperands && kind !== operandKind) continue;
         const fields = drivesValues
           ? (controlOperands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind))
           : [null];
@@ -602,7 +616,7 @@ export function buildInteractionContract(contract, {
       // browser click the card, navigate successfully, and then search the destination page for
       // a chooser that had correctly disappeared. Fold that state production into the real
       // activation control. Multi-field/composite selection steps remain separate interactions.
-      if (operands?.length === 1
+      if (valueOperands?.length === 1
           && kinds.some((kind) => ["action", "flow_start"].includes(kind))) {
         const stepFlows = flows.slice(stepFlowStart);
         const actionFlow = stepFlows.find((flow) => ["action", "flow_start"].includes(flow.kind)
@@ -660,7 +674,7 @@ export function buildInteractionContract(contract, {
             dependsOn: [],
             nextStateRequirement: step.expect,
             observable: step.expect,
-            control: null,
+            control: valueOperands?.length ? null : controlRequirement("action", null, step),
             capability: null,
           });
         }

@@ -113,6 +113,52 @@ test("a transient software catalogue search does not invent a durable lookup lif
   assert.equal(spec.interactionContract.scenarios["browse-catalogue"].lifecycle, null);
 });
 
+test("operation-managed catalogue collections remain action state instead of text inputs", () => {
+  const contract = {
+    summary: "Browse a local software catalogue and keep session favourites", projectType: "tool",
+    auth: { required: false }, routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueSessionState", owned: false,
+      storage: "client-only transient state; not persisted to a backend",
+      fields: [
+        { name: "selectedItemId", type: "string" },
+        { name: "favouriteItemIds", type: "string[]" },
+      ] }],
+    operations: [{
+      id: "toggle-favourite", entity: "catalogueSessionState", kind: "update",
+      journey: "browse-catalogue", responsibilities: [{
+        type: "functional", behavior: "toggle the selected item in the session favourites",
+        reads: ["selectedItemId", "favouriteItemIds"], writes: ["favouriteItemIds"],
+      }],
+    }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{
+      id: "browse-catalogue", title: "Browse catalogue", priority: "primary", stage: "primary_journey",
+      steps: [
+        { action: "select a software item", target: "software card", primitive: "selection",
+          operates: ["selectedItemId"], expect: "the software item is selected" },
+        { action: "add the selected software to session favourites", target: "favourite button",
+          operates: ["favouriteItemIds", "toggle-favourite"],
+          reads: ["selectedItemId", "favouriteItemIds"],
+          expect: "the session favourites list includes the selected software" },
+      ],
+    }],
+  };
+
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(
+    spec.interactionContract.scenarios["browse-catalogue"].initialState.favouriteItemIds, [],
+  );
+  assert.ok(!spec.interactionContract.flows.some((flow) => (
+    flow.control?.logicalField === "favouriteItemIds"
+  )));
+  const toggleFlow = spec.interactionContract.flows.find((flow) => (
+    flow.operationId === "toggle-favourite"
+  ));
+  assert.ok(toggleFlow?.control);
+  assert.deepEqual(toggleFlow.control.roles, ["button"]);
+});
+
 test("structured journey step reads are rejected when the contract declares no earlier producer", () => {
   const contract = {
     summary: "Generic state dependency", projectType: "tool",
