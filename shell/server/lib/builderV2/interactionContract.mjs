@@ -20,6 +20,7 @@ import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
+import { isKeyboardFocusOnlyStep } from "../../../shared/interactionSemantics.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
 
@@ -499,6 +500,7 @@ export function buildInteractionContract(contract, {
       const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
       const stepFlowStart = flows.length;
       const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
+      const keyboardFocusOnly = isKeyboardFocusOnlyStep(step);
       // WHICH CONTROLS THIS STEP OPERATES is a structured fact the contract states, not a reading
       // of its prose. "select a party size that does not exceed the slot's remaining capacity"
       // OPERATES the party size and READS the slot; the prose reader saw both as operands,
@@ -611,11 +613,15 @@ export function buildInteractionContract(contract, {
         for (const field of fields.length ? fields : [null]) {
           const writes = [];
           const reads = [];
+          let controlStatePath = null;
           if (["selection", "input"].includes(kind)) {
             const path = `${journey.id}.draft.${field || `value${stepIndex + 1}`}`;
-            writes.push(path);
-            draftWrites.push(path);
-            if (field === valuePlan.controls[0]) {
+            controlStatePath = path;
+            if (!keyboardFocusOnly) {
+              writes.push(path);
+              draftWrites.push(path);
+            }
+            if (!keyboardFocusOnly && field === valuePlan.controls[0]) {
               const produced = valuePlan.produces.map((name) => `${journey.id}.draft.${name}`);
               writes.push(...produced);
               draftWrites.push(...produced);
@@ -672,7 +678,7 @@ export function buildInteractionContract(contract, {
             field ? declaredFields.get(normalized(field)) || null : null);
           if (control) Object.assign(control, {
             stateOwner,
-            statePath: writes[0] || null,
+            statePath: controlStatePath || writes[0] || null,
             validationOwner: kind === "input" ? stateOwner : null,
             ...(kind === "input" ? { validity: validityFor(step, field, fields) } : {}),
             ...(kind === "input" && fixtureRequired.has(normalized(field))
@@ -696,12 +702,14 @@ export function buildInteractionContract(contract, {
             target: /^\/[\w/-]*$/.test(String(step.target || "").trim())
               ? String(step.target).trim() : null,
             valueWritten: field || null,
-            producedValues: field === valuePlan.controls[0] ? [...valuePlan.produces] : [],
+            producedValues: !keyboardFocusOnly && field === valuePlan.controls[0]
+              ? [...valuePlan.produces] : [],
             reads: unique(reads),
             writes: unique(writes),
             dependsOn: unique(reads),
             nextStateRequirement: step.expect,
             observable: step.expect,
+            ...(drivesValues && keyboardFocusOnly ? { interactionMode: "keyboard_focus" } : {}),
             control,
             capability: ["mutation", "cancellation", "lookup"].includes(kind)
               ? durableOwner?.factory || null

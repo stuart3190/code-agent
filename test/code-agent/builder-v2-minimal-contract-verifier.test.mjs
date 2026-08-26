@@ -240,6 +240,61 @@ test("retained false negatives and concrete failures classify correctly in a rea
       )), false, JSON.stringify(result.mechanics));
     });
 
+    await t.test("focus-only controls are keyboard-proven without changing catalogue state", async () => {
+      const search = control("searchQuery", "catalogue-search");
+      const selected = { ...control("selectedSoftwareId", "catalogue-selection",
+        ["button", "radio", "option", "combobox"]), selectedState: true };
+      pageBody = `<style>:focus-visible { outline: 4px solid rgb(0, 120, 212); outline-offset: 2px; }</style>
+        <main><label>search Query <input data-thrallo-control="catalogue-search"
+          oninput="document.getElementById('catalogue-grid').hidden=this.value!==''"></label>
+        <div id="catalogue-grid" role="group" aria-label="selected Software Id"
+          data-thrallo-control="catalogue-selection">
+          <button type="button" value="atlas-editor" data-thrallo-control="catalogue-selection"
+            aria-label="selected Software Id Atlas Editor" aria-pressed="false">View Atlas Editor</button>
+          <button type="button" value="compass-deploy" data-thrallo-control="catalogue-selection"
+            aria-label="selected Software Id Compass Deploy" aria-pressed="false">View Compass Deploy</button>
+        </div></main>`;
+      const contract = {
+        journeys: [{ id: "journey", title: "Use accessible catalogue controls", priority: "primary", steps: [
+          { action: "move keyboard focus to the catalogue search control", operates: ["searchQuery"],
+            primitive: "textbox", expect: "a visible focus indicator appears on the labelled search control" },
+          { action: "move keyboard focus to a software card action", operates: ["selectedSoftwareId"],
+            primitive: "selection",
+            expect: "a visible focus indicator appears and its accessible name identifies the software" },
+        ] }],
+        interactionContract: { flows: [
+          { journeyId: "journey", stepIndex: 0, kind: "input", interactionMode: "keyboard_focus",
+            valueWritten: "searchQuery", control: search, reads: [], writes: [] },
+          { journeyId: "journey", stepIndex: 1, kind: "selection", interactionMode: "keyboard_focus",
+            valueWritten: "selectedSoftwareId", control: selected, reads: [], writes: [] },
+        ] },
+      };
+      const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps.length, 2);
+      for (const stepResult of result.journeys[0].steps) {
+        assert.equal(stepResult.controlEvidence.focus[0].visibleIndicator, true);
+        assert.equal(stepResult.controlEvidence.focus[0].mutationObserved, false);
+      }
+      assert.equal(result.journeys[0].steps[1].controlEvidence.focus[0].nameSpecificity, true);
+    });
+
+    await t.test("focus-only verification rejects a control with no visible focus indicator", async () => {
+      const selected = { ...control("selectedSoftwareId", "catalogue-selection",
+        ["button", "radio", "option", "combobox"]), selectedState: true };
+      const result = await run(`<style>button:focus,button:focus-visible { outline: none; box-shadow: none; }</style>
+        <main><button type="button" data-thrallo-control="catalogue-selection"
+          aria-label="selected Software Id Atlas Editor" aria-pressed="false">View Atlas Editor</button></main>`,
+      { action: "move keyboard focus to a software card action", operates: ["selectedSoftwareId"],
+        primitive: "selection",
+        expect: "a visible focus indicator appears and its accessible name identifies the software" },
+      [{ kind: "selection", interactionMode: "keyboard_focus",
+        valueWritten: "selectedSoftwareId", control: selected, reads: [], writes: [] }]);
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.match(result.journeys[0].steps[0].detail, /no visible keyboard focus indicator/i);
+    });
+
     await t.test("unchanged wording does not fail a satisfied result", async () => {
       const action = control("save", "save", ["button"]);
       const result = await run(`<main><button data-thrallo-action="save">Save</button>

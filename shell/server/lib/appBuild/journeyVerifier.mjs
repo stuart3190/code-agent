@@ -34,6 +34,7 @@ import {
   isMinimalContractVerifier,
   verificationVerdict,
 } from "./verifierPolicy.mjs";
+import { isKeyboardFocusOnlyStep } from "../../../shared/interactionSemantics.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -529,6 +530,135 @@ function contractedLocators(page, control) {
     loose.push({ description: `placeholder~${alias}`, locator: page.getByPlaceholder(worded) });
   }
   return [...rows, ...loose];
+}
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])", "input:not([disabled]):not([type=hidden])", "select:not([disabled])",
+  "textarea:not([disabled])", "a[href]", "[contenteditable=true]", "[tabindex]:not([tabindex='-1'])",
+  "[role=button]", "[role=radio]", "[role=option]", "[role=combobox]",
+].join(",");
+
+async function firstFocusableContractedControl(page, control) {
+  for (const attempt of contractedLocators(page, control)) {
+    const count = Math.min(await attempt.locator.count().catch(() => 0), 24);
+    for (let index = 0; index < count; index += 1) {
+      const matched = attempt.locator.nth(index);
+      if (!(await matched.isVisible().catch(() => false))) continue;
+      const direct = await matched.evaluate((element) => {
+        const native = element.matches("button,input,select,textarea,a[href],[contenteditable=true]");
+        const semantic = element.matches("[role=button],[role=radio],[role=option],[role=combobox]");
+        return (native || semantic || element.tabIndex >= 0) && !element.disabled
+          && element.getAttribute("aria-disabled") !== "true";
+      }).catch(() => false);
+      if (direct) return { locator: matched, matchedBy: attempt.description };
+      const descendants = matched.locator(FOCUSABLE_SELECTOR);
+      const descendantsCount = Math.min(await descendants.count().catch(() => 0), 24);
+      for (let childIndex = 0; childIndex < descendantsCount; childIndex += 1) {
+        const candidate = descendants.nth(childIndex);
+        if (!(await candidate.isVisible().catch(() => false))) continue;
+        const usable = await candidate.evaluate((element) => !element.disabled
+          && element.getAttribute("aria-disabled") !== "true" && element.tabIndex >= 0).catch(() => false);
+        if (usable) return { locator: candidate, matchedBy: `${attempt.description}:descendant` };
+      }
+    }
+  }
+  return null;
+}
+
+async function keyboardFocusState(locator) {
+  return locator.evaluate((element) => {
+    const labelledBy = (element.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText || "").filter(Boolean);
+    const labels = element.labels ? [...element.labels].map((label) => label.innerText || "").filter(Boolean) : [];
+    const group = element.closest("[role=group],[role=radiogroup],[role=listbox],fieldset");
+    const groupLabelledBy = (group?.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText || "").filter(Boolean);
+    const accessibleName = element.getAttribute("aria-label") || labelledBy.join(" ") || labels.join(" ")
+      || element.getAttribute("alt") || element.getAttribute("title") || element.innerText || "";
+    const groupName = group?.getAttribute("aria-label") || groupLabelledBy.join(" ")
+      || (group?.tagName === "FIELDSET" ? group.querySelector("legend")?.innerText : "") || "";
+    const style = getComputedStyle(element);
+    const outlineVisible = !["none", "hidden"].includes(style.outlineStyle)
+      && Number.parseFloat(style.outlineWidth || "0") > 0
+      && style.outlineColor !== "rgba(0, 0, 0, 0)";
+    const shadowVisible = Boolean(style.boxShadow && style.boxShadow !== "none");
+    return {
+      active: document.activeElement === element,
+      focusVisible: element.matches(":focus-visible"),
+      accessibleName: String(accessibleName).trim(),
+      groupName: String(groupName).trim(),
+      outlineVisible,
+      shadowVisible,
+      focusStyle: {
+        outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth,
+        outlineColor: style.outlineColor, boxShadow: style.boxShadow,
+        borderColor: style.borderColor, backgroundColor: style.backgroundColor,
+      },
+      valueState: {
+        value: "value" in element ? String(element.value ?? "") : null,
+        checked: "checked" in element ? Boolean(element.checked) : null,
+        ariaPressed: element.getAttribute("aria-pressed"),
+        ariaSelected: element.getAttribute("aria-selected"),
+        dataState: element.getAttribute("data-state"),
+      },
+    };
+  }).catch(() => null);
+}
+
+async function driveKeyboardFocus(page, flow, step) {
+  const target = await firstFocusableContractedControl(page, flow?.control);
+  if (!target) return {
+    drove: false, status: "undriveable",
+    detail: `no focusable control matched contracted field ${flow?.control?.logicalField || "unknown"}`,
+    controlEvidence: { contractedField: flow?.control?.logicalField || null,
+      requiredControl: { kind: "focus", reason: "not_reliably_located" } },
+  };
+  const before = await keyboardFocusState(target.locator);
+  try {
+    await target.locator.focus({ timeout: 5_000 });
+    // Return to the exact identity through keyboard traversal. The final input modality is a real
+    // Tab key, so :focus-visible and the rendered keyboard indicator are both testable.
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForTimeout(50);
+  } catch {
+    return { drove: false, status: "undriveable", detail: "the contracted control could not receive keyboard focus",
+      controlEvidence: { contractedField: flow?.control?.logicalField || null, matchedBy: target.matchedBy } };
+  }
+  const after = await keyboardFocusState(target.locator);
+  const aliases = new Set(controlAliases(flow?.control).flatMap((alias) => wordsOf(alias)));
+  const specificNameTokens = wordsOf(after?.accessibleName || "")
+    .filter((word) => !aliases.has(word) && !IDENTITY_STOP_WORDS.has(word));
+  const specificityRequired = /\baccessible name\b.*\bidentif(?:y|ies)\b/i.test(String(step?.expect || ""));
+  const stateChanged = JSON.stringify(before?.valueState) !== JSON.stringify(after?.valueState);
+  const styleChanged = JSON.stringify(before?.focusStyle) !== JSON.stringify(after?.focusStyle);
+  const visibleIndicator = Boolean(after?.focusVisible
+    && (after.outlineVisible || after.shadowVisible || styleChanged));
+  const evidence = {
+    contractedField: flow?.control?.logicalField || null,
+    matchedBy: target.matchedBy,
+    active: Boolean(after?.active),
+    focusVisible: Boolean(after?.focusVisible),
+    visibleIndicator,
+    accessibleName: after?.accessibleName || null,
+    groupName: after?.groupName || null,
+    nameSpecificity: !specificityRequired || specificNameTokens.length > 0,
+    mutationObserved: stateChanged,
+    valueStateBefore: before?.valueState || null,
+    valueStateAfter: after?.valueState || null,
+  };
+  if (!after?.active) return { drove: true, status: "fail",
+    detail: "keyboard traversal did not leave focus on the contracted control", controlEvidence: evidence };
+  if (!after.accessibleName) return { drove: true, status: "fail",
+    detail: "the focused contracted control has no accessible name", controlEvidence: evidence };
+  if (specificityRequired && !specificNameTokens.length) return { drove: true, status: "fail",
+    detail: "the focused control's accessible name does not identify its item", controlEvidence: evidence };
+  if (!visibleIndicator) return { drove: true, status: "fail",
+    detail: "the focused contracted control has no visible keyboard focus indicator", controlEvidence: evidence };
+  if (stateChanged) return { drove: true, status: "fail",
+    detail: "moving keyboard focus changed the contracted control value", controlEvidence: evidence };
+  return { drove: true, status: "pass", detail: "keyboard focus, visible focus indication, and accessible naming are proven",
+    controlEvidence: evidence };
 }
 
 /** Drive only the fields the machine-readable contract assigns to this step. */
@@ -1839,6 +1969,31 @@ async function runStep(page, step, {
   // combined "enter … then submit" step filled the form and NEVER CLICKED — three live bv2
   // runs (and untold v1 submit steps) failed working apps on exactly this line.
   const navigated = drove;
+
+  // Focus-only accessibility steps name a value-holding primitive so the exact target remains
+  // machine-addressable, but they do not ask the verifier to edit that value. Editing a search
+  // field here can remove the later controls the same journey is meant to inspect. Drive the
+  // declared controls through keyboard traversal and prove focus visibility plus accessible
+  // naming directly; no application prose is accepted as a substitute.
+  const focusFlows = interactionFlows.filter((flow) => ["input", "selection"].includes(flow.kind)
+    && flow.control);
+  const focusOnly = interactionFlows.some((flow) => flow.interactionMode === "keyboard_focus")
+    || (focusFlows.length > 0 && isKeyboardFocusOnlyStep(step));
+  if (focusOnly) {
+    if (!focusFlows.length) return { drove, status: "undriveable",
+      detail: "the focus-only step names no contracted focusable control" };
+    const outcomes = [];
+    for (const flow of focusFlows) {
+      const outcome = await driveKeyboardFocus(page, flow, step);
+      outcomes.push(outcome);
+      if (outcome.status !== "pass") return outcome;
+    }
+    return {
+      drove: true, status: "pass",
+      detail: outcomes.map((outcome) => outcome.detail).join("; "),
+      controlEvidence: { focus: outcomes.map((outcome) => outcome.controlEvidence) },
+    };
+  }
 
   // A field an EARLIER contracted step already wrote is not this step's to type into. The live
   // contract derives party size as both a selection (its own step) and an input on the contact
