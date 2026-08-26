@@ -21,7 +21,8 @@ import { mkdtemp, mkdir, writeFile, rm, readFile, rename } from "node:fs/promise
 import { existsSync } from "node:fs";
 import {
   ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
-  destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs, PUBLISH_ROOT,
+  destroy, containerState, listPreviewContainers, pruneStoppedPreviews, removeDanglingNets,
+  caddyLogs, PUBLISH_ROOT,
   containerExists,
 } from "./docker.mjs";
 import {
@@ -68,6 +69,10 @@ const PER_CONTAINER_MB = 118; // RUNTIME.md measured idle RSS
 const CAP = Number(process.env.PREVIEW_CAP || Math.floor(AVAILABLE_MB / PER_CONTAINER_MB)); // RAM-bound (~55)
 const REAP_IDLE_MS = Number(process.env.REAP_IDLE_MS || 10 * 60 * 1000);   // billing model: ~10 min idle
 const REAP_INTERVAL_MS = Number(process.env.REAP_INTERVAL_MS || 60 * 1000);
+const STOPPED_RETENTION_MS = Number(process.env.PREVIEW_STOPPED_RETENTION_MS || 6 * 60 * 60_000);
+const STOPPED_RETAIN = Number(process.env.PREVIEW_STOPPED_RETAIN || 8);
+// Leave isolated subnet headroom for worker admission/preflight networks as well as previews.
+const PREVIEW_NETWORK_CAP = Number(process.env.PREVIEW_NETWORK_CAP || 27);
 const ATOMIC_PUBLISH = process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1";
 
 if (!TOKEN) { console.error("[provisiond] refusing to start: PROVISIOND_TOKEN is empty"); process.exit(1); }
@@ -107,10 +112,27 @@ async function reapOnce(idleMs = REAP_IDLE_MS) {
   return reaped;
 }
 
+async function maintainPreviewCapacity({ retain = STOPPED_RETAIN } = {}) {
+  const pruned = await pruneStoppedPreviews({
+    olderThanMs: STOPPED_RETENTION_MS,
+    retain: Math.max(0, retain),
+  });
+  const danglingNets = await removeDanglingNets();
+  return { pruned, danglingNets };
+}
+
 // Refuse past the RAM-bound cap. A label already running (re-provision/wake) doesn't add a slot.
 async function enforceCapacity(label) {
   const running = await listPreviewContainers();
   if (running.includes(label)) return;
+  await maintainPreviewCapacity({ retain: Math.min(STOPPED_RETAIN,
+    Math.max(0, PREVIEW_NETWORK_CAP - running.length - 1)) });
+  const allocated = await listPreviewContainers({ all: true });
+  if (allocated.length >= PREVIEW_NETWORK_CAP) {
+    const e = new Error(`preview network capacity reached (${allocated.length}/${PREVIEW_NETWORK_CAP})`);
+    e.code = "capacity";
+    throw e;
+  }
   if (running.length >= CAP) { const e = new Error(`capacity reached (${running.length}/${CAP} previews running)`); e.code = "capacity"; throw e; }
 }
 
@@ -328,7 +350,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/health") {
       const running = await listPreviewContainers();
-      return send(res, 200, { ok: true, capacity: CAP, running: running.length, reapIdleMs: REAP_IDLE_MS });
+      const allocated = await listPreviewContainers({ all: true });
+      return send(res, 200, { ok: true, capacity: CAP, running: running.length,
+        networkCapacity: PREVIEW_NETWORK_CAP, allocated: allocated.length, reapIdleMs: REAP_IDLE_MS });
     }
     if (!authed(req)) return send(res, 401, { error: "unauthorized" });
 
@@ -439,7 +463,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", async () => {
   console.log(`[provisiond] listening on 127.0.0.1:${PORT} · suffix ${SUFFIX} · scheme ${SCHEME}`);
   try {
-    const removed = await removeDanglingNets();                 // orphan cleanup
+    const maintenance = await maintainPreviewCapacity();
     // Re-raise the Caddy front after a VPS reboot: the container doesn't auto-restart and its old
     // preview-net attachments may have just been removed above, so docker start would fail anyway —
     // ensureCaddy rm -f's the dead one and runs a fresh front (certs persist in buildr-caddy-data).
@@ -448,9 +472,13 @@ server.listen(PORT, "127.0.0.1", async () => {
     await ensureCaddy(CADDY_CFG);
     const running = await listPreviewContainers();
     for (const l of running) touch(l);                          // adopt survivors so they aren't reaped at once
-    console.log(`[provisiond] boot: cap ${CAP} · adopted ${running.length} running preview(s) · removed ${removed.length} dangling net(s) · caddy up · reap idle ${REAP_IDLE_MS}ms`);
+    console.log(`[provisiond] boot: cap ${CAP} · network cap ${PREVIEW_NETWORK_CAP} · adopted ${running.length} running preview(s) · pruned ${maintenance.pruned.length} stopped preview(s) · removed ${maintenance.danglingNets.length} dangling net(s) · caddy up · reap idle ${REAP_IDLE_MS}ms`);
   } catch (e) {
     console.error("[provisiond] boot cleanup error:", e.message);
   }
-  setInterval(() => { reapOnce().catch((e) => console.error("[reaper]", e.message)); }, REAP_INTERVAL_MS);
+  setInterval(() => {
+    reapOnce()
+      .then(() => maintainPreviewCapacity())
+      .catch((e) => console.error("[reaper]", e.message));
+  }, REAP_INTERVAL_MS);
 });

@@ -161,14 +161,59 @@ export async function listPreviewContainers({ all = false } = {}) {
   return out ? out.split("\n").filter(Boolean) : [];
 }
 
-// Boot orphan cleanup: remove labelled preview networks that have no container attached (left behind
-// if a provision crashed between net-create and container-create). Never touches live containers/nets.
+export function stoppedPreviewLabelsToPrune(entries = [], { olderThanMs, retain, now }) {
+  const stopped = [...entries].sort((left, right) => right.finishedMs - left.finishedMs);
+  return stopped.filter((entry, index) => {
+    const expired = entry.finishedMs === 0 || now - entry.finishedMs > olderThanMs;
+    return expired || index >= Math.max(0, retain);
+  }).map((entry) => entry.label);
+}
+
+/**
+ * Bound the stopped-preview cache so per-project bridge networks cannot exhaust Docker's address
+ * pools. Running previews are never touched. Older entries are disposable source/dependency caches
+ * and can be recreated by the normal provision path.
+ */
+export async function pruneStoppedPreviews({ olderThanMs = 6 * 60 * 60_000, retain = 8,
+  now = Date.now() } = {}) {
+  const labels = await listPreviewContainers({ all: true });
+  const stopped = [];
+  for (const label of labels) {
+    const raw = await docker(["inspect", "-f", "{{.State.Status}}\t{{.State.FinishedAt}}", label], { ok: true });
+    const [state, finishedAt] = raw.split("\t");
+    if (!state || state === "running") continue;
+    const finishedMs = Date.parse(finishedAt);
+    stopped.push({ label, finishedMs: Number.isFinite(finishedMs) ? finishedMs : 0 });
+  }
+  const targets = stoppedPreviewLabelsToPrune(stopped, { olderThanMs, retain, now });
+  const removed = [];
+  for (const label of targets) {
+    if (await destroy(label)) removed.push(label);
+  }
+  return removed;
+}
+
+// Boot/maintenance orphan cleanup. Caddy may still be the sole endpoint after a provision or
+// preflight crashes; that proxy-only endpoint must not keep the subnet allocated forever.
 export async function removeDanglingNets() {
   const nets = await docker(["network", "ls", "--filter", "label=buildr.preview=1", "--format", "{{.Name}}"]);
+  const previewContainers = new Set(await listPreviewContainers({ all: true }));
   const removed = [];
   for (const n of (nets ? nets.split("\n").filter(Boolean) : [])) {
-    const attached = await docker(["network", "inspect", "-f", "{{len .Containers}}", n], { ok: true });
-    if (attached === "0") { await docker(["network", "rm", n], { ok: true }); removed.push(n); }
+    const expectedContainer = n.endsWith("-net") ? n.slice(0, -4) : null;
+    if (expectedContainer && previewContainers.has(expectedContainer)) continue;
+    const raw = await docker(["network", "inspect", n], { ok: true });
+    let containers = [];
+    try {
+      const inspected = JSON.parse(raw);
+      containers = Object.values(inspected?.[0]?.Containers || {}).map((entry) => entry?.Name).filter(Boolean);
+    } catch { continue; }
+    if (containers.some((name) => name !== CADDY_NAME)) continue;
+    if (containers.includes(CADDY_NAME)) {
+      await docker(["network", "disconnect", "-f", n, CADDY_NAME], { ok: true });
+    }
+    await docker(["network", "rm", n], { ok: true });
+    removed.push(n);
   }
   return removed;
 }
