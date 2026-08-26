@@ -33,6 +33,69 @@ const crudContract = {
   interactionContract: { flows: [] },
 };
 
+const catalogueContract = {
+  summary: "A software catalogue with local comparison tools",
+  journeys: Array.from({ length: 4 }, (_, index) => ({
+    id: `catalogue-${index + 1}`, priority: index ? "secondary" : "primary",
+    title: index ? "Use a catalogue tool" : "Browse the catalogue",
+    owners: ["src/pages/CatalogueScreen.jsx", `src/components/CatalogueFlow${index + 1}.jsx`],
+    steps: Array.from({ length: 3 }, (__, step) => ({
+      action: step ? "select" : "navigate", target: `catalogue-control-${step + 1}`,
+      expect: `catalogue result ${step + 1} is visible`,
+    })),
+  })),
+  entities: [], capabilities: [], interactionContract: { flows: [] },
+};
+
+function catalogueSpec({ sharedScreen = true } = {}) {
+  const journeyIds = catalogueContract.journeys.map((journey) => journey.id);
+  return {
+    contract: catalogueContract, journeys: catalogueContract.journeys,
+    tiers: { essential: { journeys: [journeyIds[0]] }, secondary: { journeys: journeyIds.slice(1) } },
+    modulePlan: [
+      ...catalogueContract.journeys.flatMap((journey, index) => [
+        { path: `src/components/CatalogueFlow${index + 1}.jsx`, required: true, journeyIds: [journey.id] },
+        { path: `src/features/CatalogueTool${index + 1}.jsx`, required: true, journeyIds: [journey.id] },
+      ]),
+      ...(sharedScreen
+        ? [{ path: "src/pages/CatalogueScreen.jsx", required: true, journeyIds }]
+        : catalogueContract.journeys.map((journey, index) => ({
+          path: `src/pages/CatalogueScreen${index + 1}.jsx`, required: true, journeyIds: [journey.id],
+        }))),
+    ],
+    scaffoldGraph: { journeyOwnership: catalogueContract.journeys.map((journey, index) => ({
+      journeyId: journey.id,
+      mountedModule: sharedScreen || index === 0
+        ? "src/pages/CatalogueScreen.jsx" : `src/pages/CatalogueScreen${index + 1}.jsx`,
+    })) },
+  };
+}
+
+test("the envelope does not reserve journey calls already included in the mounted-screen core unit", () => {
+  const envelope = deriveBuildEnvelope({
+    contract: catalogueContract, spec: catalogueSpec(), approvedCustomerCredits: 12, profile: "simple",
+  });
+  assert.deepEqual(envelope.stages.filter((stage) => stage.id.startsWith("journey_generation:")), []);
+  assert.deepEqual(envelope.stages.find((stage) => stage.id === "compile").dependencyIds, ["core_generation"]);
+  assert.equal(envelope.stages.find((stage) => stage.id === "core_generation").estimatedCredits, 5.6);
+  assert.equal(envelope.customerGeneration.plannedCredits, 6.67);
+  assert.equal(envelope.approvalRequired, false);
+});
+
+test("the envelope retains later journey stages for independently mounted screens", () => {
+  const envelope = deriveBuildEnvelope({
+    contract: catalogueContract, spec: catalogueSpec({ sharedScreen: false }),
+    approvedCustomerCredits: 12, profile: "simple",
+  });
+  const increments = envelope.stages.filter((stage) => stage.id.startsWith("journey_generation:"));
+  assert.deepEqual(increments.map((stage) => stage.id), [
+    "journey_generation:catalogue-2", "journey_generation:catalogue-3", "journey_generation:catalogue-4",
+  ]);
+  assert.equal(envelope.stages.find((stage) => stage.id === "core_generation").estimatedCredits, 2.765);
+  assert.deepEqual(envelope.stages.find((stage) => stage.id === "compile").dependencyIds,
+    increments.map((stage) => stage.id));
+});
+
 test("validated contracts receive immutable independent generation, recovery, and duration envelopes", async () => {
   const basic = deriveBuildEnvelope({ contract: staticContract, approvedCustomerCredits: 20, profile: "simple" });
   const complex = deriveBuildEnvelope({ contract: crudContract, approvedCustomerCredits: 100, profile: "advanced",

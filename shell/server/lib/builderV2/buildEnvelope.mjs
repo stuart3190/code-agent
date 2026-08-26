@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { serviceClient } from "../supabase.mjs";
 import { operationRequiresDurableMutation } from "../../../shared/implementationContract.mjs";
+import { journeysInMountedScreenUnit } from "./buildSpec.mjs";
 
 export const BUILD_ENVELOPE_VERSION = 1;
 export const FUNDING_POOL = Object.freeze({
@@ -71,6 +72,25 @@ function moduleRows(spec = {}, contract = {}) {
     .map((path, index) => ({ id: path || `module-${index + 1}`, path, required: true, journeyIds: [] }));
 }
 
+function generationUnits(spec, contract, journeys) {
+  const essentialIds = spec?.tiers?.essential?.journeys || [];
+  const essentialJourneys = essentialIds.length
+    ? journeys.filter((journey) => essentialIds.includes(journey?.id))
+    : [journeys.find((journey) => journey?.priority === "primary") || journeys[0]].filter(Boolean);
+  const resolvedSpec = { ...spec, contract: spec?.contract || contract, journeys: spec?.journeys || journeys };
+  const coreJourneys = journeysInMountedScreenUnit(resolvedSpec, essentialJourneys);
+  const coreJourneyIds = new Set(coreJourneys.map((journey) => journey?.id).filter(Boolean));
+  const secondaryIds = spec?.tiers?.secondary?.journeys || [];
+  const secondaryJourneys = secondaryIds.length
+    ? journeys.filter((journey) => secondaryIds.includes(journey?.id))
+    : journeys.filter((journey) => !coreJourneyIds.has(journey?.id));
+  return {
+    coreJourneys,
+    coreJourneyIds,
+    incrementJourneys: secondaryJourneys.filter((journey) => !coreJourneyIds.has(journey?.id)),
+  };
+}
+
 function stage({ id, fundingSource, input = 0, output = 0, credits = 0, duration = 0,
   dependencyIds = [], required = true }) {
   return {
@@ -99,8 +119,10 @@ export function deriveBuildEnvelope({
 
   const journeys = contract.journeys || [];
   const modules = moduleRows(spec, contract);
+  const { coreJourneys, coreJourneyIds, incrementJourneys } = generationUnits(spec, contract, journeys);
   const owners = unique(journeys.flatMap((journey) => journey.owners || []));
   const stepCount = journeys.reduce((sum, journey) => sum + (journey.steps || []).length, 0);
+  const coreStepCount = coreJourneys.reduce((sum, journey) => sum + (journey.steps || []).length, 0);
   const requirements = contractRuntimeRequirements(contract);
   const band = complexityBand(profile);
   const stages = [];
@@ -116,16 +138,20 @@ export function deriveBuildEnvelope({
     dependencyIds: ["contract"],
   }));
 
-  const coreModules = Math.max(1, modules.filter((row) => row.required).length || modules.length);
+  const requiredModules = modules.filter((row) => row.required);
+  const generationModules = requiredModules.length ? requiredModules : modules;
+  const coreModules = Math.max(1, generationModules.filter((row) => !row.journeyIds.length
+    || row.journeyIds.some((journeyId) => coreJourneyIds.has(journeyId))).length);
   stages.push(stage({
     id: "core_generation", fundingSource: FUNDING_POOL.CUSTOMER,
-    input: 8_000 + (coreModules * 1_200) + (stepCount * 180),
+    input: 8_000 + (coreModules * 1_200) + (coreStepCount * 180),
     output: 4_000 + (coreModules * 1_400),
-    credits: 1.4 + (coreModules * 0.42) + (stepCount * 0.035),
+    credits: 1.4 + (coreModules * 0.42) + (coreStepCount * 0.035),
     duration: 90_000 + (coreModules * 28_000), dependencyIds: ["capability_preflight"],
   }));
 
-  journeys.forEach((journey, index) => {
+  incrementJourneys.forEach((journey) => {
+    const index = journeys.indexOf(journey);
     const journeyOwners = unique(journey.owners || []);
     const journeySteps = (journey.steps || []).length;
     stages.push(stage({
@@ -142,8 +168,8 @@ export function deriveBuildEnvelope({
   stages.push(stage({
     id: "compile", fundingSource: "platform", credits: 0,
     duration: 45_000 + (modules.length * 4_000),
-    dependencyIds: journeys.length
-      ? journeys.map((journey, index) => `journey_generation:${journey.id || index + 1}`)
+    dependencyIds: incrementJourneys.length
+      ? incrementJourneys.map((journey) => `journey_generation:${journey.id || journeys.indexOf(journey) + 1}`)
       : ["core_generation"],
   }));
   stages.push(stage({
