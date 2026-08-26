@@ -39,7 +39,11 @@ const BINDING_PROPS = /\b(inputProps|groupProps|optionProps|buttonProps|labelPro
 
 // Native elements that are interactive by tag alone. `a` is deliberately absent: a link navigates,
 // it is not a contracted control, and flagging links would bury the signal.
-const NATIVE = new Set(["input", "textarea", "select", "button", "option"]);
+// A native <option> is operated through its owning <select>; it is not an independently
+// addressable control. Treating both as controls makes the unbound option look like a duplicate
+// of the correctly bound select and rejects the exact native-select shape the generator is told
+// to produce. Explicit role="option" widgets remain interactive through ROLES below.
+const NATIVE = new Set(["input", "textarea", "select", "button"]);
 // ARIA roles that promise an interaction.
 const ROLES = new Set(["button", "option", "tab", "checkbox", "radio", "switch",
   "combobox", "listbox", "menuitem", "textbox", "slider", "spinbutton"]);

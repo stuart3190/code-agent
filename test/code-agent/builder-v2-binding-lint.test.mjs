@@ -88,6 +88,34 @@ test("a literal data-thrallo-control PASSES", () => {
   assert.equal(result.ok, true, JSON.stringify(failing(result)));
 });
 
+test("native select options are owned by the bound select, not duplicate controls", () => {
+  const field = "categoryFilter";
+  const machineId = controlIdFor(field);
+  const interactionContract = { flows: [
+    { id: "browse:input", journeyId: "browse", stepIndex: 0, kind: "input",
+      control: { logicalField: field, accessibleName: "category Filter",
+        accessibleNames: ["category Filter"], machineId, roles: ["combobox"] } },
+    { id: "browse:selection", journeyId: "browse", stepIndex: 1, kind: "selection",
+      control: { logicalField: field, accessibleName: "category Filter",
+        accessibleNames: ["category Filter"], machineId, roles: ["combobox", "option"] } },
+  ] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const category = useSemanticField({ name: "categoryFilter", label: "category Filter" });
+      return <label {...category.labelProps}>Category Filter
+        <select {...category.inputProps} data-thrallo-control="${machineId}">
+          {["All categories", "Data"].map((option) =>
+            <option key={option} value={option} aria-label={\`\${option} category option\`}>{option}</option>)}
+        </select>
+      </label>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(result.elements.some((row) => row.element === "<option>"), false,
+    "native options were linted as controls separate from their select");
+});
+
 test("one operation-backed semantic action satisfies differently worded journeys", () => {
   const operationId = "filter-catalogue";
   const interactionContract = { flows: [
