@@ -229,6 +229,32 @@ test("a valid structured contract passes validation", hostOnly, () => {
   assert.deepEqual(verdict.problems.filter((problem) => /operates|reads/.test(problem)), []);
 });
 
+test("a mixed structured step keeps typed text separate from selected filters", () => {
+  const contract = {
+    summary: "software catalogue", projectType: "tool", version: 2, auth: { required: false },
+    routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueState", fields: [
+      { name: "searchQuery", type: "string" }, { name: "categoryFilter", type: "string" },
+      { name: "pricingFilter", type: "string" },
+    ] }],
+    operations: [], journeys: [{ id: "browse", title: "Browse", priority: "primary",
+      steps: [{
+        action: "enter search text and choose catalogue filters", target: "catalogue controls",
+        operates: ["searchQuery", "categoryFilter", "pricingFilter"],
+        verificationValues: { searchQuery: "Atlas", categoryFilter: "Analytics", pricingFilter: "Paid" },
+        expect: "the entered search and selected filters are visible",
+      }],
+    }], acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const flows = buildInteractionContract(contract).flows;
+  assert.deepEqual(Object.fromEntries(flows.map((flow) => [flow.valueWritten, flow.kind])), {
+    searchQuery: "input", categoryFilter: "selection", pricingFilter: "selection",
+  });
+  assert.deepEqual(Object.fromEntries(flows.map((flow) => [flow.valueWritten, flow.control.verificationValue])), {
+    searchQuery: "Atlas", categoryFilter: "Analytics", pricingFilter: "Paid",
+  });
+});
+
 test("a contract WITHOUT operands still derives — V1 and legacy are untouched", () => {
   const legacy = JSON.parse(JSON.stringify(PAID));
   for (const step of legacy.journeys[0].steps) { delete step.operates; delete step.reads; }

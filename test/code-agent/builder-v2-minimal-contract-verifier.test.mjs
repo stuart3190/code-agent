@@ -398,6 +398,47 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.deepEqual(result.journeys[0].setup.performed.map((row) => row.kind), ["navigation"]);
     });
 
+    await t.test("a ready same-screen secondary control does not replay unrelated primary filters", async () => {
+      const search = { ...control("searchQuery", "search-query"), verificationValue: "Atlas" };
+      const apply = control("apply filters", "apply-filters", ["button"]);
+      const selected = {
+        ...control("selectedSoftwareId", "selected-software", ["button", "radio", "option", "combobox"]),
+        verificationValue: "compass-deploy", selectedState: true,
+      };
+      const primary = { id: "browse", title: "Browse", priority: "primary", steps: [] };
+      const secondary = { id: "manage", title: "Manage shortlist", priority: "secondary", steps: [{
+        action: "select Compass Deploy from the software grid", operates: ["selectedSoftwareId"],
+        expect: "the detail panel shows Compass Deploy",
+      }] };
+      const primarySearch = { id: "browse:search", journeyId: "browse", stepIndex: 0,
+        kind: "input", valueWritten: "searchQuery", control: search };
+      const primaryApply = { id: "browse:apply", journeyId: "browse", stepIndex: 1,
+        kind: "action", control: apply };
+      const primarySelection = { id: "browse:selected", journeyId: "browse", stepIndex: 2,
+        kind: "selection", valueWritten: "selectedSoftwareId", control: selected };
+      const secondarySelection = { id: "manage:selected", journeyId: "manage", stepIndex: 0,
+        kind: "selection", valueWritten: "selectedSoftwareId", control: selected };
+      pageBody = `<main>
+        <label>Search query <input data-thrallo-control="search-query"></label>
+        <button data-thrallo-action="apply-filters" onclick="document.getElementById('grid').replaceChildren()">Apply filters</button>
+        <div id="grid"><button type="button" value="compass-deploy" data-thrallo-control="selected-software"
+          aria-label="selected Software Id Compass Deploy" aria-pressed="false"
+          onclick="this.setAttribute('aria-pressed','true');document.getElementById('detail').textContent='Detail panel shows Compass Deploy'">Compass Deploy</button></div>
+        <p id="detail"></p>
+      </main>`;
+      const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY, contract: {
+          journeys: [secondary], allJourneys: [primary, secondary],
+          interactionContract: { flows: [secondarySelection] },
+          prerequisiteInteractionContract: {
+            flows: [primarySearch, primaryApply, primarySelection, secondarySelection],
+          },
+        } });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.deepEqual(result.journeys[0].setup.performed, []);
+      assert.equal(result.journeys[0].setup.directEntry, "selectedSoftwareId");
+    });
+
     await t.test("a real dead button is an app-functional failure", async () => {
       const action = control("save project", "save-project", ["button"]);
       const result = await run("<main><button data-thrallo-action=\"save-project\">Save project</button><p id=out></p></main>",

@@ -1017,6 +1017,34 @@ async function semanticControlVisible(page, control) {
   return identities.some((identity) => semanticKey(identity) === target);
 }
 
+/**
+ * Is the contract's value control already usable on the fresh surface?
+ *
+ * Secondary journeys can share a page with the primary without sharing its UI progression. When
+ * their first input/selection is already enabled, replaying every earlier primary control can
+ * actively move the page away from the secondary's valid start state (for example by applying an
+ * unrelated filter). Step-gated flows still replay prerequisites because their later control is
+ * absent or disabled until the earlier steps run.
+ */
+async function semanticValueControlReady(page, control) {
+  if (!control?.machineId) return false;
+  const candidates = page.locator(
+    `[data-thrallo-control="${control.machineId}"]:visible, [data-thrallo-action="${control.machineId}"]:visible`,
+  );
+  const count = Math.min(await candidates.count().catch(() => 0), 24);
+  for (let index = 0; index < count; index += 1) {
+    const ready = await candidates.nth(index).evaluate((element) => {
+      const interactive = "button,input,select,textarea,[role=button],[role=radio],[role=option],[role=combobox]";
+      const usable = (candidate) => !candidate.disabled && !candidate.readOnly
+        && candidate.getAttribute("aria-disabled") !== "true";
+      if (element.matches(interactive) && usable(element)) return true;
+      return [...element.querySelectorAll(interactive)].some(usable);
+    }).catch(() => false);
+    if (ready) return true;
+  }
+  return false;
+}
+
 /** Which control the contract expects AFTER this one, by contracted order. */
 function nextContractedControl(journeyFlows, flow) {
   if (!flow) return null;
@@ -3357,9 +3385,17 @@ export async function verifyJourneys({
         });
       let setup = null;
       if (prerequisites.controls.length) {
-        setup = await establishPrerequisites(page, prerequisites.controls, {
-          marker, authMarker, journeyFlows, verifierPolicy,
-        });
+        const directValueEntry = journeyFlows.find((flow) => (
+          ["input", "selection"].includes(flow.kind) && flow.control
+        ));
+        const directEntryReady = !prerequisites.requiresDurableRecord && directValueEntry
+          && await semanticValueControlReady(page, directValueEntry.control);
+        setup = directEntryReady
+          ? { ok: true, performed: [], directEntry: directValueEntry.control.logicalField
+            || directValueEntry.control.accessibleName }
+          : await establishPrerequisites(page, prerequisites.controls, {
+            marker, authMarker, journeyFlows, verifierPolicy,
+          });
         if (!setup.ok) {
           results.push({
             id: journey.id, title: journey.title, priority: journey.priority,

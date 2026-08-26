@@ -6,7 +6,7 @@
 import { parse } from "@babel/parser";
 
 import {
-  ACTION_INTENT, actionIntents, commencesSomething, progressesSomething,
+  ACTION_INTENT, actionIntents, commencesSomething, phraseIntentMatches, progressesSomething,
 } from "./actionIntent.mjs";
 import { aggregateCapabilityFacts, FACTORY_METHODS } from "./capabilityLint.mjs";
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
@@ -65,6 +65,12 @@ const words = (value) => String(value || "").toLowerCase().match(/[a-z][a-z0-9-]
 const unique = (values) => [...new Set(values.filter(Boolean))];
 const list = (value) => (Array.isArray(value) ? value : []);
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
+const lexicalKey = (value) => {
+  const token = String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (token.length > 4 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
+  if (token.length > 4 && token.endsWith("s")) return token.slice(0, -1);
+  return token;
+};
 const scopedStateValue = (value, journeyId) => {
   const record = object(value);
   return record && Object.hasOwn(record, journeyId) ? record[journeyId] : value;
@@ -148,6 +154,49 @@ function atomicSelectionPlan(step, operands) {
     return { controls: operands, produces: [] };
   }
   return { controls: identities, produces: derived };
+}
+
+/**
+ * A single structured step may deliberately combine typed and selected values, for example
+ * "enter search text and choose catalogue filters". `operates` identifies every field but the
+ * step-level intent set alone cannot assign one primitive to all of them: taking the first intent
+ * turns the text field into a chooser, while taking the last turns every select into a textbox.
+ *
+ * Associate each operated field with the nearest preceding value verb that names it. This stays
+ * structural: the contract's fields and canonical intent positions are the authority, and the
+ * prose only assigns those already-declared fields to one of the two already-declared primitives.
+ */
+function mixedValueOperandKinds(step, operands, fallbackKind) {
+  const action = String(step?.action || "");
+  const actionTokens = action.toLowerCase().match(/[a-z][a-z0-9'-]*/g) || [];
+  const matches = phraseIntentMatches(action, "clause")
+    .flatMap((match) => match.intents
+      .filter((intent) => [ACTION_INTENT.SELECTION, ACTION_INTENT.INPUT].includes(intent))
+      .map((intent) => ({ index: match.index,
+        kind: intent === ACTION_INTENT.SELECTION ? "selection" : "input" })))
+    .sort((a, b) => a.index - b.index);
+  const ownerAt = (index) => [...matches].reverse().find((match) => match.index < index) || null;
+  const plan = new Map();
+  for (const operand of operands || []) {
+    const operandTokens = unique(semanticAliases(operand)
+      .flatMap((alias) => words(String(alias).replace(/([a-z])([A-Z])/g, "$1 $2")))
+      .map(lexicalKey));
+    const ownedOccurrences = actionTokens
+      .map((token, index) => ({ index, token: lexicalKey(token), owner: ownerAt(index) }))
+      .filter((row) => operandTokens.includes(row.token) && row.owner);
+    const scored = new Map();
+    for (const row of ownedOccurrences) {
+      const current = scored.get(row.owner.kind) || { count: 0, distance: 0 };
+      current.count += 1;
+      current.distance += row.index - row.owner.index;
+      scored.set(row.owner.kind, current);
+    }
+    const ranked = [...scored.entries()].sort((a, b) => (
+      b[1].count - a[1].count || a[1].distance - b[1].distance
+    ));
+    plan.set(operand, ranked[0]?.[0] || fallbackKind);
+  }
+  return plan;
 }
 
 /**
@@ -492,6 +541,11 @@ export function buildInteractionContract(contract, {
         : null;
       const valuePlan = atomicSelectionPlan(step, valueOperands || []);
       const controlOperands = operandKind === "selection" ? valuePlan.controls : valueOperands;
+      const partitionedValueOperands = (controlOperands || []).length > 0;
+      const mixedValueKinds = partitionedValueOperands
+        && !declaredPrimitive && kinds.includes("selection") && kinds.includes("input")
+        ? mixedValueOperandKinds(step, controlOperands || [], operandKind)
+        : new Map((controlOperands || []).map((field) => [field, operandKind]));
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
       const durableKinds = new Set(["mutation", "cancellation", "lookup", "recovery"]);
@@ -517,12 +571,17 @@ export function buildInteractionContract(contract, {
         const routeWithoutValueIntent = /^\s*\//.test(String(step?.target || ""))
           && !kinds.includes(kind);
         if (drivesValues && valueOperands && (kinds.includes("recovery") || routeWithoutValueIntent)) continue;
-        // A second value-writing kind on a step whose operands are declared is an artefact of an
-        // ambiguous verb ("select an account type" is a chooser, not a chooser AND a text box).
-        if (drivesValues && valueOperands && kind !== operandKind) continue;
+        // A second value-writing kind on a step whose operands are declared is usually an
+        // ambiguous-verb artefact. A genuinely mixed step is the exception: its declared fields
+        // are partitioned between the canonical input and selection clauses above.
+        if (drivesValues && valueOperands && (partitionedValueOperands
+          ? ![...mixedValueKinds.values()].includes(kind) : kind !== operandKind)) continue;
         const fields = drivesValues
-          ? (controlOperands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind))
+          ? (partitionedValueOperands
+            ? controlOperands.filter((field) => mixedValueKinds.get(field) === kind)
+            : (controlOperands || fieldCandidates(contract, `${step.action || ""} ${step.target || ""}`, kind)))
           : [null];
+        if (drivesValues && partitionedValueOperands && !fields.length) continue;
         for (const field of fields.length ? fields : [null]) {
           const writes = [];
           const reads = [];
