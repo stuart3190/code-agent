@@ -5,6 +5,7 @@
 // bounded extension rather than turning the whole application back into free-form generation.
 
 import { scaffoldEntry, SCAFFOLD_REGISTRY_VERSION, SCAFFOLDS } from "./scaffoldRegistry.mjs";
+import { MAX_JOURNEYS_PER_FILE } from "../appBuild/modularity.mjs";
 
 export const SCAFFOLD_GRAPH_VERSION = 2;
 
@@ -300,11 +301,23 @@ export function validateScaffoldGraph(graph, contract, capabilityGraph) {
 
 export function scaffoldModulePlan(graph, existingPlan = []) {
   // Scaffold families replace the old speculative free-form flow/component tree. Retain only
-  // deterministic capability modules and explicitly bounded specialist/custom modules; mounted
-  // screens below are the sole generated UI owners.
+  // deterministic capability modules and explicitly bounded specialist/custom modules. A mounted
+  // screen remains the sole ROUTE owner, but a screen coordinating more journeys than the
+  // modularity gate permits must retain one bounded child-flow module per journey. Dropping those
+  // modules made the canonical plan contradict the generation brief: the model was told to split
+  // the shared screen while the machine-enforced plan exposed only that screen as writable.
+  const decomposedJourneyIds = new Set((graph?.screens || []).flatMap((screen) => {
+    const owned = (graph?.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
+      .map((row) => row.journeyId);
+    return owned.length > MAX_JOURNEYS_PER_FILE ? owned : [];
+  }));
+  const isRequiredChildFlow = (module) => String(module?.path || "").startsWith("src/components/")
+    && /flow composition/i.test(module?.role || "")
+    && (module?.journeyIds || []).some((journeyId) => decomposedJourneyIds.has(journeyId));
   const boundedExisting = (existingPlan || []).filter((module) => module?.providedBy === "capability_composer"
     || module?.protected === true || module?.customBehaviorId || module?.customExtensionId
-    || (module?.requiredImports || []).length || String(module?.path || "").startsWith("src/extensions/"));
+    || (module?.requiredImports || []).length || String(module?.path || "").startsWith("src/extensions/")
+    || isRequiredChildFlow(module));
   const screens = (graph?.screens || []).map((screen) => ({
     path: screen.module,
     role: "mounted screen composition and application-specific visual design",

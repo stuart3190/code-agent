@@ -149,6 +149,46 @@ test("a mounted screen is one generation unit across its contracted journeys", (
     spec.scaffoldGraph.journeyOwnership[2].mountedModule);
 });
 
+test("a crowded mounted screen retains bounded child-flow modules in the canonical plan", () => {
+  const contract = {
+    summary: "A public software catalogue with transient search, filters, selection, and favourites",
+    entities: [], operations: [], auth: { required: false },
+    routes: [{ path: "/", name: "Software Catalogue" }],
+    journeys: [
+      { id: "browse-filter", title: "Browse and filter software", priority: "primary", steps: [
+        { action: "enter a catalogue search", target: "search", expect: "matching software is visible" },
+        { action: "select a category filter", target: "category", expect: "the matching category remains visible" },
+        { action: "select a software item", target: "software card", expect: "item details are visible" },
+      ] },
+      { id: "clear-results", title: "Clear an empty result", priority: "secondary", steps: [
+        { action: "enter an unmatched search", target: "search", expect: "an empty result is visible" },
+        { action: "clear the catalogue search", target: "clear", expect: "software cards are visible again" },
+      ] },
+      { id: "manage-favourites", title: "Manage transient favourites", priority: "secondary", steps: [
+        { action: "select a software item", target: "software card", expect: "item details are visible" },
+        { action: "add the selected item", target: "favourites", expect: "the item is visible in favourites" },
+        { action: "remove the selected item", target: "favourites", expect: "the favourites area is empty" },
+      ] },
+    ],
+  };
+  const spec = deriveBuildSpec(contract);
+  const screen = spec.modulePlan.find((module) => module.providedBy === "scaffold_screen_slot");
+  const childFlows = spec.modulePlan.filter((module) => /flow composition/i.test(module.role || ""));
+  const plannedPaths = new Set(spec.modulePlan.map((module) => module.path));
+
+  assert.deepEqual(screen.journeyIds, contract.journeys.map((journey) => journey.id));
+  assert.deepEqual(childFlows.map((module) => module.journeyIds[0]).sort(),
+    contract.journeys.map((journey) => journey.id).sort());
+  assert.ok(childFlows.every((module) => module.path.startsWith("src/components/")));
+  for (const flow of spec.interactionContract.flows) {
+    if (String(flow.stateOwner || "").startsWith("src/components/")) {
+      assert.ok(plannedPaths.has(flow.stateOwner), `${flow.id} state owner was removed from the canonical plan`);
+    }
+  }
+  assert.deepEqual(spec.moduleContracts.specifications.map((row) => row.path).sort(),
+    [...plannedPaths].sort());
+});
+
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {
   const inventory = {
     summary: "An inventory system for stock levels",
