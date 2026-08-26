@@ -5,8 +5,9 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 
 import {
-  controlResetTransition, expectationKeywords, expectationOutcome, expectationRequestsControlReset,
-  isObservationOnlyStep, removalExpectationSpec, requestsSingleCollectionMemberAction, verifyJourneys,
+  collectionMembershipExpectationSpec, controlResetTransition, expectationKeywords, expectationOutcome,
+  expectationRequestsControlReset, isObservationOnlyStep, removalExpectationSpec,
+  requestsSingleCollectionMemberAction, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -124,6 +125,14 @@ test("removal expectations retain a separate positive postcondition", () => {
     action: "remove the selected software",
     expect: "Atlas Editor is removed from the saved catalogue",
   }), null);
+});
+
+test("multi-member collection expectations retain their named scope", () => {
+  assert.deepEqual(
+    collectionMembershipExpectationSpec("the favourites list contains Atlas Editor and Compass Deploy"),
+    { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] },
+  );
+  assert.equal(collectionMembershipExpectationSpec("Atlas Editor is visible"), null);
 });
 
 test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
@@ -441,6 +450,51 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
+    });
+
+    await t.test("global catalogue copy cannot hide a missing collection member", async () => {
+      const favourite = {
+        ...control("favouriteSoftwareIds", "add-favourite-software", ["button", "option"]),
+        verificationValue: "compass-deploy",
+        selectedState: true,
+      };
+      const result = await run(`<main>
+        <section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <article>Atlas Editor</article><article>Compass Deploy</article>
+          <button data-thrallo-control="add-favourite-software" data-thrallo-option="compass-deploy"
+            value="compass-deploy" aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed','true');document.getElementById('favourite-members').innerHTML='<li>Compass Deploy</li>'">Add Compass Deploy</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <ul id="favourite-members"><li>Atlas Editor</li></ul>
+        </section></main>`,
+      { action: "add a second software item to favourites", operates: ["favouriteSoftwareIds"],
+        expect: "the favourites list contains Atlas Editor and Compass Deploy" },
+      [{ kind: "selection", valueWritten: "favouriteSoftwareIds", control: favourite },
+        { kind: "action", operationId: "toggle-favourite", reads: ["favouriteSoftwareIds"],
+          writes: ["favouriteSoftwareIds"] }]);
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.deepEqual(result.journeys[0].steps[0].controlEvidence.collectionMembership.missing,
+        ["Atlas Editor"]);
+
+      const retained = await run(`<main>
+        <section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <article>Atlas Editor</article><article>Compass Deploy</article>
+          <button data-thrallo-control="add-favourite-software" data-thrallo-option="compass-deploy"
+            value="compass-deploy" aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed','true');document.getElementById('favourite-members').insertAdjacentHTML('beforeend','<li>Compass Deploy</li>')">Add Compass Deploy</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <ul id="favourite-members"><li>Atlas Editor</li></ul>
+        </section></main>`,
+      { action: "add a second software item to favourites", operates: ["favouriteSoftwareIds"],
+        expect: "the favourites list contains Atlas Editor and Compass Deploy" },
+      [{ kind: "selection", valueWritten: "favouriteSoftwareIds", control: favourite },
+        { kind: "action", operationId: "toggle-favourite", reads: ["favouriteSoftwareIds"],
+          writes: ["favouriteSoftwareIds"] }]);
+      assert.equal(retained.pass, true, JSON.stringify(retained.journeys));
     });
 
     await t.test("an empty-state message cannot hide a failed contracted removal", async () => {

@@ -512,6 +512,62 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
     remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
 }
 
+const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
+const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
+
+// A named collection containing several named members is stronger than global page copy. The
+// same subjects may legitimately remain visible in catalogue cards or a detail panel, so page-
+// wide keyword presence cannot prove that the collection retained every member.
+export function collectionMembershipExpectationSpec(expect = "") {
+  const match = COLLECTION_MEMBERSHIP_PATTERN.exec(String(expect || "").trim());
+  if (!match) return null;
+  const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
+  const members = match[2].split(/\s*(?:,|\band\b)\s*/i)
+    .map((member) => member.replace(/[.;:]$/, "").trim()).filter(Boolean);
+  if (!keywords(collection, 5).length || members.length < 2 || members.length > 5
+    || members.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length)) return null;
+  return { collection, members };
+}
+
+async function collectionMembershipState(page, spec) {
+  const topics = keywords(spec.collection, 5).filter((word) => !COLLECTION_STRUCTURE_WORDS.has(word));
+  return page.evaluate(({ wantedMembers, collectionTopics }) => {
+    const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const members = wantedMembers.map(normalized);
+    const visible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+        && rect.width > 0 && rect.height > 0;
+    };
+    const regions = [...document.querySelectorAll(
+      "section, aside, [role='region'], [role='list'], ul, ol, table",
+    )].filter(visible).map((element) => {
+      const text = normalized(element.innerText);
+      const heading = element.querySelector("h1, h2, h3, h4, legend")?.innerText || "";
+      const identity = normalized(`${element.getAttribute("aria-label") || ""} ${heading}`);
+      const present = members.filter((member) => text.includes(member));
+      return {
+        element, textLength: text.length, present,
+        identityTopicMatches: collectionTopics.filter((topic) => identity.includes(topic)).length,
+        textTopicMatches: collectionTopics.filter((topic) => text.includes(topic)).length,
+      };
+    }).filter((row) => collectionTopics.length === 0 || row.textTopicMatches > 0)
+      .sort((left, right) => right.identityTopicMatches - left.identityTopicMatches
+        || left.textLength - right.textLength || right.textTopicMatches - left.textTopicMatches);
+    const region = regions[0] || null;
+    const present = region?.present || [];
+    return {
+      checked: true,
+      ok: Boolean(region) && present.length === members.length,
+      regionFound: Boolean(region),
+      present: wantedMembers.filter((_member, index) => present.includes(members[index])),
+      missing: wantedMembers.filter((_member, index) => !present.includes(members[index])),
+    };
+  }, { wantedMembers: spec.members, collectionTopics: topics })
+    .catch(() => ({ checked: false, ok: false, regionFound: false, present: [], missing: spec.members }));
+}
+
 async function collectionActionMemberState(page, spec, control, { mark = false, marker = null } = {}) {
   const markerValue = mark ? `removal-${Date.now()}-${Math.random().toString(16).slice(2)}` : marker;
   return page.evaluate(({ wantedTarget, collectionTopics, machineId, accessibleNames, markerValue, requireTarget }) => {
@@ -558,13 +614,17 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
       "section, aside, [role='region'], [role='list'], ul, ol, table",
     )].filter(visible).map((element) => {
       const text = normalized(element.innerText);
+      const heading = element.querySelector("h1, h2, h3, h4, legend")?.innerText || "";
+      const identity = normalized(`${element.getAttribute("aria-label") || ""} ${heading}`);
       const relatedMembers = memberRows.filter((row) => element.contains(row.member));
       return { element, text, targetPresent: text.includes(targetText),
         topicMatches: collectionTopics.filter((topic) => text.includes(topic)).length,
+        identityTopicMatches: collectionTopics.filter((topic) => identity.includes(topic)).length,
         controlTopicMatches: relatedMembers.length
           ? Math.max(...relatedMembers.map((row) => row.controlTopicMatches)) : -1 };
     }).filter((row) => row.topicMatches > 0 && (!requireTarget || row.targetPresent))
       .sort((left, right) => right.controlTopicMatches - left.controlTopicMatches
+        || right.identityTopicMatches - left.identityTopicMatches
         || left.text.length - right.text.length || right.topicMatches - left.topicMatches);
     const collectionRegion = markedRegion || regions[0]?.element || null;
     let regionMarked = false;
@@ -2107,6 +2167,7 @@ async function runStep(page, step, {
   const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
   const removalSpec = removalExpectationSpec({ action, expect });
+  const collectionMembershipSpec = collectionMembershipExpectationSpec(expect);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
     && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
   const removalBaseline = removalFlow
@@ -2423,8 +2484,8 @@ async function runStep(page, step, {
     const cancels = interactionFlows.some((flow) => flow.kind === "cancellation");
     const selectionFlows = cancels ? [] : declaredSelections;
     if (selectionFlows.length) {
-      const companionAction = interactionFlows.find((flow) => flow.control
-        && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+      const companionAction = interactionFlows.find((flow) =>
+        ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
       // One contracted step can set several independent filters. A fixture may deliberately keep
       // one at its current sentinel while another filter makes the real transition. Treat the
       // exact current value as that field's established precondition, but only for a compound
@@ -2474,6 +2535,10 @@ async function runStep(page, step, {
       if (!companionAction) return selectionResult;
       drove = drove || selectionResult.drove;
       controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+      // A selection-owned operation runs through the option's onSelect handler. It still has to
+      // prove the operation's contracted outcome below, but the driver must not click a second
+      // prose-matched control after the semantic option already triggered it.
+      if (!companionAction.control) contractDriven = true;
     } else {
       const outcome = await driveSelection(page, step);
       if (outcome) return outcome;
@@ -2738,6 +2803,7 @@ async function runStep(page, step, {
   const pollDeadline = Date.now() + pollBudget;
   let mutationEvidence = { checked: false, ok: false };
   let removalEvidence = { checked: false, ok: false };
+  let collectionMembershipEvidence = { checked: false, ok: false, present: [], missing: [] };
   for (;;) {
     found = [];
     fresh = [];
@@ -2764,6 +2830,9 @@ async function runStep(page, step, {
         postcondition,
       };
     }
+    if (collectionMembershipSpec) {
+      collectionMembershipEvidence = await collectionMembershipState(page, collectionMembershipSpec);
+    }
     if (mutationFlow && found.length / wanted.length >= 0.5 && fresh.length === 0) {
       const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       mutationEvidence = mutationCommitEvidence({
@@ -2776,6 +2845,8 @@ async function runStep(page, step, {
       mutationWithValues: mutationEvidence.ok, verifierPolicy,
       stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok || removalEvidence.ok,
       requiredStateTransition: removalBaseline.targetPresent,
+      collectionStateRequired: Boolean(collectionMembershipSpec),
+      collectionStateSatisfied: collectionMembershipEvidence.ok,
       actionProven: contractDriven || navigated || filledSomething || droveStepper });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
@@ -2905,6 +2976,8 @@ async function runStep(page, step, {
     verifierPolicy,
     stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok || removalEvidence.ok,
     requiredStateTransition: removalBaseline.targetPresent,
+    collectionStateRequired: Boolean(collectionMembershipSpec),
+    collectionStateSatisfied: collectionMembershipEvidence.ok,
     actionProven: contractDriven || navigated || filledSomething || droveStepper || Boolean(route),
   });
   if (resetEvidence.checked) {
@@ -2912,6 +2985,9 @@ async function runStep(page, step, {
   }
   if (removalEvidence.checked) {
     controlEvidence = { ...(controlEvidence || {}), removalTransition: removalEvidence };
+  }
+  if (collectionMembershipEvidence.checked) {
+    controlEvidence = { ...(controlEvidence || {}), collectionMembership: collectionMembershipEvidence };
   }
 
   if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
@@ -3016,8 +3092,24 @@ export function expectationOutcome({
   mutationWithValues = false, navigational: declaredNavigational = null, establishedState = false,
   readOnlyAssertion = false, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
   stateChanged = false, requiredStateTransition = false, actionProven = false,
+  collectionStateRequired = false, collectionStateSatisfied = false,
 }) {
   const ratio = found.length / wanted.length;
+  if (collectionStateRequired && !collectionStateSatisfied) {
+    if (isMinimalContractVerifier(verifierPolicy)) {
+      return verificationVerdict(drove && actionProven
+        ? VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE
+        : VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      drove && actionProven
+        ? "the contracted action ran, but the named collection does not contain every required member"
+        : "the verifier could not establish the required collection membership",
+      { drove });
+    }
+    return { drove, status: drove && actionProven ? "fail" : "undriveable",
+      detail: drove && actionProven
+        ? "the contracted action ran, but the named collection does not contain every required member"
+        : "the verifier could not establish the required collection membership" };
+  }
   if (requiredStateTransition && !stateChanged) {
     if (isMinimalContractVerifier(verifierPolicy)) {
       return verificationVerdict(drove && actionProven
