@@ -802,13 +802,17 @@ async function selectionGroups(page) {
     const groups = [];
     let id = 0;
     for (const [parent, els] of byParent) {
-      if (els.length < 2) continue;
+      const machineId = els.map((el) => el.getAttribute("data-thrallo-control")).find(Boolean) || null;
+      // Filtering can legitimately leave one selectable result. A single ordinary button is not
+      // enough evidence of a choice, but one carrying the contract's opaque identity is exact
+      // authority. It still has to prove a real false-to-true selected-state transition below.
+      if (els.length < 2 && !machineId) continue;
       groups.push({
         groupId: id,
         // The group's OPAQUE identity, if its options carry one. Position-independent and
         // label-independent by construction: renaming every option, translating the page or
         // reordering the DOM cannot change it.
-        machineId: els.map((el) => el.getAttribute("data-thrallo-control")).find(Boolean) || null,
+        machineId,
         identities: [...new Set(identitiesOf(parent, els))],
         contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
         options: els.map((el, i) => {

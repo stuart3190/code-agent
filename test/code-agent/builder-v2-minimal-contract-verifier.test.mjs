@@ -236,6 +236,27 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.requiredControl.kind, "selection");
     });
 
+    await t.test("one machine-identified catalogue result proves a real selection transition", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        selectedState: true,
+      };
+      const step = { action: "select the visible software item", operates: ["selectedSoftwareId"],
+        expect: "selected software details are visible" };
+      const flow = { kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem };
+      const working = `<main><button data-thrallo-control="software-item" aria-pressed="false"
+          onclick="this.setAttribute('aria-pressed','true'); document.getElementById('out').textContent='Selected software details are visible'">Atlas Editor</button>
+          <p id="out"></p></main>`;
+      const result = await run(working, step, [flow]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.match(result.journeys[0].steps[0].detail, /selection created/i);
+
+      const unchanged = await run(working.replace("this.setAttribute('aria-pressed','true');", ""), step, [flow]);
+      assert.equal(unchanged.pass, false, "a machine identity must not weaken selected-state proof");
+      assert.equal(unchanged.journeys[0].steps[0].status, "fail");
+      assert.match(unchanged.journeys[0].steps[0].detail, /never gained a selected state/i);
+    });
+
     await t.test("a required input absent from a healthy active surface is app-repairable", async () => {
       const query = control("searchQuery", "search-query");
       const result = await run("<main><h1>Software catalogue</h1><p>Available tools</p></main>",
