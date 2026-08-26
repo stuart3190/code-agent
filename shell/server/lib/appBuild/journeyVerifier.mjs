@@ -468,6 +468,16 @@ export function isObservationOnlyStep(step = {}, interactionFlows = [], {
     || ACTION_FLOW_KINDS.has(flow.kind));
 }
 
+/** Resolve an explicitly contracted responsive viewport without depending on one exact verb. */
+export function viewportForAction(action) {
+  const value = String(action || "");
+  if (!/\bviewport\b/i.test(value)) return null;
+  if (/\btablet\b/i.test(value)) return { width: 820, height: 900, kind: "tablet" };
+  if (/\b(?:mobile|narrow)\b/i.test(value)) return { width: 390, height: 844, kind: "mobile" };
+  if (/\b(?:desktop|wide)\b/i.test(value)) return { width: 1280, height: 900, kind: "desktop" };
+  return null;
+}
+
 async function renderedFormControls(page) {
   return page.locator("input, textarea, select").evaluateAll((elements) => elements.map((el) => {
     const labels = el.labels ? [...el.labels].map((label) => (label.innerText || "").trim()).filter(Boolean) : [];
@@ -1232,7 +1242,9 @@ async function advanceFlow(page) {
 
 // Drive a selection step semantically. Returns a full step outcome, or null when no selectable
 // group matches — the caller falls back to the generic text path.
-async function driveSelection(page, step, flow = null, excludedKeys = new Set(), journeyFlows = []) {
+async function driveSelection(page, step, flow = null, excludedKeys = new Set(), journeyFlows = [], {
+  allowAlreadySelected = false,
+} = {}) {
   const contractedNames = controlAliases(flow?.control);
   const wanted = contractedNames.length
     ? unique(contractedNames.flatMap((name) => keywords(name, 5)))
@@ -1302,6 +1314,25 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     };
   }
   if (clickIndex === -1) return null;
+  // A mixed selection-plus-action step may target an item that the journey already selected, then
+  // activate a separate contracted operation on that item. Re-clicking the already-selected
+  // option proves no transition and used to return before the operation could run. An exact
+  // contract fixture is enough to establish the action target, but only when the caller confirms
+  // that a separate machine-identified action follows on this same step.
+  if (allowAlreadySelected && contractedFixture !== null && clickIndex === beforeSelected) {
+    const selected = before[beforeSelected];
+    return {
+      drove: false,
+      groupKey: group.key,
+      status: "pass",
+      detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established for the companion action`,
+      selectedText: selected?.text || selected?.label || contractedFixture,
+      groupId: group.groupId,
+      controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+        fixtureAuthority: "contract", verificationValue: contractedFixture,
+        selectedGroupContext: group.contextText, selectedOptions: before, precondition: "already_selected" },
+    };
+  }
 
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   await page.locator(`[data-thrallo-opt="${group.groupId}:${clickIndex}"]`).click({ timeout: 5_000 }).catch(() => {});
@@ -1337,12 +1368,12 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   };
 }
 
-async function driveSelectionAfterNavigation(page, step, flow, excludedKeys, journeyFlows) {
+async function driveSelectionAfterNavigation(page, step, flow, excludedKeys, journeyFlows, options = {}) {
   const deadline = Date.now() + 5_000;
-  let outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows);
+  let outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows, options);
   while (!outcome && Date.now() < deadline) {
     await page.waitForTimeout(200);
-    outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows);
+    outcome = await driveSelection(page, step, flow, excludedKeys, journeyFlows, options);
   }
   return outcome;
 }
@@ -1726,12 +1757,9 @@ async function runStep(page, step, {
   }
 
   let viewportChanged = false;
-  if (/resize to (?:a )?tablet/i.test(action)) {
-    await page.setViewportSize({ width: 820, height: 900 });
-    drove = true;
-    viewportChanged = true;
-  } else if (/resize to (?:a )?mobile/i.test(action)) {
-    await page.setViewportSize({ width: 390, height: 844 });
+  const contractedViewport = viewportForAction(action);
+  if (contractedViewport) {
+    await page.setViewportSize({ width: contractedViewport.width, height: contractedViewport.height });
     drove = true;
     viewportChanged = true;
   }
@@ -1988,6 +2016,9 @@ async function runStep(page, step, {
     const cancels = interactionFlows.some((flow) => flow.kind === "cancellation");
     const selectionFlows = cancels ? [] : declaredSelections;
     if (selectionFlows.length) {
+      const companionAction = interactionFlows.find((flow) => flow.control
+        && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+      const selectionOptions = { allowAlreadySelected: Boolean(companionAction) };
       const outcomes = [];
       const used = new Set();
       const advances = [];
@@ -1997,8 +2028,8 @@ async function runStep(page, step, {
         // observes the loading shell and falsely declares the contracted control absent. Poll only
         // after this step actually navigated; ordinary selection failures keep their fast path.
         let outcome = navigated
-          ? await driveSelectionAfterNavigation(page, step, flow, used, journeyFlows)
-          : await driveSelection(page, step, flow, used, journeyFlows);
+          ? await driveSelectionAfterNavigation(page, step, flow, used, journeyFlows, selectionOptions)
+          : await driveSelection(page, step, flow, used, journeyFlows, selectionOptions);
         // The contracted group may belong to a step the flow has not reached. Advance and retry,
         // bounded, and only while advancing actually changes the page. The retry re-locates the
         // group by IDENTITY, so advancing can never hand this step a different group's controls.
@@ -2006,7 +2037,7 @@ async function runStep(page, step, {
           const advance = await advanceFlow(page);
           advances.push(advance);
           if (!advance.advanced) break;
-          outcome = await driveSelection(page, step, flow, used, journeyFlows);
+          outcome = await driveSelection(page, step, flow, used, journeyFlows, selectionOptions);
         }
         if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
           detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
@@ -2020,12 +2051,17 @@ async function runStep(page, step, {
         if (flow.control.statePath) writtenPaths.add(flow.control.statePath);
         if (outcome.selectedText) selections.push(outcome.selectedText);
       }
-      return { drove: true, status: "pass", detail: outcomes.map((row) => row.detail).join("; "),
+      const selectionResult = { drove: outcomes.some((row) => row.drove), status: "pass",
+        detail: outcomes.map((row) => row.detail).join("; "),
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
         controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
+      if (!companionAction) return selectionResult;
+      drove = drove || selectionResult.drove;
+      controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+    } else {
+      const outcome = await driveSelection(page, step);
+      if (outcome) return outcome;
     }
-    const outcome = await driveSelection(page, step);
-    if (outcome) return outcome;
   }
 
   // Counter/stepper steps ("select number of adults and children"): drive the increment
@@ -2139,6 +2175,7 @@ async function runStep(page, step, {
           detail: `the contracted ${contractedAction.kind} control was not offered (${contractedAction.control.accessibleName})`,
           controlEvidence: { ...(controlEvidence || {}), activation } };
       }
+      controlEvidence = { ...(controlEvidence || {}), activation };
       drove = true;
       contractDriven = true;
     }
