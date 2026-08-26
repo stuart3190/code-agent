@@ -487,6 +487,7 @@ export function requestsSingleCollectionMemberAction(step = {}) {
 const REMOVAL_ACTION_PATTERN = /\b(?:remove|delete|archive|dismiss|detach)\b/i;
 const REMOVAL_RESULT_PATTERN = /\s+(?:is|was|has\s+been|gets?)\s+(?:removed|deleted|archived|dismissed|detached)\b/i;
 const POSITIVE_POSTCONDITION_PATTERN = /\b(?:and|while|but|however|yet)\b/i;
+const POSTCONDITION_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section))\s+(?:shows?|displays?|contains?|includes?)\b/i;
 
 // A successful removal is observable as absence, so the removed entity's name cannot also be
 // required as positive page copy. Keep this structural and deliberately narrow: the action must
@@ -502,18 +503,22 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
   const suffix = text.slice(result.index + result[0].length);
   const connector = POSITIVE_POSTCONDITION_PATTERN.exec(suffix);
   if (!connector) return null;
-  const collection = suffix.slice(0, connector.index)
+  const explicitCollection = suffix.slice(0, connector.index)
     .replace(/^\s*(?:from|in|out\s+of)\s+(?:the\s+)?/i, "").trim();
   const postcondition = suffix.slice(connector.index + connector[0].length).trim();
+  const collection = explicitCollection
+    || POSTCONDITION_COLLECTION_PATTERN.exec(postcondition)?.[1]?.trim()
+    || "";
   if (!collection || !postcondition || !keywords(rawTarget, 5).length
     || !keywords(collection, 5).length || !keywords(postcondition, 5).length) return null;
   return { target: rawTarget, collection, postcondition,
-    emptyStateRequired: /\bempty(?:-|\s+)state\b/i.test(postcondition),
+    emptyStateRequired: /\bempty\b.{0,40}\b(?:state|message)\b/i.test(postcondition),
     remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
 }
 
 const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
+const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query)\b/i;
 
 // A named collection containing several named members is stronger than global page copy. The
 // same subjects may legitimately remain visible in catalogue cards or a detail panel, so page-
@@ -525,7 +530,8 @@ export function collectionMembershipExpectationSpec(expect = "") {
   const members = match[2].split(/\s*(?:,|\band\b)\s*/i)
     .map((member) => member.replace(/[.;:]$/, "").trim()).filter(Boolean);
   if (!keywords(collection, 5).length || members.length < 2 || members.length > 5
-    || members.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length)) return null;
+    || members.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length
+      || COLLECTION_MEMBER_CLAUSE_PATTERN.test(member))) return null;
   return { collection, members };
 }
 

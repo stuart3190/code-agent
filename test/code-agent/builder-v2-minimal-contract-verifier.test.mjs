@@ -125,6 +125,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     action: "remove the selected software",
     expect: "Atlas Editor is removed from the saved catalogue",
   }), null);
+  assert.deepEqual(removalExpectationSpec({
+    action: "remove Atlas Editor from favourites",
+    expect: "Atlas Editor is removed and the favourites section shows an empty favourites message",
+  }), {
+    target: "Atlas Editor",
+    collection: "favourites section",
+    postcondition: "the favourites section shows an empty favourites message",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {
@@ -133,6 +143,9 @@ test("multi-member collection expectations retain their named scope", () => {
     { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] },
   );
   assert.equal(collectionMembershipExpectationSpec("Atlas Editor is visible"), null);
+  assert.equal(collectionMembershipExpectationSpec(
+    "the visible software list shows only software matching the search and selected filters",
+  ), null);
 });
 
 test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
@@ -445,6 +458,31 @@ test("retained false negatives and concrete failures classify correctly in a rea
             onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove from favourites</button></li>
           </ul><p id="favourites-empty" data-empty-state hidden>No favourites yet</p>
         </section></section></main>`, step,
+      [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
+    });
+
+    await t.test("a removal can derive collection scope from its positive empty-message clause", async () => {
+      const remove = {
+        ...control("favourites list remove control", "remove-favourite-software", ["button"]),
+        accessibleName: "favourites list remove control",
+        accessibleNames: ["favourites list remove control"],
+      };
+      const step = {
+        action: "remove Atlas Editor from favourites",
+        expect: "Atlas Editor is removed and the favourites section shows an empty favourites message",
+      };
+      const result = await run(`<main><section aria-label="Software catalogue"><h2>Software catalogue</h2>
+        <article>Atlas Editor</article></section>
+        <section aria-label="Session favourites"><h2>Favourites</h2>
+          <div id="favourite-item">Atlas Editor <button data-thrallo-action="remove-favourite-software"
+            aria-label="favourites list remove control"
+            onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove</button></div>
+          <p id="favourites-empty" data-empty-state hidden>Empty favourites message: no software is saved yet.</p>
+        </section></main>`, step,
       [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
