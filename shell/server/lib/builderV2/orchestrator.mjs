@@ -222,6 +222,20 @@ export function targetedGateCorrection(gate, tree, contract = null) {
   files = [...new Set([...files, ...sourcePaths([
     ...(gate.layers?.d0d2?.problems || []), failure.stderr || "",
   ])])].sort();
+  // Several journey-owned child modules can all be valid yet unreachable for the same reason:
+  // their one mounted screen forgot to import them. Including every child plus that screen made
+  // an otherwise one-file integration fix exceed the targeted-correction width, so the
+  // orchestrator discarded the candidate and regenerated the whole application. Preserve the
+  // detailed findings in the brief, but when their combined scope is too wide, write only to the
+  // mounted integration owner(s). Editing an unreachable child cannot make itself reachable.
+  if (files.length > TARGETED_CANDIDATE_MAX_FILES && unreachable.length && mountedIntegrationFiles.length) {
+    const unreachableFiles = new Set(unreachable.map((finding) => finding?.file).filter(Boolean));
+    const integrationOnly = [...new Set([
+      ...files.filter((path) => !unreachableFiles.has(path)),
+      ...mountedIntegrationFiles,
+    ])].sort();
+    if (integrationOnly.length && integrationOnly.length <= TARGETED_CANDIDATE_MAX_FILES) files = integrationOnly;
+  }
   if (failure.kind === "config" && !files.length) files = ["package.json"];
   if (!files.length || files.length > TARGETED_CANDIDATE_MAX_FILES) return null;
   const missing = files.filter((path) => typeof tree?.[path] !== "string");

@@ -14,6 +14,16 @@ const slug = (value, fallback = "screen") => String(value || fallback).toLowerCa
   .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback;
 const pascal = (value, fallback = "Screen") => slug(value, fallback).split("-")
   .map((part) => part[0].toUpperCase() + part.slice(1)).join("") || fallback;
+const relativeImport = (from, to) => {
+  const source = String(from || "").split("/").slice(0, -1);
+  const target = String(to || "").split("/");
+  while (source.length && target.length && source[0] === target[0]) {
+    source.shift();
+    target.shift();
+  }
+  const specifier = `${"../".repeat(source.length)}${target.join("/")}`;
+  return specifier.startsWith(".") ? specifier : `./${specifier}`;
+};
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const semanticTokens = (value) => new Set(String(value || "").toLowerCase().split(/[^a-z0-9]+/)
   .filter((part) => part.length > 2)
@@ -318,17 +328,25 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
     || module?.protected === true || module?.customBehaviorId || module?.customExtensionId
     || (module?.requiredImports || []).length || String(module?.path || "").startsWith("src/extensions/")
     || isRequiredChildFlow(module));
-  const screens = (graph?.screens || []).map((screen) => ({
-    path: screen.module,
-    role: "mounted screen composition and application-specific visual design",
-    journeyIds: (graph.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
-      .map((row) => row.journeyId),
-    providedBy: "scaffold_screen_slot", scaffoldScreenId: screen.screenId,
-    routePath: screen.routePath,
-    stateOwnership: { owns: "screen composition and ephemeral presentation state", survivesReload: false,
-      durableStateOwner: "declared capability/custom extension interfaces" },
-    requiredExports: ["default"],
-  }));
+  const childFlows = boundedExisting.filter(isRequiredChildFlow);
+  const screens = (graph?.screens || []).map((screen) => {
+    const journeyIds = (graph.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
+      .map((row) => row.journeyId);
+    const requiredImports = childFlows.filter((module) => (module.journeyIds || [])
+      .some((journeyId) => journeyIds.includes(journeyId)))
+      .map((module) => relativeImport(screen.module, module.path));
+    return {
+      path: screen.module,
+      role: "mounted screen composition and application-specific visual design",
+      journeyIds,
+      providedBy: "scaffold_screen_slot", scaffoldScreenId: screen.screenId,
+      routePath: screen.routePath,
+      stateOwnership: { owns: "screen composition and ephemeral presentation state", survivesReload: false,
+        durableStateOwner: "declared capability/custom extension interfaces" },
+      requiredImports,
+      requiredExports: ["default"],
+    };
+  });
   const extensions = (graph?.extensions || []).map((extension) => ({
     path: extension.module, role: `bounded custom extension ${extension.extensionId}`,
     journeyIds: extension.owningJourneys, requiredExports: extension.requiredExports,

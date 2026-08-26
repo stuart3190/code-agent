@@ -180,6 +180,9 @@ test("a crowded mounted screen retains bounded child-flow modules in the canonic
   assert.deepEqual(childFlows.map((module) => module.journeyIds[0]).sort(),
     contract.journeys.map((journey) => journey.id).sort());
   assert.ok(childFlows.every((module) => module.path.startsWith("src/components/")));
+  const expectedChildImports = childFlows.map((module) => `../../${module.path.replace(/^src\//, "")}`).sort();
+  assert.deepEqual(screen.requiredImports.sort(), expectedChildImports,
+    "the mounted coordinator is explicitly contracted to integrate every bounded child flow");
   for (const flow of spec.interactionContract.flows) {
     if (String(flow.stateOwner || "").startsWith("src/components/")) {
       assert.ok(plannedPaths.has(flow.stateOwner), `${flow.id} state owner was removed from the canonical plan`);
@@ -187,6 +190,8 @@ test("a crowded mounted screen retains bounded child-flow modules in the canonic
   }
   assert.deepEqual(spec.moduleContracts.specifications.map((row) => row.path).sort(),
     [...plannedPaths].sort());
+  assert.deepEqual(spec.moduleContracts.specifications
+    .find((row) => row.path === screen.path).requiredImports.sort(), expectedChildImports);
 });
 
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {

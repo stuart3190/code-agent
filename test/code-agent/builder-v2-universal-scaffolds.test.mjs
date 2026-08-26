@@ -244,6 +244,24 @@ test("an unmounted journey module and an undeclared repair identifier are reject
   assert.deepEqual(correction.allowedFiles, [dead, mountedOwner].sort());
   assert.match(correction.instruction, /owning mounted screen/);
 
+  const crowdedCorrection = targetedGateCorrection({ layers: { d0d2: {
+    failure: { kind: "static_application", findings: [
+      unreachable,
+      { ...unreachable, file: "src/components/clear-results/ClearResultsFlow.jsx",
+        message: "clear-results is not reachable from its mounted screen" },
+      { ...unreachable, file: "src/components/manage-favourites/ManageFavouritesFlow.jsx",
+        message: "manage-favourites is not reachable from its mounted screen" },
+    ] },
+    problems: [
+      unreachable.message,
+      "src/components/clear-results/ClearResultsFlow.jsx is not reachable from its mounted screen",
+      "src/components/manage-favourites/ManageFavouritesFlow.jsx is not reachable from its mounted screen",
+    ],
+  } } }, tree, spec.contract);
+  assert.deepEqual(crowdedCorrection.allowedFiles, [mountedOwner],
+    "several unreachable children sharing one mounted screen reduce to the causal integration owner");
+  assert.match(crowdedCorrection.instruction, /editing or re-exporting the unreachable module alone cannot make progress/);
+
   delete tree[dead];
   const owner = spec.scaffoldGraph.journeyOwnership[0].mountedModule;
   tree[owner] = "export default function Screen(){ return <div>{reservation ? 'yes' : 'no'}</div>; }";
