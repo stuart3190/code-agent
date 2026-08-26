@@ -34,7 +34,7 @@ import {
   isMinimalContractVerifier,
   verificationVerdict,
 } from "./verifierPolicy.mjs";
-import { isKeyboardFocusOnlyStep } from "../../../shared/interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 

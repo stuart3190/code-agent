@@ -20,7 +20,7 @@ import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
-import { isKeyboardFocusOnlyStep } from "../../../shared/interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
 

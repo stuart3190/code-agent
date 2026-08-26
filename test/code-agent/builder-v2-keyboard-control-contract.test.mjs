@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
-import { isKeyboardFocusOnlyStep } from "../../shell/shared/interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep } from "../../shell/server/lib/builderV2/interactionSemantics.mjs";
 import { buildInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 
 function softwareCatalogue(steps) {
