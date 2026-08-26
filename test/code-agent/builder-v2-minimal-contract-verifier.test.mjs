@@ -414,6 +414,35 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
     });
 
+    await t.test("a removal is scoped to its collection instead of a broad catalogue wrapper", async () => {
+      const remove = {
+        ...control("favourites list remove control", "remove-favourite-software", ["button"]),
+        accessibleName: "favourites list remove control",
+        accessibleNames: ["favourites list remove control"],
+      };
+      const step = {
+        action: "remove the selected software from the favourites list",
+        expect: "Atlas Editor is removed from the favourites list and the favourites list empty state is visible",
+      };
+      const result = await run(`<main><section>
+        <header><p>Browse the software catalogue and keep a session favourites shortlist.</p></header>
+        <section aria-label="Software detail"><h2>Atlas Editor</h2>
+          <button data-thrallo-action="remove-favourite-software" aria-label="detail panel favourite control"
+            onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove Atlas Editor from favourites</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2><ul>
+          <li id="favourite-item">Atlas Editor <button data-thrallo-action="remove-favourite-software"
+            aria-label="favourites list remove control"
+            onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove from favourites</button></li>
+          </ul><p id="favourites-empty" data-empty-state hidden>No favourites yet</p>
+        </section></section></main>`, step,
+      [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
+    });
+
     await t.test("an empty-state message cannot hide a failed contracted removal", async () => {
       const remove = {
         ...control("saved catalogue remove control", "remove-catalogue-software", ["button"]),

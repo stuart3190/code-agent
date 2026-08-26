@@ -535,26 +535,38 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
     });
     const markedRegion = markerValue
       ? document.querySelector(`[data-thrallo-verifier-removal-region="${markerValue}"]`) : null;
-    const regions = [...document.querySelectorAll(
-      "section, aside, [role='region'], [role='list'], ul, ol, table",
-    )].filter(visible).map((element) => {
-      const text = normalized(element.innerText);
-      return { element, text, targetPresent: text.includes(targetText),
-        topicMatches: collectionTopics.filter((topic) => text.includes(topic)).length };
-    }).filter((row) => row.topicMatches > 0 && (!requireTarget || row.targetPresent))
-      .sort((left, right) => right.topicMatches - left.topicMatches || left.text.length - right.text.length);
-    const collectionRegion = markedRegion || regions[0]?.element || null;
-    const members = [];
+    const memberRows = [];
     for (const candidate of candidates) {
       let member = candidate.parentElement;
       for (let depth = 0; member && depth < 7 && ![document.body, document.documentElement].includes(member);
         depth += 1, member = member.parentElement) {
         if (!normalized(member.innerText).includes(targetText)) continue;
-        members.push(member);
+        const identity = normalized(candidate.getAttribute("aria-label") || candidate.getAttribute("title")
+          || candidate.getAttribute("name") || candidate.innerText || candidate.value);
+        memberRows.push({ member,
+          controlTopicMatches: collectionTopics.filter((topic) => identity.includes(topic)).length });
         break;
       }
     }
-    const uniqueMembers = [...new Set(members)];
+    const uniqueMembers = [...new Set(memberRows.map((row) => row.member))];
+    // Collection terms can be distributed across an unrelated broad wrapper (for example one
+    // word in introductory copy and another in a contextual control). Scope the measurement to
+    // the smallest semantic region containing the target member whose own contracted control
+    // best names the collection. Otherwise the wrapper continues to contain the target in a
+    // detail panel after a correct list removal and produces a false functional failure.
+    const regions = [...document.querySelectorAll(
+      "section, aside, [role='region'], [role='list'], ul, ol, table",
+    )].filter(visible).map((element) => {
+      const text = normalized(element.innerText);
+      const relatedMembers = memberRows.filter((row) => element.contains(row.member));
+      return { element, text, targetPresent: text.includes(targetText),
+        topicMatches: collectionTopics.filter((topic) => text.includes(topic)).length,
+        controlTopicMatches: relatedMembers.length
+          ? Math.max(...relatedMembers.map((row) => row.controlTopicMatches)) : -1 };
+    }).filter((row) => row.topicMatches > 0 && (!requireTarget || row.targetPresent))
+      .sort((left, right) => right.controlTopicMatches - left.controlTopicMatches
+        || left.text.length - right.text.length || right.topicMatches - left.topicMatches);
+    const collectionRegion = markedRegion || regions[0]?.element || null;
     let regionMarked = false;
     if (markerValue && (collectionRegion || uniqueMembers[0])) {
       uniqueMembers[0]?.setAttribute("data-thrallo-verifier-removal-member", markerValue);
