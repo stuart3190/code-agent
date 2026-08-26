@@ -153,6 +153,55 @@ test("a required read-only local catalogue collection is available as journey se
   )));
 });
 
+test("required transient filter defaults reset by an operation are available at journey start", () => {
+  const contract = {
+    summary: "Browse a local software catalogue and clear its filters", projectType: "tool",
+    auth: { required: false }, routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueFilterState", owned: false,
+      storage: "browser-session state only; no durable backend",
+      fields: [
+        { name: "query", type: "string" },
+        { name: "categoryFilter", type: "string", required: true },
+        { name: "platformFilter", type: "string", required: true },
+        { name: "visibleItemIds", type: "string[]", required: true },
+      ] }],
+    operations: [{
+      id: "apply-filters", entity: "catalogueFilterState", kind: "search",
+      journey: "view-empty-filter-state", responsibilities: [{
+        type: "functional", behavior: "filter the bundled catalogue using current session values",
+        reads: ["query", "categoryFilter", "platformFilter"], writes: ["visibleItemIds"],
+      }],
+    }, {
+      id: "clear-filters", entity: "catalogueFilterState", kind: "update",
+      journey: "view-empty-filter-state", responsibilities: [{
+        type: "functional", behavior: "restore the default local filter state",
+        reads: ["categoryFilter", "platformFilter"],
+        writes: ["query", "categoryFilter", "platformFilter", "visibleItemIds"],
+      }],
+    }],
+    integrations: [], states: [], acceptance: [], deferred: [],
+    journeys: [{
+      id: "view-empty-filter-state", title: "View and clear an empty catalogue filter state",
+      priority: "primary", stage: "primary_journey", steps: [
+        { action: "open the catalogue", target: "/", expect: "software cards are visible" },
+        { action: "enter an unmatched query", target: "catalogue search",
+          operates: ["query"], expect: "the query is visible" },
+        { action: "apply the current filters", target: "apply filters control",
+          operates: ["apply-filters"], expect: "an empty catalogue state is visible" },
+        { action: "clear all filters", target: "clear filters control",
+          operates: ["clear-filters"], expect: "the default software cards are visible again" },
+      ],
+    }],
+  };
+
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(spec.interactionContract.scenarios["view-empty-filter-state"].initialState, {
+    query: "", categoryFilter: "", platformFilter: "",
+  });
+  assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
+});
+
 test("operation-managed catalogue collections remain action state instead of text inputs", () => {
   const contract = {
     summary: "Browse a local software catalogue and keep session favourites", projectType: "tool",

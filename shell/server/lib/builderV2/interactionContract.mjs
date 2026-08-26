@@ -124,6 +124,13 @@ const transientStateDefaults = (contract, journey) => {
         const collection = /\[\]\s*$/.test(type)
           || /^(?:array|list|collection|set)(?:\b|<|\[)/.test(type);
         const collectionAccumulator = writes.has(normalized(read)) && collection;
+        // A transient reset/clear operation commonly reads the current scalar UI state and writes
+        // its default back. When no visitor control supplies that field before the operation, the
+        // scalar is an accumulator too: it exists at journey start and is not an unproduced input.
+        // Without this, default select/filter state was rejected before generation merely because
+        // a later reset operation also owned the same required fields.
+        const resettableScalar = !collection && writes.has(normalized(read))
+          && !visitorOperatedFields.has(normalized(read));
         // A required transient collection which no operation writes and no visitor control
         // supplies is bundled seed/configuration data (for example, an in-code catalogue). It
         // exists at journey start just like an accumulator's empty collection. Scalar required
@@ -133,7 +140,7 @@ const transientStateDefaults = (contract, journey) => {
         // Optional transient inputs have canonical empty values. A required collection that an
         // operation reads and writes is an accumulator and also needs an empty start; "required"
         // means the state must exist, not that a visitor can supply a value before first use.
-        if (field.required !== true || collectionAccumulator || readOnlySeedCollection
+        if (field.required !== true || collectionAccumulator || resettableScalar || readOnlySeedCollection
           || Object.hasOwn(field, "initialValue") || Object.hasOwn(field, "default")) {
           defaults[field.name] = transientDefaultValue(field);
         }
