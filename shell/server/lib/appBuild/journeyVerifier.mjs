@@ -531,7 +531,10 @@ export function collectionMembershipExpectationSpec(expect = "") {
   if (!match) return null;
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   const clauses = match[2].split(/\s*(?:,|\band\b)\s*/i)
-    .map((member) => member.replace(/[.;:]$/, "").trim()).filter(Boolean);
+    .map((member, index) => {
+      const normalized = member.replace(/[.;:]$/, "").trim();
+      return index === 0 ? normalized.replace(/^both\s+/i, "") : normalized;
+    }).filter(Boolean);
   const postconditionIndex = clauses.findIndex((clause, index) => index >= 2
     && COLLECTION_POSTCONDITION_CLAUSE_PATTERN.test(clause));
   const members = postconditionIndex < 0 ? clauses : clauses.slice(0, postconditionIndex);
