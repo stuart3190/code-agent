@@ -2579,6 +2579,31 @@ async function runStep(page, step, {
           break;
         }
       }
+      // A transient operation can be owned by the field that triggers it. Search-as-you-type and
+      // live filters are the canonical shape: the contract records both the input write and the
+      // derived result operation, but the customer did not ask for a second Apply button. Accept
+      // that coalescing only when the operation consumes this step's exact input state, the step
+      // names no explicit activation, and the contracted result became freshly visible. Durable
+      // mutations and explicit click/apply/reset steps still require their own control identity.
+      if (!activated && contractedAction.kind === "action" && filledContractedInputs.length
+        && !/\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i.test(action)) {
+        const inputWrites = new Set(filledContractedInputs.flatMap((flow) => flow.writes || []));
+        const consumesFilledInput = (contractedAction.reads || []).some((path) => inputWrites.has(path));
+        if (consumesFilledInput) {
+          const transitionDeadline = Date.now() + 3_000;
+          let expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
+          while (!expectationEvidence.met && Date.now() < transitionDeadline) {
+            await page.waitForTimeout(200);
+            expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
+          }
+          if (expectationEvidence.met) {
+            activated = true;
+            activation.matchedBy = "contracted_input_auto_applied_action";
+            activation.expectationEvidence = expectationEvidence;
+            delete activation.reason;
+          }
+        }
+      }
       if (!activated) {
         return { drove, status: "undriveable",
           detail: `the contracted ${contractedAction.kind} control was not offered (${contractedAction.control.accessibleName})`,

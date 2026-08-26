@@ -546,6 +546,34 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.match(result.journeys[0].steps[0].detail, /selection created/i);
     });
 
+    await t.test("a transient search operation may be owned by its contracted input", async () => {
+      const search = { ...control("searchQuery", "software-search"), verificationValue: "no-match" };
+      const apply = control("search input", "apply-software-filter", ["button"]);
+      const flows = [
+        { kind: "input", valueWritten: "searchQuery", writes: ["journey.searchQuery"], control: search },
+        { kind: "action", operationId: "apply-software-filter", reads: ["journey.searchQuery"],
+          writes: ["journey.visibleSoftwareIds"], control: apply },
+      ];
+      const html = `<main><label>Software search
+        <input data-thrallo-control="software-search" aria-label="search Query"
+          oninput="document.getElementById('out').textContent='No software matches the current search'">
+        </label><p id="out"></p></main>`;
+      const automatic = await run(html, {
+        action: "type a search term with no catalogue matches", operates: ["searchQuery"],
+        expect: "no software matches the current search",
+      }, flows);
+      assert.equal(automatic.pass, true, JSON.stringify(automatic.journeys));
+      assert.equal(automatic.journeys[0].steps[0].controlEvidence.activation.matchedBy,
+        "contracted_input_auto_applied_action");
+
+      const explicit = await run(html, {
+        action: "type a search term and click apply filters", operates: ["searchQuery"],
+        expect: "no software matches the current search",
+      }, flows);
+      assert.equal(explicit.pass, false, "an explicit apply action still requires its own control");
+      assert.equal(explicit.journeys[0].steps[0].status, "undriveable");
+    });
+
     await t.test("a required input absent from a healthy active surface is app-repairable", async () => {
       const query = control("searchQuery", "search-query");
       const result = await run("<main><h1>Software catalogue</h1><p>Available tools</p></main>",
