@@ -767,7 +767,13 @@ export function createOrchestrator({
               + `[${headroomScope.allowedFiles.join(", ")}]; retrying only those unfinished files`);
             continue;
           }
-          working = correctionDispatch && latestCandidate ? working : originalTree;
+          // A headroom continuation is still the same logical candidate even when its routed
+          // step remains `repair`. Resetting it here discarded clean earlier batches while
+          // leaving their snapshot as the next parent, so a later correction silently rebuilt
+          // from stale source. Preserve the retained bytes; only a genuinely fresh attempt may
+          // restart from the increment base.
+          working = internalHeadroomSplit || (correctionDispatch && latestCandidate)
+            ? working : originalTree;
           log(`${step}: ${applied.rejected.length} patch op(s) rejected (${classes.join(", ")}), feeding reasons back`);
           const staleCorrectionFiles = correctionDispatch && corrections >= maxCandidateCorrections
             ? [...new Set(applied.rejected

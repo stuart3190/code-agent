@@ -323,6 +323,73 @@ export const wizard = makeWizardMachine({ id: "book", steps: ["date", "review", 
     "compile waits until the rejected missing module has been created");
 });
 
+test("a rejected repair headroom continuation preserves earlier software catalogue batches", async () => {
+  const contract = {
+    summary: "A public software catalogue",
+    entities: [], operations: [], auth: { required: false },
+    routes: [{ path: "/", name: "Catalogue" }],
+    journeys: [{ id: "browse-catalogue", title: "Browse the software catalogue", priority: "primary",
+      steps: [{ action: "open the catalogue", target: "/", expect: "software catalogue entries are visible" }] }],
+  };
+  const screen = deriveBuildSpec(contract).scaffoldGraph.journeyOwnership[0].mountedModule;
+  const continuation = "src/components/catalogue/SoftwareList.jsx";
+  const initial = `export default function CatalogueScreen() {
+  const retainedBatch = "base";
+  return <main><h1>Software catalogue</h1><p>{retainedBatch}</p></main>;
+}`;
+  let repairDispatches = 0;
+  const snapshotStore = createSnapshotStore();
+  const orchestrator = createOrchestrator({
+    contractFn: async () => contract,
+    patchesFn: async (input) => {
+      if (input.step === "core") return [{ replaceFile: screen, content: initial }];
+      assert.equal(input.step, "repair");
+      repairDispatches += 1;
+      if (repairDispatches === 1) {
+        const patches = [{ file: screen, ops: [{ op: "replace_exact",
+          symbol: 'const retainedBatch = "base";', content: 'const retainedBatch = "retained";' }] }];
+        Object.defineProperty(patches, "dispatchScope", { value: {
+          kind: "headroom_continuation", logicalStep: "repair", batchIndex: 0,
+          files: [screen], allowedFiles: [screen], allowedPrefixes: [],
+          remainingFiles: [continuation], moduleContracts: { version: 1, specifications: [] },
+        } });
+        return patches;
+      }
+      assert.match(input.tree[screen], /retainedBatch = "retained"/,
+        "every continuation starts from the retained candidate");
+      if (repairDispatches === 2) {
+        // A malformed tool entry has no retryable file. It must not erase the clean first batch.
+        return [{ file: null, ops: [] }];
+      }
+      assert.deepEqual(input.headroomScope.allowedFiles, [continuation]);
+      return [{ newFile: continuation,
+        content: "export function SoftwareList() { return null; }\n" }];
+    },
+    assetService: {
+      async resolveIntents() { return { resolved: [], providerCalls: 0 }; },
+      async assetManifestFor() { return []; },
+    },
+    snapshotStore,
+    buildStore: memoryBuildStore(),
+    baseTree: () => fromScaffold(REACT_VITE),
+    baseline: REACT_VITE,
+    journeysFn: async ({ journeys, tree }) => {
+      const pass = String(tree[screen] || "").includes('retainedBatch = "retained"')
+        && typeof tree[continuation] === "string";
+      return { journeys: journeys.map((journey) => ({ ...journey, owners: [screen],
+        status: pass ? "pass" : "fail", steps: journey.steps.map((step) => ({ ...step,
+          drove: true, status: pass ? "pass" : "fail",
+          detail: pass ? "catalogue entries are visible" : "catalogue entries are not visible" })) })) };
+    },
+  });
+
+  const result = await orchestrator.runBuild({
+    owner: "o", projectId: "catalogue-headroom-retention", request: "software catalogue",
+  });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(repairDispatches, 3);
+});
+
 test("a rejected shared controller retry preserves queued work and its interaction-sized output budget", () => {
   const controller = "src/components/catalogue/SoftwareCatalogueController.jsx";
   const queued = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
