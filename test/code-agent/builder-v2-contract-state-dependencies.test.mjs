@@ -106,7 +106,7 @@ test("a transient software catalogue search does not invent a durable lookup lif
   const spec = deriveBuildSpec(contract);
   assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
   assert.deepEqual(spec.interactionContract.scenarios["browse-catalogue"].initialState,
-    { favouriteSoftwareIds: [] });
+    { searchQuery: "", favouriteSoftwareIds: [] });
   assert.ok(!spec.interactionContract.flows.some((flow) => (
     [...(flow.reads || []), ...(flow.writes || [])].some((path) => String(path).includes(".durable."))
   )));

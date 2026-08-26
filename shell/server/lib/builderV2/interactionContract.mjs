@@ -75,7 +75,16 @@ const initialStateFields = (value, journeyId) => {
 };
 const initialStateFieldPaths = (value, journeyId) => initialStateFields(value, journeyId)
   .flatMap((field) => [`${journeyId}.draft.${field}`, `${journeyId}.custom.${field}`]);
-const transientCollectionDefaults = (contract, journey) => {
+const transientDefaultValue = (field) => {
+  if (Object.hasOwn(field || {}, "default")) return field.default;
+  const type = String(field?.type || "").toLowerCase();
+  if (/^(?:array|list|collection|set)(?:\b|<|\[)/.test(type)) return [];
+  if (/^(?:object|map|record)(?:\b|<)/.test(type)) return {};
+  if (/^(?:boolean|bool)\b/.test(type)) return false;
+  if (/^(?:string|text|email|url|date|time)\b/.test(type)) return "";
+  return null;
+};
+const transientStateDefaults = (contract, journey) => {
   const referencedOperations = new Set((journey?.steps || []).flatMap((step) => [
     ...list(step?.operates), ...list(step?.reads),
   ]).map(normalized));
@@ -89,14 +98,13 @@ const transientCollectionDefaults = (contract, journey) => {
     const entity = (contract?.entities || []).find((candidate) => (
       normalized(candidate?.name) === normalized(operation?.entity)
     ));
-    const collectionFields = new Map((entity?.fields || [])
-      .filter((field) => /^(?:array|list|collection|set)(?:\b|<|\[)/i.test(String(field?.type || "")))
-      .map((field) => [normalized(field?.name), field?.name]));
+    const optionalFields = new Map((entity?.fields || [])
+      .filter((field) => field?.required !== true)
+      .map((field) => [normalized(field?.name), field]));
     for (const responsibility of operation.responsibilities) {
-      const writes = new Set(list(responsibility?.writes).map(normalized));
       for (const read of list(responsibility?.reads)) {
-        const field = collectionFields.get(normalized(read));
-        if (field && writes.has(normalized(read))) defaults[field] = [];
+        const field = optionalFields.get(normalized(read));
+        if (field) defaults[field.name] = transientDefaultValue(field);
       }
     }
   }
@@ -804,12 +812,12 @@ export function buildInteractionContract(contract, {
       && (own.some((flow) => flow.durableLifecycle && readsDurable(flow)) || declared === "existing");
     const basis = declared ? "declared-operation" : "data-flow";
     const explicitInitialState = object(journey.initialState);
-    const collectionDefaults = transientCollectionDefaults(contract, journey);
+    const transientDefaults = transientStateDefaults(contract, journey);
     const declaredStartAuthority = {
       initialState: explicitInitialState
-        ? { ...collectionDefaults, ...explicitInitialState }
+        ? { ...transientDefaults, ...explicitInitialState }
         : list(journey.initialState).length ? list(journey.initialState)
-          : Object.keys(collectionDefaults).length ? collectionDefaults : [],
+          : Object.keys(transientDefaults).length ? transientDefaults : [],
       durableState: list(journey.durableState),
       externalState: list(journey.externalState),
       capabilityOutputs: list(journey.capabilityOutputs),
