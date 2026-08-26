@@ -25,6 +25,18 @@ export const PROXY_SUBNET = "10.83.7.0/24";
 export const PROXY_GATEWAY = "10.83.7.1";
 export const CADDY_PROXY_IP = "10.83.7.2";       // must match the `bind` line in Caddyfile + Caddyfile.tls
 
+// The shared TLS front retains certificates and active ACME state for every live preview host.
+// Production measured 710 MiB anonymous RSS immediately before a 768 MiB cgroup OOM severed an
+// in-flight verifier connection. One GiB is the next bounded container tier (about 31% headroom),
+// not an unbounded host allocation; memory-swap remains equal so the proxy cannot spill to swap.
+export function caddyRuntimeArgs(env = process.env) {
+  const memory = String(env.CADDY_MEMORY_LIMIT || "1g").trim().toLowerCase();
+  if (!/^\d+(?:\.\d+)?[kmgt]?b?$/.test(memory)) {
+    throw new Error("CADDY_MEMORY_LIMIT must be a Docker memory value such as 1024m or 1g");
+  }
+  return ["--memory", memory, "--memory-swap", memory, "--restart", "unless-stopped"];
+}
+
 // Per-container isolation hardening — copied verbatim from the proven spike.
 const HARDENING = [
   "--cap-drop", "ALL",
@@ -80,11 +92,17 @@ export async function ensureCaddy(opts) {
   const running = await docker(["ps", "--filter", `name=^${CADDY_NAME}$`, "--format", "{{.Names}}"]);
   if (running === CADDY_NAME) {
     const cur = await docker(["inspect", "-f", '{{ index .Config.Labels "buildr.scheme" }}', CADDY_NAME], { ok: true });
-    if (cur === scheme) return; // right front already up
+    if (cur === scheme) {
+      // Resource updates are live and do not restart Caddy. Reconcile here because three
+      // provisioner services share this front and whichever starts first may have created it.
+      await docker(["update", ...caddyRuntimeArgs(), CADDY_NAME]);
+      return;
+    }
   }
   await docker(["rm", "-f", CADDY_NAME], { ok: true });
   // Static --ip on the proxy net so the Caddyfile can `bind` its listener to this address only.
-  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`, "--network", PROXY_NET, "--ip", CADDY_PROXY_IP];
+  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`,
+    "--network", PROXY_NET, "--ip", CADDY_PROXY_IP, ...caddyRuntimeArgs()];
   for (const p of publish) args.push("-p", p);
   for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   // Persist Caddy's /data (issued certs + ACME account) across recreations so we don't re-issue the

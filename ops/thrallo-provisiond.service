@@ -7,7 +7,7 @@
 # buildr's instance):
 #   PROVISIOND_PORT=8791
 #   PROVISIOND_TOKEN=<thrallo-only token>
-#   PREVIEW_PUBLIC_SUFFIX=preview.thrallo.com
+#   PREVIEW_PUBLIC_SUFFIX=preview.buildr101.com # shared wildcard certificate; avoids per-build issuance
 #   PREVIEW_SCHEME=https
 #   PUBLISH_DIR=/home/ubuntu/publish          # SAME dir as buildr's instance — the shared Caddy
 #                                             # mounts exactly one /publish, and a caddy re-raise
