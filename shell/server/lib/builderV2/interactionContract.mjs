@@ -17,7 +17,8 @@ import {
 import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
-  contractUsesDurablePersistence, operationUsesDurablePersistence, verificationFixtureFields,
+  contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
+  verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
@@ -74,6 +75,33 @@ const initialStateFields = (value, journeyId) => {
 };
 const initialStateFieldPaths = (value, journeyId) => initialStateFields(value, journeyId)
   .flatMap((field) => [`${journeyId}.draft.${field}`, `${journeyId}.custom.${field}`]);
+const transientCollectionDefaults = (contract, journey) => {
+  const referencedOperations = new Set((journey?.steps || []).flatMap((step) => [
+    ...list(step?.operates), ...list(step?.reads),
+  ]).map(normalized));
+  const defaults = {};
+  for (const operation of contract?.operations || []) {
+    const operationId = normalized(operation?.id || operation?.name);
+    if (operation?.journey !== journey?.id && !referencedOperations.has(operationId)) continue;
+    if (entityPersistencePolicy(contract, operation?.entity) !== "transient") continue;
+    if (!(operation?.responsibilities || []).length
+      || (operation.responsibilities || []).some((responsibility) => responsibility?.type !== "functional")) continue;
+    const entity = (contract?.entities || []).find((candidate) => (
+      normalized(candidate?.name) === normalized(operation?.entity)
+    ));
+    const collectionFields = new Map((entity?.fields || [])
+      .filter((field) => /^(?:array|list|collection|set)(?:\b|<|\[)/i.test(String(field?.type || "")))
+      .map((field) => [normalized(field?.name), field?.name]));
+    for (const responsibility of operation.responsibilities) {
+      const writes = new Set(list(responsibility?.writes).map(normalized));
+      for (const read of list(responsibility?.reads)) {
+        const field = collectionFields.get(normalized(read));
+        if (field && writes.has(normalized(read))) defaults[field] = [];
+      }
+    }
+  }
+  return defaults;
+};
 const IDENTITY_FIELD = /(?:id|key|reference)$/i;
 const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
 
@@ -775,8 +803,13 @@ export function buildInteractionContract(contract, {
     const consumes = !produces && touchesDurable
       && (own.some((flow) => flow.durableLifecycle && readsDurable(flow)) || declared === "existing");
     const basis = declared ? "declared-operation" : "data-flow";
+    const explicitInitialState = object(journey.initialState);
+    const collectionDefaults = transientCollectionDefaults(contract, journey);
     const declaredStartAuthority = {
-      initialState: object(journey.initialState) || list(journey.initialState),
+      initialState: explicitInitialState
+        ? { ...collectionDefaults, ...explicitInitialState }
+        : list(journey.initialState).length ? list(journey.initialState)
+          : Object.keys(collectionDefaults).length ? collectionDefaults : [],
       durableState: list(journey.durableState),
       externalState: list(journey.externalState),
       capabilityOutputs: list(journey.capabilityOutputs),

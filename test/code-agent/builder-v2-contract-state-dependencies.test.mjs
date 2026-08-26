@@ -93,7 +93,6 @@ test("a transient software catalogue search does not invent a durable lookup lif
     integrations: [], states: [], acceptance: [], deferred: [],
     journeys: [{
       id: "browse-catalogue", title: "Browse catalogue", priority: "primary", stage: "primary_journey",
-      initialState: { favouriteSoftwareIds: [] },
       steps: [
         { action: "open the software catalogue", target: "/", expect: "the catalogue is visible" },
         { action: "search for software", target: "software search input", operates: ["searchQuery"],
