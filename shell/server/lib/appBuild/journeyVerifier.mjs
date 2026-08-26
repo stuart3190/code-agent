@@ -488,6 +488,7 @@ const REMOVAL_ACTION_PATTERN = /\b(?:remove|delete|archive|dismiss|detach)\b/i;
 const REMOVAL_RESULT_PATTERN = /\s+(?:is|was|has\s+been|gets?)\s+(?:removed|deleted|archived|dismissed|detached)\b/i;
 const POSITIVE_POSTCONDITION_PATTERN = /\b(?:and|while|but|however|yet)\b/i;
 const POSTCONDITION_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section))\s+(?:shows?|displays?|contains?|includes?)\b/i;
+const POSTCONDITION_EMPTY_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?)\s+empty(?:-|\s+)(?:[\w-]+\s+){0,2}(?:state|message)\b/i;
 
 // A successful removal is observable as absence, so the removed entity's name cannot also be
 // required as positive page copy. Keep this structural and deliberately narrow: the action must
@@ -508,6 +509,7 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
   const postcondition = suffix.slice(connector.index + connector[0].length).trim();
   const collection = explicitCollection
     || POSTCONDITION_COLLECTION_PATTERN.exec(postcondition)?.[1]?.trim()
+    || POSTCONDITION_EMPTY_COLLECTION_PATTERN.exec(postcondition)?.[1]?.trim()
     || "";
   if (!collection || !postcondition || !keywords(rawTarget, 5).length
     || !keywords(collection, 5).length || !keywords(postcondition, 5).length) return null;

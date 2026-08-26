@@ -135,6 +135,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });
+  assert.deepEqual(removalExpectationSpec({
+    action: "remove the favourited software",
+    expect: "Compass Deploy is removed and the favourites empty message is visible again",
+  }), {
+    target: "Compass Deploy",
+    collection: "favourites",
+    postcondition: "the favourites empty message is visible again",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {
@@ -488,6 +498,34 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
+    });
+
+    await t.test("one removal operation may appear in both detail and collection contexts", async () => {
+      const remove = {
+        ...control("remove favourite control", "remove-favourite-software", ["button"]),
+        accessibleName: "remove favourite control",
+        accessibleNames: ["remove favourite control"],
+      };
+      const step = {
+        action: "remove the favourited software",
+        expect: "Compass Deploy is removed and the favourites empty message is visible again",
+      };
+      const result = await run(`<main>
+        <section aria-label="Software detail"><h2>Compass Deploy</h2>
+          <button data-thrallo-action="remove-favourite-software" aria-label="remove favourite control"
+            onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove favourite</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Favourites</h2>
+          <div id="favourite-item">Compass Deploy <button data-thrallo-action="remove-favourite-software"
+            aria-label="remove favourite control"
+            onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove</button></div>
+          <p id="favourites-empty" data-empty-state hidden>No favourites have been added yet.</p>
+        </section></main>`, step,
+      [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
     });
 
     await t.test("global catalogue copy cannot hide a missing collection member", async () => {
