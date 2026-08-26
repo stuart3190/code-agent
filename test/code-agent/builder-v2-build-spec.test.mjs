@@ -13,8 +13,11 @@ import {
 } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { scopeCapabilityGraph } from "../../shell/server/lib/builderV2/capabilityGraph.mjs";
 import { deriveModulePlan, journeyStepKinds } from "../../shell/server/lib/builderV2/contractTiering.mjs";
-import { validateInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
+import {
+  bindInteractionModulePlan, validateInteractionContract,
+} from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import { scaffoldModulePlan } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
+import { lintJourneyControllerMounts } from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
 
 const CONTRACT = {
   summary: "A workshop booking system with review, recovery and cancellation",
@@ -150,7 +153,7 @@ test("a mounted screen is one generation unit across its contracted journeys", (
     spec.scaffoldGraph.journeyOwnership[2].mountedModule);
 });
 
-test("a crowded mounted screen retains bounded child-flow modules in the canonical plan", () => {
+test("a crowded mounted screen has one bounded shared journey controller", () => {
   const contract = {
     summary: "A public software catalogue with transient search, filters, selection, and favourites",
     entities: [], operations: [], auth: { required: false },
@@ -178,12 +181,14 @@ test("a crowded mounted screen retains bounded child-flow modules in the canonic
   const plannedPaths = new Set(spec.modulePlan.map((module) => module.path));
 
   assert.deepEqual(screen.journeyIds, contract.journeys.map((journey) => journey.id));
-  assert.deepEqual(childFlows.map((module) => module.journeyIds[0]).sort(),
-    contract.journeys.map((journey) => journey.id).sort());
-  assert.ok(childFlows.every((module) => module.path.startsWith("src/components/")));
-  const expectedChildImports = childFlows.map((module) => `../../${module.path.replace(/^src\//, "")}`).sort();
-  assert.deepEqual(screen.requiredImports.sort(), expectedChildImports,
-    "the mounted coordinator is explicitly contracted to integrate every bounded child flow");
+  assert.equal(childFlows.length, 1);
+  assert.deepEqual(childFlows[0].journeyIds, contract.journeys.map((journey) => journey.id));
+  assert.ok(childFlows[0].path.startsWith("src/components/"));
+  assert.equal(childFlows[0].sharedControllerFor, screen.scaffoldScreenId);
+  assert.equal(screen.journeyController, childFlows[0].path);
+  const expectedChildImports = [`../../${childFlows[0].path.replace(/^src\//, "")}`];
+  assert.deepEqual(screen.requiredImports, expectedChildImports,
+    "the mounted coordinator is explicitly contracted to integrate one shared controller");
   for (const flow of spec.interactionContract.flows) {
     if (String(flow.stateOwner || "").startsWith("src/components/")) {
       assert.ok(plannedPaths.has(flow.stateOwner), `${flow.id} state owner was removed from the canonical plan`);
@@ -192,10 +197,15 @@ test("a crowded mounted screen retains bounded child-flow modules in the canonic
   assert.deepEqual(spec.moduleContracts.specifications.map((row) => row.path).sort(),
     [...plannedPaths].sort());
   assert.deepEqual(spec.moduleContracts.specifications
-    .find((row) => row.path === screen.path).requiredImports.sort(), expectedChildImports);
+    .find((row) => row.path === screen.path).requiredImports, expectedChildImports);
+  assert.equal(spec.moduleContracts.specifications
+    .find((row) => row.path === screen.path).semanticInteractions.length, 0,
+  "the mounted screen composes the controller instead of duplicating its controls");
+  assert.ok(spec.moduleContracts.specifications
+    .find((row) => row.path === childFlows[0].path).semanticInteractions.length > 0);
 });
 
-test("crowded software-catalogue child flows must invoke their planned custom behaviour modules", () => {
+test("a shared software-catalogue controller retains every planned custom behaviour module", () => {
   const journeyIds = ["browse-catalogue", "empty-result", "session-favourites"];
   const graph = {
     screens: [{ screenId: "catalogue-screen", module: "src/screens/scaffold/CatalogueScreen.jsx",
@@ -215,13 +225,54 @@ test("crowded software-catalogue child flows must invoke their planned custom be
     journeyIds: [journeyId],
   }));
   const plan = scaffoldModulePlan(graph, existingPlan);
+  const children = plan.filter((module) => /flow composition/i.test(module.role || ""));
+  assert.equal(children.length, 1);
+  assert.deepEqual(children[0].journeyIds, journeyIds);
+  assert.deepEqual(children[0].requiredImports,
+    journeyIds.map((journeyId) => `../../extensions/custom/${journeyId}.js`));
+});
 
-  for (const journeyId of journeyIds) {
-    const child = plan.find((module) => module.journeyIds?.length === 1
-      && module.journeyIds[0] === journeyId && /flow composition/i.test(module.role || ""));
-    assert.deepEqual(child.requiredImports, [`../../extensions/custom/${journeyId}.js`],
-      `${journeyId} must not duplicate its custom behaviour inside the view or leave it unreachable`);
-  }
+test("a mounted screen must render its shared journey controller exactly once", () => {
+  const modulePlan = [{
+    path: "src/screens/scaffold/SoftwareCatalogueScreen.jsx",
+    providedBy: "scaffold_screen_slot", journeyIds: ["browse", "clear", "favourites"],
+    journeyController: "src/components/browse/BrowseFlow.jsx",
+  }];
+  const screen = (body) => `import BrowseFlow from "../../components/browse/BrowseFlow.jsx";\n`
+    + `export default function SoftwareCatalogueScreen(){ return (${body}); }`;
+  assert.deepEqual(lintJourneyControllerMounts({
+    [modulePlan[0].path]: screen("<BrowseFlow />"),
+  }, modulePlan), []);
+  assert.equal(lintJourneyControllerMounts({
+    [modulePlan[0].path]: screen("<main />"),
+  }, modulePlan)[0].mounts, 0);
+  assert.equal(lintJourneyControllerMounts({
+    [modulePlan[0].path]: screen("<><BrowseFlow /><BrowseFlow /></>"),
+  }, modulePlan)[0].mounts, 2);
+});
+
+test("shared controllers retain only the journeys from their own mounted screen", () => {
+  const plan = { version: 2, flows: [
+    { id: "browse:1", journeyId: "browse", stateOwner: "src/components/old/BrowseFlow.jsx",
+      responsibleModules: ["src/components/old/BrowseFlow.jsx"], control: {
+        stateOwner: "src/components/old/BrowseFlow.jsx", validationOwner: "src/components/old/BrowseFlow.jsx",
+      } },
+    { id: "preferences:1", journeyId: "preferences", stateOwner: "src/components/old/PreferencesFlow.jsx",
+      responsibleModules: ["src/components/old/PreferencesFlow.jsx"], control: {
+        stateOwner: "src/components/old/PreferencesFlow.jsx", validationOwner: "src/components/old/PreferencesFlow.jsx",
+      } },
+  ] };
+  const modules = [
+    { path: "src/components/catalogue/CatalogueFlow.jsx", role: "shared step navigation and flow composition",
+      journeyIds: ["browse", "clear", "favourites"] },
+    { path: "src/components/preferences/PreferencesFlow.jsx", role: "shared step navigation and flow composition",
+      journeyIds: ["preferences", "reset", "preview"] },
+  ];
+  const rebound = bindInteractionModulePlan(plan, modules);
+  assert.equal(rebound.flows[0].stateOwner, modules[0].path);
+  assert.deepEqual(rebound.flows[0].responsibleModules, [modules[0].path]);
+  assert.equal(rebound.flows[1].stateOwner, modules[1].path);
+  assert.deepEqual(rebound.flows[1].responsibleModules, [modules[1].path]);
 });
 
 test("the module plan derives its vocabulary from the contract, never from a domain", () => {

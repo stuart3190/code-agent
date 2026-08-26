@@ -312,15 +312,16 @@ export function validateScaffoldGraph(graph, contract, capabilityGraph) {
 export function scaffoldModulePlan(graph, existingPlan = []) {
   // Scaffold families replace the old speculative free-form flow/component tree. Retain only
   // deterministic capability modules and explicitly bounded specialist/custom modules. A mounted
-  // screen remains the sole ROUTE owner, but a screen coordinating more journeys than the
-  // modularity gate permits must retain one bounded child-flow module per journey. Dropping those
-  // modules made the canonical plan contradict the generation brief: the model was told to split
-  // the shared screen while the machine-enforced plan exposed only that screen as writable.
-  const decomposedJourneyIds = new Set((graph?.screens || []).flatMap((screen) => {
-    const owned = (graph?.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
-      .map((row) => row.journeyId);
-    return owned.length > MAX_JOURNEYS_PER_FILE ? owned : [];
-  }));
+  // screen remains the sole ROUTE owner. When several journeys share that screen they also share
+  // one interaction surface: retaining one complete child flow per journey duplicated the same
+  // controls and state machines in the DOM. Collapse those planned flows into one bounded shared
+  // controller; presentation-only helpers may still be introduced inside its file boundary.
+  const crowdedScreens = (graph?.screens || []).map((screen) => ({
+    ...screen,
+    journeyIds: (graph?.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
+      .map((row) => row.journeyId),
+  })).filter((screen) => screen.journeyIds.length > MAX_JOURNEYS_PER_FILE);
+  const decomposedJourneyIds = new Set(crowdedScreens.flatMap((screen) => screen.journeyIds));
   const isRequiredChildFlow = (module) => String(module?.path || "").startsWith("src/components/")
     && /flow composition/i.test(module?.role || "")
     && (module?.journeyIds || []).some((journeyId) => decomposedJourneyIds.has(journeyId));
@@ -332,11 +333,25 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
       survivesReload: false, durableStateOwner: "capability handoff when contracted",
     },
   }));
+  const sharedChildren = crowdedScreens.map((screen) => {
+    const candidates = (existingPlan || []).filter((module) => isRequiredChildFlow(module)
+      && (module.journeyIds || []).some((journeyId) => screen.journeyIds.includes(journeyId)));
+    const selected = candidates[0];
+    return selected ? {
+      ...selected,
+      role: "shared step navigation and flow composition",
+      journeyIds: [...screen.journeyIds],
+      sharedControllerFor: screen.screenId,
+    } : null;
+  }).filter(Boolean);
+  const collapsedChildPaths = new Set((existingPlan || []).filter((module) => isRequiredChildFlow(module))
+    .map((module) => module.path));
   const boundedExisting = (existingPlan || []).filter((module) => module?.providedBy === "capability_composer"
     || module?.protected === true || module?.customBehaviorId || module?.customExtensionId
     || (module?.requiredImports || []).length || String(module?.path || "").startsWith("src/extensions/")
-    || isRequiredChildFlow(module));
-  const integratedExisting = boundedExisting.map((module) => {
+    || isRequiredChildFlow(module))
+    .filter((module) => !collapsedChildPaths.has(module.path));
+  const integratedExisting = [...boundedExisting, ...sharedChildren].map((module) => {
     if (!isRequiredChildFlow(module)) return module;
     const journeyIds = new Set(module.journeyIds || []);
     const requiredImports = extensions.filter((extension) => (extension.journeyIds || [])
@@ -351,12 +366,14 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
     const requiredImports = childFlows.filter((module) => (module.journeyIds || [])
       .some((journeyId) => journeyIds.includes(journeyId)))
       .map((module) => relativeImport(screen.module, module.path));
+    const journeyController = childFlows.find((module) => module.sharedControllerFor === screen.screenId)?.path || null;
     return {
       path: screen.module,
       role: "mounted screen composition and application-specific visual design",
       journeyIds,
       providedBy: "scaffold_screen_slot", scaffoldScreenId: screen.screenId,
       routePath: screen.routePath,
+      journeyController,
       stateOwnership: { owns: "screen composition and ephemeral presentation state", survivesReload: false,
         durableStateOwner: "declared capability/custom extension interfaces" },
       requiredImports,

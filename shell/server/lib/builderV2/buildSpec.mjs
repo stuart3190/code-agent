@@ -16,7 +16,7 @@ import {
   tierContract,
 } from "./contractTiering.mjs";
 import {
-  buildInteractionContract, composeCapabilityGraphInteractions, scopeInteractionContract,
+  bindInteractionModulePlan, buildInteractionContract, composeCapabilityGraphInteractions, scopeInteractionContract,
   validateInteractionContract,
 } from "./interactionContract.mjs";
 import { buildModuleGenerationContracts } from "./moduleContracts.mjs";
@@ -78,13 +78,16 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
   const compositionPlan = capabilityCompositionPlan(capabilityGraph);
   const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
+  const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
   const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);
-  const enriched = { ...plannedContract, interactionContract, dependencyPlan, capabilityGraph, scaffoldGraph };
+  const enriched = { ...plannedContract, interactionContract: finalInteractionContract,
+    dependencyPlan, capabilityGraph, scaffoldGraph };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
-    contract: enriched, modulePlan: finalModulePlan, interactionContract, bindings, journeys, capabilityGraph,
+    contract: enriched, modulePlan: finalModulePlan, interactionContract: finalInteractionContract,
+    bindings, journeys, capabilityGraph,
   });
-  const interactionVerdict = validateInteractionContract(interactionContract, { capabilityGraph });
+  const interactionVerdict = validateInteractionContract(finalInteractionContract, { capabilityGraph });
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
   const scaffoldVerdict = validateScaffoldGraph(scaffoldGraph, enriched, capabilityGraph);
   const profileVerdict = validateBuildProfileContract(enriched, buildProfile);
@@ -99,7 +102,7 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     bindings,
     dependencyPlan,
     modulePlan: finalModulePlan,
-    interactionContract,
+    interactionContract: finalInteractionContract,
     capabilityGraph,
     compositionPlan,
     scaffoldGraph,
@@ -136,17 +139,20 @@ export function scopeBuildSpec(spec, journeys = []) {
   const entities = structuredOwnership
     ? (spec.contract?.entities || []).filter((entity) => entityNames.has(entity.name))
     : (spec.contract?.entities || []);
-  const interactionContract = scopeInteractionContract(spec.interactionContract, scopedJourneys);
+  const scopedBaseInteraction = scopeInteractionContract(spec.interactionContract, scopedJourneys);
   const bindings = bindingsForJourneys(spec.contract, spec.bindings, scopedJourneys);
   const dependencyPlan = scopeDependencyPlan(spec.dependencyPlan, scopedJourneys);
   const capabilityGraph = scopeCapabilityGraph(spec.capabilityGraph, scopedJourneys);
   const scaffoldGraph = scopeScaffoldGraph(spec.scaffoldGraph, scopedJourneys);
   const scopedContract = {
-    ...spec.contract, journeys: scopedJourneys, operations, entities, interactionContract, dependencyPlan,
+    ...spec.contract, journeys: scopedJourneys, operations, entities,
+    interactionContract: scopedBaseInteraction, dependencyPlan,
     capabilityGraph, scaffoldGraph,
   };
   const modulePlan = scaffoldModulePlan(scaffoldGraph, capabilityModulePlan(capabilityGraph,
     deriveModulePlan(scopedContract, scopedJourneys, { dependencyPlan })));
+  const interactionContract = bindInteractionModulePlan(scopedBaseInteraction, modulePlan);
+  scopedContract.interactionContract = interactionContract;
   return {
     ...spec,
     scopedContract,

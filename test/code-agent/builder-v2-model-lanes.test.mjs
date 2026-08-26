@@ -175,7 +175,7 @@ test("scoped correction prompts use compact module contracts while full generati
   assert.doesNotMatch(compact, /diagnosticPadding/);
 });
 
-test("initial generation is told to decompose a mounted screen that owns several journeys", () => {
+test("initial generation is told to mount one shared controller for a crowded screen", () => {
   const modulePlan = [{
     path: "src/screens/scaffold/SoftwareCatalogueScreen.jsx",
     role: "mounted screen composition and application-specific visual design",
@@ -185,7 +185,7 @@ test("initial generation is told to decompose a mounted screen that owns several
   const prompt = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
     tree: {}, modulePlan, moduleContracts: { version: 1, specifications: [] } });
   assert.match(prompt, /Keep it as a small mounted coordinator/);
-  assert.match(prompt, /each journey implementation in bounded child component modules from the first batch/);
+  assert.match(prompt, /render its planned shared journey controller exactly once from the first batch/);
   assert.match(prompt, /rejects a file above 5000 tokens that implements more than 2 journeys/);
 });
 

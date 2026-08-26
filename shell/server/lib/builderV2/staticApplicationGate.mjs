@@ -196,6 +196,48 @@ function parseSource(source, file) {
   }
 }
 
+/** A crowded mounted screen has one planned interaction controller, rendered exactly once. */
+export function lintJourneyControllerMounts(tree = {}, modulePlan = []) {
+  const findings = [];
+  for (const screen of (modulePlan || []).filter((module) => (
+    module?.providedBy === "scaffold_screen_slot" && module?.journeyController
+  ))) {
+    const source = tree?.[screen.path];
+    if (typeof source !== "string") continue;
+    const ast = parseSource(source, screen.path);
+    if (!ast) continue;
+    const locals = new Set();
+    const namespaces = new Set();
+    for (const declaration of ast.program.body || []) {
+      if (declaration.type !== "ImportDeclaration" || typeof declaration.source?.value !== "string") continue;
+      if (!resolvedImportCandidates(screen.path, declaration.source.value).includes(screen.journeyController)) continue;
+      for (const specifier of declaration.specifiers || []) {
+        if (specifier.type === "ImportNamespaceSpecifier") namespaces.add(specifier.local.name);
+        else if (specifier.local?.name) locals.add(specifier.local.name);
+      }
+    }
+    let mounts = 0;
+    const inspect = (node) => {
+      if (!node || typeof node.type !== "string") return;
+      if (node.type === "JSXOpeningElement") {
+        const name = node.name;
+        if (name?.type === "JSXIdentifier" && locals.has(name.name)) mounts += 1;
+        if (name?.type === "JSXMemberExpression" && name.object?.type === "JSXIdentifier"
+          && namespaces.has(name.object.name)) mounts += 1;
+      }
+      for (const [, child] of childrenOf(node)) inspect(child);
+    };
+    inspect(ast.program);
+    if (mounts !== 1) findings.push({
+      code: "scaffold_composition_invalid", file: screen.path,
+      journeyController: screen.journeyController, mounts,
+      journeyIds: screen.journeyIds || [],
+      message: `${screen.path} must render shared journey controller ${screen.journeyController} exactly once (found ${mounts})`,
+    });
+  }
+  return findings;
+}
+
 function objectPropertyName(property) {
   if (!property || property.type === "SpreadElement") return null;
   if (property.computed && property.key?.type !== "StringLiteral") return null;
@@ -395,12 +437,15 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   const undefinedIdentifiers = lintUndefinedIdentifiers(tree);
   const unresolvedImports = lintUnresolvedImports(tree);
   const extensionInterfaces = lintCustomExtensionInterfaces(tree, scaffoldGraph, journeys);
+  const journeyControllerMounts = lintJourneyControllerMounts(tree, modulePlan);
   checks.push({ name: "source_integrity",
-    ok: undefinedIdentifiers.length + unresolvedImports.length + extensionInterfaces.length === 0,
-    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces]
+    ok: undefinedIdentifiers.length + unresolvedImports.length + extensionInterfaces.length
+      + journeyControllerMounts.length === 0,
+    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces, ...journeyControllerMounts]
       .map((finding) => finding.message) });
   blocking.push(...undefinedIdentifiers, ...unresolvedImports);
   blocking.push(...extensionInterfaces);
+  blocking.push(...journeyControllerMounts);
 
   const reachable = reachablePaths(tree);
   const scopedContract = { ...contract, journeys };

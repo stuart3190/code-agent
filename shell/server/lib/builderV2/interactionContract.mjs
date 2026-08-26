@@ -186,11 +186,11 @@ function mixedValueOperandKinds(step, operands, fallbackKind) {
   const actionTokens = action.toLowerCase().match(/[a-z][a-z0-9'-]*/g) || [];
   const matches = phraseIntentMatches(action, "clause")
     .flatMap((match) => match.intents
-      .filter((intent) => [ACTION_INTENT.SELECTION, ACTION_INTENT.INPUT].includes(intent))
+      .filter((intent) => [ACTION_INTENT.SELECTION, ACTION_INTENT.INPUT, ACTION_INTENT.LOOKUP].includes(intent))
       .map((intent) => ({ index: match.index,
         kind: intent === ACTION_INTENT.SELECTION ? "selection" : "input" })))
     .sort((a, b) => a.index - b.index);
-  const ownerAt = (index) => [...matches].reverse().find((match) => match.index < index) || null;
+  const ownerAt = (index) => [...matches].reverse().find((match) => match.index <= index) || null;
   const plan = new Map();
   for (const operand of operands || []) {
     const operandTokens = unique(semanticAliases(operand)
@@ -558,7 +558,8 @@ export function buildInteractionContract(contract, {
       const controlOperands = operandKind === "selection" ? valuePlan.controls : valueOperands;
       const partitionedValueOperands = (controlOperands || []).length > 0;
       const mixedValueKinds = partitionedValueOperands
-        && !declaredPrimitive && kinds.includes("selection") && kinds.includes("input")
+        && !declaredPrimitive && kinds.includes("selection")
+          && (kinds.includes("input") || kinds.includes("lookup"))
         ? mixedValueOperandKinds(step, controlOperands || [], operandKind)
         : new Map((controlOperands || []).map((field) => [field, operandKind]));
       const localOperationOnly = declaredOperationObjects.length > 0
@@ -569,8 +570,11 @@ export function buildInteractionContract(contract, {
       const ownershipKinds = kinds
         .filter((kind) => !(inferredLocalValueOnly && durableKinds.has(kind)))
         .map((kind) => (!durableContract || localOperationOnly) && durableKinds.has(kind) ? "action" : kind);
-      const effectiveKinds = valueOperands && !ownershipKinds.includes(operandKind)
-        ? [...ownershipKinds, operandKind] : ownershipKinds;
+      const effectiveKinds = unique([
+        ...ownershipKinds,
+        ...(valueOperands ? [...mixedValueKinds.values()] : []),
+        ...(valueOperands && !ownershipKinds.includes(operandKind) ? [operandKind] : []),
+      ]);
       for (const kind of effectiveKinds) {
         const drivesValues = ["selection", "input"].includes(kind);
         // A step that performs an operation writes no value THROUGH A CONTROL of its own: the verb
@@ -1440,6 +1444,36 @@ export function scopeInteractionContract(plan, journeys = []) {
       ))
     )),
     capabilityGraphVersion: plan?.capabilityGraphVersion || null,
+  };
+}
+
+/** Rebind visual ownership after scaffold planning replaces per-journey drafts with mounted units. */
+export function bindInteractionModulePlan(plan, modulePlan = []) {
+  const plannedPaths = new Set((modulePlan || []).map((module) => module.path));
+  const visualOwner = (journeyId) => (modulePlan || []).find((module) => (
+    module.providedBy !== "scaffold_screen_slot"
+      && /flow|form|editor|composition/i.test(module.role || "")
+      && (module.journeyIds || module.ownedJourneys || []).includes(journeyId)
+  )) || (modulePlan || []).find((module) => module.providedBy === "scaffold_screen_slot"
+    && (module.journeyIds || []).includes(journeyId)) || null;
+  return {
+    ...plan,
+    flows: (plan?.flows || []).map((flow) => {
+      const visual = visualOwner(flow.journeyId);
+      const responsibleModules = unique([
+        ...(flow.responsibleModules || []).filter((path) => plannedPaths.has(path)),
+        visual?.path,
+      ]);
+      const stateOwner = plannedPaths.has(flow.stateOwner) ? flow.stateOwner : visual?.path || flow.stateOwner;
+      const control = flow.control ? {
+        ...flow.control,
+        stateOwner: plannedPaths.has(flow.control.stateOwner)
+          ? flow.control.stateOwner : visual?.path || flow.control.stateOwner,
+        validationOwner: flow.control.validationOwner && !plannedPaths.has(flow.control.validationOwner)
+          ? visual?.path || flow.control.validationOwner : flow.control.validationOwner,
+      } : null;
+      return { ...flow, responsibleModules, stateOwner, control };
+    }),
   };
 }
 

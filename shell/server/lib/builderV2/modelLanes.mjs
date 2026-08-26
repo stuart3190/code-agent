@@ -97,6 +97,9 @@ against a code index. Rules:
   explicit legacy key operationId is also supported. Do not rely on spreading a domain object whose
   generic fields (for example id) may not match the extension contract.
 - Keep components small; compose unique screens and bounded helpers behind the mounted slots.
+- When a mounted screen's module plan names a shared journey controller, render that controller
+  exactly once. It owns the screen's contracted controls and interaction state. Do not mount a
+  parallel per-journey copy of those controls in the screen or in another child component.
 - BUILD THE WHOLE ASSIGNED DISPATCH SCOPE IN THIS ONE BATCH. A normal core step is several patches and several
   kilobytes of new JSX: new files for every section/page, real copy, real form state, and
   every assigned mounted screen/custom extension. A batch that re-emits existing content, leaves scaffold stubs
@@ -687,15 +690,18 @@ export function renderPatchPrompt({
         }
         if (module.providedBy === "scaffold_screen_slot") {
           const journeyIds = module.journeyIds || [];
+          const controller = module.journeyController
+            ? ` Render ${module.journeyController} exactly once as this screen's shared journey controller.` : "";
           const decomposition = journeyIds.length > MAX_JOURNEYS_PER_FILE
             ? ` This slot coordinates ${journeyIds.length} journeys. Keep it as a small mounted coordinator and `
-              + `put each journey implementation in bounded child component modules from the first batch; the `
+              + `render its planned shared journey controller exactly once from the first batch. That controller `
+              + `owns the contracted controls and interaction state; split only presentation-only helpers around it. The `
               + `gate rejects a file above ${MULTI_JOURNEY_MIN_TOKENS} tokens that implements more than `
               + `${MAX_JOURNEYS_PER_FILE} journeys, and every file remains capped at ${FILE_MAX_TOKENS} tokens.`
             : "";
           return `- ${module.path}: PROVIDED, MOUNTED, MODEL-OWNED screen slot for route ${module.routePath}; `
             + "implement this exact module and keep its default export. Do not register another route or move the journey to a dead component."
-            + decomposition;
+            + controller + decomposition;
         }
         return `- ${module.path}: ${module.role}${module.factory ? `; bind ${module.factory}(...) here` : ""}; `
           + `owns=${ownership.owns || "presentation only"}; survivesReload=${ownership.survivesReload === true}; `

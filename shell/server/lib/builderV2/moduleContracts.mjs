@@ -28,17 +28,28 @@ const factoryForBinding = (binding) => (CAPABILITIES[binding?.name]?.interface |
 
 function targetModules(flow, modulePlan) {
   const targets = new Set(flow?.responsibleModules || []);
-  // The scaffold graph is the mounted live-surface authority. Every interaction in a journey is
-  // owned by that journey's generated screen slot even when its semantic kind is a terminal
-  // mutation/recovery that the legacy role-name heuristics would otherwise assign nowhere.
+  const plannedVisualController = modulePlan.find((module) => (
+    module.providedBy !== "scaffold_screen_slot"
+      && /flow|form|editor|composition/i.test(module.role || "")
+      && (module.journeyIds || module.ownedJourneys || []).includes(flow?.journeyId)
+  ));
+  if (plannedVisualController) targets.add(plannedVisualController.path);
+  const hasVisualController = Boolean(plannedVisualController) || [...targets].some((path) => modulePlan.some((module) => (
+    module.path === path && module.providedBy !== "scaffold_screen_slot"
+      && /flow|form|editor|composition/i.test(module.role || "")
+  )));
+  // The scaffold graph is the mounted live-surface authority. A screen owns an interaction only
+  // when no planned child controller owns it; otherwise the screen composes that controller.
   for (const module of modulePlan) {
-    if (module?.providedBy === "scaffold_screen_slot" && (module.journeyIds || []).includes(flow?.journeyId)) {
+    if (!hasVisualController && module?.providedBy === "scaffold_screen_slot"
+      && (module.journeyIds || []).includes(flow?.journeyId)) {
       targets.add(module.path);
     }
   }
   const addRole = (pattern) => modulePlan.filter((module) => {
     const ownedJourneys = module.journeyIds || module.ownedJourneys || [];
-    return pattern.test(module.role || "")
+    return !(hasVisualController && module.providedBy === "scaffold_screen_slot")
+      && pattern.test(module.role || "")
       && (!ownedJourneys.length || ownedJourneys.includes(flow?.journeyId));
   })
     .forEach((module) => targets.add(module.path));
@@ -112,8 +123,13 @@ export function buildModuleGenerationContracts({
       path: planned.path,
       role: planned.role || "planned module",
       providedBy: planned.providedBy || null,
+      journeyController: planned.journeyController || null,
+      sharedControllerFor: planned.sharedControllerFor || null,
       protected: planned.protected === true,
-      ownedJourneys: unique(assignedFlows.map((flow) => flow.journeyId)),
+      ownedJourneys: unique([
+        ...(planned.journeyIds || planned.ownedJourneys || []),
+        ...assignedFlows.map((flow) => flow.journeyId),
+      ]),
       requiredImports: unique(planned.requiredImports || []),
       requiredCapabilities,
       forbiddenCapabilityBypasses: owners,
@@ -224,6 +240,8 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
         path: specification.path,
         role: specification.role,
         ownedJourneys,
+        journeyController: specification.journeyController || null,
+        sharedControllerFor: specification.sharedControllerFor || null,
         requiredImports: specification.requiredImports || [],
         capabilities: (specification.requiredCapabilities || []).map((capability) => ({
           capability: capability.capability,

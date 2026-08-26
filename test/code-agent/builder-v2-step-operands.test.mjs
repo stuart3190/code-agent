@@ -264,3 +264,25 @@ test("a contract WITHOUT operands still derives — V1 and legacy are untouched"
   assert.ok(controls.length >= 1, "legacy contracts still derive controls");
   assert.ok(controls.some((flow) => flow.control.logicalField === "partySize"));
 });
+
+test("a lookup-and-selection step types its query and selects its filter", () => {
+  const contract = {
+    summary: "software catalogue", projectType: "tool", version: 2, auth: { required: false },
+    routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueState", fields: [
+      { name: "searchQuery", type: "string" }, { name: "categoryFilter", type: "string" },
+    ] }],
+    operations: [], journeys: [{ id: "browse", title: "Browse", priority: "primary",
+      steps: [{
+        action: "search for a catalogue term and choose a matching category filter",
+        target: "catalogue controls", operates: ["searchQuery", "categoryFilter"],
+        verificationValues: { searchQuery: "Atlas", categoryFilter: "Analytics" },
+        expect: "the matching catalogue entries are visible",
+      }],
+    }], acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  };
+  const flows = buildInteractionContract(contract).flows;
+  assert.deepEqual(Object.fromEntries(flows.map((flow) => [flow.valueWritten, flow.kind])), {
+    searchQuery: "input", categoryFilter: "selection",
+  });
+});
