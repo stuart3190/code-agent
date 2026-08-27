@@ -185,6 +185,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });
+  assert.deepEqual(selectedRemovalExpectationSpec(removalExpectationSpec({
+    action: "remove the software from favourites",
+    expect: "the software is removed from the favourites list and an empty favourites message is visible",
+  }), ["PLANNING\nForge Planner\nWeb · Team\nCoordinate project milestones"], ["forge-planner"]), {
+    target: "Forge Planner",
+    collection: "favourites list",
+    postcondition: "an empty favourites message is visible",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {

@@ -529,18 +529,23 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
     remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
 }
 
-function selectedEntityText(selectedText) {
+function selectedEntityText(selectedText, selectedValue = null) {
   const lines = selectedText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const valueKey = semanticKey(selectedValue);
+  const valueMatchedLine = valueKey
+    ? lines.find((line) => semanticKey(line) === valueKey) || null
+    : null;
+  if (valueMatchedLine) return valueMatchedLine;
   const firstLineIsMetadata = /[·•|]/u.test(lines[0] || "");
   return (firstLineIsMetadata
     ? lines.slice(1).find((value) => value.split(/\s+/).length <= 8 && keywords(value, 5).length)
     : lines[0]) || lines[0] || "";
 }
 
-export function selectedRemovalExpectationSpec(spec, selections = []) {
+export function selectedRemovalExpectationSpec(spec, selections = [], selectionValues = []) {
   if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record|favourite|favorite)$/i
     .test(String(spec.target || "").trim())) return spec;
-  const target = selectedEntityText(String(selections.at(-1) || ""));
+  const target = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
   if (!target || target.split(/\s+/).length > 8 || !keywords(target, 5).length) return spec;
   return { ...spec, target };
 }
@@ -573,12 +578,12 @@ export function collectionMembershipExpectationSpec(expect = "") {
 
 const SELECTED_COLLECTION_MEMBER_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\b/i;
 
-export function selectedCollectionExpectationSpec(expect = "", selections = []) {
+export function selectedCollectionExpectationSpec(expect = "", selections = [], selectionValues = []) {
   const text = String(expect || "").trim();
   if (!/\bselected\b.{0,48}\b(?:name|item|software|product)\b/i.test(text)) return null;
   const match = SELECTED_COLLECTION_MEMBER_PATTERN.exec(text);
   if (!match) return null;
-  const member = selectedEntityText(String(selections.at(-1) || ""));
+  const member = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
   if (!member || member.split(/\s+/).length > 8 || !keywords(member, 5).length) return null;
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   if (!keywords(collection, 5).length) return null;
@@ -597,7 +602,8 @@ async function collectionMembershipState(page, spec) {
         && rect.width > 0 && rect.height > 0;
     };
     const regions = [...document.querySelectorAll(
-      "section, aside, [role='region'], [role='list'], ul, ol, table",
+      "section, aside, [role='region'], [role='list'], ul, ol, table, "
+        + "[aria-label]:not(button):not(a):not(input):not(select):not(textarea)",
     )].filter(visible).map((element) => {
       const text = normalized(element.innerText);
       const heading = element.querySelector("h1, h2, h3, h4, legend")?.innerText || "";
@@ -667,7 +673,8 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
     // best names the collection. Otherwise the wrapper continues to contain the target in a
     // detail panel after a correct list removal and produces a false functional failure.
     const regions = [...document.querySelectorAll(
-      "section, aside, [role='region'], [role='list'], ul, ol, table",
+      "section, aside, [role='region'], [role='list'], ul, ol, table, "
+        + "[aria-label]:not(button):not(a):not(input):not(select):not(textarea)",
     )].filter(visible).map((element) => {
       const text = normalized(element.innerText);
       const heading = element.querySelector("h1, h2, h3, h4, legend")?.innerText || "";
@@ -695,7 +702,9 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
         || [...uniqueMembers].sort((left, right) => normalized(left.innerText).length
           - normalized(right.innerText).length)[0];
       scopedMember?.setAttribute("data-thrallo-verifier-removal-member", markerValue);
-      const region = collectionRegion || scopedMember.closest("section, aside, [role='region']")
+      const region = collectionRegion || scopedMember.closest(
+        "section, aside, [role='region'], [aria-label]:not(button):not(a):not(input):not(select):not(textarea)",
+      )
         || scopedMember.parentElement?.parentElement || scopedMember.parentElement;
       if (region && ![document.body, document.documentElement].includes(region)) {
         region.setAttribute("data-thrallo-verifier-removal-region", markerValue);
@@ -1859,6 +1868,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
         status: "pass",
         detail: `the sole available selection "${String(selected?.text || selected?.label || selected?.value || "").slice(0, 40)}" and its expected outcome were already established`,
         selectedText: selected?.text || selected?.label || String(selected?.value || ""),
+        selectedValue: selected?.value ?? null,
         groupId: group.groupId,
         controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
           fixtureAuthority: "single_available_option", selectedGroupContext: group.contextText,
@@ -1880,6 +1890,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
       status: "pass",
       detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established for the companion action`,
       selectedText: selected?.text || selected?.label || contractedFixture,
+      selectedValue: selected?.value ?? contractedFixture,
       groupId: group.groupId,
       controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
         fixtureAuthority: "contract", verificationValue: contractedFixture,
@@ -1896,6 +1907,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
         status: "pass",
         detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" and its expected outcome were already established`,
         selectedText: selected?.text || selected?.label || contractedFixture,
+        selectedValue: selected?.value ?? contractedFixture,
         groupId: group.groupId,
         controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
           fixtureAuthority: "contract", verificationValue: contractedFixture,
@@ -1937,6 +1949,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     status: verdict.ok ? "pass" : "fail",
     detail: verdict.ok ? verdict.detail : verdict.reason,
     selectedText: verdict.selectedText || null,
+    selectedValue: before[clickIndex]?.value ?? null,
     groupId: group.groupId,
     controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
       fixtureAuthority: contractedFixture === null ? "option_transition" : "contract",
@@ -2269,7 +2282,7 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
 }
 
 async function runStep(page, step, {
-  marker, authMarker = marker, previewUrl, selections = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
+  marker, authMarker = marker, previewUrl, selections = [], selectionValues = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
   authState = { accounts: [], active: null }, allowEstablishedState = false,
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
@@ -2307,9 +2320,11 @@ async function runStep(page, step, {
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
-  const removalSpec = selectedRemovalExpectationSpec(removalExpectationSpec({ action, expect }), selections);
+  const removalSpec = selectedRemovalExpectationSpec(
+    removalExpectationSpec({ action, expect }), selections, selectionValues,
+  );
   const collectionMembershipSpec = collectionMembershipExpectationSpec(expect)
-    || selectedCollectionExpectationSpec(expect, selections);
+    || selectedCollectionExpectationSpec(expect, selections, selectionValues);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
     && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
   const removalBaseline = removalFlow
@@ -2664,7 +2679,10 @@ async function runStep(page, step, {
         outcomes.push(outcome);
         if (outcome.status !== "pass") return outcome;
         if (flow.control.statePath) writtenPaths.add(flow.control.statePath);
-        if (outcome.selectedText) selections.push(outcome.selectedText);
+        if (outcome.selectedText) {
+          selections.push(outcome.selectedText);
+          selectionValues.push(outcome.selectedValue ?? null);
+        }
       }
       const selectionResult = { drove: outcomes.some((row) => row.drove), status: "pass",
         detail: outcomes.map((row) => row.detail).join("; "),
@@ -4126,6 +4144,7 @@ export async function verifyJourneys({
 
       const steps = [];
       const selections = []; // what this journey actually chose — confirmations must reflect it
+      const selectionValues = []; // exact option values identify selected entities across later steps
       const enteredValues = []; // exact contracted values; review must echo them
       const writtenPaths = new Set(); // contracted state this journey has already written
       // What the durable record looked like when it was created — recovery is measured against it.
@@ -4217,7 +4236,7 @@ export async function verifyJourneys({
         const fatalBefore = runtimeEvidenceCursor;
         const platformBefore = platformSignals.length;
         let outcome = await runStep(page, step, {
-          marker, authMarker, previewUrl, selections, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
+          marker, authMarker, previewUrl, selections, selectionValues, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
           authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true, verifierPolicy,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
@@ -4236,7 +4255,10 @@ export async function verifyJourneys({
         if (outcome.verifierDefect) verifierDefects.push({
           ...outcome.verifierDefect, journeyId: journey.id, stepIndex, action: step.action,
         });
-        if (outcome.selectedText) selections.push(outcome.selectedText);
+        if (outcome.selectedText) {
+          selections.push(outcome.selectedText);
+          selectionValues.push(outcome.selectedValue ?? null);
+        }
         for (const advisory of outcome.advisories || outcome.controlEvidence?.advisories || []) {
           advisories.push({ journeyId: journey.id, stepIndex, ...advisory });
         }

@@ -72,6 +72,41 @@ before(async () => {
           <p id="fragmented-selection-out"></p>
         </aside>
       </section>
+      <section aria-label="Labelled collection removal fixture">
+        <div role="group" aria-label="selected Software Id" data-thrallo-control="labelled-removal-selection">
+          <button type="button" value="forge-planner" data-thrallo-control="labelled-removal-selection"
+            aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed', 'true'); document.getElementById('labelled-detail-title').textContent='Forge Planner'">
+            <span>PLANNING</span>
+            <span style="display:block">Forge Planner</span>
+            <span style="display:block">Web · Team</span>
+            <span style="display:block">Coordinate project milestones</span>
+          </button>
+        </div>
+        <aside aria-label="Catalogue side panel">
+          <div aria-label="Selected-item detail panel">
+            <h2 id="labelled-detail-title">No selected software</h2>
+            <button type="button" data-thrallo-action="toggle-labelled-favourite"
+              onclick="document.getElementById('labelled-favourites-list').hidden=false; document.getElementById('labelled-empty').hidden=true; this.textContent='Remove selected software from favourites'; document.getElementById('labelled-removal-out').textContent='Forge Planner appears in favourites list'">
+              detail panel favourite control
+            </button>
+          </div>
+          <div aria-label="Session-only favourites list">
+            <h2>Session favourites</h2>
+            <ul id="labelled-favourites-list" hidden>
+              <li>Forge Planner <span>Planning</span>
+                <button type="button" data-thrallo-action="toggle-labelled-favourite"
+                  aria-label="favourites list remove control"
+                  onclick="document.getElementById('labelled-favourites-list').hidden=true; document.getElementById('labelled-empty').hidden=false; document.getElementById('labelled-removal-out').textContent='No favourites remain'">
+                  Remove
+                </button>
+              </li>
+            </ul>
+            <p id="labelled-empty">No favourites yet</p>
+            <p id="labelled-removal-out"></p>
+          </div>
+        </aside>
+      </section>
       <p id="out"></p>
     </main>`);
   });
@@ -262,4 +297,61 @@ test("an exact fixture selects a matching auxiliary fragment with the same contr
 
     assert.equal(result.pass, true, JSON.stringify(result.journeys));
     assert.equal(result.journeys[0].steps[0].selectedTexts[0], "Close detail panel");
+  });
+
+test("a labelled collection stays authoritative when selected-card metadata remains in a sibling panel",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const selectionControl = {
+      logicalField: "selectedSoftwareId",
+      accessibleName: "selected Software Id",
+      accessibleNames: ["selected Software Id"],
+      machineId: "labelled-removal-selection",
+      roles: ["button", "radio", "option", "combobox"],
+      selectedState: true,
+      verificationValue: "forge-planner",
+    };
+    const actionControl = {
+      accessibleName: "toggle favourite",
+      accessibleNames: ["toggle favourite"],
+      machineId: "toggle-labelled-favourite",
+      roles: ["button"],
+    };
+    const flows = [
+      { id: "manage-favourites:1:selection:selectedsoftwareid", journeyId: "manage-favourites",
+        stepIndex: 0, kind: "selection", valueWritten: "selectedSoftwareId",
+        control: selectionControl, stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"],
+        reads: [], writes: [] },
+      { id: "manage-favourites:2:action", journeyId: "manage-favourites", stepIndex: 1,
+        kind: "action", operationId: "toggle-favourite", control: actionControl,
+        stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], reads: [], writes: [] },
+      { id: "manage-favourites:3:action", journeyId: "manage-favourites", stepIndex: 2,
+        kind: "action", operationId: "toggle-favourite", control: actionControl,
+        stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], reads: [], writes: [] },
+    ];
+    const result = await verifyJourneys({
+      previewUrl: baseUrl,
+      timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: {
+        journeys: [{ id: "manage-favourites", title: "Manage session favourites", priority: "primary",
+          steps: [
+            { action: "select a software card", target: "Forge Planner card",
+              operates: ["selectedSoftwareId"],
+              verificationValues: { selectedSoftwareId: "forge-planner" },
+              expect: "the selected-item detail panel displays Forge Planner" },
+            { action: "add the selected software to favourites", target: "detail panel favourite control",
+              expect: "Forge Planner appears in the favourites list" },
+            { action: "remove the software from favourites", target: "favourites list remove control",
+              expect: "the software is removed from the favourites list and an empty favourites message is visible" },
+          ] }],
+        interactionContract: { flows },
+      },
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys));
+    const removal = result.journeys[0].steps[2].controlEvidence.removalTransition;
+    assert.equal(removal.target, "Forge Planner");
+    assert.equal(removal.beforeCount, 1);
+    assert.equal(removal.afterCount, 0);
+    assert.equal(removal.postcondition.emptyStateEvidence.inMarkedRegion, true);
   });
