@@ -214,6 +214,10 @@ test("multi-member collection expectations retain their named scope", () => {
     "the favourites list shows one item and displays the selected software name",
     ["Atlas Editor\nDeveloper Tools"],
   ), { collection: "favourites list", members: ["Atlas Editor"] });
+  assert.deepEqual(selectedCollectionExpectationSpec(
+    "the favourites list shows one item and displays the selected software name",
+    ["DESIGN · TEAM\nVector Studio\nCreate reusable catalogue assets"],
+  ), { collection: "favourites list", members: ["Vector Studio"] });
   const selectedMemberOutcome = expectationOutcome({
     wanted: ["favourites", "list", "one", "item", "displays"], found: [], fresh: [],
     drove: true, action: "add selected software", actionProven: true,
@@ -555,7 +559,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <li id="favourite-item">Atlas Editor <button data-thrallo-action="remove-favourite-software"
             aria-label="favourites list remove control"
             onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove from favourites</button></li>
-          </ul><p id="favourites-empty" data-empty-state hidden>No favourites yet</p>
+          </ul><p id="favourites-empty" data-empty-state hidden>No favourites yet. Add Atlas Editor from the catalogue.</p>
         </section></section></main>`, step,
       [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));

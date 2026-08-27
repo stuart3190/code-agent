@@ -529,15 +529,18 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
     remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
 }
 
+function selectedEntityText(selectedText) {
+  const lines = selectedText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const firstLineIsMetadata = /[·•|]/u.test(lines[0] || "");
+  return (firstLineIsMetadata
+    ? lines.slice(1).find((value) => value.split(/\s+/).length <= 8 && keywords(value, 5).length)
+    : lines[0]) || lines[0] || "";
+}
+
 export function selectedRemovalExpectationSpec(spec, selections = []) {
   if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record|favourite|favorite)$/i
     .test(String(spec.target || "").trim())) return spec;
-  const selectedText = String(selections.at(-1) || "");
-  const lines = selectedText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-  const firstLineIsMetadata = /[·•|]/u.test(lines[0] || "");
-  const target = (firstLineIsMetadata
-    ? lines.slice(1).find((value) => value.split(/\s+/).length <= 8 && keywords(value, 5).length)
-    : lines[0]) || lines[0] || "";
+  const target = selectedEntityText(String(selections.at(-1) || ""));
   if (!target || target.split(/\s+/).length > 8 || !keywords(target, 5).length) return spec;
   return { ...spec, target };
 }
@@ -575,8 +578,7 @@ export function selectedCollectionExpectationSpec(expect = "", selections = []) 
   if (!/\bselected\b.{0,48}\b(?:name|item|software|product)\b/i.test(text)) return null;
   const match = SELECTED_COLLECTION_MEMBER_PATTERN.exec(text);
   if (!match) return null;
-  const selectedText = String(selections.at(-1) || "");
-  const member = selectedText.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || "";
+  const member = selectedEntityText(String(selections.at(-1) || ""));
   if (!member || member.split(/\s+/).length > 8 || !keywords(member, 5).length) return null;
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   if (!keywords(collection, 5).length) return null;
@@ -700,13 +702,19 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
         regionMarked = true;
       }
     }
+    const actionBoundTargetMembers = uniqueMembers.filter((member) => !collectionRegion || collectionRegion.contains(member));
+    const structuralTargetMembers = collectionRegion ? [...collectionRegion.querySelectorAll(
+      "li, tr, [role='listitem'], article, [data-item], [data-entry], [data-record]",
+    )].filter((element) => visible(element) && normalized(element.innerText).includes(targetText)) : [];
+    const targetMemberCandidates = [...new Set([...actionBoundTargetMembers, ...structuralTargetMembers])];
+    const scopedTargetMembers = targetMemberCandidates.filter((element) => !targetMemberCandidates.some(
+      (other) => other !== element && element.contains(other),
+    ));
     return {
       checked: true,
       matchedControlCount: candidates.length,
-      targetMemberCount: collectionRegion
-        ? Number(normalized(collectionRegion.innerText).includes(targetText)) : uniqueMembers.length,
-      targetPresent: collectionRegion
-        ? normalized(collectionRegion.innerText).includes(targetText) : uniqueMembers.length > 0,
+      targetMemberCount: scopedTargetMembers.length,
+      targetPresent: scopedTargetMembers.length > 0,
       marker: markerValue,
       regionMarked,
     };
