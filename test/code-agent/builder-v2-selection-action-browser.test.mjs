@@ -44,6 +44,34 @@ before(async () => {
           data-thrallo-option="desktop" aria-pressed="false">Desktop</button>
       </div>
       <article>Atlas Editor is Developer Tools software</article>
+      <section aria-label="Software catalogue fragments">
+        <article>
+          <button type="button" value="atlas-buildkit" data-thrallo-control="catalogue-favourite"
+            aria-pressed="false">Favourite Atlas BuildKit</button>
+        </article>
+        <article>
+          <button type="button" value="pulsedesk" data-thrallo-control="catalogue-favourite"
+            aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed', 'true'); document.getElementById('fragmented-favourite-out').textContent='PulseDesk appears in favourites'">
+            Favourite PulseDesk
+          </button>
+        </article>
+        <p id="fragmented-favourite-out"></p>
+      </section>
+      <section aria-label="Selected software fragments">
+        <article>
+          <button type="button" value="atlas-buildkit" data-thrallo-control="selected-software"
+            aria-pressed="true">Open Atlas BuildKit details</button>
+        </article>
+        <aside>
+          <button type="button" value="none" data-thrallo-control="selected-software"
+            aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed', 'true'); document.getElementById('fragmented-selection-out').textContent='Select software from the catalogue'">
+            Close detail panel
+          </button>
+          <p id="fragmented-selection-out"></p>
+        </aside>
+      </section>
       <p id="out"></p>
     </main>`);
   });
@@ -154,4 +182,84 @@ test("a compound filter step may retain one exact sentinel while another selecti
     assert.equal(result.pass, true, JSON.stringify(result.journeys));
     const evidence = result.journeys[0].steps[0].controlEvidence.selections;
     assert.equal(evidence[1].precondition, "already_selected");
+  });
+
+test("an exact fixture selects the matching repeated-card fragment with the same control identity",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const flow = {
+      id: "manage-session-favourites:1:selection:favouritesoftwareids",
+      journeyId: "manage-session-favourites",
+      stepIndex: 0,
+      kind: "selection",
+      valueWritten: "favouriteSoftwareIds",
+      control: {
+        logicalField: "favouriteSoftwareIds",
+        accessibleName: "favourite Software Ids",
+        accessibleNames: ["favourite Software Ids"],
+        machineId: "catalogue-favourite",
+        roles: ["button", "radio", "option", "combobox"],
+        selectedState: true,
+        verificationValue: "pulsedesk",
+      },
+      stateOwner: "src/App.jsx",
+      responsibleModules: ["src/App.jsx"],
+      reads: [],
+      writes: [],
+    };
+    const result = await verifyJourneys({
+      previewUrl: baseUrl,
+      timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: {
+        journeys: [{ id: "manage-session-favourites", title: "Manage session favourites",
+          priority: "primary", steps: [{ action: "add a second software card to favourites",
+            target: "PulseDesk favourite control", operates: ["favouriteSoftwareIds"],
+            verificationValues: { favouriteSoftwareIds: "pulsedesk" },
+            expect: "PulseDesk appears in favourites" }] }],
+        interactionContract: { flows: [flow] },
+      },
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys));
+    assert.equal(result.journeys[0].steps[0].selectedTexts[0], "Favourite PulseDesk");
+  });
+
+test("an exact fixture selects a matching auxiliary fragment with the same control identity",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const flow = {
+      id: "inspect-software:1:selection:selectedsoftwareid",
+      journeyId: "inspect-software",
+      stepIndex: 0,
+      kind: "selection",
+      valueWritten: "selectedSoftwareId",
+      control: {
+        logicalField: "selectedSoftwareId",
+        accessibleName: "selected Software Id",
+        accessibleNames: ["selected Software Id"],
+        machineId: "selected-software",
+        roles: ["button", "radio", "option", "combobox"],
+        selectedState: true,
+        verificationValue: "none",
+      },
+      stateOwner: "src/App.jsx",
+      responsibleModules: ["src/App.jsx"],
+      reads: [],
+      writes: [],
+    };
+    const result = await verifyJourneys({
+      previewUrl: baseUrl,
+      timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: {
+        journeys: [{ id: "inspect-software", title: "Inspect software", priority: "primary",
+          steps: [{ action: "close the selected-item detail panel",
+            target: "detail panel close control", operates: ["selectedSoftwareId"],
+            verificationValues: { selectedSoftwareId: "none" },
+            expect: "Select software from the catalogue" }] }],
+        interactionContract: { flows: [flow] },
+      },
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys));
+    assert.equal(result.journeys[0].steps[0].selectedTexts[0], "Close detail panel");
   });

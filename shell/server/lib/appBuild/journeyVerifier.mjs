@@ -1788,7 +1788,16 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     .map((g) => ({ ...g, key: groupKey(g) }))
     .filter((g) => !excludedKeys.has(g.key));
 
+  const contractedFixture = verificationFixtureFor(flow, "selection");
+  const fixtureMatch = (option) => contractedFixture !== null && [option.value, option.label, option.text]
+    .filter((value) => value !== null && value !== undefined)
+    .some((value) => String(value).trim().toLowerCase() === contractedFixture.trim().toLowerCase());
+  const groupContainingFixture = (candidates) => contractedFixture === null
+    ? candidates[0] || null
+    : candidates.find((candidate) => candidate.options.some(fixtureMatch)) || candidates[0] || null;
+
   let group = null;
+  let identityGroups = [];
   if (flow?.control) {
     // A CONTRACTED selection is matched on the group's own declared identity, never on prose and
     // never on position. Live proof: scoring by rendered text drove the date options for the
@@ -1797,12 +1806,16 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     // not on screen the step is undriveable, which is the truth, rather than a false pass.
     // MACHINE IDENTITY FIRST: an exact, opaque match needs no vocabulary at all. The semantic-key
     // comparison below it is the fallback for groups that carry no identity.
-    group = flow.control.machineId
-      ? eligible.find((g) => g.machineId === flow.control.machineId) || null
-      : null;
+    if (flow.control.machineId) {
+      identityGroups = eligible.filter((g) => g.machineId === flow.control.machineId);
+      group = groupContainingFixture(identityGroups);
+    }
     if (!group) {
       const target = semanticKey(flow.control.logicalField || flow.control.accessibleName);
-      group = eligible.find((g) => g.identities.some((identity) => semanticKey(identity) === target)) || null;
+      identityGroups = eligible.filter((g) => (
+        g.identities.some((identity) => semanticKey(identity) === target)
+      ));
+      group = groupContainingFixture(identityGroups);
     }
     if (!group) return null;
   } else {
@@ -1815,10 +1828,6 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
 
   const before = group.options;
   const beforeSelected = before.findIndex((o) => o.selected);
-  const contractedFixture = verificationFixtureFor(flow, "selection");
-  const fixtureMatch = (option) => contractedFixture !== null && [option.value, option.label, option.text]
-    .filter((value) => value !== null && value !== undefined)
-    .some((value) => String(value).trim().toLowerCase() === contractedFixture.trim().toLowerCase());
   // A declared domain fixture outranks option order. Without one, click a DIFFERENT available
   // option than the current selection (or the first, if none) to prove a real transition.
   const clickIndex = contractedFixture === null
@@ -1834,7 +1843,10 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
       groupId: group.groupId,
       controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
         fixtureAuthority: "contract", verificationValue: contractedFixture,
-        selectedGroupContext: group.contextText, selectedOptions: before, autoAdvance: null },
+        selectedGroupContext: group.contextText,
+        selectedOptions: identityGroups.length > 1
+          ? identityGroups.flatMap((candidate) => candidate.options) : before,
+        autoAdvance: null },
     };
   }
   if (contractedFixture === null && clickIndex === -1 && before.length === 1 && beforeSelected === 0) {
