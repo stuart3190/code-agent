@@ -1530,6 +1530,16 @@ async function expectationBecameVisible(page, expect, textBefore) {
   return { met: found.length / wanted.length >= 0.5 && fresh.length > 0, found, fresh, wanted };
 }
 
+async function expectationIsVisible(page, expect) {
+  const wanted = keywords(expect, 5);
+  if (!wanted.length) return { met: false, found: [], wanted };
+  const found = [];
+  for (const word of wanted) {
+    if (await anyVisibleTextMatch(page, word)) found.push(word);
+  }
+  return { met: found.length / wanted.length >= 0.5, found, wanted };
+}
+
 /**
  * A selection can unmount synchronously while the state it selected is resolved asynchronously.
  * Wait at that real asynchronous boundary for BOTH pieces of contracted evidence: the next
@@ -1777,6 +1787,24 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
         fixtureAuthority: "contract", verificationValue: contractedFixture,
         selectedGroupContext: group.contextText, selectedOptions: before, precondition: "already_selected" },
     };
+  }
+  if (contractedFixture !== null && clickIndex === beforeSelected) {
+    const expectationEvidence = await expectationIsVisible(page, step.expect);
+    if (expectationEvidence.met) {
+      const selected = before[beforeSelected];
+      return {
+        drove: false,
+        groupKey: group.key,
+        status: "pass",
+        detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" and its expected outcome were already established`,
+        selectedText: selected?.text || selected?.label || contractedFixture,
+        groupId: group.groupId,
+        controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+          fixtureAuthority: "contract", verificationValue: contractedFixture,
+          selectedGroupContext: group.contextText, selectedOptions: before,
+          precondition: "already_selected", expectationEvidence },
+      };
+    }
   }
 
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
