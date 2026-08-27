@@ -4,7 +4,7 @@ import { serviceClient } from "../supabase.mjs";
 import { operationRequiresDurableMutation } from "../../../shared/implementationContract.mjs";
 import { journeysInMountedScreenUnit } from "./buildSpec.mjs";
 
-export const BUILD_ENVELOPE_VERSION = 1;
+export const BUILD_ENVELOPE_VERSION = 2;
 export const FUNDING_POOL = Object.freeze({
   CUSTOMER: "customer_generation",
   RECOVERY: "thrallo_recovery",
@@ -210,8 +210,25 @@ export function deriveBuildEnvelope({
       basis: { uniqueOwnerModules: owners.length },
     },
   ];
+  const strategyCapacity = Math.max(3, (journeys.length * 3) + owners.length + 2);
+  const protocolCorrectionCredits = Number(strategyCostPlan
+    .find((row) => row.id === "contract_protocol_correction")?.estimatedCredits || 0);
+  const candidateCorrectionCredits = Number(strategyCostPlan
+    .find((row) => row.id === "deterministic_patch_correction")?.estimatedCredits || 0);
+  const repairStrategyCredits = strategyCostPlan
+    .filter((row) => ["exact_owning_file_repair", "causal_dependency_repair", "owner_module_regeneration"]
+      .includes(row.id))
+    .map((row) => Number(row.estimatedCredits || 0));
+  // A productive browser repair resets the strategy ladder to the exact owner and may expose the
+  // next contracted defect. The live catalogue proof had capacity for eleven rounds but funded
+  // each strategy only once; two valid rounds left less than one smallest causal continuation.
+  // Fund the already-bounded round capacity, including one retained-candidate correction per
+  // round. This changes only Thrallo recovery authority; customer generation approval is intact.
+  const repairRoundCreditAllowance = r4(Math.max(...repairStrategyCredits, 0)
+    + candidateCorrectionCredits);
+  const fixedRecoveryCredits = r4(protocolCorrectionCredits + candidateCorrectionCredits);
   const recoveryCredits = r4(Math.max(Number(recoveryFloorCredits || 0),
-    strategyCostPlan.reduce((sum, row) => sum + row.estimatedCredits, 0)));
+    fixedRecoveryCredits + (strategyCapacity * repairRoundCreditAllowance)));
   const customerPlanned = r4(stages.filter((row) => row.fundingSource === FUNDING_POOL.CUSTOMER)
     .reduce((sum, row) => sum + row.estimatedCredits, 0));
   const expectedDurationMs = Math.ceil(stages.reduce((sum, row) => sum + row.estimatedDurationMs, 0)
@@ -237,7 +254,9 @@ export function deriveBuildEnvelope({
     thralloRecovery: {
       approvedCredits: recoveryCredits, consumedCredits: 0, heldCredits: 0,
       strategyCostPlan,
-      strategyCapacity: Math.max(3, (journeys.length * 3) + owners.length + 2),
+      strategyCapacity,
+      fixedCorrectionCredits: fixedRecoveryCredits,
+      repairRoundCreditAllowance,
       exceptionalApproval: null,
     },
     execution: {

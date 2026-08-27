@@ -583,6 +583,40 @@ export const defectSignature = (defect) => [
   defect.stepIndex ?? "-", defect.control?.id || defect.control?.logicalField || "-",
 ].join("|");
 
+/**
+ * Keep a retained browser-proven tree while carrying forward strictly additive attribution learned
+ * from a rejected/no-progress candidate. The defect identity and observation remain those of the
+ * retained tree; only generated-source addresses for the same defect signature are widened.
+ */
+export function mergeDefectAttribution(retained = [], observed = []) {
+  const observedBySignature = new Map();
+  for (const defect of observed || []) {
+    const signature = defectSignature(defect);
+    if (!observedBySignature.has(signature)) observedBySignature.set(signature, []);
+    observedBySignature.get(signature).push(defect);
+  }
+  return (retained || []).map((defect) => {
+    const matches = observedBySignature.get(defectSignature(defect)) || [];
+    if (!matches.length) return defect;
+    const modules = unique([defect.modules, ...matches.map((row) => row.modules)].flat())
+      .filter(generatedSource);
+    const failureRefs = unique([defect.failureRefs, ...matches.map((row) => row.failureRefs)].flat());
+    const routingTargets = unique([
+      defect.scaffoldRouting?.targetFiles,
+      ...matches.map((row) => row.scaffoldRouting?.targetFiles),
+    ].flat()).filter(generatedSource);
+    return {
+      ...defect,
+      modules,
+      failureRefs,
+      ...(defect.scaffoldRouting || routingTargets.length ? {
+        scaffoldRouting: { ...(defect.scaffoldRouting || matches.find((row) => row.scaffoldRouting)?.scaffoldRouting || {}),
+          targetFiles: routingTargets },
+      } : {}),
+    };
+  });
+}
+
 /** Versioned durable defect evidence with sensitive entity values represented only by hashes. */
 export function verificationDefectRecord(defect, {
   sourceTreeHash, candidateSnapshotId = null, dependencyOwners = [],

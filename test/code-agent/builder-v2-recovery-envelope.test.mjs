@@ -125,6 +125,20 @@ test("validated contracts receive immutable independent generation, recovery, an
     envelope: complex }), (error) => error.code === "build_envelope_identity_conflict");
 });
 
+test("software catalogue recovery funding covers every contract-bounded repair round", () => {
+  const envelope = deriveBuildEnvelope({
+    contract: catalogueContract, spec: catalogueSpec(), approvedCustomerCredits: 12, profile: "simple",
+  });
+  const recovery = envelope.thralloRecovery;
+  assert.equal(recovery.approvedCredits,
+    recovery.fixedCorrectionCredits + (recovery.strategyCapacity * recovery.repairRoundCreditAllowance));
+  assert.ok(recovery.approvedCredits > recovery.strategyCostPlan
+    .reduce((sum, row) => sum + row.estimatedCredits, 0),
+  "a repeatable strategy ladder cannot be funded as though every strategy runs only once");
+  assert.equal(envelope.customerGeneration.approvedCredits, 12,
+    "Thrallo recovery headroom must not change the customer's generation approval");
+});
+
 test("exceptional recovery increases require a durable actor, reason, allowance, and expiry", async () => {
   const envelope = deriveBuildEnvelope({ contract: staticContract, approvedCustomerCredits: 20 });
   const store = memoryBuildEnvelopes();

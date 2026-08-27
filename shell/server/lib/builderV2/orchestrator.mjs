@@ -34,7 +34,7 @@ import {
 } from "./verification.mjs";
 import {
   verificationDefects, actionableDefects, platformDefectsOf,
-  defectEvidence, defectWriteBoundary, defectProgress, defectSignature,
+  defectEvidence, defectWriteBoundary, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
@@ -1701,7 +1701,7 @@ export function createOrchestrator({
             currentTree = retained.tree;
             currentSnapshot = retained.snapshot;
             currentVerdicts = retained.verdicts;
-            currentDefects = retained.defects;
+            currentDefects = mergeDefectAttribution(retained.defects, currentDefects);
             currentEligibility = retained.eligibility;
             rows = retained.rows;
             progressStop = { round: rounds, strategy: mode, ...progress };

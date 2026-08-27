@@ -18,7 +18,7 @@ import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotSt
 import {
   DEFECT_CLASS, DEFECT_OWNER, REPAIR_TIER,
   verificationDefects, actionableDefects, platformDefectsOf,
-  defectEvidence, defectWriteBoundary, defectProgress, defectSignature,
+  defectEvidence, defectWriteBoundary, defectProgress, defectSignature, mergeDefectAttribution,
 } from "../../shell/server/lib/builderV2/verificationDefects.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { deriveVerificationManifest, controlIdFor, actionIdFor }
@@ -222,6 +222,27 @@ test("the write boundary is the verifier's own attribution, and absent attributi
   });
   assert.ok(actionableDefects(unattributed).length, "there is still a defect to repair");
   assert.equal(defectWriteBoundary(unattributed), null);
+});
+
+test("a rolled-back software catalogue repair retains newly observed causal owners", () => {
+  const flow = "src/components/catalogue/CatalogueFlow.jsx";
+  const filterState = "src/components/catalogue/useCatalogueFilters.js";
+  const base = {
+    defectClass: DEFECT_CLASS.INTERACTION,
+    code: "contracted_control_undriveable",
+    journeyId: "browse-software-catalogue",
+    stepIndex: 2,
+    control: { id: "ctl_catalogue_item", logicalField: "selectedSoftwareId" },
+    modules: [flow],
+    failureRefs: [flow],
+    evidence: { observed: "the contracted catalogue selection was not available" },
+  };
+  const observed = { ...base, modules: [flow, filterState], failureRefs: [flow, filterState] };
+  const [merged] = mergeDefectAttribution([base], [observed]);
+  assert.deepEqual(merged.modules, [flow, filterState]);
+  assert.equal(merged.evidence, base.evidence, "the retained tree's browser observation remains authoritative");
+  assert.ok(defectWriteBoundary([{ ...merged, owner: DEFECT_OWNER.APP, tier: REPAIR_TIER.REPAIR }])
+    .allowedFiles.includes(filterState));
 });
 
 test("LIVE-SHAPED REGRESSION — rendered source ownership survives browser evidence", () => {
