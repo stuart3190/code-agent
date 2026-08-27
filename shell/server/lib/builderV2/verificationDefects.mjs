@@ -316,7 +316,8 @@ export function verificationDefects({
     // The ambiguity is useful evidence and keeps ownership unknown, but it cannot demote a
     // browser-classified application interaction defect into an unrepairable platform stop.
     const inconclusiveAddressing = minimal && ambiguous
-      && !isAppRepairableVerificationClass(resultClass);
+      && !isAppRepairableVerificationClass(resultClass)
+      && !appSelectionValueMissing;
     const surfaceIntegration = mountedSurfaceFor(diagnostic.journeyId);
     const causalSurfaceModules = surfaceIntegration ? unique([
       ...surfaceIntegration.routeFiles,
