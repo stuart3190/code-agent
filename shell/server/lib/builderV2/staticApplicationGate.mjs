@@ -196,6 +196,113 @@ function parseSource(source, file) {
   }
 }
 
+const memberName = (member) => {
+  if (!["MemberExpression", "OptionalMemberExpression"].includes(member?.type)) return null;
+  return member.computed ? literalValue(member.property) : member.property?.name || null;
+};
+
+function nodeContainsAttributeRead(node, attributeName) {
+  let found = false;
+  const inspect = (current) => {
+    if (found || !current || typeof current.type !== "string") return;
+    if (["CallExpression", "OptionalCallExpression"].includes(current.type)
+        && ["getAttribute", "hasAttribute"].includes(memberName(current.callee))
+        && literalValue(current.arguments?.[0]) === attributeName) {
+      found = true;
+      return;
+    }
+    for (const [, child] of childrenOf(current)) inspect(child);
+  };
+  inspect(node);
+  return found;
+}
+
+function observerCallbackWrites(callback) {
+  const writes = [];
+  const inspect = (node, ancestors = []) => {
+    if (!node || typeof node.type !== "string") return;
+    const operation = ["setAttribute", "removeAttribute", "toggleAttribute"].includes(memberName(node.callee))
+      ? memberName(node.callee) : null;
+    const attributeName = operation ? literalValue(node.arguments?.[0]) : null;
+    if (["CallExpression", "OptionalCallExpression"].includes(node.type) && attributeName) {
+      const guarded = ancestors.some(({ node: parent, key }) => (
+        (parent.type === "IfStatement" && key === "consequent"
+          && nodeContainsAttributeRead(parent.test, attributeName))
+        || (parent.type === "ConditionalExpression" && ["consequent", "alternate"].includes(key)
+          && nodeContainsAttributeRead(parent.test, attributeName))
+        || (parent.type === "LogicalExpression" && key === "right"
+          && nodeContainsAttributeRead(parent.left, attributeName))
+      ));
+      if (!guarded) writes.push({ attributeName, operation, line: node.loc?.start?.line || 0 });
+    }
+    for (const [key, child] of childrenOf(node)) inspect(child, [...ancestors, { node, key }]);
+  };
+  inspect(callback);
+  return writes;
+}
+
+/** Reject a MutationObserver callback that can retrigger itself by rewriting a watched attribute. */
+export function lintSelfTriggeringMutationObservers(tree = {}) {
+  const findings = [];
+  for (const [file, source] of Object.entries(tree)) {
+    if (!SOURCE.test(file) || PLATFORM.test(file) || typeof source !== "string") continue;
+    const ast = parseSource(source, file);
+    if (!ast) continue;
+    const functions = new Map();
+    const observers = new Map();
+    const observeCalls = [];
+    const collect = (node) => {
+      if (!node || typeof node.type !== "string") return;
+      if (node.type === "FunctionDeclaration" && node.id) functions.set(node.id.name, node);
+      if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+        if (["ArrowFunctionExpression", "FunctionExpression"].includes(node.init?.type)) {
+          functions.set(node.id.name, node.init);
+        }
+        if (node.init?.type === "NewExpression" && node.init.callee?.type === "Identifier"
+            && node.init.callee.name === "MutationObserver") {
+          observers.set(node.id.name, node.init.arguments?.[0] || null);
+        }
+      }
+      if (["CallExpression", "OptionalCallExpression"].includes(node.type)
+          && memberName(node.callee) === "observe" && node.callee.object?.type === "Identifier") {
+        observeCalls.push({ observer: node.callee.object.name, options: node.arguments?.[1] || null });
+      }
+      for (const [, child] of childrenOf(node)) collect(child);
+    };
+    collect(ast.program);
+
+    for (const call of observeCalls) {
+      const callbackReference = observers.get(call.observer);
+      const callback = callbackReference?.type === "Identifier"
+        ? functions.get(callbackReference.name) : callbackReference;
+      if (!callback || call.options?.type !== "ObjectExpression") continue;
+      const attributes = literalValue(literalObjectProperty(call.options, "attributes")?.value) === true;
+      const subtree = literalValue(literalObjectProperty(call.options, "subtree")?.value) === true;
+      const filterNode = literalObjectProperty(call.options, "attributeFilter")?.value;
+      const attributeFilter = filterNode?.type === "ArrayExpression"
+        ? new Set((filterNode.elements || []).map(literalValue).filter((value) => typeof value === "string"))
+        : null;
+      if (!attributes && !attributeFilter) continue;
+      for (const write of observerCallbackWrites(callback)) {
+        if (attributeFilter && !attributeFilter.has(write.attributeName)) continue;
+        // With subtree observation, a callback that rewrites a watched attribute anywhere in the
+        // observed surface can feed its own mutation queue. A same-node observer is equally unsafe;
+        // generated callbacks must compare the current value before writing either shape.
+        if (!subtree && call.options && !attributes) continue;
+        findings.push({
+          code: "self_triggering_mutation_observer",
+          file,
+          line: write.line,
+          attribute: write.attributeName,
+          message: `${file}:${write.line} rewrites watched attribute ${write.attributeName} `
+            + "without checking its current value, which can retrigger its MutationObserver indefinitely",
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 /** A crowded mounted screen has one planned interaction controller, rendered exactly once. */
 export function lintJourneyControllerMounts(tree = {}, modulePlan = []) {
   const findings = [];
@@ -438,14 +545,17 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   const unresolvedImports = lintUnresolvedImports(tree);
   const extensionInterfaces = lintCustomExtensionInterfaces(tree, scaffoldGraph, journeys);
   const journeyControllerMounts = lintJourneyControllerMounts(tree, modulePlan);
+  const observerSafety = lintSelfTriggeringMutationObservers(tree);
   checks.push({ name: "source_integrity",
     ok: undefinedIdentifiers.length + unresolvedImports.length + extensionInterfaces.length
-      + journeyControllerMounts.length === 0,
-    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces, ...journeyControllerMounts]
+      + journeyControllerMounts.length + observerSafety.length === 0,
+    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces, ...journeyControllerMounts,
+      ...observerSafety]
       .map((finding) => finding.message) });
   blocking.push(...undefinedIdentifiers, ...unresolvedImports);
   blocking.push(...extensionInterfaces);
   blocking.push(...journeyControllerMounts);
+  blocking.push(...observerSafety);
 
   const reachable = reachablePaths(tree);
   const scopedContract = { ...contract, journeys };
