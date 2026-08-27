@@ -1142,6 +1142,8 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
   const byId = new Map(flows.map((flow) => [flow.id, flow]));
   const coverage = [];
   const operationsAtStep = new Map();
+  const declaredOperationIds = new Set((graph?.operationResponsibilities || [])
+    .map((operation) => normalized(operation.operationId)).filter(Boolean));
   for (const operation of graph?.operationResponsibilities || []) {
     const key = `${operation.journeyId}:${operation.stepIndex}`;
     operationsAtStep.set(key, (operationsAtStep.get(key) || 0) + 1);
@@ -1185,6 +1187,13 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
 
     const journey = journeys.get(operation.journeyId) || null;
     const step = operation.stepIndex >= 0 ? journey?.steps?.[operation.stepIndex] || null : null;
+    const stepOperationIds = list(step?.operates).map(normalized)
+      .filter((operationId) => declaredOperationIds.has(operationId));
+    const declaredStepProduces = stepOperationIds.length === 1
+      && stepOperationIds[0] === normalized(operation.operationId)
+      ? unique(list(step?.produces).map((value) => String(value).split(".").pop()).filter(Boolean))
+        .map((field) => `${operation.journeyId}.custom.${field}`)
+      : [];
     const semanticNode = nodes.get(semantic.owner);
     const semanticModule = moduleForNode(semanticNode) || `journey:${operation.journeyId}`;
     const persistenceNode = persistence ? nodes.get(persistence.owner) : null;
@@ -1233,7 +1242,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         ? actionIdFor(operation.operationId) : flow.control?.machineId || null;
       if (flow.control && operationMachineId) flow.control.machineId = operationMachineId;
       const reads = unique([...(flow.reads || []), ...semanticReads]);
-      const writes = unique([...(flow.writes || []), ...semanticWrites]);
+      const writes = unique([...(flow.writes || []), ...semanticWrites, ...declaredStepProduces]);
       const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
       Object.assign(flow, {
         operationId: operation.operationId,
@@ -1259,7 +1268,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         persistenceHandoff: handoff,
         persistenceSource,
         expectedStateTransition: {
-          produces: semanticWrites,
+          produces: unique([...semanticWrites, ...declaredStepProduces]),
           persists: handoff?.writes || (persistence ? persistence.writes || [] : []),
           readsPersisted: persistenceSource?.writes || [],
           requirement: flow.nextStateRequirement || step?.expect || semantic.behavior,

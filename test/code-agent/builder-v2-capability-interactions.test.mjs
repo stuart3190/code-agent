@@ -76,6 +76,48 @@ test("plain CRUD update produces a complete capability-backed interaction contra
   )), ["list", "get", "remove"]);
 });
 
+test("an operation step's declared outputs satisfy later operation dependencies", () => {
+  const spec = deriveBuildSpec(makeContract({
+    fields: ["recordName", "recordCreatedById", "recordId", "childTitle", "childId"],
+    operations: [
+      {
+        id: "create-record", entity: "record", kind: "create", journey: "primary-flow",
+        responsibilities: [
+          { type: "functional", reads: ["recordName"], writes: ["recordCreatedById"] },
+          { type: "persistence", reads: ["recordName", "recordCreatedById"],
+            writes: ["recordId", "recordName", "recordCreatedById"] },
+        ],
+      },
+      {
+        id: "create-child", entity: "record", kind: "create", journey: "primary-flow",
+        responsibilities: [
+          { type: "functional", reads: ["recordId", "childTitle"], writes: ["childTitle"] },
+          { type: "persistence", reads: ["recordId", "childTitle"],
+            writes: ["childId", "recordId", "childTitle"] },
+        ],
+      },
+    ],
+    steps: [
+      { action: "enter a record name", target: "record name", operates: ["recordName"],
+        expect: "the record name is visible" },
+      { action: "create the record", target: "create record", operates: ["create-record"],
+        reads: ["recordName"], produces: ["recordId"], expect: "the created record is visible" },
+      { action: "enter a child title", target: "child title", operates: ["childTitle"],
+        expect: "the child title is visible" },
+      { action: "create the child", target: "create child", operates: ["create-child"],
+        reads: ["recordId", "childTitle"], produces: ["childId"], expect: "the child is visible" },
+      { action: "review the child", target: "child", reads: ["childId"],
+        expect: "the child remains visible" },
+    ],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.ok(interactionFor(spec, "create-record").writes.includes("primary-flow.custom.recordId"));
+  assert.ok(interactionFor(spec, "create-child").reads.includes("primary-flow.custom.recordId"));
+  assert.ok(interactionFor(spec, "create-child").writes.includes("primary-flow.custom.childId"));
+  assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
+});
+
 test("custom calculation plus CRUD persistence produces a complete custom interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "invoice", fields: ["lineAmounts", "subtotal", "tax", "total"],
