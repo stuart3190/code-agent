@@ -175,6 +175,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });
+  assert.deepEqual(selectedRemovalExpectationSpec(removalExpectationSpec({
+    action: "remove the software from favourites",
+    expect: "the software is removed from the favourites list and the empty favourites message is visible again",
+  }), ["AUTOMATION · CLOUD\nForge Flow\nCoordinate routine catalogue workflows"]), {
+    target: "Forge Flow",
+    collection: "favourites list",
+    postcondition: "the empty favourites message is visible again",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {

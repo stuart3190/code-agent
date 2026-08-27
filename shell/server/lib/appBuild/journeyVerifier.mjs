@@ -533,7 +533,11 @@ export function selectedRemovalExpectationSpec(spec, selections = []) {
   if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record|favourite|favorite)$/i
     .test(String(spec.target || "").trim())) return spec;
   const selectedText = String(selections.at(-1) || "");
-  const target = selectedText.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || "";
+  const lines = selectedText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const firstLineIsMetadata = /[·•|]/u.test(lines[0] || "");
+  const target = (firstLineIsMetadata
+    ? lines.slice(1).find((value) => value.split(/\s+/).length <= 8 && keywords(value, 5).length)
+    : lines[0]) || lines[0] || "";
   if (!target || target.split(/\s+/).length > 8 || !keywords(target, 5).length) return spec;
   return { ...spec, target };
 }
