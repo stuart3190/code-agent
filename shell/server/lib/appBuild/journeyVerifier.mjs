@@ -535,7 +535,7 @@ export function collectionMembershipExpectationSpec(expect = "") {
       const normalized = member.replace(/[.;:]$/, "").trim();
       return index === 0 ? normalized.replace(/^both\s+/i, "") : normalized;
     }).filter(Boolean);
-  const postconditionIndex = clauses.findIndex((clause, index) => index >= 2
+  const postconditionIndex = clauses.findIndex((clause, index) => index >= 1
     && COLLECTION_POSTCONDITION_CLAUSE_PATTERN.test(clause));
   const members = postconditionIndex < 0 ? clauses : clauses.slice(0, postconditionIndex);
   if (!keywords(collection, 5).length || members.length < 2 || members.length > 5

@@ -158,6 +158,10 @@ test("removal expectations retain a separate positive postcondition", () => {
 });
 
 test("multi-member collection expectations retain their named scope", () => {
+  assert.equal(
+    collectionMembershipExpectationSpec("the favourites list shows Meridian Atlas and the favourites count is 1"),
+    null,
+  );
   assert.deepEqual(
     collectionMembershipExpectationSpec("the favourites list contains Atlas Editor and Compass Deploy"),
     { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] },
