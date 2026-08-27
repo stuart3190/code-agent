@@ -487,7 +487,7 @@ export function requestsSingleCollectionMemberAction(step = {}) {
 const REMOVAL_ACTION_PATTERN = /\b(?:remove|delete|archive|dismiss|detach)\b/i;
 const REMOVAL_RESULT_PATTERN = /\s+(?:is|was|has\s+been|gets?)\s+(?:removed|deleted|archived|dismissed|detached)\b/i;
 const POSITIVE_POSTCONDITION_PATTERN = /\b(?:and|while|but|however|yet)\b/i;
-const POSTCONDITION_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section))\s+(?:shows?|displays?|contains?|includes?)\b/i;
+const POSTCONDITION_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section|panel))\s+(?:shows?|displays?|contains?|includes?)\b/i;
 const POSTCONDITION_EMPTY_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?)\s+empty(?:-|\s+)(?:[\w-]+\s+){0,2}(?:state|message)\b/i;
 
 // A successful removal is observable as absence, so the removed entity's name cannot also be

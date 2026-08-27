@@ -136,6 +136,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     remainingMemberRequired: false,
   });
   assert.deepEqual(removalExpectationSpec({
+    action: "remove the same software from favourites",
+    expect: "Forge Planner is removed and the favourites panel shows its empty favourites message",
+  }), {
+    target: "Forge Planner",
+    collection: "favourites panel",
+    postcondition: "the favourites panel shows its empty favourites message",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
+  assert.deepEqual(removalExpectationSpec({
     action: "remove the favourited software",
     expect: "Compass Deploy is removed and the favourites empty message is visible again",
   }), {
