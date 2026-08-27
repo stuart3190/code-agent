@@ -554,6 +554,29 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
     });
 
+    await t.test("a detail action measures removal in the explicitly named collection", async () => {
+      const remove = {
+        ...control("remove favourite control", "remove-favourite-software", ["button"]),
+        accessibleName: "remove favourite control",
+        accessibleNames: ["remove favourite control"],
+      };
+      const step = {
+        action: "remove Atlas Editor from favourites",
+        expect: "Atlas Editor is removed from the favourites panel and the panel shows an empty favourites message if no favourites remain",
+      };
+      const result = await run(`<main><section aria-label="Selected item detail panel"><h2>Atlas Editor</h2>
+        <button data-thrallo-action="remove-favourite-software" aria-label="remove favourite control"
+          onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove favourite</button>
+        </section><section aria-label="Favourites panel"><h2>Favourites panel</h2><ul>
+        <li id="favourite-item">Atlas Editor</li></ul>
+        <p id="favourites-empty" data-empty-state hidden>No favourites remain</p></section></main>`, step,
+      [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.scope, "contracted_collection_member");
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+    });
+
     await t.test("a removal can derive collection scope from its positive empty-message clause", async () => {
       const remove = {
         ...control("favourites list remove control", "remove-favourite-software", ["button"]),

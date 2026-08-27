@@ -673,8 +673,12 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
         controlTopicMatches: relatedMembers.length
           ? Math.max(...relatedMembers.map((row) => row.controlTopicMatches)) : -1 };
     }).filter((row) => row.topicMatches > 0 && (!requireTarget || row.targetPresent))
-      .sort((left, right) => right.controlTopicMatches - left.controlTopicMatches
-        || right.identityTopicMatches - left.identityTopicMatches
+      // A heading or aria-label that names the contracted collection is stronger scope evidence
+      // than a detail-panel control whose label merely mentions that collection. The action may
+      // legitimately live outside the collection it mutates, while the named region remains the
+      // authority for proving that its member disappeared.
+      .sort((left, right) => right.identityTopicMatches - left.identityTopicMatches
+        || right.controlTopicMatches - left.controlTopicMatches
         || left.text.length - right.text.length || right.topicMatches - left.topicMatches);
     const collectionRegion = markedRegion || regions[0]?.element || null;
     let regionMarked = false;
