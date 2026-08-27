@@ -659,9 +659,14 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
     const collectionRegion = markedRegion || regions[0]?.element || null;
     let regionMarked = false;
     if (markerValue && (collectionRegion || uniqueMembers[0])) {
-      uniqueMembers[0]?.setAttribute("data-thrallo-verifier-removal-member", markerValue);
-      const region = collectionRegion || uniqueMembers[0].closest("section, aside, [role='region']")
-        || uniqueMembers[0].parentElement?.parentElement || uniqueMembers[0].parentElement;
+      const scopedMember = memberRows.filter((row) => !collectionRegion || collectionRegion.contains(row.member))
+        .sort((left, right) => right.controlTopicMatches - left.controlTopicMatches
+          || normalized(left.member.innerText).length - normalized(right.member.innerText).length)[0]?.member
+        || [...uniqueMembers].sort((left, right) => normalized(left.innerText).length
+          - normalized(right.innerText).length)[0];
+      scopedMember?.setAttribute("data-thrallo-verifier-removal-member", markerValue);
+      const region = collectionRegion || scopedMember.closest("section, aside, [role='region']")
+        || scopedMember.parentElement?.parentElement || scopedMember.parentElement;
       if (region && ![document.body, document.documentElement].includes(region)) {
         region.setAttribute("data-thrallo-verifier-removal-region", markerValue);
         regionMarked = true;
@@ -1588,6 +1593,7 @@ async function activateContractedControl(page, control, {
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
   evidence = null,
   allowEquivalentCandidates = false,
+  preferredMemberMarker = null,
 } = {}) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
   const reliableVisible = async (locator) => {
@@ -1607,7 +1613,19 @@ async function activateContractedControl(page, control, {
   // The contract's own opaque identity, when the app emitted one: no prose, no aliasing, and
   // immune to the label being renamed, translated or replaced by an icon.
   if (control?.machineId) {
-    const identityLocator = page.locator(`[data-thrallo-action="${control.machineId}"]`);
+    let identityLocator = page.locator(`[data-thrallo-action="${control.machineId}"]`);
+    if (preferredMemberMarker) {
+      const equivalentCandidates = await identityLocator.count().catch(() => 0);
+      if (evidence && equivalentCandidates > 1) evidence.equivalentCandidates = equivalentCandidates;
+      const scopedIdentity = page.locator(
+        `[data-thrallo-verifier-removal-member="${preferredMemberMarker}"] `
+          + `[data-thrallo-action="${control.machineId}"]`,
+      );
+      if (await scopedIdentity.count().catch(() => 0)) {
+        identityLocator = scopedIdentity;
+        if (evidence) evidence.scope = "contracted_collection_member";
+      }
+    }
     const byIdentity = minimal ? await reliableVisible(identityLocator) : identityLocator.first();
     if (byIdentity && await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)) {
       if (await byIdentity.isDisabled().catch(() => true)) {
@@ -2715,6 +2733,7 @@ async function runStep(page, step, {
         // proved by a native reset or a named collection-member removal transition.
         allowEquivalentCandidates: requestsSingleCollectionMemberAction(step)
           || Boolean(removalSpec) || resetExpected,
+        preferredMemberMarker: removalBaseline.targetPresent ? removalBaseline.marker : null,
       });
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never

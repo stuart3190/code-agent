@@ -751,6 +751,25 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(missingOutcome.pass, false, "a sole selected option still requires its outcome");
     });
 
+    await t.test("a duplicated action identity is scoped to the named catalogue member", async () => {
+      const favouriteAction = control("favouriteSoftwareIds", "favourite-action", ["button"]);
+      const step = { action: "remove Atlas QA from favourites", operates: ["favouriteSoftwareIds"],
+        expect: "Atlas QA is removed from the favourites list and the empty favourites message is visible again" };
+      const flow = { kind: "action", control: favouriteAction, writes: ["favouriteSoftwareIds"] };
+      const result = await run(`<main>
+        <section><h2>Selected software</h2><p>Beacon Monitor</p>
+          <button data-thrallo-action="favourite-action" onclick="this.dataset.clicked='true'">Toggle selected</button>
+        </section>
+        <section><h2>Favourites list</h2><ul><li id="atlas-member">Atlas QA
+          <button data-thrallo-action="favourite-action" onclick="document.querySelector('#atlas-member').remove(); document.querySelector('#empty-favourites').hidden=false">Remove</button>
+        </li></ul><p id="empty-favourites" data-empty-state hidden>No favourites saved yet.</p></section>
+      </main>`, step, [flow]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.scope,
+        "contracted_collection_member");
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+    });
+
     await t.test("a clipped accessibility mirror cannot shadow the visible catalogue selection", async () => {
       const selectedItem = {
         ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
