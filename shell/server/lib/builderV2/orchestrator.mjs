@@ -884,10 +884,13 @@ export function createOrchestrator({
         for (const file of noOpTargets) rejectionHistory.push({ signature: `${file}:noop` });
         working = internalHeadroomSplit || (correctionDispatch && latestCandidate) ? working : originalTree;
         noOps += 1;
-        if ((step === "repair" || correctionDispatch) && !scheduleCorrectionRetry()) {
-          return failure(`${step === "repair" ? "the repair" : "the candidate correction"} produced no applicable change after the correction allowance`, {
-            code: "no_substantive_repair",
-          });
+        if (step === "repair" || correctionDispatch) {
+          // A byte-identical response is a protocol retry of the SAME logical correction. It must
+          // not advance the substantive correction counter: doing so left a simple build only one
+          // real chance to correct its retained candidate. Keep the correction lane and immutable
+          // tree, but let the independent no-op ceiling bound repeated empty work.
+          retryAsCorrection = true;
+          protocolRetryPending = true;
         }
         attemptLedger.push({ attempt, dispatch: dispatchStep,
           class: patches.length ? "patch_noop" : "empty_patch_envelope", substantive: false });
