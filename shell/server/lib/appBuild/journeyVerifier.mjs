@@ -473,6 +473,103 @@ export function isObservationOnlyStep(step = {}, interactionFlows = [], {
     || ACTION_FLOW_KINDS.has(flow.kind));
 }
 
+// An accessibility observation is structural browser evidence, not page copy. Keep the matcher
+// deliberately narrow so ordinary read-only assertions retain their contracted text rules.
+function requestsNamedInteractiveControlsObservation(action, expect) {
+  const assertion = String(expect || "");
+  const description = `${String(action || "")} ${assertion}`;
+  return /\binteractive\s+controls?\b/i.test(description)
+    && /\b(?:visible\s+labels?|accessible\s+names?)\b/i.test(assertion)
+    && /\b(?:all|each|every)\b/i.test(assertion);
+}
+
+async function namedInteractiveControlsState(page) {
+  return page.evaluate(() => {
+    const selector = [
+      "a[href]", "button", "input:not([type='hidden'])", "select", "textarea", "summary",
+      "[contenteditable]:not([contenteditable='false'])", "[onclick]", "[tabindex]",
+      "[role='button']", "[role='link']", "[role='checkbox']", "[role='radio']",
+      "[role='switch']", "[role='tab']", "[role='menuitem']", "[role='menuitemcheckbox']",
+      "[role='menuitemradio']", "[role='option']", "[role='combobox']", "[role='listbox']",
+      "[role='slider']", "[role='spinbutton']", "[role='searchbox']", "[role='textbox']",
+      "[role='treeitem']",
+    ].join(",");
+    const normalized = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const visible = (element) => {
+      if (element.closest("[hidden], [inert]")) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden"
+        && Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0;
+    };
+    const referencedText = (element) => normalized((element.getAttribute("aria-labelledby") || "")
+      .split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent || "").join(" "));
+    const labelText = (element) => normalized(element.labels
+      ? [...element.labels].map((label) => label.textContent || "").join(" ") : "");
+    const contentNamedRoles = new Set([
+      "button", "link", "checkbox", "radio", "switch", "tab", "menuitem",
+      "menuitemcheckbox", "menuitemradio", "option", "treeitem",
+    ]);
+    const accessibleName = (element) => {
+      const tag = element.tagName.toLowerCase();
+      const role = normalized(element.getAttribute("role")).toLowerCase();
+      const type = normalized(element.getAttribute("type")).toLowerCase();
+      const ariaLabel = normalized(element.getAttribute("aria-label"));
+      if (ariaLabel) return { name: ariaLabel, source: "aria-label" };
+      const labelledBy = referencedText(element);
+      if (labelledBy) return { name: labelledBy, source: "aria-labelledby" };
+      const labels = labelText(element);
+      if (labels) return { name: labels, source: "label" };
+      if (tag === "input" && type === "image") {
+        const alt = normalized(element.getAttribute("alt"));
+        if (alt) return { name: alt, source: "alt" };
+      }
+      if (tag === "input" && ["button", "submit", "reset"].includes(type)) {
+        const value = normalized(element.getAttribute("value"));
+        if (value) return { name: value, source: "value" };
+      }
+      if (["button", "a", "summary"].includes(tag) || contentNamedRoles.has(role)) {
+        const text = normalized(element.innerText);
+        if (text) return { name: text, source: "visible-text" };
+        const descendantAlt = normalized([...element.querySelectorAll("img[alt]")]
+          .map((image) => image.getAttribute("alt") || "").join(" "));
+        if (descendantAlt) return { name: descendantAlt, source: "descendant-alt" };
+      }
+      const title = normalized(element.getAttribute("title"));
+      return title ? { name: title, source: "title" } : { name: "", source: null };
+    };
+    const controls = [...new Set(document.querySelectorAll(selector))]
+      .filter((element) => visible(element))
+      .filter((element) => element.getAttribute("tabindex") !== "-1"
+        || element.matches(selector.replace(", [tabindex]", "")));
+    const rows = controls.map((element) => {
+      const naming = accessibleName(element);
+      const hiddenFromAccessibility = Boolean(element.closest("[aria-hidden='true']"));
+      const descriptive = /[\p{L}\p{N}]/u.test(naming.name);
+      return {
+        tag: element.tagName.toLowerCase(),
+        type: element.getAttribute("type") || null,
+        role: element.getAttribute("role") || null,
+        id: element.id || null,
+        machineId: element.getAttribute("data-thrallo-control")
+          || element.getAttribute("data-thrallo-action") || null,
+        named: !hiddenFromAccessibility && descriptive,
+        nameSource: naming.source,
+        reason: hiddenFromAccessibility ? "aria_hidden"
+          : descriptive ? null : naming.name ? "non_descriptive_name" : "missing_name",
+      };
+    });
+    const unnamedControls = rows.filter((row) => !row.named);
+    return {
+      checked: true,
+      total: rows.length,
+      named: rows.length - unnamedControls.length,
+      unnamed: unnamedControls.length,
+      unnamedControls: unnamedControls.slice(0, 8),
+    };
+  }).catch(() => null);
+}
+
 // A collection member action legitimately renders the same exact contracted control once per
 // item. It is safe to choose the first stable DOM match only when the step explicitly asks for one
 // member and the required outcome proves that another member remains. Ordinary repeated commits
@@ -2332,6 +2429,27 @@ async function runStep(page, step, {
     : { checked: false, targetPresent: false, targetMemberCount: 0, matchedControlCount: 0 };
   const urlBefore = page.url();
   let controlEvidence = null;
+
+  if (minimal && observationOnly && requestsNamedInteractiveControlsObservation(action, expect)) {
+    const accessibility = await namedInteractiveControlsState(page);
+    if (!accessibility) return {
+      drove: false, status: "undriveable",
+      detail: "the verifier could not inspect the visible interactive controls",
+      controlEvidence: { accessibility: { checked: false } },
+    };
+    if (accessibility.total === 0) return {
+      drove: false, status: "undriveable",
+      detail: "the active surface exposes no visible interactive controls to inspect",
+      controlEvidence: { accessibility },
+    };
+    return accessibility.unnamed === 0
+      ? { drove: false, status: "pass",
+        detail: `all ${accessibility.total} visible interactive controls expose a visible label or accessible name`,
+        controlEvidence: { accessibility } }
+      : { drove: false, status: "fail",
+        detail: `${accessibility.unnamed} of ${accessibility.total} visible interactive controls lack a descriptive label or accessible name`,
+        controlEvidence: { accessibility } };
+  }
 
   const explicitAuth = interactionFlows.some((flow) => flow.kind === "flow_start")
     ? { handled: false }
