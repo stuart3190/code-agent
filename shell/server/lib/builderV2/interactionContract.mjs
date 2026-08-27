@@ -774,6 +774,32 @@ export function buildInteractionContract(contract, {
         }
       }
 
+      // A contract correction may assign state production to an existing control-free journey
+      // step (for example, opening a catalogue exposes its visible item ids). Preserve that exact
+      // producer on the interaction already derived for the step. Previously `produces` survived
+      // only on value controls or declared operations, so a successful dependency repair was
+      // deterministically discarded and the unchanged downstream read failed the gate again.
+      // Do not synthesize a new interaction, and leave operation-owned outputs to graph binding.
+      if (!declaredOperationIds.length) {
+        const declaredProducedFields = unique(list(step?.produces)
+          .map((value) => String(value).split(".").pop())
+          .filter((name) => operableFields.has(normalized(name))));
+        const stepFlows = flows.slice(stepFlowStart);
+        const unboundProducedFields = declaredProducedFields.filter((field) => {
+          const suffix = `.${field}`;
+          return !stepFlows.some((flow) => (flow.writes || []).some((path) => String(path).endsWith(suffix)));
+        });
+        const producer = stepFlows.find((flow) => flow.kind === "flow_start" && !flow.valueWritten)
+          || stepFlows.find((flow) => ["navigation", "action"].includes(flow.kind) && !flow.valueWritten)
+          || stepFlows[0];
+        if (producer && unboundProducedFields.length) {
+          const paths = unboundProducedFields.map((field) => `${journey.id}.draft.${field}`);
+          producer.writes = unique([...(producer.writes || []), ...paths]);
+          producer.producedValues = unique([...(producer.producedValues || []), ...unboundProducedFields]);
+          draftWrites.push(...paths);
+        }
+      }
+
       // An operation identity names what the step DOES, not another value control. Preserve that
       // identity on the step itself before the capability graph is derived. Without it, the graph
       // can only guess among unclaimed interactions of the same kind in the whole journey. A
