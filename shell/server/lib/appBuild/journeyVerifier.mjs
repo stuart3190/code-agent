@@ -2764,14 +2764,19 @@ async function runStep(page, step, {
         if (consumesFilledInput) {
           const transitionDeadline = Date.now() + 3_000;
           let expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
-          while (!expectationEvidence.met && Date.now() < transitionDeadline) {
+          let autoAppliedStateChanged = await page.evaluate(() => document.body?.innerText || "")
+            .then((text) => text !== textBefore).catch(() => false);
+          while (!expectationEvidence.met && !autoAppliedStateChanged && Date.now() < transitionDeadline) {
             await page.waitForTimeout(200);
             expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
+            autoAppliedStateChanged = await page.evaluate(() => document.body?.innerText || "")
+              .then((text) => text !== textBefore).catch(() => false);
           }
-          if (expectationEvidence.met) {
+          if (expectationEvidence.met || autoAppliedStateChanged) {
             activated = true;
             activation.matchedBy = "contracted_input_auto_applied_action";
             activation.expectationEvidence = expectationEvidence;
+            activation.stateChanged = autoAppliedStateChanged || undefined;
             delete activation.reason;
           }
         }

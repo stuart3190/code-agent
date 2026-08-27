@@ -824,6 +824,18 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(automatic.journeys[0].steps[0].controlEvidence.activation.matchedBy,
         "contracted_input_auto_applied_action");
 
+      const genericCopyAlreadyVisible = await run(`<main>
+        <p>Visible result count updates in the software grid.</p>
+        <label>Software search <input data-thrallo-control="software-search" aria-label="search Query"
+          oninput="document.getElementById('result-card').textContent='Atlas Insight'"></label>
+        <p id="result-card">Beacon Monitor</p>
+      </main>`, {
+        action: "type a search term that matches a catalogue product", operates: ["searchQuery"],
+        expect: "the visible result count updates and the software grid includes a card titled Atlas Insight",
+      }, flows);
+      assert.equal(genericCopyAlreadyVisible.pass, true, JSON.stringify(genericCopyAlreadyVisible.journeys));
+      assert.equal(genericCopyAlreadyVisible.journeys[0].steps[0].controlEvidence.activation.stateChanged, true);
+
       const explicit = await run(html, {
         action: "type a search term and click apply filters", operates: ["searchQuery"],
         expect: "no software matches the current search",
