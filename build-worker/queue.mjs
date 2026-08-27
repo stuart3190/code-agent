@@ -20,9 +20,15 @@ export function serialiseWorkerFailure(error, classification) {
 }
 
 export function createWorkerQueue(client) {
-  const rpc = async (name, args) => {
-    const { data, error } = await client.rpc(name, args);
-    if (error) throw new Error(`${name}: ${error.message}`);
+  const rpc = async (name, args, { signal } = {}) => {
+    const request = client.rpc(name, args);
+    const { data, error } = await (signal && typeof request.abortSignal === "function"
+      ? request.abortSignal(signal)
+      : request);
+    if (error) throw Object.assign(new Error(`${name}: ${error.message}`), {
+      code: error.code || null,
+      cause: error,
+    });
     return Array.isArray(data) ? data[0] : data;
   };
   return {
@@ -51,10 +57,10 @@ export function createWorkerQueue(client) {
     start: (job, workerId) => rpc("build_work_start", {
       p_job_id: job.id, p_worker_id: workerId, p_lease_token: job.lease_token,
     }),
-    heartbeat: (job, workerId, leaseSeconds, details = {}) => rpc("build_work_heartbeat", {
+    heartbeat: (job, workerId, leaseSeconds, details = {}, options = {}) => rpc("build_work_heartbeat", {
       p_job_id: job.id, p_worker_id: workerId, p_lease_token: job.lease_token,
       p_lease_seconds: leaseSeconds, p_details: details,
-    }),
+    }, options),
     event: (job, workerId, eventType, details = {}) => rpc("build_work_event", {
       p_job_id: job.id, p_worker_id: workerId, p_lease_token: job.lease_token,
       p_event_type: eventType, p_details: details,

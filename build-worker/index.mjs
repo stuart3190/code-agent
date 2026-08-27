@@ -10,6 +10,7 @@ import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
 import { resolveWorkerReleaseIdentity } from "../shell/server/lib/builderV2/workerReleaseIdentity.mjs";
 import { createWorkerQueue, serialiseWorkerFailure } from "./queue.mjs";
+import { startWorkerLeaseHeartbeat } from "./leaseHeartbeat.mjs";
 import { proveWorkerPreviewIsolation, resolvePreviewIsolationRunId } from "./previewIsolationPreflight.mjs";
 import { resolvePreviewIsolationRefreshPolicy } from "./previewIsolationPolicy.mjs";
 import { createPreviewIsolationReadiness, readinessJobTypes } from "./previewIsolationReadiness.mjs";
@@ -166,20 +167,28 @@ async function runJob(job) {
     });
     return eventChain;
   };
-  const heartbeat = setInterval(async () => {
-    try {
-      const state = await queue.heartbeat(job, WORKER_ID, LEASE_SECONDS, { outputBytes });
+  const heartbeat = startWorkerLeaseHeartbeat({
+    initialLeaseExpiresAt: job.lease_expires_at,
+    leaseSeconds: LEASE_SECONDS,
+    renew: ({ signal }) => queue.heartbeat(job, WORKER_ID, LEASE_SECONDS, { outputBytes }, { signal }),
+    onState(state) {
       lastHeartbeat = Date.now();
       if (state?.cancel_requested) currentAbort.abort(Object.assign(new Error("cancel requested"), { code: "cancelled" }));
-    } catch (error) {
-      console.error(`[build-worker] heartbeat ${job.id}: ${error.message}`);
-      currentAbort.abort(Object.assign(new Error("lease lost"), { code: "lease_lost" }));
-    }
+    },
+    onTransientError(error, state) {
+      console.error(`[build-worker] heartbeat retry ${job.id} before ${state.leaseExpiresAt}: ${error.message}`);
+    },
+    onLeaseLost(error) {
+      console.error(`[build-worker] heartbeat lease lost ${job.id}: ${error.cause?.message || error.message}`);
+      currentAbort.abort(error);
+    },
+  });
+  const nodeHeartbeat = setInterval(async () => {
     await publishWorkerNode().catch((error) => {
       console.error(`[build-worker] node heartbeat during ${job.id}: ${error.message}`);
     });
   }, Math.max(5_000, Math.floor(LEASE_SECONDS * 1000 / 3)));
-  heartbeat.unref?.();
+  nodeHeartbeat.unref?.();
 
   try {
     let outcome;
@@ -263,7 +272,7 @@ async function runJob(job) {
       [error, eventFailure], "build work failed and its worker evidence could not persist",
     ), { code: "worker_evidence_failed", retryable: false });
     const classification = currentAbort.signal.aborted
-      ? (error.code === "lease_lost" ? "worker_crash" : "cancelled")
+      ? (currentAbort.signal.reason?.code === "lease_lost" ? "worker_crash" : "cancelled")
       : error.classification || error.code || "worker_error";
     if (job.job_type === "qa_browser") {
       try {
@@ -305,7 +314,8 @@ async function runJob(job) {
     }
     console.error(`[build-worker] ${classification} ${job.id}: ${error.message}`);
   } finally {
-    clearInterval(heartbeat);
+    heartbeat.stop();
+    clearInterval(nodeHeartbeat);
     current = null; currentAbort = null;
   }
 }

@@ -9,6 +9,7 @@ import { buildWorkerEnabled, limitsFor, workIdempotencyKey } from "../../shell/s
 import { runProcess } from "../../build-worker/processTree.mjs";
 import { safeChildEnvironment, sandboxTmpfsMb } from "../../build-worker/sandboxRunner.mjs";
 import { createWorkerQueue } from "../../build-worker/queue.mjs";
+import { startWorkerLeaseHeartbeat } from "../../build-worker/leaseHeartbeat.mjs";
 
 const slowScript = (phase, ms = 1_200) => `console.log(${JSON.stringify(`${phase}:stdout`)}); console.error(${JSON.stringify(`${phase}:stderr`)}); setTimeout(()=>{},${ms});`;
 
@@ -164,6 +165,75 @@ test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation
   assert.match(runner, /jobRoot.*artifactRoot/);
   assert.match(proof, /memoryMb: 384, pids: 96/,
     "the browser proof retains its memory guard and measured Chromium task headroom");
+});
+
+test("C7 transient heartbeat transport failure retries within the durable lease", async () => {
+  let attempts = 0;
+  const transient = [];
+  const state = await new Promise((resolve, reject) => {
+    const guard = startWorkerLeaseHeartbeat({
+      initialLeaseExpiresAt: new Date(Date.now() + 500).toISOString(),
+      leaseSeconds: 1,
+      intervalMs: 5,
+      retryMs: 5,
+      requestTimeoutMs: 20,
+      async renew({ signal }) {
+        attempts += 1;
+        assert.equal(signal instanceof AbortSignal, true);
+        if (attempts === 1) throw new Error("upstream request timeout");
+        return { state: "running", cancel_requested: false,
+          lease_expires_at: new Date(Date.now() + 500).toISOString() };
+      },
+      onState(value) { guard.stop(); resolve(value); },
+      onTransientError(error) { transient.push(error.message); },
+      onLeaseLost: reject,
+    });
+  });
+  assert.equal(attempts, 2);
+  assert.deepEqual(transient, ["upstream request timeout"]);
+  assert.equal(state.state, "running");
+});
+
+test("C7 heartbeat fails closed when the last confirmed lease expires", async () => {
+  let attempts = 0;
+  const error = await new Promise((resolve) => {
+    startWorkerLeaseHeartbeat({
+      initialLeaseExpiresAt: new Date(Date.now() + 300).toISOString(),
+      leaseSeconds: 1,
+      intervalMs: 5,
+      retryMs: 5,
+      requestTimeoutMs: 25,
+      renew({ signal }) {
+        attempts += 1;
+        return new Promise((unused, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      },
+      onState() { assert.fail("an unavailable heartbeat cannot renew the lease"); },
+      onLeaseLost: resolve,
+    });
+  });
+  assert.equal(error.code, "lease_lost");
+  assert.ok(attempts >= 2, "a timed-out transport is retried before the lease deadline");
+});
+
+test("C7 heartbeat passes its bounded request signal to Supabase", async () => {
+  let observedSignal = null;
+  const request = {
+    abortSignal(signal) {
+      observedSignal = signal;
+      return Promise.resolve({ data: [{ state: "running" }], error: null });
+    },
+  };
+  const client = { rpc() { return request; } };
+  const state = await createWorkerQueue(client).heartbeat(
+    { id: "job", lease_token: "token" }, "worker", 45, {}, { signal: AbortSignal.timeout(50) },
+  );
+  assert.equal(observedSignal instanceof AbortSignal, true);
+  assert.equal(state.state, "running");
+});
+
+test("C7 worker classification follows the durable lease-loss abort reason", async () => {
+  const worker = await readFile(new URL("../../build-worker/index.mjs", import.meta.url), "utf8");
+  assert.match(worker, /currentAbort\.signal\.reason\?\.code === "lease_lost" \? "worker_crash"/);
 });
 
 test("a pre-dispatch platform failure is not reported to the customer as a worker crash", async () => {
