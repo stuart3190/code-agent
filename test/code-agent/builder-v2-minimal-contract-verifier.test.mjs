@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   collectionMembershipExpectationSpec, controlResetTransition, expectationKeywords, expectationOutcome,
-  expectationRequestsControlReset, isObservationOnlyStep, removalExpectationSpec,
+  expectationRequestsControlReset, isObservationOnlyStep, removalExpectationSpec, selectedRemovalExpectationSpec,
   requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
@@ -152,6 +152,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     target: "Compass Deploy",
     collection: "favourites",
     postcondition: "the favourites empty message is visible again",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
+  assert.deepEqual(selectedRemovalExpectationSpec(removalExpectationSpec({
+    action: "remove the same software from favourites",
+    expect: "the software is removed from the favourites list and the empty favourites message appears",
+  }), ["Atlas Editor\nDeveloper Tools"]), {
+    target: "Atlas Editor",
+    collection: "favourites list",
+    postcondition: "the empty favourites message appears",
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });

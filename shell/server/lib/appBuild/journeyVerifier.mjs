@@ -518,6 +518,15 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
     remainingMemberRequired: /\b(?:remain(?:s|ed|ing)?|remaining|other|rest)\b/i.test(postcondition) };
 }
 
+export function selectedRemovalExpectationSpec(spec, selections = []) {
+  if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record)$/i
+    .test(String(spec.target || "").trim())) return spec;
+  const selectedText = String(selections.at(-1) || "");
+  const target = selectedText.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || "";
+  if (!target || target.split(/\s+/).length > 8 || !keywords(target, 5).length) return spec;
+  return { ...spec, target };
+}
+
 const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
 const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query|not|without|excludes?)\b/i;
@@ -2259,7 +2268,7 @@ async function runStep(page, step, {
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
-  const removalSpec = removalExpectationSpec({ action, expect });
+  const removalSpec = selectedRemovalExpectationSpec(removalExpectationSpec({ action, expect }), selections);
   const collectionMembershipSpec = collectionMembershipExpectationSpec(expect)
     || selectedCollectionExpectationSpec(expect, selections);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
