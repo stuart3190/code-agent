@@ -165,6 +165,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });
+  assert.deepEqual(selectedRemovalExpectationSpec(removalExpectationSpec({
+    action: "remove the favourite from the favourites list",
+    expect: "the favourites area shows the empty state text No saved software yet and the favourites count reads 0",
+  }), ["Atlas Editor\nDeveloper Tools"]), {
+    target: "Atlas Editor",
+    collection: "favourites list",
+    postcondition: "the favourites area shows the empty state text No saved software yet and the favourites count reads 0",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {
@@ -463,6 +473,30 @@ test("retained false negatives and concrete failures classify correctly in a rea
       [{ kind: "action", operationId: "remove-saved-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
+    });
+
+    await t.test("an implicit empty-state removal scopes duplicate action identities", async () => {
+      const remove = {
+        ...control("Remove Atlas Editor from favourites control", "remove-favourite-software", ["button"]),
+        accessibleName: "Remove Atlas Editor from favourites control",
+        accessibleNames: ["Remove Atlas Editor from favourites control"],
+      };
+      const step = {
+        action: "remove Atlas Editor from the favourites list",
+        expect: "the favourites area shows the empty state text No favourites yet and the favourites count reads 0",
+      };
+      const result = await run(`<main><section aria-label="Software detail"><h2>Atlas Editor</h2>
+        <button data-thrallo-action="remove-favourite-software" aria-label="Remove Atlas Editor from favourites control">Remove</button>
+        </section><section aria-label="Favourites"><h2>Favourites</h2><p id="favourite-count">Favourites count reads 1</p><ul>
+        <li id="favourite-item">Atlas Editor <button data-thrallo-action="remove-favourite-software"
+          aria-label="Remove Atlas Editor from favourites control"
+          onclick="document.getElementById('favourite-item').remove();document.getElementById('favourite-count').textContent='Favourites count reads 0';document.getElementById('empty').hidden=false">Remove</button></li>
+        </ul><p id="empty" data-empty-state hidden>No favourites yet</p></section></main>`, step,
+      [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation.scope, "contracted_collection_member");
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
     });
 
     await t.test("a contracted removal proves disappearance and its positive empty state", async () => {

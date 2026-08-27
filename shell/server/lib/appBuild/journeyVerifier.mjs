@@ -489,6 +489,7 @@ const REMOVAL_RESULT_PATTERN = /\s+(?:is|was|has\s+been|gets?)\s+(?:removed|dele
 const POSITIVE_POSTCONDITION_PATTERN = /\b(?:and|while|but|however|yet)\b/i;
 const POSTCONDITION_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section|panel))\s+(?:shows?|displays?|contains?|includes?)\b/i;
 const POSTCONDITION_EMPTY_COLLECTION_PATTERN = /^(?:the\s+)?(.{1,80}?)\s+empty(?:-|\s+)(?:[\w-]+\s+){0,2}(?:state|message)\b/i;
+const ACTION_COLLECTION_REMOVAL_PATTERN = /\b(?:remove|delete|archive|dismiss|detach)\s+(?:the\s+)?(.{1,80}?)\s+from\s+(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section|panel))\b/i;
 
 // A successful removal is observable as absence, so the removed entity's name cannot also be
 // required as positive page copy. Keep this structural and deliberately narrow: the action must
@@ -498,7 +499,17 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
   if (!REMOVAL_ACTION_PATTERN.test(String(action))) return null;
   const text = String(expect || "").trim();
   const result = REMOVAL_RESULT_PATTERN.exec(text);
-  if (!result || result.index < 1) return null;
+  if (!result || result.index < 1) {
+    const actionRemoval = ACTION_COLLECTION_REMOVAL_PATTERN.exec(String(action));
+    const emptyStateRequired = /\bempty\b.{0,40}\b(?:state|message|text)\b/i.test(text);
+    if (!actionRemoval || !emptyStateRequired) return null;
+    const rawTarget = actionRemoval[1].trim();
+    const collection = actionRemoval[2].trim();
+    if (!rawTarget || rawTarget.split(/\s+/).length > 8 || !keywords(rawTarget, 5).length
+      || !keywords(collection, 5).length || !keywords(text, 5).length) return null;
+    return { target: rawTarget, collection, postcondition: text,
+      emptyStateRequired: true, remainingMemberRequired: false };
+  }
   const rawTarget = text.slice(0, result.index).replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   if (!rawTarget || rawTarget.split(/\s+/).length > 8) return null;
   const suffix = text.slice(result.index + result[0].length);
@@ -519,7 +530,7 @@ export function removalExpectationSpec({ action = "", expect = "" } = {}) {
 }
 
 export function selectedRemovalExpectationSpec(spec, selections = []) {
-  if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record)$/i
+  if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record|favourite|favorite)$/i
     .test(String(spec.target || "").trim())) return spec;
   const selectedText = String(selections.at(-1) || "");
   const target = selectedText.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || "";
