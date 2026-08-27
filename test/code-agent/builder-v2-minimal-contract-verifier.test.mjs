@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import {
   collectionMembershipExpectationSpec, controlResetTransition, expectationKeywords, expectationOutcome,
   expectationRequestsControlReset, isObservationOnlyStep, removalExpectationSpec,
-  requestsSingleCollectionMemberAction, verifyJourneys,
+  requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -166,6 +166,17 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.deepEqual(collectionMembershipExpectationSpec(
     "the favourites list contains Atlas Editor and Compass Deploy and the favourite count is 2",
   ), { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] });
+  assert.deepEqual(selectedCollectionExpectationSpec(
+    "the favourites list shows one item and displays the selected software name",
+    ["Atlas Editor\nDeveloper Tools"],
+  ), { collection: "favourites list", members: ["Atlas Editor"] });
+  const selectedMemberOutcome = expectationOutcome({
+    wanted: ["favourites", "list", "one", "item", "displays"], found: [], fresh: [],
+    drove: true, action: "add selected software", actionProven: true,
+    collectionStateRequired: true, collectionStateSatisfied: true,
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+  });
+  assert.equal(selectedMemberOutcome.classification, VERIFICATION_RESULT_CLASS.PASS);
 });
 
 test("an enumerated selection that omits the exact fixture is an app-repairable defect", () => {
@@ -715,6 +726,29 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="true">Atlas Editor</button>
         </div></main>`, step, [flow]);
       assert.equal(missingOutcome.pass, false, "selected state alone must not satisfy the outcome");
+    });
+
+    await t.test("a sole filtered catalogue item already selected with its outcome visible is accepted", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        selectedState: true,
+      };
+      const step = { action: "select the visible software item", operates: ["selectedSoftwareId"],
+        expect: "selected software details are visible" };
+      const flow = { kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem };
+      const established = await run(`<main><div role="radiogroup" aria-label="selected software">
+          <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="true">Atlas Editor</button>
+        </div><section><h2>Atlas Editor details</h2><p>Selected software details are visible</p></section></main>`,
+      step, [flow]);
+      assert.equal(established.pass, true, JSON.stringify(established.journeys));
+      assert.equal(established.journeys[0].steps[0].drove, false);
+      assert.equal(established.journeys[0].steps[0].controlEvidence.selections[0].fixtureAuthority,
+        "single_available_option");
+
+      const missingOutcome = await run(`<main><div role="radiogroup" aria-label="selected software">
+          <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="true">Atlas Editor</button>
+        </div></main>`, step, [flow]);
+      assert.equal(missingOutcome.pass, false, "a sole selected option still requires its outcome");
     });
 
     await t.test("a clipped accessibility mirror cannot shadow the visible catalogue selection", async () => {

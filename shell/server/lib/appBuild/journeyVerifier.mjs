@@ -544,6 +544,21 @@ export function collectionMembershipExpectationSpec(expect = "") {
   return { collection, members };
 }
 
+const SELECTED_COLLECTION_MEMBER_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\b/i;
+
+export function selectedCollectionExpectationSpec(expect = "", selections = []) {
+  const text = String(expect || "").trim();
+  if (!/\bselected\b.{0,48}\b(?:name|item|software|product)\b/i.test(text)) return null;
+  const match = SELECTED_COLLECTION_MEMBER_PATTERN.exec(text);
+  if (!match) return null;
+  const selectedText = String(selections.at(-1) || "");
+  const member = selectedText.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || "";
+  if (!member || member.split(/\s+/).length > 8 || !keywords(member, 5).length) return null;
+  const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
+  if (!keywords(collection, 5).length) return null;
+  return { collection, members: [member] };
+}
+
 async function collectionMembershipState(page, spec) {
   const topics = keywords(spec.collection, 5).filter((word) => !COLLECTION_STRUCTURE_WORDS.has(word));
   return page.evaluate(({ wantedMembers, collectionTopics }) => {
@@ -1768,6 +1783,23 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
         selectedGroupContext: group.contextText, selectedOptions: before, autoAdvance: null },
     };
   }
+  if (contractedFixture === null && clickIndex === -1 && before.length === 1 && beforeSelected === 0) {
+    const expectationEvidence = await expectationIsVisible(page, step.expect);
+    if (expectationEvidence.met) {
+      const selected = before[0];
+      return {
+        drove: false,
+        groupKey: group.key,
+        status: "pass",
+        detail: `the sole available selection "${String(selected?.text || selected?.label || selected?.value || "").slice(0, 40)}" and its expected outcome were already established`,
+        selectedText: selected?.text || selected?.label || String(selected?.value || ""),
+        groupId: group.groupId,
+        controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
+          fixtureAuthority: "single_available_option", selectedGroupContext: group.contextText,
+          selectedOptions: before, precondition: "already_selected", expectationEvidence },
+      };
+    }
+  }
   if (clickIndex === -1) return null;
   // A mixed selection-plus-action step may target an item that the journey already selected, then
   // activate a separate contracted operation on that item. Re-clicking the already-selected
@@ -2210,7 +2242,8 @@ async function runStep(page, step, {
   const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
   const removalSpec = removalExpectationSpec({ action, expect });
-  const collectionMembershipSpec = collectionMembershipExpectationSpec(expect);
+  const collectionMembershipSpec = collectionMembershipExpectationSpec(expect)
+    || selectedCollectionExpectationSpec(expect, selections);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
     && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
   const removalBaseline = removalFlow
@@ -3169,12 +3202,15 @@ export function expectationOutcome({
         : "the verifier could not establish the contracted removal transition" };
   }
   if (isMinimalContractVerifier(verifierPolicy)) {
-    if (ratio >= 0.5 || reviewWithValues || mutationWithValues || urlChanged || stateChanged) {
+    if (ratio >= 0.5 || reviewWithValues || mutationWithValues || urlChanged || stateChanged
+      || (collectionStateRequired && collectionStateSatisfied)) {
       const advisory = ratio >= 0.5 && !fresh.length && drove && !urlChanged && !stateChanged
         ? [{ code: "text_freshness_not_observed", detail: "the contracted result was already visible" }]
         : [];
       return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS,
-        ratio >= 0.5 ? `contracted result visible: ${found.join(", ")}`
+        collectionStateRequired && collectionStateSatisfied
+          ? "the contracted collection contains its required member"
+          : ratio >= 0.5 ? `contracted result visible: ${found.join(", ")}`
           : urlChanged ? "the contracted navigation changed route"
             : "the contracted action produced an observable state change",
         { drove, readOnlyAssertion: readOnlyAssertion || undefined, advisories: advisory });
