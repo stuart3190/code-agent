@@ -348,6 +348,23 @@ export function verificationDefects({
         expected: diagnostic.expectedStateAfter || null,
         observed: diagnostic.actualObservedState || null,
         drove: step?.drove ?? null,
+        // Preserve the exact option the browser operated. A selected-state failure without this
+        // value only tells repair to add styling; it hides cross-module domain mismatches where a
+        // handler receives a real option id but an adapter returns an empty/foreign state value.
+        selectionAttempt: step?.selectedValue !== undefined && step?.selectedValue !== null
+          ? {
+            field: step?.controlEvidence?.contractedField || control?.logicalField || null,
+            value: step.selectedValue,
+            text: step?.selectedText || null,
+            fixtureAuthority: step?.controlEvidence?.fixtureAuthority || null,
+            optionStates: (step?.controlEvidence?.selectedOptions || []).slice(0, 12).map((option) => ({
+              value: option?.value ?? null,
+              label: option?.label ?? null,
+              text: option?.text ?? null,
+              selected: option?.selected === true,
+            })),
+          }
+          : null,
         // WHAT THE PAGE ITSELF SAID. Captured for every failing step since run #9 and, until now,
         // read only by a human after the money was spent.
         pageText: step?.observation?.text || null,
@@ -520,6 +537,7 @@ export function defectEvidence(defects = []) {
       attemptedLocators: defect.evidence?.attemptedLocators || [],
       controlAddressing: defect.evidence?.addressing || null,
       mechanics: defect.evidence?.mechanics || null,
+      selectionAttempt: defect.evidence?.selectionAttempt || null,
       drove: defect.evidence?.drove ?? null,
       pageTextWhenItFailed: defect.evidence?.pageText || null,
       consoleErrorsDuringStep: defect.evidence?.consoleErrors || [],

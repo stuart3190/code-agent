@@ -310,6 +310,39 @@ test("the brief carries the page's own account of the failure, not a summary of 
   assert.ok(row.repairTier, "every row states which allowance answers it");
 });
 
+test("a selected-state repair receives the exact software option the browser operated", () => {
+  const lines = defectEvidence(defectsFrom(verdicts({
+    failAt: 1,
+    step: {
+      status: "fail",
+      drove: true,
+      detail: "the clicked option never gained a selected state",
+      selectedValue: "aurora-editor",
+      selectedText: "Aurora Editor",
+      controlEvidence: {
+        contractedField: "selectedItemId",
+        fixtureAuthority: "option_transition",
+        selectedOptions: [
+          { value: "atlas-notes", text: "Atlas Notes", selected: true },
+          { value: "aurora-editor", text: "Aurora Editor", selected: false },
+        ],
+      },
+    },
+  })));
+  const row = lines.map((line) => { try { return JSON.parse(line); } catch { return null; } })
+    .find(Boolean);
+  assert.deepEqual(row.selectionAttempt, {
+    field: "selectedItemId",
+    value: "aurora-editor",
+    text: "Aurora Editor",
+    fixtureAuthority: "option_transition",
+    optionStates: [
+      { value: "atlas-notes", label: null, text: "Atlas Notes", selected: true },
+      { value: "aurora-editor", label: null, text: "Aurora Editor", selected: false },
+    ],
+  });
+});
+
 test("structured attribution drives retrieval — no filename is scraped out of prose", () => {
   const evidence = defectEvidence(defectsFrom(verdicts({ failAt: 1 })));
   const prose = evidence.filter((line) => !line.trim().startsWith("{"));

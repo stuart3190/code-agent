@@ -528,6 +528,8 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
         `action=${structured.userAction || "unknown"}`,
         `expected=${structured.expectedStateAfter || structured.expectedOutcome || structured.expected || "contracted visible transition"}`,
         `observed=${structured.actualObservedState || structured.detail || "the transition did not occur"}`,
+        structured.selectionAttempt?.value !== undefined && structured.selectionAttempt?.value !== null
+          ? `attemptedSelection=${JSON.stringify(structured.selectionAttempt)}` : null,
         structured.target ? `target=${structured.target}` : null,
       ].filter(Boolean).join("; ");
     }))].slice(0, 4);
@@ -954,6 +956,10 @@ export function headroomSourceFragments(source, problems = [], { maxFragments = 
     if (!structured) return [String(problem || "")];
     return [structured.userAction, structured.expectedStateAfter, structured.expectedOutcome,
       structured.actualObservedState, structured.detail, structured.target,
+      structured.selectionAttempt?.value, structured.selectionAttempt?.text,
+      ...(structured.selectionAttempt?.optionStates || []).flatMap((option) => [
+        option?.value, option?.label, option?.text,
+      ]),
       structured.control?.logicalField, ...(structured.control?.accessibleNames || []),
       ...(structured.expectedControls || []).flatMap((control) => [
         control.field, ...(control.accessibleNames || []),

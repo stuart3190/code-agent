@@ -440,6 +440,49 @@ test("an irreducible large component resizes to exact causal fragments inside re
   assert.match(logs.join("\n"), /resize 2/);
 });
 
+test("selection repair fragments retain the exact attempted catalogue option", () => {
+  const filePath = "src/components/Catalogue.jsx";
+  const source = [
+    'const SOFTWARE = [{ id: "atlas-notes" }, { id: "aurora-editor" }];',
+    "function selectSoftware(selectedItemId) {",
+    "  const selected = SOFTWARE.find((item) => item.id === selectedItemId) || null;",
+    "  return { selectedItemId: selected ? selected.id : \"\" };",
+    "}",
+    "export function Catalogue() { return null; }",
+  ].join("\n");
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure",
+    userAction: "select a software card",
+    actualObservedState: "the clicked option never gained a selected state",
+    selectionAttempt: {
+      field: "selectedItemId",
+      value: "aurora-editor",
+      text: "Aurora Editor",
+      optionStates: [
+        { value: "atlas-notes", text: "Atlas Notes", selected: true },
+        { value: "aurora-editor", text: "Aurora Editor", selected: false },
+      ],
+    },
+  });
+  const fragments = headroomSourceFragments(source, [problem]);
+  assert.ok(fragments.length > 0);
+  assert.match(fragments.map((fragment) => fragment.content).join("\n"), /selectSoftware/);
+  const prompt = renderPatchPrompt({
+    step: "repair",
+    contract: CONTRACT,
+    tiers: TIERS,
+    tree: { [filePath]: source },
+    problems: [problem],
+    headroomScope: {
+      kind: "headroom_fragment_continuation",
+      fragmented: true,
+      allowedFiles: [filePath],
+      fragments: fragments.map((fragment) => ({ path: filePath, ...fragment })),
+    },
+  });
+  assert.match(prompt, /attemptedSelection=.*aurora-editor/);
+});
+
 test("structural modularity correction keeps the complete module and cannot degrade to a handler fragment", () => {
   const filePath = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
   const source = [
