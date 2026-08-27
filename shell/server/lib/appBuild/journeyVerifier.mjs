@@ -2316,6 +2316,31 @@ async function driveAuthenticationForm(page, marker, { mode = "create", credenti
   };
 }
 
+async function visibleAuthenticationCredentials(page) {
+  const deadline = Date.now() + 1_000;
+  const email = await firstVisible([
+    page.getByLabel(/e-?mail/i), page.getByPlaceholder(/e-?mail/i), page.locator('input[type="email"]'),
+  ], deadline);
+  const password = await firstVisible([
+    page.getByLabel(/password/i), page.getByPlaceholder(/password/i), page.locator('input[type="password"]'),
+  ], deadline);
+  if (!email || !password) return null;
+  return {
+    email: await email.inputValue().catch(() => ""),
+    password: await password.inputValue().catch(() => ""),
+  };
+}
+
+async function waitForFreshExpectation(page, expect, textBefore, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let evidence = await expectationBecameVisible(page, expect, textBefore);
+  while (!evidence.met && Date.now() < deadline) {
+    await page.waitForTimeout(200);
+    evidence = await expectationBecameVisible(page, expect, textBefore);
+  }
+  return evidence;
+}
+
 async function openAuthenticationEntry(page, previewUrl, mode) {
   await page.goto(previewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
   const names = mode === "signin" ? /sign ?in account form|sign ?in/i : /create account account form|create account|sign ?up/i;
@@ -2661,6 +2686,11 @@ async function runStep(page, step, {
   if (!navigated && !observationOnly
     && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
     const entry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control);
+    const authenticationFlow = isAuthenticationFlow(entry, step);
+    // If the form is already visible, this exact contracted control is the submit action rather
+    // than a launcher for a second generic form-driving phase. Preserve the filled credentials so
+    // successful account state can still support later same/different-account journey steps.
+    const visibleAuthBefore = authenticationFlow ? await visibleAuthenticationCredentials(page) : null;
     const activation = {};
     // A flow-entry control can legitimately be repeated for a collection: product cards, search
     // results, projects, catalogue items, and similar choices all offer the same contracted
@@ -2679,12 +2709,38 @@ async function runStep(page, step, {
         controlEvidence: { ...controlEvidence, contractedField: entry.control.accessibleName } };
     }
     await page.waitForTimeout(700);
-    if (isAuthenticationFlow(entry, step)) {
-      const authentication = await driveAuthenticationForm(page, authMarker);
+    if (authenticationFlow) {
+      let authentication;
+      if (visibleAuthBefore) {
+        const expectationEvidence = await waitForFreshExpectation(page, expect, textBefore, 20_000);
+        authentication = expectationEvidence.met ? {
+          attempted: true,
+          submitted: true,
+          authenticated: true,
+          email: visibleAuthBefore.email,
+          credentials: visibleAuthBefore,
+          via: "contracted_flow_entry",
+          expectationEvidence,
+        } : {
+          attempted: true,
+          submitted: true,
+          authenticated: false,
+          email: visibleAuthBefore.email,
+          credentials: visibleAuthBefore,
+          via: "contracted_flow_entry",
+          expectationEvidence,
+          reason: "the contracted authentication action ran but did not produce the required signed-in state",
+        };
+      } else {
+        // The contracted entry opened a separate account form, so the existing generic form
+        // driver remains authoritative for filling and submitting that newly exposed surface.
+        authentication = await driveAuthenticationForm(page, authMarker);
+      }
       controlEvidence = { ...(controlEvidence || {}), authentication };
       drove = drove || authentication.authenticated === true;
       if (!authentication.authenticated) {
-        return { drove, status: "undriveable", detail: authentication.reason || "authentication did not complete",
+        return { drove, status: visibleAuthBefore ? "fail" : "undriveable",
+          detail: authentication.reason || "authentication did not complete",
           controlEvidence };
       }
       if (!authState.accounts.some((row) => row.email === authentication.credentials.email)) {
