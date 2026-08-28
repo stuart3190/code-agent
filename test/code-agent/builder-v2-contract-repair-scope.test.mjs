@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  contractDependencyRepairScope, mergeContractDependencyRepair,
+  contractDependencyRepairScope, DEPENDENCY_REPAIR_INSTRUCTION, mergeContractDependencyRepair,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
 
 const field = (name, type = "string") => ({ name, type, required: false });
@@ -101,4 +102,118 @@ test("contract validation rejects functional writes outside the operation entity
   assert.ok(verdict.problems.some((problem) => (
     problem.includes('writes "detailPanel" outside its operation entity "catalogueState"')
   )));
+});
+
+test("dependency repair includes a prior operation whose visible result owns a missing row identity", () => {
+  const contract = {
+    summary: "A software catalogue editor",
+    projectType: "tool",
+    buildProfile: {
+      version: 1,
+      requestedBuildType: "application",
+      resolvedBuildType: "application",
+      applicationSubtype: "auto",
+      requirementSignals: ["saved_data"],
+      inferenceSource: "explicit",
+      confidence: 1,
+    },
+    entities: [{
+      name: "catalogueItem",
+      storage: "durable",
+      owned: false,
+      fields: [field("itemId"), field("title"), field("status")],
+    }, {
+      name: "catalogueFilter",
+      storage: "transient",
+      owned: false,
+      fields: [field("query")],
+    }],
+    operations: [{
+      id: "find-catalogue-items",
+      entity: "catalogueFilter",
+      kind: "search",
+      journey: "browse-catalogue",
+      responsibilities: [{
+        type: "functional",
+        reads: ["query", "title", "status"],
+        writes: [],
+        outputEffect: {
+          type: "transient_result", effect: "read_result", operationKind: "search", durable: false,
+        },
+      }],
+    }, {
+      id: "update-catalogue-status",
+      entity: "catalogueItem",
+      kind: "update",
+      journey: "maintain-catalogue",
+      responsibilities: [{
+        type: "persistence",
+        capability: "crud",
+        capabilityMethod: "update",
+        reads: ["itemId", "status"],
+        writes: ["status"],
+      }],
+    }],
+    journeys: [{
+      id: "filter-catalogue",
+      title: "Filter and update the software catalogue",
+      priority: "primary",
+      stage: "primary_journey",
+      steps: [
+        { action: "open the catalogue", target: "/", expect: "catalogue items are visible" },
+        { action: "enter a query", target: "catalogue search", operates: ["query"],
+          primitive: "textbox", expect: "the query is visible" },
+        { action: "show matching catalogue items", target: "search results",
+          operates: ["find-catalogue-items"], reads: ["query"],
+          expect: "matching catalogue items are visible" },
+        { action: "change a visible item status", target: "visible item row",
+          operates: ["status", "update-catalogue-status"], reads: ["itemId"],
+          expect: "the edited item shows the new status" },
+      ],
+      acceptance: ["the edited item shows the new status"],
+    }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    auth: { required: false, rules: [] },
+    integrations: [],
+    states: [],
+    acceptance: [{
+      id: "catalogue-status",
+      statement: "the edited item shows the new status",
+      journey: "filter-catalogue",
+      kind: "persistence",
+    }],
+    deferred: [],
+  };
+
+  const rejected = deriveBuildSpec(contract);
+  assert.equal(rejected.verdict.ok, false);
+  const issue = rejected.verdict.interaction.issues.find((candidate) => (
+    candidate.code === "interaction_state_dependency_missing"
+  ));
+  assert.ok(issue);
+
+  const scope = contractDependencyRepairScope(contract, [issue]);
+  assert.deepEqual(scope.operations.map((operation) => operation.id), [
+    "find-catalogue-items", "update-catalogue-status",
+  ]);
+  assert.deepEqual(scope.invalidDependencies[0].priorOperationCandidates, [{
+    operationId: "find-catalogue-items", stepIndex: 2,
+  }]);
+  assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /existing observable result already exposes that field/);
+
+  const correctedJourney = structuredClone(scope.journeys[0]);
+  correctedJourney.steps[2].produces = ["itemId"];
+  const repaired = mergeContractDependencyRepair(contract, {
+    contractPatch: {
+      journeys: [correctedJourney],
+      operations: scope.operations,
+      entities: scope.entities,
+    },
+  }, scope);
+  const accepted = deriveBuildSpec(repaired);
+  assert.equal(accepted.verdict.ok, true, accepted.verdict.problems.join("; "));
+  const updateFlow = accepted.interactionContract.flows.find((flow) => (
+    flow.operationId === "update-catalogue-status"
+  ));
+  assert.ok(updateFlow.reads.includes("filter-catalogue.custom.itemId"));
 });

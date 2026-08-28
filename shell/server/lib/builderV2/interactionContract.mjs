@@ -1132,13 +1132,46 @@ function canMoveProducer(producer, consumer) {
 export function normalizeInteractionStateDependencies(plan) {
   const flows = (plan?.flows || []).map((flow) => ({ ...flow }));
   const moves = [];
+  const rebindings = [];
   for (let consumerIndex = 0; consumerIndex < flows.length; consumerIndex += 1) {
     const consumer = flows[consumerIndex];
-    for (const path of consumer.reads || []) {
+    for (const originalPath of [...(consumer.reads || [])]) {
+      let path = originalPath;
       const prior = flows.slice(0, consumerIndex).some((flow) => flow.journeyId === consumer.journeyId
         && (flow.writes || []).includes(path));
       if (prior || stateAvailableAtJourneyStart(plan, consumer.journeyId, path,
         journeyStartState(plan, consumer.journeyId))) continue;
+      // `step.produces` is bound to its operation only after the capability graph is composed. A
+      // later structured read was already canonicalized to `.draft.<field>` in the base pass, so
+      // it could not see that graph-owned `.custom.<field>` producer and the unchanged repair was
+      // rejected again. Rebind only to an earlier flow that explicitly carries the same declared
+      // produced value; matching a field name alone is not authority to borrow unrelated state.
+      if (String(path).startsWith(`${consumer.journeyId}.draft.`)) {
+        const field = String(path).split(".").at(-1);
+        const producer = flows.slice(0, consumerIndex).findLast((flow) => (
+          flow.journeyId === consumer.journeyId
+          && (flow.producedValues || []).some((value) => normalized(value) === normalized(field))
+          && (flow.writes || []).some((value) => String(value).endsWith(`.${field}`))
+        ));
+        const reboundPath = (producer?.writes || []).find((value) => String(value).endsWith(`.${field}`));
+        if (reboundPath) {
+          consumer.reads = unique((consumer.reads || []).map((value) => (
+            value === originalPath ? reboundPath : value
+          )));
+          consumer.dependsOn = unique((consumer.dependsOn || []).map((value) => (
+            value === originalPath ? reboundPath : value
+          )));
+          rebindings.push({
+            journeyId: consumer.journeyId,
+            fromStatePath: originalPath,
+            toStatePath: reboundPath,
+            producerInteractionId: producer.id,
+            consumerInteractionId: consumer.id,
+          });
+          path = reboundPath;
+          continue;
+        }
+      }
       const relativeProducer = flows.slice(consumerIndex + 1).findIndex((flow) => (
         flow.journeyId === consumer.journeyId && (flow.writes || []).includes(path)
         && canMoveProducer(flow, consumer)
@@ -1156,10 +1189,12 @@ export function normalizeInteractionStateDependencies(plan) {
       consumerIndex += 1;
     }
   }
+  const changed = moves.length > 0 || rebindings.length > 0;
   return {
-    plan: { ...plan, flows, dependencyNormalization: { changed: moves.length > 0, moves } },
-    changed: moves.length > 0,
+    plan: { ...plan, flows, dependencyNormalization: { changed, moves, rebindings } },
+    changed,
     moves,
+    rebindings,
   };
 }
 
@@ -1284,6 +1319,8 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       if (flow.control && operationMachineId) flow.control.machineId = operationMachineId;
       const reads = unique([...(flow.reads || []), ...semanticReads]);
       const writes = unique([...(flow.writes || []), ...semanticWrites, ...declaredStepProduces]);
+      const producedValues = unique([...(flow.producedValues || []), ...declaredStepProduces
+        .map((path) => String(path).split(".").at(-1))]);
       const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
       Object.assign(flow, {
         operationId: operation.operationId,
@@ -1297,6 +1334,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         responsibleModules,
         reads,
         writes,
+        producedValues,
         dependsOn: reads,
         nextStateRequirement: flow.nextStateRequirement || step?.expect || semantic.behavior,
         downstreamConsumers,

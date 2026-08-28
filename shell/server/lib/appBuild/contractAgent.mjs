@@ -279,6 +279,13 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
 const DEPENDENCY_ISSUE = "interaction_state_dependency_missing";
 const SEMANTICS_ISSUE = "interaction_contract_semantics_incomplete";
 
+export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid dependency or semantic subset. "
+  + "Do not invent user actions, operations, entities, fields, or business behavior. You may mark an existing "
+  + "step or operation as producing an already-declared field only when its existing observable result already "
+  + "exposes that field; this records existing data flow rather than adding behavior. Reorder an existing producer "
+  + "only when the declared journey semantics permit it; otherwise connect an already-declared producer or return "
+  + "the unresolved dependency unchanged.";
+
 /**
  * Build the smallest contract subset needed to repair invalid journey data flow or operation
  * semantics.
@@ -302,9 +309,29 @@ export function contractDependencyRepairScope(contract, issues = []) {
     ...semanticOperations.map((operation) => operation?.journey),
   ].filter(Boolean));
   const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
+  const operationByIdentity = new Map((contract.operations || []).map((operation) => (
+    [String(operation?.id || operation?.name || "").toLowerCase(), operation]
+  )).filter(([identity]) => identity));
+  const priorOperationCandidates = new Map(dependencies.map((issue) => {
+    const journey = journeys.find((candidate) => candidate.id === issue.journeyId);
+    const consumerStepIndex = Number.isInteger(issue.consumerStepIndex)
+      ? issue.consumerStepIndex : 0;
+    const seen = new Set();
+    const candidates = (journey?.steps || []).slice(0, consumerStepIndex).flatMap((step, stepIndex) => (
+      [...(step?.operates || []), ...(step?.reads || [])].flatMap((value) => {
+        const operation = operationByIdentity.get(String(value || "").toLowerCase());
+        const operationId = operation?.id || operation?.name || null;
+        if (!operationId || seen.has(operationId)) return [];
+        seen.add(operationId);
+        return [{ operationId, stepIndex }];
+      })
+    ));
+    return [issue, candidates];
+  }));
   const operationIds = new Set(dependencies.flatMap((issue) => [
     issue.consumerOperationId,
     ...(issue.candidateProducers || []).map((producer) => producer.operationId),
+    ...(priorOperationCandidates.get(issue) || []).map((producer) => producer.operationId),
   ]).filter(Boolean));
   for (const operationId of semanticOperationIds) operationIds.add(operationId);
   for (const operation of contract.operations || []) {
@@ -340,6 +367,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
       expectedProducerSource: issue.expectedProducerSource,
       expectedProducerSources: issue.expectedProducerSources,
       candidateProducers: issue.candidateProducers || [],
+      priorOperationCandidates: priorOperationCandidates.get(issue) || [],
     })),
     invalidSemantics: semantics.map((issue) => ({
       operationId: issue.operationId || null,
@@ -440,10 +468,8 @@ export async function generateContract({
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const dependencyAsk = dependencyRepairScope
-      ? `${profileGuidance}\n\nSCOPED INTERACTION CONTRACT REPAIR MODE. Correct only the supplied invalid dependency or semantic subset. `
-        + `Do not invent user actions, operations, fields, or business behavior. Reorder an existing producer `
-        + `only when the declared journey semantics permit it; otherwise connect an already-declared producer `
-        + `or return the unresolved dependency unchanged. Return one JSON object containing only corrected `
+      ? `${profileGuidance}\n\nSCOPED INTERACTION CONTRACT REPAIR MODE. ${DEPENDENCY_REPAIR_INSTRUCTION} `
+        + `Return one JSON object containing only corrected `
         + `journeys, operations, and entities from this subset; unlisted contract sections are preserved `
         + `server-side.\n\nINVALID DEPENDENCY SUBSET:\n${JSON.stringify(dependencyRepairScope)}\n\n`
         + `REJECTION DETAILS:\n${lastProblems.map((problem) => `- ${problem}`).join("\n")}`
