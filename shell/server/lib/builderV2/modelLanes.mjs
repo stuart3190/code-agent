@@ -97,7 +97,11 @@ against a code index. Rules:
 - Custom-extension calls must select the operation with a literal second-argument context such as
   { operation: "<operationId>" } and pass that operation's declared input keys explicitly. The
   explicit legacy key operationId is also supported. Do not rely on spreading a domain object whose
-  generic fields (for example id) may not match the extension contract.
+  generic fields (for example id) may not match the extension contract. Declared runtime inputs are
+  authoritative: collection add/remove/toggle operations must transform the passed collection using
+  the passed identifier. Never reject that identifier against private module-local records unless
+  those records are themselves a declared input, and never recreate a controller-owned domain
+  collection independently inside an extension.
 - Keep components small; compose unique screens and bounded helpers behind the mounted slots.
 - When a mounted screen's module plan names a shared journey controller, render that controller
   exactly once. It owns the screen's contracted controls and interaction state. Do not mount a

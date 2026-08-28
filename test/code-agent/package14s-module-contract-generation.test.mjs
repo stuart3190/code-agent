@@ -187,8 +187,14 @@ test("a shared controller receives one composition contract for a custom operati
     }],
     composition: "one_runtime_operation",
   }]);
-  assert.match(moduleGenerationContractsBrief(contracts), /ONE runtime action/);
-  assert.match(moduleGenerationContractsRepairBrief(contracts), /never overwrite a valid result/);
+  const generationBrief = moduleGenerationContractsBrief(contracts);
+  const repairBrief = moduleGenerationContractsRepairBrief(contracts);
+  assert.match(generationBrief, /ONE runtime action/);
+  assert.match(generationBrief, /Declared runtime inputs are authoritative/);
+  assert.match(generationBrief, /must not reject that identifier against private module-local records/);
+  assert.match(repairBrief, /Declared runtime inputs are authoritative/);
+  assert.match(repairBrief, /never recreate controller-owned domain collections independently/);
+  assert.match(repairBrief, /Never overwrite a valid result/);
 });
 
 test("browser repair prompt includes every failed journey but only their failed interaction steps", () => {

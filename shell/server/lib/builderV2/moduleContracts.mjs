@@ -221,7 +221,8 @@ export function moduleGenerationContractsBrief(moduleContracts) {
     "journeys decide whether the result is correct.",
     "Semantic controls may use any standards-compliant accessible HTML/ARIA shape; visual design is unrestricted.",
     "A sharedCustomOperations group is ONE runtime action projected into several contracted journeys, not a pipeline of independent fallbacks.",
-    "Delegate to one implementation, or give every implementation the same complete runtime source data (including in-code collections) and merge equivalent outputs without allowing an empty/default result from a missing input to overwrite a valid result.",
+    "Delegate to one implementation, or pass the same canonical source data explicitly through every implementation's declared runtime inputs; never recreate controller-owned domain collections independently inside extensions.",
+    "Declared runtime inputs are authoritative. Collection add/remove/toggle operations must transform the passed collection using the passed identifier and must not reject that identifier against private module-local records unless those records are themselves a declared input. Merge equivalent outputs without allowing an empty/default result from a missing input to overwrite a valid result.",
   ].join("\n");
 }
 
@@ -323,7 +324,8 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
     JSON.stringify(compact, null, 2),
     "ENFORCED: preserve capability ownership, durable state, module boundaries and every currently passing journey.",
     "Browser/process-local persistence and lower-level writes around capability-owned operations remain forbidden.",
-    "A sharedCustomOperations group is one runtime action: use one implementation or identical complete source inputs, and never overwrite a valid result with an empty/default result produced from missing inputs.",
+    "A sharedCustomOperations group is one runtime action: use one implementation or pass identical canonical source data through declared runtime inputs; never recreate controller-owned domain collections independently inside extensions.",
+    "Declared runtime inputs are authoritative. Collection add/remove/toggle operations must transform the passed collection using the passed identifier and must not reject that identifier against private module-local records unless those records are themselves a declared input. Never overwrite a valid result with an empty/default result produced from missing inputs.",
   ].join("\n");
 }
 

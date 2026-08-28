@@ -797,6 +797,9 @@ test("WP9 — patchesFn: forced strict call, patches returned, rejection feedbac
   assert.equal(patches.length, 1);
   assert.deepEqual(provider.calls[0].toolChoice, { type: "function", name: "emit_patches" });
   assert.equal(provider.calls[0].tools[0], EMIT_PATCHES_SCHEMA);
+  assert.match(provider.calls[0].systemPrompt, /Declared runtime inputs are\s+authoritative/);
+  assert.match(provider.calls[0].systemPrompt,
+    /Never reject that identifier against private module-local records unless/);
   assert.equal(diag.steps.length, 1);
   assert.equal(diag.steps[0].usage.input, 1000, "spend recorded on the canonical step");
 
