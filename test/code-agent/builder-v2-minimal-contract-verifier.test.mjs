@@ -973,6 +973,56 @@ test("retained false negatives and concrete failures classify correctly in a rea
       });
       assert.equal(evidence.expectationEvidence.met, true);
 
+      const transitioned = await run(`<style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+          overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}</style>
+        <main><label>Selected software
+          <select data-thrallo-control="software-item" aria-label="selected Software Id"
+            onchange="document.getElementById('detail').textContent=this.value==='atlas-compiler'?'The active compiler workspace details are visible':'Choose a compiler'">
+            <option value="compass-compiler" selected>Compass Compiler</option>
+            <option value="atlas-compiler">Atlas Compiler</option>
+          </select></label>
+          <button class="sr-only" data-thrallo-action="refresh-software-result">Refresh selected software</button>
+          <section id="detail">Choose a compiler</section>
+        </main>`,
+      { action: "select Atlas Compiler from the software catalogue", operates: ["selectedSoftwareId"],
+        expect: "the active compiler workspace details are visible" }, flows);
+      assert.equal(transitioned.pass, true, JSON.stringify(transitioned.journeys));
+      const transitionEvidence = transitioned.journeys[0].steps[0]
+        .controlEvidence.selectionTransitionAction;
+      assert.deepEqual({
+        selectionControl: transitionEvidence.selectionControl,
+        actionControl: transitionEvidence.actionControl,
+        matchedBy: transitionEvidence.matchedBy,
+        candidateCount: transitionEvidence.candidateCount,
+        perceivableCount: transitionEvidence.perceivableCount,
+      }, {
+        selectionControl: "software-item",
+        actionControl: "refresh-software-result",
+        matchedBy: "selection_transition_auto_applied_action",
+        candidateCount: 1,
+        perceivableCount: 0,
+      });
+      assert.equal(transitionEvidence.expectationEvidence.met, true);
+
+      const durableTransition = await run(`<style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+          overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}</style>
+        <main><label>Selected software
+          <select data-thrallo-control="software-item" aria-label="selected Software Id"
+            onchange="document.getElementById('detail').textContent=this.value==='atlas-compiler'?'The active compiler workspace details are visible':'Choose a compiler'">
+            <option value="compass-compiler" selected>Compass Compiler</option>
+            <option value="atlas-compiler">Atlas Compiler</option>
+          </select></label>
+          <button class="sr-only" data-thrallo-action="refresh-software-result">Refresh selected software</button>
+          <section id="detail">Choose a compiler</section>
+        </main>`,
+      { action: "select Atlas Compiler from the software catalogue", operates: ["selectedSoftwareId"],
+        expect: "the active compiler workspace details are visible" }, [
+        flows[0], { ...flows[1], durableLifecycle: true,
+          writes: ["journey.durable.selectedSoftwareName"] },
+      ]);
+      assert.equal(durableTransition.pass, false,
+        "a durable companion operation cannot be replaced by a selection transition");
+
       const explicitApply = await run(html,
         { action: "select Atlas Compiler and press Apply", operates: ["selectedSoftwareId"],
           expect: "the active compiler workspace details are visible" }, flows);

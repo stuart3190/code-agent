@@ -3062,9 +3062,10 @@ async function runStep(page, step, {
       // selection, one hidden machine identity, a non-durable action that reads that selection's
       // state, no explicit Apply/Save-style instruction, and the exact expected result already
       // visible. Visible controls, explicit activations and durable mutations remain mandatory.
-      let establishedSelectionAction = null;
+      let autoAppliedSelectionAction = null;
       const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
         && outcomes[0]?.controlEvidence?.precondition === "already_selected";
+      const transitionedSelection = selectionFlows.length === 1 && selectionResult.drove;
       const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
       const consumesSelection = selectionStatePath
         && (companionAction.reads || []).includes(selectionStatePath);
@@ -3072,21 +3073,27 @@ async function runStep(page, step, {
         || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
       const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
         .test(action);
-      if (establishedSelection && companionAction.kind === "action" && consumesSelection
+      if ((establishedSelection || transitionedSelection)
+        && companionAction.kind === "action" && consumesSelection
         && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
         const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
         const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
-          ? await expectationIsVisible(page, expect) : { met: false, found: [], wanted: [] };
+          ? await expectationIsVisible(page, expect)
+          : { met: false, found: [], wanted: [] };
         if (expectationEvidence.met) {
-          establishedSelectionAction = {
+          autoAppliedSelectionAction = {
             selectionControl: selectionFlows[0].control?.machineId || null,
             actionControl: companionAction.control.machineId,
-            matchedBy: "established_selection_auto_applied_action",
+            matchedBy: establishedSelection
+              ? "established_selection_auto_applied_action"
+              : "selection_transition_auto_applied_action",
             candidateCount: presentation.candidateCount,
             perceivableCount: presentation.perceivableCount,
             expectationEvidence,
           };
-          selectionResult.controlEvidence.establishedSelectionAction = establishedSelectionAction;
+          const evidenceKey = establishedSelection
+            ? "establishedSelectionAction" : "selectionTransitionAction";
+          selectionResult.controlEvidence[evidenceKey] = autoAppliedSelectionAction;
         }
       }
       if (!selectionOwnedOperation && selectionResult.drove) {
@@ -3116,7 +3123,7 @@ async function runStep(page, step, {
       // prove the operation's contracted outcome below, but the driver must not click a second
       // prose-matched control after the semantic option already triggered it.
       if (selectionResult.terminalOutcomeProven || selectionOwnedAction
-        || establishedSelectionAction || !companionAction.control) {
+        || autoAppliedSelectionAction || !companionAction.control) {
         contractDriven = true;
       }
     } else {
