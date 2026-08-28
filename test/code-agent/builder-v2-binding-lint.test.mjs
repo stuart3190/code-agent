@@ -425,6 +425,53 @@ test("a wrapper forwarding props is UNRESOLVED, and never fails", () => {
   assert.ok(result.findings.some((row) => row.code === "contract_control_coverage_undetermined"));
 });
 
+test("runtime wrapper identities cannot turn a nearby catalogue action into field binding failures", () => {
+  const fields = ["softwareTitle", "softwareSummary", "softwareStatus"];
+  const interactionContract = { flows: [
+    { id: "catalogue:input:title", kind: "input", journeyId: "manage-catalogue",
+      control: { logicalField: fields[0], accessibleName: "software Title",
+        machineId: controlIdFor(fields[0]), roles: ["textbox"] } },
+    { id: "catalogue:input:summary", kind: "input", journeyId: "manage-catalogue",
+      control: { logicalField: fields[1], accessibleName: "software Summary",
+        machineId: controlIdFor(fields[1]), roles: ["textbox"] } },
+    { id: "catalogue:selection:status", kind: "selection", journeyId: "manage-catalogue",
+      control: { logicalField: fields[2], accessibleName: "software Status",
+        machineId: controlIdFor(fields[2]), roles: ["combobox", "option"] } },
+  ] };
+  const tree = { "src/screens/Catalogue.jsx": `
+    function TextField({ id, label, machineId }) {
+      return <label>{label}<input id={id} data-thrallo-control={machineId} /></label>;
+    }
+    function StatusField({ id, label, machineId }) {
+      return <label>{label}<select id={id} data-thrallo-control={machineId}>
+        <option>Draft</option><option>Published</option>
+      </select></label>;
+    }
+    export default function Catalogue() {
+      return <main>
+        <TextField id="softwareTitle" label="software Title" machineId="${controlIdFor(fields[0])}" />
+        <TextField id="softwareSummary" label="software Summary" machineId="${controlIdFor(fields[1])}" />
+        <StatusField id="softwareStatus" label="software Status" machineId="${controlIdFor(fields[2])}" />
+        <div aria-label="software Status" data-thrallo-control="${controlIdFor(fields[2])}">
+          {["Draft", "Published"].map((option) => <button key={option}
+            data-thrallo-action={option === "Published" ? "act_catalogue_publish" : undefined}>
+            {option}</button>)}
+        </div>
+      </main>;
+    }`, };
+
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_wrong_binding"), false,
+    JSON.stringify(result.findings, null, 2));
+  assert.equal(result.elements.some((row) => row.attribute === "data-thrallo-control"
+    && row.binding === BINDING.UNRESOLVED), true, JSON.stringify(result.elements, null, 2));
+  assert.equal(result.elements.some((row) => row.coversOnly && row.attribute === "data-thrallo-control"
+    && row.machineId === controlIdFor(fields[2])), true, JSON.stringify(result.elements, null, 2));
+  assert.ok(result.findings.some((row) => row.code === "contract_control_coverage_undetermined"),
+    JSON.stringify(result.findings, null, 2));
+});
+
 // ── coverage ───────────────────────────────────────────────────────────────────────────────────
 
 test("a contracted control absent from the tree entirely FAILS as contract_control_missing", () => {

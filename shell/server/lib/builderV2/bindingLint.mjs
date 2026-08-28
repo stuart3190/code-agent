@@ -61,6 +61,21 @@ const text = (node) => {
   return "";
 };
 
+// A machine identity is statically proven only when the complete attribute value is literal.
+// `data-thrallo-control={machineId}` is common inside generated wrapper components, but the value
+// reaches that wrapper through props. Treating it as a literal binding with a null identity lets
+// nearby copy claim it as any contracted control and turns uncertainty into a false mismatch.
+const staticIdentity = (node) => {
+  if (!node) return "";
+  if (node.type === "StringLiteral") return node.value;
+  if (node.type !== "JSXExpressionContainer") return "";
+  if (node.expression?.type === "StringLiteral") return node.expression.value;
+  if (node.expression?.type === "TemplateLiteral" && !node.expression.expressions?.length) {
+    return node.expression.quasis.map((q) => q.value.cooked).join("");
+  }
+  return "";
+};
+
 const attrNode = (opening, name) => (opening.attributes || [])
   .find((row) => row?.type === "JSXAttribute" && row.name?.name === name) || null;
 const attr = (opening, name) => text(attrNode(opening, name)?.value);
@@ -101,9 +116,12 @@ function bindingOf(opening, fileSource, raw) {
   const literalControl = attrNode(opening, "data-thrallo-control");
   const literalAction = attrNode(opening, "data-thrallo-action");
   const literal = literalAction || literalControl;
-  if (literal) return { binding: BINDING.LITERAL, evidence: "attribute",
-    attribute: literalAction ? "data-thrallo-action" : "data-thrallo-control",
-    machineId: text(literal.value) || null };
+  if (literal) {
+    const attribute = literalAction ? "data-thrallo-action" : "data-thrallo-control";
+    const machineId = staticIdentity(literal.value) || null;
+    return { binding: machineId ? BINDING.LITERAL : BINDING.UNRESOLVED,
+      evidence: machineId ? "attribute" : `${attribute} runtime value`, attribute, machineId };
+  }
 
   const spreads = (opening.attributes || []).filter((row) => row?.type === "JSXSpreadAttribute");
   if (!spreads.length) return { binding: BINDING.UNBOUND, evidence: null };
@@ -216,8 +234,12 @@ function walkFile(file, source, elements) {
       // Otherwise the hand-wired options inside it would be condemned for a binding that is
       // probably there. Unknown is not broken, one level up.
       const spread = (opening.attributes || []).some((row) => row?.type === "JSXSpreadAttribute");
-      const identities = spread ? identitiesOf(node, opening, raw, labels) : [];
-      if (spread && identities.length) {
+      // A non-interactive container can own a selectable control group. An action identity still
+      // belongs on the actionable descendant and must never make a passive container driveable.
+      const literalIdentity = attrNode(opening, "data-thrallo-control");
+      const bindableContainer = spread || Boolean(literalIdentity);
+      const identities = bindableContainer ? identitiesOf(node, opening, raw, labels) : [];
+      if (bindableContainer && (identities.length || literalIdentity)) {
         const resolved = bindingOf(opening, raw, raw);
         elements.push({
           file, line: node.loc?.start?.line || null, element: `<${jsxName(opening)}>`,
@@ -330,6 +352,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // The first two are exact. The third is the fragile one, and it is the only one used to
     // condemn anything — which is why the residual gap below is stated with every result.
     const actionFlow = !["input", "selection"].includes(flow.kind);
+    const expectedAttribute = actionFlow ? "data-thrallo-action" : "data-thrallo-control";
     const expectedActionName = String(flow.control?.accessibleName || flow.control?.purpose || key);
     const expectedBindingName = actionFlow && flow.operationId ? String(flow.operationId) : String(key);
     const claims = (row) => {
@@ -342,6 +365,13 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       // In particular useFlowAdvance always emits the canonical "advance" action; visible copy on
       // that button cannot turn it into an arbitrary contracted action identity.
       if (row.binding === BINDING.BINDING) return false;
+      // A runtime-valued attribute proves its binding channel, but not which control uses it. An
+      // action attribute therefore cannot textually impersonate a field binding (or vice versa).
+      if (row.binding === BINDING.UNRESOLVED && row.attribute
+        && row.attribute !== expectedAttribute) return false;
+      // Static literal bindings have already been decided by their exact machine identity above.
+      // Text is evidence only for genuinely unbound or unresolved elements.
+      if (![BINDING.UNBOUND, BINDING.UNRESOLVED].includes(row.binding)) return false;
       return [...row.identities, ...(row.inheritedIdentities || [])].some((identity) =>
         identityMatches([identity], names) || semanticKey(identity) === semanticKey(key));
     };
@@ -351,7 +381,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     const compatibleBinding = (row) => {
       if (row.binding === BINDING.UNBOUND) return false;
       if (row.binding === BINDING.LITERAL) {
-        return row.attribute === (actionFlow ? "data-thrallo-action" : "data-thrallo-control")
+        return row.attribute === expectedAttribute
           && (!row.machineId || row.machineId === flow.control?.machineId);
       }
       if (flow.kind === "input") return row.factory === "useSemanticField";
@@ -384,7 +414,9 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       compatibleBound: compatibleBound.length, unresolved: unresolvedMatches.length,
       authoritativeSurface: Boolean(authoritative) });
 
-    if (!matches.length && dynamicBindings.length) {
+    const unnamedRuntimeBindings = elements.filter((row) => row.binding === BINDING.UNRESOLVED
+      && row.attribute === expectedAttribute && !claims(row));
+    if (!matches.length && (dynamicBindings.length || unnamedRuntimeBindings.length)) {
       // A DYNAMIC BINDING BINDS A CONTROL THIS FILE CANNOT NAME.
       //
       //   const fields = Object.fromEntries(NAMES.map((name) => [name, useSemanticField({ name })]))
@@ -399,8 +431,15 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
         requiredBinding, authoritativeSurface: Boolean(authoritative),
         dynamicBindings: dynamicBindings.slice(0, 3),
-        message: `no static element names the contracted control "${key}", but this tree binds `
-          + `controls dynamically (${dynamicBindings[0]}) — coverage cannot be decided offline`,
+        elements: unnamedRuntimeBindings.slice(0, 3).map((row) => ({
+          file: row.file, line: row.line, element: row.element, attribute: row.attribute,
+          runtimeIdentity: true,
+        })),
+        message: dynamicBindings.length
+          ? `no static element names the contracted control "${key}", but this tree binds `
+            + `controls dynamically (${dynamicBindings[0]}) — coverage cannot be decided offline`
+          : `no static element names the contracted control "${key}", but ${expectedAttribute} `
+            + "is supplied through a runtime wrapper value — coverage cannot be decided offline",
       });
       continue;
     }
