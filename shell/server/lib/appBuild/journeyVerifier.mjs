@@ -446,6 +446,10 @@ export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null)
   });
 }
 
+function flowRequestsControlReset(flow) {
+  return /^\s*(?:clear|reset)\b/i.test(String(flow?.action || flow?.semanticPurpose || ""));
+}
+
 // A contract may ask the browser to observe a surface that is already present: view a list,
 // inspect a summary, compare a result. These steps have no control or state transition to drive;
 // their whole assertion is whether the named evidence is visible. Treating them as actions makes
@@ -1110,8 +1114,10 @@ async function fillContractedFields(page, flows, marker, {
       break;
     }
     const contractedFixture = verificationFixtureFor(flow, marker);
+    const resetRequested = flowRequestsControlReset(flow);
     const fieldEvidence = { field: logicalField, expectedStateOwner: flow.stateOwner, matchedBy,
-      fixtureAuthority: contractedFixture === null ? "native_or_generated" : "contract",
+      fixtureAuthority: resetRequested ? "contract_reset"
+        : contractedFixture === null ? "native_or_generated" : "contract",
       accessibleNames: flow.control.accessibleNames || [flow.control.accessibleName],
       ...(ambiguous && field ? { identityAdvisory: {
         code: "ambiguous_identity", matchedBy: ambiguous.description, matches: ambiguous.matches,
@@ -1126,7 +1132,7 @@ async function fillContractedFields(page, flows, marker, {
       evidence.fields.push({ ...fieldEvidence, status: "missing" });
       continue;
     }
-    if (minimal && flow.control.requiresVerificationFixture && contractedFixture === null) {
+    if (minimal && flow.control.requiresVerificationFixture && contractedFixture === null && !resetRequested) {
       evidence.fields.push({ ...fieldEvidence, status: "fixture_unavailable",
         detail: "the contract requires an explicit domain-valid verification fixture" });
       continue;
@@ -1157,10 +1163,12 @@ async function fillContractedFields(page, flows, marker, {
         disabled: Boolean(option.disabled),
       }))).catch(() => []);
       const available = options.filter((option) => !option.disabled);
-      const target = contractedFixture === null
-        ? available.find((option) => option.value !== currentValue && option.value !== "")
+      const target = resetRequested
+        ? available.find((option) => option.value === "") || available[0]
+        : contractedFixture === null
+          ? available.find((option) => option.value !== currentValue && option.value !== "")
           || available.find((option) => option.value !== currentValue)
-        : available.find((option) => option.value === contractedFixture || option.label === contractedFixture);
+          : available.find((option) => option.value === contractedFixture || option.label === contractedFixture);
       if (!target) {
         evidence.fields.push({ ...fieldEvidence,
           status: contractedFixture === null ? "value_not_accepted" : "fixture_invalid",
@@ -1208,7 +1216,7 @@ async function fillContractedFields(page, flows, marker, {
     const booleanControl = flow.control.valueType === "boolean" || facts?.type === "checkbox";
     if (booleanControl && flow.control.validity !== "invalid") {
       const before = await field.isChecked().catch(() => false);
-      const expected = facts?.required ? true : !before;
+      const expected = resetRequested ? false : facts?.required ? true : !before;
       let changed = false;
       if (facts?.required && before) {
         await field.uncheck({ timeout: 3_000 }).then(() => { changed = true; }).catch(() => {});
@@ -1225,7 +1233,7 @@ async function fillContractedFields(page, flows, marker, {
       if (status === "filled") filled.push(logicalField);
       continue;
     }
-    let value = fixtureValueFor(flow, facts, marker, currentValue);
+    let value = resetRequested ? "" : fixtureValueFor(flow, facts, marker, currentValue);
     if (flow.control.validity === "invalid" && contractedFixture === null) {
       value = invalidValueFor(logicalField, flow.control.inputTypes);
       if (value === null) {

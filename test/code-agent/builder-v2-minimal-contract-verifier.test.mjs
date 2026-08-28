@@ -312,6 +312,25 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
     });
 
+    await t.test("a contracted reset clears a fixture-protected input without inventing a value", async () => {
+      const search = { ...control("searchQuery", "search-query"), requiresVerificationFixture: true };
+      const clear = control("clear search control", "clear-search", ["button"]);
+      const result = await run(`<main><label>Software search box
+          <input data-thrallo-control="search-query" aria-label="search Query" value="missing-entry"></label>
+          <button data-thrallo-action="clear-search"
+            onclick="document.querySelector('[data-thrallo-control=search-query]').value='';document.getElementById('cards').hidden=false">Clear search</button>
+          <section id="cards" hidden><h2>Software cards</h2><p>Atlas Editor</p></section></main>`,
+      { action: "clear the current search", operates: ["searchQuery"],
+        expect: "software cards are visible again and the empty results message is no longer shown" }, [
+        { kind: "input", valueWritten: "searchQuery", action: "clear the current search", control: search },
+        { kind: "action", operationId: "clear-search", action: "clear the current search", control: clear },
+      ]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].expectedValue, "");
+      assert.equal(result.journeys[0].steps[0].controlEvidence.fields[0].fixtureAuthority, "contract_reset");
+      assert.equal(result.journeys[0].steps[0].controlEvidence.resetTransition.ok, true);
+    });
+
     await t.test("numeric and checkbox fixtures use native control types", async () => {
       const amount = { ...control("quantity", "quantity"), valueType: "number" };
       const enabled = { ...control("enabled", "enabled"), valueType: "boolean" };
