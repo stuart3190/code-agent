@@ -247,6 +247,32 @@ test("RETAINED SCAFFOLD REGRESSION — dead bound routes cannot conflict with th
   assert.equal(conformance.controlBindings.ignoredSourceFiles.includes("src/routes/HomePage.jsx"), true);
 });
 
+test("qualified date controls do not conflict with a different bound date field", () => {
+  const interactionContract = { flows: [{
+    id: "task-workspace:selection:taskduedate", journeyId: "task-workspace", stepIndex: 0,
+    kind: "selection", valueWritten: "taskDueDate", control: {
+      logicalField: "taskDueDate", accessibleName: "task Due Date",
+      machineId: controlIdFor("taskDueDate"), roles: ["button", "option", "combobox"],
+    },
+  }] };
+  const tree = { "src/screens/TaskWorkspace.jsx": `
+    import { useSemanticSelection } from "../lib/capabilities/react.js";
+    export default function TaskWorkspace() {
+      const taskDate = useSemanticSelection({ name: "taskDueDate", label: "Task due date" });
+      return <main>
+        <div {...taskDate.groupProps}><button {...taskDate.optionProps("next-week")}>Next week</button></div>
+        <label>Start date<input aria-label="start date" type="date" /></label>
+        <label>Due date<input aria-label="due date" type="date" /></label>
+      </main>;
+    }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result), null, 2));
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+});
+
 test("useFlowAdvance cannot impersonate an arbitrary contracted action through its visible copy", () => {
   const actionContract = { flows: [{
     id: "start:1:flow_start", kind: "flow_start", journeyId: "start",

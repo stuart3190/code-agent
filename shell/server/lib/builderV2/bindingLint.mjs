@@ -22,7 +22,7 @@
 
 import { parse } from "@babel/parser";
 
-import { identityMatches, semanticAliases, semanticKey } from "./controlIdentity.mjs";
+import { identityMatches, semanticAliases, semanticKey, semanticQualifier } from "./controlIdentity.mjs";
 import { ADVANCE_ACTION_NAME, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 
 /** How an element gets its machine identity, or fails to. */
@@ -373,7 +373,8 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // inconsistent and is safe to correct before a paid browser pass.
     const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
       && [...row.identities, ...(row.inheritedIdentities || [])]
-        .some((identity) => semanticKey(identity) === semanticKey(key)));
+        .some((identity) => semanticKey(identity) === semanticKey(key)
+          && semanticQualifier(identity) === semanticQualifier(key)));
     const requiredBinding = requiredBindingFor(flow, key);
     coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length,
       compatibleBound: compatibleBound.length,
