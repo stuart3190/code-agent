@@ -206,11 +206,13 @@ export default function ScaffoldApp() {
 }
 
 function screenSlotSource(screen, graph) {
-  const owner = (graph?.journeyOwnership || []).filter((row) => row.screenId === screen.screenId);
+  const owner = (graph?.journeyRouteOwnership || graph?.journeyOwnership || [])
+    .filter((row) => row.screenId === screen.screenId);
   const families = unique(owner.flatMap((row) => row.scaffoldNodeIds || []).map((id) => id.replace(/^scaffold:/, "")));
+  const journeyIds = unique(owner.map((row) => row.journeyId));
   return `// ${SCREEN_SLOT_MARKER}: ${screen.screenId}.\n`
     + "// Model-owned visual/domain composition. This module is already mounted by the protected router.\n"
-    + `// Journeys: ${owner.map((row) => row.journeyId).join(", ") || "none"}. Scaffold slots: ${families.join(", ") || "app_shell"}.\n`
+    + `// Journeys: ${journeyIds.join(", ") || "none"}. Scaffold slots: ${families.join(", ") || "app_shell"}.\n`
     + `export default function ${String(screen.module).split("/").at(-1).replace(/\.(?:jsx?|tsx?)$/, "")}() {\n`
     + `  return <section data-scaffold-slot=${quote(screen.screenId)}><h1>${String(screen.routeName)}</h1><p>Application screen ready for composition.</p></section>;\n`
     + "}\n";
@@ -309,7 +311,7 @@ export function validateScaffoldComposition(tree, graph, plan = scaffoldComposit
       problems.push(`route ${route.routePath} does not mount ${route.module}`);
     }
   }
-  for (const owner of graph?.journeyOwnership || []) {
+  for (const owner of graph?.journeyRouteOwnership || graph?.journeyOwnership || []) {
     const route = (plan.routeScreenMap || []).find((candidate) => candidate.screenId === owner.screenId);
     if (!route || route.module !== owner.mountedModule || !route.journeyIds.includes(owner.journeyId)) {
       problems.push(`journey ${owner.journeyId} is not traceable to its mounted live screen`);

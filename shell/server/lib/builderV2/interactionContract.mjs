@@ -1614,12 +1614,24 @@ export function scopeInteractionContract(plan, journeys = []) {
 /** Rebind visual ownership after scaffold planning replaces per-journey drafts with mounted units. */
 export function bindInteractionModulePlan(plan, modulePlan = []) {
   const plannedPaths = new Set((modulePlan || []).map((module) => module.path));
-  const visualOwner = (journeyId) => (modulePlan || []).find((module) => (
+  const screenModules = (modulePlan || []).filter((module) => module.providedBy === "scaffold_screen_slot");
+  const screenPaths = new Set(screenModules.map((module) => module.path));
+  const nonScreenVisualOwner = (journeyId) => (modulePlan || []).find((module) => (
     module.providedBy !== "scaffold_screen_slot"
       && /flow|form|editor|composition/i.test(module.role || "")
       && (module.journeyIds || module.ownedJourneys || []).includes(journeyId)
-  )) || (modulePlan || []).find((module) => module.providedBy === "scaffold_screen_slot"
-    && (module.journeyIds || []).includes(journeyId)) || null;
+  )) || null;
+  const screenForFlow = (flow) => {
+    const journeyScreens = screenModules.filter((module) => (module.journeyIds || []).includes(flow.journeyId));
+    const routeTransitions = (plan?.flows || []).filter((candidate) => candidate.journeyId === flow.journeyId
+      && Number(candidate.stepIndex) <= Number(flow.stepIndex)
+      && candidate.target
+      && journeyScreens.some((module) => module.routePath === candidate.target))
+      .sort((a, b) => Number(b.stepIndex) - Number(a.stepIndex));
+    const activeRoute = routeTransitions[0]?.target || null;
+    return journeyScreens.find((module) => module.routePath === activeRoute) || journeyScreens[0] || null;
+  };
+  const visualOwner = (flow) => nonScreenVisualOwner(flow.journeyId) || screenForFlow(flow);
   const boundVisualOwner = (declaredOwner, visual) => {
     if (PLATFORM.test(String(declaredOwner || ""))) return declaredOwner;
     // A bounded custom extension supplies behaviour to a mounted controller; it does not render
@@ -1630,14 +1642,16 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
     if (visual?.path && String(declaredOwner || "").startsWith("src/extensions/custom/")) {
       return visual.path;
     }
+    if (visual?.path && screenPaths.has(declaredOwner) && declaredOwner !== visual.path) return visual.path;
     return plannedPaths.has(declaredOwner) ? declaredOwner : visual?.path || declaredOwner;
   };
   return {
     ...plan,
     flows: (plan?.flows || []).map((flow) => {
-      const visual = visualOwner(flow.journeyId);
+      const visual = visualOwner(flow);
       const responsibleModules = unique([
-        ...(flow.responsibleModules || []).filter((path) => plannedPaths.has(path)),
+        ...(flow.responsibleModules || []).filter((path) => plannedPaths.has(path)
+          && (!screenPaths.has(path) || path === visual?.path)),
         visual?.path,
       ]);
       const stateOwner = boundVisualOwner(flow.stateOwner, visual);

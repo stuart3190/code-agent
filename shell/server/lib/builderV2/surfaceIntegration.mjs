@@ -135,7 +135,9 @@ function contractedJourneyModules(tree, contract, journeys, modulePlan) {
     return [...ids].some((id) => compact.includes(normalized(id)));
   });
   const scaffoldActive = typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string";
-  const scaffoldOwned = (scaffoldActive ? contract?.scaffoldGraph?.journeyOwnership || [] : [])
+  const scaffoldOwned = (scaffoldActive
+    ? contract?.scaffoldGraph?.journeyRouteOwnership || contract?.scaffoldGraph?.journeyOwnership || []
+    : [])
     .filter((row) => ids.has(row.journeyId)).flatMap((row) => [row.mountedModule,
       ...(scaffoldActive ? contract?.scaffoldGraph?.extensions || [] : [])
         .filter((extension) => extension.owningJourneys?.includes(row.journeyId))
@@ -162,7 +164,9 @@ export function journeySurfaceContext(tree = {}, contract = {}, journeys = [], {
   const scaffoldActive = typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string";
   const routePaths = unique(selected.flatMap((journey) => [
     ...routeTargets(contract, journey),
-    (scaffoldActive ? contract?.scaffoldGraph?.journeyOwnership || [] : [])
+    (scaffoldActive
+      ? contract?.scaffoldGraph?.journeyRouteOwnership || contract?.scaffoldGraph?.journeyOwnership || []
+      : [])
       .find((row) => row.journeyId === journey?.id)?.routePath,
   ]));
   const scaffoldRoutes = scaffoldActive ? contract?.scaffoldGraph?.routes || [] : [];

@@ -184,7 +184,8 @@ export function scopeBuildSpec(spec, journeys = []) {
 export function journeysInMountedScreenUnit(spec, seedJourneys = []) {
   const seeds = new Set(seedJourneys.map((journey) => journey?.id).filter(Boolean));
   if (!seeds.size) return [];
-  const ownership = spec?.scaffoldGraph?.journeyOwnership || [];
+  const ownership = spec?.scaffoldGraph?.journeyRouteOwnership
+    || spec?.scaffoldGraph?.journeyOwnership || [];
   const mountedModules = new Set(ownership
     .filter((owner) => seeds.has(owner.journeyId))
     .map((owner) => owner.mountedModule).filter(Boolean));

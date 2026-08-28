@@ -218,13 +218,14 @@ export function deriveVerificationManifest(spec) {
       testContract: node.testContract || [],
     };
   }).filter(Boolean));
-  const scaffoldAssertions = (scaffoldGraph?.journeyOwnership || []).map((owner) => ({
+  const scaffoldAssertions = (scaffoldGraph?.journeyRouteOwnership || scaffoldGraph?.journeyOwnership || []).map((owner) => ({
     journeyId: owner.journeyId,
     routePath: owner.routePath,
     screenId: owner.screenId,
     mountedOwner: owner.mountedModule,
     scaffoldNodeIds: owner.scaffoldNodeIds || [],
     extensionIds: owner.extensionIds || [],
+    stepIndex: Number.isInteger(owner.stepIndex) ? owner.stepIndex : null,
     expectedScreen: (scaffoldGraph.routes || []).find((route) => route.screenId === owner.screenId)?.routeName || null,
   }));
 

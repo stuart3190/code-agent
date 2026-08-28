@@ -56,17 +56,21 @@ function targetModules(flow, modulePlan) {
     module.path === path && module.providedBy !== "scaffold_screen_slot"
       && /flow|form|editor|composition/i.test(module.role || "")
   )));
+  const hasBoundScaffoldScreen = [...targets].some((path) => modulePlan.some((module) => (
+    module.path === path && module.providedBy === "scaffold_screen_slot"
+  )));
+  const hasBoundVisual = hasVisualController || hasBoundScaffoldScreen;
   // The scaffold graph is the mounted live-surface authority. A screen owns an interaction only
   // when no planned child controller owns it; otherwise the screen composes that controller.
   for (const module of modulePlan) {
-    if (!hasVisualController && module?.providedBy === "scaffold_screen_slot"
+    if (!hasBoundVisual && module?.providedBy === "scaffold_screen_slot"
       && (module.journeyIds || []).includes(flow?.journeyId)) {
       targets.add(module.path);
     }
   }
   const addRole = (pattern) => modulePlan.filter((module) => {
     const ownedJourneys = module.journeyIds || module.ownedJourneys || [];
-    return !(hasVisualController && module.providedBy === "scaffold_screen_slot")
+    return !(hasBoundVisual && module.providedBy === "scaffold_screen_slot")
       && pattern.test(module.role || "")
       && (!ownedJourneys.length || ownedJourneys.includes(flow?.journeyId));
   })
@@ -154,6 +158,7 @@ export function buildModuleGenerationContracts({
     const controls = assignedFlows.filter((flow) => flow.control && /\.(?:jsx|tsx)$/.test(planned.path)).map((flow) => ({
       interactionId: flow.id,
       journeyId: flow.journeyId,
+      stepIndex: flow.stepIndex,
       logicalField: flow.control.logicalField || flow.valueWritten || null,
       roles: flow.control.roles || [],
       inputTypes: flow.control.inputTypes || [],
@@ -564,7 +569,8 @@ export function validateModuleConformance(tree, {
     for (const problem of composition.problems) {
       const module = String(problem).match(/src\/[^\s:]+/)?.[0] || null;
       add({ code: "scaffold_composition_invalid", module,
-        journeys: (scaffoldGraph.journeyOwnership || []).filter((row) => !module || row.mountedModule === module)
+        journeys: (scaffoldGraph.journeyRouteOwnership || scaffoldGraph.journeyOwnership || [])
+          .filter((row) => !module || row.mountedModule === module)
           .map((row) => row.journeyId), message: problem });
     }
   }

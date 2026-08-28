@@ -17,6 +17,7 @@ import {
   bindInteractionModulePlan, validateInteractionContract,
 } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import { scaffoldModulePlan } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
+import { routeScaffoldDefect } from "../../shell/server/lib/builderV2/scaffoldRepairRouting.mjs";
 import { lintJourneyControllerMounts } from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
 
 const CONTRACT = {
@@ -151,6 +152,65 @@ test("a mounted screen is one generation unit across its contracted journeys", (
     spec.scaffoldGraph.journeyOwnership[1].mountedModule);
   assert.notEqual(spec.scaffoldGraph.journeyOwnership[0].mountedModule,
     spec.scaffoldGraph.journeyOwnership[2].mountedModule);
+});
+
+test("a journey crossing mounted routes binds each step and repair to the active screen", () => {
+  const contract = {
+    summary: "A record workspace with separate create and list screens",
+    entities: [{ name: "record", fields: [{ name: "title" }, { name: "status" }] }],
+    operations: [
+      { id: "create-record", entity: "record", kind: "create", journey: "manage-records" },
+      { id: "update-record", entity: "record", kind: "update", journey: "manage-records" },
+    ],
+    routes: [
+      { path: "/", name: "Workspace" },
+      { path: "/records/new", name: "New Record" },
+      { path: "/records", name: "Records" },
+    ],
+    auth: { required: false },
+    journeys: [{ id: "manage-records", title: "Create and update a record", priority: "primary", steps: [
+      { action: "open the workspace", target: "/", expect: "the workspace is visible" },
+      { action: "open the new record screen", target: "/records/new", expect: "the record editor is visible" },
+      { action: "enter a record title", target: "title", operates: ["title"], primitive: "textbox",
+        expect: "the title is visible" },
+      { action: "save the record", target: "save", operates: ["create-record"],
+        expect: "the saved record is visible" },
+      { action: "open the records list", target: "/records", expect: "the records list is visible" },
+      { action: "select the saved record", target: "record row", operates: ["status"], primitive: "selection",
+        expect: "the saved record is selected" },
+    ] }],
+  };
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(spec.scaffoldGraph.journeyRouteOwnership.map((owner) => owner.routePath),
+    ["/", "/records/new", "/records"]);
+
+  const screens = new Map(spec.modulePlan.filter((module) => module.providedBy === "scaffold_screen_slot")
+    .map((module) => [module.routePath, module]));
+  assert.deepEqual([...screens.keys()], ["/", "/records/new", "/records"]);
+  const expectedRouteAt = (stepIndex) => stepIndex < 1 ? "/" : stepIndex < 4 ? "/records/new" : "/records";
+  for (const flow of spec.interactionContract.flows) {
+    const expected = screens.get(expectedRouteAt(flow.stepIndex)).path;
+    assert.ok(flow.responsibleModules.includes(expected), `${flow.id} must bind ${expected}`);
+    assert.equal(flow.responsibleModules.some((path) => [...screens.values()]
+      .some((screen) => screen.path === path && path !== expected)), false,
+    `${flow.id} must not retain a stale mounted screen`);
+  }
+
+  for (const [routePath, screen] of screens) {
+    const moduleContract = spec.moduleContracts.specifications.find((row) => row.path === screen.path);
+    assert.ok(moduleContract.semanticInteractions.every((flow) => expectedRouteAt(flow.stepIndex) === routePath),
+      `${routePath}: ${moduleContract.semanticInteractions.map((flow) => `${flow.interactionId}@${flow.stepIndex}`).join(", ")}`);
+  }
+  assert.ok(spec.moduleContracts.specifications.find((row) => row.path === screens.get("/records/new").path)
+    .semanticInteractions.length, "the create screen must own its routed controls");
+  assert.ok(spec.moduleContracts.specifications.find((row) => row.path === screens.get("/records").path)
+    .semanticInteractions.length, "the list screen must own its routed controls");
+  const routedRepair = routeScaffoldDefect({
+    journeyId: "manage-records", stepIndex: 2, defectClass: "interaction",
+    classification: "interaction", control: { id: "title" }, modules: [],
+  }, spec.scaffoldGraph);
+  assert.equal(routedRepair.targetFiles[0], screens.get("/records/new").path);
 });
 
 test("a crowded mounted screen has one bounded shared journey controller", () => {

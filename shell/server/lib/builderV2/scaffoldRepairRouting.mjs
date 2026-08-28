@@ -4,6 +4,19 @@ import { SCAFFOLD_COMPOSED_ROOT, SCAFFOLD_ENTRY_PATH } from "./scaffoldComposer.
 
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 
+function routeOwnerForDefect(defect, scaffoldGraph, modules = []) {
+  const owners = (scaffoldGraph?.journeyRouteOwnership || scaffoldGraph?.journeyOwnership || [])
+    .filter((row) => row.journeyId === defect?.journeyId);
+  if (!owners.length) return null;
+  const stepIndex = Number(defect?.stepIndex ?? defect?.diagnostic?.stepIndex);
+  if (Number.isInteger(stepIndex)) {
+    const active = owners.filter((row) => Number(row.stepIndex ?? 0) <= stepIndex)
+      .sort((a, b) => Number(b.stepIndex ?? 0) - Number(a.stepIndex ?? 0))[0];
+    if (active) return active;
+  }
+  return owners.find((row) => modules.includes(row.mountedModule)) || owners[0];
+}
+
 export const SCAFFOLD_REPAIR_CLASS = Object.freeze({
   INTERNAL: "scaffold_internal",
   INTEGRATION: "scaffold_integration",
@@ -22,7 +35,7 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
     owner: "platform", repairableByModel: false, targetFiles: [],
     reason: `failure is inside protected deterministic scaffold module ${protectedInternal}`,
   };
-  const owner = (scaffoldGraph?.journeyOwnership || []).find((row) => row.journeyId === defect?.journeyId);
+  const owner = routeOwnerForDefect(defect, scaffoldGraph, modules);
   const extensions = (scaffoldGraph?.extensions || []).filter((extension) => modules.includes(extension.module));
   const extensionFiles = new Set(extensions.flatMap((extension) => extension.allowedFiles || [extension.module]));
   const declaredUiStateOwners = unique(defect?.diagnostic?.stateOwners || [])

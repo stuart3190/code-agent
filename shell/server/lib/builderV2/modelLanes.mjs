@@ -75,6 +75,8 @@ against a code index. Rules:
   messages, newsletter signups, bookings, …) must still go through its owning capability
   (submitContact / subscribe / createBooking): a raw db.entity(...) write to one bypasses that
   capability's validation and is rejected.
+- Every protected session export is asynchronous, including currentUser(). Await session calls in
+  an effect or event handler; never store or branch on an unresolved Promise as authentication state.
 - Imagery: import { ASSETS } from "./lib/assetData.js" (adjust the relative path) and render
   with the helpers in src/lib/assets.js (imageProps / pictureSources / isPlaceholder /
   placeholderStyle). Never hardcode an image URL and never invent one. When ASSET_CREDITS

@@ -223,7 +223,8 @@ export function targetedGateCorrection(gate, tree, contract = null, modulePlan =
         }
       }
     }
-    return (contract?.scaffoldGraph?.journeyOwnership || [])
+    return (contract?.scaffoldGraph?.journeyRouteOwnership
+      || contract?.scaffoldGraph?.journeyOwnership || [])
       .filter((owner) => journeyIds.has(owner?.journeyId)).map((owner) => owner.mountedModule);
   }).filter((file) => /^src\//.test(file));
   files = [...new Set([...files, ...mountedIntegrationFiles])];

@@ -60,7 +60,8 @@ export function entityStore(entityType) {
     const sessionExports = CAPABILITIES.session.interface;
     files[`${COMPOSED_ROOT}/session.js`] = `${banner("session")}export { ${sessionExports.join(", ")} } from "../session.js";
 `;
-    interfaces.push({ module: `${COMPOSED_ROOT}/session.js`, exports: [...sessionExports] });
+    interfaces.push({ module: `${COMPOSED_ROOT}/session.js`, exports: [...sessionExports],
+      asyncExports: [...sessionExports] });
   }
 
   if (nodes.has("capability:roles")) {

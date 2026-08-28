@@ -139,6 +139,22 @@ test("generation receives graph, composed interfaces, extension points, and prot
   assert.match(prompt, /custom_behavior/);
 });
 
+test("session composition tells generation that every protected session export is asynchronous", () => {
+  const contract = { ...CRUD, auth: { required: true, rules: [] } };
+  const spec = deriveBuildSpec(contract);
+  const session = spec.compositionPlan.interfaces
+    .find((row) => row.module === "src/lib/capabilities/composed/session.js");
+  assert.ok(session);
+  assert.deepEqual(session.asyncExports, CAPABILITIES.session.interface);
+  const prompt = renderPatchPrompt({
+    step: "core", contract: spec.contract, tiers: spec.tiers, tree: REACT_VITE,
+    journey: spec.contract.journeys[0], modulePlan: spec.modulePlan,
+    moduleContracts: spec.moduleContracts, capabilityGraph: spec.capabilityGraph,
+    compositionPlan: spec.compositionPlan,
+  });
+  assert.match(prompt, /"asyncExports"/);
+});
+
 test("one custom module can be corrected without replacing composed capability modules", () => {
   const spec = deriveBuildSpec(INTERACTIVE);
   const composed = composeCapabilityFoundation(REACT_VITE, spec.capabilityGraph);

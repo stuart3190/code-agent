@@ -573,10 +573,12 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
         .flatMap((module) => module.journeyIds || module.ownedJourneys || []),
       ...(scaffoldGraph?.extensions || []).filter((extension) => extension?.module === file
         || (extension?.allowedFiles || []).includes(file)).flatMap((extension) => extension.owningJourneys || []),
-      ...(scaffoldGraph?.journeyOwnership || []).filter((owner) => owner?.mountedModule === file)
+      ...(scaffoldGraph?.journeyRouteOwnership || scaffoldGraph?.journeyOwnership || [])
+        .filter((owner) => owner?.mountedModule === file)
         .map((owner) => owner.journeyId),
     ]).filter((id) => (journeys || []).some((journey) => journey?.id === id));
-    const mountedModules = unique((scaffoldGraph?.journeyOwnership || [])
+    const mountedModules = unique((scaffoldGraph?.journeyRouteOwnership
+      || scaffoldGraph?.journeyOwnership || [])
       .filter((owner) => journeyIds.includes(owner?.journeyId)).map((owner) => owner.mountedModule));
     return { code: "journey_surface_unreachable", file, journeyIds, mountedModules,
       message: `${file} implements contracted work but is unreachable from the mounted live application` };

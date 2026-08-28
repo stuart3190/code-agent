@@ -7,7 +7,7 @@
 import { scaffoldEntry, SCAFFOLD_REGISTRY_VERSION, SCAFFOLDS } from "./scaffoldRegistry.mjs";
 import { MAX_JOURNEYS_PER_FILE } from "../appBuild/modularity.mjs";
 
-export const SCAFFOLD_GRAPH_VERSION = 2;
+export const SCAFFOLD_GRAPH_VERSION = 3;
 
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const slug = (value, fallback = "screen") => String(value || fallback).toLowerCase()
@@ -65,6 +65,18 @@ function routeForJourney(contract, journey) {
     return { route, index, score: overlap * 3 + containment };
   }).sort((a, b) => b.score - a.score || a.index - b.index);
   return (ranked[0]?.score > 0 ? ranked[0].route?.path : routes[0]?.path) || "/";
+}
+
+function routeTransitionsForJourney(contract, journey) {
+  const routes = contract?.routes || [];
+  const transitions = (journey?.steps || []).flatMap((step, stepIndex) => {
+    const target = String(step?.target || "").trim();
+    const routePath = target.startsWith("/") ? target.split(/[?#]/)[0] || "/" : null;
+    return routePath && routes.some((route) => route.path === routePath)
+      ? [{ routePath, stepIndex }]
+      : [];
+  });
+  return transitions.length ? transitions : [{ routePath: routeForJourney(contract, journey), stepIndex: 0 }];
 }
 
 function screensFor(contract) {
@@ -229,6 +241,17 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
     owner.extensionIds = extensions.filter((extension) => extension.owningJourneys.includes(owner.journeyId))
       .map((extension) => extension.extensionId);
   }
+  // A journey can intentionally cross several mounted routes. Keep the historical primary owner
+  // for compatibility, but retain every route transition so generation, verification and repair
+  // can bind each step to the screen that is actually mounted at that point in the journey.
+  const journeyRouteOwnership = journeyOwnership.flatMap((owner) => {
+    const journey = (contract?.journeys || []).find((candidate) => candidate.id === owner.journeyId);
+    return routeTransitionsForJourney(contract, journey).map(({ routePath, stepIndex }) => {
+      const screen = screens.find((candidate) => candidate.routePath === routePath) || screens[0];
+      return { ...owner, routePath: screen.routePath, screenId: screen.screenId,
+        mountedModule: screen.module, stepIndex };
+    });
+  });
   const dependencyOrder = families.slice().sort((a, b) => {
     if (a === "app_shell") return -1;
     if (b === "app_shell") return 1;
@@ -240,9 +263,10 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
     ...families.filter((id) => id !== "app_shell")
       .map((id) => ({ from: "scaffold:app_shell", to: `scaffold:${id}`, type: "contains" })),
     ...screens.map((screen) => ({ from: "scaffold:app_shell", to: screen.owner, type: "mounts" })),
-    ...journeyOwnership.flatMap((owner) => [
+    ...journeyOwnership.flatMap((owner) => owner.scaffoldNodeIds
+      .map((id) => ({ from: `journey:${owner.journeyId}`, to: id, type: "uses" }))),
+    ...journeyRouteOwnership.flatMap((owner) => [
       { from: `journey:${owner.journeyId}`, to: owner.screenId ? `screen:${owner.screenId}` : null, type: "renders_on" },
-      ...owner.scaffoldNodeIds.map((id) => ({ from: `journey:${owner.journeyId}`, to: id, type: "uses" })),
       ...owner.capabilityNodeIds.map((id) => ({ from: owner.screenId ? `screen:${owner.screenId}` : null, to: id, type: "adapts" })),
       ...owner.extensionIds.map((id) => ({ from: owner.screenId ? `screen:${owner.screenId}` : null, to: id, type: "extends" })),
     ]),
@@ -266,13 +290,14 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
     families: familyNodes,
     dependencyOrder: dependencyOrder.map((id) => `scaffold:${id}`),
     routes: screens.map(({ owner: _owner, ...screen }) => ({ ...screen,
-      journeyIds: journeyOwnership.filter((row) => row.screenId === screen.screenId).map((row) => row.journeyId) })),
+      journeyIds: unique(journeyRouteOwnership.filter((row) => row.screenId === screen.screenId)
+        .map((row) => row.journeyId)) })),
     screens,
     stateOwnership: familyNodes.map((node) => ({ scaffoldNodeId: node.id,
       ownership: scaffoldEntry(node.scaffoldId).stateOwnership })),
     persistenceOwnership: familyNodes.map((node) => ({ scaffoldNodeId: node.id,
       ownership: scaffoldEntry(node.scaffoldId).persistenceOwnership })),
-    journeyOwnership, extensions, edges, crossScaffoldInterfaces, expectedModuleSurface,
+    journeyOwnership, journeyRouteOwnership, extensions, edges, crossScaffoldInterfaces, expectedModuleSurface,
     protectedFiles: unique(familyNodes.flatMap((node) => scaffoldEntry(node.scaffoldId).protectedModules)),
   };
 }
@@ -301,6 +326,11 @@ export function validateScaffoldGraph(graph, contract, capabilityGraph) {
       problems.push(`journey ${journeyId} has no mounted scaffold owner`);
     }
   }
+  for (const owner of graph?.journeyRouteOwnership || []) {
+    if (!owner?.mountedModule || !routePaths.has(owner.routePath)) {
+      problems.push(`journey ${owner.journeyId} route transition has no mounted scaffold owner`);
+    }
+  }
   for (const extension of graph?.extensions || []) {
     if (!extension.module || !(extension.requiredExports || []).length || !(extension.allowedFiles || []).includes(extension.module)) {
       problems.push(`extension ${extension.extensionId} is not bounded to a declared module/export`);
@@ -316,10 +346,11 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
   // one interaction surface: retaining one complete child flow per journey duplicated the same
   // controls and state machines in the DOM. Collapse those planned flows into one bounded shared
   // controller; presentation-only helpers may still be introduced inside its file boundary.
+  const routeOwnership = graph?.journeyRouteOwnership || graph?.journeyOwnership || [];
   const crowdedScreens = (graph?.screens || []).map((screen) => ({
     ...screen,
-    journeyIds: (graph?.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
-      .map((row) => row.journeyId),
+    journeyIds: unique(routeOwnership.filter((row) => row.screenId === screen.screenId)
+      .map((row) => row.journeyId)),
   })).filter((screen) => screen.journeyIds.length > MAX_JOURNEYS_PER_FILE);
   const decomposedJourneyIds = new Set(crowdedScreens.flatMap((screen) => screen.journeyIds));
   const isRequiredChildFlow = (module) => String(module?.path || "").startsWith("src/components/")
@@ -361,8 +392,8 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
   });
   const childFlows = integratedExisting.filter(isRequiredChildFlow);
   const screens = (graph?.screens || []).map((screen) => {
-    const journeyIds = (graph.journeyOwnership || []).filter((row) => row.screenId === screen.screenId)
-      .map((row) => row.journeyId);
+    const journeyIds = unique(routeOwnership.filter((row) => row.screenId === screen.screenId)
+      .map((row) => row.journeyId));
     const requiredImports = childFlows.filter((module) => (module.journeyIds || [])
       .some((journeyId) => journeyIds.includes(journeyId)))
       .map((module) => relativeImport(screen.module, module.path));
@@ -386,7 +417,9 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
 export function scopeScaffoldGraph(graph, journeys = []) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
   const ownership = (graph?.journeyOwnership || []).filter((row) => ids.has(row.journeyId));
-  const screenIds = new Set(ownership.map((row) => row.screenId));
+  const routeOwnership = (graph?.journeyRouteOwnership || graph?.journeyOwnership || [])
+    .filter((row) => ids.has(row.journeyId));
+  const screenIds = new Set(routeOwnership.map((row) => row.screenId));
   const familyIds = new Set(["scaffold:app_shell", ...ownership.flatMap((row) => row.scaffoldNodeIds || [])]);
   const extensionIds = new Set(ownership.flatMap((row) => row.extensionIds || []));
   const screens = (graph?.screens || []).filter((screen) => screenIds.has(screen.screenId));
@@ -397,6 +430,7 @@ export function scopeScaffoldGraph(graph, journeys = []) {
   for (const id of ids) endpoints.add(`journey:${id}`);
   for (const id of extensionIds) endpoints.add(id);
   return { ...graph, families: nodes, routes, screens, journeyOwnership: ownership,
+    journeyRouteOwnership: routeOwnership,
     extensions: (graph?.extensions || []).filter((extension) => extensionIds.has(extension.extensionId)),
     edges: (graph?.edges || []).filter((edge) => endpoints.has(edge.from) && endpoints.has(edge.to)),
     dependencyOrder: (graph?.dependencyOrder || []).filter((id) => familyIds.has(id)),
@@ -404,9 +438,10 @@ export function scopeScaffoldGraph(graph, journeys = []) {
 }
 
 export function scaffoldJourneyOwners(graph, journeyId) {
-  const owner = (graph?.journeyOwnership || []).find((row) => row.journeyId === journeyId);
-  if (!owner) return [];
-  return unique([owner.mountedModule,
+  const owners = (graph?.journeyRouteOwnership || graph?.journeyOwnership || [])
+    .filter((row) => row.journeyId === journeyId);
+  if (!owners.length) return [];
+  return unique([...owners.map((owner) => owner.mountedModule),
     ...(graph?.extensions || []).filter((extension) => extension.owningJourneys.includes(journeyId))
       .map((extension) => extension.module)]);
 }

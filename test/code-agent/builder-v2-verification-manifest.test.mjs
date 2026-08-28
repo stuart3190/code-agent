@@ -19,6 +19,7 @@ import {
   actionIdFor, browserPlan, controlIdFor, deriveVerificationManifest,
 } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { SCAFFOLD_GRAPH_VERSION } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { CRM_CONTRACT } from "./fixtures/crmScenarioApp.mjs";
 import { CHECKOUT_CONTRACT } from "./fixtures/checkoutScenarioApp.mjs";
@@ -29,7 +30,7 @@ const CRM = deriveVerificationManifest(deriveBuildSpec(CRM_CONTRACT));
 
 test("the manifest is derived from the build spec and speaks only in primitives", () => {
   assert.equal(CRM.version, 3);
-  assert.equal(CRM.scaffoldGraphVersion, 2);
+  assert.equal(CRM.scaffoldGraphVersion, SCAFFOLD_GRAPH_VERSION);
   assert.ok(CRM.scaffoldAssertions.length > 0, "mounted scaffold ownership is carried to verification");
   assert.ok(CRM.controls.length > 0, "controls derived");
   assert.ok(CRM.actions.length > 0, "actions derived");
