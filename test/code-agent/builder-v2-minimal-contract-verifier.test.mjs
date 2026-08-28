@@ -111,6 +111,10 @@ test("layout guidance does not become required visible copy", () => {
     expectationKeywords("the default catalogue grid is visible with multiple software cards"),
     ["catalogue", "software"],
   );
+  assert.deepEqual(
+    expectationKeywords("the detail panel is visible with the heading Atlas CLI and shows its category, platform, pricing, and description"),
+    ["atlas", "cli", "category", "platform", "pricing"],
+  );
 });
 
 test("removal expectations retain a separate positive postcondition", () => {
@@ -856,6 +860,49 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <button data-thrallo-control="software-item" value="atlas-editor" aria-pressed="true">Atlas Editor</button>
         </div></main>`, step, [flow]);
       assert.equal(missingOutcome.pass, false, "selected state alone must not satisfy the outcome");
+    });
+
+    await t.test("a repeated card control identity resolves the contracted catalogue member", async () => {
+      const selectedItem = {
+        ...control("selectedItemId", "catalogue-item", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-cli",
+        selectedState: true,
+      };
+      const step = { action: "select the matching software card", operates: ["selectedItemId"],
+        expect: "the detail panel is visible with the heading Atlas CLI and shows its category, platform, pricing, and description" };
+      const flow = { kind: "selection", valueWritten: "selectedItemId", control: selectedItem };
+      const result = await run(`<main><section><h2>Software catalogue</h2><div>
+          <article><h3>Compass Deploy</h3><button data-thrallo-control="catalogue-item"
+            value="compass-deploy" aria-pressed="false">Select Compass Deploy</button></article>
+          <article><h3>Atlas CLI</h3><button data-thrallo-control="catalogue-item"
+            value="atlas-cli" aria-label="selected Item Id atlas-cli" aria-pressed="true">Select Atlas CLI</button></article>
+        </div></section><aside><h2>Atlas CLI</h2><dl>
+          <dt>Category</dt><dd>Developer Tools</dd><dt>Platform</dt><dd>Desktop</dd>
+          <dt>Pricing</dt><dd>Free</dd><dt>Description</dt><dd>Command-line software</dd>
+        </dl></aside></main>`, step, [flow]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.selections[0].verificationValue,
+        "atlas-cli");
+    });
+
+    await t.test("filled catalogue controls cannot replace a missing contracted filter result", async () => {
+      const search = { ...control("searchQuery", "catalogue-search"), verificationValue: "atlas" };
+      const apply = control("catalogue controls", "apply-catalogue-filter", ["button"]);
+      const result = await run(`<main><label>Software search
+          <input data-thrallo-control="catalogue-search" aria-label="search Query"></label>
+          <button data-thrallo-action="apply-catalogue-filter"
+            onclick="document.getElementById('results').hidden=true">Catalogue controls</button>
+          <section id="results"><h2>Other software</h2><p>No matching catalogue item is available.</p></section></main>`,
+      { action: "search and filter the software catalogue", operates: ["searchQuery"],
+        expect: "the results area shows a visible card named Atlas CLI and the result count reflects the active search" }, [
+        { kind: "input", valueWritten: "searchQuery", writes: ["journey.searchQuery"], control: search },
+        { kind: "action", operationId: "filter-catalogue", reads: ["journey.searchQuery"],
+          writes: ["journey.resultItemIds"], control: apply },
+      ]);
+      assert.equal(result.pass, false, "filled inputs do not prove a contracted operation result");
+      assert.equal(result.journeys[0].steps[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.doesNotMatch(result.journeys[0].steps[0].detail, /fields hold values/i);
     });
 
     await t.test("a sole filtered catalogue item already selected with its outcome visible is accepted", async () => {

@@ -61,7 +61,8 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
   "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads",
-  "hero", "above", "again", "default", "grid", "multiple", "card", "cards"]);
+  "hero", "above", "again", "default", "grid", "multiple", "card", "cards", "detail", "panel",
+  "its"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -3297,7 +3298,15 @@ async function runStep(page, step, {
   // produce the contracted outcome, retain the normal expectation failure instead of converting
   // the filled credential into a pass.
   const claimsAuthenticationOutcome = isAuthenticationFlow(null, step);
-  const fillsContractedFields = contractedInputs.length > 0
+  // Form-state evidence answers only an input-only contract. When the same step also declares an
+  // operation, mutation, lookup or other transition, populated controls do not prove that the
+  // contracted result happened. A live catalogue filter emptied every result because its
+  // operation received no catalogue data, yet this fallback accepted the step as "6/6 fields
+  // hold values" and displaced the defect onto the next selection control. Keep the real missing
+  // outcome authoritative so repair is routed to the operation that caused it.
+  const contractedInputStateOnly = contractedInputs.length > 0
+    && interactionFlows.every((flow) => flow.kind === "input");
+  const fillsContractedFields = contractedInputStateOnly
     // V1 and any contract that typed nothing for this step: prose is all there is, so it still
     // answers here. It no longer answers for anything the contract DID type.
     || (!interactionFlows.length && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect));
