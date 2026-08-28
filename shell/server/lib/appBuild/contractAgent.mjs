@@ -288,7 +288,8 @@ export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid 
   + "the unresolved dependency unchanged. Do not duplicate journey steps. Listing a field in `operates` means the "
   + "user changes that control; it does not make a navigation or observation step produce the field. Existing "
   + "durable entity data may instead be declared in the journey's durableState when it genuinely exists before the "
-  + "journey starts.";
+  + "journey starts. Prefer a durableState array containing the exact missingStatePath string rather than a nested "
+  + "entity object.";
 
 /**
  * Build the smallest contract subset needed to repair invalid journey data flow or operation
@@ -417,16 +418,38 @@ const mergeScopedEntities = (current, replacements, allowed) => {
   });
 };
 
+const nestedObjectKeys = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value).flatMap(([key, nested]) => [key, ...nestedObjectKeys(nested)]);
+};
+
+const normalizeRepairJourneyStartState = (journey, scope) => {
+  if (!journey || Array.isArray(journey.durableState)
+    || !journey.durableState || typeof journey.durableState !== "object") return journey;
+  const declaredFields = new Set(nestedObjectKeys(journey.durableState).map((value) => String(value).toLowerCase()));
+  const matchingPaths = (scope.invalidDependencies || [])
+    .filter((issue) => issue.journeyId === journey.id)
+    .map((issue) => String(issue.missingStatePath || ""))
+    .filter((path) => path && declaredFields.has(String(path).split(".").at(-1).toLowerCase()));
+  if (!matchingPaths.length) return journey;
+  // Scoped repair already established the exact missing path and the model explicitly placed its
+  // field under durableState. Convert that equivalent structured declaration to the canonical
+  // exact-path representation; unrelated object keys cannot acquire start-state authority.
+  return { ...journey, durableState: [...new Set(matchingPaths)] };
+};
+
 /** Merge only the dependency subset the correction call was authorized to change. */
 export function mergeContractDependencyRepair(contract, reply, scope) {
   if (!scope) return reply;
   const patch = reply?.contractPatch || reply || {};
+  const repairedJourneys = (patch.journeys || [])
+    .map((journey) => normalizeRepairJourneyStartState(journey, scope));
   const journeyIds = new Set((scope.journeys || []).map((journey) => journey.id));
   const operationIds = new Set((scope.operations || []).map((operation) => operation.id || operation.name));
   const entityNames = new Set((scope.entities || []).map((entity) => entity.name));
   return {
     ...contract,
-    journeys: mergeScoped(contract.journeys, patch.journeys, journeyIds, (journey) => journey?.id),
+    journeys: mergeScoped(contract.journeys, repairedJourneys, journeyIds, (journey) => journey?.id),
     operations: mergeScoped(contract.operations, patch.operations, operationIds,
       (operation) => operation?.id || operation?.name),
     // The repair scope intentionally sends only fields used by the invalid journeys. Replacing a

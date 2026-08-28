@@ -273,3 +273,28 @@ test("scoped repair retries when its first structurally-valid reply leaves the c
   assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /Do not duplicate journey steps/);
   assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /does not make a navigation or observation step produce/);
 });
+
+test("scoped repair canonicalizes an explicit durable entity field to its exact missing state path", () => {
+  const contract = dependencyRepairFixture();
+  const rejected = deriveBuildSpec(contract);
+  const issue = rejected.verdict.interaction.issues.find((candidate) => (
+    candidate.code === "interaction_state_dependency_missing"
+  ));
+  assert.ok(issue);
+  const scope = contractDependencyRepairScope(contract, [issue]);
+  const correctedJourney = structuredClone(scope.journeys[0]);
+  correctedJourney.durableState = {
+    catalogueItem: { itemId: "existing-software-item", status: "review" },
+  };
+
+  const repaired = mergeContractDependencyRepair(contract, {
+    contractPatch: {
+      journeys: [correctedJourney], operations: scope.operations, entities: scope.entities,
+    },
+  }, scope);
+
+  assert.deepEqual(repaired.journeys[0].durableState, [issue.missingStatePath]);
+  const accepted = deriveBuildSpec(repaired);
+  assert.equal(accepted.verdict.ok, true, accepted.verdict.problems.join("; "));
+  assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /exact missingStatePath/);
+});
