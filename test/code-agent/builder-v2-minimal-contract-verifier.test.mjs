@@ -897,6 +897,36 @@ test("retained false negatives and concrete failures classify correctly in a rea
         "atlas-cli");
     });
 
+    await t.test("one catalogue identity anchors equivalent unnamed card selections", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        verificationValue: "analytics-desk",
+        selectedState: true,
+      };
+      const selectSoftware = control("software card list", "select-software", ["button"]);
+      const step = { action: "select the Analytics Desk software card", operates: ["selectedSoftwareId"],
+        expect: "the detail result shows the active Analytics Desk workspace marker" };
+      const result = await run(`<main><div role="list" aria-label="software card list">
+          <article role="listitem"><h2>ForgeKit Pro</h2><button data-thrallo-control="software-item"
+            data-thrallo-action="select-software" value="forgekit-pro" aria-pressed="false"
+            onclick="for(const card of document.querySelectorAll('[aria-pressed]'))card.setAttribute('aria-pressed',String(card===this));document.getElementById('detail').textContent='ForgeKit Pro detail result'">ForgeKit Pro</button></article>
+          <article role="listitem"><h2>Analytics Desk</h2><button value="analytics-desk" aria-pressed="false"
+            onclick="for(const card of document.querySelectorAll('[aria-pressed]'))card.setAttribute('aria-pressed',String(card===this));document.getElementById('detail').textContent='Active Analytics Desk workspace marker'">Analytics Desk</button>
+            <button type="button">Open documentation</button></article>
+        </div><aside id="detail">Select software to view its detail result</aside></main>`, step, [
+        { kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem },
+        { kind: "action", operationId: "select-software", control: selectSoftware },
+      ]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const selection = result.journeys[0].steps[0].controlEvidence.selections[0];
+      assert.equal(selection.verificationValue, "analytics-desk");
+      assert.deepEqual(selection.selectedOptions.map((option) => option.value),
+        ["forgekit-pro", "analytics-desk"], "ordinary sibling actions stay outside the selection group");
+      assert.deepEqual(selection.selectedOptions.map((option) => option.selected), [false, true]);
+      assert.deepEqual(result.journeys[0].steps[0].controlEvidence.selectionOwnedAction,
+        { selectionControl: "software-item", actionControl: "select-software" });
+    });
+
     await t.test("independent named selections in one software grid keep separate state", async () => {
       const targetSoftware = {
         ...control("targetSoftwareId", "target-software", ["button", "radio", "option", "combobox"]),

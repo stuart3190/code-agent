@@ -1575,11 +1575,38 @@ async function selectionGroups(page) {
       // lets selected state from one field prevent a real transition in another. Partition first
       // by the controls' declared HTML field identity, then by their opaque Thrallo identity;
       // only genuinely anonymous legacy options remain one parent-scoped group.
+      const selectionKind = (el) => {
+        if (el.matches('input[type="radio"]')) return "native-radio";
+        const role = String(el.getAttribute("role") || "").toLowerCase();
+        if (["option", "tab", "radio"].includes(role)) return `role:${role}`;
+        if (el.hasAttribute("aria-selected")) return "aria-selected";
+        if (el.hasAttribute("aria-pressed")) return "aria-pressed";
+        if (el.hasAttribute("data-state")) return "data-state";
+        return null;
+      };
+      const unnamedMachineIds = [...new Set(parentElements
+        .filter((el) => !String(el.getAttribute("name") || "").trim())
+        .map((el) => String(el.getAttribute("data-thrallo-control") || "").trim())
+        .filter(Boolean))];
+      const anchoredMachineId = unnamedMachineIds.length === 1 ? unnamedMachineIds[0] : null;
+      const anchoredKinds = new Set(anchoredMachineId ? parentElements
+        .filter((el) => !String(el.getAttribute("name") || "").trim()
+          && String(el.getAttribute("data-thrallo-control") || "").trim() === anchoredMachineId)
+        .map(selectionKind).filter(Boolean) : []);
       const partitions = new Map();
       for (const el of parentElements) {
         const name = String(el.getAttribute("name") || "").trim();
         const machineId = String(el.getAttribute("data-thrallo-control") || "").trim();
-        const key = name ? `name:${name}` : machineId ? `machine:${machineId}` : "anonymous";
+        // The scaffold can stamp a repeated control identity on one representative member while
+        // leaving the other rendered members anonymous. A lone stamped member is therefore an
+        // anchor for unnamed siblings only when they expose the exact same native selection
+        // mechanism. Ordinary buttons in the list are not absorbed, and names still partition
+        // independent fields before opaque identities do.
+        const anchoredSibling = !name && !machineId && anchoredMachineId
+          && anchoredKinds.has(selectionKind(el));
+        const key = name ? `name:${name}`
+          : machineId ? `machine:${machineId}`
+            : anchoredSibling ? `machine:${anchoredMachineId}` : "anonymous";
         if (!partitions.has(key)) partitions.set(key, []);
         partitions.get(key).push(el);
       }
@@ -1606,7 +1633,9 @@ async function selectionGroups(page) {
             // control unmounts, and this is then the only surviving evidence of what was activated.
             return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80),
               label: el.getAttribute("aria-label") || null, value: el.getAttribute("value") || null,
-              selected: isSelected(el) };
+              selected: isSelected(el),
+              controlId: el.getAttribute("data-thrallo-control") || null,
+              actionId: el.getAttribute("data-thrallo-action") || null };
           }),
         });
         id += 1;
@@ -1624,6 +1653,8 @@ async function groupState(page, group) {
       return [...select.options].filter((option) => !option.disabled).map((option, index) => ({
         index,
         text: (option.textContent || option.value || "").trim().slice(0, 80),
+        label: option.label || null,
+        value: option.value,
         selected: option.selected === true,
       }));
     }
@@ -1640,7 +1671,11 @@ async function groupState(page, group) {
       .map((el) => ({
         index: Number(el.getAttribute("data-thrallo-opt").split(":")[1]),
         text: (el.innerText || el.value || "").trim().slice(0, 80),
+        label: el.getAttribute("aria-label") || null,
+        value: el.getAttribute("value") || null,
         selected: isSelected(el),
+        controlId: el.getAttribute("data-thrallo-control") || null,
+        actionId: el.getAttribute("data-thrallo-action") || null,
       }))
       .sort((a, b) => a.index - b.index);
   }, { groupId: group.groupId, nativeSelect: Boolean(group.nativeSelect) }).catch(() => []);
@@ -2111,6 +2146,9 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
   }
 
   const verdict = selectionTransition({ before, after, clickedIndex: clickIndex, autoAdvance });
+  const selectionOwnedActionIds = unique(before
+    .filter((option) => option.controlId === flow?.control?.machineId && option.actionId)
+    .map((option) => option.actionId));
   return {
     drove: true,
     groupKey: group.key,
@@ -2118,6 +2156,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     detail: verdict.ok ? verdict.detail : verdict.reason,
     selectedText: verdict.selectedText || null,
     selectedValue: before[clickIndex]?.value ?? null,
+    selectionOwnedActionIds,
     terminalOutcomeProven: verdict.terminalOutcomeProven === true,
     groupId: group.groupId,
     controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
@@ -2986,12 +3025,28 @@ async function runStep(page, step, {
         selectionResult.terminalOutcomeProven = true;
         selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
       }
+      // The scaffold stamps a coalesced selection/operation pair on one representative repeated
+      // option. Equivalent members execute that same handler even when only the representative
+      // carries the opaque attributes. Once a real selection transition has run, activating the
+      // representative action identity would perform the operation a second time on the wrong
+      // member. This shortcut requires both identities on the same option; a separate Apply/Save
+      // control therefore remains mandatory.
+      const selectionOwnedActionIndex = companionAction.control?.machineId
+        ? outcomes.findIndex((row) => row.selectionOwnedActionIds?.includes(companionAction.control.machineId))
+        : -1;
+      const selectionOwnedAction = selectionResult.drove && selectionOwnedActionIndex >= 0
+        ? { selectionControl: selectionFlows[selectionOwnedActionIndex]?.control?.machineId || null,
+          actionControl: companionAction.control.machineId }
+        : null;
+      if (selectionOwnedAction) selectionResult.controlEvidence.selectionOwnedAction = selectionOwnedAction;
       drove = drove || selectionResult.drove;
       controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
       // A selection-owned operation runs through the option's onSelect handler. It still has to
       // prove the operation's contracted outcome below, but the driver must not click a second
       // prose-matched control after the semantic option already triggered it.
-      if (selectionResult.terminalOutcomeProven || !companionAction.control) contractDriven = true;
+      if (selectionResult.terminalOutcomeProven || selectionOwnedAction || !companionAction.control) {
+        contractDriven = true;
+      }
     } else {
       const outcome = await driveSelection(page, step);
       if (outcome) return outcome;
