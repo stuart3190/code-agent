@@ -1205,6 +1205,37 @@ test("retained false negatives and concrete failures classify correctly in a rea
     });
   });
 
+test("a removed marked catalogue member outranks a retained detail action", { ...needsBrowser }, async () => {
+  const remove = {
+    ...control("favourites list remove control", "toggle-favourite-software", ["button"]),
+    accessibleName: "favourites list remove control",
+    accessibleNames: ["favourites list remove control"],
+  };
+  const step = {
+    action: "remove the same software from favourites",
+    expect: "Flow Automation Suite is removed from the favourites list and the empty favourites message is visible when no favourites remain",
+  };
+  const result = await run(`<main><aside>
+    <div><p>Detail panel</p><div role="status"><h2>Flow Automation Suite</h2>
+      <p>Selected software: Flow Automation Suite is highlighted in the software card grid.</p>
+      <button data-thrallo-action="toggle-favourite-software" aria-label="detail panel favourite control">Saved to favourites — remove</button>
+    </div></div>
+    <div id="favourites-panel"><div><h2>Favourites</h2><span>Favourite count: 1</span></div>
+      <div id="favourites-list" role="list"><span>Favourites list</span><div role="listitem" id="favourite-item"><span>Flow Automation Suite</span>
+        <button data-thrallo-action="toggle-favourite-software" aria-label="favourites list remove control"
+          onclick="document.getElementById('favourites-list').remove();document.getElementById('favourite-count').textContent='Favourite count: 0';document.getElementById('favourites-empty').hidden=false">Remove</button>
+      </div></div><span id="favourite-count">Favourite count: 1</span>
+      <p id="favourites-empty" role="status" hidden>Empty favourites list — no software is saved yet.</p>
+    </div>
+    </aside></main>`, step,
+  [{ kind: "action", operationId: "toggle-favourite-software", control: remove }]);
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[0].controlEvidence.activation.scope,
+    "contracted_collection_member");
+  assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
+  assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+});
+
 test("minimal result classes route only concrete app failures to repair", () => {
   const base = {
     id: "journey", title: "Save", priority: "primary", owners: ["src/App.jsx"],

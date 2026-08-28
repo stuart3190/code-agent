@@ -796,9 +796,15 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
       .sort((left, right) => right.identityTopicMatches - left.identityTopicMatches
         || right.controlTopicMatches - left.controlTopicMatches
         || left.text.length - right.text.length || right.topicMatches - left.topicMatches);
-    const collectionRegion = markedRegion || regions[0]?.element || null;
+    // A removal marker is a baseline scope, not a fresh discovery hint. Once the action removes
+    // that region, follow-up polling must not move the same marker onto another matching context
+    // (for example the selected-item detail panel which legitimately keeps the removed title).
+    // Re-anchoring made a correct list removal look unchanged on every later poll.
+    const collectionRegion = markerValue && !requireTarget
+      ? markedRegion
+      : markedRegion || regions[0]?.element || null;
     let regionMarked = false;
-    if (markerValue && (collectionRegion || uniqueMembers[0])) {
+    if (requireTarget && markerValue && (collectionRegion || uniqueMembers[0])) {
       const scopedMember = memberRows.filter((row) => !collectionRegion || collectionRegion.contains(row.member))
         .sort((left, right) => right.controlTopicMatches - left.controlTopicMatches
           || normalized(left.member.innerText).length - normalized(right.member.innerText).length)[0]?.member
@@ -814,7 +820,9 @@ async function collectionActionMemberState(page, spec, control, { mark = false, 
         regionMarked = true;
       }
     }
-    const actionBoundTargetMembers = uniqueMembers.filter((member) => !collectionRegion || collectionRegion.contains(member));
+    const actionBoundTargetMembers = markerValue && !requireTarget && !collectionRegion
+      ? []
+      : uniqueMembers.filter((member) => !collectionRegion || collectionRegion.contains(member));
     const structuralTargetMembers = collectionRegion ? [...collectionRegion.querySelectorAll(
       "li, tr, [role='listitem'], article, [data-item], [data-entry], [data-record]",
     )].filter((element) => visible(element) && normalized(element.innerText).includes(targetText)) : [];
