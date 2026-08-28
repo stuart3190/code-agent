@@ -492,6 +492,87 @@ function requestsNamedInteractiveControlsObservation(action, expect) {
     && /\b(?:all|each|every)\b/i.test(assertion);
 }
 
+const DETAIL_SURFACE_PATTERN = /\bdetails?(?:\s+(?:panel|view|section|area|region|surface))?\b/i;
+
+// Detail expectations often name document structure rather than customer-facing copy. Prove the
+// requested structure inside one visible detail authority; never let matching words elsewhere on
+// the page answer for a missing summary, badge group, or list.
+export function detailObservationExpectationSpec(action = "", expect = "") {
+  const assertion = String(expect || "");
+  const description = `${String(action || "")} ${assertion}`;
+  if (!DETAIL_SURFACE_PATTERN.test(description)) return null;
+  const requirements = {
+    summary: /\b(?:summary|description|overview)\b/i.test(assertion),
+    badges: /\b(?:badges?|tags?|chips?)\b/i.test(assertion),
+    list: /\b(?:capabilit(?:y|ies)|features?)\b.{0,32}\blist\b|\blist\b.{0,32}\b(?:capabilit(?:y|ies)|features?)\b/i
+      .test(assertion),
+  };
+  if (Object.values(requirements).filter(Boolean).length < 2) return null;
+  return {
+    ...requirements,
+    minimumBadges: /\b(?:badges|tags|chips)\b/i.test(assertion) ? 2 : 1,
+  };
+}
+
+async function detailObservationState(page, spec, selectedIdentities = []) {
+  return page.evaluate(({ requirements, selectedIdentities: expectedIdentities }) => {
+    const normalized = (value) => String(value || "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const visible = (element) => {
+      if (!element || element.closest("[hidden], [inert]")) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden"
+        && Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = [...document.querySelectorAll(
+      "section, aside, article, [role='region'], [aria-label]",
+    )].filter(visible).map((element) => {
+      const headings = [...element.querySelectorAll("h1, h2, h3, h4, [role='heading']")]
+        .filter(visible).map((heading) => normalized(heading.textContent)).filter(Boolean);
+      const identity = normalized(`${element.getAttribute("aria-label") || ""} ${headings.join(" ")}`);
+      const labelledDetail = /\bdetails?\b/.test(normalized(element.getAttribute("aria-label")));
+      const selectedHeading = expectedIdentities.length
+        ? headings.some((heading) => expectedIdentities.some((selectedIdentity) => {
+          const headingKey = heading.replace(/\s+/g, "");
+          const selectedKey = selectedIdentity.replace(/\s+/g, "");
+          return headingKey === selectedKey || headingKey.includes(selectedKey)
+            || selectedKey.includes(headingKey);
+        }))
+        : headings.length > 0;
+      if (!labelledDetail && !(expectedIdentities.length && selectedHeading)) return null;
+      const summaries = [...element.querySelectorAll("p")].filter(visible)
+        .map((paragraph) => String(paragraph.textContent || "").replace(/\s+/g, " ").trim())
+        .filter((text) => text.length >= 20);
+      const badges = [...element.querySelectorAll(
+        "span, [class*='badge'], [class*='chip'], [class*='tag']",
+      )].filter(visible).map((badge) => normalized(badge.textContent))
+        .filter((text) => text.length > 0 && text.length <= 80);
+      const lists = [...element.querySelectorAll("ul, ol, [role='list']")].filter(visible)
+        .map((list) => [...list.querySelectorAll("li, [role='listitem']")].filter(visible).length)
+        .filter((count) => count > 0);
+      const checks = {
+        identity: selectedHeading,
+        summary: !requirements.summary || summaries.length > 0,
+        badges: !requirements.badges || badges.length >= requirements.minimumBadges,
+        list: !requirements.list || lists.length > 0,
+      };
+      return {
+        element, checks, labelledDetail, headingCount: headings.length,
+        summaryCount: summaries.length, badgeCount: badges.length,
+        listCount: lists.length, listItemCount: lists.reduce((total, count) => total + count, 0),
+        textLength: String(element.innerText || "").length,
+      };
+    }).filter(Boolean).sort((left, right) => (
+      Number(right.labelledDetail) - Number(left.labelledDetail) || left.textLength - right.textLength
+    ));
+    const match = candidates[0] || null;
+    if (!match) return { checked: true, ok: false, reason: "detail_surface_absent" };
+    const { element: _element, ...evidence } = match;
+    return { checked: true, ok: Object.values(match.checks).every(Boolean), ...evidence };
+  }, { requirements: spec, selectedIdentities }).catch(() => null);
+}
+
 async function namedInteractiveControlsState(page) {
   return page.evaluate(() => {
     const selector = [
@@ -662,6 +743,8 @@ const REMAINING_COLLECTION_MEMBER_PATTERN = /\b(?:and|while|but|however|yet)\s+(
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
 const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query|not|without|excludes?)\b/i;
 const COLLECTION_POSTCONDITION_CLAUSE_PATTERN = /\b(?:count|total|message|state|status)\b|\b(?:is|are|was|were|remains?|becomes?|equals?)\b/i;
+const COLLECTION_MEMBER_STRUCTURE_SUFFIX_PATTERN = /\s+as\s+(?:(?:one|two|three|four|five|\d+)\s+)?(?:(?:separate|distinct|individual)\s+)?(?:software\s+)?(?:items?|entries?|records?|members?|results?)\s*$/i;
+const COLLECTION_ABSENT_MEMBER_PATTERN = /^(.{1,80}?)\s+(?:is\s+)?no\s+longer(?:\s+(?:listed|present|visible|shown|included))?$/i;
 
 // A named collection containing several named members is stronger than global page copy. The
 // same subjects may legitimately remain visible in catalogue cards or a detail panel, so page-
@@ -673,11 +756,14 @@ export function collectionMembershipExpectationSpec(expect = "") {
     const member = direct[1].trim();
     const collection = direct[2].trim();
     const remaining = REMAINING_COLLECTION_MEMBER_PATTERN.exec(text.slice(direct[0].length))?.[1]?.trim();
-    const members = [member, ...(remaining ? [remaining] : [])];
+    const absent = COLLECTION_ABSENT_MEMBER_PATTERN.exec(member)?.[1]?.trim() || null;
+    const members = absent ? (remaining ? [remaining] : []) : [member, ...(remaining ? [remaining] : [])];
+    const allNamedMembers = [...members, ...(absent ? [absent] : [])];
     const invalid = (value) => value.split(/\s+/).length > 8 || !keywords(value, 5).length
       || COLLECTION_MEMBER_CLAUSE_PATTERN.test(value);
-    if (keywords(collection, 5).length && members.every((value) => !invalid(value))) {
-      return { collection, members };
+    if (members.length && keywords(collection, 5).length
+      && allNamedMembers.every((value) => !invalid(value))) {
+      return { collection, members, ...(absent ? { absentMembers: [absent] } : {}) };
     }
   }
   const match = COLLECTION_MEMBERSHIP_PATTERN.exec(text);
@@ -685,16 +771,29 @@ export function collectionMembershipExpectationSpec(expect = "") {
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   const clauses = match[2].split(/\s*(?:,|\band\b)\s*/i)
     .map((member, index) => {
-      const normalized = member.replace(/[.;:]$/, "").trim();
+      // "as two items" describes the collection shape; it is not part of the second member's
+      // identity. Retaining it makes an otherwise exact member impossible to find.
+      const normalized = member.replace(/[.;:]$/, "").trim()
+        .replace(COLLECTION_MEMBER_STRUCTURE_SUFFIX_PATTERN, "").trim();
       return index === 0 ? normalized.replace(/^both\s+/i, "") : normalized;
     }).filter(Boolean);
-  const postconditionIndex = clauses.findIndex((clause, index) => index >= 1
+  const absentMembers = [];
+  const positiveClauses = clauses.filter((clause, index) => {
+    if (index < 1) return true;
+    const absent = COLLECTION_ABSENT_MEMBER_PATTERN.exec(clause);
+    if (!absent) return true;
+    absentMembers.push(absent[1].trim());
+    return false;
+  });
+  const postconditionIndex = positiveClauses.findIndex((clause, index) => index >= 1
     && COLLECTION_POSTCONDITION_CLAUSE_PATTERN.test(clause));
-  const members = postconditionIndex < 0 ? clauses : clauses.slice(0, postconditionIndex);
-  if (!keywords(collection, 5).length || members.length < 2 || members.length > 5
-    || members.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length
+  const members = postconditionIndex < 0 ? positiveClauses : positiveClauses.slice(0, postconditionIndex);
+  const allNamedMembers = [...members, ...absentMembers];
+  if (!keywords(collection, 5).length || members.length < (absentMembers.length ? 1 : 2)
+    || allNamedMembers.length > 5
+    || allNamedMembers.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length
       || COLLECTION_MEMBER_CLAUSE_PATTERN.test(member))) return null;
-  return { collection, members };
+  return { collection, members, ...(absentMembers.length ? { absentMembers } : {}) };
 }
 
 const SELECTED_COLLECTION_MEMBER_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\b/i;
@@ -713,9 +812,10 @@ export function selectedCollectionExpectationSpec(expect = "", selections = [], 
 
 async function collectionMembershipState(page, spec) {
   const topics = keywords(spec.collection, 5).filter((word) => !COLLECTION_STRUCTURE_WORDS.has(word));
-  return page.evaluate(({ wantedMembers, collectionTopics }) => {
+  return page.evaluate(({ wantedMembers, absentMembers: unwantedMembers, collectionTopics }) => {
     const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
     const members = wantedMembers.map(normalized);
+    const absentMembers = unwantedMembers.map(normalized);
     const visible = (element) => {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -729,27 +829,41 @@ async function collectionMembershipState(page, spec) {
       const text = normalized(element.innerText);
       const heading = element.querySelector("h1, h2, h3, h4, legend")?.innerText || "";
       const identity = normalized(`${element.getAttribute("aria-label") || ""} ${heading}`);
-      const present = members.filter((member) => text.includes(member));
+      // Status copy inside a collection may name the item that just left it. When the collection
+      // exposes real rows/items, those descendants are the membership authority; narration is not.
+      const structuralMembers = [...element.querySelectorAll(
+        "li, [role='listitem'], tbody tr, [data-collection-item]",
+      )].filter(visible).map((member) => normalized(member.innerText)).filter(Boolean);
+      const membershipText = structuralMembers.length ? structuralMembers.join(" \n ") : text;
+      const present = members.filter((member) => membershipText.includes(member));
+      const unexpected = absentMembers.filter((member) => membershipText.includes(member));
       return {
-        element, textLength: text.length, present,
+        element, textLength: text.length, present, unexpected,
+        structuralMemberCount: structuralMembers.length,
         identityTopicMatches: collectionTopics.filter((topic) => identity.includes(topic)).length,
         textTopicMatches: collectionTopics.filter((topic) => text.includes(topic)).length,
       };
     }).filter((row) => collectionTopics.length === 0 || row.textTopicMatches > 0)
       .sort((left, right) => right.identityTopicMatches - left.identityTopicMatches
         || right.present.length - left.present.length
+        || left.unexpected.length - right.unexpected.length
         || left.textLength - right.textLength || right.textTopicMatches - left.textTopicMatches);
     const region = regions[0] || null;
     const present = region?.present || [];
+    const unexpected = region?.unexpected || [];
     return {
       checked: true,
-      ok: Boolean(region) && present.length === members.length,
+      ok: Boolean(region) && present.length === members.length && unexpected.length === 0,
       regionFound: Boolean(region),
       present: wantedMembers.filter((_member, index) => present.includes(members[index])),
       missing: wantedMembers.filter((_member, index) => !present.includes(members[index])),
+      absent: unwantedMembers.filter((_member, index) => !unexpected.includes(absentMembers[index])),
+      unexpected: unwantedMembers.filter((_member, index) => unexpected.includes(absentMembers[index])),
+      structuralMemberCount: region?.structuralMemberCount || 0,
     };
-  }, { wantedMembers: spec.members, collectionTopics: topics })
-    .catch(() => ({ checked: false, ok: false, regionFound: false, present: [], missing: spec.members }));
+  }, { wantedMembers: spec.members, absentMembers: spec.absentMembers || [], collectionTopics: topics })
+    .catch(() => ({ checked: false, ok: false, regionFound: false, present: [], missing: spec.members,
+      absent: [], unexpected: spec.absentMembers || [] }));
 }
 
 async function collectionActionMemberState(page, spec, control, { mark = false, marker = null } = {}) {
@@ -2646,6 +2760,27 @@ async function runStep(page, step, {
       : { drove: false, status: "fail",
         detail: `${accessibility.unnamed} of ${accessibility.total} visible interactive controls lack a descriptive label or accessible name`,
         controlEvidence: { accessibility } };
+  }
+
+  const detailObservationSpec = minimal && observationOnly
+    ? detailObservationExpectationSpec(action, expect) : null;
+  if (detailObservationSpec) {
+    const selected = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
+    const selectedIdentities = unique([selectionValues.at(-1), selected]).map(semanticKey).filter(Boolean);
+    const detailObservation = await detailObservationState(page, detailObservationSpec, selectedIdentities);
+    if (!detailObservation) return verificationVerdict(
+      VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      "the verifier could not inspect the contracted detail surface",
+      { drove: false, readOnlyAssertion: true,
+        controlEvidence: { detailObservation: { checked: false } } },
+    );
+    return verificationVerdict(
+      detailObservation.ok ? VERIFICATION_RESULT_CLASS.PASS : VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      detailObservation.ok
+        ? "the selected detail surface contains every contracted structural element"
+        : "the selected detail surface is missing one or more contracted structural elements",
+      { drove: false, readOnlyAssertion: true, controlEvidence: { detailObservation } },
+    );
   }
 
   const explicitAuth = interactionFlows.some((flow) => flow.kind === "flow_start")

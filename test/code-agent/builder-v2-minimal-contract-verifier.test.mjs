@@ -6,7 +6,8 @@ import { readFile } from "node:fs/promises";
 
 import {
   collectionMembershipExpectationSpec, controlResetTransition, expectationKeywords, expectationOutcome,
-  expectationRequestsControlReset, isObservationOnlyStep, removalExpectationSpec, selectedRemovalExpectationSpec,
+  detailObservationExpectationSpec, expectationRequestsControlReset, isObservationOnlyStep,
+  removalExpectationSpec, selectedRemovalExpectationSpec,
   requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
@@ -234,6 +235,24 @@ test("multi-member collection expectations retain their named scope", () => {
     collectionMembershipExpectationSpec("the favourites list shows both Atlas Editor and Compass Deploy"),
     { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] },
   );
+  assert.deepEqual(
+    collectionMembershipExpectationSpec(
+      "the favourites list shows Atlas Workbench and Forge Monitor as two software items",
+    ),
+    { collection: "favourites list", members: ["Atlas Workbench", "Forge Monitor"] },
+  );
+  assert.deepEqual(
+    collectionMembershipExpectationSpec(
+      "the favourites list shows Atlas Workbench and Forge Monitor is no longer listed",
+    ),
+    { collection: "favourites list", members: ["Atlas Workbench"], absentMembers: ["Forge Monitor"] },
+  );
+  assert.deepEqual(
+    collectionMembershipExpectationSpec(
+      "the favourites list shows Atlas Workbench and Forge Monitor no longer",
+    ),
+    { collection: "favourites list", members: ["Atlas Workbench"], absentMembers: ["Forge Monitor"] },
+  );
   assert.equal(collectionMembershipExpectationSpec("Atlas Editor is visible"), null);
   assert.equal(collectionMembershipExpectationSpec(
     "the visible software list shows only software matching the search and selected filters",
@@ -294,6 +313,13 @@ test("observation steps require no control identity", () => {
   assert.equal(isObservationOnlyStep({
     action: "review and submit the order", expect: "order confirmation is visible",
   }, [], { verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY }), false);
+  assert.deepEqual(detailObservationExpectationSpec(
+    "inspect the selected software",
+    "the detail panel displays a summary, category badge, platform badges, and capabilities list",
+  ), { summary: true, badges: true, list: true, minimumBadges: 2 });
+  assert.equal(detailObservationExpectationSpec(
+    "inspect the selected software", "the detail panel is visible",
+  ), null);
 });
 
 test("retained false negatives and concrete failures classify correctly in a real browser",
@@ -303,6 +329,40 @@ test("retained false negatives and concrete failures classify correctly in a rea
         { action: "view live competitions", expect: "competition cards are visible", reads: ["competitions"] });
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].drove, false);
+    });
+
+    await t.test("a selected detail observation is proven from scoped structure", async () => {
+      const result = await run(`<main><section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <article><h3>Atlas Workbench</h3><p>Catalogue summary remains visible.</p></article></section>
+        <aside><section aria-label="detail panel"><h2>Atlas Workbench</h2>
+          <span>Analytics</span><span>Web</span><span>Desktop</span>
+          <p>A focused software workspace with enough descriptive content to establish its summary.</p>
+          <h3>Capabilities</h3><ul><li>Workflow boards</li><li>Report export</li></ul>
+        </section></aside></main>`, {
+        action: "inspect the selected software", reads: ["selectedSoftwareId"],
+        expect: "the detail panel displays a summary, category badge, platform badges, and capabilities list",
+      });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const evidence = result.journeys[0].steps[0].controlEvidence.detailObservation;
+      assert.equal(evidence.ok, true);
+      assert.equal(evidence.listItemCount, 2);
+    });
+
+    await t.test("global catalogue copy cannot replace a missing detail list", async () => {
+      const result = await run(`<main><section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <p>Summary, category badge, platform badges, and capabilities list.</p>
+          <ul><li>Unscoped catalogue capability</li></ul></section>
+        <section aria-label="detail panel"><h2>Atlas Workbench</h2>
+          <span>Analytics</span><span>Web</span>
+          <p>A focused software workspace with enough descriptive content to establish its summary.</p>
+        </section></main>`, {
+        action: "inspect the selected software", reads: ["selectedSoftwareId"],
+        expect: "the detail panel displays a summary, category badge, platform badges, and capabilities list",
+      });
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].classification,
+        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].controlEvidence.detailObservation.checks.list, false);
     });
 
     await t.test("a pre-populated accepted input is not rejected for starting correct", async () => {
@@ -744,6 +804,57 @@ test("retained false negatives and concrete failures classify correctly in a rea
         { kind: "action", operationId: "toggle-favourite", reads: ["favouriteSoftwareIds"],
           writes: ["favouriteSoftwareIds"] }]);
       assert.equal(retained.pass, true, JSON.stringify(retained.journeys));
+
+      const quantified = await run(`<main>
+        <section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <article>Atlas Workbench</article><article>Forge Monitor</article>
+          <button data-thrallo-control="add-favourite-software" data-thrallo-option="forge-monitor"
+            value="forge-monitor" aria-pressed="false"
+            onclick="this.setAttribute('aria-pressed','true');document.getElementById('quantified-members').insertAdjacentHTML('beforeend','<li>Forge Monitor</li>')">Add Forge Monitor</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <ul id="quantified-members"><li>Atlas Workbench</li></ul>
+        </section></main>`,
+      { action: "add a second software item to favourites", operates: ["favouriteSoftwareIds"],
+        expect: "the favourites list shows Atlas Workbench and Forge Monitor as two software items" },
+      [{ kind: "selection", valueWritten: "favouriteSoftwareIds", control: {
+        ...favourite, verificationValue: "forge-monitor",
+      } }, { kind: "action", operationId: "toggle-favourite", reads: ["favouriteSoftwareIds"],
+        writes: ["favouriteSoftwareIds"] }]);
+      assert.equal(quantified.pass, true, JSON.stringify(quantified.journeys));
+
+      const absent = await run(`<main>
+        <section aria-label="Software catalogue"><h2>Software catalogue</h2>
+          <article>Atlas Workbench</article><article>Forge Monitor</article>
+          <button data-thrallo-action="remove-favourite-software"
+            onclick="document.getElementById('absent-forge').remove()">Remove Forge Monitor</button>
+        </section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <p role="status">Forge Monitor is no longer in the favourites list.</p>
+          <ul><li>Atlas Workbench</li><li id="absent-forge">Forge Monitor</li></ul>
+        </section></main>`,
+      { action: "remove Forge Monitor from favourites",
+        expect: "the favourites list shows Atlas Workbench and Forge Monitor is no longer listed" },
+      [{ kind: "action", operationId: "remove-favourite-software", control: {
+        ...control("remove favourite software", "remove-favourite-software", ["button"]),
+        accessibleName: "Remove Forge Monitor", accessibleNames: ["Remove Forge Monitor"],
+      } }]);
+      assert.equal(absent.pass, true, JSON.stringify(absent.journeys));
+
+      const stillPresent = await run(`<main>
+        <section aria-label="Software catalogue"><h2>Software catalogue</h2><article>Forge Monitor</article>
+          <button data-thrallo-action="remove-favourite-software">Remove Forge Monitor</button></section>
+        <section aria-label="Session favourites"><h2>Session favourites</h2>
+          <ul><li>Atlas Workbench</li><li>Forge Monitor</li></ul></section></main>`,
+      { action: "remove Forge Monitor from favourites",
+        expect: "the favourites list shows Atlas Workbench and Forge Monitor is no longer listed" },
+      [{ kind: "action", operationId: "remove-favourite-software", control: {
+        ...control("remove favourite software", "remove-favourite-software", ["button"]),
+        accessibleName: "Remove Forge Monitor", accessibleNames: ["Remove Forge Monitor"],
+      } }]);
+      assert.equal(stillPresent.pass, false, JSON.stringify(stillPresent.journeys));
+      assert.deepEqual(stillPresent.journeys[0].steps[0].controlEvidence.collectionMembership.unexpected,
+        ["Forge Monitor"]);
     });
 
     await t.test("an empty-state message cannot hide a failed contracted removal", async () => {
