@@ -59,6 +59,20 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
       reason: "repair the missing visible outcome in its declared JSX state owner",
     };
   }
+  const controlIntegrationDefect = Boolean(defect?.control)
+    && (defect?.defectClass === "interaction" || defect?.classification === "interaction"
+      || defect?.code === "contracted_control_undriveable");
+  // When the browser names the JSX state owner of a missing selection surface, that evidence is
+  // more specific than an incidental capability-configuration module in the attribution set.
+  // The live empty-catalogue failure was otherwise sent to configuration and never reached the
+  // controller that owned the active filters and conditional option grid.
+  if (controlIntegrationDefect && declaredUiStateOwners.length) {
+    return {
+      classification: SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION,
+      owner: "app", repairableByModel: true, targetFiles: declaredUiStateOwners,
+      reason: "repair the missing contracted control in its declared JSX state owner",
+    };
+  }
   if (modules.includes("src/extensions/capabilityConfiguration.js")) return {
     classification: SCAFFOLD_REPAIR_CLASS.INTEGRATION,
     owner: "app", repairableByModel: true,
@@ -69,9 +83,6 @@ export function routeScaffoldDefect(defect, scaffoldGraph) {
   // bounded custom extension, but that extension cannot mount a button, input, route or group.
   // Prefer the mounted screen and attributed UI modules before considering extension ownership.
   // This prevents a functional helper from stealing repair ownership from the live JSX seam.
-  const controlIntegrationDefect = Boolean(defect?.control)
-    && (defect?.defectClass === "interaction" || defect?.classification === "interaction"
-      || defect?.code === "contracted_control_undriveable");
   if (controlIntegrationDefect && owner?.mountedModule) {
     const uiModules = modules.filter((path) => !extensionFiles.has(path)
       && /^src\/(?:screens|routes|components)\//.test(String(path)));

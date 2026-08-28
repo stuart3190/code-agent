@@ -944,6 +944,33 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].steps[0].controlEvidence.requiredControl.kind, "selection");
     });
 
+    await t.test("an empty selection surface reports active generic filter sentinels to repair", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        selectedState: true,
+      };
+      const result = await run(`<main><h1>Software catalogue</h1>
+          <label>Search query <input name="searchQuery" value=""></label>
+          <div role="group" aria-label="category Filter">
+            <button type="button" value="All categories" aria-pressed="true">All categories</button>
+            <button type="button" value="Utilities" aria-pressed="false">Utilities</button>
+          </div>
+          <div role="group" aria-label="platform Filter">
+            <button type="button" value="All platforms" aria-pressed="true">All platforms</button>
+            <button type="button" value="Desktop" aria-pressed="false">Desktop</button>
+          </div>
+          <p role="status">0 visible results for the current search or filters.</p></main>`,
+      { action: "select a visible software item", operates: ["selectedSoftwareId"],
+        expect: "the selected software detail is visible" },
+      [{ kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem }]);
+      const failure = result.journeys[0].steps[0];
+      assert.equal(failure.status, "undriveable");
+      assert.match(failure.detail, /0 visible results for the current search or filters/i);
+      assert.match(failure.detail, /category Filter="All categories"/);
+      assert.deepEqual(failure.controlEvidence.surfaceState.activeValues[0],
+        { control: "category Filter", value: "All categories" });
+    });
+
     await t.test("one machine-identified catalogue result proves a real selection transition", async () => {
       const selectedItem = {
         ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
@@ -1010,6 +1037,42 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.selections[0].verificationValue,
         "atlas-cli");
+    });
+
+    await t.test("a stable hyphenated selection id matches its spaced collection label", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-insight", selectedState: true,
+      };
+      const addItem = control("favourites control", "add-favourite", ["button"]);
+      pageBody = `<main><fieldset aria-label="selected Software Id">
+          <legend>Software</legend>
+          <label><input type="radio" name="selectedSoftwareId" value="compass-notes"
+            data-thrallo-control="software-item" checked>Compass Notes</label>
+          <label><input type="radio" name="selectedSoftwareId" value="atlas-insight"
+            data-thrallo-control="software-item">Atlas Insight</label>
+        </fieldset>
+        <p>Selected software details are visible</p>
+        <button data-thrallo-action="add-favourite"
+          onclick="document.getElementById('favourites').innerHTML='<li>Atlas Insight</li>'">Add selected software</button>
+        <section aria-label="favourites list"><h2>Favourites list</h2><ul id="favourites"></ul></section></main>`;
+      const contract = {
+        journeys: [{ id: "catalogue", title: "Select and save software", priority: "primary", steps: [
+          { action: "select Atlas Insight", operates: ["selectedSoftwareId"],
+            expect: "selected software details are visible" },
+          { action: "add the selected software to favourites",
+            expect: "the favourites list shows one item and displays the selected software name" },
+        ] }],
+        interactionContract: { flows: [
+          { journeyId: "catalogue", stepIndex: 0, kind: "selection", valueWritten: "selectedSoftwareId",
+            stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], control: selectedItem },
+          { journeyId: "catalogue", stepIndex: 1, kind: "action", operationId: "add-favourite",
+            stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], control: addItem },
+        ] },
+      };
+      const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
     });
 
     await t.test("one catalogue identity anchors equivalent unnamed card selections", async () => {

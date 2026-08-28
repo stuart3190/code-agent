@@ -436,6 +436,18 @@ test("scaffold-aware repair targets mounted/config/custom seams and never protec
   assert.equal(visibleOutcome.classification, SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION);
   assert.deepEqual(visibleOutcome.targetFiles, [sharedController],
     "a missing rendered outcome is repaired in its declared JSX state owner before non-rendering seams");
+  const missingSelection = routeScaffoldDefect({
+    journeyId: owner.journeyId,
+    code: "contracted_control_undriveable",
+    defectClass: "interaction",
+    control: { logicalField: "selectedSoftwareId" },
+    diagnostic: { stateOwners: [sharedController] },
+    modules: ["src/extensions/capabilityConfiguration.js", sharedController, owner.mountedModule],
+    failureRefs: [sharedController, owner.mountedModule],
+  }, spec.scaffoldGraph);
+  assert.equal(missingSelection.classification, SCAFFOLD_REPAIR_CLASS.UI_COMPOSITION);
+  assert.deepEqual(missingSelection.targetFiles, [sharedController],
+    "an empty selection surface is repaired in its declared JSX owner before configuration seams");
   const configuration = routeScaffoldDefect({ journeyId: owner.journeyId,
     modules: ["src/extensions/capabilityConfiguration.js"] }, spec.scaffoldGraph);
   assert.equal(configuration.classification, SCAFFOLD_REPAIR_CLASS.INTEGRATION);

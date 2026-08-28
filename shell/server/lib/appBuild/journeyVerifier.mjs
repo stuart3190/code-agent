@@ -813,7 +813,11 @@ export function selectedCollectionExpectationSpec(expect = "", selections = [], 
 async function collectionMembershipState(page, spec) {
   const topics = keywords(spec.collection, 5).filter((word) => !COLLECTION_STRUCTURE_WORDS.has(word));
   return page.evaluate(({ wantedMembers, absentMembers: unwantedMembers, collectionTopics }) => {
-    const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    // Contract fixtures may retain an entity's stable slug while the collection renders its
+    // human label. Hyphens/underscores are word separators in those two equivalent identities;
+    // preserving them made `atlas-insight` fail against a real `Atlas Insight` list member.
+    const normalized = (value) => String(value || "").toLowerCase()
+      .replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
     const members = wantedMembers.map(normalized);
     const absentMembers = unwantedMembers.map(normalized);
     const visible = (element) => {
@@ -1089,6 +1093,42 @@ function contractedLocators(page, control) {
     loose.push({ description: `placeholder~${alias}`, locator: page.getByPlaceholder(worded) });
   }
   return [...rows, ...loose];
+}
+
+/** Compact visible state for a contracted selection surface that rendered no usable options. */
+async function selectionSurfaceState(page) {
+  return page.evaluate(() => {
+    const visible = (element) => {
+      if (!element || element.offsetParent === null) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+        && rect.width > 1 && rect.height > 1;
+    };
+    const concise = (value, limit = 180) => String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
+    const emptyMessage = [...document.querySelectorAll(
+      "[data-empty-state], [data-state='empty'], [role='status'], strong, p",
+    )].filter(visible).map((element) => concise(element.innerText || element.textContent))
+      .find((text) => /\b(?:0|no)\s+(?:visible\s+)?(?:results?|items?|options?|records?|software)\b|\bno\b.{0,80}\b(?:match|available|found)\b/i.test(text))
+      || null;
+    const activeValues = [];
+    for (const element of document.querySelectorAll("input, select, textarea")) {
+      if (!visible(element) || element.disabled || element.type === "radio" || element.type === "checkbox") continue;
+      const identity = concise(element.getAttribute("name") || element.getAttribute("aria-label")
+        || element.id || element.labels?.[0]?.innerText, 80);
+      const value = concise(element.value, 80);
+      if (identity && value) activeValues.push({ control: identity, value });
+    }
+    for (const element of document.querySelectorAll('[aria-pressed="true"], [aria-selected="true"]')) {
+      if (!visible(element)) continue;
+      const group = element.closest("fieldset,[role=group],[role=radiogroup],[role=listbox]");
+      const identity = concise(group?.getAttribute("aria-label") || group?.querySelector("legend")?.innerText
+        || element.getAttribute("name") || element.getAttribute("aria-label"), 80);
+      const value = concise(element.getAttribute("value") || element.innerText, 80);
+      if (identity && value) activeValues.push({ control: identity, value });
+    }
+    return { emptyMessage, activeValues: activeValues.slice(0, 8) };
+  }).catch(() => ({ emptyMessage: null, activeValues: [] }));
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -3151,12 +3191,23 @@ async function runStep(page, step, {
           if (!advance.advanced) break;
           outcome = await driveSelection(page, step, flow, used, journeyFlows, selectionOptions);
         }
-        if (!outcome) return { drove: outcomes.length > 0, status: "undriveable",
-          detail: `no selectable control group matched contracted field ${flow.control.logicalField}`,
-          controlEvidence: { contractedField: flow.control.logicalField,
+        if (!outcome) {
+          const surfaceState = await selectionSurfaceState(page);
+          const surfaceDetail = [
+            surfaceState.emptyMessage ? `visible surface reports ${JSON.stringify(surfaceState.emptyMessage)}` : null,
+            surfaceState.activeValues.length
+              ? `active controls: ${surfaceState.activeValues.map((row) => `${row.control}=${JSON.stringify(row.value)}`).join(", ")}`
+              : null,
+          ].filter(Boolean).join("; ");
+          return { drove: outcomes.length > 0, status: "undriveable",
+            detail: `no selectable control group matched contracted field ${flow.control.logicalField}`
+              + (surfaceDetail ? `; ${surfaceDetail}` : ""),
+            controlEvidence: { contractedField: flow.control.logicalField,
             requiredControl: { kind: "selection", reason: "not_reliably_located" },
             flowAdvances: advances,
+            surfaceState,
             aliases: flow.control.accessibleNames || [flow.control.accessibleName] } };
+        }
         // Multi-member toggles expose several pressed items at once, so their selected-state
         // transition is not radio-like. The collection postcondition is stronger than that local
         // mechanic: accept the coalesced click only when it already produced the exact contracted
