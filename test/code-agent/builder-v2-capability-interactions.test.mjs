@@ -548,6 +548,48 @@ test("shared transient controls provide defaults to an independent catalogue jou
   assert.equal(spec.interactionContract.scenarios["empty-search"].initialState.pricingFilter, "");
 });
 
+test("a reset step binds its owned state to the declared clear operation", () => {
+  const contract = {
+    summary: "A software catalogue with resettable local filters",
+    projectType: "tool", auth: { required: false, rules: [] }, integrations: [], states: [],
+    acceptance: [], deferred: [],
+    entities: [{
+      name: "catalogueViewState",
+      storage: "client-only transient state; not persisted",
+      fields: [
+        { name: "searchQuery", type: "string", required: true },
+        { name: "clearFilters", type: "boolean", required: true },
+        { name: "visibleSoftwareIds", type: "string[]", required: true },
+        { name: "resultCount", type: "number", required: true },
+        { name: "emptyStateMessage", type: "string", required: true },
+      ],
+    }],
+    operations: [{
+      id: "clear-catalogue-filters", entity: "catalogueViewState", kind: "update",
+      journey: "empty-search", responsibilities: [{
+        type: "functional", reads: ["clearFilters"],
+        writes: ["searchQuery", "visibleSoftwareIds", "resultCount", "emptyStateMessage", "clearFilters"],
+        behavior: "clear local filters and restore the full software catalogue",
+      }],
+    }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    journeys: [{ id: "empty-search", title: "Recover from an empty search", priority: "primary", steps: [
+      { action: "enter a missing software term", target: "catalogue search", operates: ["searchQuery"],
+        expect: "the empty catalogue state is visible", verificationValues: { searchQuery: "missing-entry" } },
+      { action: "clear the search and filters", target: "clear filters control", operates: ["clearFilters"],
+        expect: "the full software catalogue is visible again" },
+    ] }],
+  };
+  const spec = deriveBuildSpec(contract);
+  const reset = interactionFor(spec, "clear-catalogue-filters");
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.equal(reset.stepIndex, 1);
+  assert.equal(reset.kind, "action");
+  assert.equal(reset.control.machineId, actionIdFor("clear-catalogue-filters"));
+  assert.equal(spec.interactionContract.flows.some((flow) => flow.valueWritten === "clearFilters"), false);
+});
+
 test("distinct declared operations retain distinct action identities", () => {
   const contract = {
     summary: "A software catalogue with two local actions",

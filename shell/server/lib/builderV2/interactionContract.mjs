@@ -558,10 +558,25 @@ export function buildInteractionContract(contract, {
       // `implementationContract.validateContract`), never a control invented from the target text.
       const declaredOperands = Array.isArray(step?.operates)
         ? step.operates.map((value) => String(value).split(".").pop()).filter(Boolean) : null;
-      const declaredOperationIds = unique((declaredOperands || [])
+      const explicitOperationIds = unique((declaredOperands || [])
         .map((operand) => declaredOperations.get(normalized(operand))?.id
           || declaredOperations.get(normalized(operand))?.name)
         .filter(Boolean));
+      // A reset step may name the transient state it clears rather than repeat the operation id.
+      // When exactly one functional operation in that journey owns the named state, that
+      // structured ownership is enough to bind the step to the operation. Otherwise a boolean
+      // reset flag becomes an invented checkbox and the real clear action is never driven.
+      const resetOperationCandidates = !explicitOperationIds.length
+        && RESET_OPERATION_ACTION.test(String(step?.action || ""))
+        ? [...declaredOperations.values()].filter((operation) => operation?.journey === journey.id
+          && (declaredOperands || []).some((operand) => (
+            functionalManagedState([operation], step).has(normalized(operand))
+          ))) : [];
+      const declaredOperationIds = unique([
+        ...explicitOperationIds,
+        ...(resetOperationCandidates.length === 1
+          ? [resetOperationCandidates[0]?.id || resetOperationCandidates[0]?.name] : []),
+      ].filter(Boolean));
       const declaredOperationObjects = declaredOperationIds
         .map((identity) => declaredOperations.get(normalized(identity))).filter(Boolean);
       const operands = declaredOperands?.length
