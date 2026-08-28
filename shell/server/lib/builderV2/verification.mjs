@@ -23,7 +23,7 @@ const canonical = (value) => {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
 };
 
-export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-25.3";
+export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-25.4";
 export const DEFAULT_VERIFICATION_CONTEXT = Object.freeze({
   verifierVersion: VERIFICATION_CACHE_VERSION,
   verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,

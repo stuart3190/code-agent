@@ -116,6 +116,10 @@ test("layout guidance does not become required visible copy", () => {
     ["atlas", "cli", "category", "platform", "pricing"],
   );
   assert.deepEqual(
+    expectationKeywords("the selected card is visually highlighted and its software title, category, summary, and feature list are shown"),
+    ["software", "category", "summary", "feature", "list"],
+  );
+  assert.deepEqual(
     expectationKeywords("the detail panel replaces the previous selection and displays Pulse QA Monitor details"),
     ["pulse", "monitor"],
   );

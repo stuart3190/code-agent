@@ -62,7 +62,11 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
   "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads",
   "hero", "above", "again", "default", "grid", "multiple", "card", "cards", "detail", "details",
-  "panel", "replace", "replaces", "replaced", "replacing", "previous", "selected", "selection", "its"]);
+  "panel", "replace", "replaces", "replaced", "replacing", "previous", "selected", "selection", "its",
+  // These describe DOM state or document structure, not customer-facing copy. Selection state is
+  // proved from the option transition itself; headings prove titles structurally. Requiring the
+  // literal words made correctly highlighted cards with real detail headings fail verification.
+  "visually", "highlighted", "title"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -3432,6 +3436,66 @@ async function runStep(page, step, {
       actionProven: contractDriven || navigated || filledSomething || droveStepper });
     if (early.status === "pass") break;
     await page.waitForTimeout(500);
+  }
+
+  // A contract that explicitly requires regions to stack in one column is about geometry, not
+  // visible narration. Prove it from the rendered boxes: at least two top-level content regions,
+  // each using most of the viewport, aligned on the horizontal axis and vertically separated.
+  // This rejects a squeezed two-column mobile layout even when it has no horizontal overflow,
+  // while never requiring words such as "stacked" or "single-column" to appear in the product.
+  const requiresStackedLayout = viewportChanged
+    && /\b(?:single[- ]column|stack(?:ed|s|ing)?(?:\s+(?:in|into|as))?\s+(?:a\s+)?(?:single[- ]column|one\s+column))\b/i
+      .test(`${action} ${expect}`);
+  if (requiresStackedLayout) {
+    const layout = await page.evaluate(() => {
+      const visible = (element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+          && rect.width > 1 && rect.height > 1;
+      };
+      // A deterministic scaffold may wrap the generated application in its own main/section.
+      // Measure every visible main authority and keep the one exposing the most peer regions;
+      // choosing the first main incorrectly collapses the whole generated app into one wrapper.
+      const roots = [...document.querySelectorAll("main,[role=main]")].filter(visible);
+      if (!roots.length) roots.push(document.body);
+      const regionSets = roots.map((root) => {
+        const candidates = [...root.querySelectorAll("section,aside,article,nav")].filter(visible);
+        return candidates.filter((element) => !candidates.some(
+          (other) => other !== element && other.contains(element),
+        ));
+      }).sort((a, b) => b.length - a.length);
+      const regions = (regionSets[0] || []).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width };
+      }).sort((a, b) => a.top - b.top || a.left - b.left);
+      const wide = regions.every((rect) => rect.width >= window.innerWidth * 0.6);
+      const stacked = regions.length >= 2 && regions.slice(1).every((rect, index) => {
+        const prior = regions[index];
+        const overlap = Math.max(0, Math.min(prior.right, rect.right) - Math.max(prior.left, rect.left));
+        return overlap >= Math.min(prior.width, rect.width) * 0.75 && rect.top >= prior.bottom - 2;
+      });
+      return {
+        width: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body?.scrollWidth || 0,
+        regionCount: regions.length,
+        singleColumn: regions.length >= 2 && wide && stacked,
+      };
+    }).catch(() => null);
+    if (!layout) return { drove: true, status: "undriveable", detail: "responsive layout could not be measured" };
+    const overflow = Math.max(layout.scrollWidth, layout.bodyScrollWidth) > layout.width + 2;
+    controlEvidence = { ...(controlEvidence || {}), responsiveLayout: layout };
+    if (overflow) return { drove: true, status: "fail",
+      detail: `the ${layout.width}px viewport has horizontal overflow (${Math.max(layout.scrollWidth, layout.bodyScrollWidth)}px)`,
+      controlEvidence };
+    return layout.singleColumn
+      ? { drove: true, status: "pass",
+        detail: `the ${layout.width}px viewport renders ${layout.regionCount} top-level content regions in one column without horizontal overflow`,
+        controlEvidence }
+      : { drove: true, status: "fail",
+        detail: `the ${layout.width}px viewport does not render its ${layout.regionCount} top-level content regions in one column`,
+        controlEvidence };
   }
 
   if (viewportChanged && minimal) {
