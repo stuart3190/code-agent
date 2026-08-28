@@ -1360,6 +1360,22 @@ export function selectionTransition({ before = [], after = [], clickedIndex = -1
   if (clickedIndex >= 0 && before[clickedIndex] && !after.length && autoAdvance) {
     const activated = before[clickedIndex];
     const chosen = activated.label || activated.text || String(activated.value ?? "");
+    // A terminal collection action can legitimately remove the option control it just operated.
+    // There is no later control to require in that shape; the freshly visible contracted outcome
+    // is the authoritative proof. This remains fail-closed when that exact outcome does not appear.
+    if (autoAdvance.terminalStep) {
+      if (!autoAdvance.expectationMet) {
+        return { ok: false,
+          reason: "the selection removed its own controls but the contracted terminal outcome never became visible" };
+      }
+      return {
+        ok: true,
+        advanced: true,
+        terminalOutcomeProven: true,
+        detail: `selection "${String(chosen).slice(0, 40)}" produced the contracted terminal outcome`,
+        selectedText: activated.text || chosen,
+      };
+    }
     if (!autoAdvance.nextControl) {
       return { ok: false, reason: "the selection removed its own controls and the contract names no following control, so nothing proves the flow advanced" };
     }
@@ -2032,6 +2048,9 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     const nextControl = nextContractedControl(journeyFlows, flow);
     const observed = await waitForAutoAdvanceEvidence(page, nextControl, step.expect, textBefore);
     autoAdvance = {
+      terminalStep: !(journeyFlows || []).some((candidate) => (
+        candidate?.control && candidate.stepIndex > flow?.stepIndex
+      )),
       nextControl: nextControl ? (nextControl.logicalField || nextControl.accessibleName) : null,
       nextControlVisible: observed.nextControlVisible,
       expectationMet: observed.expectationEvidence.met,
@@ -2047,6 +2066,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
     detail: verdict.ok ? verdict.detail : verdict.reason,
     selectedText: verdict.selectedText || null,
     selectedValue: before[clickIndex]?.value ?? null,
+    terminalOutcomeProven: verdict.terminalOutcomeProven === true,
     groupId: group.groupId,
     controlEvidence: { contractedField: flow?.control?.logicalField || null, aliases: wanted,
       fixtureAuthority: contractedFixture === null ? "option_transition" : "contract",
@@ -2861,6 +2881,7 @@ async function runStep(page, step, {
       const selectionResult = { drove: outcomes.some((row) => row.drove), status: "pass",
         detail: outcomes.map((row) => row.detail).join("; "),
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
+        terminalOutcomeProven: outcomes.some((row) => row.terminalOutcomeProven === true),
         controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
       if (compoundSelection && !selectionResult.drove && !companionAction) {
         return { ...selectionResult, status: "fail",
@@ -2872,7 +2893,7 @@ async function runStep(page, step, {
       // A selection-owned operation runs through the option's onSelect handler. It still has to
       // prove the operation's contracted outcome below, but the driver must not click a second
       // prose-matched control after the semantic option already triggered it.
-      if (!companionAction.control) contractDriven = true;
+      if (selectionResult.terminalOutcomeProven || !companionAction.control) contractDriven = true;
     } else {
       const outcome = await driveSelection(page, step);
       if (outcome) return outcome;
