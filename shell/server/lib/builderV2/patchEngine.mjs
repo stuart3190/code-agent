@@ -88,7 +88,7 @@ function duplicateDefault(candidateText) {
 }
 
 const SAFE_BARE_CALL_GLOBALS = new Set([
-  "Array", "BigInt", "Boolean", "Date", "Function", "Map", "Number", "Object", "Promise",
+  "Array", "BigInt", "Boolean", "Date", "Event", "Function", "Map", "Number", "Object", "Promise",
   "Proxy", "RegExp", "Set", "String", "Symbol", "URL", "URLSearchParams", "WeakMap", "WeakSet",
   "alert", "atob", "btoa", "cancelAnimationFrame", "clearInterval", "clearTimeout",
   "confirm", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
