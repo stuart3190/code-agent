@@ -107,6 +107,10 @@ test("layout guidance does not become required visible copy", () => {
     expectationKeywords("a distinctive Atlas Suite hero is visible above the software catalogue section"),
     ["atlas", "suite", "software", "catalogue", "section"],
   );
+  assert.deepEqual(
+    expectationKeywords("the default catalogue grid is visible with multiple software cards"),
+    ["catalogue", "software"],
+  );
 });
 
 test("removal expectations retain a separate positive postcondition", () => {
@@ -645,13 +649,14 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <div id="favourite-item">Compass Deploy <button data-thrallo-action="remove-favourite-software"
             aria-label="remove favourite control"
             onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove</button></div>
-          <p id="favourites-empty" data-empty-state hidden>No favourites have been added yet.</p>
+          <p id="favourites-empty" hidden>No favourites have been added in this browser session.</p>
         </section></main>`, step,
       [{ kind: "action", operationId: "remove-favourite-software", control: remove }]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.activation.equivalentCandidates, 2);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
       assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.postcondition.emptyStateEvidence.visible, true);
     });
 
     await t.test("global catalogue copy cannot hide a missing collection member", async () => {

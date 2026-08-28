@@ -61,7 +61,7 @@ const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "int
   "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
   "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads",
-  "hero", "above", "again"]);
+  "hero", "above", "again", "default", "grid", "multiple", "card", "cards"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -867,7 +867,7 @@ async function removalPositiveState(page, spec, baseline, current) {
         const structural = candidate.hasAttribute("data-empty-state")
           || candidate.getAttribute("data-state") === "empty"
           || /empty/i.test(`${candidate.id} ${candidate.className}`);
-        const semantic = /\b(?:no|none|nothing)\b.{0,80}\b(?:yet|saved|items?|entries|results?|records?|available|selected)\b/i.test(text);
+        const semantic = /\b(?:no|none|nothing)\b.{0,80}\b(?:yet|saved|added|items?|entries|results?|records?|available|selected)\b/i.test(text);
         const topicMatch = (topics || []).some((topic) => text.includes(topic));
         if ((structural || semantic) && (Boolean(markedRegion) || topicMatch)) {
           return { visible: true, text: text.slice(0, 160), inMarkedRegion: Boolean(markedRegion) };
