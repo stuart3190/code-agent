@@ -688,6 +688,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
         ["Atlas Editor"]);
 
       const retained = await run(`<main>
+        <div role="status" aria-label="Catalogue results and favourites status">1 result visible. Favourite count is 1.</div>
         <section aria-label="Software catalogue"><h2>Software catalogue</h2>
           <article>Atlas Editor</article><article>Compass Deploy</article>
           <button data-thrallo-control="add-favourite-software" data-thrallo-option="compass-deploy"

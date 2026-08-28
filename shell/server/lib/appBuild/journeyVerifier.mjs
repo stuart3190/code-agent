@@ -713,6 +713,7 @@ async function collectionMembershipState(page, spec) {
       };
     }).filter((row) => collectionTopics.length === 0 || row.textTopicMatches > 0)
       .sort((left, right) => right.identityTopicMatches - left.identityTopicMatches
+        || right.present.length - left.present.length
         || left.textLength - right.textLength || right.textTopicMatches - left.textTopicMatches);
     const region = regions[0] || null;
     const present = region?.present || [];
