@@ -2270,7 +2270,7 @@ async function anyVisibleTextMatch(page, word) {
 }
 
 export function shouldSubmitContractedForm(action = "") {
-  return /\b(generate|rename|apply|save|submit|send|create|change|edit|update)\b|\biterat(?:e|ion|ive|ing)\b/i
+  return /\b(generate|rename|apply|save|submit|send|create|change|edit|update|authenticate)\b|\b(?:sign|log)[ -]?in\b|\biterat(?:e|ion|ive|ing)\b/i
     .test(String(action));
 }
 
@@ -3281,11 +3281,18 @@ async function runStep(page, step, {
   // so whether a correct application passed depended on the adjective the contract happened to
   // use. The contract already says, structurally, that this step operates input controls.
   const claimsDurableRecord = interactionFlows.some((flow) => ["recovery", "lookup"].includes(flow.kind));
+  // Authentication is a transition to a protected surface, not a form-state assertion. A live
+  // sign-in step with one contracted field was accepted as "1/1 fields hold values" without ever
+  // submitting its form, so the next dashboard step failed against the still-visible sign-in
+  // screen. The owning-form path above now submits sign-in actions; if that submission does not
+  // produce the contracted outcome, retain the normal expectation failure instead of converting
+  // the filled credential into a pass.
+  const claimsAuthenticationOutcome = isAuthenticationFlow(null, step);
   const fillsContractedFields = contractedInputs.length > 0
     // V1 and any contract that typed nothing for this step: prose is all there is, so it still
     // answers here. It no longer answers for anything the contract DID type.
     || (!interactionFlows.length && /field|detail|input|form|accept|valid|enabled|complete/i.test(expect));
-  if (filledSomething && !claimsDurableRecord && fillsContractedFields
+  if (filledSomething && !claimsDurableRecord && !claimsAuthenticationOutcome && fillsContractedFields
     && (found.length / wanted.length < 0.5 || fresh.length === 0)) {
     const state = await page.evaluate(() => {
       const inputs = [...document.querySelectorAll("input, textarea, select")]

@@ -15,8 +15,32 @@ let server;
 let baseUrl;
 
 before(async () => {
-  server = http.createServer((_request, response) => {
+  server = http.createServer((request, response) => {
     response.writeHead(200, { "content-type": "text/html" });
+    if (request.url === "/plain-sign-in") {
+      response.end(`<main>
+        <form onsubmit="event.preventDefault(); this.remove(); document.getElementById('out').textContent='Project dashboard opens and the header shows Studio Operations'">
+          <h1>Team workspace sign-in</h1>
+          <label>Member email<input type="email" aria-label="member email"
+            data-thrallo-control="member-email"></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p id="out" role="status"></p>
+      </main>`);
+      return;
+    }
+    if (request.url === "/stuck-sign-in") {
+      response.end(`<main>
+        <form onsubmit="event.preventDefault()">
+          <h1>Team workspace sign-in</h1>
+          <label>Member email<input type="email" aria-label="member email"
+            data-thrallo-control="member-email"></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p id="out" role="status"></p>
+      </main>`);
+      return;
+    }
     response.end(`<main>
       <h1>Team workspace sign-in</h1>
       <label>Email address<input type="email" aria-label="email" value="member@example.test"
@@ -37,6 +61,52 @@ before(async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
+
+const plainSignInContract = {
+  journeys: [{
+    id: "team-member-sign-in", title: "Open the team workspace", priority: "primary",
+    steps: [{
+      action: "sign in with a team member account",
+      target: "team workspace sign-in",
+      operates: ["memberEmail"],
+      expect: "the project dashboard opens and the header shows Studio Operations",
+    }],
+  }],
+  interactionContract: { flows: [{
+    id: "team-member-sign-in:1:input:member-email",
+    journeyId: "team-member-sign-in", stepIndex: 0, kind: "input",
+    valueWritten: "memberEmail", writes: ["team-member-sign-in.draft.memberEmail"], reads: [],
+    control: {
+      logicalField: "memberEmail", machineId: "member-email",
+      accessibleName: "member email", accessibleNames: ["member email"],
+      roles: ["textbox"], editable: true, statePath: "team-member-sign-in.draft.memberEmail",
+    },
+  }] },
+};
+
+test("a contracted plain sign-in input submits its owning form and proves the protected surface",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const result = await verifyJourneys({
+      previewUrl: `${baseUrl}/plain-sign-in`, timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: plainSignInContract,
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys));
+    assert.match(result.journeys[0].steps[0].detail, /project, dashboard, header, studio, operations/i);
+  });
+
+test("a contracted sign-in outcome cannot pass on retained credential fields alone",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const result = await verifyJourneys({
+      previewUrl: `${baseUrl}/stuck-sign-in`, timeoutMs: 35_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: plainSignInContract,
+    });
+
+    assert.equal(result.pass, false, JSON.stringify(result.journeys));
+    assert.doesNotMatch(result.journeys[0].steps[0].detail, /fields hold values/i);
+  });
 
 after(async () => new Promise((resolve) => server?.close(resolve)));
 
