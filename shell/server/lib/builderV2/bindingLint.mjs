@@ -363,9 +363,13 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       return row.factory === "useSemanticAction"
         && (!flow.operationId || semanticKey(row.boundName) === semanticKey(expectedBindingName));
     };
-    const bound = matches.filter((row) => row.binding !== BINDING.UNBOUND);
-    const compatibleBound = matches.filter(compatibleBinding);
+    // UNRESOLVED is intentionally not a binding verdict. A child component commonly receives
+    // `selection.optionProps(...)` through a prop; this file can see the spread but cannot trace
+    // it back to the parent hook. Counting that uncertainty as a bound-but-incompatible primitive
+    // contradicted the linter's proof boundary and blocked correctly wired split components.
     const provenBound = matches.filter((row) => [BINDING.LITERAL, BINDING.BINDING].includes(row.binding));
+    const compatibleBound = provenBound.filter(compatibleBinding);
+    const unresolvedMatches = matches.filter((row) => row.binding === BINDING.UNRESOLVED);
     // A bound implementation on a later surface must not mask a second, hand-wired implementation
     // of the same contracted control. This is narrower than the general textual binding lint: the
     // unbound element must itself carry the contracted semantic identity, and another element must
@@ -376,8 +380,8 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
         .some((identity) => semanticKey(identity) === semanticKey(key)
           && semanticQualifier(identity) === semanticQualifier(key)));
     const requiredBinding = requiredBindingFor(flow, key);
-    coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: bound.length,
-      compatibleBound: compatibleBound.length,
+    coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: provenBound.length,
+      compatibleBound: compatibleBound.length, unresolved: unresolvedMatches.length,
       authoritativeSurface: Boolean(authoritative) });
 
     if (!matches.length && dynamicBindings.length) {
@@ -412,12 +416,12 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       });
       continue;
     }
-    if (bound.length && !compatibleBound.length) {
+    if (provenBound.length && !compatibleBound.length) {
       findings.push({
         code: "contract_control_wrong_binding", fails: true, interactionId: flow.id,
         control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
         requiredBinding, authoritativeSurface: Boolean(authoritative),
-        elements: bound.filter((row) => !row.coversOnly).map((row) => ({
+        elements: provenBound.filter((row) => !row.coversOnly).map((row) => ({
           file: row.file, line: row.line, element: row.element, via: row.via,
           factory: row.factory, boundName: row.boundName, actionName: row.actionName,
           attribute: row.attribute, machineId: row.machineId,
@@ -437,7 +441,20 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
           + `${shadowedUnbound.map((row) => `${row.file}:${row.line}`).join(", ")} also implements `
           + "that exact control without machine identity; bind the journey-facing implementation",
       });
-    } else if (!bound.length) {
+    } else if (!provenBound.length && unresolvedMatches.length) {
+      coverage[coverage.length - 1].undetermined = true;
+      findings.push({
+        code: "contract_control_coverage_undetermined", fails: false, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        elements: unresolvedMatches.slice(0, 3).map((row) => ({
+          file: row.file, line: row.line, element: row.element, via: row.via,
+          spread: row.bindingEvidence,
+        })),
+        message: `the contracted control "${key}" is rendered through a spread this file cannot `
+          + "trace to its parent binding; coverage cannot be decided offline",
+      });
+    } else if (!provenBound.length) {
       // Present, hand-wired, and therefore invisible to the browser's mechanics probe.
       findings.push({
         code: "contract_control_unbound", fails: true, interactionId: flow.id,

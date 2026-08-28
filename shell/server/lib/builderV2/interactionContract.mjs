@@ -109,6 +109,17 @@ const operationOwnsActionState = (step, fieldName, declaredField, managedFields)
   return COLLECTION_VALUE_TYPE.test(String(declaredField?.type || "").toLowerCase())
     || RESET_OPERATION_ACTION.test(String(step?.action || ""));
 };
+const valueFlowForLocalOperation = (contract, operation, stepFlows = []) => {
+  if (!operation || operationUsesDurablePersistence(contract, operation)) return null;
+  const valueFlows = stepFlows.filter((flow) => ["selection", "input"].includes(flow.kind)
+    && flow.valueWritten);
+  const byField = new Map(valueFlows.map((flow) => [normalized(flow.valueWritten), flow]));
+  const writes = unique((operation.responsibilities || [])
+    .flatMap((responsibility) => list(responsibility?.writes)).map(normalized));
+  if (!writes.length || writes.some((field) => !byField.has(field))) return null;
+  const matching = unique(writes.map((field) => byField.get(field)));
+  return matching.length === 1 ? matching[0] : null;
+};
 const transientStateDefaults = (contract, journey) => {
   const referencedOperations = new Set((journey?.steps || []).flatMap((step) => [
     ...list(step?.operates), ...list(step?.reads),
@@ -822,17 +833,28 @@ export function buildInteractionContract(contract, {
       // "Enter" button and read both values before their producer controls ran.
       //
       // Operation-only commit/action steps already have one suitable interaction. A mixed
-      // value-plus-operation step receives its operation interaction immediately after its value
-      // flows: selecting or entering the value is the producer; the declared operation is the
-      // consumer. Keep the operation's own control identity so the browser can drive an explicit
-      // operation instead of treating the prerequisite value control as though it performed the
-      // operation. Transient auto-applied operations remain accepted by the verifier after the
-      // exact value control produces their observable result.
+      // value-plus-operation step receives its operation semantics immediately after its value
+      // flows. An operation with independent writes keeps its own control identity so the browser
+      // can drive it explicitly; a local operation that only stores the one operated value stays
+      // on that value control and is observed as the same atomic interaction.
       if (declaredOperationIds.length) {
         const stepFlows = flows.slice(stepFlowStart);
         const unclaimedActionFlows = stepFlows.filter((flow) => !flow.operationId && !flow.valueWritten
           && ["action", "lookup", "mutation", "cancellation"].includes(flow.kind));
         for (const operationId of declaredOperationIds) {
+          const operation = declaredOperations.get(normalized(operationId));
+          // A local operation which writes only one value already driven by this step is the
+          // semantic effect of that value control, not a second button. A catalogue-card
+          // selection, for example, both chooses and stores selectedSoftwareId. Keep the
+          // operation on that selection flow. Operations with any independent write (such as a
+          // saved-items collection/count) retain their own action identity below.
+          const valueOperationFlow = valueFlowForLocalOperation(contract, operation, stepFlows);
+          if (valueOperationFlow && !valueOperationFlow.operationId) {
+            valueOperationFlow.operationId = operationId;
+            valueOperationFlow.declaredOperation = true;
+            valueOperationFlow.operationAppliedByValueControl = true;
+            continue;
+          }
           if (declaredOperationIds.length === 1 && unclaimedActionFlows.length === 1) {
             unclaimedActionFlows[0].operationId = operationId;
             unclaimedActionFlows[0].declaredOperation = true;
@@ -841,7 +863,6 @@ export function buildInteractionContract(contract, {
             }
             continue;
           }
-          const operation = declaredOperations.get(normalized(operationId));
           const owners = ownerModules(modulePlan, "action", { durableOwner, draftOwner });
           const stateOwner = owners[0] || `journey:${journey.id}`;
           flows.push({
@@ -1432,7 +1453,11 @@ export function validateInteractionContract(plan, { capabilityGraph = null } = {
     availableByJourney.set(journeyId, available);
     if (!flow.id || !flow.journeyId) problems.push("interaction flow is missing identity");
     if ((flow.writes || []).length && !flow.stateOwner) problems.push(`${flow.id} writes state without an owner`);
-    const missing = (flow.reads || []).filter((path) => !produced.has(path)
+    // A local value operation may consume the exact value its own selection/input control
+    // produces. That is one atomic interaction, so the value is not a missing prerequisite;
+    // independent reads still require journey-start or prior-step authority as before.
+    const atomicWrites = flow.operationAppliedByValueControl ? new Set(flow.writes || []) : new Set();
+    const missing = (flow.reads || []).filter((path) => !produced.has(path) && !atomicWrites.has(path)
       && !stateAvailableAtJourneyStart(plan, journeyId, path, available));
     if (missing.length) {
       const candidateFlows = (plan?.flows || []).filter((candidate) => candidate.journeyId === journeyId

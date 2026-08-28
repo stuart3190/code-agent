@@ -420,8 +420,9 @@ test("a wrapper forwarding props is UNRESOLVED, and never fails", () => {
   const unresolved = result.elements.filter((row) => row.binding === BINDING.UNRESOLVED);
   assert.ok(unresolved.length >= 2, `spreads were not treated as unresolved: ${JSON.stringify(
     result.elements.map((row) => [row.element, row.binding]))}`);
-  assert.equal(failing(result).some((row) => row.code === "contract_control_unbound"), false,
-    "an unresolvable spread was condemned as unbound");
+  assert.equal(result.ok, true, `an unresolvable spread failed the build: ${JSON.stringify(failing(result))}`);
+  assert.equal(result.coverageUndetermined, true);
+  assert.ok(result.findings.some((row) => row.code === "contract_control_coverage_undetermined"));
 });
 
 // ── coverage ───────────────────────────────────────────────────────────────────────────────────

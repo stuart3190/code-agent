@@ -588,6 +588,37 @@ test("a catalogue selection followed by a declared local action keeps both contr
   assert.notEqual(action.control.machineId, selection.control.machineId);
 });
 
+test("a local selection operation stays on its value control", () => {
+  const contract = makeContract({
+    entity: "catalogueSessionState",
+    fields: ["selectedSoftwareId"],
+    operations: [{
+      id: "select-software", entity: "catalogueSessionState", kind: "update",
+      journey: "primary-flow", responsibilities: [{
+        type: "functional", reads: ["selectedSoftwareId"], writes: ["selectedSoftwareId"],
+        behavior: "store the selected software identifier in local session state",
+      }],
+    }],
+    steps: [{
+      action: "select a software card", target: "software cards", primitive: "selection",
+      operates: ["selectedSoftwareId", "select-software"],
+      verificationValues: { selectedSoftwareId: "catalogue-item-a" },
+      expect: "the selected software details are visible",
+    }],
+  });
+  contract.entities[0].storage = "client-only transient session state; not persisted";
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const operation = interactionFor(spec, "select-software");
+  assert.equal(operation.kind, "selection");
+  assert.equal(operation.valueWritten, "selectedSoftwareId");
+  assert.equal(operation.control.logicalField, "selectedSoftwareId");
+  assert.equal(spec.interactionContract.flows.filter((flow) => (
+    flow.operationId === "select-software"
+  )).length, 1);
+});
+
 test("a reset step binds its owned state to the declared clear operation", () => {
   const contract = {
     summary: "A software catalogue with resettable local filters",
