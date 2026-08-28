@@ -94,6 +94,34 @@ function ownershipRules(bindings) {
   });
 }
 
+function sharedCustomOperations(flows) {
+  const byOperation = new Map();
+  for (const flow of flows || []) {
+    if (!flow?.operationId || !flow?.customBehaviorModule) continue;
+    const group = byOperation.get(flow.operationId) || new Map();
+    const implementation = group.get(flow.customBehaviorModule) || {
+      module: flow.customBehaviorModule,
+      journeys: [],
+      inputFields: [],
+      outputFields: [],
+    };
+    implementation.journeys = unique([...implementation.journeys, flow.journeyId]);
+    implementation.inputFields = unique([...implementation.inputFields,
+      ...(flow.reads || []).map((path) => String(path).split(".").at(-1))]);
+    implementation.outputFields = unique([...implementation.outputFields,
+      ...(flow.writes || []).map((path) => String(path).split(".").at(-1))]);
+    group.set(flow.customBehaviorModule, implementation);
+    byOperation.set(flow.operationId, group);
+  }
+  return [...byOperation.entries()].flatMap(([operationId, implementations]) => (
+    implementations.size > 1 ? [{
+      operationId,
+      implementations: [...implementations.values()],
+      composition: "one_runtime_operation",
+    }] : []
+  ));
+}
+
 /**
  * Convert the build-wide plans into exact contracts for every planned generated module.
  * Callers may supply richer generic module-plan rows; no application domain is special-cased.
@@ -158,6 +186,7 @@ export function buildModuleGenerationContracts({
         survivesReload: planned.stateOwnership?.survivesReload === true,
       },
       semanticInteractions: controls,
+      sharedCustomOperations: sharedCustomOperations(assignedFlows),
       downstream: {
         consumes: reads,
         produces: writes,
@@ -186,6 +215,8 @@ export function moduleGenerationContractsBrief(moduleContracts) {
     "(called directly or passed as a reference, e.g. useSyncExternalStore) are yours to decide — the browser",
     "journeys decide whether the result is correct.",
     "Semantic controls may use any standards-compliant accessible HTML/ARIA shape; visual design is unrestricted.",
+    "A sharedCustomOperations group is ONE runtime action projected into several contracted journeys, not a pipeline of independent fallbacks.",
+    "Delegate to one implementation, or give every implementation the same complete runtime source data (including in-code collections) and merge equivalent outputs without allowing an empty/default result from a missing input to overwrite a valid result.",
   ].join("\n");
 }
 
@@ -273,6 +304,7 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
           accessibleNames: control.accessibleNames || [],
           stateOwner: control.stateOwner || null,
         }))),
+        sharedCustomOperations: specification.sharedCustomOperations || [],
         state: focusedState(specification, interactions),
         persistenceOwner: specification.persistence?.owner || null,
         requiredExports: specification.requiredExports || [],
@@ -286,6 +318,7 @@ export function moduleGenerationContractsRepairBrief(moduleContracts, { focusPat
     JSON.stringify(compact, null, 2),
     "ENFORCED: preserve capability ownership, durable state, module boundaries and every currently passing journey.",
     "Browser/process-local persistence and lower-level writes around capability-owned operations remain forbidden.",
+    "A sharedCustomOperations group is one runtime action: use one implementation or identical complete source inputs, and never overwrite a valid result with an empty/default result produced from missing inputs.",
   ].join("\n");
 }
 

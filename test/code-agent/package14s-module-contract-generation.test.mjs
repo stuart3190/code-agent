@@ -139,6 +139,58 @@ test("a focused repair summary excludes unrelated journeys and state carried by 
   assert.doesNotMatch(compact, /unrelated-journey\.draft\.name/);
 });
 
+test("a shared controller receives one composition contract for a custom operation projected across journeys", () => {
+  const modulePlan = [{
+    path: "src/components/SoftwareCatalogueFlow.jsx",
+    role: "shared flow composition",
+    sharedControllerFor: "catalogue-screen",
+    journeyIds: ["browse-catalogue", "clear-search"],
+  }];
+  const interactionContract = { flows: [{
+    id: "browse-catalogue:2:operation:filtercatalogue",
+    journeyId: "browse-catalogue",
+    stepIndex: 1,
+    kind: "action",
+    operationId: "filter-catalogue",
+    customBehaviorModule: "src/extensions/custom/browse-catalogue.js",
+    responsibleModules: ["src/components/SoftwareCatalogueFlow.jsx"],
+    reads: ["browse-catalogue.draft.query"],
+    writes: ["browse-catalogue.custom.visibleItemIds"],
+  }, {
+    id: "clear-search:2:operation:filtercatalogue",
+    journeyId: "clear-search",
+    stepIndex: 1,
+    kind: "action",
+    operationId: "filter-catalogue",
+    customBehaviorModule: "src/extensions/custom/clear-search.js",
+    responsibleModules: ["src/components/SoftwareCatalogueFlow.jsx"],
+    reads: ["clear-search.draft.query"],
+    writes: ["clear-search.custom.visibleItemIds"],
+  }] };
+  const journeys = [{ id: "browse-catalogue" }, { id: "clear-search" }];
+  const contracts = buildModuleGenerationContracts({
+    contract: { journeys }, journeys, modulePlan, interactionContract,
+  });
+  const shared = contracts.specifications[0].sharedCustomOperations;
+  assert.deepEqual(shared, [{
+    operationId: "filter-catalogue",
+    implementations: [{
+      module: "src/extensions/custom/browse-catalogue.js",
+      journeys: ["browse-catalogue"],
+      inputFields: ["query"],
+      outputFields: ["visibleItemIds"],
+    }, {
+      module: "src/extensions/custom/clear-search.js",
+      journeys: ["clear-search"],
+      inputFields: ["query"],
+      outputFields: ["visibleItemIds"],
+    }],
+    composition: "one_runtime_operation",
+  }]);
+  assert.match(moduleGenerationContractsBrief(contracts), /ONE runtime action/);
+  assert.match(moduleGenerationContractsRepairBrief(contracts), /never overwrite a valid result/);
+});
+
 test("browser repair prompt includes every failed journey but only their failed interaction steps", () => {
   const secondary = {
     id: "validate-contact", title: "Validate contact", priority: "secondary", steps: [
