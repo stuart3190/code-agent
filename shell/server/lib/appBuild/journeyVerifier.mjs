@@ -1921,6 +1921,39 @@ async function activateContractedControl(page, control, {
   return false;
 }
 
+async function contractedActionPresentation(page, machineId) {
+  if (!machineId) return { candidateCount: 0, perceivableCount: 0 };
+  return page.evaluate((id) => {
+    const candidates = [...document.querySelectorAll("[data-thrallo-action]")]
+      .filter((element) => element.getAttribute("data-thrallo-action") === id);
+    const isUserPerceivable = (element) => {
+      if (!element || element.offsetParent === null || element.closest("[hidden], [inert]")) return false;
+      const ownRect = element.getBoundingClientRect();
+      if (ownRect.width <= 1 || ownRect.height <= 1) return false;
+      for (let current = element; current && current !== document.documentElement;
+        current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility)
+          || Number(style.opacity || 1) <= 0.01 || style.contentVisibility === "hidden") return false;
+        const clip = String(style.clip || "auto").toLowerCase();
+        if (clip !== "auto") {
+          const edges = clip.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+          if (edges.length >= 4 && (edges[1] - edges[3] <= 1 || edges[2] - edges[0] <= 1)) return false;
+        }
+        const clipPath = String(style.clipPath || "none").replace(/\s+/g, "").toLowerCase();
+        if (clipPath === "inset(50%)" || clipPath === "inset(100%)") return false;
+        if (/hidden|clip/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+          const rect = current.getBoundingClientRect();
+          if (rect.width <= 1 || rect.height <= 1) return false;
+        }
+      }
+      return true;
+    };
+    return { candidateCount: candidates.length,
+      perceivableCount: candidates.filter(isUserPerceivable).length };
+  }, machineId).catch(() => ({ candidateCount: 0, perceivableCount: 0 }));
+}
+
 /**
  * Move a multi-step flow on by one step.
  *
@@ -3018,6 +3051,40 @@ async function runStep(page, step, {
           detail: "every contracted selection value was already selected, so no transition was observed" };
       }
       if (!companionAction) return selectionResult;
+      // A generated selection surface can expose a hidden action-identity proxy whose handler
+      // simply replays the already-selected value. That proxy is contract scaffolding, not a
+      // second customer operation: the visible select/card handler has already produced the
+      // transient result. Recognize only the narrow established-state shape: one exact contracted
+      // selection, one hidden machine identity, a non-durable action that reads that selection's
+      // state, no explicit Apply/Save-style instruction, and the exact expected result already
+      // visible. Visible controls, explicit activations and durable mutations remain mandatory.
+      let establishedSelectionAction = null;
+      const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
+        && outcomes[0]?.controlEvidence?.precondition === "already_selected";
+      const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
+      const consumesSelection = selectionStatePath
+        && (companionAction.reads || []).includes(selectionStatePath);
+      const writesDurableState = Boolean(companionAction.durableLifecycle)
+        || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
+      const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
+        .test(action);
+      if (establishedSelection && companionAction.kind === "action" && consumesSelection
+        && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
+        const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
+        const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
+          ? await expectationIsVisible(page, expect) : { met: false, found: [], wanted: [] };
+        if (expectationEvidence.met) {
+          establishedSelectionAction = {
+            selectionControl: selectionFlows[0].control?.machineId || null,
+            actionControl: companionAction.control.machineId,
+            matchedBy: "established_selection_auto_applied_action",
+            candidateCount: presentation.candidateCount,
+            perceivableCount: presentation.perceivableCount,
+            expectationEvidence,
+          };
+          selectionResult.controlEvidence.establishedSelectionAction = establishedSelectionAction;
+        }
+      }
       if (!selectionOwnedOperation && selectionResult.drove) {
         selectionOwnedOperation = await selectionOwnedCollectionOperation();
       }
@@ -3044,7 +3111,8 @@ async function runStep(page, step, {
       // A selection-owned operation runs through the option's onSelect handler. It still has to
       // prove the operation's contracted outcome below, but the driver must not click a second
       // prose-matched control after the semantic option already triggered it.
-      if (selectionResult.terminalOutcomeProven || selectionOwnedAction || !companionAction.control) {
+      if (selectionResult.terminalOutcomeProven || selectionOwnedAction
+        || establishedSelectionAction || !companionAction.control) {
         contractDriven = true;
       }
     } else {

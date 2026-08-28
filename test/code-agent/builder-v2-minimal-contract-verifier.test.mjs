@@ -927,6 +927,55 @@ test("retained false negatives and concrete failures classify correctly in a rea
         { selectionControl: "software-item", actionControl: "select-software" });
     });
 
+    await t.test("an established catalogue selection owns its hidden transient result proxy", async () => {
+      const selectedItem = {
+        ...control("selectedSoftwareId", "software-item", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-compiler",
+        selectedState: true,
+      };
+      const refreshResult = control("software catalogue", "refresh-software-result", ["button"]);
+      const html = `<style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+          overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}</style>
+        <main><label>Selected software
+          <select data-thrallo-control="software-item" aria-label="selected Software Id">
+            <option value="atlas-compiler" selected>Atlas Compiler</option>
+          </select></label>
+          <button class="sr-only" data-thrallo-action="refresh-software-result">Refresh selected software</button>
+          <section><h2>Atlas Compiler</h2><p>The active compiler workspace details are visible</p></section>
+        </main>`;
+      const flows = [
+        { kind: "selection", valueWritten: "selectedSoftwareId", writes: ["journey.selectedSoftwareId"],
+          control: selectedItem },
+        { kind: "action", operationId: "select-software", reads: ["journey.selectedSoftwareId"],
+          writes: ["journey.result.selectedSoftwareName"], control: refreshResult },
+      ];
+      const result = await run(html,
+        { action: "select Atlas Compiler from the software catalogue", operates: ["selectedSoftwareId"],
+          expect: "the active compiler workspace details are visible" }, flows);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const evidence = result.journeys[0].steps[0].controlEvidence.establishedSelectionAction;
+      assert.deepEqual({
+        selectionControl: evidence.selectionControl,
+        actionControl: evidence.actionControl,
+        matchedBy: evidence.matchedBy,
+        candidateCount: evidence.candidateCount,
+        perceivableCount: evidence.perceivableCount,
+      }, {
+        selectionControl: "software-item",
+        actionControl: "refresh-software-result",
+        matchedBy: "established_selection_auto_applied_action",
+        candidateCount: 1,
+        perceivableCount: 0,
+      });
+      assert.equal(evidence.expectationEvidence.met, true);
+
+      const explicitApply = await run(html,
+        { action: "select Atlas Compiler and press Apply", operates: ["selectedSoftwareId"],
+          expect: "the active compiler workspace details are visible" }, flows);
+      assert.equal(explicitApply.pass, false, "an explicit activation cannot be replaced by established state");
+      assert.match(explicitApply.journeys[0].steps[0].detail, /contracted action control was not offered/i);
+    });
+
     await t.test("independent named selections in one software grid keep separate state", async () => {
       const targetSoftware = {
         ...control("targetSoftwareId", "target-software", ["button", "radio", "option", "combobox"]),
