@@ -548,6 +548,46 @@ test("shared transient controls provide defaults to an independent catalogue jou
   assert.equal(spec.interactionContract.scenarios["empty-search"].initialState.pricingFilter, "");
 });
 
+test("a catalogue selection followed by a declared local action keeps both control identities", () => {
+  const contract = makeContract({
+    entity: "catalogueSessionState",
+    fields: ["selectedSoftwareId", "favoriteSoftwareIds", "favouriteCount"],
+    operations: [{
+      id: "toggle-saved-software", entity: "catalogueSessionState", kind: "update",
+      journey: "primary-flow", responsibilities: [{
+        type: "functional", reads: ["selectedSoftwareId", "favoriteSoftwareIds"],
+        writes: ["favoriteSoftwareIds", "favouriteCount"],
+        behavior: "toggle the selected software identifier in the session-only saved list",
+      }],
+    }],
+    steps: [{
+      action: "add a software card to the session-only saved list",
+      target: "save software control",
+      primitive: "selection",
+      operates: ["selectedSoftwareId", "favoriteSoftwareIds", "toggle-saved-software"],
+      produces: ["favouriteCount"],
+      expect: "the saved list shows the selected software title",
+    }],
+  });
+  contract.entities[0].storage = "client-only transient session state; not persisted";
+  for (const field of contract.entities[0].fields) field.required = false;
+  contract.entities[0].fields.find((field) => field.name === "favoriteSoftwareIds").type = "array";
+  contract.entities[0].fields.find((field) => field.name === "favouriteCount").type = "number";
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+
+  const stepFlows = spec.interactionContract.flows.filter((flow) => flow.stepIndex === 0);
+  const selection = stepFlows.find((flow) => flow.kind === "selection"
+    && flow.control?.logicalField === "selectedSoftwareId");
+  const action = stepFlows.find((flow) => flow.operationId === "toggle-saved-software");
+
+  assert.ok(selection);
+  assert.equal(action.kind, "action");
+  assert.equal(action.control.machineId, actionIdFor("toggle-saved-software"));
+  assert.equal(action.actionIdentity.controlId, actionIdFor("toggle-saved-software"));
+  assert.notEqual(action.control.machineId, selection.control.machineId);
+});
+
 test("a reset step binds its owned state to the declared clear operation", () => {
   const contract = {
     summary: "A software catalogue with resettable local filters",

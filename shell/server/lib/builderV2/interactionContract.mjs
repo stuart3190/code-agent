@@ -822,9 +822,12 @@ export function buildInteractionContract(contract, {
       // "Enter" button and read both values before their producer controls ran.
       //
       // Operation-only commit/action steps already have one suitable interaction. A mixed
-      // value-plus-operation step receives a control-free semantic interaction immediately after
-      // its value flows: selecting the value is the producer; the declared operation is the
-      // consumer. No user action or business behavior is invented.
+      // value-plus-operation step receives its operation interaction immediately after its value
+      // flows: selecting or entering the value is the producer; the declared operation is the
+      // consumer. Keep the operation's own control identity so the browser can drive an explicit
+      // operation instead of treating the prerequisite value control as though it performed the
+      // operation. Transient auto-applied operations remain accepted by the verifier after the
+      // exact value control produces their observable result.
       if (declaredOperationIds.length) {
         const stepFlows = flows.slice(stepFlowStart);
         const unclaimedActionFlows = stepFlows.filter((flow) => !flow.operationId && !flow.valueWritten
@@ -858,7 +861,7 @@ export function buildInteractionContract(contract, {
             dependsOn: [],
             nextStateRequirement: step.expect,
             observable: step.expect,
-            control: valueOperands?.length ? null : controlRequirement("action", null, step, null, operationId),
+            control: controlRequirement("action", null, step, null, operationId),
             capability: null,
           });
         }
