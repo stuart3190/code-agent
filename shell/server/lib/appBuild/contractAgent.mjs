@@ -17,6 +17,7 @@ import {
   adoptBuildProfile, buildProfileBrief, requestUsesTransientSimulation, resolveBuildProfile,
   validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
+import { deriveBuildSpec } from "../builderV2/buildSpec.mjs";
 
 // Exported so a test can hold the brief and the code that enforces it to the same statement:
 // the operand type confusion of 2026-08-12 was a disagreement between them.
@@ -284,7 +285,10 @@ export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid 
   + "step or operation as producing an already-declared field only when its existing observable result already "
   + "exposes that field; this records existing data flow rather than adding behavior. Reorder an existing producer "
   + "only when the declared journey semantics permit it; otherwise connect an already-declared producer or return "
-  + "the unresolved dependency unchanged.";
+  + "the unresolved dependency unchanged. Do not duplicate journey steps. Listing a field in `operates` means the "
+  + "user changes that control; it does not make a navigation or observation step produce the field. Existing "
+  + "durable entity data may instead be declared in the journey's durableState when it genuinely exists before the "
+  + "journey starts.";
 
 /**
  * Build the smallest contract subset needed to repair invalid journey data flow or operation
@@ -496,9 +500,18 @@ export async function generateContract({
     const contract = normaliseContract(repaired, { prompt, buildProfile: productProfile });
     const baseVerdict = validateContract(contract);
     const profileVerdict = validateBuildProfileContract(contract, productProfile);
+    // A scoped gate repair is useful only if it closes the same canonical derivation gates that
+    // requested the repair. Structural validation alone accepted malformed replies that duplicated
+    // navigation steps and put a missing field in `operates`; the orchestrator then rejected the
+    // unchanged missing producer without giving the repair lane its built-in correction attempt.
+    const derivedVerdict = dependencyRepairScope ? deriveBuildSpec(contract).verdict : null;
     const verdict = {
-      ok: baseVerdict.ok && profileVerdict.ok,
-      problems: [...baseVerdict.problems, ...profileVerdict.problems],
+      ok: baseVerdict.ok && profileVerdict.ok && (!derivedVerdict || derivedVerdict.ok),
+      problems: [...new Set([
+        ...baseVerdict.problems,
+        ...profileVerdict.problems,
+        ...(derivedVerdict?.problems || []),
+      ])],
       warnings: baseVerdict.warnings,
     };
     if (verdict.ok) {

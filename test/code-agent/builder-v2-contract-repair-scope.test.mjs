@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  contractDependencyRepairScope, DEPENDENCY_REPAIR_INSTRUCTION, mergeContractDependencyRepair,
+  contractDependencyRepairScope, DEPENDENCY_REPAIR_INSTRUCTION, generateContract,
+  mergeContractDependencyRepair,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
@@ -104,8 +105,7 @@ test("contract validation rejects functional writes outside the operation entity
   )));
 });
 
-test("dependency repair includes a prior operation whose visible result owns a missing row identity", () => {
-  const contract = {
+const dependencyRepairFixture = () => ({
     summary: "A software catalogue editor",
     projectType: "tool",
     buildProfile: {
@@ -132,9 +132,10 @@ test("dependency repair includes a prior operation whose visible result owns a m
       id: "find-catalogue-items",
       entity: "catalogueFilter",
       kind: "search",
-      journey: "browse-catalogue",
+      journey: "filter-catalogue",
       responsibilities: [{
         type: "functional",
+        behavior: "return catalogue items matching the supplied query",
         reads: ["query", "title", "status"],
         writes: [],
         outputEffect: {
@@ -145,7 +146,7 @@ test("dependency repair includes a prior operation whose visible result owns a m
       id: "update-catalogue-status",
       entity: "catalogueItem",
       kind: "update",
-      journey: "maintain-catalogue",
+      journey: "filter-catalogue",
       responsibilities: [{
         type: "persistence",
         capability: "crud",
@@ -176,14 +177,19 @@ test("dependency repair includes a prior operation whose visible result owns a m
     auth: { required: false, rules: [] },
     integrations: [],
     states: [],
-    acceptance: [{
-      id: "catalogue-status",
-      statement: "the edited item shows the new status",
-      journey: "filter-catalogue",
-      kind: "persistence",
-    }],
+    acceptance: [
+      { id: "catalogue-visible", statement: "catalogue items are visible",
+        journey: "filter-catalogue", kind: "content" },
+      { id: "catalogue-filtered", statement: "matching catalogue items are visible",
+        journey: "filter-catalogue", kind: "interaction" },
+      { id: "catalogue-status", statement: "the edited item shows the new status",
+        journey: "filter-catalogue", kind: "persistence" },
+    ],
     deferred: [],
-  };
+  });
+
+test("dependency repair includes a prior operation whose visible result owns a missing row identity", () => {
+  const contract = dependencyRepairFixture();
 
   const rejected = deriveBuildSpec(contract);
   assert.equal(rejected.verdict.ok, false);
@@ -216,4 +222,54 @@ test("dependency repair includes a prior operation whose visible result owns a m
     flow.operationId === "update-catalogue-status"
   ));
   assert.ok(updateFlow.reads.includes("filter-catalogue.custom.itemId"));
+});
+
+test("scoped repair retries when its first structurally-valid reply leaves the canonical gate red", async () => {
+  const contract = dependencyRepairFixture();
+  const rejected = deriveBuildSpec(contract);
+  const issue = rejected.verdict.interaction.issues.find((candidate) => (
+    candidate.code === "interaction_state_dependency_missing"
+  ));
+  assert.ok(issue);
+  const scope = contractDependencyRepairScope(contract, [issue]);
+
+  const malformedJourney = structuredClone(scope.journeys[0]);
+  malformedJourney.steps.splice(1, 0, {
+    ...structuredClone(malformedJourney.steps[0]),
+    operates: ["itemId"],
+  });
+  const correctedJourney = structuredClone(scope.journeys[0]);
+  correctedJourney.steps[2].produces = ["itemId"];
+  const replies = [malformedJourney, correctedJourney];
+  let dispatches = 0;
+
+  const outcome = await generateContract({
+    prompt: "Build a software catalogue editor with saved item status changes.",
+    buildProfile: contract.buildProfile,
+    priorContract: contract,
+    priorProblems: rejected.verdict.problems,
+    priorIssues: [issue],
+    provider: {
+      model: "zero-model-contract-repair",
+      async runTurn() {
+        const journey = replies[dispatches];
+        dispatches += 1;
+        return {
+          text: JSON.stringify({ contractPatch: {
+            journeys: [journey], operations: scope.operations, entities: scope.entities,
+          } }),
+          toolCalls: [],
+          usage: { input: 0, output: 0, total: 0 },
+        };
+      },
+    },
+  });
+
+  assert.equal(dispatches, 2, "the unchanged canonical dependency gate was accepted after one call");
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.problems.length, 0, outcome.problems.join("; "));
+  assert.equal(deriveBuildSpec(outcome.contract).verdict.ok, true);
+  assert.equal(outcome.contract.journeys[0].steps.length, contract.journeys[0].steps.length);
+  assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /Do not duplicate journey steps/);
+  assert.match(DEPENDENCY_REPAIR_INSTRUCTION, /does not make a navigation or observation step produce/);
 });
