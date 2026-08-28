@@ -190,6 +190,45 @@ test("LIVE-SHAPED REGRESSION — a later bound copy cannot mask the hand-wired e
     `the exact conflict did not reach the pre-compile correction gate: ${JSON.stringify(conformance.blocking)}`);
 });
 
+test("a named action section does not rename independent row-selection buttons", () => {
+  const operationId = "create-project";
+  const machineId = actionIdFor(operationId);
+  const interactionContract = { flows: [{
+    id: "project-workspace:mutation", journeyId: "project-workspace", stepIndex: 0,
+    kind: "mutation", operationId,
+    control: { accessibleName: "create project form", machineId, roles: ["button"] },
+  }] };
+  const tree = { "src/components/ProjectWorkspace.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export default function ProjectWorkspace({ projects, selectProject, createProject }) {
+      const create = useSemanticAction({ name: "create-project", onActivate: createProject });
+      return <section aria-label="create project form" data-thrallo-action="create-project">
+        <button type="button" {...create.buttonProps} data-thrallo-action="${machineId}">
+          Create project
+        </button>
+        {projects.map((project) => <button type="button" key={project.id}
+          onClick={() => selectProject(project.id)}>
+          {project.name} — owner {project.owner} — status {project.status}
+        </button>)}
+      </section>;
+    }`,
+  };
+
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false);
+
+  const duplicateTree = { ...tree,
+    "src/components/ProjectWorkspace.jsx": tree["src/components/ProjectWorkspace.jsx"].replace(
+      "{projects.map((project)",
+      `<button type="button" onClick={createProject}>Create project form</button>
+        {projects.map((project)`,
+    ) };
+  const duplicateResult = lintControlBindings(duplicateTree, { interactionContract });
+  assert.equal(failing(duplicateResult).some((row) => row.code === "contract_control_binding_conflict"), true,
+    "an independently named duplicate action was no longer rejected");
+});
+
 test("RETAINED SCAFFOLD REGRESSION — dead bound routes cannot conflict with the mounted live screen", () => {
   const capability = composeCapabilityFoundation(fromScaffold(REACT_VITE), SPEC.capabilityGraph);
   const composed = composeScaffoldFoundation(capability.tree, SPEC.scaffoldGraph);

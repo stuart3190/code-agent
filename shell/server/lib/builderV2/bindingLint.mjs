@@ -355,6 +355,16 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     const expectedAttribute = actionFlow ? "data-thrallo-action" : "data-thrallo-control";
     const expectedActionName = String(flow.control?.accessibleName || flow.control?.purpose || key);
     const expectedBindingName = actionFlow && flow.operationId ? String(flow.operationId) : String(key);
+    // A named ancestor can identify the options in a grouped field, but it cannot rename every
+    // independent action nested inside a form or section. Letting action buttons inherit arbitrary
+    // container copy makes an unrelated row/select button look like a duplicate of the form action.
+    // Selection-backed flow entries retain group inheritance because their options are one control.
+    const inheritsGroupedIdentity = ["input", "selection"].includes(flow.kind)
+      || (flow.kind === "flow_start" && Boolean(flow.control?.logicalField));
+    const textualIdentities = (row) => [
+      ...row.identities,
+      ...(inheritsGroupedIdentity ? (row.inheritedIdentities || []) : []),
+    ];
     const claims = (row) => {
       if (row.actionName && actionFlow) return semanticKey(row.actionName) === semanticKey(expectedActionName);
       if (row.boundName) return [key, expectedBindingName]
@@ -372,7 +382,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       // Static literal bindings have already been decided by their exact machine identity above.
       // Text is evidence only for genuinely unbound or unresolved elements.
       if (![BINDING.UNBOUND, BINDING.UNRESOLVED].includes(row.binding)) return false;
-      return [...row.identities, ...(row.inheritedIdentities || [])].some((identity) =>
+      return textualIdentities(row).some((identity) =>
         identityMatches([identity], names) || semanticKey(identity) === semanticKey(key));
     };
     const matches = elements.filter(claims);
@@ -406,7 +416,7 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // prove the platform binding exists elsewhere. That exact mixed state is internally
     // inconsistent and is safe to correct before a paid browser pass.
     const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
-      && [...row.identities, ...(row.inheritedIdentities || [])]
+      && textualIdentities(row)
         .some((identity) => semanticKey(identity) === semanticKey(key)
           && semanticQualifier(identity) === semanticQualifier(key)));
     const requiredBinding = requiredBindingFor(flow, key);
