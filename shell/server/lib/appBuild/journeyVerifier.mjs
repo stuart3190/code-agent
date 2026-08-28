@@ -58,11 +58,11 @@ function wordsOf(text) {
 const NOISE = new Set(["the", "and", "for", "with", "that", "then", "from", "into", "this", "their",
   "click", "clicks", "select", "selects", "enter", "enters", "type", "types", "open", "opens",
   "page", "button", "field", "form", "user", "visitor", "shown", "show", "shows", "displayed",
-  "display", "visible", "appears", "appear", "should", "must", "step", "value", "input",
+  "display", "displays", "visible", "appears", "appear", "should", "must", "step", "value", "input",
   "area", "message", "when", "have", "has", "had", "been", "being", "empty-state",
   "main", "heading", "naming", "labelled", "labeled", "empty", "state", "says", "reads",
-  "hero", "above", "again", "default", "grid", "multiple", "card", "cards", "detail", "panel",
-  "its"]);
+  "hero", "above", "again", "default", "grid", "multiple", "card", "cards", "detail", "details",
+  "panel", "replace", "replaces", "replaced", "replacing", "previous", "selected", "selection", "its"]);
 
 // QUALITATIVE design language is guidance for the builder, not an assertion for this driver.
 // "a polished confirmation state" failed a live build because the page did not contain the word
@@ -653,6 +653,8 @@ export function selectedRemovalExpectationSpec(spec, selections = [], selectionV
 }
 
 const COLLECTION_MEMBERSHIP_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\s+(.+)$/i;
+const MEMBER_APPEARS_IN_COLLECTION_PATTERN = /^(?:then\s+)?(?:the\s+)?(.{1,80}?)\s+(?:appears?|is\s+(?:shown|listed|present|visible))\s+(?:in|inside|within|under)\s+(?:the\s+)?(.{1,80}?\b(?:list|collection|grid|table|area|section|panel))\b/i;
+const REMAINING_COLLECTION_MEMBER_PATTERN = /\b(?:and|while|but|however|yet)\s+(?:the\s+)?(.{1,80}?)\s+remains?\s+(?:listed|present|visible)\b/i;
 const COLLECTION_STRUCTURE_WORDS = new Set(["list", "collection", "grid", "table", "area", "section"]);
 const COLLECTION_MEMBER_CLAUSE_PATTERN = /\b(?:only|all|any|matching|matches?|filtered|filter(?:s|ed|ing)?|selected|search|query|not|without|excludes?)\b/i;
 const COLLECTION_POSTCONDITION_CLAUSE_PATTERN = /\b(?:count|total|message|state|status)\b|\b(?:is|are|was|were|remains?|becomes?|equals?)\b/i;
@@ -661,7 +663,20 @@ const COLLECTION_POSTCONDITION_CLAUSE_PATTERN = /\b(?:count|total|message|state|
 // same subjects may legitimately remain visible in catalogue cards or a detail panel, so page-
 // wide keyword presence cannot prove that the collection retained every member.
 export function collectionMembershipExpectationSpec(expect = "") {
-  const match = COLLECTION_MEMBERSHIP_PATTERN.exec(String(expect || "").trim());
+  const text = String(expect || "").trim();
+  const direct = MEMBER_APPEARS_IN_COLLECTION_PATTERN.exec(text);
+  if (direct) {
+    const member = direct[1].trim();
+    const collection = direct[2].trim();
+    const remaining = REMAINING_COLLECTION_MEMBER_PATTERN.exec(text.slice(direct[0].length))?.[1]?.trim();
+    const members = [member, ...(remaining ? [remaining] : [])];
+    const invalid = (value) => value.split(/\s+/).length > 8 || !keywords(value, 5).length
+      || COLLECTION_MEMBER_CLAUSE_PATTERN.test(value);
+    if (keywords(collection, 5).length && members.every((value) => !invalid(value))) {
+      return { collection, members };
+    }
+  }
+  const match = COLLECTION_MEMBERSHIP_PATTERN.exec(text);
   if (!match) return null;
   const collection = match[1].replace(/^(?:then\s+)?(?:the\s+)?/i, "").trim();
   const clauses = match[2].split(/\s*(?:,|\band\b)\s*/i)
@@ -1553,30 +1568,49 @@ async function selectionGroups(page) {
         ...idPrefixes,
       ].map((value) => String(value).trim()).filter(Boolean);
     };
-    for (const [parent, els] of byParent) {
-      const machineId = els.map((el) => el.getAttribute("data-thrallo-control")).find(Boolean) || null;
-      // Filtering can legitimately leave one selectable result. A single ordinary button is not
-      // enough evidence of a choice, but one carrying the contract's opaque identity is exact
-      // authority. It still has to prove a real false-to-true selected-state transition below.
-      if (els.length < 2 && !machineId) continue;
-      groups.push({
-        groupId: id,
-        // The group's OPAQUE identity, if its options carry one. Position-independent and
-        // label-independent by construction: renaming every option, translating the page or
-        // reordering the DOM cannot change it.
-        machineId,
-        identities: [...new Set(identitiesOf(parent, els))],
-        contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
-        options: els.map((el, i) => {
-          el.setAttribute("data-thrallo-opt", `${id}:${i}`);
-          // label/value are captured BEFORE any click: when a selection advances the flow its
-          // control unmounts, and this is then the only surviving evidence of what was activated.
-          return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80),
-            label: el.getAttribute("aria-label") || null, value: el.getAttribute("value") || null,
-            selected: isSelected(el) };
-        }),
-      });
-      id += 1;
+    for (const [parent, parentElements] of byParent) {
+      // One repeated card list can expose several independent selections (for example, the
+      // selected catalogue item and the item targeted by a separate collection action). The
+      // labelled list is their shared visual container, not one radio group. Mixing those fields
+      // lets selected state from one field prevent a real transition in another. Partition first
+      // by the controls' declared HTML field identity, then by their opaque Thrallo identity;
+      // only genuinely anonymous legacy options remain one parent-scoped group.
+      const partitions = new Map();
+      for (const el of parentElements) {
+        const name = String(el.getAttribute("name") || "").trim();
+        const machineId = String(el.getAttribute("data-thrallo-control") || "").trim();
+        const key = name ? `name:${name}` : machineId ? `machine:${machineId}` : "anonymous";
+        if (!partitions.has(key)) partitions.set(key, []);
+        partitions.get(key).push(el);
+      }
+      for (const els of partitions.values()) {
+        const machineIds = [...new Set(els
+          .map((el) => el.getAttribute("data-thrallo-control"))
+          .filter(Boolean))];
+        const machineId = machineIds.length === 1 ? machineIds[0] : null;
+        // Filtering can legitimately leave one selectable result. A single ordinary button is not
+        // enough evidence of a choice, but one carrying the contract's opaque identity is exact
+        // authority. It still has to prove a real false-to-true selected-state transition below.
+        if (els.length < 2 && !machineId) continue;
+        groups.push({
+          groupId: id,
+          // The group's OPAQUE identity, if its options carry one. Position-independent and
+          // label-independent by construction: renaming every option, translating the page or
+          // reordering the DOM cannot change it.
+          machineId,
+          identities: [...new Set(identitiesOf(parent, els))],
+          contextText: `${parent.closest("section,fieldset,[role=group]")?.querySelector("h1,h2,h3,h4,legend,[role=heading]")?.innerText || ""} ${parent.innerText || ""}`.slice(0, 400).toLowerCase(),
+          options: els.map((el, i) => {
+            el.setAttribute("data-thrallo-opt", `${id}:${i}`);
+            // label/value are captured BEFORE any click: when a selection advances the flow its
+            // control unmounts, and this is then the only surviving evidence of what was activated.
+            return { index: i, text: (el.innerText || el.value || "").trim().slice(0, 80),
+              label: el.getAttribute("aria-label") || null, value: el.getAttribute("value") || null,
+              selected: isSelected(el) };
+          }),
+        });
+        id += 1;
+      }
     }
     return groups;
   }).catch(() => []);
@@ -2490,6 +2524,30 @@ async function runStep(page, step, {
   const removalBaseline = removalFlow
     ? await collectionActionMemberState(page, removalSpec, removalFlow.control, { mark: true })
     : { checked: false, targetPresent: false, targetMemberCount: 0, matchedControlCount: 0 };
+  // A repeated item toggle can legitimately own both the contracted target selection and the
+  // collection operation. In that shape, clicking the target once performs the operation;
+  // clicking the separately-described action identity again immediately undoes it. Recognize the
+  // coalescing only from the operation's strong structural postcondition: the named member entered
+  // its named collection, or the marked member left it while the positive remainder still holds.
+  // Text or selected-state movement alone can never arm this shortcut.
+  const selectionOwnedCollectionOperation = async () => {
+    if (removalFlow && removalBaseline.targetPresent) {
+      const current = await collectionActionMemberState(page, removalSpec, removalFlow.control,
+        { marker: removalBaseline.marker });
+      const postcondition = await removalPositiveState(page, removalSpec, removalBaseline, current);
+      if (current.targetMemberCount < removalBaseline.targetMemberCount && postcondition.ok) {
+        return { ok: true, kind: "collection_removal", target: removalSpec.target,
+          beforeCount: removalBaseline.targetMemberCount, afterCount: current.targetMemberCount,
+          postcondition };
+      }
+    }
+    if (collectionMembershipSpec) {
+      const membership = await collectionMembershipState(page, collectionMembershipSpec);
+      if (membership.ok) return { ok: true, kind: "collection_membership",
+        collection: collectionMembershipSpec.collection, present: membership.present };
+    }
+    return null;
+  };
   const urlBefore = page.url();
   let controlEvidence = null;
 
@@ -2864,6 +2922,7 @@ async function runStep(page, step, {
       const outcomes = [];
       const used = new Set();
       const advances = [];
+      let selectionOwnedOperation = null;
       for (const flow of selectionFlows) {
         // A route navigation waits only for DOMContentLoaded. Generated apps commonly fetch
         // availability before rendering their first semantic option group, so an immediate query
@@ -2887,6 +2946,20 @@ async function runStep(page, step, {
             requiredControl: { kind: "selection", reason: "not_reliably_located" },
             flowAdvances: advances,
             aliases: flow.control.accessibleNames || [flow.control.accessibleName] } };
+        // Multi-member toggles expose several pressed items at once, so their selected-state
+        // transition is not radio-like. The collection postcondition is stronger than that local
+        // mechanic: accept the coalesced click only when it already produced the exact contracted
+        // add/remove result, and do not activate the same operation a second time below.
+        if (outcome.status !== "pass" && outcome.drove && companionAction) {
+          selectionOwnedOperation = await selectionOwnedCollectionOperation();
+          if (selectionOwnedOperation?.ok) outcome = {
+            ...outcome,
+            status: "pass",
+            detail: `the selected item performed its contracted ${selectionOwnedOperation.kind.replace("_", " ")}`,
+            terminalOutcomeProven: true,
+            controlEvidence: { ...(outcome.controlEvidence || {}), selectionOwnedOperation },
+          };
+        }
         used.add(outcome.groupKey);
         outcomes.push(outcome);
         if (outcome.status !== "pass") return outcome;
@@ -2906,6 +2979,13 @@ async function runStep(page, step, {
           detail: "every contracted selection value was already selected, so no transition was observed" };
       }
       if (!companionAction) return selectionResult;
+      if (!selectionOwnedOperation && selectionResult.drove) {
+        selectionOwnedOperation = await selectionOwnedCollectionOperation();
+      }
+      if (selectionOwnedOperation?.ok) {
+        selectionResult.terminalOutcomeProven = true;
+        selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
+      }
       drove = drove || selectionResult.drove;
       controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
       // A selection-owned operation runs through the option's onSelect handler. It still has to

@@ -115,6 +115,10 @@ test("layout guidance does not become required visible copy", () => {
     expectationKeywords("the detail panel is visible with the heading Atlas CLI and shows its category, platform, pricing, and description"),
     ["atlas", "cli", "category", "platform", "pricing"],
   );
+  assert.deepEqual(
+    expectationKeywords("the detail panel replaces the previous selection and displays Pulse QA Monitor details"),
+    ["pulse", "monitor"],
+  );
 });
 
 test("removal expectations retain a separate positive postcondition", () => {
@@ -213,6 +217,14 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.deepEqual(
     collectionMembershipExpectationSpec("the favourites list contains Atlas Editor and Compass Deploy"),
     { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] },
+  );
+  assert.deepEqual(
+    collectionMembershipExpectationSpec("Atlas Build Studio appears in the favourites list and its card shows a favourited state"),
+    { collection: "favourites list", members: ["Atlas Build Studio"] },
+  );
+  assert.deepEqual(
+    collectionMembershipExpectationSpec("Pulse QA Monitor appears in the favourites list while Atlas Build Studio remains listed"),
+    { collection: "favourites list", members: ["Pulse QA Monitor", "Atlas Build Studio"] },
   );
   assert.deepEqual(
     collectionMembershipExpectationSpec("the favourites list shows both Atlas Editor and Compass Deploy"),
@@ -883,6 +895,77 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].controlEvidence.selections[0].verificationValue,
         "atlas-cli");
+    });
+
+    await t.test("independent named selections in one software grid keep separate state", async () => {
+      const targetSoftware = {
+        ...control("targetSoftwareId", "target-software", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-build-studio",
+        selectedState: true,
+      };
+      const updateFavourites = control("update favourites", "update-favourites", ["button"]);
+      const result = await run(`<main>
+        <div role="list" aria-label="software card grid">
+          <article role="listitem"><h2>Atlas Build Studio</h2>
+            <button name="selectedSoftwareId" value="atlas-build-studio"
+              data-thrallo-control="selected-software" aria-pressed="true">Select details</button>
+            <button name="targetSoftwareId" value="atlas-build-studio"
+              data-thrallo-control="target-software" aria-pressed="false"
+              onclick="for (const item of document.querySelectorAll('[name=targetSoftwareId]')) item.setAttribute('aria-pressed', String(item === this))">Choose favourite target</button>
+          </article>
+          <article role="listitem"><h2>Pulse QA Monitor</h2>
+            <button name="selectedSoftwareId" value="pulse-qa-monitor"
+              data-thrallo-control="selected-software" aria-pressed="false">Select details</button>
+            <button name="targetSoftwareId" value="pulse-qa-monitor"
+              data-thrallo-control="target-software" aria-pressed="true"
+              onclick="for (const item of document.querySelectorAll('[name=targetSoftwareId]')) item.setAttribute('aria-pressed', String(item === this))">Choose favourite target</button>
+          </article>
+        </div>
+        <button data-thrallo-action="update-favourites"
+          onclick="document.getElementById('out').textContent='Atlas Build Studio is removed from favourites and Pulse QA Monitor remains listed'">Update favourites</button>
+        <p id="out"></p>
+      </main>`,
+      { action: "choose Atlas Build Studio and update favourites", operates: ["targetSoftwareId"],
+        expect: "Atlas Build Studio is removed from favourites and Pulse QA Monitor remains listed" }, [
+        { kind: "selection", valueWritten: "targetSoftwareId", control: targetSoftware },
+        { kind: "action", control: updateFavourites, writes: ["favouriteSoftwareIds"] },
+      ]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const selection = result.journeys[0].steps[0].controlEvidence.selections[0];
+      assert.equal(selection.verificationValue, "atlas-build-studio");
+      assert.deepEqual(selection.selectedOptions.map((option) => option.selected), [true, false]);
+    });
+
+    await t.test("one catalogue toggle is not activated twice when its collection change is proven", async () => {
+      const targetSoftware = {
+        ...control("targetSoftwareId", "target-software", ["button", "radio", "option", "combobox"]),
+        verificationValue: "atlas-build-studio",
+        selectedState: true,
+      };
+      const toggleFavourite = control("toggle favourite", "toggle-favourite", ["button"]);
+      const result = await run(`<main>
+        <div role="list" aria-label="software card grid">
+          <article role="listitem"><h2>Atlas Build Studio</h2><button
+            name="targetSoftwareId" value="atlas-build-studio" data-thrallo-control="target-software"
+            data-thrallo-action="toggle-favourite" aria-pressed="false"
+            onclick="const list=document.getElementById('favourites-list');const prior=document.getElementById('atlas-favourite');if(prior){prior.remove();this.setAttribute('aria-pressed','false')}else{list.insertAdjacentHTML('beforeend','<li id=atlas-favourite>Atlas Build Studio</li>');this.setAttribute('aria-pressed','true')}">Toggle favourite</button></article>
+          <article role="listitem"><h2>Pulse QA Monitor</h2><button
+            name="targetSoftwareId" value="pulse-qa-monitor" data-thrallo-control="target-software"
+            data-thrallo-action="toggle-favourite" aria-pressed="false">Toggle favourite</button></article>
+        </div>
+        <section aria-label="favourites list"><h2>Favourites</h2><ul id="favourites-list"></ul></section>
+      </main>`,
+      { action: "add Atlas Build Studio to favourites", operates: ["targetSoftwareId"],
+        expect: "Atlas Build Studio appears in the favourites list and its card shows a favourited state" }, [
+        { kind: "selection", valueWritten: "targetSoftwareId", control: targetSoftware },
+        { kind: "action", control: toggleFavourite, writes: ["favouriteSoftwareIds"] },
+      ]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      const evidence = result.journeys[0].steps[0].controlEvidence.selectionOwnedOperation;
+      assert.equal(evidence.kind, "collection_membership");
+      assert.deepEqual(evidence.present, ["Atlas Build Studio"]);
+      assert.equal(result.journeys[0].steps[0].controlEvidence.activation, undefined,
+        "the already-proven toggle must not be clicked a second time");
     });
 
     await t.test("filled catalogue controls cannot replace a missing contracted filter result", async () => {
