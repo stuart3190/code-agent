@@ -291,6 +291,46 @@ test("a retained complex application continuation carries only the selected modu
     `the bounded semantic envelope is still too large: ${plan.estimatedInputTokens}`);
 });
 
+test("a missing shared controller keeps its useful output allowance without duplicated graph semantics", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const controller = spec.modulePlan.find((module) => module.sharedControllerFor);
+  assert.ok(controller);
+  assert.ok(controller.journeyIds.length > 2, "the fixture exercises a multi-journey controller");
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [controller.path], allowedFiles: [controller.path] },
+    logicalStep: "core",
+  });
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    headroomScope: scope,
+  });
+  const graphSummary = prompt.slice(prompt.indexOf("CAPABILITY GRAPH"),
+    prompt.indexOf("DETERMINISTIC CAPABILITY COMPOSITION"));
+  assert.doesNotMatch(graphSummary, /"operationResponsibilities"|"stateOwnership"|"persistenceSemantics"/,
+    "verifier-only graph relationships are enforced after the patch instead of being serialized twice");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.equal(plan.maxOutputTokens, plan.outputEnvelope.plannedOutputTokens,
+    "the unchanged per-call ceiling fits the complete scoped controller response");
+  assert.ok(plan.maxOutputTokens >= 5_500);
+  assert.ok(plan.estimatedInputTokens < 35_000, plan.estimatedInputTokens);
+});
+
 test("browser-repair headroom batching targets only evidence owners and fits a useful one-file continuation", () => {
   const liveSizedSource = `export default function Planner(){return <main>${"x".repeat(17_000)}</main>}`;
   const fixture = oversizedModuleFixture({ source: liveSizedSource });

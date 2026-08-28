@@ -392,22 +392,12 @@ function isDownstreamFailureEvidence(problem) {
 // can make the input alone exceed the unchanged per-call ceiling on a complex application.
 function headroomCapabilityGraphBrief(graph) {
   if (!graph) return null;
-  const compactResponsibility = (responsibility) => ({
-    id: responsibility.id,
-    operationId: responsibility.operationId,
-    type: responsibility.type,
-    behavior: responsibility.behavior,
-    entity: responsibility.entity,
-    capabilityId: responsibility.capabilityId,
-    capabilityMethod: responsibility.capabilityMethod,
-    reads: responsibility.reads || [],
-    writes: responsibility.writes || [],
-    owner: responsibility.owner,
-    customBehavior: responsibility.customBehavior,
-    outputEffect: responsibility.outputEffect || null,
-    persistenceHandoff: responsibility.persistenceHandoff || null,
-    persistenceSource: responsibility.persistenceSource || null,
-  });
+  // The interaction and per-module contracts immediately below already carry every selected
+  // operation's reads, writes, responsibility, state owner and persistence handoff. Repeating
+  // those same build-wide semantic rows here made a three-journey shared controller consume the
+  // entire per-call allowance before one useful output token could fit. A continuation needs the
+  // protected runtime interface it may call; canonical full-graph validation still runs after
+  // the patch and remains the authority for all omitted verifier-only relationships.
   return {
     version: graph.version,
     buildProfile: graph.buildProfile,
@@ -421,39 +411,8 @@ function headroomCapabilityGraphBrief(graph) {
       requiredOperations: node.requiredOperations || [],
       requiredInputs: node.type === "custom_behavior" ? node.requiredInputs || [] : undefined,
       outputs: node.type === "custom_behavior" ? node.outputs || [] : undefined,
-      stateOwnership: node.stateOwnership,
-      persistenceSemantics: node.persistenceSemantics,
-      dependencies: node.dependencies || [],
-      entities: node.entities || [],
-      journeys: node.journeys || [],
-      interactions: node.interactions || [],
       compositionModule: node.compositionModule || null,
       extension: node.extension || null,
-      verificationSemantics: node.type === "custom_behavior" ? {
-        actions: node.verificationSemantics?.actions || [],
-        stateChange: node.verificationSemantics?.stateChange || [],
-        observe: node.verificationSemantics?.observe || [],
-        persistenceHandoff: node.verificationSemantics?.persistenceHandoff || [],
-      } : undefined,
-    })),
-    // Interaction-to-interaction edges repeat the same reads/writes/downstream relationships in
-    // the interaction contract below. Node-level dependency and persistence edges remain here.
-    edges: (graph.edges || []).filter((edge) => [
-      "depends_on", "persistence_handoff", "persistence_source",
-    ].includes(edge.type)),
-    journeys: (graph.journeys || []).map((journey) => ({
-      journeyId: journey.journeyId,
-      requiredNodeIds: journey.requiredNodeIds || [],
-      entities: journey.entities || [],
-      durableStateOwner: journey.durableStateOwner || null,
-      customBehavior: journey.customBehavior || null,
-    })),
-    operationResponsibilities: (graph.operationResponsibilities || []).map((operation) => ({
-      operationId: operation.operationId,
-      journeyId: operation.journeyId,
-      entity: operation.entity,
-      stepIndex: operation.stepIndex,
-      responsibilities: (operation.responsibilities || []).map(compactResponsibility),
     })),
     customBehavior: graph.customBehavior || [],
   };
