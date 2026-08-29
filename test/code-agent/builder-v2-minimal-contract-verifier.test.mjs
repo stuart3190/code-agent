@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   collectionMembershipExpectationSpec, controlResetTransition, expectationKeywords, expectationOutcome,
+  resolvedCollectionMembershipExpectationSpec,
   detailObservationExpectationSpec, expectationRequestsControlReset, isObservationOnlyStep,
   removalExpectationSpec, selectedRemovalExpectationSpec,
   requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, verifyJourneys,
@@ -273,6 +274,17 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.deepEqual(collectionMembershipExpectationSpec(
     "the favourites list contains Atlas Editor and Compass Deploy and the favourite count is 2",
   ), { collection: "favourites list", members: ["Atlas Editor", "Compass Deploy"] });
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
+    "the new project appears in the projects table with its client, owner, and status",
+    [{ field: "name", value: "Journey 123" }, { field: "clientName", value: "Studio 123" }],
+  ), { collection: "projects table", members: ["Journey 123"] });
+  assert.equal(resolvedCollectionMembershipExpectationSpec(
+    "the new project appears in the projects table with its client, owner, and status",
+  ), null, "a generic record reference is not a literal table member without entered identity evidence");
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
+    "Atlas Build Studio appears in the favourites list and its card shows a favourited state",
+    [{ field: "name", value: "Journey 123" }],
+  ), { collection: "favourites list", members: ["Atlas Build Studio"] });
   assert.deepEqual(selectedCollectionExpectationSpec(
     "the favourites list shows one item and displays the selected software name",
     ["Atlas Editor\nDeveloper Tools"],

@@ -22,7 +22,7 @@ import {
 
 import {
   ADVANCE_ACTION_PATTERN, DRIVEABLE_ACTION_ROLES, IDENTITY_STOP_WORDS, semanticAliases,
-  semanticConcept, semanticKey,
+  semanticConcept, semanticKey, semanticQualifier,
 } from "../builderV2/controlIdentity.mjs";
 import {
   ADVANCE_ACTION_ID, browserPlan, controlIdFor, deriveVerificationManifest,
@@ -439,9 +439,13 @@ export function interactionFlowsFor(contract, journeyId, stepIndex, kind = null)
       flows = [...flows.filter((flow) => flow.kind !== "selection"), ...(keep ? [keep] : [])];
     }
   }
-  const canonical = (flow) => `${flow.kind}:${semanticKey(
-    flow.control?.logicalField || flow.control?.accessibleName || flow.valueWritten || flow.kind,
-  )}`;
+  const canonical = (flow) => {
+    const control = flow.control || {};
+    const explicitIdentity = control.statePath || control.machineId;
+    if (explicitIdentity) return `${flow.kind}:${explicitIdentity}`;
+    const identity = control.logicalField || control.accessibleName || flow.valueWritten || flow.kind;
+    return `${flow.kind}:${semanticKey(identity)}:${semanticQualifier(identity)}`;
+  };
   const seen = new Set();
   return flows.filter((flow) => {
     const key = canonical(flow);
@@ -802,6 +806,34 @@ export function collectionMembershipExpectationSpec(expect = "") {
     || allNamedMembers.some((member) => member.split(/\s+/).length > 6 || !keywords(member, 5).length
       || COLLECTION_MEMBER_CLAUSE_PATTERN.test(member))) return null;
   return { collection, members, ...(absentMembers.length ? { absentMembers } : {}) };
+}
+
+const GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN = /^(?:new|created|updated|saved|added|submitted|same|selected|chosen|current|this|that)\s+(?:software|item|product|entry|record|project|task|user|member|account|booking|reservation|document|note|file|message|post|event|appointment|contact|lead|invoice|quote|report|ticket|asset|favourite|favorite|selection|result)$/;
+
+function enteredCollectionIdentity(member, enteredValues = []) {
+  if (!GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim())) return null;
+  const noun = semanticKey(String(member).trim().split(/\s+/).at(-1));
+  const values = (Array.isArray(enteredValues) ? enteredValues : [])
+    .filter((row) => row?.field && row?.value);
+  const normalizedField = (row) => String(row.field).replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const entityName = values.find((row) => [noun, `${noun}name`, `${noun}title`]
+    .includes(normalizedField(row)));
+  const genericName = values.find((row) => ["name", "title", "label"].includes(normalizedField(row)));
+  const qualifiedName = [...values].reverse().find((row) => /(?:name|title|label)$/.test(normalizedField(row)));
+  return String((entityName || genericName || qualifiedName)?.value || "").trim() || null;
+}
+
+// "the new project" names the record created by the preceding contracted inputs; it is not the
+// literal row label "new project". Resolve that reference to the exact entered identity before
+// applying the strong collection-membership check. Without an entered identity, leave this
+// postcondition to the mutation evidence instead of demanding generic narration inside a row.
+export function resolvedCollectionMembershipExpectationSpec(expect = "", enteredValues = []) {
+  const spec = collectionMembershipExpectationSpec(expect);
+  if (!spec) return null;
+  const resolved = spec.members.map((member) => enteredCollectionIdentity(member, enteredValues) || member);
+  const unresolvedGeneric = resolved.some((member, index) => member === spec.members[index]
+    && GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim()));
+  return unresolvedGeneric ? null : { ...spec, members: resolved };
 }
 
 const SELECTED_COLLECTION_MEMBER_PATTERN = /\b(.{1,80}?\b(?:list|collection|grid|table))\s+(?:contains?|includes?|shows?|displays?)\b/i;
@@ -2756,7 +2788,7 @@ async function runStep(page, step, {
   const removalSpec = selectedRemovalExpectationSpec(
     removalExpectationSpec({ action, expect }), selections, selectionValues,
   );
-  const collectionMembershipSpec = collectionMembershipExpectationSpec(expect)
+  const collectionMembershipSpec = resolvedCollectionMembershipExpectationSpec(expect, enteredValues)
     || selectedCollectionExpectationSpec(expect, selections, selectionValues);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
     && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
