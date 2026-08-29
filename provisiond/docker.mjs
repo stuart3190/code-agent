@@ -187,6 +187,12 @@ export function stoppedPreviewLabelsToPrune(entries = [], { olderThanMs, retain,
   }).map((entry) => entry.label);
 }
 
+// Docker reports a freshly created container as `created` until `docker start` completes. The
+// periodic capacity sweep can overlap that short provisioning window, so only a genuinely stopped
+// (`exited`) preview belongs in the retention cache. Treating every non-running state as stopped
+// lets the sweep delete a new container while its provision request is still starting it.
+export const isPrunableStoppedPreviewState = (state) => state === "exited";
+
 /**
  * Bound the stopped-preview cache so per-project bridge networks cannot exhaust Docker's address
  * pools. Running previews are never touched. Older entries are disposable source/dependency caches
@@ -199,7 +205,7 @@ export async function pruneStoppedPreviews({ olderThanMs = 6 * 60 * 60_000, reta
   for (const label of labels) {
     const raw = await docker(["inspect", "-f", "{{.State.Status}}\t{{.State.FinishedAt}}", label], { ok: true });
     const [state, finishedAt] = raw.split("\t");
-    if (!state || state === "running") continue;
+    if (!isPrunableStoppedPreviewState(state)) continue;
     const finishedMs = Date.parse(finishedAt);
     stopped.push({ label, finishedMs: Number.isFinite(finishedMs) ? finishedMs : 0 });
   }

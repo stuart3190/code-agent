@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { stoppedPreviewLabelsToPrune } from "../../provisiond/docker.mjs";
+import {
+  isPrunableStoppedPreviewState,
+  stoppedPreviewLabelsToPrune,
+} from "../../provisiond/docker.mjs";
 
 test("stopped preview retention preserves running capacity and expires old disposable caches", () => {
   const hour = 60 * 60_000;
@@ -24,4 +27,12 @@ test("stopped preview retention preserves running capacity and expires old dispo
     retain: 8,
     now,
   }), []);
+});
+
+test("capacity maintenance cannot prune a preview that is still being created", () => {
+  assert.equal(isPrunableStoppedPreviewState("created"), false);
+  assert.equal(isPrunableStoppedPreviewState("running"), false);
+  assert.equal(isPrunableStoppedPreviewState("restarting"), false);
+  assert.equal(isPrunableStoppedPreviewState("paused"), false);
+  assert.equal(isPrunableStoppedPreviewState("exited"), true);
 });
