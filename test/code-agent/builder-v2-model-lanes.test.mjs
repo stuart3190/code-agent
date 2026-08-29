@@ -497,11 +497,20 @@ test("an irreducible large component resizes to exact causal fragments inside re
     step: "repair", originalStep: "core", contract: CONTRACT, tiers: TIERS,
     tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
     problems: [problem], headroomScope: fragmentScope,
+    rejections: [{
+      reason: "replace_exact: introduced unresolved call identifier(s): applySelection",
+    }],
+    regenerateFiles: [filePath],
     onRetrieval: (trace) => { retrieval = trace; },
   });
   assert.match(prompt, /replace_exact/);
   assert.match(HEADROOM_FRAGMENT_SYSTEM_PROMPT, /changing labels, messages, or static copy merely to echo/i);
   assert.match(prompt, /Repair actual handler\/state\/conditional flow/);
+  assert.match(prompt, /PREVIOUS EXACT-SOURCE PATCH REJECTIONS/);
+  assert.match(prompt, /introduced unresolved call identifier\(s\): applySelection/);
+  assert.match(prompt, /REPEATED-REJECTION ESCALATION/);
+  assert.match(prompt, /whole-file replacement[\s\S]*exact causal fragment/);
+  assert.match(prompt, /Do not repeat the rejected operation/);
   assert.doesNotMatch(prompt, /unrelated retained line 120/);
   const plan = planCallReservation({
     systemPrompt: HEADROOM_FRAGMENT_SYSTEM_PROMPT,

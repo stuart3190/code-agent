@@ -513,7 +513,9 @@ export function repairFailureOwnedPaths(contract = {}, problems = []) {
     .filter((path) => typeof path === "string" && GENERATED_SOURCE.test(path)))];
 }
 
-function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieval = null }) {
+function renderHeadroomFragmentPrompt({
+  headroomScope, problems = [], rejections = [], regenerateFiles = [], onRetrieval = null,
+}) {
   const fragments = headroomScope?.fragments || [];
   const included = fragments.map((fragment) => ({
     path: fragment.path, form: "exact_fragment", reason: "live verifier named this control/state",
@@ -537,6 +539,11 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
         structured.target ? `target=${structured.target}` : null,
       ].filter(Boolean).join("; ");
     }))].slice(0, 4);
+  const rejected = [...new Set((rejections || []).map((rejection) => String(rejection?.reason || rejection))
+    .filter(Boolean))].slice(0, 4);
+  const escalated = [...new Set((regenerateFiles || []).filter((path) => (
+    headroomScope?.allowedFiles?.includes(path)
+  )))];
   return [
     "RETAINED CANDIDATE MICRO-REPAIR",
     "The full candidate is retained. Fix only the named transition below. Deterministic structure,",
@@ -545,6 +552,22 @@ function renderHeadroomFragmentPrompt({ headroomScope, problems = [], onRetrieva
     `Allowed file: ${headroomScope.allowedFiles[0]}`,
     "Failure evidence:",
     ...failures.map((failure) => `- ${failure}`),
+    ...(rejected.length ? [
+      "",
+      "PREVIOUS EXACT-SOURCE PATCH REJECTIONS (authoritative):",
+      ...rejected.map((rejection) => `- ${rejection}`),
+      "Emit a substantively corrected replacement. Do not repeat the rejected operation or",
+      "introduce an identifier that is not already bound in the supplied source excerpt unless",
+      "its binding is also declared inside the complete replacement.",
+    ] : []),
+    ...(escalated.length ? [
+      "",
+      "REPEATED-REJECTION ESCALATION:",
+      ...escalated.map((path) => `- ${path}`),
+      "The complete file cannot fit this bounded correction envelope, so whole-file replacement",
+      "has been narrowed to its exact causal fragment. Address every rejection above in one",
+      "different replace_exact operation; the full retained file will be parsed and gated after it lands.",
+    ] : []),
     "",
     "EXACT CURRENT SOURCE EXCERPTS (line numbers are informational):",
     ...fragments.map((fragment) => [
@@ -573,7 +596,9 @@ export function renderPatchPrompt({
     return renderCustomExtensionCorrectionPrompt({ tree, repairScope, onRetrieval });
   }
   if (headroomScope?.fragmented) {
-    return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
+    return renderHeadroomFragmentPrompt({
+      headroomScope, problems, rejections, regenerateFiles, onRetrieval,
+    });
   }
   const compileScope = [headroomScope, repairScope, moduleCorrectionScope]
     .find((scope) => scope?.kind === "compile" || scope?.sourceKind === "compile");
