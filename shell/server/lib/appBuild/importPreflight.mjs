@@ -203,6 +203,24 @@ function applySubstitution(source, specifier, from, to) {
   ));
 }
 
+function importLocals(statement) {
+  return [
+    statement.default,
+    statement.namespace,
+    ...(statement.named || []).map((entry) => entry.local),
+  ].filter(Boolean);
+}
+
+function identifierAppearsOutsideImport(source, rawImport, identifier) {
+  const withoutImport = String(source).replace(rawImport, "");
+  const escaped = String(identifier).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`).test(withoutImport);
+}
+
+function removeUnusedImport(source, rawImport) {
+  return String(source).replace(rawImport, "");
+}
+
 // ── the preflight ────────────────────────────────────────────────────────────────────────────
 /**
  * Check every import in the tree.
@@ -263,6 +281,19 @@ export async function preflightImports(tree, { nodeModules, autoCorrect = true }
         // build, which is the exact failure mode this preflight exists to prevent. The honest
         // question is whether the import RESOLVES, so ask node_modules before reporting.
         if (nodeModules && await isInstalled(packageName, nodeModules)) continue;
+        const locals = importLocals(statement);
+        if (autoCorrect && !statement.sideEffect && locals.length
+          && locals.every((local) => !identifierAppearsOutsideImport(
+            working[file] ?? tree[file], statement.raw, local,
+          ))) {
+          edit(file, removeUnusedImport(working[file] ?? tree[file], statement.raw));
+          corrections.push({
+            kind: "removed_unused_missing_dependency", file, line, specifier, package: packageName, locals,
+            from: specifier, to: "removed unused import",
+            message: `${file}:${line} imported only unused bindings from unavailable package "${packageName}". Removed the dead import.`,
+          });
+          continue;
+        }
         problems.push({
           kind: "missing_dependency", file, line, specifier, package: packageName,
           message: `${file}:${line} imports "${specifier}", but "${packageName}" is neither in package.json nor installed.`,

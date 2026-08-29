@@ -9,6 +9,9 @@ import assert from "node:assert/strict";
 import {
   preflightImports, parseImports, substituteFor, preflightSummary,
 } from "../../shell/server/lib/appBuild/importPreflight.mjs";
+import { runStageGate } from "../../shell/server/lib/appBuild/stageGate.mjs";
+import { fromScaffold } from "../../src/engine/fileTree.mjs";
+import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { exportSurface, installedVersion, resetSurfaceCache } from "../../shell/server/lib/appBuild/moduleSurface.mjs";
 import { depsNodeModules } from "../../harness/workspace.mjs";
 import { existsSync } from "node:fs";
@@ -134,7 +137,7 @@ test("FAULT 3 — a non-existent named export with no safe substitute is reporte
 test("an undeclared dependency is caught, and builtins are not", async () => {
   const result = await preflightImports({
     "package.json": manifest({ react: "18.3.1" }),
-    "src/App.jsx": `import { debounce } from "lodash";\nimport fs from "node:fs";\nimport React from "react";\n`,
+    "src/App.jsx": `import { debounce } from "lodash";\nimport fs from "node:fs";\nimport React from "react";\nexport const run = debounce(() => fs, 10);\n`,
   }, { nodeModules });
 
   assert.equal(result.problems.length, 1);
@@ -143,10 +146,71 @@ test("an undeclared dependency is caught, and builtins are not", async () => {
   assert.match(result.problems[0].message, /neither in package\.json nor installed/);
 });
 
+test("an unavailable package import is removed only after its bindings become unused", async () => {
+  const tree = {
+    "package.json": manifest({ react: "18.3.1" }),
+    "src/Catalogue.jsx": [
+      `import { useCatalogueRoute } from "catalogue-router-kit";`,
+      "function getCatalogueId() {",
+      "  return window.location.pathname.split('/').filter(Boolean).at(-1);",
+      "}",
+      "export default function Catalogue() {",
+      "  return <main>{getCatalogueId()}</main>;",
+      "}",
+    ].join("\n"),
+  };
+
+  const result = await preflightImports(tree, { nodeModules });
+  assert.equal(result.ok, true, JSON.stringify(result.problems));
+  assert.equal(result.problems.length, 0);
+  assert.equal(result.corrections.length, 1);
+  assert.equal(result.corrections[0].kind, "removed_unused_missing_dependency");
+  assert.doesNotMatch(result.tree["src/Catalogue.jsx"], /catalogue-router-kit|useCatalogueRoute/);
+  assert.match(result.tree["src/Catalogue.jsx"], /window\.location\.pathname/);
+});
+
+test("an unavailable package import remains a hard failure while any imported binding is used", async () => {
+  const result = await preflightImports({
+    "package.json": manifest({ react: "18.3.1" }),
+    "src/Catalogue.jsx": [
+      `import { useCatalogueRoute } from "catalogue-router-kit";`,
+      "export default function Catalogue() {",
+      "  const route = useCatalogueRoute();",
+      "  return <main>{route}</main>;",
+      "}",
+    ].join("\n"),
+  }, { nodeModules });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.corrections.length, 0);
+  assert.equal(result.problems[0].kind, "missing_dependency");
+});
+
+test("the stage gate adopts unused unavailable-import cleanup before compiling", async () => {
+  let compiledTree = null;
+  const result = await runStageGate({
+    ...fromScaffold(REACT_VITE),
+    "src/Catalogue.jsx": [
+      `import { useCatalogueRoute } from "catalogue-router-kit";`,
+      "const catalogueId = window.location.pathname.split('/').filter(Boolean).at(-1);",
+      "export default function Catalogue() { return <main>{catalogueId}</main>; }",
+    ].join("\n"),
+  }, {
+    nodeModules,
+    baseline: REACT_VITE,
+    compile: async (tree) => { compiledTree = tree; return { ok: true, stderr: "" }; },
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.problems));
+  assert.ok(compiledTree, "compile receives the corrected tree");
+  assert.doesNotMatch(compiledTree["src/Catalogue.jsx"], /catalogue-router-kit|useCatalogueRoute/);
+  assert.equal(result.corrections[0].kind, "removed_unused_missing_dependency");
+});
+
 test("scoped packages resolve to the scope, not the first segment", async () => {
   const result = await preflightImports({
     "package.json": manifest({ "@tanstack/react-query": "5.0.0" }),
-    "src/App.jsx": `import { useQuery } from "@tanstack/react-query";\nimport x from "@missing/thing";\n`,
+    "src/App.jsx": `import { useQuery } from "@tanstack/react-query";\nimport x from "@missing/thing";\nexport const query = useQuery;\nexport const missing = x;\n`,
   }, { nodeModules });
   assert.deepEqual(result.problems.map((p) => p.package), ["@tanstack/react-query", "@missing/thing"]);
   assert.equal(result.problems[0].kind, "dependency_not_installed",
@@ -234,7 +298,7 @@ test("build tooling imported by config files is not reported as a missing depend
   // Genuinely absent packages are still caught.
   const absent = await preflightImports({
     "package.json": manifest({}),
-    "src/App.jsx": `import x from "definitely-not-installed-anywhere";\n`,
+    "src/App.jsx": `import x from "definitely-not-installed-anywhere";\nexport default x;\n`,
   }, { nodeModules });
   assert.equal(absent.problems[0].kind, "missing_dependency");
 });
