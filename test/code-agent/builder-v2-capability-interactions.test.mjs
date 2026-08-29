@@ -261,6 +261,34 @@ test("registered auth surface resolves to session ownership with explicit sessio
     .exports.includes("signIn"));
 });
 
+test("a routed combined auth step retains its explicitly declared input controls", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "accountView", fields: ["authEmail", "authPassword"],
+    operations: [{
+      id: "sign-in", entity: "accountView", kind: "auth", journey: "primary-flow",
+      responsibilities: [{
+        type: "persistence", capability: "auth", capabilityMethod: "signIn",
+        reads: ["authEmail", "authPassword"], writes: [],
+      }],
+    }],
+    steps: [{
+      action: "sign in as a standard user", target: "/login",
+      operates: ["authEmail", "authPassword", "sign-in"], primitive: "textbox",
+      expect: "the workspace home page is visible",
+    }],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const stepFlows = spec.interactionContract.flows
+    .filter((flow) => flow.journeyId === "primary-flow" && flow.stepIndex === 0);
+  assert.deepEqual(stepFlows.filter((flow) => flow.kind === "input")
+    .map((flow) => flow.control.logicalField), ["authEmail", "authPassword"]);
+  const action = stepFlows.find((flow) => flow.operationId === "sign-in");
+  assert.ok(action);
+  assert.ok(action.reads.includes("primary-flow.draft.authEmail"));
+  assert.ok(action.reads.includes("primary-flow.draft.authPassword"));
+});
+
 test("registered functional capability produces a capability-backed interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "booking", fields: ["date", "slotId", "name", "email", "reference", "status"],

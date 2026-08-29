@@ -656,7 +656,7 @@ export function buildInteractionContract(contract, {
         // navigation-only step with a stray operand must remain read-only; the inferred fallback
         // input in `effectiveKinds` is not authority to type after changing routes.
         const routeWithoutValueIntent = /^\s*\//.test(String(step?.target || ""))
-          && !kinds.includes(kind);
+          && !kinds.includes(kind) && declaredPrimitive !== kind;
         if (drivesValues && valueOperands && (kinds.includes("recovery") || routeWithoutValueIntent)) continue;
         // A second value-writing kind on a step whose operands are declared is usually an
         // ambiguous-verb artefact. A genuinely mixed step is the exception: its declared fields
