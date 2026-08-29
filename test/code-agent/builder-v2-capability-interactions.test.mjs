@@ -118,6 +118,93 @@ test("an operation step's declared outputs satisfy later operation dependencies"
   assert.ok(!spec.verdict.problems.some((problem) => problem.includes("reads state before it is produced")));
 });
 
+test("a compound catalogue form fills values before commit and preserves returned identity", () => {
+  const contract = makeContract({
+    entity: "catalogueEntry",
+    fields: ["entryId", "title", "description", "status"],
+    operations: [
+      {
+        id: "create-entry", entity: "catalogueEntry", kind: "create", journey: "primary-flow",
+        responsibilities: [{
+          type: "persistence", capability: "crud", capabilityMethod: "create",
+          reads: ["title", "description"], writes: ["entryId", "title", "description"],
+        }],
+      },
+      {
+        id: "update-entry-status", entity: "catalogueEntry", kind: "update", journey: "primary-flow",
+        responsibilities: [{
+          type: "persistence", capability: "crud", capabilityMethod: "update",
+          reads: ["entryId", "status"], writes: ["status"],
+        }],
+      },
+    ],
+    steps: [
+      { action: "open the software catalogue", target: "/", expect: "the catalogue is visible" },
+      { action: "create a catalogue entry", target: "entry form",
+        operates: ["title", "description", "create-entry"], primitive: "textbox",
+        expect: "the new entry is visible" },
+      { action: "change the entry status", target: "status control",
+        operates: ["status", "update-entry-status"], reads: ["entryId"], primitive: "selection",
+        expect: "the updated status is visible" },
+    ],
+  });
+  contract.entities.unshift({
+    name: "catalogueSession", storage: "client-only transient state; not persisted",
+    fields: [{ name: "activeView", type: "string", required: false }],
+  });
+  contract.journeys.push({
+    id: "update-existing-entry", title: "Update an existing catalogue entry", priority: "secondary",
+    stage: "supporting", steps: [
+      { action: "open an existing catalogue entry", target: "/", expect: "the existing entry is visible" },
+      { action: "change the existing entry status", target: "status control",
+        operates: ["status", "update-entry-status"], reads: ["entryId"], primitive: "selection",
+        expect: "the updated status is visible" },
+    ],
+  });
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const flows = spec.interactionContract.flows;
+  const titleInput = flows.find((flow) => flow.id === "primary-flow:2:input:title");
+  const create = interactionFor(spec, "create-entry");
+  const update = flows.find((flow) => flow.journeyId === "primary-flow"
+    && flow.operationId === "update-entry-status");
+  const existingUpdate = flows.find((flow) => flow.journeyId === "update-existing-entry"
+    && flow.operationId === "update-entry-status");
+
+  assert.ok(flows.indexOf(titleInput) < flows.indexOf(create), "form values must be produced before commit");
+  assert.ok(create.writes.includes("primary-flow.custom.entryId"));
+  assert.ok(update.reads.includes("primary-flow.custom.entryId"));
+  assert.ok(existingUpdate.reads.includes("update-existing-entry.durable.entryId"));
+  assert.equal(spec.interactionContract.scenarios["update-existing-entry"].role, "consumes");
+  assert.equal(spec.interactionContract.scenarios["primary-flow"].lifecycle, "crud:catalogueEntry");
+});
+
+test("a zero-input transient catalogue effect remains fully specified", () => {
+  const contract = makeContract({
+    entity: "catalogueView",
+    fields: ["visibleEntryIds"],
+    operations: [{
+      id: "show-default-catalogue", entity: "catalogueView", kind: "read", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "show the default in-code catalogue", reads: [], writes: [],
+      }],
+    }],
+    steps: [
+      { action: "open the catalogue", target: "/", expect: "the catalogue is visible" },
+      { action: "show the default catalogue", target: "default view control",
+        operates: ["show-default-catalogue"], expect: "the default catalogue entries are visible" },
+    ],
+  });
+  contract.entities[0].storage = "client-only transient state; not persisted";
+
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const flow = interactionFor(spec, "show-default-catalogue");
+  assert.deepEqual(flow.reads, []);
+  assert.equal(flow.outputEffect?.type, "transient_result");
+  assert.ok(flow.writes.includes("primary-flow.effect.show-default-catalogue"));
+});
+
 test("custom calculation plus CRUD persistence produces a complete custom interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "invoice", fields: ["lineAmounts", "subtotal", "tax", "total"],

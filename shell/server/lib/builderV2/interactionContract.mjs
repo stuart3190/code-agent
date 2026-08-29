@@ -14,7 +14,9 @@ import { bindCapabilities, deriveModulePlan } from "./contractTiering.mjs";
 import {
   IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey, semanticQualifier,
 } from "./controlIdentity.mjs";
-import { declaredLifecycleRole } from "./lifecycleOperations.mjs";
+import {
+  canonicalOperationKind, declaredLifecycleRole, OPERATES_ON_EXISTING_RECORD,
+} from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
@@ -516,12 +518,14 @@ export function buildInteractionContract(contract, {
 } = {}) {
   const durableContract = contractUsesDurablePersistence(contract);
   const durableOwner = durableContract ? durableOperationOwner(bindings) : null;
-  const durableEntity = durableOwner?.capability
-    ? ((contract?.entities || []).find((entity) => (bindings || [])
-      .some((binding) => binding.name === durableOwner.capability
-        && binding.configuration?.entity === entity?.name))?.name
-      || contract?.entities?.[0]?.name || "record")
-    : contract?.entities?.[0]?.name || "record";
+  const configuredDurableEntity = durableOwner?.capability
+    ? (bindings || []).find((binding) => binding.name === durableOwner.capability
+      && binding.configuration?.entity)?.configuration?.entity || null
+    : null;
+  const durableEntity = configuredDurableEntity
+    || (contract?.entities || []).find((entity) => (
+      entityPersistencePolicy(contract, entity?.name) !== "transient"
+    ))?.name || contract?.entities?.[0]?.name || "record";
   const draftOwner = draftStateOwner(bindings);
   // The only things a browser control can HOLD: the fields the contract's entities declare.
   // Operations, entity names and routes are all legal contract references and none of them is a
@@ -643,6 +647,15 @@ export function buildInteractionContract(contract, {
         ...(valueOperands ? [...mixedValueKinds.values()] : []),
         ...(valueOperands && !ownershipKinds.includes(operandKind) ? [operandKind] : []),
       ]);
+      // A compound form step fills its declared value controls before activating its operation.
+      // `actionKinds` can surface the durable mutation first (for example, "create a record"),
+      // but executing that ordering makes the commit consume same-step draft fields before those
+      // controls have produced them. Keep the model's step intact and order only the interactions
+      // inside it: values first, then the action that consumes them.
+      if (valueOperands?.length) effectiveKinds.sort((left, right) => (
+        Number(!["selection", "input"].includes(left))
+        - Number(!["selection", "input"].includes(right))
+      ));
       for (const kind of effectiveKinds) {
         const drivesValues = ["selection", "input"].includes(kind);
         // A step that performs an operation writes no value THROUGH A CONTROL of its own: the verb
@@ -927,6 +940,19 @@ export function buildInteractionContract(contract, {
             // graph. Let that authority attach its exact custom/capability output path rather than
             // inventing a parallel draft dependency here.
             if (operationProducer) return null;
+            // A durable update/read/delete operation may be reused by another journey (for
+            // example, an existing record edited from a summary surface). Its owner journey is
+            // the producer; the reusing journey inherits the declared record identity. Keep this
+            // narrow: an operation owned by this same journey still requires its explicit prior
+            // producer, which preserves the missing-dependency repair gate for search results.
+            const consumerOperation = declaredOperations.get(normalized(consumer.operationId));
+            const consumerKind = canonicalOperationKind(consumerOperation?.kind || consumerOperation?.type);
+            if (IDENTITY_FIELD.test(field)
+                && consumerOperation?.journey && consumerOperation.journey !== journey.id
+                && operationUsesDurablePersistence(contract, consumerOperation)
+                && OPERATES_ON_EXISTING_RECORD.includes(consumerKind)) {
+              return `${journey.id}.durable.${field}`;
+            }
             // A first-step read is the journey's declared external starting input. Reads introduced
             // later remain draft dependencies and require an earlier producer or explicit start
             // authority.
@@ -1509,7 +1535,7 @@ export function validateInteractionContract(plan, { capabilityGraph = null } = {
       ];
       const types = new Set(flow.semanticResponsibilityTypes || []);
       if (types.has("custom_functional")) missingFields.push(
-        ...(!(flow.reads || []).length ? ["reads"] : []),
+        ...(!(flow.reads || []).length && !flow.outputEffect ? ["reads"] : []),
         ...(!(flow.writes || []).length ? ["writes"] : []),
         ...(!flow.customBehavior ? ["customBehavior"] : []),
         ...(!flow.customBehaviorModule ? ["customBehaviorModule"] : []),

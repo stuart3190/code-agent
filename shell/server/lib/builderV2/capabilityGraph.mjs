@@ -219,7 +219,10 @@ function explicitResponsibilities(operation, journey, flows, contract) {
       requestedCapabilityMethod: requestedMethod && requestedMethod !== capabilityMethod ? requestedMethod : null,
       reads: persistence ? unique([...reads, ...(automaticPersistence?.reads || []),
         ...capabilityInputPaths(journey, capabilityId, capabilityMethod)]) : reads,
-      writes: persistence ? unique([...(automaticPersistence?.writes || writes), ...capabilityOutputs])
+      // The declared fields returned by persistence are observable operation outputs too. Keep
+      // them alongside the generic durable record so later steps can consume an exact identity
+      // (or another returned field) without requiring a duplicate step-level `produces` claim.
+      writes: persistence ? unique([...(automaticPersistence?.writes || []), ...writes, ...capabilityOutputs])
         : unique([...writes, ...capabilityOutputs]),
       declaredReads, declaredWrites,
       outputEffect: outputEffect ? { ...outputEffect, statePath: effectWrites[0] } : null,
@@ -652,7 +655,7 @@ export function validateCapabilityGraph(graph, contract, interactionContract = c
         const owner = nodes.get(responsibility.customBehavior);
         if (!owner || owner.type !== "custom_behavior") problems.push(`${prefix} has no bounded custom_behavior owner`);
         const missingSemanticFields = [
-          ...(!(responsibility.reads || []).length ? ["reads"] : []),
+          ...(!(responsibility.reads || []).length && !responsibility.outputEffect ? ["reads"] : []),
           ...(!(responsibility.writes || []).length ? ["writes"] : []),
         ];
         if (missingSemanticFields.length) {
