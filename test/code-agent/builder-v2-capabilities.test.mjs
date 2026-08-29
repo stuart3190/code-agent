@@ -55,6 +55,8 @@ test("structured auth declarations resolve to the registered session capability"
 test("WP4 — the capability brief is byte-stable and sorted (a cacheable prefix segment)", () => {
   assert.equal(capabilityBrief(), capabilityBrief());
   assert.match(capabilityBrief(["session", "crud"]), /crud@1\.0\.0[\s\S]*session@1\.1\.0/);
+  assert.match(capabilityBrief(["session"]), /signIn\(\{ email, password \}\)/,
+    "generation receives the protected session capability's exact credential call shape");
 });
 
 test("WP4 — patch engine and stage gate both refuse capability edits", async () => {

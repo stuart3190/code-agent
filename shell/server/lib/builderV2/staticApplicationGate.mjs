@@ -403,6 +403,84 @@ function callObject(argument, bindings) {
   return null;
 }
 
+const SESSION_INVOCATION_INPUTS = Object.freeze({
+  signUp: Object.freeze(["email", "password"]),
+  signIn: Object.freeze(["email", "password"]),
+  resetPassword: Object.freeze(["email"]),
+  confirmReset: Object.freeze(["email", "code", "newPassword"]),
+});
+const SESSION_MODULES = new Set([
+  "src/lib/capabilities/session.js",
+  "src/lib/capabilities/index.js",
+  "src/lib/capabilities/composed/session.js",
+  "src/lib/capabilities/composed/index.js",
+]);
+
+function sessionInvocationTarget(callee, named, namespaces) {
+  if (callee?.type === "Identifier") return named.get(callee.name) || null;
+  if (!["MemberExpression", "OptionalMemberExpression"].includes(callee?.type)
+      || callee.object?.type !== "Identifier" || !namespaces.has(callee.object.name)) return null;
+  const method = callee.computed ? literalValue(callee.property) : callee.property?.name;
+  return SESSION_INVOCATION_INPUTS[method] ? method : null;
+}
+
+/** Reject generated calls that cannot satisfy the protected session capability's public API. */
+export function lintCapabilityInvocationShapes(tree = {}) {
+  const findings = [];
+  for (const [file, source] of Object.entries(tree)) {
+    if (!SOURCE.test(file) || PLATFORM.test(file) || typeof source !== "string") continue;
+    const ast = parseSource(source, file);
+    if (!ast) continue;
+    const named = new Map();
+    const namespaces = new Set();
+    for (const declaration of ast.program.body || []) {
+      if (declaration.type !== "ImportDeclaration" || typeof declaration.source?.value !== "string") continue;
+      const sessionModule = resolvedImportCandidates(file, declaration.source.value)
+        .some((candidate) => SESSION_MODULES.has(candidate));
+      if (!sessionModule) continue;
+      for (const specifier of declaration.specifiers || []) {
+        if (specifier.type === "ImportNamespaceSpecifier") namespaces.add(specifier.local.name);
+        if (specifier.type !== "ImportSpecifier") continue;
+        const imported = specifier.imported?.name || specifier.imported?.value;
+        if (SESSION_INVOCATION_INPUTS[imported]) named.set(specifier.local.name, imported);
+      }
+    }
+    if (!named.size && !namespaces.size) continue;
+    const bindings = localObjectBindings(ast);
+    const inspect = (node) => {
+      if (!node || typeof node.type !== "string") return;
+      if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
+        const method = sessionInvocationTarget(node.callee, named, namespaces);
+        if (method) {
+          const inputObject = callObject(node.arguments?.[0], bindings);
+          const explicitKeys = new Set((inputObject?.properties || []).map(objectPropertyName).filter(Boolean));
+          const missingInputs = SESSION_INVOCATION_INPUTS[method]
+            .filter((input) => !explicitKeys.has(input));
+          if (node.arguments?.length !== 1 || !inputObject || missingInputs.length) {
+            const requiredInputs = SESSION_INVOCATION_INPUTS[method];
+            const signature = `${method}({ ${requiredInputs.join(", ")} })`;
+            findings.push({
+              code: "capability_invocation_invalid",
+              file,
+              line: node.loc?.start?.line || 0,
+              capability: "session",
+              method,
+              requiredInputs,
+              missingInputs,
+              explicitKeys: [...explicitKeys].sort(),
+              argumentCount: node.arguments?.length || 0,
+              message: `${file}:${node.loc?.start?.line || 0} must call the protected session capability as ${signature} with one explicit credentials object; positional arguments are not supported`,
+            });
+          }
+        }
+      }
+      for (const [, child] of childrenOf(node)) inspect(child);
+    };
+    inspect(ast.program);
+  }
+  return findings;
+}
+
 function inputAliases(input, contract) {
   const value = String(input || "");
   const leaf = value.split(".").at(-1);
@@ -544,16 +622,18 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   const undefinedIdentifiers = lintUndefinedIdentifiers(tree);
   const unresolvedImports = lintUnresolvedImports(tree);
   const extensionInterfaces = lintCustomExtensionInterfaces(tree, scaffoldGraph, journeys);
+  const capabilityInvocationShapes = lintCapabilityInvocationShapes(tree);
   const journeyControllerMounts = lintJourneyControllerMounts(tree, modulePlan);
   const observerSafety = lintSelfTriggeringMutationObservers(tree);
   checks.push({ name: "source_integrity",
     ok: undefinedIdentifiers.length + unresolvedImports.length + extensionInterfaces.length
-      + journeyControllerMounts.length + observerSafety.length === 0,
-    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces, ...journeyControllerMounts,
-      ...observerSafety]
+      + capabilityInvocationShapes.length + journeyControllerMounts.length + observerSafety.length === 0,
+    detail: [...undefinedIdentifiers, ...unresolvedImports, ...extensionInterfaces,
+      ...capabilityInvocationShapes, ...journeyControllerMounts, ...observerSafety]
       .map((finding) => finding.message) });
   blocking.push(...undefinedIdentifiers, ...unresolvedImports);
   blocking.push(...extensionInterfaces);
+  blocking.push(...capabilityInvocationShapes);
   blocking.push(...journeyControllerMounts);
   blocking.push(...observerSafety);
 

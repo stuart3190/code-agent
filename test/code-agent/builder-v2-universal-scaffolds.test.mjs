@@ -10,7 +10,8 @@ import {
 } from "../../shell/server/lib/builderV2/scaffoldComposer.mjs";
 import { validateScaffoldGraph, scaffoldJourneyOwners } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
 import { SCAFFOLDS, validateScaffoldRegistry } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
-import { runStaticApplicationGate } from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
+import { lintCapabilityInvocationShapes, runStaticApplicationGate }
+  from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
 import { applyPatches } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS }
   from "../../shell/server/lib/builderV2/scaffoldRepairRouting.mjs";
@@ -462,6 +463,41 @@ test("scaffold-aware repair targets mounted/config/custom seams and never protec
   assert.equal(capabilityRewrite.applied.length, 0,
     "existing capability ownership remains protected alongside the scaffold foundation");
   assert.equal(capabilityRewrite.rejected[0].code, "write_scope_violation");
+});
+
+test("session capability credential calls require one explicit object before browser execution", () => {
+  const file = "src/screens/scaffold/SignInScreen.jsx";
+  const invalid = {
+    [file]: `import { signIn as authenticate, signUp } from "../../lib/capabilities/composed/session.js";
+      export async function submit(email, password) {
+        try { return await authenticate(email, password); }
+        catch { return signUp({ email }); }
+      }`,
+  };
+  const findings = lintCapabilityInvocationShapes(invalid);
+  assert.equal(findings.length, 2);
+  assert.deepEqual(findings.map((finding) => finding.method).sort(), ["signIn", "signUp"]);
+  assert.equal(findings.find((finding) => finding.method === "signIn").argumentCount, 2);
+  assert.deepEqual(findings.find((finding) => finding.method === "signUp").missingInputs, ["password"]);
+  assert.ok(findings.every((finding) => finding.code === "capability_invocation_invalid"));
+  assert.ok(findings.every((finding) => /one explicit credentials object/.test(finding.message)));
+  const correction = targetedGateCorrection({ layers: { d0d2: {
+    failure: { kind: "static_application", findings },
+    problems: findings.map((finding) => finding.message),
+  } } }, invalid, {});
+  assert.deepEqual(correction.allowedFiles, [file]);
+  assert.match(JSON.stringify(correction.findings), /one explicit credentials object/,
+    "the deterministic gate routes the exact session call-shape correction back to its source file");
+
+  const valid = {
+    [file]: `import * as session from "../../lib/capabilities/composed/session.js";
+      export async function submit(email, password) {
+        const credentials = { email, password };
+        try { return await session.signIn(credentials); }
+        catch { return session.signUp({ email, password }); }
+      }`,
+  };
+  assert.deepEqual(lintCapabilityInvocationShapes(valid), []);
 });
 
 test("generation and verifier consume the same mounted scaffold authority while design remains free", () => {

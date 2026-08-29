@@ -344,6 +344,7 @@ export function preferredAssemblyBrief(needs = {}) {
 
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
+  session: "signUp({ email, password }); signIn({ email, password }); resetPassword({ email }); confirmReset({ email, code, newPassword }); currentUser(); signOut() — credential methods take ONE object, never positional arguments",
   booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
   wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe; getState()/subscribe snapshots expose canonical { stepId, stepIndex, values } plus compatible step/currentStep/current aliases; restore() reloads durable state and restore({ stepId, values, ... }) atomically adopts and saves a compatible state; methods { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
@@ -356,8 +357,9 @@ export function capabilityBrief(names = Object.keys(CAPABILITIES)) {
   for (const name of [...names].sort()) {
     const entry = CAPABILITIES[name];
     if (!entry) continue;
-    lines.push(`  ${entry.name}@${entry.version}: ${entry.interface.join(", ")}`);
-    if (INSTANCE_METHODS[name]) lines.push(`    ${INSTANCE_METHODS[name]}`);
+    const inlineMethods = name === "session" ? `; ${INSTANCE_METHODS.session}` : "";
+    lines.push(`  ${entry.name}@${entry.version}: ${entry.interface.join(", ")}${inlineMethods}`);
+    if (INSTANCE_METHODS[name] && name !== "session") lines.push(`    ${INSTANCE_METHODS[name]}`);
     if (entry.uiContract.length) lines.push(`    UI must render states: ${entry.uiContract.join(", ")}`);
   }
   lines.push("REACT BINDINGS (import from ./lib/capabilities — assemble, do not reinvent):");
