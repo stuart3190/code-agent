@@ -111,6 +111,14 @@ against a code index. Rules:
   every assigned mounted screen/custom extension. A batch that re-emits existing content, leaves scaffold stubs
   in place, or only tweaks one line is rejected as a no-op and costs you a round.`;
 
+export const COMPILE_CORRECTION_SYSTEM_PROMPT = `You repair a retained generated application that failed to compile.
+Call emit_patches exactly once and change only the machine-enforced allowed files. Resolve the named
+compiler error with the smallest source change while preserving all existing behavior, exports, routes,
+labels, state, and interactions. Reconcile imports and exports across the supplied files when necessary.
+Use newFile only for a named missing file. For an existing file use validated ops, replace_exact, or
+replaceFile with its complete corrected content. Never edit protected infrastructure or unrelated files,
+and do not emit prose outside emit_patches.`;
+
 // When the ordinary bounded file prompt still cannot fit, the orchestrator supplies exact source
 // excerpts and an exact-replacement primitive. This deliberately excludes broad architecture and
 // capability prose: the retained tree supplies exact current bytes, the write boundary is
@@ -319,6 +327,37 @@ function renderCustomExtensionCorrectionPrompt({ tree, repairScope, onRetrieval 
     "",
     "VALIDATOR-NAMED MODULES IN FULL:",
     ...files.flatMap((path) => ["", `--- ${path} ---`, String(tree?.[path] || "")]),
+  ].join("\n");
+}
+
+export function renderCompileCorrectionPrompt({ tree, repairScope, problems = [], onRetrieval = null }) {
+  const files = [...new Set(repairScope?.files || repairScope?.allowedFiles || [])].sort();
+  const findings = [...new Set([
+    ...(problems || []).map(String),
+    ...(repairScope?.findings || []).map((finding) => String(finding?.message || finding)),
+  ].filter(Boolean))].slice(0, 8);
+  const context = renderPrecompileRepairContext(tree, {
+    repairScope: { ...repairScope, files }, onRetrieval,
+  });
+  return [
+    "STEP: correction",
+    "COMPILE CORRECTION: the retained candidate is complete enough to compile. Fix only the exact",
+    "compiler failure below, preserve every unrelated behavior, and leave all later gates intact.",
+    "",
+    repairScope?.instruction || "Correct the compiler failure in the named files.",
+    `Allowed files: [${files.join(", ")}]`,
+    "",
+    "COMPILER FINDINGS:",
+    ...findings.map((finding) => `- ${finding}`),
+    "",
+    "REQUIRED PROGRESS:",
+    "- Resolve the named syntax, import, export, dependency, or type mismatch at its source.",
+    "- When one supplied file imports a missing symbol from another supplied file, reconcile the",
+    "  importer and exporter together; do not invent an unrelated replacement architecture.",
+    "- Preserve all existing routes, visible behavior, state transitions, labels, and machine IDs.",
+    "- Emit only the minimal allowed patch batch and call emit_patches now.",
+    "",
+    context,
   ].join("\n");
 }
 
@@ -535,6 +574,11 @@ export function renderPatchPrompt({
   }
   if (headroomScope?.fragmented) {
     return renderHeadroomFragmentPrompt({ headroomScope, problems, onRetrieval });
+  }
+  const compileScope = [headroomScope, repairScope, moduleCorrectionScope]
+    .find((scope) => scope?.kind === "compile" || scope?.sourceKind === "compile");
+  if (compileScope) {
+    return renderCompileCorrectionPrompt({ tree, repairScope: compileScope, problems, onRetrieval });
   }
   const isEdit = step === "edit";
   const isRepair = step === "repair" || step === "correction";
@@ -1057,6 +1101,7 @@ export function headroomDispatchScope({
     : "";
   return {
     kind: "headroom_continuation",
+    sourceKind: previousScope?.sourceKind || active?.kind || null,
     logicalStep: previousScope?.logicalStep || logicalStep,
     batchIndex: Number(previousScope?.batchIndex || 0),
     files,
@@ -1603,7 +1648,11 @@ export function createModelLanes({
       const dispatchWithHeadroom = async () => {
         for (;;) {
           let retrievalTrace = null;
-          systemPrompt = headroomScope?.fragmented ? HEADROOM_FRAGMENT_SYSTEM_PROMPT : fullSystemPrompt;
+          const compileScoped = [headroomScope, repairScope, moduleCorrectionScope]
+            .some((scope) => scope?.kind === "compile" || scope?.sourceKind === "compile");
+          systemPrompt = headroomScope?.fragmented
+            ? HEADROOM_FRAGMENT_SYSTEM_PROMPT
+            : compileScoped ? COMPILE_CORRECTION_SYSTEM_PROMPT : fullSystemPrompt;
           prompt = renderPatchPrompt({
             step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,

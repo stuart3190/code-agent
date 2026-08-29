@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
-  causalRepairProblems, createModelLanes, estimatePromptTokens, HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
+  causalRepairProblems, COMPILE_CORRECTION_SYSTEM_PROMPT, createModelLanes, estimatePromptTokens,
+  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
   headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
   repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
@@ -173,6 +174,76 @@ test("scoped correction prompts use compact module contracts while full generati
     "bounded corrections no longer resend every unrelated module contract");
   assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);
   assert.doesNotMatch(compact, /diagnosticPadding/);
+});
+
+test("compile corrections fit the per-call guard with only compiler evidence and named source", async () => {
+  const importer = "src/components/catalogue/SoftwareFlow.jsx";
+  const exporter = "src/extensions/custom/catalogue.js";
+  const tree = {
+    "src/App.jsx": "export default function App(){return null}",
+    [importer]: 'import { SOFTWARE_CATALOGUE } from "../../extensions/custom/catalogue.js";\n'
+      + "export default function SoftwareFlow(){return <main>{SOFTWARE_CATALOGUE.length}</main>}",
+    [exporter]: "export function runCatalogueOperation(input){return input}",
+  };
+  const problem = `${importer} (1:9): SOFTWARE_CATALOGUE is not exported by ${exporter}`;
+  const compileScope = {
+    kind: "compile", files: [importer, exporter], allowedFiles: [importer, exporter],
+    findings: [], expectedPatchTokens: 2_000,
+    instruction: "Retain the candidate and correct the bounded compile failure in the named files.",
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: {
+      ...CONTRACT, diagnosticPadding: "x".repeat(180_000),
+    }, tiers: TIERS, tree, problems: [problem], moduleCorrectionScope: compileScope,
+    modulePlan: [], moduleContracts: { version: 1, specifications: [] },
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /COMPILE CORRECTION/);
+  assert.match(prompt, /SOFTWARE_CATALOGUE is not exported/);
+  assert.match(prompt, /runCatalogueOperation/);
+  assert.doesNotMatch(prompt, /diagnosticPadding|IMPLEMENTATION CONTRACT/);
+  assert.deepEqual(retrieval.included.map((row) => row.path).sort(), [exporter, importer].sort());
+  const plan = planCallReservation({
+    systemPrompt: COMPILE_CORRECTION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: prompt }], tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000, callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 2, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: compileScope.expectedPatchTokens },
+    budget: { approvedCeilingCredits: 44.88, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 44.88 },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200);
+  assert.ok(plan.estimatedInputTokens < 8_000, plan.estimatedInputTokens);
+
+  let dispatched;
+  const provider = {
+    model: "gpt-5.5", provider: "codex",
+    runTurn: async (options) => {
+      dispatched = options;
+      return { text: "", toolCalls: [{ id: "compile", name: "emit_patches",
+        arguments: { patches: [] } }], usage: {
+        input: 1_200, output: 200, total: 1_400, providerRequestId: "compile-correction",
+      } };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "codex", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 0.5, callCeilingCredits: 4, maxOutputTokens: 8_000,
+    } }),
+    ceilingCredits: 44.88, reservations: memoryModelReservations(),
+    knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "compile-build", step: "correction",
+    originalStep: "core", contract: { ...CONTRACT, diagnosticPadding: "x".repeat(180_000) },
+    tiers: TIERS, tree, rejections: [], problems: [problem], modulePlan: [],
+    moduleContracts: { version: 1, specifications: [] }, moduleCorrectionScope: compileScope,
+  });
+  assert.equal(dispatched.systemPrompt, COMPILE_CORRECTION_SYSTEM_PROMPT);
+  assert.match(dispatched.messages[0].content, /COMPILE CORRECTION/);
 });
 
 test("initial generation is told to mount one shared controller for a crowded screen", () => {
