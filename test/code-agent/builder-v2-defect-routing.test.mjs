@@ -25,6 +25,8 @@ import { deriveVerificationManifest, controlIdFor, actionIdFor }
   from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { causalRepairProblems, renderPrecompileRepairContext, repairFailureOwnedPaths } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { validateModulePatchScope } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY }
+  from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 
@@ -785,6 +787,68 @@ test("the prerequisite brief names the control and survives the downstream-evide
 });
 
 // ── a repair round must not be able to destroy the build ──────────────────────────────────────
+
+test("an activated durable prerequisite failure is routed to the producing application modules", () => {
+  const producerScreen = "src/screens/scaffold/ProjectsScreen.jsx";
+  const producerExtension = "src/extensions/custom/create-work.js";
+  const contract = {
+    journeys: [
+      { id: "create-work", priority: "primary", steps: [] },
+      { id: "manage-team", priority: "secondary", steps: [] },
+    ],
+    interactionContract: { flows: [{
+      id: "create-work:mutation", journeyId: "create-work", stepIndex: 3,
+      kind: "mutation", action: "save the project", durableLifecycle: "crud:project",
+      observable: "the new project appears in the catalogue",
+      stateOwner: producerScreen,
+      responsibleModules: [producerExtension, producerScreen],
+      control: { machineId: "act_save_project", accessibleName: "Save Project control",
+        stateOwner: producerScreen },
+    }] },
+  };
+  const defects = verificationDefects({
+    contract, interactionContract: contract.interactionContract,
+    journeyResults: {
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      journeys: [{
+        id: "manage-team", priority: "secondary", status: "undriveable",
+        owners: ["src/screens/scaffold/AdminScreen.jsx"], steps: [],
+        setup: { ok: false, code: "journey_prerequisites_unmet", failure: {
+          control: "Save Project control", kind: "mutation",
+          reason: "the durable mutation did not reach its contracted observable state",
+        } },
+      }],
+    },
+  });
+
+  const prerequisite = defects.find((defect) => defect.prerequisite);
+  assert.equal(prerequisite.code, "prerequisite_durable_outcome_missing");
+  assert.equal(prerequisite.owner, DEFECT_OWNER.APP);
+  assert.equal(prerequisite.defectClass, DEFECT_CLASS.BEHAVIOUR);
+  assert.equal(prerequisite.tier, REPAIR_TIER.REPAIR);
+  assert.equal(prerequisite.journeyId, "create-work");
+  assert.equal(prerequisite.blockedJourneyId, "manage-team");
+  assert.deepEqual(prerequisite.modules, [producerScreen, producerExtension]);
+  const brief = defectEvidence(defects).join("\n");
+  assert.match(brief, /exact durable mutation control was found and activated/i);
+  assert.match(brief, /Do not seed or statically render that final result/i);
+});
+
+test("compound selections already at every target value get exact repair guidance", () => {
+  const brief = defectEvidence([{
+    code: "contracted_outcome_missing", defectClass: DEFECT_CLASS.BEHAVIOUR,
+    owner: DEFECT_OWNER.APP, tier: REPAIR_TIER.REPAIR,
+    journeyId: "configure-catalogue", stepIndex: 2, action: "choose catalogue filters",
+    control: { id: "ctl_category", logicalField: "category" },
+    modules: ["src/screens/scaffold/CatalogueScreen.jsx"],
+    evidence: {
+      expected: "the selected filters are visible",
+      observed: "every contracted selection value was already selected, so no transition was observed",
+    },
+  }]).join("\n");
+  assert.match(brief, /Initialise at least one control to a real non-target option/i);
+  assert.match(brief, /Do not pre-render the expected post-selection message/i);
+});
 
 test("a scope naming a planned-but-unwritten module offers a stub instead of throwing", () => {
   // This threw on src/components/create-auto-layout/ControlColumn.jsx and took a paid build to

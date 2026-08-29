@@ -84,6 +84,24 @@ function flowsForStep(interactionContract, journeyId, stepIndex) {
     .filter((flow) => flow.journeyId === journeyId && flow.stepIndex === stepIndex);
 }
 
+const semanticControlKey = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** Resolve a failed secondary-journey setup control back to its primary producer. */
+function prerequisiteProducerFlow(contract, interactionContract, namedControl) {
+  const wanted = semanticControlKey(namedControl);
+  if (!wanted) return null;
+  const flows = [
+    ...(contract?.prerequisiteInteractionContract?.flows || []),
+    ...(interactionContract?.flows || []),
+  ];
+  return flows.find((flow) => flow?.control && [
+    flow.control.logicalField,
+    flow.control.accessibleName,
+    flow.control.purpose,
+    ...(flow.control.accessibleNames || []),
+  ].some((identity) => semanticControlKey(identity) === wanted)) || null;
+}
+
 /**
  * The probe's addressing evidence for one control id.
  *
@@ -263,20 +281,48 @@ export function verificationDefects({
   for (const journey of verdicts.journeys || []) {
     if (journey.setup?.ok !== false) continue;
     const named = journey.setup.failure?.control || null;
+    const setupReason = String(journey.setup.failure?.reason || "");
+    const producer = prerequisiteProducerFlow(contract, interactionContract, named);
+    // This reason is emitted only after setup found and activated the exact durable mutation.
+    // It is concrete application evidence and belongs to the producing control's modules, not
+    // to the secondary journey that was waiting for that record.
+    const activatedDurableMutation = minimal && producer?.kind === "mutation"
+      && /durable mutation did not reach its contracted observable state|no entered value or new durable reference was committed/i
+        .test(setupReason);
+    const producerModules = activatedDurableMutation ? unique([
+      producer.stateOwner,
+      producer.control?.stateOwner,
+      ...(producer.responsibleModules || []),
+    ]).filter(generatedSource) : [];
     defects.push({
-      code: named ? "journey_prerequisite_control_missing" : (journey.setup.code || "journey_prerequisites_unmet"),
+      code: activatedDurableMutation ? "prerequisite_durable_outcome_missing"
+        : named ? "journey_prerequisite_control_missing" : (journey.setup.code || "journey_prerequisites_unmet"),
       // Named control → an interaction defect a patch can answer. Unnamed → genuinely nothing to
       // aim at, so it stays context.
-      defectClass: minimal ? DEFECT_CLASS.PLATFORM : (named ? DEFECT_CLASS.INTERACTION : DEFECT_CLASS.CONTRACT),
-      owner: minimal ? DEFECT_OWNER.PLATFORM : DEFECT_OWNER.UNKNOWN,
-      tier: minimal ? REPAIR_TIER.NONE : (named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE),
-      uncertain: true, downstream: !named,
+      defectClass: activatedDurableMutation ? DEFECT_CLASS.BEHAVIOUR
+        : minimal ? DEFECT_CLASS.PLATFORM : (named ? DEFECT_CLASS.INTERACTION : DEFECT_CLASS.CONTRACT),
+      owner: activatedDurableMutation ? DEFECT_OWNER.APP
+        : minimal ? DEFECT_OWNER.PLATFORM : DEFECT_OWNER.UNKNOWN,
+      tier: activatedDurableMutation ? REPAIR_TIER.REPAIR
+        : minimal ? REPAIR_TIER.NONE : (named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE),
+      uncertain: activatedDurableMutation ? undefined : true, downstream: !named,
       prerequisite: true,
-      journeyId: journey.id, stepIndex: null, action: null,
-      control: named ? { id: null, logicalField: named } : null,
-      modules: unique((journey.owners || []).filter(generatedSource)),
-      failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
-      evidence: { observed: journey.setup.failure?.reason || "the journey's starting state could not be established" },
+      blockedJourneyId: activatedDurableMutation ? journey.id : undefined,
+      journeyId: activatedDurableMutation ? producer.journeyId : journey.id,
+      stepIndex: activatedDurableMutation ? producer.stepIndex : null,
+      action: activatedDurableMutation ? producer.action : null,
+      control: activatedDurableMutation
+        ? { id: producer.control?.machineId || null,
+          logicalField: producer.control?.logicalField || producer.control?.accessibleName || named }
+        : named ? { id: null, logicalField: named } : null,
+      modules: activatedDurableMutation
+        ? producerModules : unique((journey.owners || []).filter(generatedSource)),
+      failureRefs: activatedDurableMutation ? producerModules
+        : unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
+      evidence: {
+        expected: activatedDurableMutation ? producer.observable || null : null,
+        observed: setupReason || "the journey's starting state could not be established",
+      },
     });
   }
 
@@ -516,6 +562,17 @@ export function defectEvidence(defects = []) {
         + "— the control is present and located by its declared identity, so bind it so a typed value "
         + "lands in state and renders back: value + onChange writing through the setter, the capability "
         + "field binding, or an uncontrolled input with defaultValue.");
+    }
+    if (/every contracted selection value was already selected/i.test(String(defect.evidence?.observed || ""))) {
+      lines.push("the compound selection controls start in every contracted final value. Initialise at "
+        + "least one control to a real non-target option so the browser can perform and observe the "
+        + "contracted transition. Do not pre-render the expected post-selection message as initial state.");
+    }
+    if (defect.code === "prerequisite_durable_outcome_missing") {
+      lines.push("the exact durable mutation control was found and activated during prerequisite setup, "
+        + "but its contracted result did not become a post-action observable. Do not seed or statically "
+        + "render that final result before activation; wire the mutation to publish the newly committed "
+        + "record on the mounted surface.");
     }
     if (defect.evidence?.collectionMembership?.checked) {
       const membership = defect.evidence.collectionMembership;
