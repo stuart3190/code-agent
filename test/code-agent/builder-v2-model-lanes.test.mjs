@@ -402,6 +402,109 @@ test("a missing shared controller keeps its useful output allowance without dupl
   assert.ok(plan.estimatedInputTokens < 35_000, plan.estimatedInputTokens);
 });
 
+test("a retained scaffold placeholder mounts its existing shared controller without resending every journey", async () => {
+  const screen = "src/screens/scaffold/SignInScreen.jsx";
+  const controller = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const journeyIds = ["browse-catalogue", "filter-catalogue", "save-view", "review-summary"];
+  const journeys = journeyIds.map((id) => ({
+    id,
+    title: id,
+    priority: "primary",
+    steps: Array.from({ length: 4 }, (_, index) => ({
+      action: `use catalogue control ${index + 1}`,
+      expect: `catalogue state ${"remains observable ".repeat(240)}`,
+    })),
+  }));
+  const contract = {
+    summary: "software catalogue workspace",
+    journeys,
+    entities: [], routes: [{ path: "/signin", name: "Sign in" }], operations: [],
+    interactionContract: { version: 1, flows: [] },
+  };
+  const tiers = {
+    essential: { journeys: journeyIds, entities: [], operations: [] },
+    secondary: { journeys: [], entities: [], operations: [] },
+  };
+  const modulePlan = [{
+    path: screen,
+    role: "mounted screen composition",
+    providedBy: "scaffold_screen_slot",
+    routePath: "/signin",
+    journeyIds,
+    journeyController: controller,
+    requiredImports: [`../../components/catalogue/SoftwareCatalogueFlow.jsx`],
+    requiredExports: ["default"],
+  }];
+  const moduleContracts = { version: 1, specifications: [{
+    ...modulePlan[0],
+    ownedJourneys: journeyIds,
+    semanticInteractions: Array.from({ length: 20 }, (_, index) => ({
+      interactionId: `catalogue-control-${index + 1}`,
+      journeyId: journeyIds[index % journeyIds.length],
+      logicalField: `catalogueField${index + 1}`,
+      accessibleNames: [`Catalogue field ${index + 1}`],
+    })),
+    requiredCapabilities: [], forbiddenCapabilityBypasses: [],
+    state: { owns: "screen composition" }, downstream: { consumes: [], produces: [] },
+    persistence: { owner: null }, moduleSizeBoundary: 6_000,
+  }] };
+  const tree = {
+    [screen]: "// @thrallo-scaffold-screen-slot: signin.\n"
+      + "export default function SignInScreen(){return <section data-scaffold-slot=\"signin\">"
+      + "<p>Application screen ready for composition.</p></section>}",
+    [controller]: "export default function SoftwareCatalogueFlow(){return <main>Catalogue</main>}",
+  };
+  const scope = headroomDispatchScope({
+    tree, modulePlan, moduleContracts,
+    repairScope: { files: [screen], allowedFiles: [screen] },
+    logicalStep: "core",
+  });
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract, tiers, tree, modulePlan, moduleContracts,
+    headroomScope: scope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /HEADROOM-SCOPED SCAFFOLD MOUNT/);
+  assert.match(prompt, /SoftwareCatalogueFlow\.jsx/);
+  assert.match(prompt, /render that controller exactly once/);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT|INTERACTION CONTRACT|catalogue state remains observable/);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 5_000);
+  assert.deepEqual(retrieval.included.map((row) => row.path).sort(), [controller, screen].sort());
+
+  let providerCalls = 0;
+  const reservations = memoryModelReservations();
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return {
+        text: "",
+        toolCalls: [{ id: "screen-mount", name: "emit_patches", arguments: { patches: [{
+          replaceFile: screen,
+          content: "import SoftwareCatalogueFlow from \"../../components/catalogue/SoftwareCatalogueFlow.jsx\";\n"
+            + "export default function SignInScreen(){return <SoftwareCatalogueFlow />}",
+        }] } }],
+        usage: { input: 4_000, output: 300, total: 4_300, providerRequestId: "screen-mount" },
+      };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "screen-mount-build",
+    step: "core", originalStep: "core", contract, tiers, tree, rejections: [], problems: [],
+    modulePlan, moduleContracts, headroomScope: scope,
+  });
+  assert.equal(providerCalls, 1);
+  assert.equal(reservations.rows().length, 1);
+  assert.deepEqual(patches.dispatchScope.allowedFiles, [screen]);
+});
+
 test("browser-repair headroom batching targets only evidence owners and fits a useful one-file continuation", () => {
   const liveSizedSource = `export default function Planner(){return <main>${"x".repeat(17_000)}</main>}`;
   const fixture = oversizedModuleFixture({ source: liveSizedSource });

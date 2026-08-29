@@ -581,6 +581,51 @@ function renderHeadroomFragmentPrompt({
   ].join("\n");
 }
 
+function renderHeadroomScreenMountPrompt({
+  headroomScope, screenModules, tree, rejections = [], regenerateFiles = [], onRetrieval = null,
+}) {
+  const files = screenModules.map((module) => module.path);
+  const controllers = [...new Set(screenModules.map((module) => module.journeyController).filter(Boolean))];
+  const sourceContext = renderPrecompileRepairContext(tree, {
+    repairScope: { ...headroomScope, files, adapterInterfaces: controllers },
+    onRetrieval,
+  });
+  const parts = [
+    "STEP: core",
+    "HEADROOM-SCOPED SCAFFOLD MOUNT: the protected router already mounts each named model-owned",
+    "screen, and each screen's journey controller is already implemented in the retained candidate.",
+    "Complete only the thin mounted wrapper; do not reimplement or duplicate the controller's",
+    "journey controls, state, data, capabilities, or custom behavior in the screen.",
+    "",
+    "MOUNT CONTRACT (machine-enforced JSON):",
+    JSON.stringify({ modules: screenModules.map((module) => ({
+      path: module.path,
+      routePath: module.routePath || null,
+      journeyController: module.journeyController,
+      requiredImports: [...new Set(module.requiredImports || [])],
+      requiredExports: module.requiredExports || ["default"],
+    })) }, null, 2),
+    "For each module: import its existing journeyController through the relative path shown by",
+    "requiredImports, render that controller exactly once, and retain the screen's default export.",
+    "Do not add another router, another application shell, or a second implementation of any flow.",
+    "",
+    "INTERNAL HEADROOM-SCOPED WRITE BOUNDARY (machine-enforced):",
+    `Allowed files: [${files.join(", ")}]`,
+    "",
+    sourceContext,
+  ];
+  if (rejections.length) {
+    parts.push("", "PREVIOUS PATCH REJECTIONS (emit only corrected unfinished work):",
+      ...rejections.map((rejection) => `- ${rejection.reason}`));
+  }
+  if (regenerateFiles.length) {
+    parts.push("", "WHOLE-FILE ESCALATION:", ...regenerateFiles.map((file) => `- ${file}`),
+      "Emit one complete replaceFile for each listed existing screen; preserve its mount contract.");
+  }
+  parts.push("", "Call emit_patches now with the complete bounded screen-wrapper batch.");
+  return parts.join("\n");
+}
+
 export function renderPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
@@ -614,6 +659,19 @@ export function renderPatchPrompt({
   const promptModulePlan = activeScopePaths.length
     ? modulePlan.filter((module) => activeScopePaths.includes(module.path))
     : modulePlan;
+  const headroomScreenMounts = headroomScope && activeScopePaths.length
+    ? promptModulePlan.filter((module) => module.providedBy === "scaffold_screen_slot"
+      && module.journeyController
+      && typeof tree?.[module.journeyController] === "string"
+      && /data-scaffold-slot=/.test(String(tree?.[module.path] || ""))
+      && String(tree?.[module.path] || "").includes("Application screen ready for composition."))
+    : [];
+  if (headroomScope && activeScopePaths.length > 0
+    && headroomScreenMounts.length === activeScopePaths.length) {
+    return renderHeadroomScreenMountPrompt({
+      headroomScope, screenModules: headroomScreenMounts, tree, rejections, regenerateFiles, onRetrieval,
+    });
+  }
   const contractJourneyIds = new Set((contract?.journeys || []).map((row) => row?.id).filter(Boolean));
   const headroomJourneyIds = headroomScope && activeScopePaths.length ? (() => {
     const selectedContracts = (headroomScope.moduleContracts?.specifications?.length
