@@ -732,8 +732,16 @@ function selectedEntityText(selectedText, selectedValue = null) {
 export function selectedRemovalExpectationSpec(spec, selections = [], selectionValues = []) {
   if (!spec || !/^(?:the\s+)?(?:(?:same|selected|favourited|saved)\s+)?(?:software|item|product|entry|record|favourite|favorite)$/i
     .test(String(spec.target || "").trim())) return spec;
-  const target = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
-  if (!target || target.split(/\s+/).length > 8 || !keywords(target, 5).length) return spec;
+  const usableTarget = (value) => {
+    const candidate = String(value || "").trim();
+    return candidate && candidate.split(/\s+/).length <= 8 && keywords(candidate, 5).length
+      && !/^(?:the\s+)?(?:selected|chosen|active|current)(?:\s+(?:card|software|item|product|entry|record|option|result))?$/i
+        .test(candidate);
+  };
+  const selectedValue = String(selectionValues.at(-1) || "").replace(/[-_]+/g, " ").trim();
+  const selectedText = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
+  const target = usableTarget(selectedText) ? selectedText : (usableTarget(selectedValue) ? selectedValue : "");
+  if (!target) return spec;
   return { ...spec, target };
 }
 
@@ -873,7 +881,8 @@ async function collectionMembershipState(page, spec) {
 async function collectionActionMemberState(page, spec, control, { mark = false, marker = null } = {}) {
   const markerValue = mark ? `removal-${Date.now()}-${Math.random().toString(16).slice(2)}` : marker;
   return page.evaluate(({ wantedTarget, collectionTopics, machineId, accessibleNames, markerValue, requireTarget }) => {
-    const normalized = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const normalized = (value) => String(value || "").toLowerCase()
+      .replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
     const targetText = normalized(wantedTarget);
     const names = new Set((accessibleNames || []).map(normalized).filter(Boolean));
     const visible = (element) => {

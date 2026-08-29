@@ -212,6 +212,16 @@ test("removal expectations retain a separate positive postcondition", () => {
     emptyStateRequired: true,
     remainingMemberRequired: false,
   });
+  assert.deepEqual(selectedRemovalExpectationSpec(removalExpectationSpec({
+    action: "remove the same software from favourites",
+    expect: "the software is removed from the favourites list and the empty favourites message is visible again",
+  }), ["Selected card"], ["atlas-analytics"]), {
+    target: "atlas analytics",
+    collection: "favourites list",
+    postcondition: "the empty favourites message is visible again",
+    emptyStateRequired: true,
+    remainingMemberRequired: false,
+  });
 });
 
 test("multi-member collection expectations retain their named scope", () => {
@@ -1624,6 +1634,56 @@ test("a removed marked catalogue member outranks a retained detail action", { ..
     "contracted_collection_member");
   assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.beforeCount, 1);
   assert.equal(result.journeys[0].steps[0].controlEvidence.removalTransition.afterCount, 0);
+});
+
+test("a generic selected label retains the stable member identity for later removal", { ...needsBrowser }, async () => {
+  const selected = {
+    ...control("selectedSoftwareId", "catalogue-selection", ["button", "radio", "option", "combobox"]),
+    selectedState: true,
+  };
+  const remove = {
+    ...control("active favourite control", "toggle-favourite-software", ["button"]),
+    accessibleName: "active favourite control",
+    accessibleNames: ["active favourite control"],
+  };
+  pageBody = `<main>
+    <section aria-label="Software catalogue"><h1>Software catalogue</h1>
+      <div role="group" aria-label="selected Software Id" data-thrallo-control="catalogue-selection">
+        <button type="button" value="atlas-analytics" data-thrallo-control="catalogue-selection"
+          aria-label="selected Software Id Atlas Analytics" aria-pressed="false"
+          onclick="this.setAttribute('aria-pressed','true');this.textContent='Selected card'">View Atlas Analytics</button>
+      </div>
+    </section>
+    <aside aria-label="Software details"><h2>Atlas Analytics</h2>
+      <button data-thrallo-action="toggle-favourite-software" aria-label="active favourite control"
+        onclick="document.getElementById('favourite-item').remove();document.getElementById('favourites-empty').hidden=false">Remove favourite</button>
+    </aside>
+    <section aria-label="Favourites list"><h2>Favourites</h2>
+      <div role="list"><div role="listitem" id="favourite-item">Atlas Analytics</div></div>
+      <p id="favourites-empty" role="status" data-empty-state hidden>No saved software yet.</p>
+    </section>
+  </main>`;
+  const contract = {
+    journeys: [{ id: "journey", title: "Manage session favourites", priority: "primary", steps: [
+      { action: "select a software card", operates: ["selectedSoftwareId"], primitive: "selection",
+        expect: "the selected card is visible" },
+      { action: "remove the same software from favourites",
+        expect: "the software is removed from the favourites list and the empty favourites message is visible again" },
+    ] }],
+    interactionContract: { flows: [
+      { journeyId: "journey", stepIndex: 0, kind: "selection", valueWritten: "selectedSoftwareId",
+        stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], reads: [], writes: [], control: selected },
+      { journeyId: "journey", stepIndex: 1, kind: "action", operationId: "toggle-favourite-software",
+        stateOwner: "src/App.jsx", responsibleModules: ["src/App.jsx"], reads: [], writes: [], control: remove },
+    ] },
+  };
+  const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 35_000,
+    verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[1].controlEvidence.activation.scope,
+    "contracted_collection_member");
+  assert.equal(result.journeys[0].steps[1].controlEvidence.removalTransition.beforeCount, 1);
+  assert.equal(result.journeys[0].steps[1].controlEvidence.removalTransition.afterCount, 0);
 });
 
 test("minimal result classes route only concrete app failures to repair", () => {
