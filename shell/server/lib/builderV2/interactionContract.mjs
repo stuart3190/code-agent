@@ -1642,13 +1642,22 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
   const plannedPaths = new Set((modulePlan || []).map((module) => module.path));
   const screenModules = (modulePlan || []).filter((module) => module.providedBy === "scaffold_screen_slot");
   const screenPaths = new Set(screenModules.map((module) => module.path));
-  const nonScreenVisualOwner = (journeyId) => (modulePlan || []).find((module) => (
+  const sharedControllerPaths = new Set((modulePlan || []).filter((module) => module.sharedControllerFor)
+    .map((module) => module.path));
+  const nonScreenVisualOwner = (journeyId, activeScreen) => (modulePlan || []).find((module) => (
     module.providedBy !== "scaffold_screen_slot"
       && /flow|form|editor|composition/i.test(module.role || "")
       && (module.journeyIds || module.ownedJourneys || []).includes(journeyId)
+      && (!module.sharedControllerFor || module.sharedControllerFor === activeScreen?.scaffoldScreenId)
   )) || null;
   const screenForFlow = (flow) => {
     const journeyScreens = screenModules.filter((module) => (module.journeyIds || []).includes(flow.journeyId));
+    const scaffoldTransitions = journeyScreens.flatMap((module) => (module.journeyRouteStarts || [])
+      .filter((transition) => transition.journeyId === flow.journeyId
+        && Number(transition.stepIndex) <= Number(flow.stepIndex))
+      .map((transition) => ({ ...transition, module })))
+      .sort((a, b) => Number(b.stepIndex) - Number(a.stepIndex));
+    if (scaffoldTransitions[0]?.module) return scaffoldTransitions[0].module;
     const routeTransitions = (plan?.flows || []).filter((candidate) => candidate.journeyId === flow.journeyId
       && Number(candidate.stepIndex) <= Number(flow.stepIndex)
       && candidate.target
@@ -1657,7 +1666,10 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
     const activeRoute = routeTransitions[0]?.target || null;
     return journeyScreens.find((module) => module.routePath === activeRoute) || journeyScreens[0] || null;
   };
-  const visualOwner = (flow) => nonScreenVisualOwner(flow.journeyId) || screenForFlow(flow);
+  const visualOwner = (flow) => {
+    const screen = screenForFlow(flow);
+    return nonScreenVisualOwner(flow.journeyId, screen) || screen;
+  };
   const boundVisualOwner = (declaredOwner, visual) => {
     if (PLATFORM.test(String(declaredOwner || ""))) return declaredOwner;
     // A bounded custom extension supplies behaviour to a mounted controller; it does not render
@@ -1677,7 +1689,8 @@ export function bindInteractionModulePlan(plan, modulePlan = []) {
       const visual = visualOwner(flow);
       const responsibleModules = unique([
         ...(flow.responsibleModules || []).filter((path) => plannedPaths.has(path)
-          && (!screenPaths.has(path) || path === visual?.path)),
+          && (!screenPaths.has(path) || path === visual?.path)
+          && (!sharedControllerPaths.has(path) || path === visual?.path)),
         visual?.path,
       ]);
       const stateOwner = boundVisualOwner(flow.stateOwner, visual);

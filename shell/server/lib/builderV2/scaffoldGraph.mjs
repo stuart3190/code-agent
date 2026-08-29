@@ -49,34 +49,47 @@ function operationMethods(graph) {
   )).map((responsibility) => responsibility.capabilityMethod || responsibility.semanticOperation).filter(Boolean));
 }
 
+function semanticRoute(routes, value) {
+  const words = normalized(value);
+  const tokens = semanticTokens(value);
+  const ranked = (routes || []).map((route, index) => {
+    const identity = `${route?.name || ""} ${String(route?.path || "").split("/").at(-1) || ""}`;
+    const routeIdentity = normalized(identity);
+    const routeTokens = semanticTokens(identity);
+    const overlap = [...routeTokens].filter((token) => tokens.has(token)).length;
+    const containment = routeIdentity && (words.includes(routeIdentity) || routeIdentity.includes(words)) ? 2 : 0;
+    return { route, index, score: overlap * 3 + containment };
+  }).sort((a, b) => b.score - a.score || a.index - b.index);
+  if (!(ranked[0]?.score > 0) || ranked[1]?.score === ranked[0].score) return null;
+  return ranked[0].route;
+}
+
 function routeForJourney(contract, journey) {
   const routes = contract?.routes || [];
   if (!routes.length) return "/";
   const explicit = (journey?.steps || []).map((step) => String(step?.target || "").trim())
     .find((target) => target.startsWith("/") && routes.some((route) => route.path === target.split(/[?#]/)[0]));
   if (explicit) return explicit.split(/[?#]/)[0] || "/";
-  const words = normalized(`${journey?.id || ""} ${journey?.title || ""}`);
-  const journeyTokens = semanticTokens(`${journey?.id || ""} ${journey?.title || ""}`);
-  const ranked = routes.map((route, index) => {
-    const routeIdentity = normalized(`${route?.name || ""} ${String(route?.path || "").split("/").at(-1) || ""}`);
-    const routeTokens = semanticTokens(`${route?.name || ""} ${route?.path || ""}`);
-    const overlap = [...routeTokens].filter((token) => journeyTokens.has(token)).length;
-    const containment = routeIdentity && (words.includes(routeIdentity) || routeIdentity.includes(words)) ? 2 : 0;
-    return { route, index, score: overlap * 3 + containment };
-  }).sort((a, b) => b.score - a.score || a.index - b.index);
-  return (ranked[0]?.score > 0 ? ranked[0].route?.path : routes[0]?.path) || "/";
+  return semanticRoute(routes, `${journey?.id || ""} ${journey?.title || ""}`)?.path || routes[0]?.path || "/";
 }
 
 function routeTransitionsForJourney(contract, journey) {
   const routes = contract?.routes || [];
-  const transitions = (journey?.steps || []).flatMap((step, stepIndex) => {
+  const transitions = [];
+  for (const [stepIndex, step] of (journey?.steps || []).entries()) {
     const target = String(step?.target || "").trim();
-    const routePath = target.startsWith("/") ? target.split(/[?#]/)[0] || "/" : null;
-    return routePath && routes.some((route) => route.path === routePath)
-      ? [{ routePath, stepIndex }]
-      : [];
-  });
-  return transitions.length ? transitions : [{ routePath: routeForJourney(contract, journey), stepIndex: 0 }];
+    const explicit = target.startsWith("/") ? target.split(/[?#]/)[0] || "/" : null;
+    const routePath = explicit && routes.some((route) => route.path === explicit)
+      ? explicit
+      : semanticRoute(routes, `${step?.action || ""} ${target} ${step?.expect || ""}`)?.path || null;
+    if (routePath && transitions.at(-1)?.routePath !== routePath) transitions.push({ routePath, stepIndex });
+  }
+  if (!transitions.length) return [{ routePath: routeForJourney(contract, journey), stepIndex: 0 }];
+  if (transitions[0].stepIndex > 0) {
+    const initial = routeForJourney(contract, journey);
+    if (initial !== transitions[0].routePath) transitions.unshift({ routePath: initial, stepIndex: 0 });
+  }
+  return transitions;
 }
 
 function screensFor(contract) {
@@ -394,6 +407,8 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
   const screens = (graph?.screens || []).map((screen) => {
     const journeyIds = unique(routeOwnership.filter((row) => row.screenId === screen.screenId)
       .map((row) => row.journeyId));
+    const journeyRouteStarts = routeOwnership.filter((row) => row.screenId === screen.screenId)
+      .map((row) => ({ journeyId: row.journeyId, stepIndex: Number(row.stepIndex) || 0 }));
     const requiredImports = childFlows.filter((module) => (module.journeyIds || [])
       .some((journeyId) => journeyIds.includes(journeyId)))
       .map((module) => relativeImport(screen.module, module.path));
@@ -402,6 +417,7 @@ export function scaffoldModulePlan(graph, existingPlan = []) {
       path: screen.module,
       role: "mounted screen composition and application-specific visual design",
       journeyIds,
+      journeyRouteStarts,
       providedBy: "scaffold_screen_slot", scaffoldScreenId: screen.screenId,
       routePath: screen.routePath,
       journeyController,

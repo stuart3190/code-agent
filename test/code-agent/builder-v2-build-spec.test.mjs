@@ -213,6 +213,123 @@ test("a journey crossing mounted routes binds each step and repair to the active
   assert.equal(routedRepair.targetFiles[0], screens.get("/records/new").path);
 });
 
+test("semantic route steps bind account prerequisites to the mounted sign-in screen", () => {
+  const contract = {
+    summary: "A software workspace with account access and a separate catalogue screen",
+    entities: [
+      { name: "item", fields: [{ name: "title" }, { name: "status" }] },
+      { name: "accountView", fields: [{ name: "authEmail" }, { name: "authPassword" }] },
+    ],
+    operations: [
+      { id: "create-item", entity: "item", kind: "create", journey: "manage-items" },
+      { id: "sign-in-workspace", entity: "accountView", kind: "auth", journey: "manage-items",
+        responsibilities: [{ type: "persistence", capability: "auth", capabilityMethod: "signIn",
+          reads: ["authEmail", "authPassword"], writes: [] }] },
+      { id: "sign-in-catalogue", entity: "accountView", kind: "auth", journey: "filter-catalogue",
+        responsibilities: [{ type: "persistence", capability: "auth", capabilityMethod: "signIn",
+          reads: ["authEmail", "authPassword"], writes: [] }] },
+    ],
+    routes: [
+      { path: "/", name: "Home" },
+      { path: "/signin", name: "Sign In" },
+      { path: "/workspace", name: "Workspace" },
+      { path: "/catalogue", name: "Catalogue" },
+    ],
+    auth: { required: true },
+    journeys: [
+      { id: "manage-items", title: "Manage workspace items", priority: "primary", steps: [
+        { action: "enter account sign-in credentials", target: "authEmail",
+          operates: ["authEmail", "authPassword"],
+          primitive: "textbox", expect: "the account email is visible" },
+        { action: "submit sign-in", target: "sign in control", operates: ["sign-in-workspace"],
+          expect: "the workspace opens" },
+        { action: "open the workspace", target: "workspace", expect: "workspace items are visible" },
+        { action: "create an item", target: "title", operates: ["create-item"],
+          expect: "the created item is visible" },
+      ] },
+      { id: "filter-catalogue", title: "Filter the software catalogue", priority: "secondary", steps: [
+        { action: "enter account sign-in credentials", target: "authEmail",
+          operates: ["authEmail", "authPassword"],
+          primitive: "textbox", expect: "the account email is visible" },
+        { action: "submit sign-in", target: "sign in control", operates: ["sign-in-catalogue"],
+          expect: "the catalogue opens" },
+        { action: "open the catalogue", target: "catalogue", expect: "catalogue items are visible" },
+        { action: "enter a catalogue filter", target: "filter", expect: "matching items are visible" },
+      ] },
+    ],
+  };
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const screens = new Map(spec.modulePlan.filter((module) => module.providedBy === "scaffold_screen_slot")
+    .map((module) => [module.routePath, module]));
+  const signIn = screens.get("/signin");
+  assert.deepEqual(signIn.journeyIds.sort(), ["filter-catalogue", "manage-items"]);
+  assert.ok(signIn.journeyRouteStarts.every((transition) => transition.stepIndex === 0));
+  const workspace = screens.get("/workspace");
+  const catalogue = screens.get("/catalogue");
+  for (const flow of spec.interactionContract.flows) {
+    const expected = flow.stepIndex < 2
+      ? signIn.path
+      : flow.journeyId === "manage-items" ? workspace.path : catalogue.path;
+    assert.ok(flow.responsibleModules.includes(expected), `${flow.id} must bind ${expected}`);
+  }
+  const signInContract = spec.moduleContracts.specifications.find((row) => row.path === signIn.path);
+  assert.ok(signInContract.semanticInteractions.some((flow) => flow.logicalField === "authEmail"),
+    "the generated sign-in screen must own the contracted account field");
+});
+
+test("a crowded prerequisite screen controller does not absorb later routed interactions", () => {
+  const destinations = ["workspace", "catalogue", "reports", "settings", "library"];
+  const contract = {
+    summary: "A multi-screen software workspace with shared account access",
+    entities: [{ name: "accountView", fields: [
+      { name: "authEmail" }, { name: "authPassword" },
+      ...destinations.map((destination) => ({ name: `${destination}Filter` })),
+    ] }],
+    operations: destinations.map((destination) => ({
+      id: `sign-in-${destination}`,
+      entity: "accountView",
+      kind: "auth",
+      journey: `open-${destination}`,
+      responsibilities: [{ type: "persistence", capability: "auth", capabilityMethod: "signIn",
+        reads: ["authEmail", "authPassword"], writes: [] }],
+    })),
+    routes: [{ path: "/signin", name: "Sign In" },
+      ...destinations.map((destination) => ({ path: `/${destination}`, name: destination }))],
+    auth: { required: true },
+    journeys: destinations.map((destination, index) => ({
+      id: `open-${destination}`,
+      title: `Open ${destination}`,
+      priority: index === 0 ? "primary" : "secondary",
+      steps: [
+        { action: "enter account sign-in credentials", target: "authEmail",
+          operates: ["authEmail", "authPassword"], primitive: "textbox",
+          expect: "the account email is visible" },
+        { action: "submit sign-in", target: "sign in control", operates: [`sign-in-${destination}`],
+          expect: "the account session is active" },
+        { action: `open ${destination}`, target: destination, expect: `${destination} is visible` },
+        { action: `enter a ${destination} filter`, target: `${destination}Filter`,
+          operates: [`${destination}Filter`], primitive: "textbox", expect: "matching entries are visible" },
+      ],
+    })),
+  };
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const signIn = spec.modulePlan.find((module) => module.routePath === "/signin");
+  assert.ok(signIn.journeyController, "the crowded sign-in screen must use one bounded controller");
+  const controllerContract = spec.moduleContracts.specifications
+    .find((row) => row.path === signIn.journeyController);
+  assert.ok(controllerContract.semanticInteractions.length > 0);
+  assert.ok(controllerContract.semanticInteractions.every((flow) => flow.stepIndex < 2),
+    "the shared prerequisite controller must contain only account-access steps");
+  for (const destination of destinations) {
+    const screen = spec.modulePlan.find((module) => module.routePath === `/${destination}`);
+    const moduleContract = spec.moduleContracts.specifications.find((row) => row.path === screen.path);
+    assert.ok(moduleContract.semanticInteractions.some((flow) => flow.stepIndex === 3),
+      `${destination} must retain its own routed interaction`);
+  }
+});
+
 test("a crowded mounted screen has one bounded shared journey controller", () => {
   const contract = {
     summary: "A public software catalogue with transient search, filters, selection, and favourites",

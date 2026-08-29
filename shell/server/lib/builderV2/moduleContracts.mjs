@@ -46,11 +46,20 @@ export function expectedMissingModuleTokens(paths = [], moduleContracts = null) 
 
 function targetModules(flow, modulePlan) {
   const targets = new Set(flow?.responsibleModules || []);
-  const plannedVisualController = modulePlan.find((module) => (
+  const responsiblePaths = new Set(flow?.responsibleModules || []);
+  const responsibleScreen = modulePlan.find((module) => (
+    module.providedBy === "scaffold_screen_slot" && responsiblePaths.has(module.path)
+  ));
+  const responsibleController = modulePlan.find((module) => (
+    module.providedBy !== "scaffold_screen_slot"
+      && /flow|form|editor|composition/i.test(module.role || "")
+      && responsiblePaths.has(module.path)
+  ));
+  const plannedVisualController = responsibleController || (!responsibleScreen && modulePlan.find((module) => (
     module.providedBy !== "scaffold_screen_slot"
       && /flow|form|editor|composition/i.test(module.role || "")
       && (module.journeyIds || module.ownedJourneys || []).includes(flow?.journeyId)
-  ));
+  )));
   if (plannedVisualController) targets.add(plannedVisualController.path);
   const hasVisualController = Boolean(plannedVisualController) || [...targets].some((path) => modulePlan.some((module) => (
     module.path === path && module.providedBy !== "scaffold_screen_slot"
@@ -71,6 +80,7 @@ function targetModules(flow, modulePlan) {
   const addRole = (pattern) => modulePlan.filter((module) => {
     const ownedJourneys = module.journeyIds || module.ownedJourneys || [];
     return !(hasBoundVisual && module.providedBy === "scaffold_screen_slot")
+      && !(hasBoundVisual && module.sharedControllerFor && !targets.has(module.path))
       && pattern.test(module.role || "")
       && (!ownedJourneys.length || ownedJourneys.includes(flow?.journeyId));
   })
