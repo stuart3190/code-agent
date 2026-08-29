@@ -2863,11 +2863,18 @@ async function runStep(page, step, {
     viewportChanged = true;
   }
 
-  // Navigation, when the step names a route.
-  const route = (step.target || "").match(/^\/[\w/-]*/) || action.match(/\s(\/[\w/-]+)/);
-  if (route && /open|go to|navigate|visit/i.test(action)) {
-    await page.goto(new URL(route[0] ?? route[1], previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});
+  // An explicit route target is structured execution data. It remains authoritative when the
+  // same step also enters a value, applies an action, or reloads the destination; requiring the
+  // prose to repeat one of a small set of navigation verbs left the browser on the previous
+  // mounted screen even though the contract named the next route exactly.
+  const route = (step.target || "").match(/^\/[\w/-]*/)?.[0]
+    || action.match(/\s(\/[\w/-]+)/)?.[1]
+    || null;
+  let routeNavigated = false;
+  if (route) {
+    await page.goto(new URL(route, previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});
     drove = true;
+    routeNavigated = true;
   }
 
   // A RECOVERY step means "this survives coming back to it", so the reload is the step, whatever
@@ -2888,7 +2895,13 @@ async function runStep(page, step, {
   // CAPTURED BEFORE THE FILL: a fill is not a navigation. Treating it as one meant every
   // combined "enter … then submit" step filled the form and NEVER CLICKED — three live bv2
   // runs (and untold v1 submit steps) failed working apps on exactly this line.
-  const navigated = drove;
+  // A routed composite step must continue after opening its destination. Treat only a pure
+  // navigation/recovery step as completed by the route change; value and action flows on that
+  // destination still have to be driven and proved.
+  const routedComposite = routeNavigated && interactionFlows.some((flow) => (
+    !["navigation", "recovery"].includes(flow.kind)
+  ));
+  const navigated = drove && !routedComposite;
 
   // Focus-only accessibility steps name a value-holding primitive so the exact target remains
   // machine-addressable, but they do not ask the verifier to edit that value. Editing a search
