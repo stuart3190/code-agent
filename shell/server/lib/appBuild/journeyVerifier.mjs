@@ -4803,22 +4803,24 @@ export async function verifyJourneys({
     const ordered = [...(contract?.journeys || [])]
       .sort((a, b) => (a.priority === "primary" ? -1 : 0) - (b.priority === "primary" ? -1 : 0));
 
-    for (const journey of ordered) {
+    for (const [journeyIndex, journey] of ordered.entries()) {
       if (Date.now() > deadline) {
         results.push({ id: journey.id, title: journey.title, priority: journey.priority,
           status: minimal ? "undriveable" : "skipped", steps: [],
           ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}) });
         continue;
       }
-      // Scenario isolation. An independent journey opens the app as a brand-new visitor would;
-      // a journey that depends on a durable record keeps the identity that created it.
+      // Scenario isolation. Every journey gets a fresh browser context so authentication and
+      // other browser-persisted terminal state from one journey cannot hide the next journey's
+      // contracted entry controls. Durable dependencies still resolve through the stable
+      // verification visitor/account identity and the app's real backend; they do not require
+      // reusing browser storage.
       const scenario = contract?.interactionContract?.scenarios?.[journey.id]
         || { role: "independent", startState: "fresh" };
       const isolatedJourneyContract = Boolean(contract?.prerequisiteInteractionContract)
         && (contract?.journeys || []).length === 1;
-      if ((isolatedJourneyContract && journey.priority !== "primary")
-        || (!isolatedJourneyContract && (scenario.role === "independent"
-          || (scenario.role === "produces" && journey.priority !== "primary")))) {
+      if (journeyIndex > 0) {
+        await page.context().close().catch(() => {});
         page = await openContext();
       }
       // Include fatal errors raised while the contracted surface mounts in the first step's

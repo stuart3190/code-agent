@@ -41,6 +41,35 @@ before(async () => {
       </main>`);
       return;
     }
+    if (request.url === "/multi-journey-auth") {
+      response.end(`<main id="app"></main><script>
+        const root = document.getElementById('app');
+        const renderWorkspace = () => {
+          root.innerHTML = '<h1>Team dashboard shell</h1>'
+            + '<button type="button" data-thrallo-action="open-board">Board navigation</button>'
+            + '<p id="board-output" role="status"></p>';
+          root.querySelector('[data-thrallo-action="open-board"]').onclick = () => {
+            document.getElementById('board-output').textContent = 'Board page shows To Do, In Progress, Review, and Done columns';
+          };
+        };
+        const renderSignIn = () => {
+          root.innerHTML = '<h1>Team workspace sign-in</h1>'
+            + '<button type="button" data-thrallo-action="open-sign-in">sign-in form</button>';
+          root.querySelector('[data-thrallo-action="open-sign-in"]').onclick = () => {
+            root.innerHTML = '<form id="auth"><label>Email <input type="email"></label>'
+              + '<label>Password <input type="password"></label>'
+              + '<button type="submit">Open team workspace</button></form>';
+            document.getElementById('auth').onsubmit = (event) => {
+              event.preventDefault();
+              localStorage.setItem('contracted-auth-session', 'active');
+              renderWorkspace();
+            };
+          };
+        };
+        localStorage.getItem('contracted-auth-session') === 'active' ? renderWorkspace() : renderSignIn();
+      </script>`);
+      return;
+    }
     response.end(`<main>
       <h1>Team workspace sign-in</h1>
       <label>Email address<input type="email" aria-label="email" value="member@example.test"
@@ -161,4 +190,68 @@ test("a visible authentication form uses its contracted submit action exactly on
     assert.equal(step.controlEvidence.activation.matchedBy, "machine_identity");
     assert.equal(step.controlEvidence.authentication.authenticated, true);
     assert.equal(step.controlEvidence.authentication.via, "contracted_flow_entry");
+  });
+
+test("dependent journeys start with fresh browser auth state while retaining shared backend identity",
+  { ...needsBrowser, timeout: 120_000 }, async () => {
+    const signIn = {
+      id: "team-primary:0:flow-start", journeyId: "team-primary", stepIndex: 0,
+      kind: "flow_start", writes: ["team-primary.authenticated"], reads: [],
+      control: {
+        purpose: "sign-in form", machineId: "open-sign-in",
+        accessibleName: "sign-in form", accessibleNames: ["sign-in form"],
+        roles: ["button"], flowEntry: true,
+      },
+    };
+    const boardControl = {
+      purpose: "board navigation", machineId: "open-board",
+      accessibleName: "Board navigation", accessibleNames: ["Board navigation"],
+      roles: ["button"],
+    };
+    const primaryBoard = {
+      id: "team-primary:1:action:board", journeyId: "team-primary", stepIndex: 1,
+      kind: "action", writes: ["team-primary.boardVisible"], reads: ["team-primary.authenticated"],
+      observable: "Board page shows To Do, In Progress, Review, and Done columns",
+      control: boardControl,
+    };
+    const dependentBoard = {
+      id: "team-dependent:0:action:board", journeyId: "team-dependent", stepIndex: 0,
+      kind: "action", writes: ["team-dependent.boardVisible"], reads: ["team-primary.authenticated"],
+      observable: "Board page shows To Do, In Progress, Review, and Done columns",
+      control: boardControl,
+    };
+    const result = await verifyJourneys({
+      previewUrl: `${baseUrl}/multi-journey-auth`, timeoutMs: 45_000,
+      verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+      contract: {
+        journeys: [
+          {
+            id: "team-primary", title: "Open the team board", priority: "primary",
+            steps: [
+              { action: "sign in with a team member account", target: "sign-in form",
+                expect: "the Team dashboard shell is visible" },
+              { action: "open the board page", target: "Board navigation",
+                expect: "the Board page shows To Do, In Progress, Review, and Done columns" },
+            ],
+          },
+          {
+            id: "team-dependent", title: "Reopen the team board", priority: "secondary",
+            steps: [{ action: "open the board page", target: "Board navigation",
+              expect: "the Board page shows To Do, In Progress, Review, and Done columns" }],
+          },
+        ],
+        interactionContract: {
+          flows: [signIn, primaryBoard, dependentBoard],
+          scenarios: {
+            "team-primary": { role: "produces", startState: "fresh", lifecycle: "team:workspace" },
+            "team-dependent": { role: "consumes", startState: "inherits", lifecycle: "team:workspace" },
+          },
+        },
+      },
+    });
+
+    assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+    assert.deepEqual(result.journeys.map((journey) => journey.status), ["pass", "pass"]);
+    assert.equal(result.journeys[1].setup?.ok, true);
+    assert.equal(result.journeys[1].setup?.performed?.[0]?.kind, "authentication");
   });
