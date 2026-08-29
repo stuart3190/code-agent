@@ -310,6 +310,62 @@ test("the brief carries the page's own account of the failure, not a summary of 
   assert.ok(row.repairTier, "every row states which allowance answers it");
 });
 
+test("collection repairs retain durable mutation, structural membership, and freshness evidence", () => {
+  const result = verdicts({
+    failAt: 2,
+    step: {
+      status: "fail",
+      drove: true,
+      detail: "the action ran, but the catalogue collection did not show the saved software entry",
+      controlEvidence: {
+        collectionMembership: {
+          ok: false,
+          checked: true,
+          regionFound: true,
+          structuralMemberCount: 0,
+          missing: ["software entry Atlas Editor"],
+          unexpected: [],
+        },
+      },
+    },
+  });
+  result.journeys[0].steps[1].advisories = [{
+    code: "text_freshness_not_observed",
+    detail: "the contracted result was already visible",
+  }];
+  result.journeys[0].backendEvidence = {
+    changed: true,
+    entityDiff: { created: ["row-1"], changed: [], deleted: [] },
+  };
+
+  const [defect] = defectsFrom(result).filter((row) => row.journeyId === "booking");
+  assert.deepEqual(defect.evidence.collectionMembership, {
+    ok: false,
+    checked: true,
+    regionFound: true,
+    structuralMemberCount: 0,
+    missing: ["software entry Atlas Editor"],
+    unexpected: [],
+  });
+  assert.deepEqual(defect.evidence.entityDiff,
+    { created: ["row-1"], changed: [], deleted: [] });
+  assert.deepEqual(defect.evidence.journeyAdvisories, [{
+    stepIndex: 1,
+    code: "text_freshness_not_observed",
+    detail: "the contracted result was already visible",
+  }]);
+
+  const lines = defectEvidence([defect]);
+  assert.ok(lines.some((line) => /structuralMemberCount=0/.test(line)));
+  assert.ok(lines.some((line) => /Backend evidence recorded 1 created row/.test(line)));
+  assert.ok(lines.some((line) => /dependent step from racing an unfinished async transition/.test(line)));
+  const structured = lines.map((line) => { try { return JSON.parse(line); } catch { return null; } })
+    .find(Boolean);
+  assert.deepEqual(structured.collectionMembership, defect.evidence.collectionMembership);
+  assert.deepEqual(structured.backendEntityDiff, defect.evidence.entityDiff);
+  assert.deepEqual(structured.journeyAdvisories, defect.evidence.journeyAdvisories);
+});
+
 test("a selected-state repair receives the exact software option the browser operated", () => {
   const lines = defectEvidence(defectsFrom(verdicts({
     failAt: 1,

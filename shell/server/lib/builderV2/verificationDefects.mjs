@@ -348,6 +348,21 @@ export function verificationDefects({
         expected: diagnostic.expectedStateAfter || null,
         observed: diagnostic.actualObservedState || null,
         drove: step?.drove ?? null,
+        // Collection verification already distinguishes "the action did not run" from "the
+        // durable row exists but the mounted collection still renders no matching member". Keep
+        // that distinction through repair dispatch; dropping it made repeated rounds rewrite a
+        // working mutation while leaving the actual state/filter/render seam untouched.
+        collectionMembership: step?.controlEvidence?.collectionMembership || null,
+        // A dependent step can race an unfinished async action when the prior step's expected text
+        // was already on screen. The browser records that as an advisory. Carry the bounded causal
+        // history so repair can remove the pre-existing outcome or publish/await the real state
+        // transition instead of treating the downstream symptom as an isolated render failure.
+        journeyAdvisories: (journey?.steps || []).slice(0, diagnostic.stepIndex + 1)
+          .flatMap((candidate, index) => (candidate?.advisories || []).map((advisory) => ({
+            stepIndex: index,
+            code: advisory?.code || null,
+            detail: advisory?.detail || null,
+          }))),
         // Preserve the exact option the browser operated. A selected-state failure without this
         // value only tells repair to add styling; it hides cross-module domain mismatches where a
         // handler receives a real option id but an adapter returns an empty/foreign state value.
@@ -377,7 +392,7 @@ export function verificationDefects({
           : null,
         entityBefore: journey?.backendEvidence?.before || null,
         entityAfter: journey?.backendEvidence?.after || null,
-        entityDiff: journey?.backendEvidence?.diff || null,
+        entityDiff: journey?.backendEvidence?.entityDiff || journey?.backendEvidence?.diff || null,
         surfaceIntegration,
       },
       diagnostic,
@@ -502,6 +517,20 @@ export function defectEvidence(defects = []) {
         + "lands in state and renders back: value + onChange writing through the setter, the capability "
         + "field binding, or an uncontrolled input with defaultValue.");
     }
+    if (defect.evidence?.collectionMembership?.checked) {
+      const membership = defect.evidence.collectionMembership;
+      const created = defect.evidence?.entityDiff?.created || [];
+      lines.push(`the browser checked the rendered collection after activation: regionFound=${membership.regionFound === true}, `
+        + `structuralMemberCount=${Number(membership.structuralMemberCount || 0)}, `
+        + `missing=${JSON.stringify(membership.missing || [])}, unexpected=${JSON.stringify(membership.unexpected || [])}. `
+        + (created.length
+          ? `Backend evidence recorded ${created.length} created row(s), so repair the mounted state/filter/render handoff rather than duplicating the mutation.`
+          : "Repair the action-to-mounted-collection state transition."));
+    }
+    if ((defect.evidence?.journeyAdvisories || [])
+      .some((advisory) => advisory.code === "text_freshness_not_observed")) {
+      lines.push("an earlier contracted result was already visible before its action completed. Prevent the dependent step from racing an unfinished async transition: do not pre-render the post-action outcome, or publish/await the completed state before dependent controls can run.");
+    }
     if (defect.evidence?.surfaceIntegration) {
       const surface = defect.evidence.surfaceIntegration;
       lines.push(`journey ${defect.journeyId} has generated source that is not reachable from its `
@@ -538,6 +567,9 @@ export function defectEvidence(defects = []) {
       controlAddressing: defect.evidence?.addressing || null,
       mechanics: defect.evidence?.mechanics || null,
       selectionAttempt: defect.evidence?.selectionAttempt || null,
+      collectionMembership: defect.evidence?.collectionMembership || null,
+      journeyAdvisories: defect.evidence?.journeyAdvisories || [],
+      backendEntityDiff: defect.evidence?.entityDiff || null,
       drove: defect.evidence?.drove ?? null,
       pageTextWhenItFailed: defect.evidence?.pageText || null,
       consoleErrorsDuringStep: defect.evidence?.consoleErrors || [],
@@ -668,6 +700,8 @@ export function verificationDefectRecord(defect, {
     entityBefore: defect.evidence?.entityBefore || null,
     entityAfter: defect.evidence?.entityAfter || null,
     entityDiff: defect.evidence?.entityDiff || null,
+    collectionMembership: defect.evidence?.collectionMembership || null,
+    journeyAdvisories: defect.evidence?.journeyAdvisories || [],
     failureRefs: unique(defect.failureRefs || defect.modules || []),
     owningModules: unique(defect.modules || []),
     dependencyOwners: unique(dependencyOwners),
