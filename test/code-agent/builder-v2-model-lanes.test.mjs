@@ -314,6 +314,31 @@ test("whole-core retry keeps every missing planned module queued after prioritis
     "resetting a whole-core attempt cannot silently drop clean modules that now need regeneration");
 });
 
+test("whole-core retry keeps existing scaffold placeholders queued after prioritising the named failure", () => {
+  const extension = "src/extensions/custom/catalogue.js";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const screenStub = "export default function SoftwareCatalogueScreen(){return "
+    + "<section data-scaffold-slot=\"software-catalogue\"><p>"
+    + "Application screen ready for composition.</p></section>}";
+  const scope = headroomDispatchScope({
+    tree: {
+      "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};",
+      [screen]: screenStub,
+    },
+    modulePlan: [
+      { path: extension, role: "bounded custom catalogue extension" },
+      { path: screen, role: "mounted catalogue screen", providedBy: "scaffold_screen_slot" },
+    ],
+    moduleContracts: { version: 1, specifications: [] },
+    problems: [`${extension} has a named compile finding`],
+    logicalStep: "core",
+  });
+  assert.equal(scope.allowedFiles[0], extension, "the causal module remains first");
+  assert.deepEqual(new Set([...scope.allowedFiles, ...scope.remainingFiles]),
+    new Set([extension, screen]),
+    "resetting to the foundation cannot silently drop mounted screen placeholders");
+});
+
 test("a retained complex application continuation carries only the selected module's semantic journey", () => {
   const fixture = JSON.parse(readFileSync(new URL(
     "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,

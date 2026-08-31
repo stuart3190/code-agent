@@ -1119,6 +1119,13 @@ export function headroomDispatchScope({
   const evidence = evidencePaths([...(problems || []), ...(rejections || [])]);
   const planned = (modulePlan || []).map((module) => module.path).filter((path) => GENERATED_SOURCE.test(path));
   const missing = planned.filter((path) => typeof tree?.[path] !== "string");
+  const unfinished = planned.filter((path) => {
+    if (typeof tree?.[path] !== "string") return true;
+    const module = (modulePlan || []).find((candidate) => candidate.path === path);
+    return module?.providedBy === "scaffold_screen_slot"
+      && /data-scaffold-slot=/.test(String(tree[path]))
+      && String(tree[path]).includes("Application screen ready for composition.");
+  });
   const semantic = semanticFiles.filter((path) => GENERATED_SOURCE.test(path)
     && (planned.includes(path) || typeof tree?.[path] === "string"));
   const targeted = [...new Set([
@@ -1133,7 +1140,7 @@ export function headroomDispatchScope({
   // retained build's headroom. Planned modules remain the fallback for unscoped generation.
   const unscopedGeneration = !active && !["repair", "correction"].includes(logicalStep);
   const candidates = targeted.length
-    ? [...new Set([...targeted, ...(unscopedGeneration ? missing : [])])]
+    ? [...new Set([...targeted, ...(unscopedGeneration ? unfinished : [])])]
     : [...new Set([
       ...missing,
       ...planned,
