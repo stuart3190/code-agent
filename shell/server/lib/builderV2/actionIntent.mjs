@@ -42,6 +42,7 @@ export const ACTION_INTENT = Object.freeze({
   LOOKUP: "lookup",       // locates an existing durable record
   NAVIGATE: "navigate",   // moves between surfaces
   ACTIVATE: "activate",   // presses a control whose semantics the prose does not name
+  AUTHENTICATE: "authenticate", // submits an account/session sign-in control
 });
 
 // Inflection, generically. A stem covers its own inflected forms rather than being listed twice:
@@ -104,6 +105,8 @@ const FAMILIES = [
   { intent: ACTION_INTENT.START, stems: ["start", "begin", "open", "launch", "create", "initiate", "commence", "enter"] },
   { intent: ACTION_INTENT.NAVIGATE, stems: ["open", "navigate", "visit"], phrases: ["go to"] },
   { intent: ACTION_INTENT.ACTIVATE, stems: ["click", "press", "tap", "use", "next", "back", "continue"] },
+  { intent: ACTION_INTENT.AUTHENTICATE, stems: [],
+    phrases: ["(?:sign|log)(?:s|ed|ing)?\\s?in"] },
 ].map((family) => ({
   ...family,
   // A clause may name its act with a nominal ("confirmation of the order"); a control's name may

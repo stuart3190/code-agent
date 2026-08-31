@@ -376,6 +376,27 @@ test("a routed combined auth step retains its explicitly declared input controls
   assert.ok(action.reads.includes("primary-flow.draft.authPassword"));
 });
 
+test("a combined sign-in step without a declared auth operation still has a canonical submit action", () => {
+  const spec = deriveBuildSpec(makeContract({
+    entity: "accountView", fields: ["authEmail", "authPassword"], operations: [],
+    steps: [{
+      action: "sign in with a platform team account", target: null,
+      operates: ["authEmail", "authPassword"], primitive: "textbox",
+      expect: "the workspace is visible",
+    }],
+  }));
+
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const stepFlows = spec.interactionContract.flows
+    .filter((flow) => flow.journeyId === "primary-flow" && flow.stepIndex === 0);
+  assert.deepEqual(stepFlows.filter((flow) => flow.kind === "input")
+    .map((flow) => flow.control.logicalField), ["authEmail", "authPassword"]);
+  const submit = stepFlows.find((flow) => flow.kind === "action");
+  assert.ok(submit, "sign-in submission must not fall through to an untyped keyword click");
+  assert.equal(submit.control.machineId, actionIdFor("sign-in"));
+  assert.deepEqual(submit.control.roles, ["button"]);
+});
+
 test("registered functional capability produces a capability-backed interaction contract", () => {
   const spec = deriveBuildSpec(makeContract({
     entity: "booking", fields: ["date", "slotId", "name", "email", "reference", "status"],

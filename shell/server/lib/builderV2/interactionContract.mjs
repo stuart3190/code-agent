@@ -333,6 +333,7 @@ function actionKinds(step, context = {}) {
   if (intents.has(ACTION_INTENT.CONFIRM)) kinds.push("mutation");
   if (intents.has(ACTION_INTENT.RECOVER)) kinds.push("recovery");
   if (intents.has(ACTION_INTENT.LOOKUP)) kinds.push("lookup");
+  if (intents.has(ACTION_INTENT.AUTHENTICATE)) kinds.push("action");
   // A cancellation is its own durable transition. It rides ALONGSIDE the commit rather than
   // replacing it: "confirm cancellation" both presses a commit control and cancels the record,
   // and dropping either half loses a real contracted fact.
@@ -501,11 +502,13 @@ function controlRequirement(kind, field, step, declaredField = null, operationId
       machineId: ADVANCE_ACTION_ID, accessibleName: named, accessibleNames: [named] };
   }
   if (["mutation", "cancellation", "lookup", "action"].includes(kind)) {
+    const actionIdentity = kind === "action" && actionIntents(step).has(ACTION_INTENT.AUTHENTICATE)
+      ? "sign-in" : String(operationId || step?.target || step?.action || name);
     return { purpose: name, roles: ["button"],
       // A declared operation is one semantic action even when several journeys exercise it.
       // Deriving this identity from each journey's prose gave the same mounted control a different
       // id in every flow, so a later increment replaced the identity an earlier journey required.
-      machineId: actionIdFor(String(operationId || step?.target || step?.action || name)),
+      machineId: actionIdFor(actionIdentity),
       accessibleName: String(step?.target || step?.action || name) };
   }
   return null;
