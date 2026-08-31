@@ -79,9 +79,18 @@ function routeTransitionsForJourney(contract, journey) {
   for (const [stepIndex, step] of (journey?.steps || []).entries()) {
     const target = String(step?.target || "").trim();
     const explicit = target.startsWith("/") ? target.split(/[?#]/)[0] || "/" : null;
+    // A semantic control/region target is not a route transition. The browser stays on the
+    // current page unless the contract names a route or the step is a pure navigation step. A
+    // live qualification was otherwise planned as if an edit form had teleported to a different
+    // screen, so generation and every repair correctly wrote an off-screen controller that the
+    // sequential browser journey could never reach.
+    const semanticNavigation = stepIndex === 0 || (!(step?.operates || []).length
+      && /\b(?:open|visit|navigate|go|return|reload|refresh)\b/i.test(String(step?.action || "")));
     const routePath = explicit && routes.some((route) => route.path === explicit)
       ? explicit
-      : semanticRoute(routes, `${step?.action || ""} ${target} ${step?.expect || ""}`)?.path || null;
+      : semanticNavigation
+        ? semanticRoute(routes, `${step?.action || ""} ${target} ${step?.expect || ""}`)?.path || null
+        : null;
     if (routePath && transitions.at(-1)?.routePath !== routePath) transitions.push({ routePath, stepIndex });
   }
   if (!transitions.length) return [{ routePath: routeForJourney(contract, journey), stepIndex: 0 }];

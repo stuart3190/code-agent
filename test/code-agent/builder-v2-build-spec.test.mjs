@@ -213,6 +213,54 @@ test("a journey crossing mounted routes binds each step and repair to the active
   assert.equal(routedRepair.targetFiles[0], screens.get("/records/new").path);
 });
 
+test("semantic control targets do not invent a mounted-route transition", () => {
+  const contract = {
+    summary: "A software catalogue with separate entry and catalogue screens",
+    entities: [{ name: "catalogueItem", fields: [
+      { name: "title" }, { name: "category" }, { name: "itemState" },
+    ] }],
+    operations: [
+      { id: "create-catalogue-item", entity: "catalogueItem", kind: "create", journey: "manage-catalogue-item" },
+      { id: "update-catalogue-item", entity: "catalogueItem", kind: "update", journey: "manage-catalogue-item" },
+    ],
+    routes: [
+      { path: "/", name: "Home" },
+      { path: "/catalogue/new", name: "New Entry" },
+      { path: "/catalogue", name: "Catalogue" },
+    ],
+    auth: { required: false },
+    journeys: [{ id: "manage-catalogue-item", title: "Create and update a catalogue item",
+      priority: "primary", steps: [
+        { action: "open the application", target: "/", expect: "the home screen is visible" },
+        { action: "create a catalogue item", target: "/catalogue/new",
+          operates: ["title", "create-catalogue-item"], expect: "the new item is visible" },
+        { action: "assign a category and change item state", target: "catalogue item edit controls",
+          operates: ["category", "itemState", "update-catalogue-item"], primitive: "selection",
+          expect: "the item shows the selected category and state" },
+        { action: "reload the catalogue", target: "/catalogue",
+          expect: "the updated item remains visible" },
+      ] }],
+  };
+  const spec = deriveBuildSpec(contract);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  assert.deepEqual(spec.scaffoldGraph.journeyRouteOwnership.map(({ routePath, stepIndex }) => (
+    { routePath, stepIndex }
+  )), [
+    { routePath: "/", stepIndex: 0 },
+    { routePath: "/catalogue/new", stepIndex: 1 },
+    { routePath: "/catalogue", stepIndex: 3 },
+  ]);
+
+  const screens = new Map(spec.modulePlan.filter((module) => module.providedBy === "scaffold_screen_slot")
+    .map((module) => [module.routePath, module.path]));
+  const updateFlows = spec.interactionContract.flows.filter((flow) => flow.stepIndex === 2);
+  assert.ok(updateFlows.length, "the update step must retain its contracted controls");
+  assert.ok(updateFlows.every((flow) => flow.responsibleModules.includes(screens.get("/catalogue/new"))),
+    "the update controls must remain on the browser's current mounted screen");
+  assert.equal(updateFlows.some((flow) => flow.responsibleModules.includes(screens.get("/catalogue"))), false,
+    "the later catalogue route must not own controls before its explicit transition");
+});
+
 test("semantic route steps bind account prerequisites to the mounted sign-in screen", () => {
   const contract = {
     summary: "A software workspace with account access and a separate catalogue screen",
