@@ -755,8 +755,19 @@ export function renderPatchPrompt({
       ...(specification.semanticInteractions || []).map((interaction) => interaction.interactionId),
       ...(specification.downstream?.consumers || []),
     ]).filter(Boolean));
-  const promptInteractionFlows = headroomScope && headroomInteractionIds.size
-    ? repairFlows.filter((flow) => headroomInteractionIds.has(flow.id))
+  const headroomOwnedInteractionFlows = headroomScope && activeScopePaths.length
+    ? repairFlows.filter((flow) => [
+      flow.stateOwner,
+      flow.control?.stateOwner,
+      flow.customBehaviorModule,
+      ...(flow.responsibleModules || []),
+    ].some((path) => activeScopePaths.includes(path)))
+    : [];
+  const promptInteractionFlows = headroomScope
+    ? headroomInteractionIds.size || headroomOwnedInteractionFlows.length
+      ? repairFlows.filter((flow) => headroomInteractionIds.has(flow.id)
+        || headroomOwnedInteractionFlows.includes(flow))
+      : repairFlows
     : repairFlows;
   const repairInteractionPlan = browserRepair || headroomScope ? {
     version: scopedInteractions.version,

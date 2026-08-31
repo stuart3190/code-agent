@@ -387,6 +387,49 @@ test("a retained complex application continuation carries only the selected modu
     `the bounded semantic envelope is still too large: ${plan.estimatedInputTokens}`);
 });
 
+test("a custom-extension headroom continuation scopes interactions by its owning module", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const selectedModule = spec.modulePlan.find((module) => (
+    module.path === "src/extensions/custom/create-auto-layout-project.js"
+  ));
+  assert.ok(selectedModule);
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [selectedModule.path], allowedFiles: [selectedModule.path] },
+    logicalStep: "core",
+  });
+  assert.equal(scope.moduleContracts.specifications[0].semanticInteractions.length, 0,
+    "the regression requires an extension contract without direct control interactions");
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    scaffoldGraph: spec.scaffoldGraph, scaffoldPlan: spec.scaffoldCompositionPlan,
+    headroomScope: scope,
+  });
+  const interactionSection = prompt.slice(prompt.indexOf("INTERACTION CONTRACT"),
+    prompt.indexOf("INTERNAL HEADROOM-SCOPED WRITE BOUNDARY"));
+  assert.match(interactionSection, /create-auto-layout-project:7:action/);
+  assert.doesNotMatch(interactionSection, /task-and-exclusion-zones:4:operation:autolayoutproject/,
+    "unrelated application interactions are not resent when direct control ids are absent");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.equal(plan.maxOutputTokens, plan.outputEnvelope.plannedOutputTokens);
+  assert.ok(plan.maxOutputTokens >= 1_450);
+});
+
 test("a missing shared controller keeps its useful output allowance without duplicated graph semantics", () => {
   const fixture = JSON.parse(readFileSync(new URL(
     "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
