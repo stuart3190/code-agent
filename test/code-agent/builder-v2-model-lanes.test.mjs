@@ -882,6 +882,8 @@ test("custom-extension correction receives every call site in one whole-file dis
         operation: "filter-catalogue", missingInputs: ["catalogue.draft.searchQuery", "catalogue.input.categoryFilter"] },
       { code: "custom_extension_invalid", exportName: "runClearCatalogue",
         operation: "clear-catalogue", missingInputs: ["catalogue.input.visibleItemIds"] },
+      { code: "custom_extension_invalid", exportName: "runBrowseCatalogue", operation: null,
+        allowedOperations: ["filter-catalogue", "inspect-catalogue"] },
     ],
     instruction: "Pass every named extension input explicitly at its direct call site.",
     expectedPatchTokens: 6_000,
@@ -897,6 +899,9 @@ test("custom-extension correction receives every call site in one whole-file dis
   assert.match(prompt, /searchQuery/);
   assert.match(prompt, /visibleItemIds/);
   assert.match(prompt, /Repair ALL listed operations/);
+  assert.match(prompt, /literal context\.operation or context\.operationId/);
+  assert.match(prompt, /variable shorthand such as \{ operation \}/);
+  assert.match(prompt, /inspect-catalogue/);
   assert.match(prompt, /VALIDATOR-NAMED MODULES IN FULL/);
   assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT:/);
   assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 20_000);

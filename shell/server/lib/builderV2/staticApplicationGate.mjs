@@ -552,6 +552,9 @@ export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, j
             findings.push({
               code: "custom_extension_invalid", file, extensionId: target.extension.extensionId,
               exportName: target.exportName, operation: operation || null,
+              allowedOperations: unique((target.extension.operationContracts || []).flatMap((contract) => (
+                (contract.selectors || []).length ? contract.selectors : [contract.operationId]
+              )).filter(Boolean)),
               journeyIds: target.extension.owningJourneys || [],
               message: !inputObject
                 ? `${file} must call ${target.exportName} with an explicit inspectable input object`

@@ -205,7 +205,7 @@ export function targetedGateCorrection(gate, tree, contract = null, modulePlan =
   let files = [...new Set(findings.map((finding) => finding?.file).filter((file) => /^src\//.test(file)))];
   const unreachable = findings.filter((finding) => finding?.code === "journey_surface_unreachable");
   const extensionInterfaces = findings.filter((finding) => finding?.code === "custom_extension_invalid"
-    && ((finding?.missingInputs || []).length || finding?.operation));
+    && ((finding?.missingInputs || []).length || finding?.operation || (finding?.allowedOperations || []).length));
   const plannedImporters = (target) => (modulePlan || []).filter((module) => (
     (module.requiredImports || []).some((specifier) => (
       path.posix.normalize(path.posix.join(path.posix.dirname(module.path), specifier)) === target
@@ -265,7 +265,7 @@ export function targetedGateCorrection(gate, tree, contract = null, modulePlan =
         ? "Integrate the named module from its planned live importer and use its declared export in the live interaction; editing or re-exporting the unreachable module alone cannot make progress. "
         : "")
       + (extensionInterfaces.length
-        ? "At the named custom-extension call site, pass every missing contract input as an explicit object property using its declared semantic key; an object spread or generic id alias is not sufficient. "
+        ? "At the named custom-extension call site, pass every missing contract input as an explicit object property using its declared semantic key; an object spread or generic id alias is not sufficient. Replace any variable or computed operation selector with an allowed literal context.operation or context.operationId at each direct operation branch. "
         : "")
       + "Do not regenerate the application or change unrelated working modules.",
   };
