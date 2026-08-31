@@ -17,6 +17,7 @@ import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngin
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { moduleCorrectionScope } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { structuredBuildFailure } from "../../shell/server/lib/builderV2/buildFailure.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
@@ -327,22 +328,25 @@ test("module correction focuses the exact conflicting control and requires direc
     ],
   }] };
   const finding = {
-    code: "contract_control_binding_conflict", module: screen, interactionId: target, control: "title",
+    code: "contract_control_binding_conflict", module: screen, file: screen, line: 1,
+    elements: [{ file: screen, line: 1, element: "<input>" }], interactionId: target, control: "title",
     requiredBinding: { helper: "useSemanticField", name: "title", spread: "inputProps", machineId: "ctl_title" },
   };
+  const correctionScope = moduleCorrectionScope({
+    correction: { modules: [screen] }, blocking: [finding],
+  }, moduleContracts);
   const prompt = renderPatchPrompt({
     step: "correction", contract: { journeys: [], interactionContract: { flows: [] } }, tiers: {},
     tree: { [screen]: "export default function SoftwareCatalogueScreen(){return <input aria-label=\"Title\"/>}" },
     modulePlan: [{ path: screen, role: "mounted catalogue screen" }], moduleContracts,
-    moduleCorrectionScope: {
-      kind: "module_contract", files: [screen], allowedFiles: [screen], findings: [finding],
-      moduleContracts, instruction: "Attach every required binding directly to its mounted control; unused props variables are incomplete.",
-    },
+    moduleCorrectionScope: correctionScope,
   });
   assert.match(prompt, /inspect-catalogue:2:input:title/);
   assert.doesNotMatch(prompt, /filter-catalogue:1:input:category/,
     "an exact binding correction must not be diluted by unrelated controls in the shared screen");
-  assert.match(prompt, /unused props variables are incomplete/);
+  assert.match(prompt, /modify the exact existing element named by finding\.file\/finding\.line/);
+  assert.match(prompt, /Do not add a parallel bound copy/);
+  assert.match(prompt, /unused props variable is incomplete|unused props variables is incomplete|unused props variable|unused props variables/);
 });
 
 test("whole-core retry keeps existing scaffold placeholders queued after prioritising the named failure", () => {
