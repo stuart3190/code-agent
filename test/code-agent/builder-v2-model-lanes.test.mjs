@@ -314,6 +314,37 @@ test("whole-core retry keeps every missing planned module queued after prioritis
     "resetting a whole-core attempt cannot silently drop clean modules that now need regeneration");
 });
 
+test("module correction focuses the exact conflicting control and requires direct mounted binding", () => {
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const target = "inspect-catalogue:2:input:title";
+  const unrelated = "filter-catalogue:1:input:category";
+  const moduleContracts = { version: 1, specifications: [{
+    path: screen, role: "mounted catalogue screen", ownedJourneys: ["inspect-catalogue", "filter-catalogue"],
+    requiredCapabilities: [], requiredImports: [], requiredExports: ["default"], moduleSizeBoundary: 5_500,
+    semanticInteractions: [
+      { interactionId: target, journeyId: "inspect-catalogue", logicalField: "title", accessibleNames: ["Title"] },
+      { interactionId: unrelated, journeyId: "filter-catalogue", logicalField: "category", accessibleNames: ["Category"] },
+    ],
+  }] };
+  const finding = {
+    code: "contract_control_binding_conflict", module: screen, interactionId: target, control: "title",
+    requiredBinding: { helper: "useSemanticField", name: "title", spread: "inputProps", machineId: "ctl_title" },
+  };
+  const prompt = renderPatchPrompt({
+    step: "correction", contract: { journeys: [], interactionContract: { flows: [] } }, tiers: {},
+    tree: { [screen]: "export default function SoftwareCatalogueScreen(){return <input aria-label=\"Title\"/>}" },
+    modulePlan: [{ path: screen, role: "mounted catalogue screen" }], moduleContracts,
+    moduleCorrectionScope: {
+      kind: "module_contract", files: [screen], allowedFiles: [screen], findings: [finding],
+      moduleContracts, instruction: "Attach every required binding directly to its mounted control; unused props variables are incomplete.",
+    },
+  });
+  assert.match(prompt, /inspect-catalogue:2:input:title/);
+  assert.doesNotMatch(prompt, /filter-catalogue:1:input:category/,
+    "an exact binding correction must not be diluted by unrelated controls in the shared screen");
+  assert.match(prompt, /unused props variables are incomplete/);
+});
+
 test("whole-core retry keeps existing scaffold placeholders queued after prioritising the named failure", () => {
   const extension = "src/extensions/custom/catalogue.js";
   const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";

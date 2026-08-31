@@ -813,6 +813,10 @@ export function renderPatchPrompt({
     flow.id,
     flow.control?.logicalField,
     ...(flow.control?.accessibleNames || []),
+  ]).filter(Boolean))] : moduleCorrectionScope ? [...new Set((moduleCorrectionScope.findings || []).flatMap((finding) => [
+    finding.interactionId,
+    finding.control,
+    finding.requiredBinding?.name,
   ]).filter(Boolean))] : [];
   const compactPersistencePlan = browserRepair || activeScopePaths.length ? {
     durableJourneys: persistencePlan?.durableJourneys || [],

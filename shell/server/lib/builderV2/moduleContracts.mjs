@@ -700,6 +700,6 @@ export function moduleCorrectionScope(report, moduleContracts) {
     capabilityPaths,
     findings: blocking,
     moduleContracts: { version: moduleContracts?.version || 1, specifications: selected },
-    instruction: "Correct only the validator-named modules so they satisfy their per-module generation contracts. Preserve every conforming module, the module plan, and visual design; do not regenerate the application. For control-binding findings, apply the finding's requiredBinding helper/attribute and exact machineId on the mounted control; data-journey-control is not a verifier identity.",
+    instruction: "Correct only the validator-named modules so they satisfy their per-module generation contracts. Preserve every conforming module, the module plan, and visual design; do not regenerate the application. For every control-binding finding, attach the finding's requiredBinding directly to each named mounted control in this same response (including its inputProps spread or exact attribute and machineId); merely importing/calling the helper or declaring an unused props variable is incomplete. data-journey-control is not a verifier identity.",
   };
 }
