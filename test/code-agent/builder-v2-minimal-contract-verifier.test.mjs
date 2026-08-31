@@ -951,6 +951,17 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(actionableDefects(defects)[0].defectClass, "interaction");
     });
 
+    await t.test("typed semantic navigation opens the matching result-card route", async () => {
+      const result = await run(`<main><h1>Projects</h1>
+        <article><h2>Atlas Workspace</h2><a href="/projects/atlas/board">Open Atlas Workspace board</a></article>
+        <p>Board columns are Backlog, In Progress, Review, and Done.</p></main>`,
+      { action: "open the new project's board", target: "project card",
+        expect: "the workspace board destination is ready" },
+      [{ kind: "navigation", target: null }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.match(result.journeys[0].steps[0].detail, /navigation changed route/i);
+    });
+
     await t.test("a required selection absent from a healthy active surface is app-repairable", async () => {
       const category = {
         ...control("categoryId", "software-category", ["group"]),

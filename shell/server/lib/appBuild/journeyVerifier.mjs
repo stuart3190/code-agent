@@ -2909,6 +2909,23 @@ async function runStep(page, step, {
     routeNavigated = true;
   }
 
+  // A typed navigation can name a semantic surface instead of a literal route (for example,
+  // opening the newly-created record from its result card). The interaction contract has already
+  // established that this step is navigation, so use the step's own vocabulary to select one
+  // visible action. Keeping this gated on the typed flow avoids reviving the old untyped "open"
+  // heuristic that could click an unrelated form action merely because its label shared a noun.
+  if (!route && interactionFlows.some((flow) => flow.kind === "navigation")) {
+    const navigationControl = await bestVisibleAction(page, `${step.target || ""} ${action}`, deadline);
+    if (navigationControl) {
+      try {
+        await navigationControl.click({ timeout: 5_000 });
+        await waitForActiveSurface(page);
+        drove = true;
+        routeNavigated = true;
+      } catch {}
+    }
+  }
+
   // A RECOVERY step means "this survives coming back to it", so the reload is the step, whatever
   // words the contract used for it. Prose still answers for contracts that typed nothing.
   // A planner may attach recovery metadata to the same step that first opens an account or
