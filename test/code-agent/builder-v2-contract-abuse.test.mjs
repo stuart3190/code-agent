@@ -315,6 +315,28 @@ test("same-step durable setup fills contracted inputs before it commits", async 
   }).controls.map((flow) => flow.control.logicalField), ["Create account", "prompt", "Generate"]);
 });
 
+test("an authenticated secondary replays only the primary authentication contract", async () => {
+  const { journeyPrerequisites } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  const control = (name) => ({ logicalField: name, accessibleName: name });
+  const flows = [
+    { id: "route", journeyId: "primary", stepIndex: 0, kind: "navigation", target: "/sign-in" },
+    { id: "email", journeyId: "primary", stepIndex: 1, kind: "input", control: control("email") },
+    { id: "password", journeyId: "primary", stepIndex: 1, kind: "input", control: control("password") },
+    { id: "sign-in", journeyId: "primary", stepIndex: 1, kind: "mutation",
+      action: "sign in", control: control("sign-in form"), durableLifecycle: "crud:account" },
+    { id: "catalogue-title", journeyId: "primary", stepIndex: 2, kind: "input",
+      control: control("catalogue title") },
+    { id: "save-catalogue", journeyId: "primary", stepIndex: 2, kind: "mutation",
+      control: control("save catalogue"), durableLifecycle: "crud:catalogue" },
+    { id: "tools", journeyId: "secondary", stepIndex: 0, kind: "flow_start",
+      control: control("tools menu") },
+  ];
+  assert.deepEqual(journeyPrerequisites(flows, "secondary", "primary", {
+    reconstructIsolated: true, primaryProducesDurableRecord: false,
+    requiresAuthenticatedStart: true,
+  }).controls.map((flow) => flow.id), ["route", "email", "password", "sign-in"]);
+});
+
 test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {
   const verdict = validation.validateContract(withJourneys([], [
     { id: "create-booking", entity: "booking", kind: "create", journey: "book" },

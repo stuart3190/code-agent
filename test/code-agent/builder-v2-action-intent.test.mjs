@@ -289,6 +289,16 @@ test("derivation — an inflected flow entry derives flow_start, not a mutation"
   assert.equal(kinds.includes("0:mutation"), false, `no commit for a flow entry: ${kinds.join(", ")}`);
 });
 
+test("a later explicit primitive makes an earlier menu opener a flow entry", () => {
+  const kinds = kindsOf([
+    { action: "open the catalogue tools", target: "tools menu", expect: "catalogue tools are visible" },
+    { action: "change the software status", target: "status selector", operates: ["status"],
+      primitive: "selection", expect: "the chosen status is visible" },
+  ]);
+  assert.ok(kinds.includes("0:flow_start"), kinds.join(", "));
+  assert.equal(kinds.includes("0:navigation"), false, kinds.join(", "));
+});
+
 test("derivation — an inflected transition derives flow_advance", () => {
   const kinds = kindsOf([
     { action: "advancing to the details step", target: "booking wizard", expect: "the details field is visible" },

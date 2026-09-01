@@ -4149,7 +4149,7 @@ export function expectationOutcome({
 /** @returns {{controls: object[], requiresDurableRecord: boolean}} */
 export function journeyPrerequisites(flows, journeyId, primaryId, {
   requiresPrimaryRecord = false, reconstructIsolated = false,
-  primaryProducesDurableRecord = null,
+  primaryProducesDurableRecord = null, requiresAuthenticatedStart = false,
 } = {}) {
   const routeTarget = (flow) => flow?.kind === "navigation"
     && /^\/[\w/-]*$/.test(String(flow?.target || "").trim())
@@ -4175,6 +4175,19 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   }
 
   const chain = ordered(primaryId);
+  // Some isolated secondary journeys explicitly begin in an authenticated state. Reconstruct
+  // only the primary's contracted authentication step, not the unrelated durable work that comes
+  // after it. This is derived from the primary's machine contract: route, credential inputs, then
+  // the first controlled authentication action/mutation.
+  if (requiresAuthenticatedStart) {
+    const authCommit = chain.findIndex((flow) => flow.stepIndex >= 0 && flow.control
+      && ["flow_start", "mutation", "action"].includes(flow.kind)
+      && isAuthenticationFlow(flow, { action: flow.action }));
+    if (authCommit >= 0) {
+      return { controls: chain.slice(0, authCommit + 1).filter((flow) => flow.stepIndex >= 0),
+        requiresDurableRecord: false };
+    }
+  }
   // Entering the flow at all — "start booking control" and friends. Every journey that drives a
   // contracted control inside the flow needs these, including one whose own first control is the
   // very first selection.
@@ -4939,6 +4952,9 @@ export async function verifyJourneys({
       const describedExistingRecord = /\b(existing|saved|previous|history|generated asset)\b/i.test(String(
         `${journey.steps?.[0]?.action || ""} ${journey.steps?.[0]?.target || ""}`,
       ));
+      const requiresAuthenticatedStart = isolatedJourneyContract
+        && /\b(?:while|when|as)\s+(?:already\s+)?signed[ -]?in\b|\bauthenticated (?:user|account|session)\b/i
+          .test(String(`${journey.steps?.[0]?.action || ""} ${journey.steps?.[0]?.target || ""}`));
       const requiresPrimaryRecord = isolatedJourneyContract && Boolean(
         primaryProducesDurableRecord === true
           || (primaryProducesDurableRecord == null && describedExistingRecord),
@@ -4949,7 +4965,7 @@ export async function verifyJourneys({
         ? { controls: [], requiresDurableRecord: false }
         : journeyPrerequisites(allFlows, journey.id, primaryId, {
           requiresPrimaryRecord, reconstructIsolated: isolatedJourneyContract,
-          primaryProducesDurableRecord,
+          primaryProducesDurableRecord, requiresAuthenticatedStart,
         });
       let setup = null;
       if (prerequisites.controls.length) {

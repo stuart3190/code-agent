@@ -551,7 +551,12 @@ export function buildInteractionContract(contract, {
     const stepsList = journey.steps || [];
     const drivesControls = (from) => stepsList.slice(from).some((later) => {
       const intents = actionIntents(later);
-      return intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
+      // A contract primitive is stronger than prose. "Change a role" and "set a status" may
+      // contain no chooser verb, but an explicit selection/textbox primitive still proves that
+      // the earlier commencement action opens a real multi-step flow.
+      const primitive = String(later?.primitive || "").toLowerCase();
+      return ["selection", "textbox", "input"].includes(primitive)
+        || intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
     });
     for (const [stepIndex, step] of stepsList.entries()) {
       const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
