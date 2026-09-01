@@ -324,6 +324,13 @@ function advancesFlow(step, { laterStepsDriveControls = false, writesOwnValue = 
  * "confirmation", "recovery" and "advancing" are understood as the same intents as their bare
  * stems, and a record noun in ordinary prose is understood as neither.
  */
+/** Preserve literal and parameterised application routes as structured navigation authority. */
+export function structuredRouteTarget(value = "") {
+  const target = String(value || "").trim();
+  return target === "/" || /^\/(?:[\w-]+|:[A-Za-z_$][\w$]*)(?:\/(?:[\w-]+|:[A-Za-z_$][\w$]*))*\/?$/.test(target)
+    ? target : null;
+}
+
 function actionKinds(step, context = {}) {
   const intents = actionIntents(step);
   const kinds = [];
@@ -779,8 +786,7 @@ export function buildInteractionContract(contract, {
             // Keep an explicit route as structured execution data. Secondary-journey setup may
             // need to replay this navigation before a primary control is reachable; prose is not
             // a safe substitute for the contract's own target.
-            target: /^\/[\w/-]*$/.test(String(step.target || "").trim())
-              ? String(step.target).trim() : null,
+            target: structuredRouteTarget(step.target),
             valueWritten: field || null,
             producedValues: !keyboardFocusOnly && field === valuePlan.controls[0]
               ? [...valuePlan.produces] : [],

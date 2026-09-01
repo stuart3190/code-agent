@@ -337,6 +337,34 @@ test("an authenticated secondary replays only the primary authentication contrac
   }).controls.map((flow) => flow.id), ["route", "email", "password", "sign-in"]);
 });
 
+test("parameterised catalogue routes remain structured and are never opened as truncated literals", async () => {
+  const contract = {
+    ...BASE,
+    routes: [{ path: "/", name: "Catalogue" }, { path: "/catalogue/:itemId", name: "Item" }],
+    journeys: [{ id: "j", title: "Open a catalogue item", priority: "primary", steps: [
+      { action: "open a catalogue item", target: "/catalogue/:itemId", expect: "the item view is visible" },
+    ] }],
+  };
+  const navigation = deriveBuildSpec(contract).interactionContract.flows
+    .find((flow) => flow.kind === "navigation");
+  assert.equal(navigation.target, "/catalogue/:itemId");
+
+  const { concreteRouteTarget } = await import("../../shell/server/lib/appBuild/journeyVerifier.mjs");
+  assert.equal(concreteRouteTarget("/catalogue/items"), "/catalogue/items");
+  assert.equal(concreteRouteTarget("/catalogue/:itemId"), null);
+});
+
+test("a missing contracted account entry is app-repairable browser evidence", async () => {
+  const { applyMinimalStepClassification, missingAuthenticationEntryOutcome } = await import(
+    "../../shell/server/lib/appBuild/journeyVerifier.mjs"
+  );
+  const outcome = applyMinimalStepClassification(missingAuthenticationEntryOutcome("create"));
+  assert.equal(outcome.status, "undriveable");
+  assert.equal(outcome.classification, "APP_FUNCTIONAL_FAILURE");
+  assert.equal(outcome.controlEvidence.activation.requiredAtContractedStep, true);
+  assert.equal(outcome.controlEvidence.activation.reason, "not_reliably_located");
+});
+
 test("an operation naming a journey that does not exist is refused before generation", hostOnly, () => {
   const verdict = validation.validateContract(withJourneys([], [
     { id: "create-booking", entity: "booking", kind: "create", journey: "book" },

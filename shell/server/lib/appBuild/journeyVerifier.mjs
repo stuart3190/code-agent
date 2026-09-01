@@ -35,6 +35,7 @@ import {
   verificationVerdict,
 } from "./verifierPolicy.mjs";
 import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
+import { structuredRouteTarget } from "../builderV2/interactionContract.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -2696,6 +2697,25 @@ async function openAuthenticationEntry(page, previewUrl, mode) {
   return true;
 }
 
+export function missingAuthenticationEntryOutcome(mode) {
+  return {
+    handled: true,
+    status: "undriveable",
+    detail: `the ${mode} account entry was not offered`,
+    controlEvidence: { activation: {
+      requiredAtContractedStep: true,
+      reason: "not_reliably_located",
+      target: `${mode} account entry`,
+    } },
+  };
+}
+
+/** A parameterised route is structured navigation, but never a literal browser destination. */
+export function concreteRouteTarget(value = "") {
+  const target = structuredRouteTarget(value);
+  return target && !target.includes(":") ? target : null;
+}
+
 async function driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState }) {
   if (/sign out/i.test(action) && !/sign back in|sign in as the first/i.test(action)) {
     const signOut = await firstVisible([
@@ -2734,7 +2754,7 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
     authState.active = null;
   }
   if (!(await openAuthenticationEntry(page, previewUrl, mode))) {
-    return { handled: true, status: "undriveable", detail: `the ${mode} account entry was not offered` };
+    return missingAuthenticationEntryOutcome(mode);
   }
   const authentication = await driveAuthenticationForm(page, `${marker}-${authState.accounts.length + 1}`, { mode, credentials });
   if (!authentication.authenticated) {
@@ -2899,9 +2919,8 @@ async function runStep(page, step, {
   // same step also enters a value, applies an action, or reloads the destination; requiring the
   // prose to repeat one of a small set of navigation verbs left the browser on the previous
   // mounted screen even though the contract named the next route exactly.
-  const route = (step.target || "").match(/^\/[\w/-]*/)?.[0]
-    || action.match(/\s(\/[\w/-]+)/)?.[1]
-    || null;
+  const actionRoute = action.match(/(?:^|\s)(\/[^\s,;]+)/)?.[1] || null;
+  const route = concreteRouteTarget(step.target) || concreteRouteTarget(actionRoute);
   let routeNavigated = false;
   if (route) {
     await page.goto(new URL(route, previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});
@@ -4151,10 +4170,11 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   requiresPrimaryRecord = false, reconstructIsolated = false,
   primaryProducesDurableRecord = null, requiresAuthenticatedStart = false,
 } = {}) {
-  const routeTarget = (flow) => flow?.kind === "navigation"
-    && /^\/[\w/-]*$/.test(String(flow?.target || "").trim())
-    && String(flow.target).trim() !== "/"
-    ? String(flow.target).trim() : null;
+  const routeTarget = (flow) => {
+    if (flow?.kind !== "navigation") return null;
+    const target = structuredRouteTarget(flow.target);
+    return target && target !== "/" ? target : null;
+  };
   const controlKey = (flow) => routeTarget(flow)
     ? `route:${routeTarget(flow)}`
     : semanticKey(flow.control?.logicalField || flow.control?.accessibleName);
@@ -4247,9 +4267,9 @@ async function establishPrerequisites(page, controls, {
   const enteredValues = [];
   let durableCommitted = false;
   for (const flow of controls) {
-    const route = flow.kind === "navigation" && /^\/[\w/-]*$/.test(String(flow.target || "").trim())
-      ? String(flow.target).trim() : null;
-    const label = route || flow.control?.logicalField || flow.control?.accessibleName || flow.kind;
+    const structuredRoute = flow.kind === "navigation" ? structuredRouteTarget(flow.target) : null;
+    const route = concreteRouteTarget(structuredRoute);
+    const label = structuredRoute || flow.control?.logicalField || flow.control?.accessibleName || flow.kind;
     if (route) {
       const destination = new URL(route, page.url());
       // Prerequisite navigation is restricted to the preview's current origin. The interaction
@@ -4267,6 +4287,23 @@ async function establishPrerequisites(page, controls, {
       }
       await waitForActiveSurface(page);
       performed.push({ control: label, kind: flow.kind, detail: `opened ${destination.pathname}` });
+      continue;
+    }
+    if (structuredRoute) {
+      const navigationControl = await bestVisibleAction(page, `${flow.target || ""} ${flow.action || ""}`,
+        Date.now() + STEP_TIMEOUT_MS);
+      if (!navigationControl) {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: "the parameterised prerequisite route had no visible contracted entry control" } };
+      }
+      try {
+        await navigationControl.click({ timeout: 5_000 });
+        await waitForActiveSurface(page);
+      } catch {
+        return { ok: false, performed, failure: { control: label, kind: flow.kind,
+          reason: "the parameterised prerequisite route entry could not be opened" } };
+      }
+      performed.push({ control: label, kind: flow.kind, detail: "opened the contracted parameterised route" });
       continue;
     }
     if (flow.kind === "selection") {
@@ -4684,7 +4721,7 @@ const selectionSnapshot = (page, id) => page.evaluate((controlId) => [...documen
   .map((el) => `${el.getAttribute("aria-pressed") || ""}:${el.getAttribute("aria-selected") || ""}`
     + `:${el.getAttribute("data-selected") || ""}:${el.className || ""}`), id).catch(() => []);
 
-function applyMinimalStepClassification(outcome, fatalRuntimeErrors = []) {
+export function applyMinimalStepClassification(outcome, fatalRuntimeErrors = []) {
   if (outcome?.status !== "pass" && fatalRuntimeErrors.length) {
     return verificationVerdict(
       VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE,
