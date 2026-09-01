@@ -10,7 +10,7 @@ import {
 } from "../../shell/server/lib/builderV2/scaffoldComposer.mjs";
 import { validateScaffoldGraph, scaffoldJourneyOwners } from "../../shell/server/lib/builderV2/scaffoldGraph.mjs";
 import { SCAFFOLDS, validateScaffoldRegistry } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
-import { lintCapabilityInvocationShapes, runStaticApplicationGate }
+import { lintCapabilityInvocationShapes, lintCustomExtensionInterfaces, runStaticApplicationGate }
   from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
 import { applyPatches } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS }
@@ -318,6 +318,30 @@ test("a broken custom extension cannot poison the deterministic foundation", () 
   assert.equal(invalid.ok, false);
   assert.match(invalid.problems.join(" "), /must export/);
   assert.deepEqual(Object.fromEntries(plan.protectedFiles.map((path) => [path, hash(tree[path])])), before);
+});
+
+test("a custom extension default-import mismatch is rejected before browser execution", () => {
+  const extension = {
+    extensionId: "custom_behavior:browse-catalogue",
+    module: "src/extensions/custom/browse-catalogue.js",
+    requiredExports: ["runBrowseCatalogue"],
+    owningJourneys: ["browse-catalogue"],
+    operationContracts: [{ operationId: "browse-catalogue", inputKeys: [] }],
+  };
+  const tree = {
+    "src/extensions/custom/browse-catalogue.js": "export function runBrowseCatalogue() { return []; }",
+    "src/screens/scaffold/CatalogueScreen.jsx": [
+      'import BrowseCatalogue from "../../extensions/custom/browse-catalogue.js";',
+      "export default function CatalogueScreen() { return <main>{BrowseCatalogue()}</main>; }",
+    ].join("\n"),
+  };
+
+  const findings = lintCustomExtensionInterfaces(tree, { extensions: [extension] }, [{ id: "browse-catalogue" }]);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].code, "custom_extension_invalid");
+  assert.equal(findings[0].file, "src/screens/scaffold/CatalogueScreen.jsx");
+  assert.deepEqual(findings[0].requiredExports, ["runBrowseCatalogue"]);
+  assert.match(findings[0].message, /import its declared named export instead/);
 });
 
 test("retained smoke extension seam rejects a generic id spread before browser and accepts its semantic key", () => {

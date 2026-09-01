@@ -515,6 +515,19 @@ export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, j
         .includes(candidate.module));
       if (!extension) continue;
       for (const specifier of declaration.specifiers || []) {
+        if (specifier.type === "ImportDefaultSpecifier"
+            && !(extension.requiredExports || []).includes("default")) {
+          findings.push({
+            code: "custom_extension_invalid",
+            file,
+            extensionId: extension.extensionId,
+            exportName: "default",
+            requiredExports: [...(extension.requiredExports || [])],
+            message: `${file} imports a default value from ${extension.module}, but that custom extension `
+              + `exports only [${(extension.requiredExports || []).join(", ")}]; import its declared named export instead`,
+          });
+          continue;
+        }
         if (specifier.type === "ImportNamespaceSpecifier") namespaces.set(specifier.local.name, extension);
         if (specifier.type !== "ImportSpecifier") continue;
         const exportName = specifier.imported?.name || specifier.imported?.value;
