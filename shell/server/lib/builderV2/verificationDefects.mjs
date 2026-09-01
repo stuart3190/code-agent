@@ -563,6 +563,13 @@ export function defectEvidence(defects = []) {
         + "lands in state and renders back: value + onChange writing through the setter, the capability "
         + "field binding, or an uncontrolled input with defaultValue.");
     }
+    if (defect.evidence?.addressing?.reason === "ambiguous_identity") {
+      lines.push(`${defect.evidence.addressing.matches || "Multiple"} visible controls share the declared `
+        + `machine identity ${defect.control?.id || "for this field"}. Render exactly one active `
+        + "journey-facing control with that identity. If the form is inside a repeated collection, "
+        + "move the contracted form outside the repeated rows or render it only for the active row; "
+        + "do not copy the same data-thrallo-control onto every row.");
+    }
     if (/every contracted selection value was already selected/i.test(String(defect.evidence?.observed || ""))) {
       lines.push("the compound selection controls start in every contracted final value. Initialise at "
         + "least one control to a real non-target option so the browser can perform and observe the "

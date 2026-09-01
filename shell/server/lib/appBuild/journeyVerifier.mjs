@@ -4149,6 +4149,7 @@ export function expectationOutcome({
 /** @returns {{controls: object[], requiresDurableRecord: boolean}} */
 export function journeyPrerequisites(flows, journeyId, primaryId, {
   requiresPrimaryRecord = false, reconstructIsolated = false,
+  primaryProducesDurableRecord = null,
 } = {}) {
   const routeTarget = (flow) => flow?.kind === "navigation"
     && /^\/[\w/-]*$/.test(String(flow?.target || "").trim())
@@ -4189,7 +4190,12 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   // because a historical contract gave those fields the same names as this journey's controls.
   // The retained Roblox candidate reached this point, created the row successfully, then setup
   // demanded a fictitious modelSpec chooser that exists only as generated output.
-  if (requiresPrimaryRecord || (reconstructIsolated && requiresDurableRecord)) {
+  // A durable consumer only replays the primary when the contract says that primary PRODUCES
+  // the same lifecycle. Sharing a broad lifecycle label is not enough: two independent update
+  // journeys can both be consumers, and replaying one as the other's producer invents a false
+  // dependency. `null` preserves the historical fallback for contracts without scenario roles.
+  if (requiresPrimaryRecord || (reconstructIsolated && requiresDurableRecord
+    && primaryProducesDurableRecord !== false)) {
     const durableMutation = chain.findIndex((flow) => flow.kind === "mutation" && flow.durableLifecycle);
     return { controls: durableMutation >= 0 ? chain.slice(0, durableMutation + 1) : chain,
       requiresDurableRecord: true };
@@ -4925,11 +4931,17 @@ export async function verifyJourneys({
       const primaryId = (allJourneys.find((j) => j.priority === "primary") || allJourneys[0])?.id;
       const primaryScenario = contract?.prerequisiteInteractionContract?.scenarios?.[primaryId]
         || contract?.interactionContract?.scenarios?.[primaryId] || null;
+      const scenarioRolesKnown = Boolean(scenario?.role && primaryScenario?.role);
+      const primaryProducesDurableRecord = scenarioRolesKnown
+        ? primaryScenario.role === "produces" && scenario.role === "consumes"
+          && Boolean(scenario.lifecycle) && scenario.lifecycle === primaryScenario.lifecycle
+        : null;
+      const describedExistingRecord = /\b(existing|saved|previous|history|generated asset)\b/i.test(String(
+        `${journey.steps?.[0]?.action || ""} ${journey.steps?.[0]?.target || ""}`,
+      ));
       const requiresPrimaryRecord = isolatedJourneyContract && Boolean(
-        (scenario.lifecycle && scenario.lifecycle === primaryScenario?.lifecycle)
-          || /\b(existing|saved|previous|history|generated asset)\b/i.test(String(
-            `${journey.steps?.[0]?.action || ""} ${journey.steps?.[0]?.target || ""}`,
-          )),
+        primaryProducesDurableRecord === true
+          || (primaryProducesDurableRecord == null && describedExistingRecord),
       );
       const explicitAccountStart = /create (?:a )?new account|create account|sign ?up/i
         .test(String(journey.steps?.[0]?.action || ""));
@@ -4937,6 +4949,7 @@ export async function verifyJourneys({
         ? { controls: [], requiresDurableRecord: false }
         : journeyPrerequisites(allFlows, journey.id, primaryId, {
           requiresPrimaryRecord, reconstructIsolated: isolatedJourneyContract,
+          primaryProducesDurableRecord,
         });
       let setup = null;
       if (prerequisites.controls.length) {

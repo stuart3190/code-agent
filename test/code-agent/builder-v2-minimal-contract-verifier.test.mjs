@@ -1526,6 +1526,47 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].setup.directEntry, "selectedSoftwareId");
     });
 
+    await t.test("isolated consumers sharing a lifecycle do not invent a primary producer", async () => {
+      const category = {
+        ...control("categoryId", "catalogue-category", ["button"]),
+        accessibleName: "software category", accessibleNames: ["software category"], selectedState: true,
+      };
+      const primary = { id: "maintain", title: "Maintain catalogue", priority: "primary", steps: [] };
+      const secondary = { id: "filter", title: "Filter catalogue", priority: "secondary", steps: [{
+        action: "select a software category", operates: ["categoryId"],
+        expect: "filtered software is visible",
+      }] };
+      const unrelatedPrimaryMutation = {
+        id: "maintain:update", journeyId: "maintain", stepIndex: 0, kind: "mutation",
+        durableLifecycle: "crud:software", reads: ["maintain.durable.record"],
+        control: { accessibleName: "save catalogue", machineId: "save-catalogue", roles: ["button"] },
+      };
+      const secondaryChoice = {
+        id: "filter:category", journeyId: "filter", stepIndex: 0, kind: "selection",
+        durableLifecycle: "crud:software", reads: ["filter.durable.record"],
+        valueWritten: "categoryId", control: category,
+      };
+      pageBody = `<main><button type="button" data-thrallo-control="catalogue-category"
+        aria-label="software category" aria-pressed="false"
+        onclick="this.setAttribute('aria-pressed','true');document.getElementById('result').textContent='Filtered software is visible'">Editors</button>
+        <p id="result"></p></main>`;
+      const scenarios = {
+        maintain: { role: "consumes", lifecycle: "crud:software", startState: "inherits" },
+        filter: { role: "consumes", lifecycle: "crud:software", startState: "inherits" },
+      };
+      const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 35_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY, contract: {
+          journeys: [secondary], allJourneys: [primary, secondary],
+          interactionContract: { flows: [secondaryChoice] },
+          prerequisiteInteractionContract: {
+            flows: [unrelatedPrimaryMutation, secondaryChoice], scenarios,
+          },
+        } });
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].setup == null, true,
+        "an unrelated consumer was replayed as this journey's record producer");
+    });
+
     await t.test("a real dead button is an app-functional failure", async () => {
       const action = control("save project", "save-project", ["button"]);
       const result = await run("<main><button data-thrallo-action=\"save-project\">Save project</button><p id=out></p></main>",

@@ -850,6 +850,23 @@ test("compound selections already at every target value get exact repair guidanc
   assert.match(brief, /Do not pre-render the expected post-selection message/i);
 });
 
+test("ambiguous machine identity receives repeated-control repair guidance", () => {
+  const brief = defectEvidence([{
+    code: "contracted_control_undriveable", defectClass: DEFECT_CLASS.INTERACTION,
+    owner: DEFECT_OWNER.UNKNOWN, tier: REPAIR_TIER.REPAIR,
+    journeyId: "filter-catalogue", stepIndex: 0, action: "choose a category",
+    control: { id: "ctl_category", logicalField: "category" },
+    modules: ["src/screens/scaffold/CatalogueScreen.jsx"],
+    evidence: {
+      expected: "one category control", observed: "the control identity was ambiguous",
+      addressing: { reason: "ambiguous_identity", matches: 3 },
+    },
+  }]).join("\n");
+  assert.match(brief, /3 visible controls share the declared machine identity/i);
+  assert.match(brief, /render exactly one active journey-facing control/i);
+  assert.match(brief, /do not copy the same data-thrallo-control onto every row/i);
+});
+
 test("a scope naming a planned-but-unwritten module offers a stub instead of throwing", () => {
   // This threw on src/components/create-auto-layout/ControlColumn.jsx and took a paid build to
   // `failed` with 30 of 60 credits spent — a module that was planned, never written, and quite
