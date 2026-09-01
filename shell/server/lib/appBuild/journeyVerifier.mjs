@@ -35,7 +35,6 @@ import {
   verificationVerdict,
 } from "./verifierPolicy.mjs";
 import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
-import { structuredRouteTarget } from "../builderV2/interactionContract.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -2710,9 +2709,15 @@ export function missingAuthenticationEntryOutcome(mode) {
   };
 }
 
+function verifierStructuredRouteTarget(value = "") {
+  const target = String(value || "").trim();
+  return target === "/" || /^\/(?:[\w-]+|:[A-Za-z_$][\w$]*)(?:\/(?:[\w-]+|:[A-Za-z_$][\w$]*))*\/?$/.test(target)
+    ? target : null;
+}
+
 /** A parameterised route is structured navigation, but never a literal browser destination. */
 export function concreteRouteTarget(value = "") {
-  const target = structuredRouteTarget(value);
+  const target = verifierStructuredRouteTarget(value);
   return target && !target.includes(":") ? target : null;
 }
 
@@ -4172,7 +4177,7 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
 } = {}) {
   const routeTarget = (flow) => {
     if (flow?.kind !== "navigation") return null;
-    const target = structuredRouteTarget(flow.target);
+    const target = verifierStructuredRouteTarget(flow.target);
     return target && target !== "/" ? target : null;
   };
   const controlKey = (flow) => routeTarget(flow)
@@ -4267,7 +4272,7 @@ async function establishPrerequisites(page, controls, {
   const enteredValues = [];
   let durableCommitted = false;
   for (const flow of controls) {
-    const structuredRoute = flow.kind === "navigation" ? structuredRouteTarget(flow.target) : null;
+    const structuredRoute = flow.kind === "navigation" ? verifierStructuredRouteTarget(flow.target) : null;
     const route = concreteRouteTarget(structuredRoute);
     const label = structuredRoute || flow.control?.logicalField || flow.control?.accessibleName || flow.kind;
     if (route) {
