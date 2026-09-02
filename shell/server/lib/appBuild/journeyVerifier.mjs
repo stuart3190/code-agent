@@ -3318,9 +3318,13 @@ async function runStep(page, step, {
         // availability before rendering their first semantic option group, so an immediate query
         // observes the loading shell and falsely declares the contracted control absent. Poll only
         // after this step actually navigated; ordinary selection failures keep their fast path.
-        let outcome = navigated
-          ? await driveSelectionAfterNavigation(page, step, flow, used, journeyFlows, selectionOptions)
-          : await driveSelection(page, step, flow, used, journeyFlows, selectionOptions);
+        // The bounded wait applies to EVERY declared selection, not only to a step that navigated
+        // itself: the previous step's navigation passes on the surface's heading while the option
+        // group is still loading its rows ("select a member row to edit" ran against a members
+        // table whose rows were being seeded — bv2 medium qualification, build a5396ba2, three
+        // repair waves against a group that was seconds from existing). A group that never
+        // appears still ends undriveable after the same bounded window.
+        let outcome = await driveSelectionAfterNavigation(page, step, flow, used, journeyFlows, selectionOptions);
         // The contracted group may belong to a step the flow has not reached. Advance and retry,
         // bounded, and only while advancing actually changes the page. The retry re-locates the
         // group by IDENTITY, so advancing can never hand this step a different group's controls.
@@ -3567,6 +3571,32 @@ async function runStep(page, step, {
           activation.matchedBy = "contracted_field_form_submit";
           delete activation.reason;
           break;
+        }
+      }
+      // A read-only operation with NO input of its own is applied by the surface that shows it:
+      // "load the current summary" (target "analytics summary panel", operates
+      // calculate-analytics-summary) computes on arrival, and the contract's button for it is an
+      // artefact of naming a passive surface as a control. When the application offers no control
+      // under that identity at all, and the operation persists nothing and consumes nothing this
+      // step typed, the contracted result being visible IS the operation having run. A hidden or
+      // disabled control under the identity, or any durable write, still requires activation.
+      // Live proof: bv2 medium qualification, build a5396ba2, three repair waves against a button
+      // that had nothing to do.
+      if (!activated && contractedAction.kind === "action" && !filledContractedInputs.length
+        && !declaredSelections.length && contractedAction.control?.machineId
+        && !contractedAction.persistenceHandoff && !contractedAction.durableLifecycle
+        && !(contractedAction.semanticResponsibilityTypes || []).includes("persistence")
+        && (contractedAction.writes || []).length > 0
+        && (contractedAction.writes || []).every((path) => /\.custom\./.test(String(path)))) {
+        const presentation = await contractedActionPresentation(page, contractedAction.control.machineId);
+        if (presentation.candidateCount === 0) {
+          const expectationEvidence = await expectationIsVisible(page, expect);
+          if (expectationEvidence.met) {
+            activated = true;
+            activation.matchedBy = "read_operation_applied_on_load";
+            activation.expectationEvidence = expectationEvidence;
+            delete activation.reason;
+          }
         }
       }
       // A transient operation can be owned by the field that triggers it. Search-as-you-type and

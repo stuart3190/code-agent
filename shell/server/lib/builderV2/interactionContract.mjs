@@ -561,6 +561,49 @@ function nameRouteTargetedActionControls(flows) {
   return flows;
 }
 
+/**
+ * A reset BUTTON is an action, even when the contract spelt it as a boolean field.
+ *
+ * "clear all filters" (target "clear filters button", operates ["clearFilters"], taskFilter
+ * declaring clearFilters: boolean) derived a checkbox input. The generated screen rendered exactly
+ * that checkbox; the verifier's reset semantics then asked the box to be false and found it
+ * already false — no transition, `value_not_accepted`, three repair waves with nothing to repair
+ * (bv2 medium qualification, build a5396ba2). A step that resets, names a button, and operates
+ * only a boolean field is one activation whose outcome the reset rule already proves from the
+ * other controls returning to their defaults; it is derived as that action.
+ */
+function resetButtonsAreActions(flows, contract) {
+  const stepsOf = new Map((contract?.journeys || []).map((journey) => [journey.id, journey.steps || []]));
+  const byStep = new Map();
+  for (const flow of flows) {
+    const key = `${flow.journeyId}|${flow.stepIndex}`;
+    if (!byStep.has(key)) byStep.set(key, []);
+    byStep.get(key).push(flow);
+  }
+  for (const [, stepFlows] of byStep) {
+    const inputs = stepFlows.filter((flow) => flow.kind === "input" && flow.control);
+    if (!inputs.length || inputs.length !== stepFlows.filter((flow) => flow.control).length) continue;
+    if (!inputs.every((flow) => flow.control.valueType === "boolean")) continue;
+    const step = stepsOf.get(inputs[0].journeyId)?.[inputs[0].stepIndex];
+    if (!step || !/\b(?:button|control)\b/i.test(String(step.target || ""))) continue;
+    if (!/^\s*(?:clear|reset)\b/i.test(String(step.action || ""))) continue;
+    if (inputs.some((flow) => flow.control.verificationValue !== undefined)) continue;
+    for (const flow of inputs) {
+      const field = flow.control.logicalField;
+      const named = String(step.target);
+      flow.kind = "action";
+      flow.id = `${flow.journeyId}:${flow.stepIndex + 1}:action:${normalized(field)}`;
+      flow.control = {
+        purpose: named, roles: ["button"], machineId: actionIdFor(field),
+        accessibleName: named, accessibleNames: [named], logicalField: field,
+        stateOwner: flow.control.stateOwner, statePath: flow.control.statePath, validationOwner: null,
+        resetsState: true,
+      };
+    }
+  }
+  return flows;
+}
+
 export function buildInteractionContract(contract, {
   modulePlan = deriveModulePlan(contract, contract?.journeys || []),
   bindings = bindCapabilities(contract),
@@ -1134,6 +1177,7 @@ export function buildInteractionContract(contract, {
   }
 
   nameRouteTargetedActionControls(flows);
+  resetButtonsAreActions(flows, contract);
 
   const plan = {
     version: INTERACTION_CONTRACT_VERSION,
