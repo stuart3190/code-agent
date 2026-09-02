@@ -522,6 +522,45 @@ function controlRequirement(kind, field, step, declaredField = null, operationId
 }
 
 /** Derive the interaction/data-flow contract once, before implementation generation. */
+/**
+ * A ROUTE is where a step happens, never what its control is called.
+ *
+ * "return to analytics and refresh" (target /analytics, operates calculate-analytics) derived the
+ * operation's control with accessibleName "/analytics" — the route path — while the earlier
+ * "refresh the analytics summary" step named the SAME machine identity "refresh analytics
+ * control". The generated screen implemented both names faithfully: one machine-bound refresh
+ * button and a second, hand-wired `<button aria-label="/analytics">`, which the conformance lint
+ * rejected as a duplicate contracted control through three corrections and the whole allowance
+ * (bv2 medium qualification, build 47648001). Every retained contract carried the same shape
+ * ("/sign-in", "/admin", "/tasks").
+ *
+ * The control keeps its identity and the flow keeps the route as navigation authority; only the
+ * NAME changes: the name a prior flow already gave this identity, else the operation humanised,
+ * else the step's own action prose.
+ */
+function nameRouteTargetedActionControls(flows) {
+  const namedByIdentity = new Map();
+  for (const flow of flows) {
+    const control = flow?.control;
+    if (!control?.machineId) continue;
+    const routeShaped = Boolean(structuredRouteTarget(control.accessibleName));
+    if (!routeShaped) {
+      if (!namedByIdentity.has(control.machineId)) namedByIdentity.set(control.machineId, control.accessibleName);
+      continue;
+    }
+    if (!["mutation", "cancellation", "lookup", "action"].includes(flow.kind)) continue;
+    const humanised = String(flow.operationId || "").replace(/[-_]+/g, " ").trim();
+    const renamed = namedByIdentity.get(control.machineId) || humanised || String(flow.action || "").trim();
+    if (!renamed) continue;
+    control.purpose = renamed;
+    control.accessibleName = renamed;
+    if (Array.isArray(control.accessibleNames)) control.accessibleNames = unique([renamed, ...control.accessibleNames
+      .filter((name) => !structuredRouteTarget(name))]);
+    if (!namedByIdentity.has(control.machineId)) namedByIdentity.set(control.machineId, renamed);
+  }
+  return flows;
+}
+
 export function buildInteractionContract(contract, {
   modulePlan = deriveModulePlan(contract, contract?.journeys || []),
   bindings = bindCapabilities(contract),
@@ -1093,6 +1132,8 @@ export function buildInteractionContract(contract, {
           basis: touchesDurable ? basis : "data-flow" };
     scenarios[journey.id] = { ...scenario, ...declaredStartAuthority };
   }
+
+  nameRouteTargetedActionControls(flows);
 
   const plan = {
     version: INTERACTION_CONTRACT_VERSION,
