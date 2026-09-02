@@ -816,14 +816,34 @@ export function collectionMembershipExpectationSpec(expect = "") {
 const GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN = /^(?:new|created|updated|saved|added|submitted|same|selected|chosen|current|this|that)\s+(?:software|item|product|entry|record|project|task|user|member|account|booking|reservation|document|note|file|message|post|event|appointment|contact|lead|invoice|quote|report|ticket|asset|favourite|favorite|selection|result)(?:\s+(?:card|row|tile|line|chip|panel|badge))?$/;
 const COLLECTION_MEMBER_RENDERING_SUFFIX_PATTERN = /\s+(?:card|row|tile|line|chip|panel|badge)$/i;
 
+// "a project card with the entered project name" is not a label either: a phrase that describes
+// the member through what the journey ENTERED (or created, chose, saved) refers to the record the
+// preceding inputs identify. Live proof (bv2 medium qualification, build 81f7857b): the literal
+// words were demanded inside the active projects area and the create step could never pass.
+const RECORD_NOUN_PATTERN = /\b(software|item|product|entry|record|project|task|user|member|account|booking|reservation|document|note|file|message|post|event|appointment|contact|lead|invoice|quote|report|ticket|asset|favourite|favorite|selection|result)\b/i;
+const REFERENTIAL_MEMBER_PATTERN = /\b(?:entered|typed|submitted|provided|given|specified|supplied|new|newly|created|just|saved|added|selected|chosen|current)\b/i;
+
 export function isGenericCollectionMemberReference(member = "") {
-  return GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim());
+  const text = String(member || "").trim();
+  if (GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(text)) return true;
+  return /^(?:an?|the)\s/i.test(text) && REFERENTIAL_MEMBER_PATTERN.test(text) && RECORD_NOUN_PATTERN.test(text);
+}
+
+function referencedRecordNoun(reference) {
+  // "the entered project name" names the project by its name; "a task row with the created title"
+  // names the task. Prefer the noun that qualifies a name/title, else the first record noun.
+  const qualified = reference.match(new RegExp(`${RECORD_NOUN_PATTERN.source}\\s+(?:name|title|label)\\b`, "i"));
+  if (qualified) return semanticKey(qualified[1]);
+  const first = reference.match(RECORD_NOUN_PATTERN);
+  return first ? semanticKey(first[1]) : semanticKey(reference.split(/\s+/).at(-1));
 }
 
 function enteredCollectionIdentity(member, enteredValues = []) {
   if (!isGenericCollectionMemberReference(member)) return null;
   const reference = String(member).trim().replace(COLLECTION_MEMBER_RENDERING_SUFFIX_PATTERN, "");
-  const noun = semanticKey(reference.split(/\s+/).at(-1));
+  const noun = GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member).trim())
+    ? semanticKey(reference.split(/\s+/).at(-1))
+    : referencedRecordNoun(reference);
   const values = (Array.isArray(enteredValues) ? enteredValues : [])
     .filter((row) => row?.field && row?.value);
   const normalizedField = (row) => String(row.field).replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -843,7 +863,7 @@ export function resolvedCollectionMembershipExpectationSpec(expect = "", entered
   if (!spec) return null;
   const resolved = spec.members.map((member) => enteredCollectionIdentity(member, enteredValues) || member);
   const unresolvedGeneric = resolved.some((member, index) => member === spec.members[index]
-    && GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim()));
+    && isGenericCollectionMemberReference(member));
   return unresolvedGeneric ? null : { ...spec, members: resolved };
 }
 

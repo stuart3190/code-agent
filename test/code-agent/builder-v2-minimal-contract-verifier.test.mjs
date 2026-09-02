@@ -294,6 +294,18 @@ test("multi-member collection expectations retain their named scope", () => {
     "the created task row appears in the task list with its owner",
     [{ field: "taskTitle", value: "Journey 44" }],
   ), { collection: "task list", members: ["Journey 44"] });
+  // Retained wording (build 81f7857b): a member described through what the journey ENTERED is the
+  // record those inputs identify, never the literal words of the description.
+  const referentialWording = "a project card with the entered project name appears in the active projects area";
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(referentialWording, [
+    { field: "projectName", value: "Journey 7" }, { field: "clientName", value: "Client 7" },
+  ]), { collection: "active projects area", members: ["Journey 7"] });
+  assert.equal(resolvedCollectionMembershipExpectationSpec(referentialWording), null,
+    "an unresolved referential member never becomes a literal row label");
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
+    "a task row with the created title appears in the task list",
+    [{ field: "projectName", value: "Journey 7" }, { field: "taskTitle", value: "Task 7" }],
+  ), { collection: "task list", members: ["Task 7"] });
   assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
     "Atlas Build Studio appears in the favourites list and its card shows a favourited state",
     [{ field: "name", value: "Journey 123" }],
