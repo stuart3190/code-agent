@@ -279,6 +279,18 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
 
 const DEPENDENCY_ISSUE = "interaction_state_dependency_missing";
 const SEMANTICS_ISSUE = "interaction_contract_semantics_incomplete";
+// One field name operated for two entities in one journey shares one control identity (see
+// interactionContract.mjs controlIdentityCollisions). Live proof (bv2 medium, build 018625f3):
+// the gate named the collision, but the repair lane had no scope for it, fell back to an
+// unscoped rewrite, and the model returned the same contract — the build died at 2.9 credits
+// having been told exactly what was wrong and given no way to say it back.
+const COLLISION_ISSUE = "interaction_control_identity_collision";
+export const COLLISION_REPAIR_INSTRUCTION = "A field name listed under invalidControlIdentities is operated "
+  + "for two different entities inside one journey, so both controls share one identity. Rename that field on "
+  + "the entity that is not the journey's primary subject (for example task.dueDate becomes taskDueDate) and "
+  + "use the new name consistently: in that entity's fields, in every operation responsibility that reads or "
+  + "writes it, and in every journey step's operates, reads, produces and verificationValues that refer to it. "
+  + "Leave the other entity's field name unchanged. Do not add, remove or reorder steps, operations or entities.";
 
 export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid dependency or semantic subset. "
   + "Do not invent user actions, operations, entities, fields, or business behavior. You may mark an existing "
@@ -299,7 +311,8 @@ export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid 
 export function contractDependencyRepairScope(contract, issues = []) {
   const dependencies = (issues || []).filter((issue) => issue?.code === DEPENDENCY_ISSUE);
   const semantics = (issues || []).filter((issue) => issue?.code === SEMANTICS_ISSUE);
-  if (!contract || (!dependencies.length && !semantics.length)) return null;
+  const collisions = (issues || []).filter((issue) => issue?.code === COLLISION_ISSUE);
+  if (!contract || (!dependencies.length && !semantics.length && !collisions.length)) return null;
   const semanticOperationIds = new Set(semantics.map((issue) => issue.operationId).filter(Boolean));
   const semanticOperations = (contract.operations || []).filter((operation) => (
     semanticOperationIds.has(operation?.id || operation?.name)
@@ -312,6 +325,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
     ...dependencies.map((issue) => issue.journeyId),
     ...semanticJourneyIds,
     ...semanticOperations.map((operation) => operation?.journey),
+    ...collisions.map((issue) => issue.journeyId),
   ].filter(Boolean));
   const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
   const operationByIdentity = new Map((contract.operations || []).map((operation) => (
@@ -339,6 +353,9 @@ export function contractDependencyRepairScope(contract, issues = []) {
     ...(priorOperationCandidates.get(issue) || []).map((producer) => producer.operationId),
   ]).filter(Boolean));
   for (const operationId of semanticOperationIds) operationIds.add(operationId);
+  for (const issue of collisions) {
+    for (const use of issue.uses || []) for (const operationId of use.operationIds || []) operationIds.add(operationId);
+  }
   for (const operation of contract.operations || []) {
     if (journeyIds.has(operation?.journey)) operationIds.add(operation.id || operation.name);
   }
@@ -362,8 +379,14 @@ export function contractDependencyRepairScope(contract, issues = []) {
       fields: (entity.fields || []).filter((field) => usedFields.has(String(field?.name || field))),
     }));
   return {
-    mode: semantics.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
+    mode: semantics.length || collisions.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
     contractSummary: contract.summary || null,
+    ...(collisions.length ? { invalidControlIdentities: collisions.map((issue) => ({
+      journeyId: issue.journeyId, field: issue.field, machineId: issue.machineId,
+      uses: (issue.uses || []).map((use) => ({
+        stepIndex: use.stepIndex, entity: use.entity, operationIds: use.operationIds || [],
+      })),
+    })) } : {}),
     invalidDependencies: dependencies.map((issue) => ({
       journeyId: issue.journeyId,
       consumerStepId: issue.consumerStepId,
@@ -447,6 +470,25 @@ export function mergeContractDependencyRepair(contract, reply, scope) {
   const journeyIds = new Set((scope.journeys || []).map((journey) => journey.id));
   const operationIds = new Set((scope.operations || []).map((operation) => operation.id || operation.name));
   const entityNames = new Set((scope.entities || []).map((entity) => entity.name));
+  // A control-identity collision is repaired by RENAMING the colliding field on one entity. The
+  // field-preserving merge below would keep the old name beside the new one; when the reply's
+  // version of a colliding entity no longer lists the colliding field, that omission is the rename
+  // and the old field goes with it. Only colliding fields on colliding entities may disappear.
+  const renamedAway = new Map();
+  for (const collision of scope.invalidControlIdentities || []) {
+    for (const use of collision.uses || []) {
+      const replied = (patch.entities || []).find((entity) => entity?.name === use.entity);
+      if (!replied) continue;
+      const stillListed = (replied.fields || []).some((field) => String(field?.name ?? field) === collision.field);
+      if (stillListed) continue;
+      if (!renamedAway.has(use.entity)) renamedAway.set(use.entity, new Set());
+      renamedAway.get(use.entity).add(collision.field);
+    }
+  }
+  const entities = mergeScopedEntities(contract.entities, patch.entities, entityNames)
+    .map((entity) => (renamedAway.has(entity?.name)
+      ? { ...entity, fields: (entity.fields || []).filter((field) => !renamedAway.get(entity.name).has(String(field?.name ?? field))) }
+      : entity));
   return {
     ...contract,
     journeys: mergeScoped(contract.journeys, repairedJourneys, journeyIds, (journey) => journey?.id),
@@ -456,7 +498,7 @@ export function mergeContractDependencyRepair(contract, reply, scope) {
     // shared entity with that subset deletes fields owned by untouched journeys. Merge returned
     // fields by identity and preserve every unlisted field; new corrected fields remain allowed
     // inside the already-authorized entity.
-    entities: mergeScopedEntities(contract.entities, patch.entities, entityNames),
+    entities,
   };
 }
 
@@ -484,6 +526,7 @@ export async function generateContract({
   const baseAsk = `${knowledge ? `${knowledge}\n\n` : ""}${profileGuidance}\n\nREQUEST:\n${prompt}`;
   let lastProblems = (priorProblems || []).map(String).filter(Boolean);
   let lastContract = lastProblems.length ? priorContract : null;
+  const repairMode = Boolean(lastContract);
   const dependencyRepairScope = lastContract
     ? contractDependencyRepairScope(lastContract, priorIssues) : null;
   let usageTotal = null;
@@ -496,6 +539,7 @@ export async function generateContract({
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const dependencyAsk = dependencyRepairScope
       ? `${profileGuidance}\n\nSCOPED INTERACTION CONTRACT REPAIR MODE. ${DEPENDENCY_REPAIR_INSTRUCTION} `
+        + `${dependencyRepairScope.invalidControlIdentities?.length ? `${COLLISION_REPAIR_INSTRUCTION} ` : ""}`
         + `Return one JSON object containing only corrected `
         + `journeys, operations, and entities from this subset; unlisted contract sections are preserved `
         + `server-side.\n\nINVALID DEPENDENCY SUBSET:\n${JSON.stringify(dependencyRepairScope)}\n\n`
@@ -527,7 +571,10 @@ export async function generateContract({
     // requested the repair. Structural validation alone accepted malformed replies that duplicated
     // navigation steps and put a missing field in `operates`; the orchestrator then rejected the
     // unchanged missing producer without giving the repair lane its built-in correction attempt.
-    const derivedVerdict = dependencyRepairScope ? deriveBuildSpec(contract).verdict : null;
+    // Every REPAIR attempt is judged by the canonical derivation, scoped or not: an unscoped
+    // repair that structurally validated but still collided was accepted here and rejected by
+    // the orchestrator's gate with no second attempt (bv2 medium, build 018625f3).
+    const derivedVerdict = dependencyRepairScope || repairMode ? deriveBuildSpec(contract).verdict : null;
     const verdict = {
       ok: baseVerdict.ok && profileVerdict.ok && (!derivedVerdict || derivedVerdict.ok),
       problems: [...new Set([
