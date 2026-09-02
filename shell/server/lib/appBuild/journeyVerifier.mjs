@@ -808,11 +808,22 @@ export function collectionMembershipExpectationSpec(expect = "") {
   return { collection, members, ...(absentMembers.length ? { absentMembers } : {}) };
 }
 
-const GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN = /^(?:new|created|updated|saved|added|submitted|same|selected|chosen|current|this|that)\s+(?:software|item|product|entry|record|project|task|user|member|account|booking|reservation|document|note|file|message|post|event|appointment|contact|lead|invoice|quote|report|ticket|asset|favourite|favorite|selection|result)$/;
+// "the new project CARD appears in the projects list" still names the record the step just
+// created; the trailing structural noun describes how the collection renders a member, not a
+// second identity. Live proof (bv2 medium qualification, 2397cbc): the literal words
+// "new project card" were demanded inside the projects list, which no correct application
+// renders, and three repair waves could not move that verdict.
+const GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN = /^(?:new|created|updated|saved|added|submitted|same|selected|chosen|current|this|that)\s+(?:software|item|product|entry|record|project|task|user|member|account|booking|reservation|document|note|file|message|post|event|appointment|contact|lead|invoice|quote|report|ticket|asset|favourite|favorite|selection|result)(?:\s+(?:card|row|tile|line|chip|panel|badge))?$/;
+const COLLECTION_MEMBER_RENDERING_SUFFIX_PATTERN = /\s+(?:card|row|tile|line|chip|panel|badge)$/i;
+
+export function isGenericCollectionMemberReference(member = "") {
+  return GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim());
+}
 
 function enteredCollectionIdentity(member, enteredValues = []) {
-  if (!GENERIC_COLLECTION_MEMBER_REFERENCE_PATTERN.test(String(member || "").trim())) return null;
-  const noun = semanticKey(String(member).trim().split(/\s+/).at(-1));
+  if (!isGenericCollectionMemberReference(member)) return null;
+  const reference = String(member).trim().replace(COLLECTION_MEMBER_RENDERING_SUFFIX_PATTERN, "");
+  const noun = semanticKey(reference.split(/\s+/).at(-1));
   const values = (Array.isArray(enteredValues) ? enteredValues : [])
     .filter((row) => row?.field && row?.value);
   const normalizedField = (row) => String(row.field).replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -2813,7 +2824,9 @@ async function runStep(page, step, {
   const removalSpec = selectedRemovalExpectationSpec(
     removalExpectationSpec({ action, expect }), selections, selectionValues,
   );
-  const collectionMembershipSpec = resolvedCollectionMembershipExpectationSpec(expect, enteredValues)
+  // Resolved again after this step's own contracted fill: "the new project card" is named by the
+  // title this very step types, which is not yet in enteredValues here.
+  let collectionMembershipSpec = resolvedCollectionMembershipExpectationSpec(expect, enteredValues)
     || selectedCollectionExpectationSpec(expect, selections, selectionValues);
   const removalFlow = removalSpec ? interactionFlows.find((flow) => flow.control
     && ["mutation", "cancellation", "action"].includes(flow.kind)) : null;
@@ -3077,6 +3090,13 @@ async function runStep(page, step, {
       }
       enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
         .map((field) => ({ field: field.field, value: field.expectedValue })));
+      // The collection member this step's expectation names ("the new project card") is identified
+      // by a value this step has only now typed. Re-resolve so the strong membership check looks
+      // for the entered identity and never for the generic reference as literal row text.
+      if (result.complete) {
+        collectionMembershipSpec = resolvedCollectionMembershipExpectationSpec(expect, enteredValues)
+          || selectedCollectionExpectationSpec(expect, selections, selectionValues);
+      }
       filledContractedInputs = result.complete ? effectiveContractedInputs : [];
       drove = drove || result.filled.length > 0;
       filledSomething = filledSomething || result.filled.length > 0;
@@ -3197,7 +3217,24 @@ async function runStep(page, step, {
     // drives at most one semantic action — only bounded multi-stage kinds like flow_advance may
     // act more than once. The expectation below still decides the verdict; activation alone
     // never passes a step.
-    contractDriven = true;
+    //
+    // EXCEPT when the same step also contracts a SEPARATE operation control. A mixed step —
+    // "create a new project with title, client, …" targeting the project creation form — derives
+    // the entry control, its inputs AND the declared create-project action under its own machine
+    // identity. Entering the flow is not committing it: marking the step driven here left the
+    // filled form unsubmitted, nothing was persisted, and the verdict read "the contracted action
+    // ran" because the fill alone counted as proof. Live proof: bv2 medium qualification 2397cbc,
+    // step 4, three repair waves, zero movement. The contracted-action activation below owns that
+    // second identity; the generic click path stays suppressed either way because that block
+    // sets contractDriven itself or returns undriveable.
+    const separateOperation = !authenticationFlow && interactionFlows.find((flow) => flow !== entry
+      && flow.control?.machineId && flow.control.machineId !== entry.control.machineId
+      && ["mutation", "cancellation", "lookup", "action"].includes(flow.kind));
+    if (separateOperation) {
+      controlEvidence = { ...(controlEvidence || {}), flowEntry: activation };
+    } else {
+      contractDriven = true;
+    }
   }
 
   // A contracted TRANSITION step. It writes nothing, so there is no value to prove — the whole

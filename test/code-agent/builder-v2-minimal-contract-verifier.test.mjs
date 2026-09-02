@@ -281,6 +281,19 @@ test("multi-member collection expectations retain their named scope", () => {
   assert.equal(resolvedCollectionMembershipExpectationSpec(
     "the new project appears in the projects table with its client, owner, and status",
   ), null, "a generic record reference is not a literal table member without entered identity evidence");
+  // Retained medium-qualification wording (build 37228e5f): the rendering noun after the record
+  // reference is how the list draws a member, never a literal row label to demand.
+  const cardWording = "the new project card appears in the projects list with its client, owner, due date, and Active status";
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(cardWording, [
+    { field: "title", value: "Journey 830822" }, { field: "clientName", value: "Journey 830822" },
+    { field: "ownerId", value: "Journey 830822" }, { field: "status", value: "Paused" },
+  ]), { collection: "projects list", members: ["Journey 830822"] });
+  assert.equal(resolvedCollectionMembershipExpectationSpec(cardWording), null,
+    "\"new project card\" is a generic record reference, not the literal text \"new project card\"");
+  assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
+    "the created task row appears in the task list with its owner",
+    [{ field: "taskTitle", value: "Journey 44" }],
+  ), { collection: "task list", members: ["Journey 44"] });
   assert.deepEqual(resolvedCollectionMembershipExpectationSpec(
     "Atlas Build Studio appears in the favourites list and its card shows a favourited state",
     [{ field: "name", value: "Journey 123" }],

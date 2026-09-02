@@ -1,0 +1,501 @@
+{
+  "summary": "Alder Studio projects workspace: create a project, create a task, assign an owner, update status, reload",
+  "projectType": "dashboard",
+  "version": 1,
+  "auth": {
+    "required": false
+  },
+  "routes": [
+    {
+      "path": "/",
+      "name": "Projects",
+      "auth": false,
+      "purpose": "create, view, and update project records"
+    }
+  ],
+  "entities": [
+    {
+      "name": "memberProfile",
+      "owned": false,
+      "fields": [
+        {
+          "name": "memberId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a member profile belongs to one platform authenticated user",
+        "a member profile may own many projects",
+        "a member profile may own many tasks"
+      ]
+    },
+    {
+      "name": "project",
+      "owned": false,
+      "fields": [
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "clientName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a project has one owner member profile",
+        "a project has many tasks",
+        "a project is created by one member profile"
+      ]
+    },
+    {
+      "name": "task",
+      "owned": false,
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "taskStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a task belongs to one project",
+        "a task has one owner member profile",
+        "a task is created by one member profile"
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "create-project",
+      "kind": "create",
+      "entity": "project",
+      "journey": "create-and-update-work",
+      "description": "persist a new project via db.entity('project').create",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate",
+            "createdBy"
+          ],
+          "writes": [
+            "projectId",
+            "updatedAt"
+          ],
+          "behavior": "generate a project identifier and update timestamp for the new project"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "projectId",
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "writes": [
+            "projectId",
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "create"
+        }
+      ]
+    },
+    {
+      "id": "update-project",
+      "kind": "update",
+      "entity": "project",
+      "journey": "create-and-update-work",
+      "description": "persist changed project fields via db.entity('project').update",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectId",
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate"
+          ],
+          "writes": [
+            "updatedAt"
+          ],
+          "behavior": "set the project updated timestamp when editable fields change"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "projectId",
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate",
+            "updatedAt"
+          ],
+          "writes": [
+            "title",
+            "clientName",
+            "description",
+            "status",
+            "ownerId",
+            "dueDate",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "update"
+        }
+      ]
+    },
+    {
+      "id": "create-task",
+      "kind": "create",
+      "entity": "task",
+      "journey": "create-and-update-work",
+      "description": "persist a new task via db.entity('task').create",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "priority",
+            "taskOwnerId",
+            "taskDueDate",
+            "taskStatus",
+            "createdBy"
+          ],
+          "writes": [
+            "taskId",
+            "updatedAt"
+          ],
+          "behavior": "generate a task identifier and update timestamp for the new task"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "taskId",
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "priority",
+            "taskOwnerId",
+            "taskDueDate",
+            "taskStatus",
+            "createdBy",
+            "updatedAt"
+          ],
+          "writes": [
+            "taskId",
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "priority",
+            "taskOwnerId",
+            "taskDueDate",
+            "taskStatus",
+            "createdBy",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "create"
+        }
+      ]
+    },
+    {
+      "id": "assign-task-owner",
+      "kind": "update",
+      "entity": "task",
+      "journey": "create-and-update-work",
+      "description": "persist a changed task owner via db.entity('task').update",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "taskId",
+            "taskOwnerId"
+          ],
+          "writes": [
+            "updatedAt"
+          ],
+          "behavior": "set the task updated timestamp when the owner changes"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "taskId",
+            "taskOwnerId",
+            "updatedAt"
+          ],
+          "writes": [
+            "taskOwnerId",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "update"
+        }
+      ]
+    },
+    {
+      "id": "update-task-status",
+      "kind": "update",
+      "entity": "task",
+      "journey": "create-and-update-work",
+      "description": "persist a changed task status via db.entity('task').update",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "taskId",
+            "taskStatus"
+          ],
+          "writes": [
+            "updatedAt"
+          ],
+          "behavior": "set the task updated timestamp when status changes"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "taskId",
+            "taskStatus",
+            "updatedAt"
+          ],
+          "writes": [
+            "taskStatus",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "update"
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "create-and-update-work",
+      "stage": "primary_journey",
+      "title": "A signed-in team member creates a project, creates a task, assigns an owner, updates task status, and recovers the changes after reload",
+      "priority": "primary",
+      "acceptance": [
+        "a created project remains visible after a full page reload",
+        "a created task remains visible after a full page reload",
+        "an owner assignment and task status change remain visible after a full page reload"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page",
+          "expect": "the projects workspace shows a create project control",
+          "target": "/"
+        },
+        {
+          "action": "create a new project with title, client, description, owner, due date, and active status",
+          "expect": "the new project card appears in the projects list with its client, owner, due date, and Active status",
+          "target": "project creation form",
+          "operates": [
+            "title",
+            "clientName",
+            "description",
+            "ownerId",
+            "dueDate",
+            "status",
+            "create-project"
+          ]
+        },
+        {
+          "reads": [
+            "projectId"
+          ],
+          "action": "open the new project's tasks panel",
+          "expect": "the task creation form for the selected project is visible",
+          "target": "project card"
+        },
+        {
+          "reads": [
+            "projectId"
+          ],
+          "action": "create a task for the selected project with title, description, priority, owner, due date, and To Do status",
+          "expect": "the task appears under the selected project and on the task board in the To Do column",
+          "target": "task creation form",
+          "operates": [
+            "taskTitle",
+            "taskDescription",
+            "priority",
+            "taskOwnerId",
+            "taskDueDate",
+            "taskStatus",
+            "create-task"
+          ]
+        },
+        {
+          "reads": [
+            "taskId"
+          ],
+          "action": "change the task owner",
+          "expect": "the task card shows the newly selected owner",
+          "target": "task owner selector",
+          "operates": [
+            "taskOwnerId",
+            "assign-task-owner"
+          ],
+          "primitive": "selection"
+        },
+        {
+          "reads": [
+            "taskId"
+          ],
+          "action": "move the task to In Progress",
+          "expect": "the task card moves to the In Progress column and displays In Progress status",
+          "target": "task status selector",
+          "operates": [
+            "taskStatus",
+            "update-task-status"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "taskStatus": "In Progress"
+          }
+        },
+        {
+          "reads": [
+            "projectId",
+            "taskId"
+          ],
+          "action": "reload the browser on the projects page",
+          "expect": "the created project and updated task are still visible with the assigned owner and In Progress status",
+          "target": "/"
+        }
+      ]
+    }
+  ],
+  "acceptance": [],
+  "states": [],
+  "deferred": [],
+  "imageIntents": [],
+  "integrations": []
+}
