@@ -143,7 +143,18 @@ export default function App() {
 `,
 });
 
-const CASES = { working: { broken: false }, broken: { broken: true } };
+// The same journey with a CONTRACT-supplied status value the app's select never offers. Live proof
+// (bv2 medium, build d6a2ab65): this exact shape was charged to the verifier as a fixture defect and
+// the build stopped with zero repair; it is the application failing a contracted requirement.
+const contractedStatusModel = structuredClone(model);
+contractedStatusModel.journeys[0].steps[CREATE_STEP].verificationValues = { status: "To Do" };
+const contractedStatusContract = deriveBuildSpec(contractedStatusModel).contract;
+
+const CASES = {
+  working: { broken: false },
+  broken: { broken: true },
+  contractedOption: { broken: false, contract: contractedStatusContract },
+};
 const servers = new Map();
 const results = new Map();
 const builds = new Map();
@@ -175,7 +186,7 @@ before(async () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     servers.set(name, server);
     results.set(name, await verifyJourneys({
-      previewUrl: `http://127.0.0.1:${server.address().port}`, contract, timeoutMs: 240_000,
+      previewUrl: `http://127.0.0.1:${server.address().port}`, contract: spec.contract || contract, timeoutMs: 240_000,
       verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
     }));
   }
@@ -232,4 +243,21 @@ test("a create step whose operation persists nothing still fails — the fix wea
       "the operation control was genuinely activated before the verdict");
     assert.deepEqual(evidence.collectionMembership?.missing,
       [evidence.fields?.find((field) => field.field === "title")?.expectedValue]);
+  });
+
+test("a contract-supplied value the app's control never offers is the app's failure, not a verifier fixture defect",
+  { ...needsBrowser, timeout: 300_000 }, () => {
+    assert.equal(builds.get("contractedOption").ok, true, builds.get("contractedOption")?.stderr);
+    const result = results.get("contractedOption");
+    const journey = result.journeys.find((row) => row.id === JOURNEY_ID);
+    const step = journey.steps[CREATE_STEP];
+    const transcript = transcriptOf(journey);
+    assert.equal(step.status, "undriveable", transcript);
+    assert.equal(step.classification, "APP_FUNCTIONAL_FAILURE", transcript);
+    const status = step.controlEvidence?.fields?.find((field) => field.field === "status");
+    assert.equal(status?.status, "fixture_invalid", JSON.stringify(status));
+    assert.equal(status?.fixtureAuthority, "contract", JSON.stringify(status));
+    assert.equal(status?.expectedValue, "To Do", JSON.stringify(status));
+    assert.equal(step.verifierDefect, undefined, "the contract's own value is never the verifier's fixture defect");
+    assert.deepEqual(result.verifierDefects || [], [], JSON.stringify(result.verifierDefects));
   });

@@ -1103,7 +1103,7 @@ export function buildInteractionContract(contract, {
     externalState: contract?.externalState || null,
     capabilityOutputs: contract?.capabilityOutputs || null,
   };
-  const verdict = validateInteractionContract(plan);
+  const verdict = validateInteractionContract(plan, { operations: contract?.operations || [] });
   return { ...plan, valid: verdict.ok, problems: verdict.problems };
 }
 
@@ -1464,14 +1464,68 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     capabilityGraphVersion: graph?.version || null,
   };
   const { plan: composed } = normalizeInteractionStateDependencies(composedBeforeNormalization);
-  const verdict = validateInteractionContract(composed, { capabilityGraph: graph });
+  const verdict = validateInteractionContract(composed, { capabilityGraph: graph, operations: contract?.operations || [] });
   return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };
 }
 
 /** Reject a broken ownership/data-flow graph before implementation generation. */
-export function validateInteractionContract(plan, { capabilityGraph = null } = {}) {
+/**
+ * One control identity, two entities: a journey that operates `status` for the project it creates
+ * and again `status` for the task it then adds derives ONE machine identity and ONE draft path for
+ * both, so neither the contract nor the browser can say which control a step means. Live proof
+ * (bv2 medium qualification, build d6a2ab65): both forms rendered the contracted identity, the
+ * verifier reported the fields ambiguous, matched the task's contracted "To Do" against the
+ * project's status select and blocked the build as a platform failure before any repair. The
+ * contract must name each entity's field distinctly (taskStatus, taskDueDate…); this is caught at
+ * the gate, where the contract repair round can still fix it for free.
+ */
+function controlIdentityCollisions(plan, operations = []) {
+  const entityOf = new Map((operations || []).map((operation) => [
+    normalized(operation?.id || operation?.name), operation?.entity || null,
+  ]));
+  const flows = plan?.flows || [];
+  const stepEntity = (journeyId, stepIndex) => unique(flows
+    .filter((flow) => flow.journeyId === journeyId && flow.stepIndex === stepIndex && flow.operationId)
+    .map((flow) => entityOf.get(normalized(flow.operationId)) || null).filter(Boolean));
+  const groups = new Map();
+  for (const flow of flows) {
+    if (!["input", "selection"].includes(flow.kind) || !flow.control?.machineId) continue;
+    if (!Number.isInteger(flow.stepIndex) || flow.stepIndex < 0) continue;
+    const key = `${flow.journeyId}|${flow.control.machineId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(flow);
+  }
+  const collisions = [];
+  for (const [, group] of groups) {
+    const steps = unique(group.map((flow) => flow.stepIndex));
+    if (steps.length < 2) continue;
+    const uses = steps.map((stepIndex) => {
+      const entities = stepEntity(group[0].journeyId, stepIndex);
+      const operationIds = unique(flows.filter((flow) => flow.journeyId === group[0].journeyId
+        && flow.stepIndex === stepIndex && flow.operationId).map((flow) => flow.operationId));
+      return { stepIndex, entity: entities.length === 1 ? entities[0] : null, operationIds };
+    }).filter((use) => use.entity);
+    const entities = unique(uses.map((use) => use.entity));
+    if (entities.length < 2) continue;
+    collisions.push({
+      journeyId: group[0].journeyId, machineId: group[0].control.machineId,
+      field: group[0].control.logicalField || group[0].control.accessibleName,
+      uses: uses.map((use) => ({ stepIndex: use.stepIndex, entity: use.entity, operationIds: use.operationIds })),
+    });
+  }
+  return collisions;
+}
+
+export function validateInteractionContract(plan, { capabilityGraph = null, operations = [] } = {}) {
   const problems = [];
   const issues = [];
+  for (const collision of controlIdentityCollisions(plan, operations)) {
+    const issue = { code: "interaction_control_identity_collision", ...collision };
+    issues.push(issue);
+    problems.push(`${collision.journeyId} operates field "${collision.field}" for more than one entity under one `
+      + `control identity (${collision.uses.map((use) => `${use.entity} via ${use.operationIds.join("/")} at step `
+        + `${use.stepIndex + 1}`).join("; ")}); name each entity's field distinctly so every control is addressable`);
+  }
   const semanticIssue = (flow, missing) => {
     const issue = {
       code: "interaction_contract_semantics_incomplete",

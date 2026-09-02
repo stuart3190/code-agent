@@ -3103,7 +3103,14 @@ async function runStep(page, step, {
       if (!result.complete) {
         const missing = result.evidence.fields.filter((field) => field.status !== "filled")
           .map((field) => `${field.field}:${field.status}`).join(", ");
-        const invalidFixture = result.evidence.fields.find((field) => field.status === "fixture_invalid");
+        // A fixture the CONTRACT supplied ("To Do" from verificationValues) that no enabled native
+        // option accepts is a mismatch between the application and its contract — the control does
+        // not offer the contracted value, or the contract named two controls alike and the wrong one
+        // answered. Only a fixture the verifier GENERATED can be the verifier's own defect. Live
+        // proof (bv2 medium, build d6a2ab65): a contracted task status was charged to the platform
+        // and the build stopped with zero repair.
+        const invalidFixture = result.evidence.fields.find((field) => field.status === "fixture_invalid"
+          && field.fixtureAuthority !== "contract");
         return { drove, status: "undriveable", detail: `contracted control(s) could not be driven: ${missing}`,
           controlEvidence,
           ...(invalidFixture ? { verifierDefect: {
@@ -4823,8 +4830,13 @@ export function applyMinimalStepClassification(outcome, fatalRuntimeErrors = [])
   const requiredFieldMissing = (outcome?.controlEvidence?.fields || []).some((field) => (
     ["missing", "ambiguous_identity"].includes(field.status)
   ));
+  // The control was found, but it does not offer the value the CONTRACT names for it. That is the
+  // application (or its contract) failing an exact contracted requirement, never verifier doubt.
+  const contractedValueUnavailable = (outcome?.controlEvidence?.fields || []).some((field) => (
+    field.status === "fixture_invalid" && field.fixtureAuthority === "contract" && field.matchedBy
+  ));
   if (activationFailure || requiredEntryMissing || requiredActionMissing
-    || requiredSelectionMissing || requiredFieldMissing) {
+    || requiredSelectionMissing || requiredFieldMissing || contractedValueUnavailable) {
     return { ...outcome, classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
       status: "undriveable" };
   }
