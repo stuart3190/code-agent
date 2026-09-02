@@ -4307,6 +4307,10 @@ async function establishPrerequisites(page, controls, {
   // an input's DOM value because body.innerText excludes form values; one must be rendered by the
   // resulting durable record (or the mutation must produce a new reference token).
   const enteredValues = [];
+  // The same values with their contracted field names, so a collection-member observable ("the
+  // new project appears in the projects list") resolves to the identity this setup just typed —
+  // exactly as the journey driver resolves it.
+  const enteredFields = [];
   let durableCommitted = false;
   for (const flow of controls) {
     const structuredRoute = flow.kind === "navigation" ? verifierStructuredRouteTarget(flow.target) : null;
@@ -4382,22 +4386,31 @@ async function establishPrerequisites(page, controls, {
       if (!result.complete) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind, reason: "field not fillable" } };
       }
-      enteredValues.push(...result.evidence.fields.filter((field) => field.status === "filled")
-        .map((field) => field.expectedValue).filter(Boolean));
+      const filledFields = result.evidence.fields.filter((field) => field.status === "filled" && field.expectedValue);
+      enteredValues.push(...filledFields.map((field) => field.expectedValue));
+      enteredFields.push(...filledFields.map((field) => ({ field: field.field, value: field.expectedValue })));
       performed.push({ control: label, kind: flow.kind, detail: `filled ${label}` });
       continue;
     }
-    // A mutation/action control ("start booking control") — driven by its contracted accessible
-    // name only, never by a keyword sweep, so an unrelated button can never stand in for it.
+    // A mutation/action control ("start booking control") — driven by the contract's own opaque
+    // machine identity when the app emitted it, else by its contracted accessible name; never by
+    // a keyword sweep, so an unrelated button can never stand in for it.
     let clicked = false;
     const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    if (flow.control?.machineId) {
+      const byIdentity = page.locator(`[data-thrallo-action="${flow.control.machineId}"]`).first();
+      if (await byIdentity.count().catch(() => 0) && await byIdentity.isVisible().catch(() => false)
+        && !(await byIdentity.isDisabled().catch(() => true))) {
+        await byIdentity.click({ timeout: 5_000 }).then(() => { clicked = true; }).catch(() => {});
+      }
+    }
     // A contract names controls descriptively — "start booking control", "Confirm booking
     // control" — while the button itself is labelled "Start booking". The generic control nouns
     // are stripped as a second attempt, so the description still resolves to the real control
     // without matching on prose.
     const aliases = unique(controlAliases(flow.control).flatMap((alias) => [alias,
       String(alias).replace(/\b(control|button|link|action)\b/gi, "").replace(/\s+/g, " ").trim()]));
-    for (const alias of aliases) {
+    for (const alias of clicked ? [] : aliases) {
       for (const role of DRIVEABLE_ACTION_ROLES) {
         const candidate = page.getByRole(role, { name: new RegExp(`(^|\\W)${escapeRegex(alias)}(\\W|$)`, "i") }).first();
         if (!(await candidate.count().catch(() => 0))) continue;
@@ -4422,13 +4435,27 @@ async function establishPrerequisites(page, controls, {
     }
     if (flow.kind === "mutation" && flow.durableLifecycle && flow.observable) {
       const deadline = Date.now() + 12_000;
-      let visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
+      // The observable is judged by the SAME rules the journey driver applies to this very step.
+      // Keyword freshness alone failed a committed record live (bv2 medium, build a708c296): "the
+      // new project appears in the projects list with its title, client, owner, status, and due
+      // date" names only words the form's own labels already showed, so nothing could ever be
+      // fresh — while the primary journey had just PASSED the identical step on the contracted
+      // collection containing the entered title. A consumer journey then started "not reached"
+      // and the app was sent to repair for a verdict it had no part in.
+      const membershipSpec = resolvedCollectionMembershipExpectationSpec(flow.observable || "", enteredFields);
+      const observableState = async () => {
+        const freshness = await expectationBecameVisible(page, flow.observable || "", textBefore);
+        const membership = membershipSpec ? await collectionMembershipState(page, membershipSpec)
+          : { checked: false, ok: false };
+        return { ...freshness, met: freshness.met || membership.ok, membership };
+      };
+      let visible = await observableState();
       let textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       let identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
       let { value: durableValue, reference: durableReference } = identity;
       while (!(visible.met && (durableValue || durableReference)) && Date.now() < deadline) {
         await page.waitForTimeout(400);
-        visible = await expectationBecameVisible(page, flow.observable || "", textBefore);
+        visible = await observableState();
         textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
         identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
         ({ value: durableValue, reference: durableReference } = identity);
@@ -4447,7 +4474,9 @@ async function establishPrerequisites(page, controls, {
       await page.waitForTimeout(200);
       durableCommitted = true;
       performed.push({ control: label, kind: "durable_commit",
-        detail: `durable observable reached (${visible.found.join(", ")}) and `
+        detail: `durable observable reached (${visible.membership?.ok
+          ? `contracted collection contains ${visible.membership.present.join(", ")}`
+          : visible.found.join(", ")}) and `
           + `${durableValue ? `retained ${durableValue}` : `created ${durableReference}`}` });
     }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
