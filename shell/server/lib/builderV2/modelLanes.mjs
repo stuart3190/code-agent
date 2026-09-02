@@ -1695,12 +1695,19 @@ export function createModelLanes({
         },
       };
       let outcome;
+      // A thrown attempt must surface as ITS OWN message. Reading `outcome.contract` off an
+      // undefined outcome turned every contract-lane exception into "Cannot read properties of
+      // undefined", and a gate repair that died mid-attempt was reported as "unavailable" with no
+      // cause (bv2 medium qualification, build c56cb4c2).
+      let failure = null;
       try {
         outcome = await generateContract({
           provider: dispatchProvider, prompt: contractRequest, buildProfile, log, onUsage: accountUsage,
           priorContract: repair ? priorContract : null, priorProblems: repair ? problems : [],
           priorIssues: repair ? issues : [],
         });
+      } catch (error) {
+        failure = error;
       } finally {
         // Exact spend for THIS call = the shared bucket's delta (generateContract's own
         // `usage` reports only its last attempt). Recorded even when the guard throws —
@@ -1718,7 +1725,8 @@ export function createModelLanes({
           decision: selected.decision,
         });
       }
-      if (!outcome.contract) throw new Error(`contract generation failed: ${(outcome.problems || []).join("; ")}`);
+      if (failure) throw failure;
+      if (!outcome?.contract) throw new Error(`contract generation failed: ${(outcome?.problems || []).join("; ")}`);
       return outcome.contract;
     },
 

@@ -562,28 +562,41 @@ export async function generateContract({
       log(`contract: attempt ${attempt} did not return JSON`);
       continue;
     }
-    const repaired = dependencyRepairScope
-      ? mergeContractDependencyRepair(priorContract, parsed, dependencyRepairScope) : parsed;
-    const contract = normaliseContract(repaired, { prompt, buildProfile: productProfile });
-    const baseVerdict = validateContract(contract);
-    const profileVerdict = validateBuildProfileContract(contract, productProfile);
-    // A scoped gate repair is useful only if it closes the same canonical derivation gates that
-    // requested the repair. Structural validation alone accepted malformed replies that duplicated
-    // navigation steps and put a missing field in `operates`; the orchestrator then rejected the
-    // unchanged missing producer without giving the repair lane its built-in correction attempt.
-    // Every REPAIR attempt is judged by the canonical derivation, scoped or not: an unscoped
-    // repair that structurally validated but still collided was accepted here and rejected by
-    // the orchestrator's gate with no second attempt (bv2 medium, build 018625f3).
-    const derivedVerdict = dependencyRepairScope || repairMode ? deriveBuildSpec(contract).verdict : null;
-    const verdict = {
-      ok: baseVerdict.ok && profileVerdict.ok && (!derivedVerdict || derivedVerdict.ok),
-      problems: [...new Set([
-        ...baseVerdict.problems,
-        ...profileVerdict.problems,
-        ...(derivedVerdict?.problems || []),
-      ])],
-      warnings: baseVerdict.warnings,
-    };
+    // A reply whose SHAPE breaks merge, normalisation or derivation is a rejected attempt with a
+    // named reason, never an exception that ends the lane: the second attempt then sees exactly
+    // what the first reply did wrong (bv2 medium, build c56cb4c2 — one gate-repair call, then
+    // silence).
+    let contract;
+    let verdict;
+    try {
+      const repaired = dependencyRepairScope
+        ? mergeContractDependencyRepair(priorContract, parsed, dependencyRepairScope) : parsed;
+      contract = normaliseContract(repaired, { prompt, buildProfile: productProfile });
+      const baseVerdict = validateContract(contract);
+      const profileVerdict = validateBuildProfileContract(contract, productProfile);
+      // A scoped gate repair is useful only if it closes the same canonical derivation gates that
+      // requested the repair. Structural validation alone accepted malformed replies that duplicated
+      // navigation steps and put a missing field in `operates`; the orchestrator then rejected the
+      // unchanged missing producer without giving the repair lane its built-in correction attempt.
+      // Every REPAIR attempt is judged by the canonical derivation, scoped or not: an unscoped
+      // repair that structurally validated but still collided was accepted here and rejected by
+      // the orchestrator's gate with no second attempt (bv2 medium, build 018625f3).
+      const derivedVerdict = dependencyRepairScope || repairMode ? deriveBuildSpec(contract).verdict : null;
+      verdict = {
+        ok: baseVerdict.ok && profileVerdict.ok && (!derivedVerdict || derivedVerdict.ok),
+        problems: [...new Set([
+          ...baseVerdict.problems,
+          ...profileVerdict.problems,
+          ...(derivedVerdict?.problems || []),
+        ])],
+        warnings: baseVerdict.warnings,
+      };
+    } catch (error) {
+      lastProblems = [`the reply could not be applied as a contract: ${String(error?.message || error).slice(0, 300)}`];
+      lastContract = repairMode ? priorContract : null;
+      log(`contract: attempt ${attempt} rejected — ${lastProblems[0]}`);
+      continue;
+    }
     if (verdict.ok) {
       log(`contract: ${contractSummary(contract)}${verdict.warnings.length ? ` (${verdict.warnings.length} warning(s))` : ""}`);
       return { contract, attempts: attempt, problems: [], warnings: verdict.warnings, usage: usageTotal };

@@ -1195,6 +1195,7 @@ export function createOrchestrator({
         const failingGates = (verdict) => ["interaction", "capabilityGraph", "scaffoldGraph", "buildProfile"]
           .filter((gate) => verdict?.[gate] && !verdict[gate].ok);
         let contractRepairUsed = false;
+        let contractRepairError = null;
         if (!spec.verdict.ok) {
           // ONE targeted contract repair before the build dies. The contract lane deliberately
           // returns a degraded contract rather than nothing, and this gate then rejected it on
@@ -1223,7 +1224,8 @@ export function createOrchestrator({
             log(`contract repair ${spec.verdict.ok ? "produced a derivable contract" : "did not close the gate"}`);
           } catch (error) {
             abortIfRequested(signal);
-            log(`contract repair unavailable (${error.message}); reporting the original gate result`);
+            contractRepairError = String(error?.message || error).slice(0, 400);
+            log(`contract repair unavailable (${contractRepairError}); reporting the original gate result`);
           }
         }
         if (!spec.verdict.ok) {
@@ -1241,6 +1243,7 @@ export function createOrchestrator({
             problems,
             failingGates: failing,
             contractRepairUsed,
+            ...(contractRepairError ? { contractRepairError } : {}),
             failureClassification: "interaction_contract_invalid",
           });
         }
