@@ -179,8 +179,18 @@ test("R3 — Builder V2 keeps its shared system prefix separate from stage-varyi
     "the immutable implementation rules have one shared definition");
   assert.match(source, /const fullSystemPrompt = `\$\{PATCH_SYSTEM_PROMPT\}[\s\S]*\$\{capabilityBrief\(\)\}`/,
     "each patch turn reuses the shared rules and canonical capability catalogue");
-  assert.match(source, /let systemPrompt = fullSystemPrompt;[\s\S]*systemPrompt = headroomScope\?\.fragmented \? HEADROOM_FRAGMENT_SYSTEM_PROMPT : fullSystemPrompt;/,
-    "normal turns reuse the canonical prefix and bounded headroom turns use their own static prefix");
+  assert.match(source, /let systemPrompt = fullSystemPrompt;/,
+    "a turn starts from the canonical prefix");
+  // The point is not how many prefixes there are - a compile correction has since earned its
+  // own - but that every one of them is a static constant. Pinning the exact ternary made
+  // adding a third static prefix look like a violation, which is the opposite of the rule.
+  const assignment = source.match(/systemPrompt = headroomScope\?\.fragmented[\s\S]*?;/)?.[0];
+  assert.ok(assignment, "bounded headroom turns still select their prefix explicitly");
+  assert.match(assignment, /HEADROOM_FRAGMENT_SYSTEM_PROMPT/,
+    "a fragmented headroom turn uses its own static prefix");
+  assert.match(assignment, /fullSystemPrompt/, "every other turn reuses the canonical prefix");
+  assert.doesNotMatch(assignment, /[`+]/,
+    "every system prefix is a static constant, never assembled from stage-varying context");
   assert.match(source, /messages: \[\{ role: "user", content: prompt \}\]/,
     "contract, journey, retrieval, and repair context remain in the user message");
   assert.match(source, /"IMPLEMENTATION CONTRACT:"[\s\S]*contractBrief\(scopedContract\)/,
@@ -222,7 +232,16 @@ test("R4 — the stage prompt demands state TRANSITIONS, and names the verifier'
   // The exact step that failed in production: "choose an available date".
   const step = CONTRACT.journeys[0].steps.find((s) => s.action.includes("choose an available date"));
   const wanted = expectationKeywords(step.expect);
-  assert.ok(wanted.includes("selected") && wanted.includes("highlighted"), wanted.join(","));
+  // This once demanded "selected"/"highlighted" as literal page copy, because the booking build
+  // failed steps whose pages never showed those words. That was solved the other way round:
+  // selection is proved from the option transition and highlighting from the rendered box, so
+  // both words are excluded on purpose - demanding them made correctly highlighted cards fail.
+  // What must still hold is that the keywords are the expectation's own substantive content.
+  assert.ok(wanted.length > 0, "the step still contributes verifiable expectation content");
+  assert.ok(wanted.every((word) => step.expect.toLowerCase().includes(word)),
+    `every keyword comes from the expectation itself: ${wanted.join(",")}`);
+  assert.ok(!wanted.includes("selected") && !wanted.includes("highlighted"),
+    "DOM-state words are proved structurally, never required as visible copy");
   // v2: initial state → action → resulting state, with the anti-gaming rule stated plainly —
   // the 46.10-credit run answered a keyword list with static copy and correctly failed.
   assert.ok(prompt.includes(`before: ${wanted.join(", ")} absent (or in their pre-action state) · after: they newly appear or visibly change`));
@@ -312,8 +331,12 @@ test("R5 — a journey outcome with zero trace in any screen fails the owning st
   // And with the journey's OWN module present — where the newsletter UI exists — it passes.
   const modular = {
     ...bare,
+    // The journey contracts THREE outcomes - the section, the success message and the inline
+    // validation message - so the module that owns the journey has to carry all three. It
+    // previously carried two and passed, which is the very gap this test exists to close.
     "src/components/NewsletterSignup.jsx":
-      "export default function NewsletterSignup() { return <section>Newsletter signup — a success message confirms you joined.</section>; }",
+      "export default function NewsletterSignup() { return <section>Newsletter signup — a success message confirms you joined."
+      + " An inline validation message says the email must look like an email address.</section>; }",
   };
   const real = await runStageGate(modular, {
     contract: CONTRACT, stage: { id: "supporting", journeys: [newsletter] }, compile: okCompile,
