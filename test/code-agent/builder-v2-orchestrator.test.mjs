@@ -499,20 +499,27 @@ test("C2 — an unattributed essential failure blocks, is recorded separately, a
     contract: ghostContract,
     failJourneys: ["zzqx-ghost-flow"],
     patchPlan: {
-      core: () => [{ ...CORE_PATCH[0], replaceFile: "src/screens/scaffold/HomeScreen.jsx",
-        content: CORE_PATCH[0].content.replaceAll("BookingScreen", "HomeScreen") }],
+      core: () => [CORE_PATCH[0]],
       repair: ({ problems }) => {
         repairProblems = problems;
-        return [{ file: "src/screens/scaffold/HomeScreen.jsx", ops: [{ op: "append", content: "\n// bounded unattributed repair attempt\n" }] }];
+        return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: "\n// bounded unattributed repair attempt\n" }] }];
       },
     },
   });
   const result = await orchestrator.runBuild({ owner: "o", projectId: "proj-1", request: "booking site" });
   assert.equal(result.state, "blocked");
-  assert.equal(deriveBuildSpec(ghostContract).scaffoldGraph.journeyOwnership[0].mountedModule,
-    "src/screens/scaffold/HomeScreen.jsx", "even an unusual contract receives a deterministic mounted owner");
+  // The journey is named nothing, but its step submits a booking form, so it binds to the
+  // booking route. What matters is that ONE answer is used everywhere: the module the journey
+  // is briefed to implement must be the module the composition gate validates.
+  const ghostSpec = deriveBuildSpec(ghostContract);
+  assert.equal(ghostSpec.scaffoldGraph.journeyOwnership[0].mountedModule,
+    "src/screens/scaffold/BookingScreen.jsx", "even an unusual contract receives a deterministic mounted owner");
+  assert.equal(ghostSpec.scaffoldCompositionPlan.routeScreenMap
+    .find((route) => route.journeyIds.includes("zzqx-ghost-flow"))?.module,
+    ghostSpec.scaffoldGraph.journeyOwnership[0].mountedModule,
+    "the briefed owner and the validated owner are the same screen");
   assert.deepEqual(result.platformDefects || [], [], "the scaffold graph makes the contracted owner explicit");
-  assert.ok(repairProblems.some((p) => /HomeScreen\.jsx/.test(p)), JSON.stringify(repairProblems));
+  assert.ok(repairProblems.some((p) => /BookingScreen\.jsx/.test(p)), JSON.stringify(repairProblems));
   assert.ok(!(await snapshotStore.pointer("o", "proj-1", "green")), "unattributed failure promoted nothing");
 });
 
