@@ -314,15 +314,20 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 74", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 83", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 74);
+  assert.equal(ledger.migrations.length, 83);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260813005422",
-    "20260813005509",
+    "20260823101752",
+    "20260825105631",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 74);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 83);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
+  // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
+  assert.deepEqual(
+    ledger.migrations.map((migration) => migration.appliedOrder),
+    Array.from({ length: 83 }, (_, index) => index + 1),
+  );
 });
 
 test("migration history validation reports the effective applied ledger, not the 60-row base as remote", () => {
@@ -330,20 +335,21 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 14);
-  assert.equal(result.effectiveApplied, 74);
-  assert.equal(result.active, 81);
-  // NOTE: this overlay model reports these as pending, but production has all five APPLIED —
-  // confirmed against supabase_migrations.schema_migrations on 2026-08-20. The drift is in the
-  // validator's overlay, not in the database, and it predates the last of these entries.
-  assert.deepEqual(result.pending, [
-    { version: "20260813095526", name: "v2_customer_accounting_and_approvals" },
-    { version: "20260813183000", name: "retire_legacy_bv2_accounting_rpcs" },
-    { version: "20260813194500", name: "enforce_v2_only_builder_contract" },
-    { version: "20260815095256", name: "drop_v1_build_job_server_id" },
-    { version: "20260820092621", name: "bv2_widen_repair_dispatch_limit" },
-    { version: "20260822160000", name: "bv2_contract_envelopes_recovery_settlement" },
-    { version: "20260822223523", name: "fix_bv2_pipeline_retry_durable_payload" },
+  assert.equal(result.appliedOverlay, 23);
+  assert.equal(result.effectiveApplied, 83);
+  assert.equal(result.active, 83);
+  // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
+  // pending list that its own comment admitted was already applied. Every entry was verified
+  // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
+  // overlay, so nothing is pending: the local history and the production ledger agree.
+  assert.deepEqual(result.pending, []);
+  // Four were pushed under an apply-time version that differs from the authored filename. Their SQL
+  // is identical to the ledger; only the version differs, and it is reported rather than hidden.
+  assert.deepEqual(result.versionDrift, [
+    { version: "20260822160000", appliedVersion: "20260822234502", name: "bv2_contract_envelopes_recovery_settlement" },
+    { version: "20260822223523", appliedVersion: "20260822234552", name: "fix_bv2_pipeline_retry_durable_payload" },
+    { version: "20260823101752", appliedVersion: "20260823110830", name: "bv2_owner_connected_recovery_transport" },
+    { version: "20260825105631", appliedVersion: "20260825120326", name: "add_bv2_minimal_verifier_policy" },
   ]);
 });
 
