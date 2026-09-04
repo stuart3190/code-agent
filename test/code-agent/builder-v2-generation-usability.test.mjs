@@ -356,7 +356,11 @@ test("GUIDANCE — the brief reaches the real generation prompt and stays short"
   assert.match(prompt, /useSemanticSelection/);
   assert.match(prompt, /useSemanticField/);
   const section = prompt.slice(prompt.indexOf("PREFERRED ASSEMBLY")).split("\n\n")[0];
-  assert.ok(section.split("\n").length <= 24, `the brief must stay small: ${section.split("\n").length} lines`);
+  // A bloat guard, not an architectural limit. It moved from 24 to 25 when 1fd3bcd added the
+  // line forbidding an explicit ensureVisitorSession() call and db.entity() on a
+  // capability-owned type - an earned instruction that stops a specific generation defect.
+  // Every line is a named pattern or its one-line caveat; raise this only for the same.
+  assert.ok(section.split("\n").length <= 25, `the brief must stay small: ${section.split("\n").length} lines`);
 });
 
 // ── A. real browser: broken hand-wiring stays red, the binding propagates ─────────────────────
