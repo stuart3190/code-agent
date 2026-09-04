@@ -109,6 +109,17 @@ import { BookingStatus } from "../components/recover-booking/RecoverBookingStatu
 export default function HomePage(){ return <main><BookingFlow/><BookingReview/><BookingConfirmation/><BookingStatus/></main>; }
 `;
   tree["src/App.jsx"] = `import HomePage from "./routes/HomePage.jsx"; export default function App(){ return <HomePage/>; }`;
+  // The mounted scaffold screen must be composed, not left on its placeholder slot, or the
+  // scaffold gate blocks the build before the persistence concern under test is reached.
+  tree["src/screens/scaffold/BookingScreen.jsx"] = `
+import { BookingFlow } from "../../components/recover-booking/RecoverBookingFlow.jsx";
+import { BookingReview } from "../../components/recover-booking/RecoverBookingReview.jsx";
+import { BookingConfirmation } from "../../components/recover-booking/RecoverBookingConfirmation.jsx";
+import { BookingStatus } from "../../components/recover-booking/RecoverBookingStatus.jsx";
+export default function BookingScreen(){
+  return <main><BookingFlow/><BookingReview/><BookingConfirmation/><BookingStatus/></main>;
+}
+`;
   return tree;
 }
 
@@ -116,7 +127,10 @@ function fullCandidatePatches(flow = retainedBookingFlow) {
   const tree = candidateTree(flow);
   const scaffold = fromScaffold(REACT_VITE);
   return Object.entries(tree).filter(([path, content]) => scaffold[path] !== content)
-    .map(([path, content]) => scaffold[path] === undefined ? { newFile: path, content } : { replaceFile: path, content });
+    // Composed scaffold screens are created by the composer during the build, so they are
+    // replaced rather than added even though the base scaffold does not carry them.
+    .map(([path, content]) => scaffold[path] === undefined && !path.startsWith("src/screens/scaffold/")
+      ? { newFile: path, content } : { replaceFile: path, content });
 }
 
 test("14S persistence ownership is machine-readable in the plan and hard generation prompt", () => {
@@ -176,6 +190,7 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
   const checkpoints = [];
   const timeline = [];
   let contractCalls = 0;
+  const compileSteps = [];
   let compileCalls = 0;
   const orchestrator = createOrchestrator({
     contractFn: async () => { contractCalls += 1; return BOOKING; },
@@ -196,7 +211,7 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
     },
     snapshotStore: snapshots, buildStore: memoryBuildStore(), baseTree: () => fromScaffold(REACT_VITE),
     baseline: REACT_VITE,
-    compile: async () => { compileCalls += 1; return { ok: true }; },
+    compile: async (_tree, execution) => { compileCalls += 1; compileSteps.push(execution?.step || "candidate"); return { ok: true }; },
     journeysFn: async ({ journeys }) => {
       timeline.push("browser-verification");
       return { journeys: journeys.map((journey) => ({ ...journey, status: "pass" })) };
@@ -207,7 +222,14 @@ test("14S retained sessionStorage candidate repairs from checkpoint without repl
   assert.equal(result.state, "green", JSON.stringify(result));
   assert.equal(contractCalls, 1);
   assert.deepEqual(patchCalls.map((call) => call.step), ["core", "correction"]);
-  assert.equal(compileCalls, 1, "invalid candidate never reaches compilation");
+  // The platform compiles its own composed scaffold once before any model output exists, so a
+  // bare total no longer states the guarantee. What must hold is that exactly one CANDIDATE
+  // compile happens - the corrected one - and the rejected candidate never reaches the
+  // compiler at all.
+  assert.deepEqual(compileSteps.filter((step) => step === "scaffold_foundation").length, 1,
+    "the composed scaffold foundation is compiled once, before generation");
+  assert.equal(compileSteps.filter((step) => step !== "scaffold_foundation").length, 1,
+    `invalid candidate never reaches compilation: ${compileSteps.join(" -> ")}`);
   const invalid = checkpoints.find((row) => row.reason === "candidate:core:1");
   assert.ok(invalid?.snapshot?.id);
   assert.match((await snapshots.getSnapshot(invalid.snapshot.id)).reason, /^candidate:/,
