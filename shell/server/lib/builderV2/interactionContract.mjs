@@ -609,7 +609,15 @@ export function buildInteractionContract(contract, {
   bindings = bindCapabilities(contract),
 } = {}) {
   const durableContract = contractUsesDurablePersistence(contract);
-  const durableOwner = durableContract ? durableOperationOwner(bindings) : null;
+  // An undeclared contract has not said it is local - it has said nothing, and
+  // contractUsesDurablePersistence can only report false for it. Withholding the durable
+  // owner in that case left every cancellation flow without a capability, which the contract
+  // validator rejects outright. The owner comes from the capability BINDINGS, not from the
+  // operations, so it is derivable here; only a contract that declares operations and keeps
+  // them all local genuinely has no durable owner.
+  const contractDeclaresOperations = (contract?.operations || []).length > 0;
+  const durableOwner = durableContract || !contractDeclaresOperations
+    ? durableOperationOwner(bindings) : null;
   const configuredDurableEntity = durableOwner?.capability
     ? (bindings || []).find((binding) => binding.name === durableOwner.capability
       && binding.configuration?.entity)?.configuration?.entity || null
@@ -734,11 +742,27 @@ export function buildInteractionContract(contract, {
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
       const durableKinds = new Set(["mutation", "cancellation", "lookup", "recovery"]);
+      // Only a contract that DECLARES its operations can say it is purely local. An empty
+      // operations list is not that statement - it is the absence of one, and
+      // contractUsesDurablePersistence necessarily reports false for it because it has nothing to
+      // read. Downgrading durable kinds on `!durableContract` therefore stripped mutation,
+      // recovery and lookup from every undeclared contract, so no flow carried a durable path, no
+      // journey touched a lifecycle, and the data-flow fallback below classified all of them as
+      // independent - the exact disagreement between the two layers that the lifecycle tests
+      // exist to prevent. Known-local (declared, none durable) still downgrades.
+      // Contract-level, because declaredOperationObjects is per-STEP: a step that names no
+      // operation inside an otherwise declared, wholly-local contract must still downgrade.
+      const knownLocalContract = contractDeclaresOperations && !durableContract;
+      // A step that declares the values it operates and names no operation is a value-entry
+      // step, so the verb must not also invent a durable lookup beside those controls. This
+      // is a STEP-level rule and stays as it was; the ownership downgrade below is the
+      // contract-level one that must not fire merely because nothing was declared.
       const inferredLocalValueOnly = !durableContract && valueOperands?.length
         && declaredOperationObjects.length === 0;
       const ownershipKinds = kinds
         .filter((kind) => !(inferredLocalValueOnly && durableKinds.has(kind)))
-        .map((kind) => (!durableContract || localOperationOnly) && durableKinds.has(kind) ? "action" : kind);
+        .map((kind) => (knownLocalContract || localOperationOnly) && durableKinds.has(kind)
+          ? "action" : kind);
       const effectiveKinds = unique([
         ...ownershipKinds,
         ...(valueOperands ? [...mixedValueKinds.values()] : []),
