@@ -1,0 +1,103 @@
+{
+  "source": "Supabase MCP schema_migrations ledger on zczgvcsokfafuyognvwx, read directly on 2026-09-04",
+  "capturedAt": "2026-09-04T08:40:24.607Z",
+  "baseVersion": "20260813005509",
+  "ledgerCount": 83,
+  "note": "Every migration here was already applied in production and was being reported as pending only because the overlay stopped at 74. Four were applied under an apply-time version that differs from the authored filename; appliedVersion records the ledger value while version keeps the local file identity. Their SQL was compared statement-by-statement against the ledger and is identical.",
+  "migrations": [
+    {
+      "appliedOrder": 75,
+      "version": "20260813095526",
+      "name": "v2_customer_accounting_and_approvals",
+      "filename": "20260813095526_v2_customer_accounting_and_approvals.sql",
+      "statementCount": 94,
+      "sqlSha256": "8339eec52019cf48decb73d814d9a3bb82b3fd4af43e9786ebb5d3f62930e7d8",
+      "canonicalSqlSha256": "8339eec52019cf48decb73d814d9a3bb82b3fd4af43e9786ebb5d3f62930e7d8",
+      "localCanonicalSqlSha256": "fa177787bab4e0b57fd38ac81d9f1d544d667bf07fc58e740373001551ff079d"
+    },
+    {
+      "appliedOrder": 76,
+      "version": "20260813183000",
+      "name": "retire_legacy_bv2_accounting_rpcs",
+      "filename": "20260813183000_retire_legacy_bv2_accounting_rpcs.sql",
+      "statementCount": 5,
+      "sqlSha256": "afa0b4fea9c3b55b77d71db74bf59799bf81bdc455b94a4afaa7ed6d5af9c79c",
+      "canonicalSqlSha256": "afa0b4fea9c3b55b77d71db74bf59799bf81bdc455b94a4afaa7ed6d5af9c79c",
+      "localCanonicalSqlSha256": "a60ffe3fc2ea61bde4859b6f04ed9b3b6b50d35fe448c809926302c4d6e0bb6f"
+    },
+    {
+      "appliedOrder": 77,
+      "version": "20260813194500",
+      "name": "enforce_v2_only_builder_contract",
+      "filename": "20260813194500_enforce_v2_only_builder_contract.sql",
+      "statementCount": 1,
+      "sqlSha256": "26a67ebf178be2673b7879e0eeb8696c8f9e46eec19c0d44e24745f2a7aca61a",
+      "canonicalSqlSha256": "26a67ebf178be2673b7879e0eeb8696c8f9e46eec19c0d44e24745f2a7aca61a",
+      "localCanonicalSqlSha256": "26a67ebf178be2673b7879e0eeb8696c8f9e46eec19c0d44e24745f2a7aca61a"
+    },
+    {
+      "appliedOrder": 78,
+      "version": "20260815095256",
+      "name": "drop_v1_build_job_server_id",
+      "filename": "20260815095256_drop_v1_build_job_server_id.sql",
+      "statementCount": 1,
+      "sqlSha256": "b0c1d0689cc16d183495f872a1feb1ab688fecceecd6e93750b664a8d0a177a4",
+      "canonicalSqlSha256": "b0c1d0689cc16d183495f872a1feb1ab688fecceecd6e93750b664a8d0a177a4",
+      "localCanonicalSqlSha256": "b0a048d8b36385aa97d2b978ba7993bba936c9f3d8f14dea4d649a3a7f067d9a"
+    },
+    {
+      "appliedOrder": 79,
+      "version": "20260820092621",
+      "name": "bv2_widen_repair_dispatch_limit",
+      "filename": "20260820092621_bv2_widen_repair_dispatch_limit.sql",
+      "statementCount": 1,
+      "sqlSha256": "cad5aab842e93eda8709cbbf9183fe222968d9b39130c7cadd684cae28b8816e",
+      "canonicalSqlSha256": "cad5aab842e93eda8709cbbf9183fe222968d9b39130c7cadd684cae28b8816e",
+      "localCanonicalSqlSha256": "f2589502ad957f24ebc2634d3a498c3f01be088ed9cfd19fdd27d32cf7cf3202"
+    },
+    {
+      "appliedOrder": 80,
+      "version": "20260822160000",
+      "name": "bv2_contract_envelopes_recovery_settlement",
+      "filename": "20260822160000_bv2_contract_envelopes_recovery_settlement.sql",
+      "statementCount": 1,
+      "sqlSha256": "863888b8e9926d1ed221c1057d1996e1d35c764eb62e3d3749a0558609b7d040",
+      "canonicalSqlSha256": "863888b8e9926d1ed221c1057d1996e1d35c764eb62e3d3749a0558609b7d040",
+      "localCanonicalSqlSha256": "863888b8e9926d1ed221c1057d1996e1d35c764eb62e3d3749a0558609b7d040",
+      "appliedVersion": "20260822234502"
+    },
+    {
+      "appliedOrder": 81,
+      "version": "20260822223523",
+      "name": "fix_bv2_pipeline_retry_durable_payload",
+      "filename": "20260822223523_fix_bv2_pipeline_retry_durable_payload.sql",
+      "statementCount": 1,
+      "sqlSha256": "b383d742c5648b7bd7872076aace97973a6ee9dcdb923e0cf806c02b45e0ac38",
+      "canonicalSqlSha256": "b383d742c5648b7bd7872076aace97973a6ee9dcdb923e0cf806c02b45e0ac38",
+      "localCanonicalSqlSha256": "b383d742c5648b7bd7872076aace97973a6ee9dcdb923e0cf806c02b45e0ac38",
+      "appliedVersion": "20260822234552"
+    },
+    {
+      "appliedOrder": 82,
+      "version": "20260823101752",
+      "name": "bv2_owner_connected_recovery_transport",
+      "filename": "20260823101752_bv2_owner_connected_recovery_transport.sql",
+      "statementCount": 1,
+      "sqlSha256": "f48041759aa0b648661144afe955c91224bbfc1072a9983cbec32e1c032ac81e",
+      "canonicalSqlSha256": "f48041759aa0b648661144afe955c91224bbfc1072a9983cbec32e1c032ac81e",
+      "localCanonicalSqlSha256": "4cb40d6c31a9823208d803bf6789d0a737f9d47b85b794d8f290349c923c1e83",
+      "appliedVersion": "20260823110830"
+    },
+    {
+      "appliedOrder": 83,
+      "version": "20260825105631",
+      "name": "add_bv2_minimal_verifier_policy",
+      "filename": "20260825105631_add_bv2_minimal_verifier_policy.sql",
+      "statementCount": 1,
+      "sqlSha256": "f1a6ebfd746c9b25f7e488ccea688812d76dd92aa22ca55dc883db8c3f5bf3b9",
+      "canonicalSqlSha256": "f1a6ebfd746c9b25f7e488ccea688812d76dd92aa22ca55dc883db8c3f5bf3b9",
+      "localCanonicalSqlSha256": "7e5fc963f7ba839f7f9a95e48c770f3e8273d53e1d061b291f9e7e31a5d9c5f3",
+      "appliedVersion": "20260825120326"
+    }
+  ]
+}

@@ -49,6 +49,10 @@ for (const migration of manifest.migrations) {
 
 const lastApplied = String(manifest.migrations.at(-1).version);
 const applied = new Map(authoritative);
+// A migration pushed to production is recorded under the version the push assigned, which is not
+// always the version in the authored filename. The identity checks below stay anchored to the local
+// file; appliedVersion carries the ledger value so the difference is reported rather than lost.
+const versionDrift = [];
 let expectedOrder = manifest.migrations.length + 1;
 for (const migration of overlays.flatMap((overlay) => overlay.migrations || [])) {
   const version = String(migration.version);
@@ -65,6 +69,9 @@ for (const migration of overlays.flatMap((overlay) => overlay.migrations || []))
     throw new Error(`applied overlay local SQL diverged: ${local.filename}`);
   }
   applied.set(version, migration);
+  if (migration.appliedVersion && migration.appliedVersion !== version) {
+    versionDrift.push({ version, appliedVersion: String(migration.appliedVersion), name: migration.name });
+  }
   expectedOrder += 1;
 }
 const pending = active.filter((migration) => !applied.has(migration.version));
@@ -78,6 +85,7 @@ console.log(JSON.stringify({
   effectiveApplied: applied.size,
   active: active.length,
   pending: pending.map(({ version, name }) => ({ version, name })),
+  versionDrift,
   duplicates: 0,
 }));
 
