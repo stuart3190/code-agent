@@ -33,9 +33,18 @@ const BOOKING = {
 };
 
 const COMPLETE_TREE = {
-  "src/data/bookingSystem.js": `const booking = makeBookingSystem({ entity: "booking" });
+  // The factories must be imported: the static application gate rejects an undefined identifier,
+  // and a module that only appeared to call a capability is exactly what it exists to catch.
+  "src/data/bookingSystem.js": `function makeBookingSystem(){
+  return { createBooking: () => ({}), getBooking: () => ({}), cancelBooking: () => ({}) };
+}
+const booking = makeBookingSystem({ entity: "booking" });
 booking.createBooking({}); booking.getBooking("BK-1"); booking.cancelBooking("BK-1"); export { booking };`,
-  "src/data/bookingWizard.js": `const wizard = makeWizardMachine({ id: "booking", steps: [] });
+  "src/data/bookingWizard.js": `function makeWizardMachine(){
+  return { getState: () => ({}), subscribe: () => () => {}, restore: () => {}, select: () => {},
+    next: () => {}, confirm: () => {}, cancel: () => {} };
+}
+const wizard = makeWizardMachine({ id: "booking", steps: [] });
 wizard.getState(); wizard.subscribe(() => {}); wizard.restore(); wizard.select("date", "x");
 wizard.next(); wizard.confirm(); wizard.cancel(); export { wizard };`,
   "src/components/booking/BookingFlow.jsx": "export function BookingFlow(){ return <section />; }",
@@ -183,7 +192,18 @@ test("a differently-shaped module layout still COMPILES and RUNS; the shortfall 
   // the browser decides whether the application works.
   const incomplete = { ...COMPLETE_TREE };
   delete incomplete["src/components/booking/BookingReview.jsx"];
+  // The mounted screen still has to exist and reach the journey's components - that is the
+  // platform contract, not a shape preference. The missing Review module is the shortfall.
+  incomplete["src/screens/scaffold/BookingScreen.jsx"] = `
+import BookingFlow from "../../components/booking/BookingFlow.jsx";
+import BookingConfirmation from "../../components/booking/BookingConfirmation.jsx";
+import BookingStatus from "../../components/booking/BookingStatus.jsx";
+export default function BookingScreen(){
+  return <main><BookingFlow/><BookingConfirmation/><BookingStatus/></main>;
+}
+`;
   let compileCalls = 0;
+  const compileSteps = [];
   let browserCalls = 0;
   let receivedPlan = null;
   const logs = [];
@@ -191,29 +211,44 @@ test("a differently-shaped module layout still COMPILES and RUNS; the shortfall 
     contractFn: async () => BOOKING,
     patchesFn: async ({ modulePlan }) => {
       receivedPlan = modulePlan;
-      return Object.entries(incomplete).map(([path, content]) => ({ newFile: path, content }));
+      // The mounted screen is composed by the platform before generation, so it is replaced
+      // rather than added. Everything else keeps this fixture's deliberately different shape.
+      return Object.entries(incomplete).map(([path, content]) => (path.startsWith("src/screens/scaffold/")
+        ? { replaceFile: path, content } : { newFile: path, content }));
     },
     assetService: {
       async resolveIntents() { return { resolved: [], providerCalls: 0 }; },
       async assetManifestFor() { return []; },
     },
     baseTree: () => ({
-      "package.json": JSON.stringify({ name: "app", type: "module", scripts: { build: "vite build" } }),
+      // The composed scaffold is a React application, so react must be declared here or the
+      // imports gate correctly reports the dependency as missing.
+      "package.json": JSON.stringify({ name: "app", type: "module", scripts: { build: "vite build" },
+        dependencies: { react: "^18.3.1", "react-dom": "^18.3.1" } }),
       "index.html": '<!doctype html><html><body><div id="root"></div></body></html>',
       "vite.config.js": "export default {};",
       "src/main.jsx": "export {};",
       "src/App.jsx": "export default function App(){ return <main />; }",
     }),
-    compile: async () => { compileCalls += 1; return { ok: true }; },
+    compile: async (_tree, execution) => { compileCalls += 1; compileSteps.push(execution?.step || "candidate"); return { ok: true }; },
     journeysFn: async () => { browserCalls += 1; return { journeys: [] }; },
     maxCoreAttempts: 1,
     log: (line) => logs.push(line),
   });
   const result = await orchestrator.runBuild({ owner: "owner", projectId: "project", request: "multi-step booking" });
   // The plan is still briefed to the model...
-  assert.ok(receivedPlan.some((module) => module.path.endsWith("Review.jsx")));
+  // The plan briefs composed capability modules and the mounted screen that owns the journey,
+  // rather than a component per step: universal scaffolds made screen composition the shape.
+  // What matters here is unchanged - a plan reaches the model naming what it must implement.
+  assert.ok(receivedPlan.length > 0, "a module plan is still briefed to the model");
+  assert.ok(receivedPlan.some((module) => module.path.startsWith("src/screens/scaffold/")),
+    `the mounted screen that owns the journey is briefed: ${receivedPlan.map((m) => m.path).join(", ")}`);
   // ...and the candidate still reached compilation AND the browser.
-  assert.equal(compileCalls, 1, `the candidate must be compiled, not discarded for its shape: ${logs.join(" | ")}`);
+  // The platform compiles its own composed scaffold before generation, so the candidate compile
+  // is the one that is NOT the foundation. That is the claim here: this shape was run, not
+  // rejected for looking unfamiliar.
+  assert.equal(compileSteps.filter((step) => step !== "scaffold_foundation").length, 1,
+    `the candidate must be compiled, not discarded for its shape: ${logs.join(" | ")}`);
   assert.equal(browserCalls, 1, "behaviour must be verified in a browser");
   // It is blocked only because the contracted journeys were never proven green — the real bar.
   assert.equal(result.state, "blocked");
