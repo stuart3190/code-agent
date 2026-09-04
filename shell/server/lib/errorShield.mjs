@@ -104,6 +104,29 @@ export function friendlyFor(service, classification) {
 
 // ── Private capture ─────────────────────────────────────────────────────────────────────
 
+/*
+ * A wrapper error hides the failure that actually caused it.
+ *
+ * provider_replay_unsafe is thrown with the provider error attached as
+ * `providerError`/`cause`, but only the wrapper's own message and stack were ever
+ * persisted - so an incident recorded that replay was refused without recording
+ * why. THR-04DC8D had to be reproduced on the host to learn it was an ENOENT on a
+ * missing credential file. Anything genuinely secret lives in env and credential
+ * stores, not on these error objects.
+ */
+export function underlyingEvidence(error, depth = 0) {
+  const inner = error?.providerError || error?.cause;
+  if (!inner || depth > 3) return null;
+  const parts = [
+    `underlying[${depth}] code=${inner.code ?? "?"} status=${inner.status ?? "?"}`,
+    `dispatchState=${inner.dispatchState ?? "(none)"} retrySafe=${inner.retrySafe ?? "(none)"}`,
+    inner.providerRequestId ? `providerRequestId=${inner.providerRequestId}` : null,
+    `message=${String(inner.message || inner).slice(0, 500)}`,
+  ].filter(Boolean).join(" ");
+  const deeper = underlyingEvidence(inner, depth + 1);
+  return deeper ? `${parts}\n${deeper}` : parts;
+}
+
 export async function captureIncident({
   error,
   owner = null,
@@ -133,7 +156,8 @@ export async function captureIncident({
     code: String(error?.code || error?.status || classification.kind).slice(0, 120),
     message: String(error?.message || error || "").slice(0, 4000),
     stack: String(error?.stack || "").slice(0, 8000),
-    logs: logs ? String(logs).slice(0, 8000) : null,
+    logs: [logs ? String(logs) : null, underlyingEvidence(error)]
+      .filter(Boolean).join("\n").slice(0, 8000) || null,
     retry_count: retryCount,
     created_at: new Date().toISOString(),
   };

@@ -118,13 +118,13 @@ export async function createRoutedCodingModel({
           if (providerCompleted && !accountingSettled) {
             throw Object.assign(error, { code: error.code || "billing_settlement_failed" });
           }
-          if (dispatchContext && !accountingSettled) {
-            try {
-              await dispatchFailed?.(dispatchContext, candidate, error);
-            } catch (accountingError) {
-              throw Object.assign(accountingError, { code: accountingError.code || "billing_settlement_failed" });
-            }
-          }
+          /*
+           * Telemetry is recorded BEFORE settlement. dispatchFailed can throw
+           * (provider_replay_unsafe), and when it did, everything below it was
+           * skipped - so the one failure mode that blocks a conversation left no
+           * record of what the provider actually did. THR-04DC8D could only be
+           * diagnosed by reproducing it.
+           */
           const retryable = isRetryableProviderError(error);
           await recordAttempt(store, owner, run, candidate, index + 1, {
             status: "error",
@@ -135,6 +135,18 @@ export async function createRoutedCodingModel({
             error_code: String(error.code || `http_${error.status || "unknown"}`).slice(0, 120),
             retryable,
           }).catch((telemetryError) => console.error(`[model-routing] failure telemetry: ${telemetryError.message}`));
+          if (dispatchContext && !accountingSettled) {
+            try {
+              await dispatchFailed?.(dispatchContext, candidate, error);
+            } catch (accountingError) {
+              // Carry the provider failure with the settlement failure so the incident
+              // records WHY replay was refused, not merely that it was.
+              throw Object.assign(accountingError, {
+                code: accountingError.code || "billing_settlement_failed",
+                providerError: accountingError.providerError || error,
+              });
+            }
+          }
           const mayFallback = policy.allowFallback !== false && requested === "auto" && retryable;
           if (!mayFallback || index === candidates.length - 1) throw error;
         }
