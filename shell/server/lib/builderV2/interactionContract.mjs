@@ -433,12 +433,18 @@ function fieldCandidates(contract, text, kind) {
   // described three ways, and `guestName` beside a generic `name` is still one control — those
   // must not multiply. But `guestName` and `leadName` are two different boxes, and collapsing
   // them by concept alone dropped one of every such pair before it ever reached the contract.
+  // A SEMANTIC candidate is a generic synonym inferred from the prose ("guest count" also reads
+  // as a party size). It is never a second box: once the contract's own field of that concept is
+  // kept, the synonym is dropped whatever its qualifier - otherwise a form of six declared counts
+  // and names grew a seventh, undeclared "partySize" control that no generated app renders.
+  const declaredSet = new Set(declared);
   const kept = [];
   for (const name of candidates) {
     const key = semanticKey(name);
     const qualifier = semanticQualifier(name);
     const sameControl = kept.some((existing) => {
       if (semanticKey(existing) !== key) return false;
+      if (!declaredSet.has(name) && declaredSet.has(existing)) return true;
       const other = semanticQualifier(existing);
       return !other || !qualifier || other === qualifier;
     });
