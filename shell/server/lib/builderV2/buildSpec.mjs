@@ -89,7 +89,7 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     bindings, journeys, capabilityGraph,
   });
   const interactionVerdict = validateInteractionContract(finalInteractionContract, {
-    capabilityGraph, operations: plannedContract?.operations || [],
+    capabilityGraph, operations: plannedContract?.operations || [], contract: enriched,
   });
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
   const scaffoldVerdict = validateScaffoldGraph(scaffoldGraph, enriched, capabilityGraph);

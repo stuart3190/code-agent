@@ -7,6 +7,9 @@ import { actionIdFor, deriveVerificationManifest } from "../../shell/server/lib/
 const makeContract = ({ entity = "record", fields, operations, steps, title = "Capability interaction" }) => ({
   summary: `${title} contract`, projectType: "tool",
   entities: [{ name: entity, fields: fields.map((name) => ({ name, type: "string", required: true })) }],
+  // A single journey that edits or reads an existing record must say where that record comes from;
+  // these interaction fixtures start from seeded rows (state provenance: seed_sample_data).
+  sampleData: { [entity]: [Object.fromEntries(fields.map((name) => [name, `seed ${name}`]))] },
   operations,
   journeys: [{ id: "primary-flow", title, priority: "primary", stage: "primary_journey", steps }],
   routes: [{ path: "/", name: "Workspace" }],

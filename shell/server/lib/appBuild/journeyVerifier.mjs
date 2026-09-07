@@ -4283,6 +4283,7 @@ export function expectationOutcome({
 export function journeyPrerequisites(flows, journeyId, primaryId, {
   requiresPrimaryRecord = false, reconstructIsolated = false,
   primaryProducesDurableRecord = null, requiresAuthenticatedStart = false,
+  dependsOn = [],
 } = {}) {
   const routeTarget = (flow) => {
     if (flow?.kind !== "navigation") return null;
@@ -4330,8 +4331,15 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
       visiting.add(entity);
       const candidates = flows.filter((flow) => flow.journeyId !== journeyId
         && flow.entity === entity && flow.durableOperation === "create" && flow.control && flow.stepIndex >= 0);
-      // Do not guess between alternative creation journeys.
-      const producers = new Set(candidates.map((flow) => flow.journeyId));
+      // Do not guess between alternative creation journeys. The consumer's declared dependsOn
+      // names its producer; without a declaration two creators stay ambiguous and fail closed.
+      // (The same rule decides contract-level provenance in interactionContract.stateProvenanceIssues.)
+      let producers = new Set(candidates.map((flow) => flow.journeyId));
+      const declared = (dependsOn || []).map(String);
+      if (declared.length && [...producers].some((id) => declared.includes(id))) {
+        producers = new Set([...producers].filter((id) => declared.includes(id)));
+      }
+      const chosenCandidates = candidates.filter((flow) => producers.has(flow.journeyId));
       if (producers.size > 1) {
         issues.push({ code: "prerequisite_producer_ambiguous", entity });
         visiting.delete(entity);
@@ -4340,7 +4348,7 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
       // Entities with no contracted creator may be external account/seed data;
       // never manufacture a creator by replaying an unrelated primary mutation.
       if (!producers.size) { visiting.delete(entity); return; }
-      const producer = candidates.sort((a, b) => a.stepIndex - b.stepIndex)[0];
+      const producer = chosenCandidates.sort((a, b) => a.stepIndex - b.stepIndex)[0];
       for (const prior of flows.filter((flow) => flow.journeyId === producer.journeyId
         && flow.stepIndex >= 0 && flow.stepIndex <= producer.stepIndex)) {
         for (const dependency of prior.requiredProducerEntities || []) {
@@ -5265,6 +5273,7 @@ export async function verifyJourneys({
         : journeyPrerequisites(allFlows, journey.id, primaryId, {
           requiresPrimaryRecord, reconstructIsolated: isolatedJourneyContract,
           primaryProducesDurableRecord, requiresAuthenticatedStart,
+          dependsOn: journey.dependsOn || [],
         });
       let setup = null;
       if (prerequisites.planningIssues?.length) {

@@ -26,14 +26,17 @@ const profile = (signals = [], subtype = "general_application") => ({
   version: 1, requestedBuildType: "application", resolvedBuildType: "application",
   applicationSubtype: subtype, requirementSignals: signals, inferenceSource: "explicit", confidence: 1,
 });
-const base = ({ summary, entities = [], operations = [], journeys, routes, buildProfile = null, auth = false }) => ({
+const base = ({ summary, entities = [], operations = [], journeys, routes, buildProfile = null, auth = false, sampleData = null }) => ({
   summary, entities, operations, journeys, routes, auth: { required: auth }, buildProfile,
+  ...(sampleData ? { sampleData } : {}),
   deferred: [], imageIntents: [], integrations: [],
 });
 
 const CONTENT = base({
   summary: "A responsive content catalogue with list and detail navigation",
   entities: [{ name: "article", fields: [{ name: "title", type: "string" }] }],
+  // Articles are published content the app starts with, not records a journey creates.
+  sampleData: { articles: [{ title: "Welcome to the catalogue" }, { title: "A second article" }] },
   operations: [
     { id: "list-articles", entity: "article", kind: "list", journey: "browse-content" },
     { id: "view-article", entity: "article", kind: "get", journey: "read-content" },

@@ -15,7 +15,7 @@ import {
   IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey, semanticQualifier,
 } from "./controlIdentity.mjs";
 import {
-  canonicalOperationKind, declaredLifecycleRole, OPERATES_ON_EXISTING_RECORD,
+  canonicalOperationKind, declaredLifecycleRole, journeyLifecycleOperations, OPERATES_ON_EXISTING_RECORD,
 } from "./lifecycleOperations.mjs";
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
@@ -1109,11 +1109,52 @@ export function buildInteractionContract(contract, {
   // The lifecycle is therefore named once, from the contract's durable owner and its entity, and
   // stamped on every flow that reads or writes durable state. Unrelated entities cannot collide
   // because they resolve to different owners/entities.
-  const lifecycle = `${durableOwner?.capability || "durable"}:${durableEntity}`;
-  for (const flow of flows) {
-    const touchesDurable = [...(flow.reads || []), ...(flow.writes || [])]
-      .some((path) => /\.durable\./.test(String(path)));
-    if (touchesDurable) flow.durableLifecycle = lifecycle;
+  // …except that "the contract's durable owner and its entity" is ONE entity, and a Medium contract
+  // has several. The retained Alder contract made the administrator journey - which updates
+  // MEMBERS - a consumer of "crud:project" because project was the first durable entity, so the
+  // verifier inherited the wrong producer and the prerequisite planner looked for the wrong record.
+  // The lifecycle entity is therefore the entity of the journey's own declared operations when they
+  // agree on one; the contract default remains the fallback for journeys that declare none.
+  const lifecycleOwner = durableOwner?.capability || "durable";
+  const journeyLifecycleEntity = (journey) => {
+    const declaredEntities = unique(journeyLifecycleOperations(contract, journey)
+      .map((operation) => operation?.entity).filter(Boolean)
+      .filter((name) => entityPersistencePolicy(contract, name) !== "transient")
+      .map((name) => (contract?.entities || []).find((entity) => normalized(entity?.name) === normalized(name))?.name || name));
+    if (!declaredEntities.length) return durableEntity;
+    // The lifecycle belongs to the entity whose DECLARED FIELDS the journey's steps operate, read
+    // or produce - machine facts of the contract, never its prose. A journey that edits a lead and
+    // also files a note (its one declared operation) still lives on the lead lifecycle; the
+    // administrator journey whose steps operate member fields lives on member. A tie keeps the
+    // contract default, and so does a declared entity the steps never touch while the default's
+    // fields are the ones operated.
+    const operands = (journey?.steps || []).flatMap((step) => [
+      ...list(step?.operates), ...list(step?.reads), ...list(step?.produces),
+    ]).map((value) => normalized(String(value).split(".").pop()));
+    const fieldsOf = (name) => new Set(((contract?.entities || []).find((entity) => entity?.name === name)?.fields || [])
+      .map((field) => normalized(field?.name ?? field)));
+    // A journey that creates a project AND its tasks lives on the PARENT lifecycle: the entity the
+    // others reference by identity (task.projectId -> project). That is a declared relationship,
+    // and it is what a consumer of "the created project" inherits.
+    const parents = declaredEntities.filter((name) => declaredEntities.some((other) => other !== name
+      && fieldsOf(other).has(`${normalized(name)}id`)));
+    if (parents.length === 1) return parents[0];
+    const candidates = unique([...declaredEntities, durableEntity]);
+    const scored = candidates.map((name) => ({ name, hits: operands.filter((operand) => fieldsOf(name).has(operand)).length }))
+      .sort((a, b) => b.hits - a.hits);
+    if (scored[0].hits > (scored[1]?.hits || 0)) return scored[0].name;
+    // No field evidence at all (prose-only steps): the contract default stands, exactly as before -
+    // an operation on another entity does not move a journey off the default lifecycle by itself.
+    return durableEntity;
+  };
+  const lifecycleFor = (journey) => `${lifecycleOwner}:${journeyLifecycleEntity(journey)}`;
+  for (const journey of contract?.journeys || []) {
+    const journeyLifecycle = lifecycleFor(journey);
+    for (const flow of flows.filter((row) => row.journeyId === journey.id)) {
+      const touchesDurable = [...(flow.reads || []), ...(flow.writes || [])]
+        .some((path) => /\.durable\./.test(String(path)));
+      if (touchesDurable) flow.durableLifecycle = journeyLifecycle;
+    }
   }
 
   // ── journey scenarios ───────────────────────────────────────────────────────────────────────
@@ -1142,6 +1183,8 @@ export function buildInteractionContract(contract, {
   const scenarios = {};
   for (const journey of contract?.journeys || []) {
     const own = flows.filter((flow) => flow.journeyId === journey.id);
+    const lifecycle = lifecycleFor(journey);
+    const lifecycleEntity = journeyLifecycleEntity(journey);
     const entityFields = new Set((contract?.entities || [])
       .flatMap((entity) => (entity?.fields || []).map((field) => String(field?.name || ""))).filter(Boolean));
     // Identity and lifecycle metadata are not record CONTENTS: knowing which record you mean is
@@ -1177,7 +1220,7 @@ export function buildInteractionContract(contract, {
       && flow.stepIndex < firstCommit && readsDurable(flow));
 
     const touchesDurable = own.some((flow) => flow.durableLifecycle);
-    const declared = declaredLifecycleRole(contract, journey, { entity: durableEntity });
+    const declared = declaredLifecycleRole(contract, journey, { entity: lifecycleEntity });
     const produces = touchesDurable && (declared
       ? declared === "creates"
       : commits.some(suppliesRecordContents) && !actsOnExistingRecord);
@@ -1219,7 +1262,7 @@ export function buildInteractionContract(contract, {
     externalState: contract?.externalState || null,
     capabilityOutputs: contract?.capabilityOutputs || null,
   };
-  const verdict = validateInteractionContract(plan, { operations: contract?.operations || [] });
+  const verdict = validateInteractionContract(plan, { operations: contract?.operations || [], contract });
   return { ...plan, valid: verdict.ok, problems: verdict.problems };
 }
 
@@ -1618,7 +1661,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     };
   }
   const { plan: composed } = normalizeInteractionStateDependencies(composedBeforeNormalization);
-  const verdict = validateInteractionContract(composed, { capabilityGraph: graph, operations: contract?.operations || [] });
+  const verdict = validateInteractionContract(composed, { capabilityGraph: graph, operations: contract?.operations || [], contract });
   return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };
 }
 
@@ -1670,7 +1713,166 @@ function controlIdentityCollisions(plan, operations = []) {
   return collisions;
 }
 
-export function validateInteractionContract(plan, { capabilityGraph = null, operations = [] } = {}) {
+/**
+ * STATE PROVENANCE. Naming a path under durableState says a record exists before the journey
+ * starts; it does not say where it comes from. Every durable record a journey consumes must have
+ * exactly one proven source: an earlier producer in the same journey, a producer journey elsewhere
+ * (the prerequisite chain), a persistence loader before the consumer, declared seed rows
+ * (sampleData), or an external source the contract names (externalState / an external entity
+ * storage). No producer at all, more than one producer journey, or a producer graph that loops all
+ * fail closed - contract repair has to add the real source, not relabel the state.
+ */
+export const PROVENANCE_MISSING_ISSUE = "interaction_state_provenance_missing";
+export const PROVENANCE_AMBIGUOUS_ISSUE = "interaction_state_provenance_ambiguous";
+export const PROVENANCE_CYCLE_ISSUE = "interaction_state_provenance_cycle";
+export const PROVENANCE_SOURCES = Object.freeze([
+  "same_journey_producer", "producer_journey", "persistence_loader", "seed_sample_data", "external_state",
+]);
+
+const LOADER_OPERATIONS = new Set(["get", "list", "count", "read"]);
+const EXISTING_RECORD_OPERATIONS = new Set(["update", "remove", "delete", "get", "list", "count", "read"]);
+
+export function stateProvenanceIssues(plan, contract) {
+  if (!contract || !Array.isArray(plan?.flows)) return [];
+  const entities = (contract.entities || []).filter((entity) => entity?.name);
+  const entityByKey = new Map(entities.map((entity) => [normalized(entity.name), entity]));
+  const canonicalEntity = (name) => entityByKey.get(normalized(name))?.name || null;
+  const durableEntities = new Set(entities
+    .filter((entity) => entityPersistencePolicy(contract, entity.name) !== "transient")
+    .filter((entity) => (contract.operations || []).some((operation) => (
+      normalized(operation?.entity) === normalized(entity.name) && operationUsesDurablePersistence(contract, operation)
+    )))
+    .map((entity) => entity.name));
+  const fieldEntity = new Map();
+  for (const entity of entities) {
+    for (const field of entity.fields || []) {
+      const key = normalized(field?.name ?? field);
+      if (key && !fieldEntity.has(key)) fieldEntity.set(key, entity.name);
+    }
+  }
+  const lifecycleEntityOf = (lifecycle) => canonicalEntity(String(lifecycle || "").split(":").at(-1));
+  const seeded = (entity) => Object.keys(contract.sampleData || {}).some((key) => {
+    const k = normalized(key); const e = normalized(entity);
+    return (k === e || k === `${e}s` || `${k}s` === e) && (Array.isArray(contract.sampleData[key])
+      ? contract.sampleData[key].length > 0 : Boolean(contract.sampleData[key]));
+  });
+  const externalEntity = (entity) => {
+    const declared = entityByKey.get(normalized(entity));
+    const storage = [declared?.storage, declared?.persistence, declared?.source].filter(Boolean).join(" ");
+    return /\b(external|seed|seeded|account|auth|platform|provided)\b/i.test(storage);
+  };
+  const externalDeclared = (journeyId, entity) => [
+    ...statePaths(plan.externalState, journeyId), ...statePaths(plan.scenarios?.[journeyId]?.externalState, journeyId),
+  ].some((path) => normalized(path).includes(normalized(entity)));
+  const producerJourneys = (entity) => unique(plan.flows
+    .filter((flow) => flow.durableOperation === "create" && normalized(flow.entity) === normalized(entity))
+    .map((flow) => flow.journeyId));
+  const primaryId = (contract.journeys || []).find((journey) => journey?.priority === "primary")?.id
+    || contract.journeys?.[0]?.id || null;
+  // WHICH creator a consumer depends on is a declared fact (journey.dependsOn), never a guess: with
+  // a declaration the named creator is the producer; without one, a single creator is the producer
+  // and two creators are ambiguity - the contract has to say which. (`primaryId` is reported with the
+  // issue so the repair can name the obvious candidate.)
+  const resolveProducers = (journey, producers) => {
+    const declared = list(journey?.dependsOn).map(String);
+    return declared.length ? producers.filter((id) => declared.includes(id)) : producers;
+  };
+  const issues = [];
+  const producerEdges = new Map(); // journeyId -> Set(producer journeyIds)
+  for (const journey of contract.journeys || []) {
+    const own = plan.flows.filter((flow) => flow.journeyId === journey.id)
+      .slice().sort((a, b) => Number(a.stepIndex) - Number(b.stepIndex));
+    const scenario = plan.scenarios?.[journey.id] || null;
+    const createdBefore = (entity, stepIndex) => own.some((flow) => flow.durableOperation === "create"
+      && normalized(flow.entity) === normalized(entity) && Number(flow.stepIndex) < Number(stepIndex));
+    const loadedBefore = (entity, stepIndex) => own.some((flow) => Number(flow.stepIndex) < Number(stepIndex)
+      && (["lookup", "recovery"].includes(flow.kind)
+        || (LOADER_OPERATIONS.has(flow.durableOperation) && normalized(flow.entity) === normalized(entity))));
+    // Everything this journey CONSUMES that some earlier record must supply.
+    const consumptions = [];
+    for (const flow of own) {
+      // An operation on an existing record inside a DEPENDENT journey (one that inherits its start
+      // state) consumes what some other journey produced. A single self-contained journey that
+      // edits a record the contract never creates is not a provenance question this rule decides:
+      // the browser proves or disproves it, exactly as before.
+      if (flow.entity && EXISTING_RECORD_OPERATIONS.has(flow.durableOperation) && scenario?.startState === "inherits") {
+        consumptions.push({ entity: canonicalEntity(flow.entity), flow });
+      }
+      // A cross-entity read (a task form needs a project, analytics needs projects and tasks) always
+      // needs a proven source. An operation's OWN entity is a producer requirement only inside a
+      // dependent journey - see above.
+      for (const entity of flow.requiredProducerEntities || []) {
+        if (normalized(entity) !== normalized(flow.entity) || scenario?.startState === "inherits") {
+          consumptions.push({ entity: canonicalEntity(entity), flow });
+        }
+      }
+      if (["selection", "input"].includes(flow.kind) && flow.control?.logicalField) {
+        const entity = fieldEntity.get(normalized(flow.control.logicalField));
+        // Only the entity's OWN identity selects an existing record of it: choosing a projectId
+        // selects a project; choosing a slotId on a booking form references a slot, not a booking.
+        const field = normalized(flow.control.logicalField);
+        const ownIdentity = field === `${normalized(entity)}id` || field === "id" || field === "reference";
+        if (entity && durableEntities.has(entity) && ownIdentity && flow.kind === "selection") {
+          consumptions.push({ entity, flow });
+        }
+      }
+      if (scenario?.startState === "inherits" && (flow.reads || []).some((path) => String(path).startsWith(`${journey.id}.durable.`))) {
+        const entity = lifecycleEntityOf(scenario.lifecycle);
+        if (entity) consumptions.push({ entity, flow });
+      }
+    }
+    for (const path of [...statePaths(plan.durableState, journey.id), ...statePaths(scenario?.durableState, journey.id)]) {
+      const entity = lifecycleEntityOf(scenario?.lifecycle);
+      if (entity) consumptions.push({ entity, flow: own[0] || { id: `${journey.id}:start`, stepIndex: 0 }, declaredPath: path });
+    }
+    const seen = new Set();
+    for (const { entity, flow, declaredPath } of consumptions) {
+      if (!entity || !durableEntities.has(entity)) continue;
+      if (createdBefore(entity, flow.stepIndex ?? 0)) continue;
+      const key = `${entity}|${flow.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const producers = resolveProducers(journey, producerJourneys(entity).filter((journeyId) => journeyId !== journey.id));
+      const loader = loadedBefore(entity, flow.stepIndex ?? 0);
+      const external = seeded(entity) || externalEntity(entity) || externalDeclared(journey.id, entity);
+      const base = {
+        journeyId: journey.id, entity, consumerStepId: flow.id || null,
+        consumerStepIndex: Number.isInteger(flow.stepIndex) ? flow.stepIndex : null,
+        consumerOperationId: flow.operationId || null, declaredPath: declaredPath || null,
+        candidateProducers: producers, primaryJourneyId: primaryId, expectedProvenanceSources: [...PROVENANCE_SOURCES],
+      };
+      if (producers.length > 1) {
+        issues.push({ code: PROVENANCE_AMBIGUOUS_ISSUE, ...base,
+          message: `${journey.id} consumes ${entity} records that ${producers.length} journeys create (${producers.join(", ")}); one producer must own the record` });
+      } else if (!producers.length && !loader && !external) {
+        issues.push({ code: PROVENANCE_MISSING_ISSUE, ...base,
+          message: `${journey.id} consumes ${entity} records with no proven source: no producer journey, no loader step, no sampleData seed rows and no external source` });
+      }
+      if (producers.length === 1) {
+        if (!producerEdges.has(journey.id)) producerEdges.set(journey.id, new Set());
+        producerEdges.get(journey.id).add(producers[0]);
+      }
+    }
+  }
+  // A producer graph that loops can never be replayed: fail closed.
+  const state = new Map();
+  const visit = (journeyId, trail) => {
+    if (state.get(journeyId) === "done") return;
+    if (state.get(journeyId) === "active") {
+      const cycle = [...trail.slice(trail.indexOf(journeyId)), journeyId];
+      issues.push({ code: PROVENANCE_CYCLE_ISSUE, journeyId, cycle, expectedProvenanceSources: [...PROVENANCE_SOURCES],
+        message: `producer chain loops: ${cycle.join(" -> ")}` });
+      return;
+    }
+    state.set(journeyId, "active");
+    for (const next of producerEdges.get(journeyId) || []) visit(next, [...trail, journeyId]);
+    state.set(journeyId, "done");
+  };
+  for (const journeyId of producerEdges.keys()) visit(journeyId, []);
+  return issues;
+}
+
+export function validateInteractionContract(plan, { capabilityGraph = null, operations = [], contract = null } = {}) {
   const problems = [];
   const issues = [];
   for (const collision of controlIdentityCollisions(plan, operations)) {
@@ -1795,6 +1997,10 @@ export function validateInteractionContract(plan, { capabilityGraph = null, oper
         ]);
       }
     }
+  }
+  for (const issue of stateProvenanceIssues(plan, contract)) {
+    issues.push(issue);
+    problems.push(issue.message);
   }
   return { ok: problems.length === 0, problems, issues };
 }

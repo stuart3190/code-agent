@@ -285,6 +285,19 @@ const SEMANTICS_ISSUE = "interaction_contract_semantics_incomplete";
 // unscoped rewrite, and the model returned the same contract — the build died at 2.9 credits
 // having been told exactly what was wrong and given no way to say it back.
 const COLLISION_ISSUE = "interaction_control_identity_collision";
+// A consumed durable record with no proven source (interactionContract.mjs stateProvenanceIssues).
+// The repair must add the SOURCE - a producing operation in an earlier journey, a loader step,
+// seed rows in sampleData, or an external source the contract names - never a durableState label.
+const PROVENANCE_ISSUES = new Set([
+  "interaction_state_provenance_missing", "interaction_state_provenance_ambiguous", "interaction_state_provenance_cycle",
+]);
+export const PROVENANCE_REPAIR_INSTRUCTION = "Each entry under invalidProvenance names a durable entity a journey "
+  + "consumes without a proven source. Fix the SOURCE, not the label: either connect the consuming step to an "
+  + "operation an earlier journey already declares that creates that entity, add a persistence read (loader) step "
+  + "before the consumer, declare the seed rows the app starts with under sampleData for that entity, or name the "
+  + "external source of that data in externalState. When two journeys both create the same entity, make exactly one "
+  + "of them its producer. Never satisfy a dependency by listing a path in durableState alone; durableState only "
+  + "restates a source declared elsewhere. Do not invent user actions or business behavior.";
 export const COLLISION_REPAIR_INSTRUCTION = "A field name listed under invalidControlIdentities is operated "
   + "for two different entities inside one journey, so both controls share one identity. Rename that field on "
   + "the entity that is not the journey's primary subject (for example task.dueDate becomes taskDueDate) and "
@@ -299,8 +312,9 @@ export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid 
   + "only when the declared journey semantics permit it; otherwise connect an already-declared producer or return "
   + "the unresolved dependency unchanged. Do not duplicate journey steps. Listing a field in `operates` means the "
   + "user changes that control; it does not make a navigation or observation step produce the field. Existing "
-  + "durable entity data may instead be declared in the journey's durableState when it genuinely exists before the "
-  + "journey starts. Prefer a durableState array containing the exact missingStatePath string rather than a nested "
+  + "durable entity data may be declared in the journey's durableState ONLY when its source is also declared: the "
+  + "producing operation in an earlier journey, seed rows under sampleData, or an externalState entry naming the "
+  + "source. Prefer a durableState array containing the exact missingStatePath string rather than a nested "
   + "entity object.";
 
 /**
@@ -312,7 +326,8 @@ export function contractDependencyRepairScope(contract, issues = []) {
   const dependencies = (issues || []).filter((issue) => issue?.code === DEPENDENCY_ISSUE);
   const semantics = (issues || []).filter((issue) => issue?.code === SEMANTICS_ISSUE);
   const collisions = (issues || []).filter((issue) => issue?.code === COLLISION_ISSUE);
-  if (!contract || (!dependencies.length && !semantics.length && !collisions.length)) return null;
+  const provenance = (issues || []).filter((issue) => PROVENANCE_ISSUES.has(issue?.code));
+  if (!contract || (!dependencies.length && !semantics.length && !collisions.length && !provenance.length)) return null;
   const semanticOperationIds = new Set(semantics.map((issue) => issue.operationId).filter(Boolean));
   const semanticOperations = (contract.operations || []).filter((operation) => (
     semanticOperationIds.has(operation?.id || operation?.name)
@@ -326,6 +341,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
     ...semanticJourneyIds,
     ...semanticOperations.map((operation) => operation?.journey),
     ...collisions.map((issue) => issue.journeyId),
+    ...provenance.flatMap((issue) => [issue.journeyId, ...(issue.candidateProducers || []), ...(issue.cycle || [])]),
   ].filter(Boolean));
   const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
   const operationByIdentity = new Map((contract.operations || []).map((operation) => (
@@ -362,7 +378,10 @@ export function contractDependencyRepairScope(contract, issues = []) {
   const operations = (contract.operations || []).filter((operation) => (
     operationIds.has(operation?.id || operation?.name)
   ));
-  const entityNames = new Set(operations.map((operation) => operation?.entity).filter(Boolean));
+  const entityNames = new Set([
+    ...operations.map((operation) => operation?.entity),
+    ...provenance.map((issue) => issue.entity),
+  ].filter(Boolean));
   const usedFields = new Set([
     ...dependencies.map((issue) => String(issue.missingStatePath || "").split(".").at(-1)),
     ...journeys.flatMap((journey) => (journey.steps || []).flatMap((step) => [
@@ -379,7 +398,14 @@ export function contractDependencyRepairScope(contract, issues = []) {
       fields: (entity.fields || []).filter((field) => usedFields.has(String(field?.name || field))),
     }));
   return {
-    mode: semantics.length || collisions.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
+    mode: semantics.length || collisions.length || provenance.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
+    ...(provenance.length ? { invalidProvenance: provenance.map((issue) => ({
+      code: issue.code, journeyId: issue.journeyId, entity: issue.entity || null,
+      consumerStepId: issue.consumerStepId || null, consumerOperationId: issue.consumerOperationId || null,
+      declaredPath: issue.declaredPath || null, candidateProducers: issue.candidateProducers || [],
+      cycle: issue.cycle || null, expectedProvenanceSources: issue.expectedProvenanceSources || [],
+    })), sampleData: Object.fromEntries(Object.entries(contract.sampleData || {})
+      .filter(([key]) => provenance.some((issue) => key.toLowerCase().startsWith(String(issue.entity || "").toLowerCase().slice(0, 4))))) } : {}),
     contractSummary: contract.summary || null,
     ...(collisions.length ? { invalidControlIdentities: collisions.map((issue) => ({
       journeyId: issue.journeyId, field: issue.field, machineId: issue.machineId,

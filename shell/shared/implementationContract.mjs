@@ -301,6 +301,16 @@ export function validateContract(contract) {
     if (!journey?.title) problems.push(`${where} has no title`);
     if (journey?.id && journeyIds.has(journey.id)) problems.push(`duplicate journey id "${journey.id}"`);
     if (journey?.id) journeyIds.add(journey.id);
+    // dependsOn names the journey(s) whose records this journey consumes - the machine-readable
+    // producer chain. It must name declared journeys, and never the journey itself.
+    if (journey?.dependsOn !== undefined) {
+      const declaredJourneyIds = new Set((c.journeys || []).map((row) => row?.id).filter(Boolean));
+      if (!Array.isArray(journey.dependsOn)) problems.push(`${where} dependsOn must be an array of journey ids`);
+      else for (const producerId of journey.dependsOn) {
+        if (!declaredJourneyIds.has(String(producerId))) problems.push(`${where} dependsOn names an undeclared journey "${producerId}"`);
+        if (String(producerId) === journey.id) problems.push(`${where} cannot depend on itself`);
+      }
+    }
     if (!Array.isArray(journey?.steps) || journey.steps.length < 2) {
       problems.push(`${where} has fewer than two steps — a journey is a sequence, not a label`);
       continue;

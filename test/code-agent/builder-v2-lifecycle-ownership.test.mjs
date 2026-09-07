@@ -48,13 +48,13 @@ const JOURNEYS = [
       expect: "the stored lead is recovered and the same lead reference remains visible" },
   ] },
   // B — recover a record this journey did not create.
-  { id: "recover-existing-lead", title: "An advisor recovers an existing lead", priority: "secondary", steps: [
+  { id: "recover-existing-lead", title: "An advisor recovers an existing lead", priority: "secondary", dependsOn: ["capture-new-lead"], steps: [
     { action: "open the lead lookup area", target: "/leads", expect: "a lead reference lookup form is visible" },
     { action: "enter an existing lead reference", target: "lookup form", expect: "the lead details are displayed" },
     { action: "reload the page", target: "browser reload", expect: "the recovered lead remains displayed" },
   ] },
   // C — cancel a record that already exists.
-  { id: "cancel-existing-lead", title: "An advisor cancels an existing lead", priority: "secondary", steps: [
+  { id: "cancel-existing-lead", title: "An advisor cancels an existing lead", priority: "secondary", dependsOn: ["capture-new-lead"], steps: [
     { action: "open an existing lead", target: "/leads", expect: "the lead details and a cancel control are visible" },
     { action: "choose to cancel the lead", target: "cancel lead control", expect: "a cancellation prompt is displayed" },
     { action: "confirm cancellation", target: "confirm cancellation control",
@@ -62,7 +62,7 @@ const JOURNEYS = [
     { action: "reload the page", target: "browser reload", expect: "the lead reloads in the Cancelled state" },
   ] },
   // D — archive a record that already exists.
-  { id: "archive-existing-lead", title: "An advisor archives an existing lead", priority: "secondary", steps: [
+  { id: "archive-existing-lead", title: "An advisor archives an existing lead", priority: "secondary", dependsOn: ["capture-new-lead"], steps: [
     { action: "open the lead lookup area", target: "/leads", expect: "a lead reference lookup form is visible" },
     { action: "look up the lead by reference", target: "lookup form", expect: "the matching lead is displayed" },
     { action: "archive the lead", target: "archive lead control", expect: "the lead is shown as Archived" },
@@ -89,13 +89,13 @@ const JOURNEYS = [
       expect: "the validation message clears and the continue control becomes enabled" },
   ] },
   // G — a reference to an existing record and nothing else.
-  { id: "view-existing-lead", title: "An advisor views an existing lead", priority: "secondary", steps: [
+  { id: "view-existing-lead", title: "An advisor views an existing lead", priority: "secondary", dependsOn: ["capture-new-lead"], steps: [
     { action: "open the lead lookup area", target: "/leads", expect: "a lead reference lookup form is visible" },
     { action: "look up an existing lead by reference", target: "lookup form",
       expect: "the lead details and status are displayed" },
   ] },
   // H — an existing record, substantively edited, then UPDATED. The one that was wrong.
-  { id: "update-existing-lead", title: "An advisor updates an existing lead", priority: "secondary", steps: [
+  { id: "update-existing-lead", title: "An advisor updates an existing lead", priority: "secondary", dependsOn: ["capture-new-lead"], steps: [
     { action: "open the lead lookup area", target: "/leads", expect: "a lead reference lookup form is visible" },
     { action: "look up an existing lead by reference", target: "lookup form", expect: "the lead details are displayed" },
     { action: "edit the contact name, notes and status", target: "lead details form",
@@ -281,12 +281,12 @@ const GENERIC = {
       { action: "reload the page", target: "browser reload",
         expect: "the stored reading is recovered with the same reference" },
     ] },
-    { id: "view-reading", title: "An operator views a stored reading", priority: "secondary", steps: [
+    { id: "view-reading", title: "An operator views a stored reading", priority: "secondary", dependsOn: ["submit-reading"], steps: [
       { action: "open the readings lookup area", target: "/", expect: "a reference lookup form is visible" },
       { action: "look up a stored reading by reference", target: "lookup form",
         expect: "the reading details are displayed" },
     ] },
-    { id: "correct-reading", title: "An operator corrects a stored reading", priority: "secondary", steps: [
+    { id: "correct-reading", title: "An operator corrects a stored reading", priority: "secondary", dependsOn: ["submit-reading"], steps: [
       { action: "look up a stored reading by reference", target: "lookup form",
         expect: "the reading details are displayed" },
       { action: "edit the value and comment", target: "reading form",
@@ -294,7 +294,7 @@ const GENERIC = {
       { action: "update the reading", target: "save reading control",
         expect: "the reading shows the edited value" },
     ] },
-    { id: "withdraw-reading", title: "An operator withdraws a stored reading", priority: "secondary", steps: [
+    { id: "withdraw-reading", title: "An operator withdraws a stored reading", priority: "secondary", dependsOn: ["submit-reading"], steps: [
       { action: "look up a stored reading by reference", target: "lookup form",
         expect: "the reading details are displayed" },
       { action: "delete the reading", target: "delete reading control",
