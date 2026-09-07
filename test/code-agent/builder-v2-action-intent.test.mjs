@@ -347,3 +347,36 @@ test("a first sign-in authenticates without inventing durable-record recovery", 
   assert.equal(has("sign in again", "account form", ACTION_INTENT.RECOVER), true);
   assert.equal(has("sign back in", "account form", ACTION_INTENT.RECOVER), true);
 });
+
+// ── attributive participles in a TARGET describe a record, they do not commit one ───────────────
+//
+// Medium qualification on 5bcf0b2 (2026-09-07): "open the created project detail" targeting
+// "created project row" derived a MUTATION, because "created" at the head of the target phrase was
+// read as a finite commit verb. The verifier then demanded a commit control by machine identity on
+// a row the app rightly rendered as a link, and six repair rounds spent 21 credits on it.
+
+test("a past participle heading a target names the record, not a commit", () => {
+  assert.deepEqual(intents("open the created project detail", "created project row"), ["navigate", "start"]);
+  assert.equal(has("open the created project detail", "created project row", ACTION_INTENT.CONFIRM), false);
+  assert.equal(has("view the submitted order", "submitted order card", ACTION_INTENT.CONFIRM), false);
+  assert.equal(has("open the selected member", "selected member row", ACTION_INTENT.SELECTION), false);
+});
+
+test("a finite commit verb in a target still commits, with or without a preceder", () => {
+  assert.ok(has("confirm the booking", "confirm booking control", ACTION_INTENT.CONFIRM));
+  assert.ok(has("submit the form", "review and submit control", ACTION_INTENT.CONFIRM));
+  assert.ok(has("save the changes", "save changes button", ACTION_INTENT.CONFIRM));
+});
+
+test("derivation — opening the created record's row is navigation into it, not a second commit", () => {
+  const kinds = kindsOf([
+    { action: "open the projects route", target: "/projects", expect: "the projects list is shown" },
+    { action: "create a project", target: "new project form", operates: ["title", "create-project"],
+      expect: "the new project appears in the project list" },
+    { action: "open the created project detail", target: "created project row", reads: ["title"],
+      expect: "the project detail page shows the project title" },
+  ]);
+  assert.equal(kinds.includes("2:mutation"), false, `no commit for opening a row: ${kinds.join(", ")}`);
+  assert.ok(kinds.includes("2:navigation") || kinds.includes("2:action") || kinds.includes("2:lookup"),
+    `the step still drives something: ${kinds.join(", ")}`);
+});
