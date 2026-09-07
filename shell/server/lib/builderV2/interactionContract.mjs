@@ -1585,17 +1585,22 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     operationCoverage: coverage,
     capabilityGraphVersion: graph?.version || null,
   };
-  // Graph-created operations did not exist when the prose pass assigned scenario
-  // roles. Reconcile roles from the actual bound persistence operations - but ONLY where the
-  // contract left the graph to invent them. A contract that DECLARES its operations has already
-  // said which journey creates, edits or reads each lifecycle, and that declaration wins: a
-  // bound operation on a different entity never speaks for this lifecycle, and a declared
-  // "existing" role is not overturned because the graph bound a create somewhere in the journey.
+  // Graph-created operations did not exist when the prose pass assigned scenario roles, so
+  // roles are reconciled from the actual bound persistence operations - with the contract's
+  // DECLARED operations always winning:
+  //   - a role the prose pass resolved through declared operations is final;
+  //   - where the prose pass already named a lifecycle, only bound operations on THAT lifecycle
+  //     may speak - an operation on a different entity never reclassifies this one;
+  //   - a journey the prose pass could not place at all (independent, no lifecycle) takes its
+  //     role from whatever the graph bound, which is the case this pass exists for.
+  // Undeclared contracts keep the plain graph-derived reconcile.
   composedBeforeNormalization.scenarios = { ...(plan.scenarios || {}) };
   const contractDeclaresOperations = (contract?.operations || []).length > 0;
   for (const [id] of journeys) {
-    if (contractDeclaresOperations) break;
-    const durable = flows.filter((flow) => flow.journeyId === id && flow.durableOperation);
+    const existing = composedBeforeNormalization.scenarios[id] || null;
+    if (contractDeclaresOperations && existing?.basis === "declared-operation") continue;
+    const durable = flows.filter((flow) => flow.journeyId === id && flow.durableOperation
+      && (!contractDeclaresOperations || !existing?.lifecycle || flow.durableLifecycle === existing.lifecycle));
     if (!durable.length) continue;
     const lifecycles = unique(durable.map((flow) => flow.durableLifecycle));
     const produces = durable.some((flow) => flow.durableOperation === "create");
