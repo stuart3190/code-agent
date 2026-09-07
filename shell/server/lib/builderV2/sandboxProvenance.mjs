@@ -82,19 +82,63 @@ export const PROVENANCE_FILENAME = "sandbox-provenance.json";
 // deploy and gets switched off.
 const hash = (text) => createHash("sha256").update(String(text).replace(/\r\n/g, "\n")).digest("hex");
 
+// The modules whose static import closure decides a verdict. The identity covers every file
+// reachable from them by a relative import, not only the hand-listed ones above: on 2026-09-07 the
+// verifier began importing shell/shared, the image had no such directory, browser_verify exited 1
+// with ERR_MODULE_NOT_FOUND - and no hash in the list above had moved.
+export const SANDBOX_IDENTITY_ENTRYPOINTS = Object.freeze([
+  "build-worker/sandbox.mjs",
+  "shell/server/lib/appBuild/journeyVerifier.mjs",
+  "shell/server/lib/appBuild/verificationAgent.mjs",
+  "shell/server/lib/qaRunner.mjs",
+  "shell/server/lib/pwa.mjs",
+]);
+const IMPORT_PATTERN = /(?:import|export)\s+(?:[^"'`;]*?\s+from\s+)?["'](\.{1,2}\/[^"'`]+)["']|import\(\s*["'](\.{1,2}\/[^"'`]+)["']\s*\)/g;
+const posixJoin = (from, specifier) => {
+  const parts = from.split("/").slice(0, -1);
+  for (const part of specifier.split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") parts.pop(); else parts.push(part);
+  }
+  return parts.join("/");
+};
+
 /**
- * Hash every verdict-deciding file under `root`. A missing file is recorded as `absent:` rather
- * than throwing, so an image built from a truncated context is reported as incompatible instead
- * of crashing the check that exists to catch exactly that.
+ * Every repo-relative file the identity covers under `root`: the listed files plus the static
+ * relative-import closure of the entrypoints (sorted, deterministic). A file that cannot be read is
+ * still listed, so its absence is part of the identity.
+ */
+export async function sandboxIdentityFiles(root = process.cwd()) {
+  const seen = new Set(SANDBOX_IDENTITY_FILES);
+  const queue = [...SANDBOX_IDENTITY_ENTRYPOINTS];
+  while (queue.length) {
+    const file = queue.shift();
+    seen.add(file);
+    const source = await readFile(path.join(root, ...file.split("/")), "utf8").catch(() => null);
+    if (source === null) continue;
+    for (const match of String(source).matchAll(IMPORT_PATTERN)) {
+      const resolved = posixJoin(file, match[1] || match[2]);
+      if (!seen.has(resolved) && !queue.includes(resolved)) queue.push(resolved);
+    }
+  }
+  return [...seen].sort();
+}
+
+/**
+ * Hash every verdict-deciding file under `root`: the listed files and the entrypoints' whole static
+ * import closure. A missing file is recorded as `absent` rather than throwing, so an image built
+ * from a truncated context is reported as incompatible instead of crashing the check that exists
+ * to catch exactly that.
  */
 export async function computeSandboxIdentity({ root = process.cwd(), commit = null } = {}) {
   const files = {};
-  for (const relative of SANDBOX_IDENTITY_FILES) {
-    files[relative] = await readFile(path.join(root, relative), "utf8")
+  const covered = await sandboxIdentityFiles(root);
+  for (const relative of covered) {
+    files[relative] = await readFile(path.join(root, ...relative.split("/")), "utf8")
       .then((text) => hash(text)).catch(() => "absent");
   }
-  const identity = hash(SANDBOX_IDENTITY_FILES.map((name) => `${name}:${files[name]}`).join("\n"));
-  return { identity, commit: commit || null, verifier: files[VERIFIER_PATH], files };
+  const identity = hash(covered.map((name) => `${name}:${files[name]}`).join("\n"));
+  return { identity, commit: commit || null, verifier: files[VERIFIER_PATH], files, covered: covered.length };
 }
 
 /** Resolve the deployed host revision without trusting a short, malformed or absent marker. */

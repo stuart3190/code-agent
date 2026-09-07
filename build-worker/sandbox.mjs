@@ -7,6 +7,9 @@ const INPUT = process.env.THRALLO_JOB_INPUT || "/input/payload.json";
 const OUTPUT = process.env.THRALLO_JOB_OUTPUT || "/work/result.json";
 const WORK = process.env.THRALLO_JOB_WORK || "/work/project";
 const DEPS = process.env.THRALLO_SCAFFOLD_NODE_MODULES || "/opt/scaffold/node_modules";
+// The packaged application root: /app in the image; overridable so the packaged entrypoint can be
+// executed against a disposable copy of the COPY set (test/code-agent/sandbox-packaged-entrypoint).
+const ROOT = process.env.THRALLO_SANDBOX_ROOT || "/app";
 
 async function compileTree(payload) {
   await rm(WORK, { recursive: true, force: true });
@@ -90,16 +93,44 @@ async function browserVerify(payload) {
 // entrypoint, same runner. A provenance file read any other way proves nothing about the code
 // that will actually grade a build. The baked record is returned alongside a live recomputation
 // so a tampered or truncated image is caught rather than believed.
+// Every job module this entrypoint loads lazily, by job type. The provenance job imports each one
+// so that "the image can run browser_verify" is proven by loading browser_verify's code from the
+// image, not inferred from a file list (browser_verify exited 1 with ERR_MODULE_NOT_FOUND on
+// 2026-09-07 while every static check passed).
+const JOB_MODULES = {
+  compile: ["../src/engine/fileTree.mjs", "./processTree.mjs"],
+  publish_package: ["../shell/server/lib/pwa.mjs", "@playwright/test"],
+  browser_verify: ["../shell/server/lib/appBuild/verificationAgent.mjs", "../shell/server/lib/appBuild/journeyVerifier.mjs", "@playwright/test"],
+  qa_browser: ["../shell/server/lib/qaRunner.mjs"],
+  sandbox_provenance: ["../shell/server/lib/builderV2/sandboxProvenance.mjs"],
+};
+
+async function probeJobModules() {
+  const entrypoints = {};
+  for (const [job, specifiers] of Object.entries(JOB_MODULES)) {
+    const failures = [];
+    for (const specifier of specifiers) {
+      try { await import(specifier); } catch (error) {
+        failures.push({ specifier, code: error?.code || null, message: String(error?.message || error).slice(0, 300) });
+      }
+    }
+    entrypoints[job] = failures.length ? { ok: false, failures } : { ok: true, modules: specifiers.length };
+  }
+  return entrypoints;
+}
+
 async function sandboxProvenance() {
   const { computeSandboxIdentity, readBakedProvenance, compareSandboxIdentity } =
     await import("../shell/server/lib/builderV2/sandboxProvenance.mjs");
-  const observed = await computeSandboxIdentity({ root: "/app", commit: process.env.SOURCE_COMMIT || null });
-  const baked = await readBakedProvenance("/app");
+  const observed = await computeSandboxIdentity({ root: ROOT, commit: process.env.SOURCE_COMMIT || null });
+  const baked = await readBakedProvenance(ROOT);
   const consistent = compareSandboxIdentity(observed, baked || {});
+  const entrypoints = await probeJobModules();
+  const loadable = Object.values(entrypoints).every((row) => row.ok);
   return {
     ok: true, exitCode: 0, stdout: "", stderr: "",
     provenance: { ...observed, builtAt: baked?.builtAt || null, baked: Boolean(baked),
-      bakedConsistent: consistent.compatible },
+      bakedConsistent: consistent.compatible, entrypoints, entrypointsLoadable: loadable },
   };
 }
 

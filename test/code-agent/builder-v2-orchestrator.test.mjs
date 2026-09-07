@@ -1277,3 +1277,75 @@ test("CONTRACT GATE — a contract the gate accepts is never re-asked", async ()
   assert.equal(result.state, "green", JSON.stringify(result.error || result));
   assert.equal(calls, 1, "a derivable contract paid for a second contract dispatch");
 });
+
+// ── repair governance in the live loop ─────────────────────────────────────────────────────────
+
+test("REPAIR GOVERNANCE — a stalled defect on a bound, operated control is reclassified instead of regenerating its owner", async () => {
+  // The contracted control of the failing step is BOUND in the generated screen (its machine
+  // identity is on the button), and the browser operated it (drove: true) - the outcome did not
+  // appear. An exact repair and a causal repair both leave the defect signature unchanged. The old
+  // ladder then regenerated the owner module: a third paid round against a module the evidence
+  // already cleared. Governance reclassifies the defect as undetermined and stops the tier.
+  const spec = deriveBuildSpec(CONTRACT);
+  const flow = spec.interactionContract.flows.find((row) => row.journeyId === "book-a-visit" && row.control?.machineId);
+  assert.ok(flow, "the booking step derives a contracted control identity");
+  const boundCore = [{
+    replaceFile: "src/screens/scaffold/BookingScreen.jsx",
+    content: CORE_PATCH[0].content.replace("<button onClick",
+      `<button data-thrallo-action=${JSON.stringify(flow.control.machineId)} data-thrallo-control=${JSON.stringify(flow.control.machineId)} onClick`),
+  }];
+  assert.ok(boundCore[0].content.includes(flow.control.machineId), "the fixture binds the contracted identity");
+  let repairCalls = 0;
+  const strategies = [];
+  const h = harness({
+    maxJourneyRepairs: 4,
+    patchPlan: {
+      core: () => boundCore,
+      repair: (ctx) => { repairCalls += 1; strategies.push(ctx.repairBoundary?.kind || null);
+        return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: `\n// futile repair ${repairCalls}\n` }] }]; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((j) => (j.id === "book-a-visit"
+      ? { id: j.id, title: j.title, priority: j.priority, status: "fail",
+        steps: [{ action: "submit the booking form", status: "fail", drove: true, detail: "the confirmation never appeared" }] }
+      : { id: j.id, title: j.title, priority: j.priority, status: "pass" })) }),
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-governance", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.equal(repairCalls, 2, `exact and causal ran, the owner was never regenerated: ${JSON.stringify(strategies)}`);
+  assert.equal(result.stopReason, "repair_reclassified_undetermined", JSON.stringify({ stop: result.stopReason, progress: result.repairProgressStop }));
+  assert.equal(result.repairReclassified.length, 1, JSON.stringify(result.repairReclassified));
+  assert.equal(result.repairReclassified[0].control, flow.control.machineId);
+  assert.match(result.repairReclassified[0].reason, /bound \(src\/screens\/scaffold\/BookingScreen\.jsx\)/);
+  assert.ok(!(await h.snapshotStore.pointer("o", "proj-governance", "green")), "nothing promoted");
+});
+
+test("REPAIR GOVERNANCE — a control bound nowhere keeps the application as owner and earns the regeneration", async () => {
+  // Same failing step, but the generated screen never binds the contracted identity: the owner is
+  // provably incomplete, so the ladder's third strategy (regenerate the owner) is the right spend.
+  let repairCalls = 0;
+  const boundaries = [];
+  const h = harness({
+    // The core's reserved share is ceil(0.4 * allowance) rounds per tier pass; three rounds let the
+    // ladder reach its third strategy inside one pass.
+    maxJourneyRepairs: 6,
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: (ctx) => { repairCalls += 1; boundaries.push(ctx.repairBoundary?.kind || null);
+        return [{ file: "src/screens/scaffold/BookingScreen.jsx", ops: [{ op: "append", content: `\n// futile repair ${repairCalls}\n` }] }]; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((j) => (j.id === "book-a-visit"
+      ? { id: j.id, title: j.title, priority: j.priority, status: "fail",
+        steps: [{ action: "submit the booking form", status: "fail", drove: true, detail: "the confirmation never appeared" }] }
+      : { id: j.id, title: j.title, priority: j.priority, status: "pass" })) }),
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-governance-2", request: "booking site" });
+  assert.equal(result.state, "blocked");
+  assert.ok(repairCalls >= 3, `exact, causal, then regeneration of the incomplete owner: ${JSON.stringify(boundaries)}`);
+  assert.ok(boundaries.includes("browser_owner_regeneration_boundary"), `the owner was regenerated: ${JSON.stringify(boundaries)}`);
+  assert.deepEqual(result.repairReclassified, []);
+  assert.notEqual(result.stopReason, "repair_reclassified_undetermined");
+});

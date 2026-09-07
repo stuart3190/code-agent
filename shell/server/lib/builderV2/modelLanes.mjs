@@ -975,6 +975,8 @@ export function renderPatchPrompt({
       `Allowed files: [${repairBoundary.allowedFiles.join(", ")}]`,
       ...(repairBoundary.allowedPrefixes?.length
         ? [`New supporting modules may be created only under: [${repairBoundary.allowedPrefixes.join(", ")}]`] : []),
+      ...(repairBoundary.contextFiles?.length
+        ? [`Read-only dependency context (the modules the allowed files import or that import them; keep every export they consume satisfied, do not modify them): [${repairBoundary.contextFiles.join(", ")}]`] : []),
     ].join("\n") : "",
     headroomScope ? [
       "INTERNAL HEADROOM-SCOPED WRITE BOUNDARY (machine-enforced):",
@@ -1842,8 +1844,8 @@ export function createModelLanes({
             headroomBatchIndex: Number(headroomScope?.batchIndex || 0) + headroomResizes,
             logicalDispatchId,
             causalFiles: [...new Set([
-              ...(repairBoundary?.allowedFiles || []), ...(semanticRepairFiles || []),
-              ...(headroomScope?.allowedFiles || []),
+              ...(repairBoundary?.allowedFiles || []), ...(repairBoundary?.contextFiles || []),
+              ...(semanticRepairFiles || []), ...(headroomScope?.allowedFiles || []),
             ])],
           });
           try {

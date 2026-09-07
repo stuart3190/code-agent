@@ -38,6 +38,7 @@ import {
   defectEvidence, defectWriteBoundary, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
+import { governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -1513,6 +1514,8 @@ export function createOrchestrator({
           let progressStop = null;
           let budgetOut = false;
           let roundError = null;
+          let governanceStop = null;
+          let reclassifiedDefects = [];
           // WHY THE TIER STOPPED, decided where it actually stopped rather than re-derived from
           // counters afterwards. "used its reserved share" and "ran out of ideas" are different
           // outcomes and only one of them is a platform problem.
@@ -1521,6 +1524,8 @@ export function createOrchestrator({
             if (budgetOut) return "approved_credits_exhausted";
             if (exhausted) return "repair_allowance_exhausted";
             if (roundError) return "repair_round_error";
+            if (governanceStop) return governanceStop;
+            if (reclassifiedDefects.length && !actionableDefects(currentDefects).length) return "repair_reclassified_undetermined";
             if (!actionableDefects(currentDefects).length) return "no_actionable_defect";
             if (strategy >= REPAIR_STRATEGIES.length) return "repair_strategies_exhausted";
             if (rounds >= maxRounds) return "repair_share_exhausted";
@@ -1530,7 +1535,7 @@ export function createOrchestrator({
             tree: currentTree, snapshot: currentSnapshot, verdicts: currentVerdicts,
             defects: currentDefects, eligibility: currentEligibility, backendRowFailures: rows,
             rounds, exhausted, repairLimit: limit, progressStop, budgetExhausted: budgetOut, roundError,
-            stopReason: stopReasonNow(), verifierBlock: null,
+            stopReason: stopReasonNow(), verifierBlock: null, reclassifiedDefects,
           });
 
           // A stable fingerprint of the whole defect set, used to tell a tier that is grinding
@@ -1539,8 +1544,38 @@ export function createOrchestrator({
           let cycleBaseline = signatureOf(currentDefects);
           while (!currentEligibility.eligible && rounds < maxRounds
             && strategy < REPAIR_STRATEGIES.length) {
-            const actionable = actionableDefects(currentDefects);
+            let actionable = actionableDefects(currentDefects);
             if (!actionable.length) break; // nothing an application patch can answer
+            // OWNERSHIP BEFORE PATCHING. Only a defect the generated application owns may spend an
+            // application repair. A missing producer chain, an unexecutable contract, a verifier or
+            // sandbox failure is recorded with its owner and stops the tier instead of buying a
+            // patch that can change nothing. Feasibility is decided at the same time: a boundary
+            // that omits evidence-named modules widens the strategy NOW rather than after a round
+            // failed on scope, and a planned-but-unwritten module goes straight to regeneration.
+            let mode = REPAIR_STRATEGIES[strategy];
+            const governance = governRepairRound({
+              tree: currentTree, defects: currentDefects, strategy: mode,
+              boundary: mode === "exact_owning_file_repair" ? defectWriteBoundary(currentDefects) : null,
+            });
+            await events.telemetry?.({ owner, projectId, buildId, kind: "repair_governance", details: {
+              strategy: mode, dispatchable: governance.dispatchable.length, withheld: governance.withheld,
+              ownership: governance.ownershipCounts, escalateTo: governance.escalateTo,
+              feasibility: governance.feasibility ? { feasible: governance.feasibility.feasible,
+                reasons: governance.feasibility.reasons, missingModules: governance.feasibility.missingModules } : null,
+            } });
+            if (!governance.dispatchable.length) {
+              governanceStop = governance.stopReason;
+              log(`${label}: no defect the generated application owns - ${governance.withheld
+                .map((row) => `${row.journeyId || "-"}:${row.code} is ${row.ownership}`).join("; ")} - stopping without a repair`);
+              break;
+            }
+            if (governance.escalateTo && REPAIR_STRATEGIES.indexOf(governance.escalateTo) > strategy) {
+              log(`${label}: [${mode}] is not feasible (${governance.feasibility.reasons.join("; ")}) - `
+                + `escalating to [${governance.escalateTo}] before dispatch`);
+              strategy = REPAIR_STRATEGIES.indexOf(governance.escalateTo);
+              mode = REPAIR_STRATEGIES[strategy];
+            }
+            actionable = governance.dispatchable;
             const evidence = browserRepairEvidence({
               contract, interactionContract, journeyResults: currentVerdicts, tree: currentTree,
               backendRowFailures: rows, defects: currentDefects,
@@ -1550,7 +1585,6 @@ export function createOrchestrator({
                 .filter((finding) => finding.code !== "interaction_control_undriveable")),
             });
             if (!evidence.length) break;
-            const mode = REPAIR_STRATEGIES[strategy];
             const scaffoldRepairClasses = [...new Set(actionable
               .map((defect) => defect.scaffoldRouting?.classification).filter(Boolean))];
             await events.telemetry?.({ owner, projectId, buildId, kind: "scaffold_repair_routing", details: {
@@ -1563,7 +1597,7 @@ export function createOrchestrator({
             // was not where the defect lived, at which point the next attempt is deliberately wider.
             const regenerate = mode === "owner_module_regeneration"
               ? [...new Set(actionable.flatMap((defect) => defect.modules))].slice(0, 6) : [];
-            let boundary = mode === "exact_owning_file_repair" ? defectWriteBoundary(currentDefects) : null;
+            let boundary = mode === "exact_owning_file_repair" ? defectWriteBoundary(actionable) : null;
             if (mode === "causal_dependency_repair") {
               const graph = memoryGraph(owner, projectId, indexTree(currentTree));
               const owners = [...new Set(actionable.flatMap((defect) => defect.modules || []))];
@@ -1578,6 +1612,13 @@ export function createOrchestrator({
             } else if (mode === "owner_module_regeneration" && regenerate.length) {
               boundary = { kind: "browser_owner_regeneration_boundary", allowedFiles: regenerate,
                 allowedPrefixes: [], instruction: "Regenerate only the proven owner modules." };
+            }
+            // The repair reads its full dependency closure (imports, importers, platform helpers)
+            // whatever it may write; a fix that cannot see the consumer of the export it changes
+            // is not a feasible fix.
+            if (boundary && governance.contextFiles.length) {
+              boundary = { ...boundary, contextFiles: governance.contextFiles
+                .filter((path) => !(boundary.allowedFiles || []).includes(path)) };
             }
             rounds += 1;
             await setState(`${label}:${rounds}`);
@@ -1720,6 +1761,22 @@ export function createOrchestrator({
             rows = retained.rows;
             progressStop = { round: rounds, strategy: mode, ...progress };
             strategy += 1;
+            // NO PROGRESS RECLASSIFIES BEFORE IT REGENERATES. A defect whose control is bound and was
+            // operated, and which an exact and a causal repair both left unchanged, is not answered
+            // by rewriting the owner again: it is reclassified as undetermined (contract expectation
+            // or verifier reading to review) and leaves the actionable set. Only a control bound
+            // nowhere keeps the application as owner and earns the regeneration.
+            const strategiesTried = REPAIR_STRATEGIES.slice(0, strategy);
+            const reclassification = reclassifyStalledDefects(currentDefects, { tree: currentTree, strategiesTried });
+            if (reclassification.reclassified.length) {
+              currentDefects = reclassification.defects;
+              reclassifiedDefects = [...reclassifiedDefects, ...reclassification.reclassified];
+              await events.telemetry?.({ owner, projectId, buildId, kind: "repair_reclassified", details: {
+                round: rounds, strategy: mode, reclassified: reclassification.reclassified } });
+              log(`${label}: ${reclassification.reclassified.length} stalled defect(s) reclassified as undetermined - `
+                + reclassification.reclassified.map((row) => `${row.journeyId || "-"}:${row.code}@${row.control}`).join(", "));
+              if (!actionableDefects(currentDefects).length) break;
+            }
             log(`${label} ${rounds} ${progress.reason} under [${mode}]: `
               + `${progress.persisted.length} defect(s) survived, ${progress.introduced.length} new`
               + (strategy < REPAIR_STRATEGIES.length
@@ -1882,6 +1939,10 @@ export function createOrchestrator({
           // build that stops for the second reason with budget left is a platform defect.
           budgetExhausted,
           stopReason: repairStopReason || (budgetExhausted ? "approved_credits_exhausted" : "no_actionable_defect"),
+          // Defects the governance pass reclassified away from the application (bound, operated,
+          // unchanged by an exact and a causal repair): a contract expectation or a verifier reading
+          // to review, reported instead of spent on.
+          repairReclassified: coreRepair.reclassifiedDefects || [],
           // The typed defect set, so a resumed repair and a human post-mortem both start from
           // what the browser proved rather than from one summary sentence.
           defects: coreDefects,
