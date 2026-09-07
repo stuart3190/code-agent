@@ -7,6 +7,9 @@ const contract = ({ entity = "record", fields, operations, steps, title = "Seman
   summary: `${title} application contract`,
   projectType: "tool",
   entities: [{ name: entity, fields: fields.map((name) => ({ name, type: "string", required: true })) }],
+  // A single journey that edits an existing record says where it comes from: these semantic
+  // fixtures start from one seeded row (state provenance: seed_sample_data).
+  sampleData: { [entity]: [Object.fromEntries(fields.map((name) => [name, `seed ${name}`]))] },
   operations,
   journeys: [{ id: "primary-flow", title, priority: "primary", stage: "primary_journey", steps }],
   routes: [{ path: "/", name: "Workspace" }],

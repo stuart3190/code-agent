@@ -1629,6 +1629,28 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
   });
   for (const flow of flows) delete flow._sourceOrder;
 
+  // A declared CREATE of the journey's own lifecycle entity IS that journey's durable mutation. When
+  // a later step of the same journey reads the durable record or reference (a reload, a recovery, a
+  // cancellation) and no flow writes it, the declared create produces it. Retained proof (bv2 medium
+  // create-step contract): the primary journey created a project through a declared operation and
+  // reloaded it; with the lifecycle correctly on project, the recovery read `durable.reference`
+  // that nothing wrote, because only prose-derived mutation flows ever produced that path.
+  for (const [journeyId] of journeys) {
+    const own = flows.filter((flow) => flow.journeyId === journeyId);
+    const written = new Set(own.flatMap((flow) => flow.writes || []));
+    const lifecycleEntity = normalized(String(plan?.scenarios?.[journeyId]?.lifecycle || "").split(":").at(-1));
+    const durablePaths = [`${journeyId}.durable.record`, `${journeyId}.durable.reference`];
+    for (const reader of own) {
+      const unmet = (reader.reads || []).filter((path) => durablePaths.includes(path) && !written.has(path));
+      if (!unmet.length) continue;
+      const creator = own.find((flow) => flow.durableOperation === "create"
+        && normalized(flow.entity) === lifecycleEntity && Number(flow.stepIndex) < Number(reader.stepIndex));
+      if (!creator) continue;
+      creator.writes = unique([...(creator.writes || []), ...durablePaths]);
+      for (const path of durablePaths) written.add(path);
+    }
+  }
+
   const composedBeforeNormalization = {
     ...plan, version: INTERACTION_CONTRACT_VERSION, flows,
     operationCoverage: coverage,
@@ -1737,10 +1759,20 @@ export function stateProvenanceIssues(plan, contract) {
   const entities = (contract.entities || []).filter((entity) => entity?.name);
   const entityByKey = new Map(entities.map((entity) => [normalized(entity.name), entity]));
   const canonicalEntity = (name) => entityByKey.get(normalized(name))?.name || null;
+  // An entity is durable state only when some declared operation actually PERSISTS it. An
+  // operation whose responsibilities are all functional (a computed analytics report, a derived
+  // total) reads or derives - its entity is never stored, so no journey can be asked to produce it.
+  // Operations declared without responsibilities keep the kind-based reading (legacy shape).
+  const operationPersists = (operation) => {
+    const rows = operation?.responsibilities || [];
+    if (!rows.length) return operationUsesDurablePersistence(contract, operation);
+    return rows.some((row) => row?.type === "persistence" || Boolean(row?.capability && row?.capabilityMethod));
+  };
   const durableEntities = new Set(entities
     .filter((entity) => entityPersistencePolicy(contract, entity.name) !== "transient")
     .filter((entity) => (contract.operations || []).some((operation) => (
-      normalized(operation?.entity) === normalized(entity.name) && operationUsesDurablePersistence(contract, operation)
+      normalized(operation?.entity) === normalized(entity.name)
+        && operationUsesDurablePersistence(contract, operation) && operationPersists(operation)
     )))
     .map((entity) => entity.name));
   const fieldEntity = new Map();
@@ -1764,8 +1796,31 @@ export function stateProvenanceIssues(plan, contract) {
   const externalDeclared = (journeyId, entity) => [
     ...statePaths(plan.externalState, journeyId), ...statePaths(plan.scenarios?.[journeyId]?.externalState, journeyId),
   ].some((path) => normalized(path).includes(normalized(entity)));
+  // What CREATES a record: a declared create operation on the entity, or - in a contract whose
+  // journeys are derived from data flow rather than declared operations - the mutation flow that
+  // writes the journey's durable record on that entity's lifecycle. The retained checkout and
+  // booking fixtures have no declared responsibilities at all; their producers are these flows.
+  // A prose-derived mutation is only believed where the contract itself says the app creates that
+  // entity (a declared create operation, bound to a step or not) or declares no operations at all;
+  // in a contract that declares operations, a step that merely SAYS "create a project" with no
+  // declared create is a dangling reference, not a producer. Its journey must also be one the
+  // scenario pass classified as producing: a "confirm cancellation" mutation inside a consuming
+  // journey rewrites an existing record, it does not create one.
+  const contractDeclaresCreate = (entity) => !(contract.operations || []).length
+    || (contract.operations || []).some((operation) => normalized(operation?.entity) === normalized(entity)
+      && canonicalOperationKind(operation?.kind || operation?.action || operation?.method) === "create");
+  // Inside ONE journey an earlier mutation that writes the durable record is creation whatever the
+  // scenario pass labelled the journey (a create-review-recover-cancel journey reads as "consumes"
+  // because it also recovers and cancels). Across journeys the role decides: only a producing
+  // journey's mutation supplies another journey's record.
+  const createsRecord = (flow, entity, { sameJourney = false } = {}) => (flow.durableOperation === "create" && normalized(flow.entity) === normalized(entity))
+    || (flow.kind === "mutation" && !flow.durableOperation
+      && (flow.writes || []).some((path) => String(path).endsWith(".durable.record"))
+      && normalized(lifecycleEntityOf(flow.durableLifecycle)) === normalized(entity)
+      && (sameJourney || (plan.scenarios?.[flow.journeyId]?.role || "produces") === "produces")
+      && contractDeclaresCreate(entity));
   const producerJourneys = (entity) => unique(plan.flows
-    .filter((flow) => flow.durableOperation === "create" && normalized(flow.entity) === normalized(entity))
+    .filter((flow) => createsRecord(flow, entity))
     .map((flow) => flow.journeyId));
   const primaryId = (contract.journeys || []).find((journey) => journey?.priority === "primary")?.id
     || contract.journeys?.[0]?.id || null;
@@ -1783,8 +1838,8 @@ export function stateProvenanceIssues(plan, contract) {
     const own = plan.flows.filter((flow) => flow.journeyId === journey.id)
       .slice().sort((a, b) => Number(a.stepIndex) - Number(b.stepIndex));
     const scenario = plan.scenarios?.[journey.id] || null;
-    const createdBefore = (entity, stepIndex) => own.some((flow) => flow.durableOperation === "create"
-      && normalized(flow.entity) === normalized(entity) && Number(flow.stepIndex) < Number(stepIndex));
+    const createdBefore = (entity, stepIndex) => own.some((flow) => createsRecord(flow, entity, { sameJourney: true })
+      && Number(flow.stepIndex) < Number(stepIndex));
     const loadedBefore = (entity, stepIndex) => own.some((flow) => Number(flow.stepIndex) < Number(stepIndex)
       && (["lookup", "recovery"].includes(flow.kind)
         || (LOADER_OPERATIONS.has(flow.durableOperation) && normalized(flow.entity) === normalized(entity))));

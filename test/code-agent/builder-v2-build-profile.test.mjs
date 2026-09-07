@@ -28,11 +28,13 @@ function contract({
   ],
   auth = { required: false, model: null, rules: [] },
   integrations = [],
+  sampleData = null,
 } = {}) {
   return {
     summary,
     projectType: "other",
     buildProfile,
+    ...(sampleData ? { sampleData } : {}),
     journeys: [{
       id: "primary-flow", title: "Primary flow", priority: "primary", stage: "primary_journey",
       steps, acceptance: ["the requested outcome is visible"],
@@ -249,6 +251,9 @@ test("explicit Application makes structured behavior and state flow a planning i
     summary: "An interactive counter application",
     buildProfile: profile,
     entities: [{ name: "counter", fields: [field("value", "number")] }],
+    // The counter the journey adjusts exists before it starts: declared seed state, not a record
+    // the journey creates (state provenance: seed_sample_data).
+    sampleData: { counter: [{ value: 0 }] },
     operations: [{
       id: "change-counter", entity: "counter", kind: "update", journey: "primary-flow",
       responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "update", reads: ["value"], writes: ["value"] }],
@@ -475,6 +480,8 @@ test("Interactive workspace requires a represented interaction and state contrac
   const spec = deriveBuildSpec(contract({
     buildProfile: profile,
     entities: [{ name: "item", fields: [field("position")] }],
+    // The workspace starts with items to move (state provenance: seed_sample_data).
+    sampleData: { item: [{ position: "1" }] },
     operations: [{
       id: "move-item", entity: "item", kind: "update", journey: "primary-flow",
       responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "update", reads: ["position"], writes: ["position"] }],

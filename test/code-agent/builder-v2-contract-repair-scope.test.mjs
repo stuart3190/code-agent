@@ -117,6 +117,8 @@ const dependencyRepairFixture = () => ({
       inferenceSource: "explicit",
       confidence: 1,
     },
+    // The catalogue the journey filters and edits exists before it starts (seed_sample_data).
+    sampleData: { catalogueItem: [{ itemId: "item-1", title: "Seed item", status: "draft" }] },
     entities: [{
       name: "catalogueItem",
       storage: "durable",

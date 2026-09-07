@@ -20,6 +20,7 @@ import {
   contractDependencyRepairScope, PROVENANCE_REPAIR_INSTRUCTION,
 } from "../../shell/server/lib/appBuild/contractAgent.mjs";
 import { journeyPrerequisites } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { CHECKOUT_CONTRACT } from "./fixtures/checkoutScenarioApp.mjs";
 
 const retained = JSON.parse(await readFile(new URL("./fixtures/bv2-retained-medium-a5396ba2.json", import.meta.url)));
 
@@ -189,4 +190,94 @@ test("prerequisite replay honours dependsOn and otherwise refuses to guess betwe
   const declared = journeyPrerequisites(flows, "consumer", "first", { reconstructIsolated: true, dependsOn: ["second"] });
   assert.equal(declared.planningIssues, undefined);
   assert.deepEqual(declared.controls.map((flow) => flow.journeyId), ["second"]);
+});
+
+// ── producers and consumptions the first provenance pass got wrong ─────────────────────────────
+
+test("a data-flow contract's producing mutation supplies the records its dependent journeys consume", () => {
+  // The retained checkout shape declares operations without responsibilities; its journeys are
+  // derived from data flow. place-order's mutation IS the order producer; cancel-order's "confirm
+  // cancellation" mutation inside a consuming journey is not.
+  const { issues, verdict } = issuesOf(CHECKOUT_CONTRACT);
+  assert.deepEqual(issues, [], JSON.stringify(issues));
+  assert.equal(verdict.ok, true, verdict.problems.join("; "));
+  const orphaned = structuredClone(CHECKOUT_CONTRACT);
+  orphaned.journeys = orphaned.journeys.filter((journey) => journey.id !== "place-order");
+  orphaned.journeys.find((journey) => journey.id === "recover-existing-order").priority = "primary";
+  const missing = issuesOf(orphaned).issues.filter((issue) => issue.code === PROVENANCE_MISSING_ISSUE);
+  assert.ok(missing.some((issue) => issue.journeyId === "recover-existing-order" && issue.entity === "order"),
+    "without the producing journey the recovery has no source: " + JSON.stringify(missing));
+});
+
+test("one journey that creates, reloads and cancels its own record is self-sufficient whatever its scenario label", () => {
+  const booking = {
+    summary: "A durable multi-step table booking application",
+    entities: [{ name: "booking" }],
+    operations: [{ id: "create-booking", entity: "booking", action: "create" }],
+    routes: [{ path: "/", name: "Booking" }], auth: { required: false },
+    journeys: [{ id: "recover-booking", title: "Create, review, recover and cancel a booking", priority: "primary", steps: [
+      { action: "select date, slot, party and contact", expect: "Booking review" },
+      { action: "confirm booking", expect: "Booking confirmed with reference" },
+      { action: "reload", expect: "Confirmed booking restored" },
+      { action: "cancel", expect: "Booking cancelled" },
+    ] }],
+  };
+  const { issues, verdict } = issuesOf(booking);
+  assert.deepEqual(issues, [], JSON.stringify(issues));
+  assert.equal(verdict.ok, true, verdict.problems.join("; "));
+  // Drop the creating step: the reload now reads a record nothing in the journey produced.
+  const noCreate = structuredClone(booking);
+  noCreate.journeys[0].steps = noCreate.journeys[0].steps.filter((step) => step.action !== "confirm booking");
+  assert.equal(issuesOf(noCreate).verdict.ok, false, "a reload with no earlier creation has no proven source");
+});
+
+test("a declared create on the journey's lifecycle entity produces the durable reference its later reload reads", async () => {
+  const model = JSON.parse(await readFile(new URL("./fixtures/bv2-medium-create-step-contract.json", import.meta.url), "utf8"));
+  const { spec, verdict } = issuesOf(model);
+  assert.equal(verdict.ok, true, verdict.problems.join("; "));
+  const flows = spec.interactionContract.flows.filter((flow) => flow.journeyId === "create-and-update-work");
+  const create = flows.find((flow) => flow.operationId === "create-project");
+  const reload = flows.find((flow) => flow.kind === "recovery");
+  assert.ok(create && reload, JSON.stringify(flows.map((flow) => flow.id)));
+  assert.ok(create.writes.includes("create-and-update-work.durable.reference"), JSON.stringify(create.writes));
+  assert.ok(reload.reads.includes("create-and-update-work.durable.reference"));
+  // A create on a DIFFERENT entity than the lifecycle does not produce the lifecycle's record.
+  const stranger = structuredClone(model);
+  stranger.operations = stranger.operations.filter((operation) => operation.id !== "create-project");
+  const strangerFlows = deriveBuildSpec(stranger).interactionContract.flows.filter((flow) => flow.journeyId === "create-and-update-work");
+  assert.ok(!strangerFlows.some((flow) => flow.operationId === "create-task" && flow.writes.includes("create-and-update-work.durable.reference")),
+    "a task create does not fabricate the project lifecycle's durable reference");
+});
+
+test("an entity only ever computed by functional operations is never a durable consumption", () => {
+  const model = (reportResponsibility) => ({
+    summary: "Analytics over tasks", projectType: "dashboard", version: 1, auth: { required: false },
+    routes: [{ path: "/analytics", name: "Analytics" }],
+    entities: [
+      { name: "task", fields: [{ name: "taskId", type: "string" }, { name: "taskStatus", type: "string" }] },
+      { name: "analyticsReport", fields: [{ name: "completedTaskCount", type: "number" }] },
+    ],
+    sampleData: { task: [{ taskId: "t1", taskStatus: "Done" }] },
+    operations: [
+      { id: "update-task-status", kind: "update", entity: "task", journey: "view-analytics",
+        responsibilities: [{ type: "persistence", capability: "crud", capabilityMethod: "update", reads: ["taskStatus"], writes: ["taskStatus"] }] },
+      { id: "calculate-analytics", kind: "read", entity: "analyticsReport", journey: "view-analytics",
+        responsibilities: [reportResponsibility] },
+    ],
+    journeys: [{ id: "view-analytics", title: "analytics", priority: "primary", steps: [
+      { action: "open the analytics page", target: "/analytics", expect: "analytics cards are visible" },
+      { action: "refresh the analytics summary", target: "refresh analytics control", operates: ["calculate-analytics"],
+        expect: "the completed count is visible" },
+      { action: "mark a visible task as Done", target: "task status", operates: ["taskStatus", "update-task-status"], primitive: "selection",
+        expect: "the task shows Done" },
+    ] }],
+    acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+  });
+  const computed = issuesOf(model({ type: "functional", reads: ["taskStatus"], writes: ["completedTaskCount"], behavior: "count done tasks" }));
+  assert.deepEqual(computed.issues.filter((issue) => issue.entity === "analyticsReport"), [], JSON.stringify(computed.issues));
+  assert.equal(computed.verdict.ok, true, computed.verdict.problems.join("; "));
+  // Declare the report as PERSISTED and it becomes durable state that needs a source like any other.
+  const stored = issuesOf(model({ type: "persistence", capability: "crud", capabilityMethod: "read", reads: ["completedTaskCount"], writes: [] }));
+  assert.ok(stored.issues.some((issue) => issue.entity === "analyticsReport" && issue.code === PROVENANCE_MISSING_ISSUE),
+    JSON.stringify(stored.issues));
 });

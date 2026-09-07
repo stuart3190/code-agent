@@ -366,6 +366,8 @@ test("review of a contract-declared existing record retains its durable state de
     summary: "Review an existing durable record", projectType: "tool", auth: { required: false },
     routes: [{ path: "/record", name: "Record" }],
     entities: [{ name: "record", fields: [{ name: "reference", type: "string" }] }],
+    // The existing record is declared seed state - a durable path alone names no source.
+    sampleData: { record: [{ reference: "REC-1" }] },
     operations: [{ id: "read-record", kind: "read", entity: "record", journey: "review-record" }],
     journeys: [{ id: "review-record", title: "Review record", priority: "primary", steps: [
       { action: "review the existing record", target: "record summary",

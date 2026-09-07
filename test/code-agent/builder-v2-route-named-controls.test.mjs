@@ -30,6 +30,9 @@ const analyticsModel = () => ({
     { name: "task", fields: [{ name: "taskId", type: "string", required: true }, { name: "taskStatus", type: "string", required: true }] },
     { name: "analyticsReport", fields: [{ name: "completedTaskCount", type: "number", required: true }] },
   ],
+  // The "visible task" this journey marks Done exists before it starts (seed_sample_data); the
+  // analytics report is computed from tasks and is never stored.
+  sampleData: { task: [{ taskId: "task-1", taskStatus: "To Do" }] },
   operations: [
     { id: "sign-in", kind: "read", entity: "authSession", journey: "view-analytics-summary",
       description: "authenticate via auth.signIn", responsibilities: [{ type: "functional", reads: ["email", "password"], writes: [], behavior: "authenticate" }] },
